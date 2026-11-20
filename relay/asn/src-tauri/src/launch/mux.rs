@@ -316,7 +316,9 @@ impl Mux<'_> {
         if self.alive() {
             return Ok(Ensure::Reused);
         }
-        if self.recorded_alive().is_some() {
+        // 要看程序真的還在（#1867）：只看建立時間的話，剛被收掉、但 ASN 自己還握著 handle 的 mux 會被當成「別人剛起」，
+        // 白等 15 秒再報錯，換班接手開的新視窗就因此退回原生主控台
+        if self.live_pid().is_some() {
             // 別的 ASN 剛起、還沒開始接受連線：等它，不起第二個
             return if self.wait_alive(START_WAIT) { Ok(Ensure::Reused) } else { Err("終端服務已經在啟動，但一直連不上；請稍後再試".into()) };
         }
@@ -360,7 +362,9 @@ impl Mux<'_> {
         // 結束失敗不能當成功（#596）：`taskkill` 啟動失敗時程序還活著，這裡卻刪了 pid 檔，之後 ASN 找不到它、重開也收不掉。
         // 建立時間還對得上＝還是同一個 mux 活著：留著 pid 檔（下次還找得到、可以重試），回錯
         for _ in 0..GONE_RETRIES {
-            if self.runner.started_ms(pid) != at {
+            // 程序已結束但 ASN 還握著 handle 時建立時間照樣查得到（#1818），所以也要看它還活不活（#1867），
+            // 不然收成功了卻回「沒有結束」、pid 檔留著，之後開窗被它擋住
+            if self.runner.started_ms(pid) != at || !self.runner.alive(pid) {
                 let _ = std::fs::remove_file(&self.paths.pid);
                 return Ok(());
             }

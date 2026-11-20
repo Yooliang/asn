@@ -31,7 +31,10 @@ export function autoResumeNotice(s) {
       const cause = typeof s.cause === 'string' && s.cause ? `原因：${s.cause}。` : ''
       const lead = resumed ? ['權限和原本相同，收到信就會繼續工作，也會用到額度。', resumedLine(s.resumed)].filter(Boolean).join(NL) : ''
       const rest = failed.length ? `沒有接回 ${failed.length} 位，給它們的信會先留著，最多 12 小時：\n${failedLines(failed)}` : ''
-      return { key: `done:${s.cause ?? ''}:${resumed}:${failed.length}`, title, body: [cause, lead, rest].filter(Boolean).join('\n') }
+      // 接回了、但開在系統終端而不是共用的終端服務裡：講明是哪幾位，不能悄悄退回（#1867）
+      const native = Array.isArray(s.native) ? s.native.filter(n => typeof n === 'string' && n) : []
+      const sys = native.length ? `其中 ${native.length} 位開在系統終端，不在共用的終端服務裡：${native.slice(0, MAX_LISTED).map(n => `「${n}」`).join('、')}。要放回終端服務，請關掉那個視窗再按「喚醒」。` : ''
+      return { key: `done:${s.cause ?? ''}:${resumed}:${failed.length}:${native.length}`, title, body: [cause, lead, sys, rest].filter(Boolean).join('\n') }
     }
     default: return null
   }

@@ -1373,6 +1373,8 @@ impl PartnerOps {
                 Some(n) => format!("{n}；重開失敗：{e}"),
             });
         }
+        // 開在哪種終端：退到原生主控台時記下原因（#1867，同喚醒的做法）；換班、換模型、改名的重開都走這裡
+        let native = self.env.launched_native();
         let mut found: Option<(u32, String)> = None;
         let appeared = switch::wait_until(os, self.env.timing().appear_wait_ms, self.env.timing().poll_ms, || {
             for s in console::read_sessions(&self.dirs.sessions) {
@@ -1390,7 +1392,11 @@ impl PartnerOps {
             false
         });
         match (appeared, found) {
-            (true, Some((pid, sid))) => ok("新視窗已出現", Some(json!({ "pid": pid, "session_id": sid, "old_pid": t.pid }))),
+            (true, Some((pid, sid))) => match native {
+                // 結果照舊（pid、session_id、old_pid 不動），多兩個選填欄位；畫面只補一句，原因不放畫面
+                Some(why) => ok(format!("新視窗已出現{NATIVE_TERM_NOTE}"), Some(json!({ "pid": pid, "session_id": sid, "old_pid": t.pid, "term": "native", "reason": why }))),
+                None => ok("新視窗已出現", Some(json!({ "pid": pid, "session_id": sid, "old_pid": t.pid }))),
+            },
             _ => {
                 let base = match &still_open {
                     None => "原視窗已關閉、新視窗已送出，但一直沒看到同名的新視窗出現".to_string(),

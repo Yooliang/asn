@@ -843,3 +843,28 @@ fn t1818_程序已結束但建立時間還查得到_不算活著() {
     assert_eq!(r.started_ms(4000), Some(777));
     assert_eq!(m.live_pid(), None, "舊的判斷只看建立時間，會一直回 Some，監看永遠看不到 mux 不見");
 }
+
+#[test]
+fn t1867_收空_mux_程序已結束但還握著_handle_也算停成功_pid_檔清掉() {
+    let (d, r) = empty_rig(r#"[{"pane_id":0,"workspace":"default"}]"#);
+    let m = mux(&r, d.path());
+    // taskkill 收掉了程序，但 ASN 自己握著 handle：建立時間照樣查得到（#1818）
+    r.survive_kill.set(true);
+    r.exited.borrow_mut().push(MUX_PID);
+    assert!(m.stop_if_empty("測試"), "舊的判斷只看建立時間，會回「沒有結束」並留下 pid 檔");
+    assert!(!m.paths.pid.exists(), "pid 檔要清掉，不然下一次開窗會被它擋住");
+}
+
+#[test]
+fn t1867_pid_檔記的_mux_已結束_開窗不等它_直接起新的() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    let m = mux(&r, d.path());
+    std::fs::create_dir_all(&m.paths.dir).unwrap();
+    // 前一個 mux 剛被收掉：程序已結束、建立時間還查得到、連不上
+    std::fs::write(&m.paths.pid, "3999 777").unwrap();
+    r.birth.borrow_mut().insert(3999, 777);
+    r.exited.borrow_mut().push(3999);
+    let e = m.ensure().expect("已結束的 mux 不能當成「別人剛起」白等 15 秒再報錯，換班接手的新視窗會因此退回原生主控台");
+    assert_eq!(e, Ensure::Started { pid: 4000 });
+}
