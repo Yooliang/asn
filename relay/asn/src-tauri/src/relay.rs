@@ -81,6 +81,8 @@ pub struct Relay {
     connect_retry_ms: &'static [u64],
     /// 閘道暫時回 502／503／504 時，唯讀動作的退避基準（毫秒，見 GATEWAY_RETRY_MS）。測試預設空的＝不重試，原因同上；要測的用 with_gateway_retry
     gateway_retry_ms: &'static [u64],
+    /// 5xx 記錄的去處（電腦版接到 ui.log；沒設就只印 stderr。ui_log 只有電腦版有，所以用注入的，relay.rs 才能編進無頭／手機）
+    log_sink: Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>>,
     /// 存「誰負責撈節點信箱裡沒指定收件人的信」記號檔的資料夾（橋的工作資料夾）；None＝不做互斥（測試）
     owner_dir: Mutex<Option<PathBuf>>,
     /// 在線狀態回報：目前的狀態與個人訊息（前端改了就更新並叫醒回報迴圈）
@@ -468,7 +470,34 @@ fn jitter_rand() -> u32 {
 /// 就算夾帶，32 字以上的英數長字串也已被遮掉
 pub(crate) fn body_excerpt(text: &str) -> String {
     let capped: String = text.chars().take(4000).collect();
-    crate::ui_log::redact(&capped)
+    mask_long_tokens(&capped).chars().take(BODY_LOG_CHARS).collect()
+}
+
+/// 回應內容寫進 log 的字數上限（字元）
+pub(crate) const BODY_LOG_CHARS: usize = 200;
+
+/// 連續 32 個以上的英數與 `-_.+/=` 當成可能是權杖，換成「…略…」（和 ui_log::redact 同一條規則；那個模組只有電腦版有，這裡不能引用）
+fn mask_long_tokens(msg: &str) -> String {
+    let mut out = String::new();
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.chars().count() >= 32 {
+            out.push_str("…略…");
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for c in msg.chars() {
+        if c.is_ascii_alphanumeric() || "-_.+/=".contains(c) {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
 }
 
 /// 5xx 那一行 log：動作名、狀態碼、第幾次嘗試、回應內容前 200 字。不含網址、標頭、金鑰
@@ -505,7 +534,7 @@ pub(crate) fn net_err(e: reqwest::Error) -> String {
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
-            client: reqwest::Client::new(), base, key: std::sync::RwLock::new(key), node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), connect_retry_ms: if cfg!(test) { &[][..] } else { &CONNECT_RETRY_MS[..] }, gateway_retry_ms: if cfg!(test) { &[][..] } else { &GATEWAY_RETRY_MS[..] }, owner_dir: Mutex::new(None),
+            client: reqwest::Client::new(), base, key: std::sync::RwLock::new(key), node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), connect_retry_ms: if cfg!(test) { &[][..] } else { &CONNECT_RETRY_MS[..] }, gateway_retry_ms: if cfg!(test) { &[][..] } else { &GATEWAY_RETRY_MS[..] }, log_sink: Mutex::new(None), owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_ok: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false), setup_requested: Mutex::new(None),
             presence_wake: tokio::sync::Notify::new(), foreground_ms: AtomicU64::new(0), reports_foreground: cfg!(target_os = "android"), now_playing: Default::default(),
             ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
@@ -521,9 +550,14 @@ impl Relay {
     fn log_server_error(&self, name: &str, status: u16, attempt: usize, body: &str) {
         let line = server_error_line(name, status, attempt, body);
         elog!("{line}");
-        let Some(dir) = self.owner_dir.lock().unwrap_or_else(|p| p.into_inner()).clone() else { return };
-        // 寫 log 失敗不能讓請求跟著失敗：吞掉
-        let _ = crate::ui_log::append(&dir, &[format!("{} info {line}", crate::quota_core::iso_secs(crate::heartbeat::now_ms() as i64))]);
+        let sink = self.log_sink.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(f) = sink {
+            f(&line);
+        }
+    }
+    /// 接上 5xx 記錄的去處（電腦版：寫進 ui.log）
+    pub fn set_log_sink(&self, f: std::sync::Arc<dyn Fn(&str) + Send + Sync>) {
+        *self.log_sink.lock().unwrap_or_else(|p| p.into_inner()) = Some(f);
     }
     pub(crate) fn with_connect_retry(mut self, ms: &'static [u64]) -> Relay {
         self.connect_retry_ms = ms;
@@ -2887,15 +2921,16 @@ connection: close
     }
 
     #[tokio::test]
-    async fn t1778_5xx回應內容寫進ui_log_不含金鑰() {
+    async fn t1778_5xx回應內容交給記錄去處_不含金鑰() {
         let port = free_port();
         let body = r#"{"code":"WORKER_LIMIT","message":"超過資源上限"}"#;
         plan_server(port, vec![(503, body.into())]);
-        let d = tempfile::tempdir().unwrap();
+        let got = std::sync::Arc::new(Mutex::new(String::new()));
+        let g2 = got.clone();
         let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "SECRETKEY".into(), "n".into(), "w".into());
-        r.set_owner_dir(d.path().to_path_buf());
+        r.set_log_sink(std::sync::Arc::new(move |l: &str| g2.lock().unwrap().push_str(l)));
         let _ = r.api("ack", Some(json!({"ids": []}))).await;
-        let log = std::fs::read_to_string(crate::ui_log::path(d.path())).expect("ui.log 要有 5xx 那一行");
+        let log = got.lock().unwrap().clone();
         assert!(log.contains("WORKER_LIMIT") && log.contains("超過資源上限") && log.contains("ack HTTP 503"), "{log}");
         assert!(!log.contains("SECRETKEY") && !log.contains("x-relay-key"), "{log}");
     }
