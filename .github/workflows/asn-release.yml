@@ -1,0 +1,300 @@
+name: ASN 發版（標籤觸發）
+
+# 這一版只接電腦版與官網；Play 拆到後續的單，不在這份 workflow 裡。
+# #1892 規格 2.1。只吃 v<主>.<次>.<修訂> 標籤；不加 workflow_dispatch（重跑用 Re-run failed jobs）。
+# 「只建一次」（11-20 決定）：這一輪 CI 就是正式建置，含冒煙與 npm test 都在這一份產物上做；
+# 全過之前不推 main、不發 Release、不部署（那些都在本機腳本，CI 沒有）。改 workflow 本身要驗證時用演練 workflow。
+# CI 不簽章：更新簽章金鑰只在發版機器上，不進 GitHub；這份 workflow 沒有 secrets、沒有 environment（只用 github.token）。
+# 開關：repo variable ASN_RELEASE_AUTO，只有值恰為 true 才開；未設定一律視為 false，下游全略過。
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+# 每個標籤一組、不取消：連推標籤時中間的不會被靜默取消（別的標籤的 run 由 guard 檢查）
+concurrency:
+  group: asn-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- 0. 守門：無 secrets、無 environment（所以讀得到 repo variable）。只是防呆，不是安全邊界 ----
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      auto: ${{ steps.auto.outputs.auto }}
+      version: ${{ steps.tag.outputs.version }}
+      failed_step: ${{ steps.where.outputs.name }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # 只有值恰為 true 才是 true（未設定、空字串、false、TRUE 都是 false）
+      - name: 讀自動發版開關
+        id: auto
+        env:
+          ASN_RELEASE_AUTO: ${{ vars.ASN_RELEASE_AUTO }}
+        run: |
+          set -euo pipefail
+          if [ "${ASN_RELEASE_AUTO:-}" = "true" ]; then auto=true; else auto=false; fi
+          echo "auto=$auto" >> "$GITHUB_OUTPUT"
+          echo "自動發版開關：$auto"
+
+      - name: 標籤與版本檔檢查
+        id: tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          node tools/release/tag_check.mjs "$TAG"
+
+      - name: CHANGELOG 與官網紀錄預檢
+        id: site
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          node tools/release/site_record_check.mjs --changelog relay/asn/CHANGELOG.md --tag "$TAG"
+
+      # 已公開的同版 Release：CI 手上沒有簽章檔可比，一律停下問人（草稿或不存在才放行）
+      - name: GitHub Release 狀態檢查
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          node --input-type=module -e '
+            import { execFileSync } from "node:child_process";
+            import { releaseState } from "./tools/release/github_release.mjs";
+            const gh = a => execFileSync("gh", a, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+            const st = releaseState(gh, process.env.VERSION);
+            if (st && !st.draft) {
+              console.error("v" + process.env.VERSION + " 已經是公開的 Release：同一版不能重發，請改版號重打標籤，或人工確認");
+              process.exit(1);
+            }
+            console.log(st ? "草稿 Release 已存在，可繼續" : "還沒有這一版的 Release");
+          '
+
+      - name: 沒有別的發版 run 在跑
+        id: runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          found=""
+          for st in queued in_progress waiting pending; do
+            all=$(gh api "repos/$REPO/actions/workflows/asn-release.yml/runs?status=$st&per_page=100" --jq '.workflow_runs[].id')
+            ids=$(printf '%s\n' "$all" | grep -vx "$RUN_ID" | grep -v '^$' || true)
+            if [ -n "$ids" ]; then found="$found $ids"; fi
+          done
+          if [ -n "$found" ]; then
+            echo "還有別的發版 run 在跑或排隊（run 編號：$found）：等它結束再重跑這一個" >&2
+            exit 1
+          fi
+          echo "沒有別的發版 run"
+
+      # 哪一步失敗：只輸出固定的中文名，給 notify 用
+      - name: 記錄卡在哪一步
+        id: where
+        if: failure()
+        env:
+          TAG_OUTCOME: ${{ steps.tag.outcome }}
+          SITE_OUTCOME: ${{ steps.site.outcome }}
+          RELEASE_OUTCOME: ${{ steps.release.outcome }}
+          RUNS_OUTCOME: ${{ steps.runs.outcome }}
+        run: |
+          set -euo pipefail
+          name="其他"
+          if [ "$TAG_OUTCOME" = "failure" ]; then name="標籤與版本檔"
+          elif [ "$SITE_OUTCOME" = "failure" ]; then name="CHANGELOG 與官網紀錄預檢"
+          elif [ "$RELEASE_OUTCOME" = "failure" ]; then name="GitHub Release 狀態"
+          elif [ "$RUNS_OUTCOME" = "failure" ]; then name="別的發版 run 在跑"
+          fi
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+  # ---- 1. 電腦版：無 environment、無 secrets。冒煙與 WezTerm 都不略過；npm test 排在建置之後 ----
+  desktop:
+    needs: guard
+    if: needs.guard.outputs.auto == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # checkout 之前先關換行轉換，免得 Windows 把檔案換成 CRLF 讓雜湊與測試對不上
+      - name: 關掉換行轉換
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/asn-node-setup
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: release-windows
+          save-if: false
+
+      # 冒煙、取 WezTerm（要驗來源證明，gh 用本次工作的權杖）、tauri build --locked 都在 release-ci.mjs 裡
+      - name: 建置未簽章安裝檔
+        working-directory: relay/asn
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/release-ci.mjs
+
+      - name: 跑全套測試（在建好的產物之後）
+        working-directory: relay/asn
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          npm test
+
+      - name: 上傳安裝檔與 SHA256SUMS.txt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-installer-unsigned
+          path: relay/asn/src-tauri/target/release-ci/*
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+      - name: 上傳除錯檔
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-debug
+          path: relay/asn/src-tauri/target/release-ci-debug/*
+          if-no-files-found: warn
+          retention-days: 90
+          overwrite: true
+
+  # ---- 2. 來源證明：只拿安裝檔，只有這個 job 有 id-token 與 attestations 寫入權 ----
+  attest:
+    needs: desktop
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: asn-installer-unsigned
+          path: installer-in
+
+      - name: 核對 SHA256SUMS.txt
+        working-directory: installer-in
+        run: |
+          set -euo pipefail
+          sha256sum -c SHA256SUMS.txt
+
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: installer-in/ASN_*_x64-setup.exe
+
+  # ---- 3. 官網紀錄草稿：只放 artifact，不寫入任何地方；不依賴電腦版 ----
+  site-draft:
+    needs: guard
+    if: needs.guard.outputs.auto == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: 產官網紀錄草稿
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/site-draft"
+          node tools/release/site_record_check.mjs --changelog relay/asn/CHANGELOG.md --tag "$TAG" --out "$RUNNER_TEMP/site-draft/site-record-draft.json"
+
+      - name: 上傳草稿
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-site-draft
+          path: ${{ runner.temp }}/site-draft/site-record-draft.json
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  # ---- 4. 通知：無 environment、無 secrets；成功失敗都留一行（只寫哪一步與連結，不貼 log） ----
+  notify:
+    needs:
+      - guard
+      - desktop
+      - attest
+      - site-draft
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: 組通知文字並寫 step summary
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GUARD_STEP: ${{ needs.guard.outputs.failed_step }}
+        run: |
+          set -euo pipefail
+          node tools/release/notify_run.mjs --out "$RUNNER_TEMP/notify.md"
+
+      # 留言失敗不讓 notify 紅：只剩 step summary，並在裡面寫明
+      - name: 在發版紀錄 issue 留言
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ vars.ASN_RELEASE_ISSUE }}
+        run: |
+          set -euo pipefail
+          if ! [[ "${ISSUE:-}" =~ ^[0-9]+$ ]]; then
+            echo "沒有設定 ASN_RELEASE_ISSUE：這次沒有留言，只有 step summary。" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if ! gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/notify.md"; then
+            echo "留言到發版紀錄 issue 失敗：通知只剩這份 step summary。" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -30,3 +30,7 @@ relay/asn/src-tauri/src/launch/wezterm_fetch_fixtures/* binary
 
 # 驗簽黃金樣本：位元組不能被換行轉換動到
 relay/asn/test/fixtures/sig/* binary
+
+# 發版本機腳本會在 Windows 上改寫、提交這兩個網站檔：一律 LF，免得換行污染讓雜湊與 diff 對不上（#1892）
+site/public/update/latest.json text eol=lf
+site/public/index.html text eol=lf

@@ -30,7 +30,10 @@ export const autoEnabled = value => value === true || value === 'true'
 
 const names = list => list.map(j => JOB_NAME[j]).join('、')
 
-export function notifyStatus({ guardResult, auto, results = {}, version, runUrl, jobUrls = {}, guardStep } = {}) {
+// jobs：這次 workflow 實際有的 job（預設全部）；只有電腦版與官網時不帶 Play 三個 job，文字就不提 Play
+export function notifyStatus({ guardResult, auto, results = {}, version, runUrl, jobUrls = {}, guardStep, jobs: jobList = JOBS } = {}) {
+  const JOBS_IN = JOBS.filter(j => jobList.includes(j))
+  const withPlay = JOBS_IN.some(j => j === 'preflight-play' || j.startsWith('android-'))
   const v = typeof version === 'string' && /^\d+\.\d+\.\d+$/.test(version) ? `v${version}` : ''
   const safeUrl = u => (typeof u === 'string' && RUN_URL_RE.test(u) ? u : '')
   const link = runUrl => (safeUrl(runUrl) ? `\nrun：${safeUrl(runUrl)}` : '')
@@ -49,20 +52,20 @@ export function notifyStatus({ guardResult, auto, results = {}, version, runUrl,
   if (guardResult !== 'success') return mk('error', `【發版異常】${head}標籤檢查沒有成功也沒有失敗（${JOB_NAME.guard}結果不明）`)
   if (!autoEnabled(auto)) return mk('info', `【發版略過】${head}自動發版開關未開，請走手動備援`)
 
-  const failed = JOBS.filter(j => done(j) === 'failure')
-  const cancelled = JOBS.filter(j => done(j) === 'cancelled')
-  const succeeded = JOBS.filter(j => done(j) === 'success')
+  const failed = JOBS_IN.filter(j => done(j) === 'failure')
+  const cancelled = JOBS_IN.filter(j => done(j) === 'cancelled')
+  const succeeded = JOBS_IN.filter(j => done(j) === 'success')
 
   // skipped 成因：上游（遞迴）有失敗或被取消才算「被上游連累」，其餘不明
   const explained = j => NEEDS[j].some(u => u !== 'guard' && (done(u) === 'failure' || done(u) === 'cancelled' || (done(u) === 'skipped' && explained(u))))
-  const unexplained = JOBS.filter(j => done(j) === 'skipped' && !explained(j))
+  const unexplained = JOBS_IN.filter(j => done(j) === 'skipped' && !explained(j))
   const cancelNote = cancelled.length ? `\n另有被取消：${names(cancelled)}` : ''
   const oddNote = unexplained.length ? `\n另有不明的略過：${names(unexplained)}` : ''
 
   if (failed.length === 0) {
     if (cancelled.length) return mk('warning', `【發版中止】${head}run 被取消，已完成：${succeeded.length ? names(succeeded) : '無'}${unexplained.length ? oddNote : ''}`)
     if (unexplained.length) return mk('error', `【發版異常】${head}上游沒失敗、開關也沒關卻被略過：${names(unexplained)}`)
-    return mk('success', `【CI 完成】${head}未簽章安裝檔與 Play internal 已就緒，尚未上線。CI 好了，14 天內要簽`)
+    return mk('success', `【CI 完成】${head}${withPlay ? '未簽章安裝檔與 Play internal 已就緒' : '未簽章安裝檔已就緒'}，尚未上線。CI 好了，14 天內要簽`)
   }
 
   const desktopFail = ['desktop', 'attest'].filter(j => failed.includes(j))
@@ -71,6 +74,7 @@ export function notifyStatus({ guardResult, auto, results = {}, version, runUrl,
   const desktopOk = done('desktop') === 'success' && done('attest') === 'success'
   const playUploaded = done('android-upload') === 'success'
   const playText = playUploaded ? '已上傳' : '未上傳'
+  const playPart = withPlay ? `；Play ${playText}` : ''
   const extras = `${draftFail && (desktopFail.length || androidFail.length) ? `\n另外：${JOB_NAME['site-draft']}也沒產出` : ''}${cancelNote}${oddNote}`
   const jobs = failed
 
@@ -78,7 +82,7 @@ export function notifyStatus({ guardResult, auto, results = {}, version, runUrl,
     return mk('error', `【發版失敗】${head}兩邊都失敗\n電腦版：卡在${names(desktopFail)}\nPlay：卡在${names(androidFail)}${extras}`, jobs)
   }
   if (desktopFail.length) {
-    return mk('error', `【發版失敗】${head}電腦版失敗（卡在${names(desktopFail)}）；Play ${playText}${extras}`, jobs)
+    return mk('error', `【發版失敗】${head}電腦版失敗（卡在${names(desktopFail)}）${playPart}${extras}`, jobs)
   }
   if (androidFail.includes('preflight-play')) {
     const desk = desktopOk ? '成功' : '未完成'
@@ -90,5 +94,5 @@ export function notifyStatus({ guardResult, auto, results = {}, version, runUrl,
     return mk('warning', `【部分完成】${head}電腦版${desktopOk ? '就緒' : '未完成'}、${playLine}${extras}`, jobs)
   }
   // 只有官網紀錄草稿失敗
-  return mk('warning', `【發版部分完成】${head}電腦版${desktopOk ? '就緒' : '未完成'}；官網紀錄草稿沒產出（Play ${playText}${playUploaded ? '，同版不可重傳' : ''}）。本機腳本用 --items-file 提供人工修過的內容，仍過同一檢查${extras}`, jobs)
+  return mk('warning', `【發版部分完成】${head}電腦版${desktopOk ? '就緒' : '未完成'}；官網紀錄草稿沒產出${withPlay ? `（Play ${playText}${playUploaded ? '，同版不可重傳' : ''}）` : ''}。本機腳本用 --items-file 提供人工修過的內容，仍過同一檢查${extras}`, jobs)
 }
