@@ -1,6 +1,6 @@
-name: WezTerm 自建（20240203 正式版＋上游 #7706）
+name: WezTerm 自建（20240203 正式版＋上游 #7706＋ASN 修補）
 
-# 從上游 tag 自己建一份 WezTerm，只多套用上游 #7706（procinfo 父子 PID 循環造成的堆疊溢位），
+# 從上游 tag 自己建一份 WezTerm，只多套用上游 #7706（procinfo 父子 PID 循環造成的堆疊溢位）與 patches/wezterm/ 的 ASN 修補（#1896 build_proc 改迭代），
 # 打包成 Windows zip 與各 Linux 發行版 tar.xz，附 SHA256SUMS 與建置來源證明（artifact attestation）。
 #   - pull_request（只在這支 workflow 或它用的腳本變動時）：只建置與測試，不發佈。
 #   - workflow_dispatch：建置與測試；只有在 main 上手動觸發時，才會跑最後的「發佈」job。
@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/wezterm-build.yml'
       - '.github/scripts/wezterm-*.sh'
+      - 'patches/wezterm/**'
   workflow_dispatch:
 
 permissions:
@@ -43,7 +44,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain 指定
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - name: 取上游原始碼、核對、套 #7706
+      - name: 取上游原始碼、核對、套 #7706 與 ASN 修補
         run: bash .github/scripts/wezterm-src-prepare.sh "$RUNNER_TEMP/wez-src"
       - name: 循環測試（綠燈）與紅燈對照（預期失敗，失敗才算通過）
         run: bash .github/scripts/wezterm-procinfo-cycle-test.sh "$RUNNER_TEMP/wez-src"
@@ -70,7 +71,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain 指定
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - name: 取上游原始碼、核對、套 #7706
+      - name: 取上游原始碼、核對、套 #7706 與 ASN 修補
         run: bash .github/scripts/wezterm-src-prepare.sh C:/w/src
       - name: 循環測試（綠燈）與紅燈對照（預期失敗，失敗才算通過）
         env:
@@ -107,7 +108,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain 指定
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - name: 取上游原始碼、核對、套 #7706
+      - name: 取上游原始碼、核對、套 #7706 與 ASN 修補
         run: bash .github/scripts/wezterm-src-prepare.sh "$RUNNER_TEMP/wez-src"
       - name: 在 ${{ matrix.label }} 容器裡建置、實測、打包
         env:
@@ -166,7 +167,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain 指定
         with:
           toolchain: ${{ env.RUST_VERSION }}
-      - name: 取上游原始碼、核對、套 #7706
+      - name: 取上游原始碼、核對、套 #7706 與 ASN 修補
         run: bash .github/scripts/wezterm-src-prepare.sh "$WEZ_SRC"
       - name: 建置（需要 Strawberry Perl 給 openssl-sys）
         run: |
@@ -245,9 +246,9 @@ jobs:
           # 從標準輸入算：檔名含反斜線時，sha256sum 會在輸出最前面加一個反斜線
           [ "$(sha256sum < "$pkg/LICENSE.md" | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 與 pins 的雜湊不符：$(sha256sum < "$pkg/LICENSE.md")（$(file -b "$pkg/LICENSE.md")）" >&2; exit 1; }
           cat > "$pkg/SOURCE.txt" <<TXT
-          WezTerm ${UPSTREAM_TAG}（ASN 自行建置，只多套用上游 #7706）
+          WezTerm ${UPSTREAM_TAG}（ASN 自行建置，多套用上游 #7706 與 ASN 修補）
           上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
-          額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）
+          額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）；ASN 修補 patches/wezterm/0001-procinfo-build-proc-iterative.patch（#1896，只改 procinfo/src/windows.rs：build_proc 改迭代、深度上限 64）
           Rust：${RUST_VERSION}（cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server，用 tag 自帶的 Cargo.lock）
           建置環境：GitHub Actions windows-2022 runner（映像版本 ${ImageVersion:-未知}）
           建置紀錄：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -356,5 +357,5 @@ jobs:
           set -euo pipefail
           gh release create "${RELEASE_TAG}" -R "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --latest=false --prerelease \
             --title "WezTerm ${UPSTREAM_TAG}（ASN 自建，${ASN_SUFFIX}）" \
-            --notes "上游 WezTerm ${UPSTREAM_TAG} 加上上游 #7706 的修補，由 GitHub Actions 建置。來源、雜湊與驗證方式見 SOURCE.txt 與 SHA256SUMS；驗證：gh attestation verify <檔案> -R ${GITHUB_REPOSITORY}" \
+            --notes "上游 WezTerm ${UPSTREAM_TAG} 加上上游 #7706 與 ASN 修補（patches/wezterm/，#1896），由 GitHub Actions 建置。來源、雜湊與驗證方式見 SOURCE.txt 與 SHA256SUMS；驗證：gh attestation verify <檔案> -R ${GITHUB_REPOSITORY}" \
             dist/*.tar.xz dist/WezTerm-windows-*.zip dist/SHA256SUMS dist/SOURCE.txt dist/LICENSE.md

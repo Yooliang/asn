@@ -43,7 +43,16 @@ else:
                 e.th32ParentProcessID = ppid;
                 e
             };
-            vec![mk(4000001, 4000002), mk(4000002, 4000001)]
+            if std::env::var("PROCINFO_FAKE").as_deref() == Ok("chain") {
+                // 2000 層、不成環的父子鏈：5000001 <- 5000002 <- ... <- 5002000（每個的父是前一個）
+                let mut v = vec![mk(5000001, 4999999)];
+                for n in 2..=2000u32 {
+                    v.push(mk(5000000 + n, 5000000 + n - 1));
+                }
+                v
+            } else {
+                vec![mk(4000001, 4000002), mk(4000002, 4000001)]
+            }
         };
 '''
 assert s.count(anchor) == 1, "找不到注入點（上游程式碼變了？）"
@@ -62,6 +71,13 @@ mod cycle_probe {
         let info = LocalProcessInfo::with_root_pid(4000001).expect("root");
         assert_eq!(count(&info), 2);
     }
+
+    // 只在 windows 的測試複本有用：長鏈（PROCINFO_FAKE=chain）。迭代修補版：展開到深度 64 就停，共 65 個節點。
+    #[test]
+    fn long_chain_terminates() {
+        let info = LocalProcessInfo::with_root_pid(5000001).expect("root");
+        assert_eq!(count(&info), 65);
+    }
 }
 '''
 open(p, 'w', encoding='utf-8', newline='\n').write(s)
@@ -74,6 +90,8 @@ PY
 }
 
 run_test() { cargo test --locked -p procinfo --no-default-features parent_child_cycle_terminates -- --nocapture; }
+# 長鏈測試要設 PROCINFO_FAKE=chain（只有 windows 用到）；--exact 避免被別的測試名誤匹配
+run_chain_test() { PROCINFO_FAKE=chain cargo test --locked -p procinfo --no-default-features long_chain_terminates -- --nocapture; }
 
 echo "::group::綠燈：已套修補"
 inject
@@ -115,3 +133,40 @@ echo "紅燈對照如預期：沒套修補的版本因堆疊溢位而失敗（�
   grep -E 'overflowed its stack|stack overflow|cycle_probe' "$LOGDIR/green.log" "$LOGDIR/red.log" | head -10
   echo '```'
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+# ---- 長鏈（2000 層、不成環）：只做 windows（Linux 的遞迴不會在 2000 層溢位，紅燈對照做不出來）----
+if [ "$PLATFORM" = "windows" ]; then
+  echo "::group::長鏈綠燈：已套 #7706 與 ASN 修補"
+  # 修補之後的 HEAD 要是 ASN 修補那個 commit，HEAD~1 才是「只套 #7706」的狀態
+  git log -1 --format=%s | grep -q '^asn patch: ' || { echo "::error::HEAD 不是 ASN 修補的 commit，無法取得只套 #7706 的對照版本" >&2; exit 1; }
+  inject
+  if ! run_chain_test 2>&1 | tee "$LOGDIR/chain-green.log"; then
+    echo "::error::長鏈綠燈失敗：已套 ASN 修補的版本沒有通過" >&2; exit 1
+  fi
+  grep -q "windows::cycle_probe::long_chain_terminates ... ok" "$LOGDIR/chain-green.log"     || { echo "::error::長鏈綠燈：找不到測試通過的那一行（測試可能根本沒跑）" >&2; exit 1; }
+  echo "::endgroup::"
+  git checkout -- "$FILE" procinfo/Cargo.toml
+
+  echo "::group::長鏈紅燈對照：只套 #7706、不套 ASN 修補（HEAD~1），預期堆疊溢位"
+  git checkout "HEAD~1" -- "$FILE"
+  inject
+  set +e
+  run_chain_test > "$LOGDIR/chain-red.log" 2>&1
+  rc2=$?
+  set -e
+  cat "$LOGDIR/chain-red.log"
+  echo "::endgroup::"
+  git checkout HEAD -- "$FILE" procinfo/Cargo.toml
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "::error::長鏈還原後工作樹不乾淨" >&2; git status --short >&2; exit 1
+  fi
+  [ "$rc2" -ne 0 ] || { echo "::error::長鏈紅燈對照沒有失敗：只套 #7706 的版本竟然通過了" >&2; exit 1; }
+  grep -Eq 'overflowed its stack|stack overflow|STATUS_STACK_OVERFLOW|0xc00000fd' "$LOGDIR/chain-red.log"     || { echo "::error::長鏈紅燈對照雖然失敗了（結束碼 $rc2），但原因不是堆疊溢位" >&2; exit 1; }
+  echo "長鏈紅燈對照如預期：只套 #7706 的版本因堆疊溢位而失敗（結束碼 $rc2）"
+  {
+    echo "### procinfo 長鏈測試（windows，2000 層）"
+    echo
+    echo "- 綠燈（#7706＋ASN 修補）：通過"
+    echo "- 紅燈對照（只套 #7706）：因堆疊溢位失敗，結束碼 $rc2"
+  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+fi

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 取 WezTerm 上游原始碼（固定 tag）→ 核對 commit 與 submodule → 只 cherry-pick 上游 #7706 → 核對只動到三個 procinfo 檔。
+# 取 WezTerm 上游原始碼（固定 tag）→ 核對 commit 與 submodule → cherry-pick 上游 #7706 → 套 patches/wezterm/*.patch（ASN 自己的修補）→ 核對被動到的檔案。
 # 用法：wezterm-src-prepare.sh <目的資料夾>（必須不存在或是空的）
+# 修補檔放在 repo 根目錄 patches/wezterm/，依檔名排序逐一 git apply --check 再 git apply，並各自 commit（commit 之後，原本的乾淨檢查照舊成立）。
 # 必要環境變數：UPSTREAM_TAG、UPSTREAM_SHA（tag 指向的完整 commit）、PATCH_SHA（要 cherry-pick 的完整 commit）
 # 任何一項核對不過就以非零結束，不做任何補救。
 set -euo pipefail
@@ -9,6 +10,8 @@ DEST="${1:?用法：$0 <目的資料夾>}"
 : "${UPSTREAM_TAG:?}" "${UPSTREAM_SHA:?}" "${PATCH_SHA:?}"
 REPO_URL='https://github.com/wezterm/wezterm.git'
 EXPECT_FILES=$'procinfo/src/linux.rs\nprocinfo/src/macos.rs\nprocinfo/src/windows.rs'
+ASN_PATCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/patches/wezterm"
+ASN_APPLY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/wezterm-apply-patches.sh"
 
 mkdir -p "$DEST"
 cd "$DEST"
@@ -51,6 +54,20 @@ git -c user.name='asn-ci' -c user.email='asn-ci@users.noreply.github.com' cherry
 changed="$(git diff --name-only "${UPSTREAM_SHA}..HEAD")"
 if [ "$changed" != "$EXPECT_FILES" ]; then
   echo "::error::cherry-pick 之後，和上游 tag 相比被改動的檔案不是剛好那三個：" >&2
+  echo "$changed" >&2
+  exit 1
+fi
+
+# 套 ASN 自己的修補（清單與逐檔核對都在 wezterm-apply-patches.sh）；任何一步失敗就非零結束
+ASN_UNION="$(bash "$ASN_APPLY" "$PWD" "$ASN_PATCH_DIR")"
+
+# 修補後被改動的檔案 = #7706 的三個檔 ∪ manifest 宣告的聯集（去重）
+EXPECT_AFTER="$(printf '%s
+%s
+' "$EXPECT_FILES" "$ASN_UNION" | sed '/^$/d' | LC_ALL=C sort -u)"
+changed="$(git diff --name-only "${UPSTREAM_SHA}..HEAD" | LC_ALL=C sort -u)"
+if [ "$changed" != "$EXPECT_AFTER" ]; then
+  echo "::error::套完 ASN 修補之後，和上游 tag 相比被改動的檔案不符預期：" >&2
   echo "$changed" >&2
   exit 1
 fi
