@@ -65,6 +65,22 @@ export function latestTag(git, pattern) {
   return tags.sort((a, b) => cmpVersion(a.k, b.k)).at(-1).t
 }
 
+// 版號提交（release: x.y.z）只改版號與 CHANGELOG，不算這一版的改動：
+// 否則某平台上一版沒發時，別的平台的版號提交（動到 package.json、tauri.conf.json…）會把它拖成「要發」
+export const RELEASE_COMMIT = /^release: \d+\.\d+\.\d+/
+
+// 上一個標籤之後改到的檔：逐個提交列出，跳過合併提交與版號提交
+export function changedFilesSince(git, tag) {
+  const out = git(['log', '--no-merges', '--format=%x1e%s', '--name-only', `${tag}..HEAD`])
+  const files = new Set()
+  for (const rec of out.split('\x1e').slice(1)) {
+    const [subject, ...rest] = rec.split('\n')
+    if (RELEASE_COMMIT.test(subject.trim())) continue
+    for (const f of rest.map(s => s.trim()).filter(Boolean)) files.add(f)
+  }
+  return [...files]
+}
+
 // git：(args) => stdout 字串；測試時注入
 export function collectFromTags(git, rules) {
   const tagOf = {}
@@ -73,7 +89,7 @@ export function collectFromTags(git, rules) {
     const tag = latestTag(git, TAG_PATTERN[p])
     tagOf[p] = tag
     if (!tag) { perPlatform[p] = { missing: true }; continue }
-    const files = git(['diff', '--name-only', `${tag}..HEAD`]).split('\n').map(s => s.trim()).filter(Boolean)
+    const files = changedFilesSince(git, tag)
     const changes = files.map(file => {
       const rule = rules.find(r => globToRegExp(r.glob).test(file))
       const diff = rule?.androidIfContent ? git(['diff', `${tag}..HEAD`, '--', file]) : undefined

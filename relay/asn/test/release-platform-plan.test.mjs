@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { planPlatforms, loadRules, PLATFORMS, latestTag, collectFromTags, renderTable } from '../../../tools/release/platform_plan.mjs'
+import { planPlatforms, loadRules, PLATFORMS, latestTag, collectFromTags, renderTable, changedFilesSince } from '../../../tools/release/platform_plan.mjs'
 
 const rules = loadRules()
 const plan = changes => planPlatforms({ changes, rules })
@@ -89,7 +89,7 @@ test('CLI：各平台各自找最新標籤、依版號排序、git 可注入', (
       if (args[2] === 'linux-v*') return 'linux-v0.2.40\n'
       return ''
     }
-    if (args[0] === 'diff' && args[1] === '--name-only') return args[2].startsWith('v0.2.10') ? 'relay/asn/ui/a.js\n' : 'docs/a.md\n'
+    if (args[0] === 'log') return args.at(-1).startsWith('v0.2.10') ? '\x1e改畫面\n\nrelay/asn/ui/a.js\n' : '\x1e改文件\n\ndocs/a.md\n'
     return ''
   }
   assert.equal(latestTag(git, 'v*'), 'v0.2.10', '依版號不是字典序')
@@ -97,11 +97,11 @@ test('CLI：各平台各自找最新標籤、依版號排序、git 可注入', (
   assert.match(out, /電腦｜打｜v0\.2\.10/)
   assert.match(out, /Linux｜不打｜linux-v0\.2\.40/)
   assert.match(out, /手機｜打（找不到舊標籤）/)
-  assert.ok(calls.every(c => c.startsWith('tag --list') || c.startsWith('diff')), '只讀，不建立標籤')
+  assert.ok(calls.every(c => c.startsWith('tag --list') || c.startsWith('log') || c.startsWith('diff')), '只讀，不建立標籤')
 })
 
 test('CLI：依據超過 10 個檔寫「等 N 個」', () => {
-  const git = args => args[0] === 'tag' ? (args[2] === 'v*' ? 'v1.0.0' : '') : args[1] === '--name-only' ? Array.from({ length: 12 }, (_, i) => `relay/asn/ui/f${i}.js`).join('\n') : ''
+  const git = args => args[0] === 'tag' ? (args[2] === 'v*' ? 'v1.0.0' : '') : args[0] === 'log' ? '\x1e改畫面\n\n' + Array.from({ length: 12 }, (_, i) => `relay/asn/ui/f${i}.js`).join('\n') : ''
   assert.match(renderTable(collectFromTags(git, rules)), /等 12 個/)
 })
 test('#1979 官網檔（site/）和後台（supabase/）不發版：發版後才提交的網站檔不能把下一版拖成三個都打', () => {
@@ -119,4 +119,17 @@ test('#1979 領隊 #4501 的歸類：claude-mod、pi-extension＝電腦＋Linux�
     assert.deepEqual(r.unknown, [f], `${f} 還沒人查證，要落到判斷不出來`)
     assert.deepEqual(tagged(r), [...PLATFORMS])
   }
+})
+test('#1979 版號提交（release: x.y.z）不算改動：手機上一版沒發，不能被電腦版的版號提交拖成要發', () => {
+  // 手機停在 android-v0.2.41；之後只有 0.2.42 的版號提交（動 package.json、tauri.conf.json…）和 site 檔
+  const log = '\x1erelease: 0.2.42（版號＋CHANGELOG）\n\nrelay/asn/package.json\nrelay/asn/src-tauri/tauri.conf.json\nrelay/asn/src-tauri/Cargo.toml\nrelay/asn/src-tauri/Cargo.lock\nrelay/claude-mod/.claude-plugin/plugin.json\nrelay/asn/CHANGELOG.md\n'
+    + '\x1e發版 v0.2.42：網站檔\n\nsite/public/update/latest.json\n'
+    + '\x1eMerge pull request #1\n\n'
+  assert.deepEqual(changedFilesSince(() => log, 'android-v0.2.41'), ['site/public/update/latest.json'])
+  const git = args => args[0] === 'tag' ? ({ 'v*': 'v0.2.42', 'linux-v*': 'linux-v0.2.42', 'android-v*': 'android-v0.2.41' })[args[2]] : args[0] === 'log' ? log : ''
+  const r = collectFromTags(git, rules)
+  assert.equal(r.perPlatform.android.plan.platforms.android.tag, false, '只剩版號提交和網站檔，手機不發')
+  // 同一個檔若在一般提交裡也動到，照樣算
+  const log2 = log + '\x1e改依賴\n\nrelay/asn/package.json\n'
+  assert.deepEqual(changedFilesSince(() => log2, 'x').sort(), ['relay/asn/package.json', 'site/public/update/latest.json'])
 })
