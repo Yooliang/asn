@@ -3285,6 +3285,14 @@ pub fn run() {
     let anon_url = relay_obj.as_ref().zip(anon).and_then(|(r, a)| bell::ws_url(r.base(), &a));
     if let Some(r) = &relay_obj {
         r.set_owner_dir(work_dir.clone());
+        // 5xx 的回應內容寫進 ui.log（#1778）。ui_log 只有電腦版有；手機只印 stderr
+        #[cfg(all(desktop, feature = "gui"))]
+        {
+            let wd = work_dir.clone();
+            r.set_log_sink(Arc::new(move |line: &str| {
+                let _ = ui_log::append(&wd, &[format!("{} info {line}", quota_core::iso_secs(heartbeat::now_ms() as i64))]);
+            }));
+        }
     }
     #[cfg(desktop)]
     let bridge_mgr = bridge::Manager::new(relay_obj.clone(), anon_url.clone(), node.clone(), work_dir.clone(), bridge_data_dir);

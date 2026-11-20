@@ -79,6 +79,10 @@ pub struct Relay {
     /// 連線階段失敗時的退避（毫秒，見 CONNECT_RETRY_MS）。單元測試預設空的＝不重試：
     /// 不少測試故意把 relay 指到連不上的埠，不能每次呼叫都多等將近 2 秒；要測重試的用 with_connect_retry 打開
     connect_retry_ms: &'static [u64],
+    /// 閘道暫時回 502／503／504 時，唯讀動作的退避基準（毫秒，見 GATEWAY_RETRY_MS）。測試預設空的＝不重試，原因同上；要測的用 with_gateway_retry
+    gateway_retry_ms: &'static [u64],
+    /// 5xx 記錄的去處（電腦版接到 ui.log；沒設就只印 stderr。ui_log 只有電腦版有，所以用注入的，relay.rs 才能編進無頭／手機）
+    log_sink: Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>>,
     /// 存「誰負責撈節點信箱裡沒指定收件人的信」記號檔的資料夾（橋的工作資料夾）；None＝不做互斥（測試）
     owner_dir: Mutex<Option<PathBuf>>,
     /// 在線狀態回報：目前的狀態與個人訊息（前端改了就更新並叫醒回報迴圈）
@@ -436,6 +440,71 @@ pub(crate) fn is_transient_api_err(e: &str) -> bool {
 /// 連線階段失敗時的退避（毫秒）：最多再試這麼多次，全部加起來不到 2 秒
 static CONNECT_RETRY_MS: [u64; 3] = [200, 500, 1000];
 
+/// 閘道暫時回 502／503／504 時，唯讀動作的退避基準（毫秒）：最多再試 3 次，每次實際等待在基準的 75%～125% 之間（抖動），
+/// 全部加起來最多約 6.3 秒。很多台同時遇到同一個閘道狀況時，抖動讓大家不會同一瞬間一起重打（#1778）
+static GATEWAY_RETRY_MS: [u64; 3] = [500, 1500, 3000];
+
+/// 唯讀、重送沒有副作用的動作：閘道暫時失敗時可以安全地退避重試。寫入類（ack、設定、遠端指令…）一律不在這裡，
+/// 因為不知道第一次請求有沒有已經生效；寄信是另一條路（帶 client_id、後台去重）。
+/// inbox／inbox_peek 只讀信箱（確認收到是另一個動作 ack）；read_sync 寫的是「已讀位置」，同一批重送結果相同
+pub(crate) fn is_safe_read(name: &str) -> bool {
+    matches!(name, "whoami" | "list" | "inbox" | "inbox_peek" | "sent_status" | "chat_history" | "launchers" | "read_sync")
+}
+
+/// 退避加抖動：基準的 75%～125%。r 是亂數（呼叫端給，測試才固定得住）
+pub(crate) fn jittered_ms(base_ms: u64, r: u32) -> u64 {
+    base_ms * (75 + (r % 51) as u64) / 100
+}
+
+fn jitter_rand() -> u32 {
+    let mut b = [0u8; 4];
+    // 取不到系統亂數就不抖動（取中間值）：退避照樣有上限，只是少了分散效果
+    if getrandom::fill(&mut b).is_err() {
+        return 25;
+    }
+    u32::from_le_bytes(b)
+}
+
+/// 5xx 的回應內容（寫進 ui.log 用）：先遮掉長得像權杖的長字串（見 ui_log::redact），再取前 200 個字元（按字元算，不會切壞中文）。
+/// 後台錯誤回應是 Supabase／Deno 的錯誤 JSON 或閘道的純文字（WORKER_LIMIT、BOOT_ERROR 之類），不含請求的標頭、金鑰、信件內容；
+/// 就算夾帶，32 字以上的英數長字串也已被遮掉
+pub(crate) fn body_excerpt(text: &str) -> String {
+    let capped: String = text.chars().take(4000).collect();
+    mask_long_tokens(&capped).chars().take(BODY_LOG_CHARS).collect()
+}
+
+/// 回應內容寫進 log 的字數上限（字元）
+pub(crate) const BODY_LOG_CHARS: usize = 200;
+
+/// 連續 32 個以上的英數與 `-_.+/=` 當成可能是權杖，換成「…略…」（和 ui_log::redact 同一條規則，改一邊要一起改；那個模組只有電腦版有，這裡不能引用）
+fn mask_long_tokens(msg: &str) -> String {
+    let mut out = String::new();
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.chars().count() >= 32 {
+            out.push_str("…略…");
+        } else {
+            out.push_str(run);
+        }
+        run.clear();
+    };
+    for c in msg.chars() {
+        if c.is_ascii_alphanumeric() || "-_.+/=".contains(c) {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
+/// 5xx 那一行 log：動作名、狀態碼、第幾次嘗試、回應內容前 200 字。不含網址、標頭、金鑰
+pub(crate) fn server_error_line(name: &str, status: u16, attempt: usize, body: &str) -> String {
+    format!("[ASN] relay {name} HTTP {status}（第 {attempt} 次）回應內容：{}", body_excerpt(body))
+}
+
 pub(crate) fn net_err(e: reqwest::Error) -> String {
     let kind = if e.is_timeout() {
         "逾時"
@@ -465,11 +534,30 @@ pub(crate) fn net_err(e: reqwest::Error) -> String {
 impl Relay {
     pub fn new(base: String, key: String, node: String, window: String) -> Relay {
         Relay {
-            client: reqwest::Client::new(), base, key: std::sync::RwLock::new(key), node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), connect_retry_ms: if cfg!(test) { &[][..] } else { &CONNECT_RETRY_MS[..] }, owner_dir: Mutex::new(None),
+            client: reqwest::Client::new(), base, key: std::sync::RwLock::new(key), node, window: Mutex::new(window), old: Mutex::new(vec![]), ack_agent: Mutex::new(HashMap::new()), unaddressed: Mutex::new(vec![]), unaddressed_acked: Mutex::new(vec![]), bridge_on: AtomicBool::new(false), connect_retry_ms: if cfg!(test) { &[][..] } else { &CONNECT_RETRY_MS[..] }, gateway_retry_ms: if cfg!(test) { &[][..] } else { &GATEWAY_RETRY_MS[..] }, log_sink: Mutex::new(None), owner_dir: Mutex::new(None),
             presence: Mutex::new(("online".into(), String::new())), presence_off: AtomicBool::new(false), presence_ok: AtomicBool::new(false), presence_closed: AtomicBool::new(false), update_requested: AtomicBool::new(false), setup_requested: Mutex::new(None),
             presence_wake: tokio::sync::Notify::new(), foreground_ms: AtomicU64::new(0), reports_foreground: cfg!(target_os = "android"), now_playing: Default::default(),
             ui_inbox_ms: AtomicU64::new(0), started_ms: crate::heartbeat::now_ms(), spool: Mutex::new(vec![]),
         }
+    }
+    /// 測試用：打開唯讀動作遇到閘道暫時失敗的重試（單元測試預設不重試）
+    #[cfg(test)]
+    pub(crate) fn with_gateway_retry(mut self, ms: &'static [u64]) -> Relay {
+        self.gateway_retry_ms = ms;
+        self
+    }
+    /// 5xx 時把動作名、狀態碼與回應內容前 200 字寫進 ui.log（工作資料夾還沒設就只印 stderr）
+    fn log_server_error(&self, name: &str, status: u16, attempt: usize, body: &str) {
+        let line = server_error_line(name, status, attempt, body);
+        elog!("{line}");
+        let sink = self.log_sink.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        if let Some(f) = sink {
+            f(&line);
+        }
+    }
+    /// 接上 5xx 記錄的去處（電腦版：寫進 ui.log）
+    pub fn set_log_sink(&self, f: std::sync::Arc<dyn Fn(&str) + Send + Sync>) {
+        *self.log_sink.lock().unwrap_or_else(|p| p.into_inner()) = Some(f);
     }
     /// 測試用：打開連線階段的重試（單元測試預設不重試）
     #[cfg(test)]
@@ -676,6 +764,9 @@ impl Relay {
         let res = req.header("x-relay-key", key).timeout(Duration::from_secs(20)).send().await.map_err(|e| format!("{name} 連線失敗：{}", net_err(e)))?;
         let status = res.status().as_u16();
         let text = res.text().await.unwrap_or_default();
+        if status >= 500 {
+            self.log_server_error(name, status, 1, &text);
+        }
         Ok((status, serde_json::from_str(&text).unwrap_or(Value::Null)))
     }
     async fn api_inner(&self, action: &str, body: Option<Value>, timeout: Duration, user_token: Option<&str>) -> Result<Value, String> {
@@ -684,6 +775,8 @@ impl Relay {
         // 寄信（#1135）：這一次寄信帶一個 client_id，重試之間沿用同一個（呼叫端已經帶了就用它的）；後台據此去重，所以「請求可能已送達」也能安全重試
         let (body, idem) = with_client_id(name, body);
         let mut attempt = 0;
+        // 唯讀動作遇到閘道暫時失敗時已經重試的次數（和上面連線階段的 attempt 分開算）
+        let mut gw_attempt = 0;
         let (status, text) = loop {
             let mut req = if let Some(b) = &body { self.client.post(&url).json(b) } else { self.client.get(&url) };
             if let Some(t) = user_token.filter(|t| !t.is_empty()) {
@@ -693,13 +786,34 @@ impl Relay {
             match req.header("x-relay-key", self.key()).timeout(timeout).send().await {
                 Ok(r) => {
                     let status = r.status();
+                    // 5xx：先讀回應內容寫進 ui.log（#1778：看是 WORKER_LIMIT、BOOT_ERROR 還是別的）。內容讀不到就當空字串；
+                    // 其餘（非 5xx、500）的後續處理與以前相同
+                    let mut pre_text: Option<Result<String, reqwest::Error>> = None;
+                    let mut r = Some(r);
+                    if status.is_server_error() {
+                        let t = r.take().expect("剛放進去").text().await;
+                        self.log_server_error(name, status.as_u16(), attempt + gw_attempt + 1, t.as_deref().unwrap_or(""));
+                        pre_text = Some(t);
+                    }
                     // 閘道暫時回 502／503／504：寄信帶了 client_id 才重試（後台去重，不會寄兩封）
                     if idem && matches!(status.as_u16(), 502..=504) && wait.is_some() {
                         tokio::time::sleep(Duration::from_millis(wait.unwrap_or(0))).await;
                         attempt += 1;
                         continue;
                     }
-                    match r.text().await {
+                    // 唯讀動作：退避加抖動後重試，最多 gateway_retry_ms 的長度（#1778）；用完就照原本方式回報錯誤
+                    if is_safe_read(name) && matches!(status.as_u16(), 502..=504) {
+                        if let Some(base) = self.gateway_retry_ms.get(gw_attempt).copied() {
+                            tokio::time::sleep(Duration::from_millis(jittered_ms(base, jitter_rand()))).await;
+                            gw_attempt += 1;
+                            continue;
+                        }
+                    }
+                    let text_res = match pre_text {
+                        Some(t) => t,
+                        None => r.take().expect("沒讀過內容").text().await,
+                    };
+                    match text_res {
                         Ok(t) => break (status, t),
                         // 回應讀到一半斷了：後台可能已經寄出。有 client_id 就重送同一個，後台回第一次那封的 id
                         Err(_) if idem && wait.is_some() => {
@@ -745,6 +859,9 @@ impl Relay {
         let status = res.status();
         let mime = res.headers().get("content-type").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
         let bytes = res.bytes().await.map_err(|e| format!("{name} 讀取失敗：{}", net_err(e)))?;
+        if status.is_server_error() {
+            self.log_server_error(name, status.as_u16(), 1, &String::from_utf8_lossy(&bytes));
+        }
         if !status.is_success() {
             let err = serde_json::from_slice::<Value>(&bytes).ok().and_then(|d| d.get("error").and_then(Value::as_str).map(String::from)).unwrap_or_default();
             return Err(format!("{name} HTTP {} {err}", status.as_u16()).trim().to_string());
@@ -2696,5 +2813,162 @@ b", "at": 5 }] }), json!({ "marks": [{ "at": 5 }] })] {
         assert!(build_sent_status_body(&[ok.clone()]).is_ok());
         assert!(build_sent_status_body(&["nope".to_string()]).is_err());
         assert!(build_sent_status_body(&vec![ok; 51]).is_err());
+    }
+
+    // ---- #1778：5xx 記回應內容、唯讀動作閘道暫時失敗時退避重試 ----
+
+    /// 假後端：第 n 個連線回 plan[n]（超過就用最後一個）（狀態碼, 內容）；回傳連線數
+    fn plan_server(port: u16, plan: Vec<(u16, String)>) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let h2 = hits.clone();
+        let l = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+        std::thread::spawn(move || {
+            for c in l.incoming() {
+                let Ok(mut c) = c else { break };
+                let n = h2.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 8192];
+                let _ = std::io::Read::read(&mut c, &mut buf);
+                let (st, body) = plan.get(n).or(plan.last()).cloned().unwrap();
+                let _ = std::io::Write::write_all(&mut c, format!("HTTP/1.1 {st} X
+content-type: application/json
+content-length: {}
+connection: close
+
+{body}", body.len()).as_bytes());
+            }
+        });
+        hits
+    }
+    static FAST_GW: [u64; 3] = [5, 5, 5];
+    fn free_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    }
+    fn relay_gw(port: u16) -> Relay {
+        Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into()).with_gateway_retry(&FAST_GW)
+    }
+
+    #[test]
+    fn t1778_回應內容只留前200個字元_中文不切壞() {
+        let zh = "字".repeat(500);
+        let e = body_excerpt(&zh);
+        assert_eq!(e.chars().count(), 200);
+        assert!(e.chars().all(|c| c == '字'), "不能有切壞的字元");
+        let json = r#"{"code":"WORKER_LIMIT","message":"Function exceeded resource limit"}"#;
+        assert!(body_excerpt(json).contains("WORKER_LIMIT"));
+        // 長得像權杖的長字串被遮掉
+        let tok = "a".repeat(40);
+        assert!(!body_excerpt(&format!("x {tok} y")).contains(&tok));
+        assert!(server_error_line("inbox", 503, 2, json).contains("HTTP 503（第 2 次）"));
+    }
+
+    #[test]
+    fn t1778_退避有抖動且有上限() {
+        for base in GATEWAY_RETRY_MS {
+            for r in 0..2000u32 {
+                let w = jittered_ms(base, r);
+                assert!(w >= base * 75 / 100 && w <= base * 125 / 100, "{base} {r} {w}");
+            }
+            assert_ne!(jittered_ms(base, 0), jittered_ms(base, 50), "不同亂數要有不同等待");
+        }
+        assert!(GATEWAY_RETRY_MS.len() <= 3);
+        let total: u64 = GATEWAY_RETRY_MS.iter().map(|b| b * 125 / 100).sum();
+        assert!(total <= 7000, "全部等待加起來有上限：{total}");
+    }
+
+    #[test]
+    fn t1778_只有唯讀動作算可以安全重試() {
+        for n in ["whoami", "list", "inbox", "inbox_peek", "sent_status", "chat_history", "launchers", "read_sync"] {
+            assert!(is_safe_read(n), "{n}");
+        }
+        for n in ["send", "ack", "room_post", "launch", "set_name", "acct_switch", "usage_report", "roster", "term_req_decide", "attach_commit"] {
+            assert!(!is_safe_read(n), "{n} 不是唯讀，不能盲目重試");
+        }
+    }
+
+    #[tokio::test]
+    async fn t1778_唯讀動作遇到503_退避重試後成功() {
+        let port = free_port();
+        let hits = plan_server(port, vec![(503, "{}".into()), (503, "{}".into()), (200, r#"{"messages":[]}"#.into())]);
+        let r = relay_gw(port);
+        assert_eq!(r.api("inbox", None).await, Ok(json!({"messages": []})));
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn t1778_重試有上限_用完照原本方式回錯誤() {
+        let port = free_port();
+        let hits = plan_server(port, vec![(503, "{}".into())]);
+        let e = relay_gw(port).api("sent_status", Some(json!({"ids": []}))).await.unwrap_err();
+        assert!(e.contains("HTTP 503"), "{e}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1 + FAST_GW.len(), "第一次加最多 3 次重試，不會無限打");
+    }
+
+    #[tokio::test]
+    async fn t1778_非唯讀動作遇到503_不重試_只送一次() {
+        for action in ["ack", "room_post", "launch", "set_name"] {
+            let port = free_port();
+            let hits = plan_server(port, vec![(503, "{}".into()), (200, "{}".into())]);
+            let e = relay_gw(port).api(action, Some(json!({}))).await.unwrap_err();
+            assert!(e.contains("HTTP 503"), "{action} {e}");
+            assert_eq!(hits.load(Ordering::SeqCst), 1, "{action} 不能重送");
+        }
+    }
+
+    #[tokio::test]
+    async fn t1778_唯讀動作遇到500不重試() {
+        let port = free_port();
+        let hits = plan_server(port, vec![(500, "{}".into())]);
+        assert!(relay_gw(port).api("list", None).await.unwrap_err().contains("HTTP 500"));
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+    }
+
+    /// 掛上記錄去處的 Relay，回（Relay, 記錄內容）
+    fn relay_with_sink(port: u16) -> (Relay, std::sync::Arc<Mutex<String>>) {
+        let got = std::sync::Arc::new(Mutex::new(String::new()));
+        let g2 = got.clone();
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "k".into(), "n".into(), "w".into());
+        r.set_log_sink(std::sync::Arc::new(move |l: &str| g2.lock().unwrap().push_str(l)));
+        (r, got)
+    }
+
+    #[tokio::test]
+    async fn t1778_call_with_key遇5xx_記錄去處收到狀態碼與前200字() {
+        let port = free_port();
+        let body = format!("{}{}", "字".repeat(250), "尾巴不該出現");
+        plan_server(port, vec![(503, body)]);
+        let (r, got) = relay_with_sink(port);
+        let (st, _) = r.call_with_key("k", "whoami", None).await.unwrap();
+        assert_eq!(st, 503);
+        let log = got.lock().unwrap().clone();
+        assert!(log.contains("whoami HTTP 503") && log.contains(&"字".repeat(200)), "{log}");
+        assert!(!log.contains(&"字".repeat(201)) && !log.contains("尾巴"), "只留前 200 字：{log}");
+    }
+
+    #[tokio::test]
+    async fn t1778_api_bytes遇5xx_記錄去處收到狀態碼與前200字() {
+        let port = free_port();
+        let body = format!("{}{}", "字".repeat(250), "尾巴不該出現");
+        plan_server(port, vec![(503, body)]);
+        let (r, got) = relay_with_sink(port);
+        let e = r.api_bytes("tts", json!({}), 1024, Duration::from_secs(5)).await.unwrap_err();
+        assert!(e.contains("HTTP 503"), "{e}");
+        let log = got.lock().unwrap().clone();
+        assert!(log.contains("tts HTTP 503") && log.contains(&"字".repeat(200)), "{log}");
+        assert!(!log.contains(&"字".repeat(201)) && !log.contains("尾巴"), "只留前 200 字：{log}");
+    }
+
+    #[tokio::test]
+    async fn t1778_5xx回應內容交給記錄去處_不含金鑰() {
+        let port = free_port();
+        let body = r#"{"code":"WORKER_LIMIT","message":"超過資源上限"}"#;
+        plan_server(port, vec![(503, body.into())]);
+        let got = std::sync::Arc::new(Mutex::new(String::new()));
+        let g2 = got.clone();
+        let r = Relay::new(format!("http://127.0.0.1:{port}/relay"), "SECRETKEY".into(), "n".into(), "w".into());
+        r.set_log_sink(std::sync::Arc::new(move |l: &str| g2.lock().unwrap().push_str(l)));
+        let _ = r.api("ack", Some(json!({"ids": []}))).await;
+        let log = got.lock().unwrap().clone();
+        assert!(log.contains("WORKER_LIMIT") && log.contains("超過資源上限") && log.contains("ack HTTP 503"), "{log}");
+        assert!(!log.contains("SECRETKEY") && !log.contains("x-relay-key"), "{log}");
     }
 }
