@@ -128,7 +128,7 @@ function world(mod = () => {}) {
     mkTmp: () => fs.mkdtempSync(path.join(os.tmpdir(), 'lsp-dl-')),
     ghDownloadArtifact: (id, dest) => { ev('gh artifact', [id]); fs.writeFileSync(dest, w.zips[id]) },
     ghDownload: () => {},
-    asnCli: async args => { ev(`asn-cli ${args[0]}`, args); return { status: w.asnStatus[args[0]] ?? 0, stdout: '', stderr: '' } },
+    asnCli: async args => { ev(`asn-cli ${args[0]}`, args); return { status: w.asnStatus[args[0]] ?? 0, stdout: '', stderr: w.asnStderr?.[args[0]] ?? '' } },
     firebase: async ({ version, args }) => {
       ev(`firebase ${args[0]}`, [version, ...args])
       if (args[0] === 'login:list') return w.fbWho
@@ -454,4 +454,14 @@ test('--items-file：優先於 CI 草稿，仍過同一組檢查', async () => {
   const bad = await run(null, { itemsFile: f })
   assert.equal(bad.r.ok, false)
   fs.rmSync(f)
+})
+test('#1966 asn-cli 失敗：stderr 原文只進終端機，貼到群組的中止訊息不含原文', async () => {
+  const SECRET = '原文-不能上群組-7f3a'
+  const c = await run(w => { w.asnStatus.site = 1; w.asnStderr = { site: SECRET } })
+  aborts(c, 10)
+  const posts = c.w.events.filter(e => e.k === 'asn-cli send').map(e => e.a[4])
+  assert.ok(posts.length >= 1, '前提：有貼中止訊息')
+  assert.ok(posts.every(p => !p.includes(SECRET)), `群組文字不能帶 stderr：${posts.join(' | ')}`)
+  assert.ok(posts.some(p => /asn-cli site release 失敗（結束碼 1/.test(p)))
+  assert.ok(c.w.logs.some(l => l.includes(SECRET)), '終端機要印出原文')
 })

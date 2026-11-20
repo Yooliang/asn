@@ -11,6 +11,7 @@ import { REPO, releaseState } from './github_release.mjs'
 import { verifyAll, sigMatchesLatest } from './verify_sig.mjs'
 import { verifyOnlineLinux } from './verify_online.mjs'
 import { listZip } from './zip_lite.mjs'
+import { asnCliFail } from './asn_cli.mjs'
 
 export const LINUX_WORKFLOW = '.github/workflows/asn-release-linux.yml'
 export const LINUX_WORKFLOW_FILE = 'asn-release-linux.yml'
@@ -90,7 +91,7 @@ export async function linuxSignPublish(opts, deps) {
     if (dryRun) return
     let r
     try { r = await asnCli(['send', '--room', room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
-    if (r?.status !== 0) log(`貼群組失敗（結束碼 ${r?.status}），請自行通知：${text}`)
+    if (r?.status !== 0) log(`貼群組失敗（${asnCliFail(r)}），請自行通知：${text}`)
   }
 
   try {
@@ -301,7 +302,7 @@ export async function linuxSignPublish(opts, deps) {
       const text = `【Linux 版發版完成】v${version}：AppImage、deb 已附加到 GitHub Release v${version}、官網 latest.json 已加 ${LINUX_PLATFORM}、首頁已加 Linux 下載連結，部署與線上核對通過，網站檔已提交回 main。`
       let r
       try { r = await asnCli(['send', '--room', room, '--body', text]) } catch (e) { r = { status: 1, stderr: e?.message } }
-      if (r?.status !== 0) log(`貼群組失敗（結束碼 ${r?.status}），請自行通知：${text}`)
+      if (r?.status !== 0) log(`貼群組失敗（${asnCliFail(r)}），請自行通知：${text}`)
     })
 
     return { ok: true, dryRun: false, failedStep: null, completed, latest: S.latest, dir: S.dir }

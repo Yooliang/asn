@@ -23,6 +23,7 @@ import { checkRecord } from './site_record_check.mjs'
 import { listZip } from './zip_lite.mjs'
 import { publishRelease as realPublishRelease, attachToRelease as realAttachToRelease } from './github_release.mjs'
 import { linuxSignPublish } from './linux_publish.mjs'
+import { makeAsnCli, asnCliFail } from './asn_cli.mjs'
 
 export const REPO = 'Yooliang/asn'
 export const WORKFLOW = '.github/workflows/asn-release.yml'
@@ -108,7 +109,7 @@ export async function localSignPublish(opts, deps) {
     if (dryRun) return
     let r
     try { r = await asnCli(['send', '--room', room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
-    if (r?.status !== 0) log(`貼群組失敗（結束碼 ${r?.status}），請自行通知：${text}`)
+    if (r?.status !== 0) log(`貼群組失敗（${asnCliFail(r)}），請自行通知：${text}`)
   }
 
   try {
@@ -338,7 +339,7 @@ export async function localSignPublish(opts, deps) {
       const args = ['site', 'release', '--version', rec.version, '--date', rec.date, '--commit', rec.commit,
         ...rec.items.flatMap(i => ['--item', i]), ...rec.platforms.flatMap(p => ['--platform', p])]
       const r = await asnCli(args)
-      if (r?.status !== 0) bad(`asn-cli site release 失敗（結束碼 ${r?.status}）`)
+      if (r?.status !== 0) { log(`asn-cli site release 原文：${asnCliFail(r)}`); bad(`asn-cli site release 失敗（結束碼 ${r?.status}，原文見發版機器終端機）`) }
       S.record = rec
     })
 
@@ -346,7 +347,7 @@ export async function localSignPublish(opts, deps) {
     await step(11, '貼群組', async () => {
       const text = `【發版完成】v${version}：安裝檔已發 GitHub Release、官網已部署並線上核對通過、官網版本紀錄已寫入（平台：${S.record.platforms.join('、')}）。commit ${S.record.commit}。接著提交兩個網站檔回 main。`
       const r = await asnCli(['send', '--room', room, '--body', text])
-      if (r?.status !== 0) bad(`貼群組失敗（結束碼 ${r?.status}）`)
+      if (r?.status !== 0) { log(`貼群組 asn-cli 原文：${asnCliFail(r)}`); bad(`貼群組失敗（結束碼 ${r?.status}）`) }
     })
 
     // ---- 12 提交回 main
@@ -413,7 +414,7 @@ function realDeps(repoRoot, env) {
     repoRoot, git, gh,
     ghDownloadArtifact: (id, dest) => { const buf = execFileSync('gh', ['api', `repos/${REPO}/actions/artifacts/${id}/zip`], { cwd: repoRoot, maxBuffer: 1024 * 1024 * 1024 }); fs.writeFileSync(dest, buf) },
     ghDownload: (version, name, dir) => gh(['release', 'download', `v${version}`, '--repo', REPO, '--pattern', name, '--dir', dir]),
-    asnCli: args => { const r = spawnSync('asn-cli', args, { encoding: 'utf8' }); return { status: r.status ?? 1, stdout: r.stdout, stderr: r.stderr } },
+    asnCli: makeAsnCli({ env }),
     // firebase-tools 固定版本；版本字串已驗證過是 x.y.z，shell 只用來找 npx.cmd
     firebase: ({ version, args, cwd }) => {
       const r = spawnSync(`npx firebase-tools@${version} ${args.join(' ')}`, { cwd, shell: true, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
