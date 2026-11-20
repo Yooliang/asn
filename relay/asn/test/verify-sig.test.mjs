@@ -110,3 +110,17 @@ test('真實的 0.2.36 簽章（latest.json 裡 Tauri 簽出來的）：格式�
   assert.ok(s.keyId.equals(parsePubkey(conf.plugins.updater.pubkey).keyId))
   assert.equal(trustedFile(s.trusted), 'ASN_' + latest.version + '_x64-setup.exe')
 })
+
+test('#1928 一審：verifyAll 真的呼叫反向驗證；反向驗證失敗整體就失敗，不呼叫則沒人守', () => {
+  let called = 0
+  const spyOk = args => { called++; return reverseVerify(args) }
+  assert.equal(verifyAll({ ...base, reverse: spyOk }).ok, true)
+  assert.equal(called, 1, '驗簽通過時要跑一次反向驗證')
+  const bad = verifyAll({ ...base, reverse: () => ({ ok: false, problems: ['反向驗證：改一位元組仍驗得過（測試用）'] }) })
+  assert.equal(bad.ok, false)
+  assert.match(bad.problems.join('\n'), /反向驗證/)
+  // 正向就沒過時不必再反向（避免重複噪音），但整體仍是失敗
+  let c2 = 0
+  const r = verifyAll({ ...base, fileBytes: Buffer.from([...base.fileBytes].map((b, i) => (i === 7 ? b ^ 1 : b))), reverse: a => { c2++; return reverseVerify(a) } })
+  assert.equal(r.ok, false)
+})

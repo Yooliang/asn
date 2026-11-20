@@ -129,11 +129,12 @@ export function sigMatchesLatest({ sigText, latest, platform = PLATFORM }) {
 }
 
 /** 一次做完：驗簽、反向驗證、（有給 latest 時）與 latest.json 逐字比對 */
-export function verifyAll({ pubkeyText, sigText, fileBytes, expectedFileName, latest }) {
+// reverse 可注入，只給測試用（證明 verifyAll 真的呼叫反向驗證，且它失敗整體就失敗）
+export function verifyAll({ pubkeyText, sigText, fileBytes, expectedFileName, latest, reverse = reverseVerify }) {
   const problems = []
   const a = verifySig({ pubkeyText, sigText, fileBytes, expectedFileName })
   problems.push(...a.problems)
-  if (a.ok) problems.push(...reverseVerify({ pubkeyText, sigText, fileBytes, expectedFileName }).problems)
+  if (a.ok) problems.push(...reverse({ pubkeyText, sigText, fileBytes, expectedFileName }).problems)
   if (latest !== undefined) problems.push(...sigMatchesLatest({ sigText, latest }).problems)
   return { ok: problems.length === 0, problems }
 }
