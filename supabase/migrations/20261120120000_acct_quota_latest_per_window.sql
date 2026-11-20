@@ -12,7 +12,7 @@
 --  2. asn_relay_acct_windows_clean：不再丟「重置時間不在現在 −1 天～+8 天」的窗；讀取時間比後台現在還晚的改記成現在（不丟）。其餘逐字照舊。
 --  3. 不再用到的 asn_relay_acct_window_decide、asn_relay_acct_window_judge 在這裡 drop。
 --  4. 簽名、回傳形狀、權限不變（另外 drop 了 asn_relay_acct_window_decide、asn_relay_acct_window_judge 兩個函式，回復檔會還原它們）；不動資料表（window_pending 欄位保留，不再寫入）。
--- 部署順序：本 migration → relay（Edge Function，不需改）→ 電腦端。
+-- 部署順序：本 migration → Edge（relay）→ 電腦端。Edge 要部署：這版改了 supabase/functions/_shared/account_switch.ts 的 parseWindows。
 -- 回復：supabase/sql/rollback/20261120120000_acct_quota_latest_per_window_down.sql（換回 judge、decide、windows_clean、roster_report 的上一版本體）。
 begin;
 
