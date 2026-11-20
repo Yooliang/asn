@@ -47,6 +47,8 @@ pub enum AccErr {
     Io(String),
     /// 切換寫完之後讀回實際登入的帳號，不是要切去的那個（#1880）
     NotSwitched,
+    /// 同上，而且把檔案還原回切換前也沒成功（#1927 一審）
+    NotSwitchedRollbackFailed,
 }
 
 impl fmt::Display for AccErr {
@@ -60,6 +62,7 @@ impl fmt::Display for AccErr {
             AccErr::Corrupt(what) => write!(f, "{what}"),
             AccErr::Io(e) => write!(f, "檔案操作失敗：{e}"),
             AccErr::NotSwitched => write!(f, "{}", crate::claude_login::SWITCH_FAILED_TEXT),
+            AccErr::NotSwitchedRollbackFailed => write!(f, "{}", crate::claude_login::SWITCH_ROLLBACK_FAILED_TEXT),
         }
     }
 }
@@ -681,32 +684,50 @@ fn verdict(l: &Lookup, owner_uuid: &str, owner_email: &str) -> (bool, String) {
 }
 
 pub fn switch_to(home: &Path, email: &str) -> R<SwitchOutcome> {
-    switch_verified(home, email, std::env::var_os("CLAUDE_CONFIG_DIR"), std::time::Duration::ZERO)
+    // 只看家目錄，不讀真實環境變數（紅線：函式吃路徑參數）；真正入口 `local_switch` 會明確傳環境變數
+    switch_verified(home, email, None, std::time::Duration::ZERO)
 }
 
-/// 切換，並在寫完後讀回實際登入的帳號比對（#1880）：對不上就回失敗，不報成功。
-/// 只信讀回來的帳號，不信「剛寫過」。`settle` 大於 0 時隔這麼久再讀回一次：開著的 Claude 視窗可能在切換之後又把舊帳號寫回去。
+/// 切換，並在寫完後讀回實際登入的帳號比對（#1880）：對不上就把這次寫過的檔還原成切換前，再回失敗，不報成功。
+/// 只信讀回來的帳號，不信「剛寫過」。呼叫端要自己持有 `LOCK`。
 pub fn switch_verified(home: &Path, email: &str, cfg_env: Option<std::ffi::OsString>, settle: std::time::Duration) -> R<SwitchOutcome> {
     let out = switch_impl(home, email, Fault::None, &profile_lookup)?;
-    let path = crate::claude_login::live_json_path(home, cfg_env);
     let retry = std::time::Duration::from_millis(150);
-    let mut check = crate::claude_login::verify_switched(&path, &out.email, retry);
+    let mut check = check_switched(home, &out.email, &cfg_env, retry);
     if check.is_ok() && !settle.is_zero() {
         std::thread::sleep(settle);
-        check = crate::claude_login::verify_switched(&path, &out.email, retry);
+        check = check_switched(home, &out.email, &cfg_env, retry);
     }
-    if let Err(why) = check {
-        // 原因只進 log：實際讀到的帳號（或讀不到的原因）；畫面只說切換沒有成功
-        let what = match why {
-            crate::claude_login::NotSwitched::Other(Some(e)) => format!("實際登入的是 {e}"),
-            crate::claude_login::NotSwitched::Other(None) => "讀回來沒有登入的帳號".to_string(),
-            crate::claude_login::NotSwitched::Unreadable(r) => format!("讀不到登入的帳號：{r}"),
-        };
-        crate::claude_login::log(&format!("切換到 {} 沒有成功：{what}", out.email));
-        return Err(AccErr::NotSwitched);
+    finish_switch(home, out, check)
+}
+
+/// 讀回實際登入的帳號（不改任何檔）
+pub fn check_switched(home: &Path, email: &str, cfg_env: &Option<std::ffi::OsString>, retry: std::time::Duration) -> Result<(), crate::claude_login::NotSwitched> {
+    crate::claude_login::verify_switched(&crate::claude_login::live_json_path(home, cfg_env.clone()), email, retry)
+}
+
+/// 讀回結果出來之後收尾：對得上就通知額度重查；對不上就還原檔案（只動切換本來就會寫的兩個檔）、寫 log、回失敗
+pub fn finish_switch(home: &Path, out: SwitchOutcome, check: Result<(), crate::claude_login::NotSwitched>) -> R<SwitchOutcome> {
+    let Err(why) = check else {
+        crate::claude_quota::kick(); // 切換之後額度要立刻查一次（claude_quota.rs）
+        return Ok(out);
+    };
+    // 原因只進 log：實際讀到的帳號（或讀不到的原因）；不放檔案內容
+    let what = match why {
+        crate::claude_login::NotSwitched::Other(Some(e)) => format!("實際登入的是 {e}"),
+        crate::claude_login::NotSwitched::Other(None) => "讀回來沒有登入的帳號".to_string(),
+        crate::claude_login::NotSwitched::Unreadable(r) => format!("讀不到登入的帳號：{r}"),
+    };
+    match undo_last_switch(home) {
+        Ok(_) => {
+            crate::claude_login::log(&format!("切換到 {} 沒有成功：{what}；登入檔已還原成切換前", out.email));
+            Err(AccErr::NotSwitched)
+        }
+        Err(e) => {
+            crate::claude_login::log(&format!("切換到 {} 沒有成功：{what}；還原登入檔也失敗：{e}", out.email));
+            Err(AccErr::NotSwitchedRollbackFailed)
+        }
     }
-    crate::claude_quota::kick(); // 切換之後額度要立刻查一次（claude_quota.rs）
-    Ok(out)
 }
 
 /// 帳號正在切換、加入、刪除（或背景同步正在動登入檔）：額度查詢這一輪不查，免得把「切到一半」的登入記到錯的帳號。
@@ -1103,10 +1124,19 @@ pub async fn claude_account_undo() -> Result<String, String> {
     })
     .await?
 }
-/// 本機切換（Tauri 指令與遠端切換共用同一個入口，同一把鎖）
+/// 本機切換（Tauri 指令與遠端切換共用同一個入口，同一把鎖）。
+/// 「隔一下再讀一次」（擋開著的視窗晚一步把舊帳號寫回去）在鎖外面睡，不擋設定頁與背景同步；再讀時重新拿鎖，對不上就還原
 pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {
+    let home = claude_home();
+    let cfg = std::env::var_os("CLAUDE_CONFIG_DIR");
+    let out = {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        switch_verified(&home, email, cfg.clone(), std::time::Duration::ZERO).map_err(|e| e.to_string())?
+    };
+    std::thread::sleep(std::time::Duration::from_secs(2));
     let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    switch_verified(&claude_home(), email, std::env::var_os("CLAUDE_CONFIG_DIR"), std::time::Duration::from_secs(2)).map_err(|e| e.to_string())
+    let check = check_switched(&home, &out.email, &cfg, std::time::Duration::from_millis(150));
+    finish_switch(&home, out, check).map_err(|e| e.to_string())
 }
 /// 帳號庫清單（遠端回報用）
 pub fn local_list() -> Vec<AccountInfo> {
@@ -1952,7 +1982,10 @@ mod tests {
     fn 背景工作與_Tauri_指令用同一把鎖() {
         let src = include_str!("claude_accounts.rs").replace("\r\n", "\n");
         assert!(src.contains("auto_tick(&LOCK, &home)"), "背景工作要用和切換同一把 LOCK");
-        assert!(src.contains("pub fn local_switch(email: &str) -> Result<SwitchOutcome, String> {\n    let _g = LOCK.lock()"));
+        // 切換與「隔一下再讀」兩段都要拿同一把鎖；睡的那 2 秒不佔著鎖（#1927 一審）
+        let body = src.split("pub fn local_switch(email: &str)").nth(1).unwrap().split("/// 帳號庫清單").next().unwrap();
+        assert_eq!(body.matches("LOCK.lock()").count(), 2);
+        assert!(body.find("sleep").unwrap() > body.find("};").unwrap(), "睡之前第一把鎖已放掉");
     }
 
     #[test]

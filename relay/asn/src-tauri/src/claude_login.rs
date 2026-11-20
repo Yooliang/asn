@@ -17,6 +17,8 @@ pub const UNREADABLE_TEXT: &str = "讀不到目前登入的帳號";
 /// 切換後讀回來帳號沒換：畫面上的固定文字
 pub const SWITCH_FAILED_TEXT: &str = "切換沒有成功：這台電腦登入的帳號沒有換過去。請再切換一次；還是不行，就到 Claude 視窗用那個帳號重新登入。";
 
+/// 切換沒成功、而且還原檔案也失敗：畫面上的固定文字
+pub const SWITCH_ROLLBACK_FAILED_TEXT: &str = "切換沒有成功，而且登入檔沒能還原回切換前。請到 Claude 視窗確認目前登入的帳號，必要時用原本的帳號重新登入。";
 /// 家目錄之外，有設定資料夾環境變數時以那邊為準；沒有 `.claude.json` 才看家目錄
 pub fn live_json_path(home: &Path, cfg_env: Option<OsString>) -> PathBuf {
     match cfg_env {
@@ -169,7 +171,14 @@ mod watch {
     /// 開不起來（資料夾不存在、系統不給）回錯誤原因，呼叫端要記 log。
     pub fn start(path: PathBuf, debounce: Duration, on_change: impl Fn(Change) + Send + 'static) -> Result<Handle, String> {
         let dir = path.parent().ok_or("沒有所在的資料夾")?.to_path_buf();
-        let name = path.file_name().ok_or("沒有檔名")?.to_os_string();
+        start_dirs(vec![dir], move || path.clone(), debounce, on_change)
+    }
+
+    /// 同時盯好幾個資料夾，每次要讀時才用 `resolve` 算出現在該讀哪一份：
+    /// 自訂設定資料夾裡的 `.claude.json` 是之後才建立的也盯得到（#1927 一審）。至少要有一個資料夾開得起來，開不起來的記 log
+    pub fn start_dirs(dirs: Vec<PathBuf>, resolve: impl Fn() -> PathBuf + Send + 'static, debounce: Duration, on_change: impl Fn(Change) + Send + 'static) -> Result<Handle, String> {
+        let name = std::ffi::OsString::from(".claude.json");
+        let path = resolve();
         let tracker = Arc::new(Mutex::new(Tracker::default()));
         let first = tracker.lock().unwrap_or_else(|e| e.into_inner()).observe(read_login_retry(&path, debounce));
         let (tx, rx) = mpsc::channel::<Result<notify::Event, notify::Error>>();
@@ -177,7 +186,17 @@ mod watch {
             let _ = tx.send(ev);
         })
         .map_err(|e| format!("建立監看失敗：{e}"))?;
-        w.watch(&dir, RecursiveMode::NonRecursive).map_err(|e| format!("監看資料夾失敗：{e}"))?;
+        let mut last_err = String::new();
+        let mut opened = 0;
+        for d in &dirs {
+            match w.watch(d, RecursiveMode::NonRecursive) {
+                Ok(()) => opened += 1,
+                Err(e) => last_err = format!("監看資料夾失敗：{e}"),
+            }
+        }
+        if opened == 0 {
+            return Err(last_err);
+        }
         if let Some(c) = first {
             on_change(c);
         }
@@ -205,7 +224,7 @@ mod watch {
                 if !dirty {
                     continue;
                 }
-                let change = tracker.lock().unwrap_or_else(|e| e.into_inner()).observe(read_login_retry(&path, debounce));
+                let change = tracker.lock().unwrap_or_else(|e| e.into_inner()).observe(read_login_retry(&resolve(), debounce));
                 if let Some(c) = change {
                     on_change(c);
                 }
@@ -219,10 +238,14 @@ mod watch {
     #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub fn spawn_watch(home: PathBuf) {
         std::thread::spawn(move || {
-            let path = live_json_path(&home, std::env::var_os("CLAUDE_CONFIG_DIR"));
+            let cfg = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty());
+            let mut dirs = vec![home.clone()];
+            if let Some(c) = &cfg {
+                dirs.push(PathBuf::from(c));
+            }
             let mut logged: Option<String> = None;
             loop {
-                match start(path.clone(), Duration::from_millis(400), |c| {
+                match start_dirs(dirs.clone(), { let (h, c) = (home.clone(), cfg.clone()); move || live_json_path(&h, c.clone()) }, Duration::from_millis(400), |c| {
                     match &c {
                         Change::Email(e) => log(&format!("Claude 目前登入的帳號換成 {e}，立刻回報")),
                         Change::LoggedOut => log("Claude 目前沒有登入的帳號，立刻回報"),
@@ -253,7 +276,7 @@ mod watch {
     }
 }
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub use watch::{spawn_watch, start, Handle};
+pub use watch::{spawn_watch, start, start_dirs, Handle};
 
 #[cfg(test)]
 mod tests;

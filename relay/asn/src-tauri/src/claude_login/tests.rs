@@ -175,3 +175,48 @@ fn 畫面文字_讀不到與切換失敗_都是白話() {
     let js = include_str!("../../../ui/lib/claude-accounts.mjs");
     assert!(js.contains(&format!("CURRENT_UNREADABLE = '{UNREADABLE_TEXT}'")), "前端與 Rust 同一句");
 }
+
+fn snapshot(h: &Path) -> (Vec<u8>, Vec<u8>) {
+    (std::fs::read(h.join(".claude.json")).unwrap(), std::fs::read(h.join(".claude").join(".credentials.json")).unwrap())
+}
+
+#[test]
+fn 讀回對不上_家目錄的登入檔要還原成切換前() {
+    let home = two_accounts();
+    let before = snapshot(home.path());
+    let cfg = tempfile::tempdir().unwrap();
+    write(cfg.path(), &cj("a@x.test")); // 讀回的是這份，永遠對不上
+    let r = claude_accounts::switch_verified(home.path(), "b@x.test", Some(cfg.path().into()), Duration::ZERO);
+    assert!(matches!(r, Err(claude_accounts::AccErr::NotSwitched)), "{r:?}");
+    assert!(snapshot(home.path()) == before, "登入檔與權杖檔都要回到切換前");
+}
+
+#[test]
+fn 還原也失敗_如實回報() {
+    let home = two_accounts();
+    let cfg = tempfile::tempdir().unwrap();
+    write(cfg.path(), &cj("a@x.test"));
+    // 切換之後備份被拿走（還原靠它）：還原會失敗
+    let out = claude_accounts::switch_impl(home.path(), "b@x.test", claude_accounts::Fault::None, &|_| claude_accounts::Lookup::Failed).unwrap();
+    std::fs::remove_dir_all(home.path().join(".asn").join("claude-backup")).unwrap();
+    let check = claude_accounts::check_switched(home.path(), &out.email, &Some(cfg.path().into()), Duration::ZERO);
+    let r = claude_accounts::finish_switch(home.path(), out, check);
+    assert!(matches!(r, Err(claude_accounts::AccErr::NotSwitchedRollbackFailed)), "{r:?}");
+    assert_eq!(r.unwrap_err().to_string(), SWITCH_ROLLBACK_FAILED_TEXT);
+}
+
+#[test]
+fn 監看_自訂資料夾裡的登入檔是之後才建立的_也盯得到() {
+    let home = tempfile::tempdir().unwrap();
+    let cfg = tempfile::tempdir().unwrap();
+    write(home.path(), &cj("a@x.test"));
+    let (h, c) = (home.path().to_path_buf(), cfg.path().to_path_buf());
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _w = start_dirs(vec![h.clone(), c.clone()], move || live_json_path(&h, Some(c.clone().into())), Duration::from_millis(100), move |ch| {
+        let _ = tx.send(ch);
+    })
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    write(cfg.path(), &cj("z@x.test"));
+    assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), Change::Email("z@x.test".into()));
+}
