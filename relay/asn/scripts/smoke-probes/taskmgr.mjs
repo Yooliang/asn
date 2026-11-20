@@ -15,7 +15,7 @@ export const taskmgrProbeSource = () => `(async () => {
   const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-table tbody tr')]; return r.length >= 8 ? r : null });
   if (!rows) return { ok: false, why: '工作管理員沒有列出 8 列程式（實際 ' + document.querySelectorAll('.tm-table tbody tr').length + ' 列）' };
   const heads = [...document.querySelectorAll('.tm-table th')].map(h => h.textContent.trim()).join('、');
-  for (const c of ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '來源']) if (!heads.includes(c)) return { ok: false, why: '表頭缺「' + c + '」：' + heads };
+  for (const c of ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '來源']) if (!heads.includes(c)) return { ok: false, why: '表頭缺「' + c + '」：' + heads };
   const dups = [...document.querySelectorAll('.tm-table tbody tr.dup')];
   if (dups.length !== 2) return { ok: false, why: '「重複」列應該有 2 列，實際 ' + dups.length };
   if (!dups.every(r => r.querySelector('.tm-tag.dup')?.textContent.trim() === '重複')) return { ok: false, why: '重複的列沒有「重複」標記' };
