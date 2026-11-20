@@ -49,6 +49,11 @@ const SLOW_MS: u64 = 60_000;
 /// 所有視窗加起來，一分鐘最多讀幾次
 const MAX_READS_PER_MIN: u32 = 30;
 const MINUTE_MS: u64 = 60_000;
+/// 幾扇視窗在這段時間內都讀失敗，就請終端服務監看馬上重看一次（#1887）：一扇失敗常是那扇自己的事，兩扇以上多半是服務出問題
+const WAKE_WINDOWS: usize = 2;
+const WAKE_WITHIN_MS: u64 = 60_000;
+/// 叫醒過之後，至少隔這麼久才再叫一次（監看一輪本來就 30 秒）
+const WAKE_COOLDOWN_MS: u64 = 60_000;
 /// 讀失敗的退避上限
 const MAX_BACKOFF_MS: u64 = 300_000;
 /// 退避等到這麼久（含）以上才寫一行紀錄，免得每次小失敗都洗版
@@ -112,6 +117,9 @@ pub fn early_stop_line(id: &str) -> String {
 pub struct Schedule {
     next_at: HashMap<String, u64>,
     fails: HashMap<String, u32>,
+    /// 每扇視窗最近一次讀失敗的時間（成功或視窗關了就忘記）
+    failed_at: HashMap<String, u64>,
+    last_wake: Option<u64>,
     first_seen: HashMap<String, u64>,
     early_stopped: HashSet<String>,
     window_start: u64,
@@ -142,6 +150,7 @@ impl Schedule {
     pub fn due(&mut self, now: u64, windows: &[(String, Pace)], free_bytes: Option<u64>) -> Vec<String> {
         self.next_at.retain(|id, _| windows.iter().any(|(w, _)| w == id));
         self.fails.retain(|id, _| windows.iter().any(|(w, _)| w == id));
+        self.failed_at.retain(|id, _| windows.iter().any(|(w, _)| w == id));
         if free_bytes.is_some_and(|b| b < PAUSE_BELOW_BYTES) {
             self.paused += 1;
             return Vec::new();
@@ -175,16 +184,32 @@ impl Schedule {
     pub fn done(&mut self, id: &str, pace: Pace, ok: bool, now: u64) -> Option<String> {
         if ok {
             self.fails.remove(id);
+            self.failed_at.remove(id);
             self.next_at.insert(id.to_string(), now + pace.interval());
             return None;
         }
         self.failed += 1;
+        self.failed_at.insert(id.to_string(), now);
         let n = self.fails.entry(id.to_string()).or_insert(0);
         *n = n.saturating_add(1);
         let fails = *n;
         let wait = pace.interval().saturating_mul(1u64 << fails.min(16)).min(MAX_BACKOFF_MS);
         self.next_at.insert(id.to_string(), now + wait);
         (wait >= BACKOFF_LOG_MS).then(|| backoff_line(id, fails, wait))
+    }
+
+    /// 該不該請終端服務監看馬上重看一次（#1887）：`WAKE_WITHIN_MS` 內有 `WAKE_WINDOWS` 扇以上的視窗讀失敗才算；
+    /// 只有一扇失敗不算。叫過之後 `WAKE_COOLDOWN_MS` 內不再叫（這一輪的失敗只叫一次）。回 true 時呼叫端去要求重看
+    pub fn take_wake(&mut self, now: u64) -> bool {
+        if self.last_wake.is_some_and(|t| now.saturating_sub(t) < WAKE_COOLDOWN_MS) {
+            return false;
+        }
+        let recent = self.failed_at.values().filter(|&&t| now.saturating_sub(t) <= WAKE_WITHIN_MS).count();
+        let wake = recent >= WAKE_WINDOWS;
+        if wake {
+            self.last_wake = Some(now);
+        }
+        wake
     }
 
     /// 該寫開銷紀錄時回一行（累計值），之後歸零
@@ -407,5 +432,36 @@ mod tests {
         assert!(line.contains("reads=2") && line.contains("windows=2"), "{line}");
         s.due(NOW + REPORT_EVERY_MS, &[], Some(0));
         assert!(s.report(NOW + 2 * REPORT_EVERY_MS, 0).unwrap().contains("reads=0 failed=0 capped=0 paused=1"));
+    }
+
+    #[test]
+    fn t1887_兩扇以上視窗讀畫面失敗才叫監看重看_只有一扇不叫_叫過隔一陣才再叫() {
+        let mut s = Schedule::default();
+        let wins = w(3, Pace::Frequent);
+        s.due(NOW, &wins, FREE);
+        s.done("w0", Pace::Frequent, false, NOW);
+        assert!(!s.take_wake(NOW), "只有一扇失敗不叫");
+        s.done("w0", Pace::Frequent, false, NOW + 10_000);
+        assert!(!s.take_wake(NOW + 10_000), "同一扇連續失敗還是一扇");
+        s.done("w1", Pace::Frequent, false, NOW + 20_000);
+        assert!(s.take_wake(NOW + 20_000), "第二扇也失敗了就叫");
+        s.done("w2", Pace::Frequent, false, NOW + 30_000);
+        assert!(!s.take_wake(NOW + 30_000), "剛叫過，冷卻期內不再叫");
+        assert!(s.take_wake(NOW + 20_000 + WAKE_COOLDOWN_MS), "冷卻過了、失敗還在，再叫一次");
+    }
+
+    #[test]
+    fn t1887_失敗太久以前的_或後來讀成功的_不算() {
+        let mut s = Schedule::default();
+        s.due(NOW, &w(2, Pace::Frequent), FREE);
+        s.done("w0", Pace::Frequent, false, NOW);
+        s.done("w1", Pace::Frequent, false, NOW + WAKE_WITHIN_MS + 1);
+        assert!(!s.take_wake(NOW + WAKE_WITHIN_MS + 1), "w0 的失敗已經太舊，只剩一扇");
+        let mut s = Schedule::default();
+        s.due(NOW, &w(2, Pace::Frequent), FREE);
+        s.done("w0", Pace::Frequent, false, NOW);
+        s.done("w0", Pace::Frequent, true, NOW + 1_000);
+        s.done("w1", Pace::Frequent, false, NOW + 2_000);
+        assert!(!s.take_wake(NOW + 2_000), "w0 後來讀成功了，只剩一扇");
     }
 }

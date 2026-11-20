@@ -70,7 +70,7 @@ const M1: (u32, u64) = (100, 1_000);
 const M2: (u32, u64) = (200, 2_000);
 
 fn obs(live: Option<(u32, u64)>, names: &[&str]) -> Observed {
-    Observed { live, partners: names.iter().map(|s| s.to_string()).collect(), stopped: None }
+    Observed { live, partners: names.iter().map(|s| s.to_string()).collect(), stopped: None, ..Default::default() }
 }
 
 #[tokio::test]

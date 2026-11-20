@@ -36,6 +36,9 @@ pub struct Observed {
     pub partners: Vec<String>,
     /// ASN 上一次自己停 mux 的記號：（程序編號, 毫秒）
     pub stopped: Option<(u32, u64)>,
+    /// 終端服務記錄檔（pid 檔）裡記的（程序編號, 建立時間）；沒有記錄檔就是 None（#1887）。
+    /// 和監看記著的 mux 對不上，代表記著的那個一定不在了（記錄被換掉、或編號被別的程序佔用），不必再等第二輪
+    pub record: Option<(u32, u64)>,
 }
 
 /// 一次事故
@@ -135,8 +138,10 @@ impl Watch {
             };
             return None;
         }
-        // 消失了：換成別的 mux（確定舊的沒了）馬上算；只是暫時看不到 mux，要連續兩輪
-        if missing && !self.suspect {
+        // 消失了：換成別的 mux（確定舊的沒了）馬上算；只是暫時看不到 mux，要連續兩輪。
+        // 看不到 mux、但記錄檔記的已經不是我們在看的那個（#1887：編號跟記錄對不上），也是確定舊的沒了，馬上算
+        let record_moved = missing && o.record.is_some_and(|r| r != p.mux);
+        if missing && !self.suspect && !record_moved {
             self.suspect = true;
             return None;
         }
@@ -306,6 +311,33 @@ pub fn clear_notice(work_dir: &Path) {
 }
 
 /// 使用者自己結束 ASN（比照 #788「自己關的不接」）：忘掉記著的 mux，之後 ASN 不在時 mux 才掛掉，下次啟動不補報、不接回
+/// 有人要求馬上多看一輪（#1887：讀畫面連續失敗，可能是終端服務卡住）。監看的等待會提早結束去看
+static RECHECK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 要求監看馬上重新判斷一次（不碰別的狀態；多次要求只算一次）
+pub fn request_recheck() {
+    RECHECK.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn take_recheck() -> bool {
+    RECHECK.swap(false, std::sync::atomic::Ordering::SeqCst)
+}
+
+/// 等下一輪：每 `step_ms` 看一次有沒有人要求提早，有就馬上回 true（並清掉要求），等滿 `total_ms` 回 false。
+/// 睡眠與要求都由外面給，測試不真的等
+pub fn wait_tick(total_ms: u64, step_ms: u64, sleep: &dyn Fn(u64), take: &dyn Fn() -> bool) -> bool {
+    let mut waited = 0;
+    while waited < total_ms {
+        if take() {
+            return true;
+        }
+        let s = step_ms.min(total_ms - waited).max(1);
+        sleep(s);
+        waited += s;
+    }
+    take()
+}
+
 static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub fn note_user_quit(work_dir: &Path) {
@@ -714,7 +746,7 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         loop {
             // 第一輪不等：ASN 重開時收掉的已結束夥伴，要盡快讓收發室知道
             if !first {
-                std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
+                wait_tick(TICK_MS, 1_000, &|ms| std::thread::sleep(std::time::Duration::from_millis(ms)), &take_recheck);
             }
             first = false;
             if QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
@@ -776,7 +808,7 @@ mod tests {
     const M2: (u32, u64) = (200, 30_000_000);
 
     fn obs(live: Option<(u32, u64)>, names: &[&str]) -> Observed {
-        Observed { live, partners: names.iter().map(|s| s.to_string()).collect(), stopped: None }
+        Observed { live, partners: names.iter().map(|s| s.to_string()).collect(), stopped: None, ..Default::default() }
     }
 
     #[test]
@@ -1200,13 +1232,13 @@ mod tests {
         let mut w = Watch { boot: Some(1_000_000), ..Default::default() };
         // 重開機前記下的 mux（建立時間早於這次開機）：開機時間沒能讓 load 丟掉它
         w.seen = Some(Seen { mux: (10, 500_000), partners: vec!["甲".into(), "乙".into()], at: 600_000 });
-        let fresh = Observed { live: Some((20, 1_100_000)), partners: vec![], stopped: None };
+        let fresh = Observed { live: Some((20, 1_100_000)), partners: vec![], stopped: None, ..Default::default() };
         assert_eq!(w.tick(&fresh, 1_200_000), None, "新起的 mux 不是這次開機的事故，交給開機接回");
         assert!(w.lost.is_empty(), "也不算還沒接回");
         assert_eq!(w.seen.as_ref().map(|s| s.mux), Some((20, 1_100_000)), "改記新的");
         // 這次開機的 mux 之後被換掉，才是真的事故
         w.seen = Some(Seen { mux: (20, 1_100_000), partners: vec!["丙".into()], at: 1_150_000 });
-        let newer = Observed { live: Some((30, 1_300_000)), partners: vec![], stopped: None };
+        let newer = Observed { live: Some((30, 1_300_000)), partners: vec![], stopped: None, ..Default::default() };
         let inc = w.tick(&newer, 1_400_000).expect("同一次開機換掉 mux 要算事故");
         assert_eq!(inc.partners, ["丙"]);
     }
@@ -1215,7 +1247,7 @@ mod tests {
     fn 開機時間讀不到_照原本的判斷() {
         let mut w = Watch::default();
         w.seen = Some(Seen { mux: (10, 500_000), partners: vec!["甲".into()], at: 600_000 });
-        let fresh = Observed { live: Some((20, 1_100_000)), partners: vec![], stopped: None };
+        let fresh = Observed { live: Some((20, 1_100_000)), partners: vec![], stopped: None, ..Default::default() };
         assert!(w.tick(&fresh, 1_200_000).is_some(), "沒有開機時間就不能斷定是重開機前的紀錄");
     }
 
@@ -1291,5 +1323,66 @@ mod tests {
         let calls: Vec<String> = src.match_indices(concat!("OpenProcess", "(")).map(|(i, _)| src[i..].chars().take(80).collect()).collect();
         assert_eq!(calls.len(), 1);
         assert!(calls[0].starts_with("OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid)"));
+    }
+
+    #[test]
+    fn t1887_等下一輪_有人要求就提早結束_沒有就等滿() {
+        use std::cell::Cell;
+        let slept = Cell::new(0u64);
+        let sleep = |ms: u64| slept.set(slept.get() + ms);
+        assert!(!wait_tick(30_000, 1_000, &sleep, &|| false), "沒人要求，等滿");
+        assert_eq!(slept.get(), 30_000);
+        slept.set(0);
+        let polls = Cell::new(0);
+        let take = || {
+            polls.set(polls.get() + 1);
+            polls.get() > 3
+        };
+        assert!(wait_tick(30_000, 1_000, &sleep, &take), "第四次問到要求，提早結束");
+        assert_eq!(slept.get(), 3_000, "只等了三秒，不是三十秒");
+    }
+
+    /// 服務卡住但程序還在：監看只看程序在不在，自己看不出事。兩扇視窗同時讀不到畫面，就要把等待叫醒、馬上重看
+    #[test]
+    fn t1887_服務卡住_程序還在_兩扇視窗讀畫面失敗_要叫醒監看重看() {
+        use crate::launch::screen_watch::{Pace, Schedule};
+        let mut w = Watch::default();
+        // 程序一直在：每一輪都是同一個 mux，沒有事故（只看程序的監看看不出來）
+        assert_eq!(w.tick(&obs(Some(M1), &["甲", "乙"]), 0), None);
+        assert_eq!(w.tick(&obs(Some(M1), &["甲", "乙"]), TICK_MS), None);
+        let mut s = Schedule::default();
+        let wins = [("甲".to_string(), Pace::Frequent), ("乙".to_string(), Pace::Frequent)];
+        s.due(TICK_MS, &wins, Some(u64::MAX));
+        s.done("甲", Pace::Frequent, false, TICK_MS);
+        assert!(!s.take_wake(TICK_MS), "一扇失敗不叫");
+        let _ = take_recheck();
+        let slept = std::cell::Cell::new(0u64);
+        let woke_one = wait_tick(TICK_MS, 1_000, &|ms| slept.set(slept.get() + ms), &take_recheck);
+        assert!(!woke_one && slept.get() == TICK_MS, "只有一扇失敗，等待照常等滿");
+        s.done("乙", Pace::Frequent, false, TICK_MS + 5_000);
+        // 和 term.rs 的讀畫面迴圈同一步：兩扇都失敗 → 要求監看重看
+        if s.take_wake(TICK_MS + 5_000) {
+            request_recheck();
+        }
+        let slept = std::cell::Cell::new(0u64);
+        let woke = wait_tick(TICK_MS, 1_000, &|ms| slept.set(slept.get() + ms), &take_recheck);
+        assert!(woke, "兩扇都失敗，等待要被叫醒");
+        assert_eq!(slept.get(), 0, "馬上就重看，不用再等");
+    }
+
+    /// mux 看不到、但記錄檔記的已經不是我們在看的那個：不等第二輪，馬上算事故
+    #[test]
+    fn t1887_pid_跟記錄對不上_馬上算事故_記錄檔沒變就還是等兩輪() {
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲"]), 0);
+        let moved = Observed { live: None, record: Some(M2), ..Default::default() };
+        let inc = w.tick(&moved, TICK_MS).expect("記錄換成別的 mux 了，第一輪就下結論");
+        assert_eq!(inc.partners, ["甲"]);
+        // 記錄檔還是同一筆（程序暫時查不到）：照舊要連續兩輪
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲"]), 0);
+        let same = Observed { live: None, record: Some(M1), ..Default::default() };
+        assert_eq!(w.tick(&same, TICK_MS), None);
+        assert!(w.tick(&same, 2 * TICK_MS).is_some());
     }
 }

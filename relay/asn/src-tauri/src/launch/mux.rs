@@ -295,6 +295,11 @@ impl Mux<'_> {
         (self.runner.started_ms(pid) == Some(at) && self.runner.alive(pid)).then_some((pid, at))
     }
 
+    /// pid 檔裡記的（程序編號, 建立時間），不管程序還在不在（#1887：監看用來對照記著的 mux）
+    pub fn recorded(&self) -> Option<(u32, u64)> {
+        read_pid(&self.paths.pid)
+    }
+
     /// 每隔 `POLL` 試連一次，最多 `d`（用次數算，等待一律經過 runner.sleep，測試不真的等）
     fn wait_alive(&self, d: Duration) -> bool {
         for _ in 0..tries(d) {
