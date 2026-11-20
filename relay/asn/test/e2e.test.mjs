@@ -6,13 +6,13 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { defaultExe, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
+import { defaultExe, e2eTmpDir, maskSecrets, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
 import { FAKE_KEY, U } from './fake-relay.mjs'
 import { nudgeBody } from '../ui/lib/text.mjs'
 import { assertShotNotBlank } from './shot-png.mjs'
 
 test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
-  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-'))
+  const out = e2eTmpDir('asn-e2e-')
   const r = await runShot(out)
   assert.equal(r.code, 0, r.log)
   const reqs = r.relay.reqs
@@ -50,16 +50,18 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
   assert.ok(Math.abs(Date.now() - r.heartbeat.t) < 120_000)
   assert.equal(fs.existsSync(r.hbFile), false, '結束時清掉自己的心跳')
   if (shotCaptureSupported) {
+    // 截圖斷言失敗時附上 asn.exe 的輸出（已遮金鑰、只取最後 40 行），才看得到有沒有重截、重截幾次（#1953）
+    const shotCheck = (f, opts) => { try { return assertShotNotBlank(path.join(out, f), opts) } catch (e) { e.message += '\n--- asn.exe 輸出（末 40 行）---\n' + maskSecrets(r.log).trim().split('\n').slice(-40).join('\n'); throw e } }
     for (const f of ['list.png', 'chat.png']) {
       assert.ok(r.files.includes(f), `缺 ${f}`)
-      assertShotNotBlank(path.join(out, f))
+      shotCheck(f)
     }
     for (const f of r.files.filter(x => x.startsWith('tabs-'))) {
-      assertShotNotBlank(path.join(out, f), { minBytes: 8000 })
+      shotCheck(f, { minBytes: 8000 })
     }
     assert.ok(r.files.some(f => f.startsWith('toast-')), '有提示視窗截圖')
     for (const f of r.files.filter(x => x.startsWith('toast-'))) {
-      assertShotNotBlank(path.join(out, f), { minBytes: 3000, minUnique: 8 })
+      shotCheck(f, { minBytes: 3000, minUnique: 8 })
     }
   }
   assert.ok(fs.existsSync(path.join(r.data, 'asn-chats.json')), '對話存檔寫在資料夾')
@@ -70,7 +72,7 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
 // 分離模式另外要有指引、設定兩扇獨立視窗的截圖
 for (const mode of ['split', 'merged']) {
   test(`設定聊天窗改值會進樞紐並存檔（${mode}）`, { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-e2e-set-'))
+    const out = e2eTmpDir('asn-e2e-set-')
     const me = { winMode: mode, shotNoChat: true, shotSetting: 'look', shotSettingSet: [{ op: 'dpMode', value: 'right' }, { op: 'notify', value: { key: 'msg', on: false } }, { op: 'tabDim', value: 'status' }, { op: 'bubble', value: 'auto' }] }
     const r = await runShot(out, defaultExe, { me })
     assert.equal(r.code, 0, r.log)
