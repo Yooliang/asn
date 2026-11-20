@@ -3,7 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { evaluate, extractMergeSha, formatReport, parsePullRequestPaths, pickLatestRun, shouldTrigger } from '../../../.github/scripts/premerge-check.mjs'
+import { evaluate, extractMergeSha, listPrWorkflows, prTriggers, formatReport, parsePullRequestPaths, pickLatestRun, shouldTrigger } from '../../../.github/scripts/premerge-check.mjs'
 
 const HEAD = 'a'.repeat(40)
 const MAIN = 'b'.repeat(40)
@@ -101,4 +101,47 @@ test('#1972 trigger paths：真 workflow 檔（linux-build／ui-shots 有 paths�
   assert.equal(shouldTrigger(shots, ['relay/asn/scripts/smoke-lib.mjs']), true)
   assert.equal(shouldTrigger(shots, ['relay/asn/scripts/other.mjs']), false)
   assert.equal(shouldTrigger(null, ['x']), true)   // 讀不到 workflow 檔 → 保守當會觸發
+})
+
+// ---------- 一審必修：監看清單不能漏 workflow ----------
+const WF_DIR = new URL('../../../.github/workflows/', import.meta.url)
+const realWorkflows = () => Object.fromEntries(fs.readdirSync(WF_DIR).filter(f => /\.ya?ml$/.test(f)).map(f => [f, fs.readFileSync(new URL(f, WF_DIR), 'utf8')]))
+// 有 pull_request 觸發卻刻意不監看的 workflow：檔名 → 理由（目前沒有；要排除就寫在這裡並附理由）
+const EXCLUDED = {}
+
+test('#1972 守門：repo 內每支有 pull_request 觸發的 workflow 都在監看清單（或在附理由的排除清單）', () => {
+  const files = realWorkflows()
+  const watched = new Set(listPrWorkflows(files).map(w => w.file))
+  // 用另一種寫法（逐行找 pull_request 鍵）獨立數一遍，不依賴 prTriggers
+  const expected = Object.keys(files).filter(f => /^\s*pull_request(_target)?:/m.test(files[f]) || /^on:.*pull_request/m.test(files[f]))
+  assert.ok(expected.length >= 6, `預期至少 6 支，實際 ${expected.length}`)
+  for (const f of expected) {
+    assert.ok(watched.has(f) || (EXCLUDED[f] && EXCLUDED[f].length > 4), `${f} 有 pull_request 觸發，卻不在監看清單、也不在附理由的排除清單`)
+  }
+  for (const f of ['wezterm-build.yml', 'asn-wezterm-linux-probe.yml', 'asn-linux-build.yml', 'asn-backend-tests.yml', 'asn-ui-shots.yml', 'asn-pr-checklist.yml']) {
+    assert.ok(watched.has(f), `${f} 要被監看`)
+  }
+  assert.ok(!watched.has('asn-release.yml'), '只有 workflow_dispatch／push 觸發的不在清單')
+})
+
+test('#1972 改到 wezterm 檔：wezterm-build 紅燈／缺 run → 不可', () => {
+  const files = realWorkflows()
+  assert.equal(shouldTrigger(files['wezterm-build.yml'], ['.github/scripts/wezterm-src-prepare.sh']), true)
+  assert.equal(shouldTrigger(files['wezterm-build.yml'], ['relay/asn/ui/a.js']), false)
+  const mk = over => [...four(), wf('wezterm-build', over)]
+  assert.equal(run(mk()).ok, true)
+  assert.equal(run(mk({ run: null, merge: null })).ok, false)
+  assert.equal(run(mk({ run: { status: 'completed', conclusion: 'failure' }, merge: null })).ok, false)
+  assert.equal(run(mk({ run: { status: 'in_progress', conclusion: null }, merge: null })).ok, false)
+})
+
+test('#1972 prTriggers 認得各種寫法；pull_request_target 查不到 run 一律不可；別種縮排的 paths 保守當會觸發', () => {
+  assert.deepEqual(prTriggers('on:\n  pull_request:\n    paths:\n      - a\n'), { pr: true, target: false })
+  assert.deepEqual(prTriggers('on: [push, pull_request]\n'), { pr: true, target: false })
+  assert.deepEqual(prTriggers('on: pull_request\n'), { pr: true, target: false })
+  assert.deepEqual(prTriggers('on:\n  push:\n  workflow_dispatch:\n'), { pr: false, target: false })
+  assert.deepEqual(prTriggers('on:\n  pull_request_target:\n'), { pr: false, target: true })
+  assert.equal(run([...four(), { name: 'x', shouldRun: true, run: null, merge: null, unverifiable: true }]).ok, false)
+  // 四格縮排的寫法解析不到 paths → 保守回 true
+  assert.equal(shouldTrigger('on:\n    pull_request:\n        paths:\n            - a/**\n', ['zzz']), true)
 })

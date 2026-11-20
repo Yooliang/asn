@@ -6,7 +6,7 @@
 // 只適用「一次只合一張」。多張疊成一串時，後面那張的 base 會隨前一張合進去而改變，照舊開臨時 PR（紀律 六之 7）。
 //
 // 判斷：
-//  1. 四支 workflow（asn-linux-build／asn-backend-tests／asn-ui-shots／asn-pr-checklist）在 PR 目前 head SHA 上最近一次 run 要是 completed＋success。
+//  1. PR head 上所有有 pull_request 觸發的 workflow（動態讀 .github/workflows，新增的不用回來改；目前 6 支）在 PR 目前 head SHA 上最近一次 run 要是 completed＋success。
 //     有 paths 規則的（linux-build、ui-shots），PR 變更檔沒碰到那些 paths → 本來就不會觸發，不算缺。
 //     該觸發卻沒有 run、還在跑、結論不是 success → 不可合（缺 run 絕不當綠）。
 //  2. 每個 run 實際測的合併提交（從 run 的 checkout 紀錄抓 refs/pull/N/merge 的 SHA），確認它是 [main 當時頂端, PR head] 的合併，
@@ -16,13 +16,26 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 export const DEFAULT_REPO = 'Yooliang/asn'
-/** 要看的 workflow：file＝.github/workflows 下的檔名 */
-export const WORKFLOWS = [
-  { name: 'asn-linux-build', file: 'asn-linux-build.yml' },
-  { name: 'asn-backend-tests', file: 'asn-backend-tests.yml' },
-  { name: 'asn-ui-shots', file: 'asn-ui-shots.yml' },
-  { name: 'asn-pr-checklist', file: 'asn-pr-checklist.yml' },
-]
+const WORKFLOW_DIR = '.github/workflows'
+
+/** workflow 文字有沒有 pull_request 觸發（pull_request: 區塊、on: pull_request、on: [pull_request, …]）；pull_request_target 另外回報 */
+export function prTriggers(yaml) {
+  const t = String(yaml ?? '').replace(/\r\n/g, '\n')
+  let pr = false, target = false
+  for (const m of t.matchAll(/^\s{2,}pull_request(_target)?:/gm)) { if (m[1]) target = true; else pr = true }
+  const inline = t.match(/^on:\s*(.*)$/m)?.[1] ?? ''
+  if (/\bpull_request_target\b/.test(inline)) target = true
+  if (/\bpull_request\b(?!_)/.test(inline)) pr = true
+  return { pr, target }
+}
+
+/** 從 {檔名: 內容} 挑出所有有 pull_request 觸發的 workflow＝監看清單（動態產生，新增 workflow 不用回來改）。回傳 [{ name, file, target }]，依檔名排序 */
+export function listPrWorkflows(filesByName) {
+  return Object.keys(filesByName).filter(f => /\.ya?ml$/.test(f)).sort().flatMap(file => {
+    const t = prTriggers(filesByName[file])
+    return t.pr || t.target ? [{ name: file.replace(/\.ya?ml$/, ''), file, target: t.target && !t.pr }] : []
+  })
+}
 
 // ---------- 純函式：觸發 paths ----------
 
@@ -117,6 +130,7 @@ export function evaluate({ prHeadSha, mainTip, behindBy = null, workflows }) {
   if (!mainTip) reasons.push('讀不到 main 目前的頂端，沒辦法比對 base')
   for (const w of workflows) {
     if (!w.shouldRun) { notes.push(`${w.name}：這張 PR 改的檔案本來就不會觸發，不算缺`); continue }
+    if (w.unverifiable) { reasons.push(`${w.name}：是 pull_request_target 觸發，這支腳本查不到它的 run，沒辦法確認`); continue }
     const run = w.run
     if (!run) { reasons.push(`${w.name}：缺 run（該觸發卻沒有跑過）`); continue }
     if (run.status !== 'completed') { reasons.push(`${w.name}：還在跑（${run.status}）`); continue }
@@ -140,7 +154,7 @@ export function evaluate({ prHeadSha, mainTip, behindBy = null, workflows }) {
 export function formatReport(result) {
   const out = []
   for (const n of result.notes) out.push(`  ✓ ${n}`)
-  if (result.ok) { out.push('可直接合'); return out.join('\n') }
+  if (result.ok) { out.push('可直接合（前提：這是唯一要合的一張；多張疊成一串請開臨時 PR）'); return out.join('\n') }
   for (const r of result.reasons) out.push(`  ✗ ${r}`)
   out.push('不可直接合：需重跑／開臨時 PR（標題 tmp: 開頭，用完關掉）')
   return out.join('\n')
@@ -174,9 +188,15 @@ function gather(repo, prNumber) {
   const files = ghApi(`repos/${repo}/pulls/${prNumber}/files?per_page=100`, ['--paginate', '--jq', '.[] | .filename, (.previous_filename // empty)']).split('\n').filter(Boolean)
   const lsRemote = sh('git', ['ls-remote', 'origin', 'refs/heads/main']).trim().split(/\s+/)[0]
   const mainTip = /^[0-9a-f]{40}$/.test(lsRemote) ? lsRemote : null
-  const workflows = WORKFLOWS.map(w => {
-    const yaml = tryOr(() => ghApi(`repos/${repo}/contents/.github/workflows/${w.file}?ref=${prHeadSha}`, ['-H', 'Accept: application/vnd.github.raw']), null)
-    const shouldRun = shouldTrigger(yaml, files)
+  // 監看清單＝PR head 上所有有 pull_request 觸發的 workflow；讀不到目錄／檔案就丟錯，整體取不到、當不可合
+  const dir = ghJson(`repos/${repo}/contents/${WORKFLOW_DIR}?ref=${prHeadSha}`)
+  const texts = {}
+  for (const d of dir.filter(x => x.type === 'file' && /\.ya?ml$/.test(x.name))) {
+    texts[d.name] = ghApi(`repos/${repo}/contents/${WORKFLOW_DIR}/${d.name}?ref=${prHeadSha}`, ['-H', 'Accept: application/vnd.github.raw'])
+  }
+  const workflows = listPrWorkflows(texts).map(w => {
+    if (w.target) return { name: w.name, shouldRun: true, run: null, merge: null, unverifiable: true }
+    const shouldRun = shouldTrigger(texts[w.file], files)
     if (!shouldRun) return { name: w.name, shouldRun, run: null, merge: null }
     const runs = ghJson(`repos/${repo}/actions/workflows/${w.file}/runs?head_sha=${prHeadSha}&event=pull_request&per_page=100`).workflow_runs
     const run = pickLatestRun(runs)
