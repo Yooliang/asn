@@ -142,13 +142,14 @@ test('實跑：窗數上限照舊——一次最多收 4 窗、同名只留第�
   assert.equal((await db2.query(`select count(*)::int c from relay.asn_user_accounts where user_id = $1`, [U1])).rows[0].c, 100)
 })
 
-test('實跑：後台不看重置時間——已過期、2099 年的都照存；這次沒帶的窗不拿掉；讀取時間在未來的記成現在', { skip }, async () => {
+test('實跑：後台不看重置時間——已過期、2099 年的都照存；舊版（有舊四欄）這次沒帶的窗不拿掉；讀取時間在未來的記成現在', { skip }, async () => {
   const db = await setup()
   await report(db, 'W', rep([win('five_hour', 50, 3 * H, iso(Date.now() - 2 * H)), win('weekly', 70, 3 * H, '2099-01-01T00:00:00Z')]))
   let w = await wins(db)
   assert.ok(Date.parse(w.five_hour.resets_at) < Date.now(), '已過期的窗照存')
   assert.equal(w.weekly.resets_at, '2099-01-01T00:00:00Z')
-  await report(db, 'W', rep([win('weekly', 60, MIN)]))
+  // 舊版用戶端（列裡有舊四欄）只更新有帶的窗；新版（只有 windows）才整份取代，見 claude_quota_e2e_sql
+  await report(db, 'W', rep([win('weekly', 60, MIN)], 'claude', { at: iso(Date.now() - MIN) }))
   w = await wins(db)
   assert.deepEqual(Object.keys(w).sort(), ['five_hour', 'weekly'], '沒帶的 five_hour 即使重置時間已過也不拿掉（顯示端自己處理）')
   // 讀取時間在未來：記成現在，不會鎖死之後正常的讀數
@@ -163,7 +164,7 @@ test('實跑：後台不看重置時間——已過期、2099 年的都照存；
 test('實跑：Gemini 走同一條規則；沒帶 windows 的回報不動已存的窗；權限不變、decide／judge 已 drop', { skip }, async () => {
   const db = await setup()
   await report(db, 'W', rep([win('five_hour', 50, 10 * MIN), win('weekly', 70, 10 * MIN)], 'gemini'))
-  await report(db, 'W', rep([win('five_hour', 10, 20 * MIN)], 'gemini'))
+  await report(db, 'W', rep([win('five_hour', 10, 20 * MIN), win('weekly', 70, 10 * MIN)], 'gemini'))
   assert.equal((await wins(db, 'gemini')).five_hour.left_pct, 50)
   assert.equal((await report(db, 'W', [{ vendor: 'gemini', email: 'a@x.test', plan: 'pro', current: true }])).ok, true)
   assert.deepEqual(Object.keys(await wins(db, 'gemini')).sort(), ['five_hour', 'weekly'])

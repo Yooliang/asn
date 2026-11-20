@@ -4,7 +4,10 @@
 --  1. asn_relay_acct_roster_report：同使用者、同廠牌、同帳號，每個窗各取讀取時間（read_at）最新的那筆；
 --     進來的比存著的舊就不蓋（skipped 回 older_read），同一秒以進來的為準；不看重置時間、不看是哪一台送的。
 --     不再拿掉「這次沒帶、重置時間已過」的窗（顯示端自己處理過期）。每帳號最多留 4 窗、每人最多 100 個帳號列等上限照舊。
---     舊版用戶端的舊欄位（five_hour_pct、weekly_pct、reset_at、at）照收（legacy_windows 轉成兩窗，走同一條路），所以蓋不掉時間較新的讀數。
+--     舊版用戶端的舊欄位（five_hour_pct、weekly_pct、reset_at、at）照收（legacy_windows 當場轉成兩窗存起來，走同一條路），所以蓋不掉時間較新的讀數；
+--     舊版若同時帶 windows 與四欄，以 windows 為準。這段四欄轉換只保留這一版，**下一版拿掉**（legacy_windows 與列裡四欄的處理一併移除）。
+--     新版用戶端（列裡有 windows、沒有舊四欄鍵、windows 不是空的）每次回報整份取代該帳號的窗：這次沒帶的窗拿掉（方案拿掉 5 小時限制後畫面不再殘留 five_hour）；
+--     舊版轉換來的讀數不套用這條，只更新有帶的窗。
 --  2. asn_relay_acct_windows_clean：不再丟「重置時間不在現在 −1 天～+8 天」的窗；讀取時間比後台現在還晚的改記成現在（不丟）。其餘逐字照舊。
 --  3. 不再用到的 asn_relay_acct_window_decide、asn_relay_acct_window_judge 在這裡 drop。
 --  4. 簽名、回傳形狀、權限不變；不動資料表（window_pending 欄位保留，不再寫入）。
@@ -127,6 +130,15 @@ begin
           from jsonb_array_elements(v_merged) with ordinality t(e, i);
       end if;
     end loop;
+    -- 新版用戶端（列裡有 windows、沒有任何舊四欄鍵）每次回報就是這個帳號現在有的窗：這次沒帶的窗從後台拿掉
+    -- （例如方案拿掉 5 小時限制後不再有 five_hour）。上面「較舊不蓋較新」照舊：這次有帶的窗，被擋時維持存著的。
+    -- windows 是空的（這次讀不到）不算「都沒有了」，不動。舊版用戶端（列裡有舊四欄）不套用，只更新有帶的窗。
+    if v_row ? 'windows' and v_new <> '[]'::jsonb
+       and not (v_row ?| array['five_hour_pct', 'weekly_pct', 'reset_at', 'at', 'five_reset_at', 'week_reset_at']) then
+      select coalesce(jsonb_agg(e order by i), '[]'::jsonb) into v_merged
+        from jsonb_array_elements(v_merged) with ordinality t(e, i)
+        where exists (select 1 from jsonb_array_elements(v_new) n where n->>'name' = e->>'name');
+    end if;
     if jsonb_array_length(v_merged) > 4 then
       select jsonb_agg(s.e order by s.i) into v_merged from (
         select e, i from jsonb_array_elements(v_merged) with ordinality t(e, i) order by e->>'read_at' desc, i limit 4) s;

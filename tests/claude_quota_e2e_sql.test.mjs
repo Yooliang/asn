@@ -98,4 +98,67 @@ test('端到端（整條）：黃金回報 → 後台 → roster → 帳號頁�
   assert.equal(idle.quota.idleText, QUOTA_LINES_FOR_TEST.idle)
 })
 
+// ---------- 舊版用戶端相容（四欄轉 windows，只保留一版）與新版整份取代 ----------
+const NOW_UI = Date.parse('2026-10-24T12:05:00Z')
+const legacyRow = extra => ({ vendor: 'claude', email: 'a@x.test', plan: 'max', current: true, ...extra })
+const claudeRow = async db => (await one(db, 'select public.asn_relay_acct_roster($1, $2::uuid) r', ['H', U1])).accounts.find(a => a.account === 'a@x.test')
+const viewOf = async db => rosterView(await one(db, 'select public.asn_relay_acct_roster($1, $2::uuid) r', ['H', U1]), { nodeLabel: n => n, now: NOW_UI }).vendors.find(v => v.key === 'claude').accounts[0]
+
+test('相容：舊版只送四欄（沒有 windows）——後台當場轉成 windows，roster 與畫面文字都看得到', { skip }, async () => {
+  const db = await setup()
+  await sendLikeEdge(db, 'W', { accounts: [legacyRow({ five_hour_pct: 40, weekly_pct: 70, reset_at: '2026-10-24T14:00:00Z', at: '2026-10-24T12:00:00Z' })] })
+  const a = await claudeRow(db)
+  assert.deepEqual(a.windows.map(w => [w.name, w.left_pct, w.read_at]).sort(), [['five_hour', 40, '2026-10-24T12:00:00Z'], ['weekly', 70, '2026-10-24T12:00:00Z']])
+  assert.equal(a.windows.find(w => w.name === 'five_hour').resets_at, '2026-10-24T14:00:00Z')
+  const v = await viewOf(db)
+  assert.equal(v.quota.known, true)
+  assert.equal(v.quota.text, '5 小時剩 40%、每週剩 70%')
+})
+
+test('相容：舊版同時送 windows 與四欄——以 windows 為準', { skip }, async () => {
+  const db = await setup()
+  const w = [{ name: 'five_hour', left_pct: 62, resets_at: '2026-10-24T14:00:00Z', read_at: '2026-10-24T12:00:00Z' }, { name: 'weekly', left_pct: 80, resets_at: '2026-10-28T07:00:00Z', read_at: '2026-10-24T12:00:00Z' }]
+  await sendLikeEdge(db, 'W', { accounts: [legacyRow({ windows: w, five_hour_pct: 11, weekly_pct: 22, reset_at: '2026-10-24T14:00:00Z', at: '2026-10-24T12:00:00Z' })] })
+  assert.deepEqual((await claudeRow(db)).windows.map(x => x.left_pct).sort(), [62, 80])
+  assert.equal((await viewOf(db)).quota.text, '5 小時剩 62%、每週剩 80%')
+})
+
+test('新版整份取代：方案拿掉 5 小時限制後（先送兩窗、再只送 weekly），roster 與畫面不再有 5 小時', { skip }, async () => {
+  const db = await setup()
+  await sendLikeEdge(db, 'W', golden)
+  const next = structuredClone(golden)
+  next.accounts[0].windows = next.accounts[0].windows.filter(w => w.name === 'weekly').map(w => ({ ...w, left_pct: 75, read_at: '2026-10-24T12:30:00Z' }))
+  await sendLikeEdge(db, 'W', next)
+  const a = await claudeRow(db)
+  assert.deepEqual(a.windows.map(w => w.name), ['weekly'])
+  const v = await viewOf(db)
+  assert.doesNotMatch(v.quota.text, /5 小時/)
+  assert.match(v.quota.text, /75%/)
+})
+
+test('新版整份取代：這次有帶、但讀取時間較舊的窗不被蓋；windows 是空的（讀不到）不算「都沒有了」', { skip }, async () => {
+  const db = await setup()
+  await sendLikeEdge(db, 'W', golden)
+  const older = structuredClone(golden)
+  older.accounts[0].windows = older.accounts[0].windows.filter(w => w.name === 'weekly').map(w => ({ ...w, left_pct: 1, read_at: '2026-10-24T11:00:00Z' }))
+  await sendLikeEdge(db, 'W', older)
+  const a = await claudeRow(db)
+  assert.deepEqual(a.windows.map(w => [w.name, w.left_pct]).sort(), [['weekly', 80]], '帶的 weekly 較舊不蓋、沒帶的 five_hour 拿掉')
+  const db2 = await setup()
+  await sendLikeEdge(db2, 'W', golden)
+  const none = structuredClone(golden)
+  none.accounts[0].windows = []
+  await sendLikeEdge(db2, 'W', none)
+  assert.equal((await claudeRow(db2)).windows.length, 2)
+})
+
+test('舊版讀數只更新有帶的窗、不會把別的窗刪掉', { skip }, async () => {
+  const db = await setup()
+  await sendLikeEdge(db, 'W', golden)
+  await sendLikeEdge(db, 'H', { accounts: [legacyRow({ weekly_pct: 55, reset_at: '2026-10-28T07:00:00Z', at: '2026-10-24T12:20:00Z' })] })
+  const a = await claudeRow(db)
+  assert.deepEqual(a.windows.map(w => [w.name, w.left_pct]).sort(), [['five_hour', 62], ['weekly', 55]])
+  assert.equal((await viewOf(db)).quota.text, '5 小時剩 62%、每週剩 55%')
+})
+
 closeAtEnd()
