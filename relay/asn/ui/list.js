@@ -27,7 +27,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { REPORT_RETRY_MS } from './lib/device-state.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
-import { UNNAMED_DEVICE, emo, initial, plain } from './lib/text.mjs'
+import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
 import { QR_TEXT, normalizeQr } from './lib/fp-qr.mjs'
@@ -54,7 +54,7 @@ import { createAutoResumePoller } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
-import { ReloginBar, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
+import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
@@ -63,7 +63,7 @@ import { loadEnvNotice } from './lib/env-notice.mjs'
 import { CWD_EMPTY_HINT, bumpRecentCwd, clampMaxPerHour, cwdChoices, launchPrefsToSave, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
-import { PartnerOpDialog, loadOpsContext } from './lib/partner-ops-ui.mjs'
+import { PartnerOpDialog, PartnerOpStrip, createOpRunner, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { createTaskManager, initialState as initialTaskState } from './lib/task-manager.mjs'
 import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
@@ -98,11 +98,12 @@ import { GUIDE_TEXT, GUIDE_VENDORS, guideReshowVisible, guideRows, guideVisible,
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { splitMachines } from './lib/remote-machines.mjs'
 import { nodeLabelOf, rosterQuotaFor, rosterView } from './lib/account-roster.mjs'
+import { setNodePlatforms } from './lib/node-platform.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { deviceNameError, deviceNameOf } from './lib/device-known.mjs'
-import { alignDeviceName, followSelfRename, renameDevice as renameDeviceCall, syncPendingDeviceName } from './lib/device-rename.mjs'
+import { alignDeviceName, followSelfRename, renameDeviceFromPage, syncPendingDeviceName } from './lib/device-rename.mjs'
 import { createUsageUi } from './lib/usage.mjs'
 import { CHECK_MS, autoCheckFromSaved, initialUpdateState, manualResultText, progressPct, progressText, updateNoticeText, withAvailable, withFailure, withInstalling, withProgress, updateStatus } from './lib/update.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL, normalizeCfg, shouldAutoSpeak, sttStatusText } from './lib/voice-prefs.mjs'
@@ -356,6 +357,7 @@ const friends = ref([])
 watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
 const nodeOrder = ref([])
 const asnBadge = node => deviceAsn(asnMap.value[node], info.version)
+const nodeFacts = ref({})   // 節點 → { createdMs, seenMs }（設備詳情辨認區）
 const nodeNames = ref({})   // 節點 → 後台記的設備名（名單每個成員的 name，沒有夥伴的設備也有）
 const asnMap = ref({})   // 節點 → 在線的 ASN 視窗（版本與狀態），名單設備分組標題旁的小綠點用
 const conn = ref('connecting')
@@ -367,6 +369,7 @@ const sync = () => {
   nodeOrder.value = s.nodeOrder
   asnMap.value = s.asn ?? {}
   nodeNames.value = s.nodeNames ?? {}
+  nodeFacts.value = s.nodeFacts ?? {}
   conn.value = s.conn
   rosterReady.value = core.rosterLoaded === true
   connWhy.value = s.connWhy ?? ''
@@ -426,6 +429,7 @@ function remotePiModelsFor(node) {
   return Array.isArray(pm) && pm.length ? async () => pm : null
 }
 const remoteMachines = ref({})   // node → { platform, launch_closed_reason }（0.2 H2：沒開放時說明怎麼開，或那台自己寫的原因）
+watch(remoteMachines, m => setNodePlatforms(m, { node: info.node, phone: false }), { immediate: true })   // 手機還是電腦只有 node-platform.mjs 一份判斷（#1829）
 const launchPending = ref([])     // 啟動中列
 const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
 const launchNotice = reactive({ open: false, title: '', body: '', logPath: '' })
@@ -468,7 +472,7 @@ async function renameDevice(node, name) {
   known.busy = true
   let r
   try {
-    r = await renameDeviceCall(invoke, { node, name })
+    r = await renameDeviceFromPage(invoke, store(ONBOARD_STORE), { node, name })
     known.renameError = ''
     if (node === info.node) followSelfRename({ info, core, me }, r, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) })   // 改的是這台：本機視窗名 Rust 也換了，畫面就地跟上
   } catch (e) {
@@ -539,7 +543,7 @@ const claudeModAuto = ref(null)
 async function loadClaudeModAuto() {
   try {
     claudeModAuto.value = await invoke('claude_mod_auto_get')
-    // 必要元件、不能取消：0.1.100～0.1.104 版期間在設定裡關過的，這裡改回打開（小良哥的決定，#343）
+    // 必要元件、不能取消：0.1.100～0.1.104 版期間在設定裡關過的，這裡改回打開（擁有者的決定，#343）
     if (claudeModAuto.value === false) claudeModAuto.value = await invoke('claude_mod_auto_set', { on: true })
   } catch { claudeModAuto.value = null }
 }
@@ -579,7 +583,7 @@ const partnerModels = computed(() => launchToolRows.value)
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
 const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1, piModel: '', vendor: '', model: '' })
 const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
-// 「運行」四選一（#351、小良哥 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
+// 「運行」四選一（#351、擁有者 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
 // 目錄決定哪個能選；不能選的灰掉並寫原因；第一個能選的標「建議」。
 // 選到的廠牌列：一般廠牌照 profile 找；只能經 pi 的廠牌（DeepSeek、MiniMax）profile 都是 pi，所以照 vendor（廠牌 id）找
 const dlgRow = computed(() => (partnerDlg.vendor && dlgVendors.value.find(m => m.id === partnerDlg.vendor)) || dlgModels.value.find(m => m.profileId === partnerDlg.profile))
@@ -808,6 +812,11 @@ async function setArchived(f, archived) {
   archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
 }
 function closeOpDlg() { opDlg.open = false }
+// 夥伴操作的進度：對話框送出後收起，進度就地顯示在名單上方的提示列（#1800）；改名完成要讓釘選跟著換位址
+const opRun = reactive({ runs: {} })
+const opRunner = createOpRunner({ api: transport, state: opRun, onDone: d => onPartnerOpDone({ op: d.op, newName: d.input?.newName, friend: d.friend }) })
+const onOpRun = e => { void opRunner.start(opDlg.friend, e.op, e.input) }
+const launchNewFromRun = e => { const f = friends.value.find(x => x.id === e?.id); openPartnerDlg(f?.node || '') }
 // 喚醒找不到對話紀錄：關掉操作對話框，改開「新增夥伴」，預選原夥伴所在的電腦
 function launchNewFromOp(e) { closeOpDlg(); openPartnerDlg(e?.node || '') }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
@@ -911,7 +920,7 @@ function roomMenuTogglePin() { const m = roomMenu.value; closeRoomMenu(); if (m)
 function roomMenuPick(key) { const m = roomMenu.value; closeRoomMenu(); if (m) void openGroupMenu(m.chatId, key) }
 // 夥伴改名完成：釘選跟著換成新的對話位址（#1479）
 function onPartnerOpDone(d) {
-  const f = opDlg.friend
+  const f = d?.friend ?? opDlg.friend
   if (d?.op !== 'rename' || !f) return
   const next = friendId(f.node, String(d.newName ?? '').trim())
   if (next && next !== f.id) chatPins.value = renamedPinId(chatPins.value, f.id, next)
@@ -1129,7 +1138,7 @@ void invoke('invite_pending').then(onInviteCode).catch(() => {})
 const noticeView = reactive({ cat: NOTICE_CAT_ALL, sel: '', opened: [] })   // opened：這次開著期間點開過、但通知對話還沒整個標已讀的那幾則
 let setRailTab = () => {}   // 名單頁籤的 ref 在下面才建立，建立後換成真的
 const noticeFriendNow = computed(() => friends.value.find(isNoticeFriend) ?? null)
-const noticeAll = computed(() => noticeRows(logs[NOTICE_ID] ?? [], { unread: noticeFriendNow.value?.unread ?? 0, opened: noticeView.opened, hideDev: [UNNAMED_DEVICE] }))
+const noticeAll = computed(() => noticeRows(logs[NOTICE_ID] ?? [], { unread: noticeFriendNow.value?.unread ?? 0, opened: noticeView.opened }))
 const noticeShown = computed(() => filterNoticeRows(noticeAll.value, noticeView.cat))
 const noticeUnreadN = computed(() => noticeUnreadCount(noticeAll.value))
 const noticeSelRow = computed(() => noticeAll.value.find(r => r.key === noticeView.sel) ?? null)
@@ -1615,7 +1624,7 @@ const app = createApp({
     const top = computed(() => topOf(tab.value))
     let lastDevTab = isDevice.value ? tab.value : ''
     watch(tab, t => { if (topOf(t) === 'partners' && t) lastDevTab = t })
-    // 「⋯」小清單（設備多於 6 台時收進去的那些）：點外面、按 Esc、切到別的分頁、視窗失去焦點都收起（小良哥 11-12：「按出後，不會消失（按其它處）」）
+    // 「⋯」小清單（設備多於 6 台時收進去的那些）：點外面、按 Esc、切到別的分頁、視窗失去焦點都收起（擁有者 11-12：「按出後，不會消失（按其它處）」）
     const moreWrap = ref(null)
     watch(tab, () => { moreOpen.value = false })
     document.addEventListener('mousedown', e => { if (moreOpen.value && !moreWrap.value?.contains(e.target)) moreOpen.value = false }, true)
@@ -1666,7 +1675,7 @@ const app = createApp({
       const archived = rosterShownGroups(archivedFriends(friendsAct.value), o).flatMap(g => g.items).filter(f => !isNoticeFriend(f))
       return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => flat || !tab.value || p.node === tab.value)), archived)
     })
-    const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value !== 'on' ? '還沒連上 ASN。' : '這一頁目前沒有視窗。'))
+    const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : conn.value !== 'on' ? ROSTER_CONNECTING_TEXT : '這一頁目前沒有視窗。'))
     const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
     // 左上角的名字＝這台設備的後台名字，只顯示不能改（#1803：設備名稱只在「設定 → 設備」改，全程式只有一個改名入口）
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
@@ -1991,7 +2000,7 @@ const app = createApp({
     const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
     const deviceTree = computed(() => buildDeviceTree({
       cloudNodes: cloudMem.value,
-      friends: friends.value, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
+      friends: friends.value, nodeNames: nodeNames.value, nodeFacts: nodeFacts.value, version: info.version ?? '', nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, asn: asnMap.value, launchers: {
         ...remoteLaunchers.value,
         [info.node]: { profiles: partnerModels.value.filter(m => m.installed).map(m => ({ id: m.profileId ?? m.id })), detected: Object.keys(cliTools.value).length > 0 },
       }, machines: remoteMachines.value,
@@ -2200,7 +2209,7 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission, permHold, permPress, permHoldStart, permHoldKey, HOLD_TIP,
-      opDlg, closeOpDlg, launchNewFromOp, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, launchNewFromRun, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
@@ -2216,6 +2225,7 @@ app.component('asn-avatar', AsnAvatar)
 app.component('pin-dot', PinDot)
 app.component('new-guide-card', NewGuideCard)
 app.component('partner-op-dialog', PartnerOpDialog)
+app.component('partner-op-strip', PartnerOpStrip)
 app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)
 app.component('settings-panel', SettingsPanel)

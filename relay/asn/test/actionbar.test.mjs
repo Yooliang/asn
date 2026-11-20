@@ -111,7 +111,7 @@ test('群組列表：未讀徽章垂直置中、不被拉長；大頭像與個�
   assert.ok(!/room-ic/.test(html))
   assert.match(css, /\.room-btn\{display:flex;align-items:center;/)
   assert.match(css, /\.room-btn \.unread\{align-self:center;height:18px/)
-  assert.equal(roomInitial('  小良 團隊'), '小')
+  assert.equal(roomInitial('  擁有者 團隊'), '擁')
   assert.equal(roomInitial(''), '群')
   assert.equal(roomHue('abc'), roomHue('abc'))
   assert.ok(roomHue('團購群') >= 0 && roomHue('團購群') < 360)

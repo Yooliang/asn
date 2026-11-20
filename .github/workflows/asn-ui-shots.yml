@@ -93,6 +93,18 @@ jobs:
         run: |
           node scripts/ui-shots.mjs --base "$GITHUB_WORKSPACE/base/relay/asn/ui" --new "$GITHUB_WORKSPACE/new/relay/asn/ui" --out "$RUNNER_TEMP/ui-shots" --limit 60
 
+      # 手機觸控目標棘輪（T3）：在 CI 上真的量一次，跟 test/golden/hit-targets-baseline.json 比；只報告（continue-on-error），
+      # 有新增或惡化時步驟轉黃、摘要最上面寫明；本機要擋的檢查見 node --test test/hit-targets.test.mjs（設 ASN_HIT_TARGETS_LATEST）
+      - name: 量手機觸控目標（只報告）
+        id: hit
+        continue-on-error: true
+        working-directory: new/relay/asn
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/hit-targets.mjs --out "$RUNNER_TEMP/ui-hit-targets"
+          ASN_HIT_TARGETS_LATEST="$RUNNER_TEMP/ui-hit-targets/hit-targets.json" node --test test/hit-targets.test.mjs
+
       - name: 報告寫進摘要
         if: always()
         shell: bash
@@ -101,6 +113,13 @@ jobs:
           if [ "${{ steps.shots.outcome }}" != "success" ]; then
             echo "> **🔴 畫面截圖比對沒有正常跑完（步驟結果：${{ steps.shots.outcome }}）。下面的報告（如果有）不能當成「沒有差異」，請看上一步的 log。**" >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::畫面截圖比對沒有正常跑完（步驟結果：${{ steps.shots.outcome }}），結果不可信"
+          fi
+          if [ "${{ steps.hit.outcome }}" != "success" ]; then
+            echo "> **🔴 手機觸控目標檢查沒有通過或沒有跑完（步驟結果：${{ steps.hit.outcome }}）：有新增或惡化的過小觸控目標，或量測工具自己壞了。**" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::手機觸控目標檢查沒有通過或沒有跑完（步驟結果：${{ steps.hit.outcome }}）"
+          fi
+          if [ -f "$RUNNER_TEMP/ui-hit-targets/report.md" ]; then
+            head -c 100000 "$RUNNER_TEMP/ui-hit-targets/report.md" >> "$GITHUB_STEP_SUMMARY"
           fi
           if [ -f "$RUNNER_TEMP/ui-shots/report.md" ]; then
             head -c 900000 "$RUNNER_TEMP/ui-shots/report.md" >> "$GITHUB_STEP_SUMMARY"
@@ -117,5 +136,7 @@ jobs:
           path: |
             ${{ runner.temp }}/ui-shots/report.md
             ${{ runner.temp }}/ui-shots/diff/
+            ${{ runner.temp }}/ui-hit-targets/report.md
+            ${{ runner.temp }}/ui-hit-targets/hit-targets.json
           if-no-files-found: ignore
           retention-days: 7

@@ -42,7 +42,7 @@ test('實跑（pglite）：remove 收得下並寫進資料表；restart、close 
     create function public.asn_relay_launch_name_ok(p_name text) returns boolean language sql immutable as
       $$ select public.irori_relay_launch_name_ok(p_name) $$;
     insert into relay.nodes(id, tenant_id, owner_user, name, launcher, bell_topic) values
-      ('P','${T1}','${U1}','小良的手機', null, 'bell-P'), ('H','${T1}','${U1}','家用機', '{"profiles":[{"id":"grok"}]}', 'bell-H');
+      ('P','${T1}','${U1}','擁有者的手機', null, 'bell-P'), ('H','${T1}','${U1}','家用機', '{"profiles":[{"id":"grok"}]}', 'bell-H');
     insert into relay.roster(node, name, engine) values ('H','Grok','grok'), ('H','Gemini','gemini'), ('H','小文','claude');`)
   await db.exec(base)
   await db.exec(sql)

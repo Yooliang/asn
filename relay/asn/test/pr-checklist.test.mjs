@@ -2,9 +2,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { ITEMS, addedLines, descOk, evaluate, exemption, isDocOrCi, isTestPath, parseChecklist, recurrence, stripComments } from '../../../.github/scripts/pr-checklist.mjs'
+import { ITEMS, addedLines, changedFiles, descOk, evaluate, exemption, isDocOrCi, isTestPath, parseChecklist, recurrence, stripComments } from '../../../.github/scripts/pr-checklist.mjs'
 
 const root = new URL('../../../', import.meta.url)
 const TEMPLATE = fs.readFileSync(new URL('.github/pull_request_template.md', root), 'utf8').replace(/\r\n/g, '\n')
@@ -142,4 +144,23 @@ test('守門：workflow 只用 pull_request 事件、只讀權限、不用任何
   assert.ok(uses.length >= 1)
   for (const u of uses) assert.match(u, /^actions\/(checkout|setup-node)@[0-9a-f]{40}$/, `${u} 要釘 SHA 且只能是 checkout／setup-node`)
   assert.match(y, /node \.github\/scripts\/pr-checklist\.mjs/)
+})
+
+test('中文檔名：取改動清單時保留原字，只改中文檔名文件的 PR 貼「免檢查表」能過', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prck-'))
+  const g = (...a) => { const r = spawnSync('git', a, { cwd: dir, encoding: 'utf8' }); assert.equal(r.status, 0, r.stderr); return r.stdout }
+  try {
+    g('init', '-q', '-b', 'main')
+    g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'base')
+    g('checkout', '-q', '-b', 'docs-x')
+    fs.mkdirSync(path.join(dir, 'docs'))
+    fs.writeFileSync(path.join(dir, 'docs', '從頭建置.md'), '# 從頭建置\n')
+    g('add', '-A')
+    g('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'docs')
+    const { files, added } = changedFiles('main', dir)
+    assert.deepEqual(files, ['docs/從頭建置.md'])
+    assert.ok(added.has('docs/從頭建置.md'))
+    const r = evaluate({ title: 'docs', body: '', headRef: 'docs-x', labels: ['免檢查表'], files, added })
+    assert.equal(r.pass, true, r.errors.join('；'))
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })

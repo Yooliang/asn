@@ -59,7 +59,7 @@ test('別台、離線的設備都能永久移除（不必先被自動隱藏）�
 test('文字：二次確認寫明對話與帳號資料不會被刪除；已永久移除（N）', () => {
   assert.equal(DEVICE_TEXT.confirmRemove('舊電腦'), '確定永久移除「舊電腦」嗎？它的對話與帳號資料不會被刪除，只是不再顯示。')
   assert.equal(DEVICE_TEXT.removedLink(3), '已永久移除（3）')
-  assert.equal(DEVICE_TEXT.showBack, '顯示回名單'); assert.equal(DEVICE_TEXT.remove, '永久移除'); assert.equal(DEVICE_TEXT.back, '‹ 返回')
+  assert.equal(DEVICE_TEXT.showBack, '顯示回名單'); assert.equal(DEVICE_TEXT.remove, '永久移除'); assert.equal(DEVICE_TEXT.back, '返回')
 })
 
 // ---------- 共用邏輯：各處列表都排除被移除的 ----------
@@ -106,7 +106,8 @@ test('拖曳→存檔順序：拖 B 到 A 前面；拖到本機上＝排第一�
 
 // ---------- 電腦版設定頁 ----------
 const vend = (key, label, accounts) => ({ key, label, account: '', reported: accounts.length > 0, extra: '', accounts, switchable: false, switchHint: '' })
-const dev = (key, label, o = {}) => ({ key, label, self: false, kind: '電腦', online: true, onlineText: '在線', hidden: false, removed: false, reportedText: '', empty: '', vendors: [vend('claude', 'Claude', [{ email: `${key}@b.c`, plan: 'pro', current: true }])], ...o })
+import { withIdentity } from './helpers/with-identity.mjs'
+const dev = (key, label, o = {}) => withIdentity({ key, label, self: false, kind: '電腦', online: true, onlineText: '在線', hidden: false, removed: false, reportedText: '', empty: '', vendors: [vend('claude', 'Claude', [{ email: `${key}@b.c`, plan: 'pro', current: true }])], ...o })
 const ACCT = { list: [{ email: 'a@b.c', plan: 'Max', current: true, saved: true }], current: { email: 'a@b.c', plan: 'Max', current: true, saved: true }, codexLine: '', busy: false, confirmDel: '', msg: '', trustOwn: false, autoAdd: true, autoNote: '', mod: '', remote: { node: '', devices: [], list: [], loading: false, busy: false, msg: '' } }
 const devs = () => [
   dev('H', '家用機', { self: true }), dev('W', '工作機'),
@@ -166,7 +167,7 @@ test('滑鼠拖放與整列點擊：整列 @click 進細部頁（按鈕區不觸
 
 test('進入細部頁（dev 指到那台）：頂部「‹ 返回」＋原本的廠商→帳號內容；列表消失', async () => {
   const html = await render({ dev: 'W' })
-  assert.match(html, /class="[^"]*dv-back[^"]*"[^>]*>‹ 返回</)
+  assert.match(html, /class="[^"]*dv-back[^"]*"[^>]*>‹</)
   assert.match(html, /<h3 class="dv-name">工作機<\/h3>/)
   assert.ok(html.includes('dv-vendor') && html.includes('W@b.c'))
   assert.ok(!html.includes('class="dv-list"'))
@@ -286,14 +287,14 @@ test('手機細部頁：標題列返回鍵先回列表（頁內不再另放「�
 test('手機被隱藏設備：細部頁兩個動作；永久移除走獨立的確認畫面（rm）；確認字與電腦版相同；恢復', () => {
   const html = read('ui/m.html'), js = read('ui/m.js')
   const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
-  assert.match(pane, /v-if="acctCanRemove"[\s\S]*?acctShowBack[\s\S]*?DEVICE_TEXT\.showBack[\s\S]*?acctAskRemove[\s\S]*?DEVICE_TEXT\.remove/)
+  assert.match(pane, /v-if="acctCanShowBack"[\s\S]*?acctShowBack[\s\S]*?DEVICE_TEXT\.showBack[\s\S]*?:disabled="!acctCanRemove" @click="acctAskRemove[\s\S]*?DEVICE_TEXT\.remove/)
   assert.match(pane, /acctSw\.phase === 'rm'[\s\S]*?acctRemoveText[\s\S]*?acctRemoveNow[\s\S]*?DEVICE_TEXT\.removeYes[\s\S]*?DEVICE_TEXT\.cancel/)
   assert.ok(!/@click="acctRemoveNow"/.test(pane.split("phase === 'rm'")[0]), '確認畫面之前沒有直接移除的入口')
   assert.match(js, /acctAskRemove = \(\) => \{ if \(acctSw\.phase === 'pick' && acctCanRemove\.value\) acctSw\.phase = 'rm' \}/)
   assert.match(js, /if \(acctSw\.phase !== 'rm' \|\| !acctCanRemove\.value\) return/, '沒進過確認畫面就移除不了')
   assert.match(js, /removeDevice\(devPrefs\.deviceRemoved, acctCur\.value\.key, \{ selfNode: info\.node \}\)/)
   assert.match(js, /restoreDevice\(devPrefs\.deviceRemoved, key\)/)
-  assert.match(js, /DEVICE_TEXT\.confirmRemove\(acctCur\.value\?\.label\)/)
+  assert.match(js, /DEVICE_TEXT\.confirmRemove\(acctCur\.value\?\.identity\?\.title\)/)
   assert.match(pane, /v-if="acctRemoved\.length"[\s\S]*?DEVICE_TEXT\.removedLink\(acctRemoved\.length\)[\s\S]*?acctRestore\(d\.key\)/)
 })
 
@@ -318,5 +319,6 @@ test('細部頁：離線但沒被自動隱藏的設備（還有夥伴或未讀�
   const off = await render({ dev: 'X', devView: 'info' }, { devices: [dev('X', '未命名設備', { online: false, onlineText: '離線', hidden: false })], accounts: ACCT })
   assert.ok(off.includes('>永久移除<') && !off.includes('>顯示回名單<'))
   const on = await render({ dev: 'X', devView: 'info' }, { devices: [dev('X', '在線機', { online: true, hidden: false })], accounts: ACCT })
-  assert.ok(!on.includes('>永久移除<'))
+  assert.match(on, /<button class="aero-btn danger" type="button" disabled[^>]*>永久移除</, '在線的不能移除：按鈕變灰')
+  assert.ok(on.includes('設備在線時不能移除，離線後才能移除'), '變灰要說明原因')
 })

@@ -9,7 +9,7 @@ const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
 const D = 86_400_000, NOW = Date.UTC(2026, 10, 18)
 const F = (nick, lastAt, o = {}) => ({ id: `H/${nick}`, node: 'H', device: '家用機', nick, agent: nick, status: 'online', engine: 'claude', lastAt, ...o })
 const pins = ids => ({ pins: ids.map((id, i) => ({ id: `H/${id}`, at: 1000 + i })), unpinned: [], rev: 1 })
-// 情境照小良哥的手機截圖：釘選的夾在中間、星期五排在 10/30 前面、10/30 又排在星期一前面
+// 情境照擁有者的手機截圖：釘選的夾在中間、星期五排在 10/30 前面、10/30 又排在星期一前面
 const friends = () => [F('甲', NOW - 3 * D), F('乙釘', NOW - 20 * D), F('丙', NOW - 19 * D), F('丁', NOW - 1 * D), F('戊釘', NOW - 9 * D), F('己離線', NOW - 2 * D, { status: 'offline' }), F('庚', 0)]
 const names = list => list.map(f => f.nick)
 

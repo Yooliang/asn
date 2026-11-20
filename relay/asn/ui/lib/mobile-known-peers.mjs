@@ -5,21 +5,21 @@
 // 另一條路是掃電腦設定頁上的 QR code（scan）：外殼開相機掃、本人確認後把掃到的字存進 App 私有資料夾，**畫面只拿得到狀態字，拿不到掃到的字**；
 // 格式、節點與指紋由 Rust 判斷（android_known_scan_confirm 只收節點與憑證）。
 import { confirmWithToken, scanFingerprint } from './mobile-confirm.mjs'
-import { invoke as tauriInvoke } from './tauri.mjs'
-import { displayDeviceName } from './device-known.mjs'
-import { renameDevice } from './device-rename.mjs'
-import { UNNAMED, NAME_MAX, clean as cleanText } from './known-peers.mjs'
+import { invoke as tauriInvoke, store as tauriStore } from './tauri.mjs'
+import { ONBOARD_STORE } from './onboard.mjs'
+import { displayDeviceName, unnamedLabelOf } from './device-known.mjs'
+import { renameDeviceFromPage } from './device-rename.mjs'
+import { NAME_MAX, clean as cleanText } from './known-peers.mjs'
 
 // 清掉控制字元與雙向字元：和電腦版同一個（known-peers.mjs），手機多一步前後去空白
 const clean = (s, n = 80) => cleanText(s, Infinity).trim().slice(0, n)
 
 export const NO_LOCK_TEXT = '這支手機沒有設定螢幕鎖，請先設定再操作'
 
-/** 沒有名字的電腦一律叫 UNNAMED、名字最多 NAME_MAX 個字：定義在電腦版（known-peers.mjs），這裡匯入並照舊匯出，不再自己定義一份 */
-export { UNNAMED, NAME_MAX }
+/** 名字最多 NAME_MAX 個字：定義在電腦版（known-peers.mjs），這裡匯入並照舊匯出，不再自己定義一份 */
+export { NAME_MAX }
 
 export const TEXT = {
-  unnamed: UNNAMED,
   rename: '改名',
   renameSave: '儲存',
   renameCancel: '取消',
@@ -32,7 +32,6 @@ export const TEXT = {
   accounts: '帳號',
   detail: '詳情',
   fpLabel: '指紋',
-  neverSeen: '還沒連線過，連上時會記住指紋',
   firstSeen: t => `第一次見到：${t}`,
   forgetThis: '忘記這台',
   oldTitle: n => `舊設備紀錄（${n}）`,
@@ -81,7 +80,7 @@ export const cleanName = s => clean(s, NAME_MAX)
 export function peerOf(started, name = '') {
   const node = typeof started?.node === 'string' ? started.node : ''
   if (!node) return null
-  return { node, confirmed: started?.confirmed === true, name: clean(name) || '那台電腦' }
+  return { node, confirmed: started?.confirmed === true, name: clean(name) || unnamedLabelOf(node) }
 }
 
 /** 要不要顯示「還沒確認指紋」的條 */
@@ -99,7 +98,7 @@ export function normalizeList(raw) {
       const confirmed = p.confirmed === true
       const name = cleanName(p.name)
       // name＝記的名字（可能是空的）；label＝畫面上顯示的。沒名字顯示「未命名的電腦」，指紋只有確認過的才帶（沒確認的畫面不能知道）
-      return { node: p.node, name, label: displayDeviceName(name) || UNNAMED, fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms) }
+      return { node: p.node, name, label: displayDeviceName(name) || unnamedLabelOf(p.node), fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms) }
     })
 }
 
@@ -119,7 +118,7 @@ export function errorText(e) {
  * 確認、忘記要做的事。confirm、invoke 可以注入（測試用）。
  * 每次都先過本人確認（'ok' 才繼續；'cancel' 什麼都不送；'no_lock' 丟沒設螢幕鎖的說明），不記住上一次的結果。
  */
-export function makeKnownPeers({ confirm = challenge => confirmWithToken(challenge), scan = challenge => scanFingerprint(challenge), invoke = tauriInvoke } = {}) {
+export function makeKnownPeers({ confirm = challenge => confirmWithToken(challenge), scan = challenge => scanFingerprint(challenge), invoke = tauriInvoke, pendingStore = null } = {}) {
   // 回憑證字串（本人驗證過）或 null（取消）；沒設螢幕鎖丟說明。憑證每次都重要，不記住上一次的
   const gate = async (action, node) => {
     const challenge = await invoke('android_known_token', { action, node })
@@ -204,7 +203,7 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
      */
     rename: async (node, name) => {
       if (!node) return null
-      const r = await renameDevice(invoke, { node, name, phone: true })
+      const r = await renameDeviceFromPage(invoke, pendingStore ?? tauriStore(ONBOARD_STORE), { node, name, phone: true })   // 改名成功順手清掉首次引導存的待送名字（#1839）
       return r && r.ok === true ? { ok: true, name: typeof r.name === 'string' ? r.name : '', changed: r.changed === true, ...(r.self_renamed === true ? { selfRenamed: true, windowName: String(r.window_name ?? '') } : {}), ...(typeof r.window_rename_failed === 'string' && r.window_rename_failed ? { windowRenameFailed: r.window_rename_failed } : {}) } : null
     },
   }

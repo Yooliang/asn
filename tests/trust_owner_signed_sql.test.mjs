@@ -4,7 +4,7 @@
 //    - 本人簽章的信是 trust=owner；舊租戶 role='owner' 的角色節點寄的信是 member；一般成員是 member
 //    - 群組發言：角色節點是 member、p_owner 與本人簽章是 owner；角色節點仍能以 ~owner 身分發言（成員身分不動）
 //    - 仍認 role='owner' 的特權動作（invite、acct_list）對角色節點照舊可用、對一般成員照舊拒絕
-//    - ~owner 的顯示名取租戶的帳號名稱，沒有名稱用「帳號擁有者」，不再有「小良哥」
+//    - ~owner 的顯示名取租戶的帳號名稱，沒有名稱用「帳號擁有者」，不再寫死名字
 import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -24,7 +24,7 @@ test('靜態：交易內、只改函式、不動權限與資料表；inbox 與 r
   assert.doesNotMatch(body, /f\.role = 'owner'/)
   assert.match(body, /v_trust := case when p_owner or public\.asn_user_owns_node\(p_signed_user, p_node\)/)
   assert.doesNotMatch(body, /v_trust := [^;]*room_actor_is_owner/)
-  assert.doesNotMatch(body, /小良/)
+  assert.match(body, /帳號擁有者/)
 })
 
 let PGlite = null
@@ -50,7 +50,7 @@ async function boot({ upTo } = {}) {
     await db.exec(read(f))
   }
   await db.exec(`insert into auth.users(id, email) values ('${U1}', 'a@b.c');
-    insert into relay.tenants(id, owner_user, character_node, owner_name) values ('${T1}', '${U1}', 'ROLE1', '啟良');
+    insert into relay.tenants(id, owner_user, character_node, owner_name) values ('${T1}', '${U1}', 'ROLE1', '測試用戶');
     -- ROLE1＝舊租戶的角色節點（role=owner）；P＝本人的手機（member、屬於本人）；M＝AI 視窗所在的電腦（member）；C＝成員
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status) values
       ('ROLE1', '角色節點', 'k1', 'b1', 'owner', '${T1}', null, 'active'),
@@ -120,15 +120,15 @@ test('實跑：仍認 role=owner 的特權動作對角色節點照舊可用、�
   assert.equal((await launch('C', null)).error, 'forbidden')
 })
 
-test('實跑：~owner 的顯示名取帳號名稱；沒有名稱用中性文字，不再有「小良哥」', { skip }, async () => {
+test('實跑：~owner 的顯示名取帳號名稱；沒有名稱用中性文字，不再寫死名字', { skip }, async () => {
   const { q } = await boot()
-  assert.equal((await q(`select relay.room_member_name('~owner', $1::uuid) n`, [T1]))[0].n, '啟良')
+  assert.equal((await q(`select relay.room_member_name('~owner', $1::uuid) n`, [T1]))[0].n, '測試用戶')
   assert.equal((await q(`select relay.room_member_name('~owner', null::uuid) n`))[0].n, '帳號擁有者')
   assert.equal((await q(`select relay.room_member_name('~owner') n`))[0].n, '帳號擁有者')
   const members = (await q(`select relay.room_members_json('r1') r`))[0].r
   const own = JSON.stringify(members)
-  assert.doesNotMatch(own, /小良哥/)
-  assert.ok(members.some(m => m.key === '~owner' && m.name === '啟良'), own)
+  assert.doesNotMatch(own, /帳號擁有者/)
+  assert.ok(members.some(m => m.key === '~owner' && m.name === '測試用戶'), own)
 })
 
 test('還原驗證：套用前（只到 R6 改名）角色節點的信是 owner——證明上面的測試真的測到這支 migration', { skip }, async () => {

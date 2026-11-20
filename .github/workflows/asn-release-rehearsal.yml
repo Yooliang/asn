@@ -1,0 +1,161 @@
+name: ASN 發版演練（只建置、不上傳）
+
+# #1892 第一步：手動觸發，把電腦版安裝檔（未簽章）與 Android AAB 建一遍，看 runner 上跑不跑得起來。
+# 不掛 environment、不吃任何 secrets、不簽章、不上傳到任何外部服務；產物只存成 Actions artifact。
+# 手動觸發的 workflow 要先合進預設分支才叫得出來，所以 NSIS、AAB、冒煙在 runner 上能不能跑，合併後第一次演練才知道。
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 要演練哪一邊
+        type: choice
+        options:
+          - both
+          - desktop
+          - android
+        default: both
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    if: inputs.target == 'desktop' || inputs.target == 'both'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # checkout 之前先關換行轉換，免得 Windows 把檔案換成 CRLF 讓雜湊與測試對不上
+      - name: 關掉換行轉換
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/asn-node-setup
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: rehearsal-windows
+          save-if: false
+
+      # 冒煙、取 WezTerm（要驗來源證明，gh 用本次工作的權杖）、tauri build --locked 都在 release-ci.mjs 裡，不略過任何一項
+      - name: 建置未簽章安裝檔
+        working-directory: relay/asn
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release-ci.mjs
+
+      - name: 上傳安裝檔與 SHA256SUMS.txt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-rehearsal-installer-unsigned-${{ github.run_attempt }}
+          path: relay/asn/src-tauri/target/release-ci/*
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+      - name: 上傳除錯檔
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-rehearsal-debug-${{ github.run_attempt }}
+          path: relay/asn/src-tauri/target/release-ci-debug/*
+          if-no-files-found: warn
+          retention-days: 14
+          overwrite: true
+
+  android:
+    if: inputs.target == 'android' || inputs.target == 'both'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    env:
+      # 固定 NDK 版本（與 docs/design/ANDROID.md 工作機相同）；NDK_HOME 與 ring 的編譯器環境都指向這一版
+      ASN_NDK_VERSION: 28.2.13676358
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: ./.github/actions/asn-node-setup
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable 分支頂端；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          key: rehearsal-android
+          save-if: false
+
+      - name: 設定 NDK（固定版本，NDK_HOME 與 ring 的編譯器指向同一版）
+        run: |
+          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          test -n "$sdk" || { echo "找不到 ANDROID_HOME" >&2; exit 1; }
+          ndk="$sdk/ndk/$ASN_NDK_VERSION"
+          if [ ! -d "$ndk" ]; then
+            echo "runner 上沒有 NDK $ASN_NDK_VERSION，用 sdkmanager 安裝"
+            "$sdk/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ASN_NDK_VERSION"
+          fi
+          bin="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          test -x "$bin/aarch64-linux-android26-clang"
+          {
+            echo "NDK_HOME=$ndk"
+            echo "ANDROID_NDK_HOME=$ndk"
+            echo "CC_aarch64_linux_android=$bin/aarch64-linux-android26-clang"
+            echo "AR_aarch64_linux_android=$bin/llvm-ar"
+            echo "CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$bin/aarch64-linux-android26-clang"
+            echo "ASN_PLAY_KEY_DIR=$RUNNER_TEMP/rehearsal-play-key"
+          } >> "$GITHUB_ENV"
+
+      - name: 確認沒有 google-services.json（演練不帶推播設定）
+        run: |
+          if [ -e relay/asn/src-tauri/gen/android/app/google-services.json ]; then
+            echo "google-services.json 不該存在於演練" >&2; exit 1
+          fi
+
+      # 不帶 --upload：release-play.mjs 只建置、簽章、驗簽。上傳金鑰資料夾是空的暫存目錄，
+      # 腳本會產生「拋棄式」金鑰簽這顆 AAB，所以這顆 AAB 只能拿來看建得出來，不能上傳 Play。冒煙測試照跑。
+      - name: 建置 AAB（拋棄式金鑰、不上傳）
+        working-directory: relay/asn
+        run: node scripts/release-play.mjs
+
+      - name: 算 AAB 的 SHA256
+        working-directory: relay/asn/src-tauri/target/play
+        run: sha256sum ./*.aab > SHA256SUMS.txt
+
+      - name: 上傳 AAB 與 SHA256SUMS.txt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-rehearsal-aab-throwaway-key-${{ github.run_attempt }}
+          path: |
+            relay/asn/src-tauri/target/play/*.aab
+            relay/asn/src-tauri/target/play/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+      - name: 清掉拋棄式金鑰
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/rehearsal-play-key"

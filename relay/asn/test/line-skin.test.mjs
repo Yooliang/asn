@@ -85,7 +85,7 @@ test('line.css：每條規則都限定在 LINE 底下（縮圖除外）；九個
   assert.ok(selectors.length > 150)
   for (const sel of selectors) for (const part of sel.split(',')) assert.match(part.trim(), /^(:root\[data-skin="line"\]|\.skin-mini-line\b)/, `沒有限定在 LINE：${part.trim()}`)
   assert.doesNotMatch(css, /@/, '不寫 @ 規則：包在裡面的選擇器上面的檢查抓不到')
-  assert.match(css, /--line-me:#9be685/, '自己的泡泡顏色是變數，小良哥拍板亮綠')
+  assert.match(css, /--line-me:#9be685/, '自己的泡泡顏色是變數，擁有者拍板亮綠')
   assert.match(css, /background:var\(--line-me\)/); assert.match(css, /--line-bg:#a9bde2/)
   assert.doesNotMatch(css, /modern/, '不引用現代的變數或選擇器：自成一套')
   for (const page of ['list', 'chat', 'panel', 'toast', 'm', 'login', 'onboard', 'askpass', 'setup-progress']) {

@@ -269,7 +269,7 @@ impl Rig {
 }
 
 fn mk_op(op: &str, extra: Value) -> Op {
-    let mut v = json!({ "id": "op-1", "name": "目標", "op": op, "requested_by": "U1", "requested_by_label": "小良哥的手機", "created_at": "2026-10-22T10:00:00Z" });
+    let mut v = json!({ "id": "op-1", "name": "目標", "op": op, "requested_by": "U1", "requested_by_label": "擁有者的手機", "created_at": "2026-10-22T10:00:00Z" });
     for (k, x) in extra.as_object().cloned().unwrap_or_default() {
         v[k] = x;
     }
@@ -972,12 +972,12 @@ fn 規則6_log_與往來記錄_有誰下令_何時_做了什麼_結果() {
     r.ops.record(&op, &ok("新視窗已出現", None));
     r.ops.record(&mk_op("close", json!({})), &failed("守門：這個程序不允許結束"));
     let lines = r.log.recent().join("\n");
-    assert!(lines.contains("partner_op op-1") && lines.contains("op=rename") && lines.contains("小良哥的手機") && lines.contains("-> ok"), "{lines}");
+    assert!(lines.contains("partner_op op-1") && lines.contains("op=rename") && lines.contains("擁有者的手機") && lines.contains("-> ok"), "{lines}");
     assert!(lines.contains("-> failed"), "{lines}");
     let files: Vec<_> = std::fs::read_dir(&r.handoff).unwrap().flatten().collect();
     assert_eq!(files.len(), 1);
     let text = std::fs::read_to_string(files[0].path()).unwrap();
-    for needle in ["視窗管理", "小良哥的手機", "2026-10-22T10:00:00Z", "改名為「新名字」", "結果：成功", "關閉視窗", "結果：失敗，守門"] {
+    for needle in ["視窗管理", "擁有者的手機", "2026-10-22T10:00:00Z", "改名為「新名字」", "結果：成功", "關閉視窗", "結果：失敗，守門"] {
         assert!(text.contains(needle), "缺 {needle}：{text}");
     }
 }
@@ -1384,7 +1384,7 @@ fn 喚醒_啟動設定只有非_claude_或背景型_profile_不開() {
 // ================================================================================================
 
 fn job(cmd: &str, args: &str) -> CommandJob {
-    CommandJob { mail_id: "mail-1".into(), window: "目標".into(), command: cmd.into(), args: args.into(), from_node: "T".into(), from_agent: "u:3cda66252c34".into(), sender: "小良（本人）".into(), reply_from: "T-收發室".into() }
+    CommandJob { mail_id: "mail-1".into(), window: "目標".into(), command: cmd.into(), args: args.into(), from_node: "T".into(), from_agent: "u:3cda66252c34".into(), sender: "擁有者（本人）".into(), reply_from: "T-收發室".into() }
 }
 
 /// 第 n 次輪詢時外掛回報 control

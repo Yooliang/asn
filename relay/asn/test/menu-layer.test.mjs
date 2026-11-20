@@ -16,7 +16,7 @@ test('「＋」、名單右鍵、設備、分頁右鍵選單：同時帶 av-menu
   assert.ok(zOf('.av-menu.buddy-subpop') > zOf('.av-menu.buddy-menu'), '二級選單要比主選單高一層')
 })
 
-// 活躍度頁籤的燈（#372、小良哥 #950）：活躍綠、閒置黃、離線紅；名單「已封存」群組裡的頭像一律灰
+// 活躍度頁籤的燈（#372、擁有者 #950）：活躍綠、閒置黃、離線紅；名單「已封存」群組裡的頭像一律灰
 test('活躍度頁籤：活躍綠、閒置黃、離線一定是紅（用 lv-，不跟上線狀態的 st-offline 灰共用）', async () => {
   const { ACTIVITY_LEVELS } = await import('../ui/lib/activity.mjs')
   for (const [key] of ACTIVITY_LEVELS) assert.match(css, new RegExp(`\\.dot\\.lv-${key}\\{`), key)

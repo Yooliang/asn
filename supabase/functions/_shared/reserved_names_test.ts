@@ -68,7 +68,7 @@ Deno.test("開視窗與夥伴改名：名字是保留的回 bad_name", () => {
 Deno.test("帳號名稱（群組裡本人發言用的名字）、雲端代理名、登入帶來的名字：保留的回 null，其他不變", () => {
   for (const n of RESERVED) assertEquals(cleanDisplayName(n), null, n);
   assertEquals(cleanDisplayName("甲".repeat(37) + "收發室垃圾字元"), null, "截成 40 字之後結尾是收發室");
-  assertEquals(cleanDisplayName("  啟良 "), "啟良");
+  assertEquals(cleanDisplayName("  擁有者 "), "擁有者");
   assertEquals(cleanDisplayName("牧陽 Aegis"), "牧陽 Aegis");
   assertEquals(cleanDisplayName(""), null);
   assertEquals(cleanDisplayName(5), null);

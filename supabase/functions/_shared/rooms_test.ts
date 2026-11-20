@@ -3,7 +3,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { handleNodeRoomAction, matchAutoJoins, OWNER_ONLY_ACTIONS, parseMentions, type RoomDeps, type RoomMember, shouldRespond, syncNodeAuto, validatePrefixes, wakeOrder } from "./rooms.ts";
 
 const MEMBERS: RoomMember[] = [
-  { key: "~owner", name: "啟良", role: "owner", kind: "owner", node_role: "owner" },
+  { key: "~owner", name: "擁有者", role: "owner", kind: "owner", node_role: "owner" },
   { key: "ROLE1", name: "角色節點", role: "member", kind: "claude", node_role: "owner" },
   { key: "w02", name: "W02", kind: "claude", node_role: "member" },
   { key: "aegis", name: "牧陽 Aegis", kind: "claude", node_role: "member" },
@@ -15,7 +15,7 @@ const MEMBERS: RoomMember[] = [
 Deno.test("mentions：顯示名、key、中文、含空白的名字、通用別名「主人」", () => {
   assertEquals(parseMentions("@W02 幫忙看一下", MEMBERS), ["w02"]);
   assertEquals(parseMentions("@w02 小寫也行", MEMBERS), ["w02"]);
-  assertEquals(parseMentions("請 @小牧 回答，@啟良 也看一下", MEMBERS), ["aegis~小牧", "~owner"]);
+  assertEquals(parseMentions("請 @小牧 回答，@擁有者 也看一下", MEMBERS), ["aegis~小牧", "~owner"]);
   assertEquals(parseMentions("@牧陽 Aegis 總機請看", MEMBERS), ["aegis"]);
   assertEquals(parseMentions("@主人 幫我記", MEMBERS), ["~owner"]);
   assertEquals(parseMentions("@owner 角色節點沒有特別別名", MEMBERS), []);
@@ -37,7 +37,7 @@ Deno.test("mentions：最長的名字優先，英數結尾不會誤中更長名�
 
 Deno.test("只回點名或 owner 的判定：owner 發的、被點名的才回；沒點名的成員訊息、自己發的不回", () => {
   const msg = (from: string, trust: string, mentions: string[] = []) => ({ from, trust, mentions });
-  assert(shouldRespond(msg("~owner", "owner"), "w02"));             // 啟良發問，不用點名
+  assert(shouldRespond(msg("~owner", "owner"), "w02"));             // 擁有者發問，不用點名
   assert(shouldRespond(msg("ROLE1", "owner"), "w02"));               // 舊租戶角色節點（owner 角色）的信若被標 owner 也算
   assert(shouldRespond(msg("aegis~小牧", "member", ["w02"]), "w02")); // 被點名
   assert(!shouldRespond(msg("aegis~小牧", "member", ["H~H-主線"]), "w02")); // 點別人
@@ -94,7 +94,7 @@ Deno.test("視窗代發：視窗名不在該節點 roster → 403 且不寫入�
     assertEquals([r.status, r.body.error], [400, "bad_agent"]);
   }
   const ok = fake({ asn_relay_room_members: membersOk, asn_relay_room_post: () => ({ seq: 7, bell_topics: ["t1", "t2"] }) });
-  const r2 = await handleNodeRoomAction(ok.deps, ME, "room_post", { room: "r1", body: "@小牧 看一下，@啟良 請看", from_agent: "H-視窗" });
+  const r2 = await handleNodeRoomAction(ok.deps, ME, "room_post", { room: "r1", body: "@小牧 看一下，@擁有者 請看", from_agent: "H-視窗" });
   assertEquals([r2.status, r2.body.seq], [200, 7]);
   const post = ok.calls.find((c) => c.fn === "asn_relay_room_post")!;
   assertEquals([post.args.p_agent, post.args.p_mentions], ["H-視窗", ["aegis~小牧", "~owner"]]);
@@ -146,10 +146,10 @@ Deno.test("讀紀錄：已讀人數欄位與 reads 原樣帶給用戶端；舊�
 
 // ── 同時叫醒多個 AI 的順位（#230）：後台給每封 for_me 的信一個穩定的順位，橋依順位延遲 ──
 const AIS: RoomMember[] = [
-  { key: "~owner", name: "啟良", kind: "owner" },
-  { key: "w02", name: "W02", label: "W02（啟良）", kind: "claude" },
-  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（啟良）", kind: "claude" },
-  { key: "H~H-主線", name: "H-主線", label: "H-主線（啟良）", kind: "window" },
+  { key: "~owner", name: "擁有者", kind: "owner" },
+  { key: "w02", name: "W02", label: "W02（擁有者）", kind: "claude" },
+  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（擁有者）", kind: "claude" },
+  { key: "H~H-主線", name: "H-主線", label: "H-主線（擁有者）", kind: "window" },
   { key: "~u:abc", name: "阿明", label: "阿明", kind: "human" },
 ];
 
@@ -166,7 +166,7 @@ Deno.test("順位：主人發問沒點名，所有 AI 都被叫醒；順位依�
   assertEquals(first.before, []);
   const third = a.find((w) => w!.rank === 3)!;
   assertEquals(third.before.length, 2);
-  assert(!third.before.includes("阿明") && !third.before.includes("啟良"));
+  assert(!third.before.includes("阿明") && !third.before.includes("擁有者"));
 });
 
 Deno.test("順位：有點名只算被點名的 AI；沒被叫醒（沒點到、自己發的、系統、seed）回 null", () => {
@@ -256,7 +256,7 @@ Deno.test("owner 發話有點名時只有被點名的回", () => {
 
 Deno.test("去 Irori 化守門（#14 R7）：rooms.ts 不寫死特定人名或角色名；角色節點沒有額外別名", async () => {
   const src = await Deno.readTextFile(new URL("./rooms.ts", import.meta.url));
-  for (const word of ["希緒", "小良哥"]) assert(!src.includes(word), `rooms.ts 不該出現「${word}」`);
+  for (const word of ["希緒"]) assert(!src.includes(word), `rooms.ts 不該出現「${word}」`);
   const only: RoomMember[] = [{ key: "ROLE1", name: "角色節點", node_role: "owner" }];
   assertEquals(parseMentions("@主人 你好", only), []);
   assertEquals(parseMentions("@角色節點 你好", only), ["ROLE1"]);
@@ -284,8 +284,8 @@ Deno.test("回覆某則訊息（#225）：帶有效的 reply_to 走 asn_relay_ro
 
 Deno.test("parseMentions：新標示（夥伴名（設備名））與舊標示都解析到同一位成員，同名時只認完整標示", () => {
   const ms: RoomMember[] = [
-    { key: "W~財務", name: "財務", label: "財務（小良）", display_label: "財務（家用機）", member_kind: "ai" },
-    { key: "V~財務", name: "財務", label: "財務（小良）", display_label: "財務（VM測試機）", member_kind: "ai" },
+    { key: "W~財務", name: "財務", label: "財務（擁有者）", display_label: "財務（家用機）", member_kind: "ai" },
+    { key: "V~財務", name: "財務", label: "財務（擁有者）", display_label: "財務（VM測試機）", member_kind: "ai" },
     { key: "x:ext", name: "報表", label: "報表（阿明）", display_label: "報表（阿明）", member_kind: "ai" },
   ];
   assertEquals(parseMentions("@財務（家用機） 看一下", ms), ["W~財務"]);

@@ -1,5 +1,5 @@
 // 對話視窗上方的大按鈕功能列（#40，仿舊 MSN 對話視窗頂端那排）。
-// 分層原則（小良哥 10/21）：只影響「這一則訊息」的（傳檔、截圖、表情、震動、語音）留在輸入框旁的小工具列；影響「整個代理」的才放這裡。
+// 分層原則（擁有者 10/21）：只影響「這一則訊息」的（傳檔、截圖、表情、震動、語音）留在輸入框旁的小工具列；影響「整個代理」的才放這裡。
 // #539：一對一固定 6 格（通話／前台顯示・後台隱藏或 ACP 模式，離線時是「喚醒」／切換模型／子代理／工作項目／管理），用不到的反灰、原因寫在提示（20 字內），不再隱藏。
 // 格子的內容與反灰規則全部在純函式 barSlots；名單右鍵（list.js）也用同一個函式與 partnerMenuItems，兩邊不各寫一套。
 // #539 之二：群組對話放「群組」一顆（groupMenuItems）；群組沒有「管理」。
@@ -17,7 +17,7 @@ import { runArchive } from './archive.mjs'
 import { WHY_MAX, briefWhy, buildPartnerMenu } from './partner-menu.mjs'
 export { WHY_MAX, briefWhy }   // 反灰原因縮短搬到 partner-menu.mjs（#1559），這裡照舊轉出
 import { AsnAvatar } from './avatar-badge.mjs'
-import { PartnerOpDialog, loadOpsContext } from './partner-ops-ui.mjs'
+import { PartnerOpDialog, PartnerOpStrip, createOpRunner, loadOpsContext } from './partner-ops-ui.mjs'
 import { canInviteFrom } from './groups.mjs'
 import { offlineView } from './group-offline.mjs'
 import { placeMenu } from './menu-place.mjs'
@@ -394,7 +394,7 @@ const WAKE_TIP = '叫醒這個夥伴，接回原本的對話'
 
 export const ActionBar = {
   name: 'ActionBar',
-  components: { AsnDialog, PartnerOpDialog, OpsMenuButton, MoreMenuButton, OfflineMenuButton, AsnAvatar },
+  components: { AsnDialog, PartnerOpDialog, PartnerOpStrip, OpsMenuButton, MoreMenuButton, OfflineMenuButton, AsnAvatar },
   props: {
     friend: { type: Object, default: null },
     selfNode: { type: String, default: '' },
@@ -410,7 +410,7 @@ export const ActionBar = {
     showBack: { type: Boolean, default: false },   // 窄視窗單窗格時才有返回鍵（LINE 外觀）
     term: { type: Object, default: null },   // 終端（#902）：{ ready：在共用終端服務裡、第 2 格放「終端」, on：終端開著 }；按下發 term 事件，由對話區切換
   },
-  emits: ['call', 'ops', 'term', 'back', 'member'],   // member：點了群組「N 人離線」名單裡的人（#1515）
+  emits: ['call', 'ops', 'term', 'back', 'member', 'launch-new'],   // launch-new：喚醒找不到對話紀錄，請畫面開「開新夥伴」（#1800）；member：點了群組「N 人離線」名單裡的人（#1515）
   setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false, reason: '' })   // state：none／checking／toggle
@@ -422,6 +422,11 @@ export const ActionBar = {
     const opsCtx = reactive(initialOpsCtx())
     const opDlg = reactive({ open: false, item: null })   // 夥伴管理的對話框（第 2 格的喚醒、ACP／pi 的切換模型也用這個）
     const archiveNote = ref('')
+    // 夥伴操作的進度就地顯示在功能列上（#1800），不再用擋畫面的對話框
+    const opRun = reactive({ runs: {} })
+    const opRunner = createOpRunner({ api: props.api, state: opRun })
+    const onOpRun = e => { void opRunner.start(props.friend, e.op, e.input) }
+    const onLaunchNew = () => { opDlg.open = false; emit('launch-new', { node: props.friend?.node || '' }) }
     const engine = computed(() => friendEngine(props.friend))
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
     const isRoom = computed(() => props.friend?.room === true)
@@ -591,7 +596,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { onLaunchNew, root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -647,7 +652,8 @@ export const ActionBar = {
       </ul>
     </div>
   </template>
-  <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :self-node="selfNode" :pi-models="piModels" @close="opDlg.open = false"></partner-op-dialog>
+  <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :self-node="selfNode" :pi-models="piModels" @close="opDlg.open = false" @run="onOpRun" @launch-new="onLaunchNew"></partner-op-dialog>
+  <partner-op-strip :runner="opRunner" :runs="opRun.runs" :only="friend && friend.id" @launch-new="onLaunchNew"></partner-op-strip>
   <ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img/ab-group.svg" tip="邀請、加 AI、成員與設定" :items="groupAll" @pick="pickGroup"></ops-menu-button>
   <ops-menu-button v-if="(!isRoom && api) || opsAll.length" :items="opsAll" :disabled="!isRoom && !slot.manage.ok" :reason="slot.manage.reason" @pick="pickOps"></ops-menu-button>
   <span class="ab-note" v-if="archiveNote" role="status">{{ archiveNote }}</span>

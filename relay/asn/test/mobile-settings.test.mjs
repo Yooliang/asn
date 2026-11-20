@@ -25,7 +25,7 @@ test('分類：只放手機有的設定，鍵、名稱、圖示都沿用電腦�
 })
 
 test('摘要：每列一行目前值；欄位缺少不丟錯', () => {
-  assert.equal(mobileCatSummary('me', { name: '小良哥', hasUpload: true }), '小良哥、已上傳大頭貼')
+  assert.equal(mobileCatSummary('me', { name: '擁有者', hasUpload: true }), '擁有者、已上傳大頭貼')
   assert.equal(mobileCatSummary('me', { name: '  ', hasUpload: false }), '自動產生的大頭貼')
   assert.equal(mobileCatSummary('notify', { vibrateNudge: true, vibrateMsg: false }), '對方傳震動時震動：開、新訊息輕震：關')
   assert.equal(mobileCatSummary('update', { updateEnabled: true, autoUpdate: true }), '自動檢查：開')

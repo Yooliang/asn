@@ -59,9 +59,9 @@ async function boot({ mutate } = {}) {
   }
   await db.exec(`
     insert into auth.users(id, email) values ('${U1}', 'a@x.y'), ('${U2}', 'b@x.y');
-    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '小良'), ('${T2}', '${U2}', '財務員');
+    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '擁有者'), ('${T2}', '${U2}', '財務員');
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status, machine) values
-      ('${P1}', '小良的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
+      ('${P1}', '擁有者的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
       ('${W1}', '工作機', 'k2', 'bell-w1', 'member', '${T1}', '${U1}', 'active', '工作機'),
       ('${Q2}', '財務室電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦');
     insert into relay.roster(node, name, engine) values ('${W1}', '財務', 'claude'), ('${W1}', '管理', 'claude'), ('${W1}', '監看', 'claude'), ('${Q2}', '助理', 'claude');`)
@@ -146,7 +146,7 @@ test('實跑：別租戶的讀者——成員鍵是 x: 對外代號、標示加�
   const h = await human(db, room, '大家')
   await setInfo(db, { room, seq: h.seq, info: [{ key: A, rank: 1, hold: false }, { key: B, rank: 0, hold: true }] })
   const seen = msgOf(await readAs(db, { node: Q2, room, signed: U2 }), h.seq)
-  assert.deepEqual(seen.wake_info.map(e => [e.label, e.hold]), [['財務（小良）', false], ['管理（小良）', true]])
+  assert.deepEqual(seen.wake_info.map(e => [e.label, e.hold]), [['財務（擁有者）', false], ['管理（擁有者）', true]])
   assert.ok(seen.wake_info.every(e => /^x:/.test(e.key)), JSON.stringify(seen.wake_info))
   assert.doesNotMatch(JSON.stringify(seen), new RegExp(`${W1}|${P1}`))
   // U2 讀到的是 x: 代號；用代號回寫（另一則）也還原成真實鍵，主持人看得到自己人

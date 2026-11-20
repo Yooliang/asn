@@ -18,15 +18,15 @@ const cases = [
 
 test('橋的拆分與畫面端判斷、剩餘文字一致', () => {
   for (const c of cases) {
-    const sp = splitNudgeAnswer(c, '小良')
+    const sp = splitNudgeAnswer(c, '擁有者')
     assert.equal(sp !== null, ui.hasNudge(c), JSON.stringify(c))
     if (sp) assert.equal(sp.rest, ui.stripNudge(c), JSON.stringify(c))
   }
 })
 
 test('橋回的震動畫面端認得、不帶提示、畫面不留文字（不會來回震動）', () => {
-  const b = nudgeReplyBody('小良')
-  assert.equal(b, '（小良 傳送了一個震動）')
+  const b = nudgeReplyBody('擁有者')
+  assert.equal(b, '（擁有者 傳送了一個震動）')
   assert.ok(ui.hasNudge(b))
   assert.equal(ui.stripNudge(b), '')
 })

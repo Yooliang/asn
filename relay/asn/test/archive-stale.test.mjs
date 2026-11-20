@@ -46,7 +46,7 @@ test('mergeFriends：名單上的成員後台標 archived 或任一鍵命中都�
 })
 
 for (const [label, extra, keys] of [['夥伴 ID 鍵', { partnerId: PID }, [PID]], ['n: 鍵（沒有夥伴 ID 的舊好友）', {}, ['n:H/asn']]]) {
-  test(`AsnCore 重現小良哥的狀況（${label}）：名單已無它、本機存檔記得它 → 進「已封存」不在一般名單；取消封存後回來`, async () => {
+  test(`AsnCore 重現擁有者的狀況（${label}）：名單已無它、本機存檔記得它 → 進「已封存」不在一般名單；取消封存後回來`, async () => {
     let archivedKeys = keys
     const c = mk(() => ({ members: [{ id: 'H', name: '家用機', agents: [{ name: '別位', status: 'idle' }], offline_agents: [], archived_keys: archivedKeys }] }), saved(extra))
     await c.start()

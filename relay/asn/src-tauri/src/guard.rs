@@ -421,7 +421,7 @@ fn set_intent(dir: &Path, on: bool) {
 }
 
 // 排程指到哪個 asn.exe：建排程時記下（task-exe）。不從 schtasks /Query /XML 讀回來比對：它的輸出走系統碼頁，
-// 中文使用者名（C:\Users\小良哥\…）的路徑會變成問號，比不準。
+// 中文使用者名（C:\Users\擁有者\…）的路徑會變成問號，比不準。
 fn task_exe_path(dir: &Path) -> PathBuf {
     dir.join("task-exe")
 }
@@ -683,27 +683,27 @@ mod tests {
         // 中文、空白、其他字元（#762 那類）、太長：改用雜湊前 8 碼，排程名只有英數
         let hashed = |n: &str| n.strip_prefix("AsnGuard-").is_some_and(|h| h.len() == 8 && h.bytes().all(|b| b.is_ascii_hexdigit()));
         let long = "x".repeat(41);
-        for u in ["小良哥", "小良 哥", "John Smith", "user.name", "Ünïcödé", "a\"b", long.as_str()] {
+        for u in ["擁有者", "擁有者 哥", "John Smith", "user.name", "Ünïcödé", "a\"b", long.as_str()] {
             let n = task_name(u);
             assert!(hashed(&n), "{u} → {n}");
             assert_eq!(n, task_name(u), "同一個名字每次算出一樣的");
         }
-        assert_ne!(task_name("小良哥"), task_name("小良 哥"), "不同的使用者名不撞");
+        assert_ne!(task_name("擁有者"), task_name("擁有者 哥"), "不同的使用者名不撞");
         assert_eq!(task_name("John Smith"), task_name("john smith"), "Windows 使用者名不分大小寫");
         // 演算法固定：FNV-1a 64 的標準測試值（換掉會讓解除安裝算出的名字和當初建的不一樣）
         assert_eq!(fnv1a(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a(b"a"), 0xaf63_dc4c_8601_ec8c);
         assert_eq!(task_name("John Smith"), format!("AsnGuard-{:08x}", fnv1a(b"john smith") >> 32));
-        let xml = Path::new(r"C:\Users\小良 哥\AppData\Local\tw.yooliang.asn\guard\task.xml");
-        assert_eq!(create_args("AsnGuard-u", xml), ["/Create", "/TN", "AsnGuard-u", "/XML", r"C:\Users\小良 哥\AppData\Local\tw.yooliang.asn\guard\task.xml", "/F"]);
+        let xml = Path::new(r"C:\Users\擁有者 哥\AppData\Local\tw.yooliang.asn\guard\task.xml");
+        assert_eq!(create_args("AsnGuard-u", xml), ["/Create", "/TN", "AsnGuard-u", "/XML", r"C:\Users\擁有者 哥\AppData\Local\tw.yooliang.asn\guard\task.xml", "/F"]);
         assert_eq!(delete_args("AsnGuard-u"), ["/Delete", "/TN", "AsnGuard-u", "/F"]);
         assert_eq!(query_args("AsnGuard-u"), ["/Query", "/TN", "AsnGuard-u"]);
     }
 
     #[test]
     fn 排程_xml_用電池也跑_登入與每_5_分鐘_同時只跑一個_路徑與使用者跳脫() {
-        let exe = Path::new(r"C:\Users\小良 & 哥\AppData\Local\ASN\asn.exe");
-        let x = task_xml(r"DESKTOP-1\小良 & 哥", exe);
+        let exe = Path::new(r"C:\Users\擁有者 & 哥\AppData\Local\ASN\asn.exe");
+        let x = task_xml(r"DESKTOP-1\擁有者 & 哥", exe);
         for want in [
             "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>",
             "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>",
@@ -715,8 +715,8 @@ mod tests {
             "<StopAtDurationEnd>false</StopAtDurationEnd>",
             "<LogonType>InteractiveToken</LogonType>",
             "<RunLevel>LeastPrivilege</RunLevel>",
-            r"<UserId>DESKTOP-1\小良 &amp; 哥</UserId>",
-            r"<Command>C:\Users\小良 &amp; 哥\AppData\Local\ASN\asn.exe</Command>",
+            r"<UserId>DESKTOP-1\擁有者 &amp; 哥</UserId>",
+            r"<Command>C:\Users\擁有者 &amp; 哥\AppData\Local\ASN\asn.exe</Command>",
             "<Arguments>--guard</Arguments>",
         ] {
             assert!(x.contains(want), "少了 {want}");
@@ -806,13 +806,13 @@ mod tests {
 
     #[test]
     fn 排程指到別的_asn_exe_就重建_路徑不分大小寫() {
-        let exe = Path::new(r"C:\Users\小良哥\AppData\Local\ASN\asn.exe");
+        let exe = Path::new(r"C:\Users\擁有者\AppData\Local\ASN\asn.exe");
         assert!(!needs_rebuild(false, false, None, exe), "沒勾不建");
         assert!(needs_rebuild(true, false, Some(exe), exe), "排程不在");
         assert!(needs_rebuild(true, true, None, exe), "沒有記錄（舊測試版建的）：重建一次");
         assert!(needs_rebuild(true, true, Some(Path::new(r"D:\ASN\asn.exe")), exe), "改裝到別的資料夾");
         assert!(!needs_rebuild(true, true, Some(exe), exe));
-        assert!(!needs_rebuild(true, true, Some(Path::new(r"c:\users\小良哥\appdata\local\asn\ASN.EXE")), exe));
+        assert!(!needs_rebuild(true, true, Some(Path::new(r"c:\users\擁有者\appdata\local\asn\ASN.EXE")), exe));
         let d = tempfile::tempdir().unwrap();
         record_task_exe(d.path(), Some(exe));
         assert_eq!(recorded_task_exe(d.path()).as_deref(), Some(exe));

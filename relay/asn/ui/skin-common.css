@@ -131,7 +131,7 @@
 :root[data-skin="modern"] .list-pane > .me .me-psm-row,:root[data-skin="line"] .list-pane > .me .me-psm-row,:root[data-skin="modern"] .list-pane > .me .me-np,:root[data-skin="line"] .list-pane > .me .me-np{display:none}
 /* 換大頭貼的選單從用戶區往上彈（用戶區在最底下，往下彈會被裁掉） */
 :root[data-skin="modern"] .list-pane > .me .av-menu,:root[data-skin="line"] .list-pane > .me .av-menu{top:auto;bottom:calc(100% + 4px)}
-/* ---------- 廣告框（#1421，小良哥決定保留）：白底細灰框的圓角卡片；彩球改成淡色平面圓、緞帶改成小膠囊標籤 ---------- */
+/* ---------- 廣告框（#1421，擁有者決定保留）：白底細灰框的圓角卡片；彩球改成淡色平面圓、緞帶改成小膠囊標籤 ---------- */
 :root[data-skin="modern"] .ad-wrap,:root[data-skin="line"] .ad-wrap{margin:6px 10px 8px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:none}
 :root[data-skin="modern"] .ad,:root[data-skin="line"] .ad{border:0;border-radius:0;background:var(--panel)}
 :root[data-skin="modern"] .ad-tx b,:root[data-skin="line"] .ad-tx b{color:var(--fg);font-weight:600}
@@ -203,3 +203,4 @@
 :root[data-skin="modern"] .pv-btn .lic,:root[data-skin="line"] .pv-btn .lic,:root[data-skin="modern"] .pv-nav .lic,:root[data-skin="line"] .pv-nav .lic{display:inline-block}
 :root[data-skin="modern"] .photo-viewer .pv-btn .lic,:root[data-skin="line"] .photo-viewer .pv-btn .lic{width:20px;height:20px}
 :root[data-skin="modern"] .photo-viewer .pv-count,:root[data-skin="line"] .photo-viewer .pv-count{background:rgba(255,255,255,.16)}
+:root[data-skin="modern"] .actionbar .op-strip,:root[data-skin="line"] .actionbar .op-strip{left:50%;top:58px;margin:0;transform:translateX(-50%);width:max-content}

@@ -8,10 +8,10 @@ import { GUIDE_ENTRY_LABEL } from '../ui/lib/mobile-guides.mjs'
 const read = p => readFileSync(new URL(p, import.meta.url), 'utf8')
 
 test('內容：簡介、版本、設備名稱、出品', () => {
-  const v = aboutView({ deviceName: '小良的筆電' })
+  const v = aboutView({ deviceName: '擁有者的筆電' })
   assert.match(v.intro, /Agent Sync Network/)
   assert.equal(v.intro, ABOUT_INTRO)
-  assert.equal(v.deviceLine, '這台設備：小良的筆電')
+  assert.equal(v.deviceLine, '這台設備：擁有者的筆電')
   assert.equal(v.maker, ABOUT_MAKER); assert.match(ABOUT_MAKER, /Yooliang/)
   assert.equal(aboutView({ deviceName: '  ' }).deviceLine, '', '沒有名稱就不顯示那一行')
 })

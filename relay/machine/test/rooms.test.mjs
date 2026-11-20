@@ -105,7 +105,7 @@ test('bridge 群組：只轉 for_me；點名轉給對的視窗；owner 發的轉
     rooms: [room([
       msg(2),                                                                                      // 沒人 for_me
       msg(3, { forMe: { 'T-視窗甲': true } }),                                                      // 點名視窗甲
-      msg(4, { from: '~owner', from_name: '小良哥', trust: 'owner', forMe: { '': true, 'T-視窗甲': true } }),   // owner 發問
+      msg(4, { from: '~owner', from_name: '擁有者', trust: 'owner', forMe: { '': true, 'T-視窗甲': true } }),   // owner 發問
     ], [{ member: 'T~T-視窗甲', read_seq: 1 }, { member: 'T', read_seq: 1 }])],
   })
   try {
@@ -213,7 +213,7 @@ test('aegis 群組：白名單外（含節點本身→預設成員不在白名�
       bad: () => ({ answer: '', status: 'error', member: 'bad' }),
       secret: () => ({ answer: 'x', status: 'success', member: 'secret' }),
     },
-    rooms: [room([msg(2, { from: '~owner', from_name: '小良哥', trust: 'owner', forMe: { '阿爾法': true, 'bad': true, 'secret': true, '': true } })], [
+    rooms: [room([msg(2, { from: '~owner', from_name: '擁有者', trust: 'owner', forMe: { '阿爾法': true, 'bad': true, 'secret': true, '': true } })], [
       { member: 'T~阿爾法', read_seq: 1 }, { member: 'T~bad', read_seq: 1 }, { member: 'T~secret', read_seq: 1 }, { member: 'T', read_seq: 1 },
     ])],
   })

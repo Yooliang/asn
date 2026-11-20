@@ -9,7 +9,7 @@ const NOW = Date.parse('2026-10-23T10:00:00Z')
 const remote = (o = {}) => ({ node: 'n1', asnOnline: true, loading: false, busy: false, msg: '', reportedAt: '2026-10-23T09:30:00Z', list: [{ email: 'a@x.test', plan: 'max', current: true }, { email: 'b@x.test', plan: 'pro', current: false }], ...o })
 
 test('標題寫明對象設備', () => {
-  assert.equal(dialogTitle('啟良的工作機'), '切換「啟良的工作機」的 Claude 帳號')
+  assert.equal(dialogTitle('擁有者的工作機'), '切換「擁有者的工作機」的 Claude 帳號')
 })
 
 test('顯示目前帳號、最後回報時間、是否在線', () => {

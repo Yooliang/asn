@@ -11,20 +11,20 @@ const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').r
 const memFlag = init => { let v = init; return { load: async () => v, save: async d => { v = d }, get: () => v } }
 
 test('帳號有沒有名字：空白與建租戶時的預設稱呼不算', () => {
-  assert.equal(hasAccountName('啟良'), true)
+  assert.equal(hasAccountName('擁有者'), true)
   for (const n of ['', '  ', null, undefined, '朋友', '主人']) assert.equal(hasAccountName(n), false, String(n))
 })
 
 test('步驟：全新用戶兩步；帳號已有名字跳過第一步；兩樣都有（舊用戶）或旗標已設就不引導', () => {
   assert.deepEqual(onboardSteps({ done: false, accountName: '朋友', deviceCustom: false }), ['account', 'device'])
-  assert.deepEqual(onboardSteps({ done: false, accountName: '啟良', deviceCustom: false }), ['device'], '別台設備設過名字就跳過第一步')
-  assert.deepEqual(onboardSteps({ done: false, accountName: '啟良', deviceCustom: true }), [], '舊用戶升級上來不打擾')
+  assert.deepEqual(onboardSteps({ done: false, accountName: '擁有者', deviceCustom: false }), ['device'], '別台設備設過名字就跳過第一步')
+  assert.deepEqual(onboardSteps({ done: false, accountName: '擁有者', deviceCustom: true }), [], '舊用戶升級上來不打擾')
   assert.deepEqual(onboardSteps({ done: true, accountName: '', deviceCustom: false }), [], '旗標已設')
   assert.deepEqual(onboardSteps({ done: false, accountName: '', deviceCustom: true }), ['account'])
 })
 
 test('名字檢查：去頭尾空白、1～40 字、不含控制字元', () => {
-  assert.deepEqual(checkName('  啟良 '), { ok: true, name: '啟良', error: '' })
+  assert.deepEqual(checkName('  擁有者 '), { ok: true, name: '擁有者', error: '' })
   assert.equal(checkName('').ok, false)
   assert.equal(checkName('   ').error, '名字不能是空的')
   assert.equal(checkName('字'.repeat(40)).ok, true)
@@ -55,7 +55,7 @@ test('planOnboarding：沒登入不引導；旗標已設不問後台；不用引
   assert.equal(f2.get(), null, '還沒走完不設旗標')
   // 舊用戶：兩樣都有 → 設旗標
   const f3 = memFlag(null)
-  assert.deepEqual((await planOnboarding({ store: f3, status: signed, accountInfo: async () => ({ owner_name: '啟良' }), startup: { window_name_custom: true } })).steps, [])
+  assert.deepEqual((await planOnboarding({ store: f3, status: signed, accountInfo: async () => ({ owner_name: '擁有者' }), startup: { window_name_custom: true } })).steps, [])
   assert.equal(f3.get().done, true)
   // 後台取不到
   const f4 = memFlag(null)
@@ -93,7 +93,7 @@ test('接線守門：電腦版登入後轉引導頁、手機版有引導畫面�
   assert.ok(list.includes('!info.needs_login'), '沒登入畫面時不判斷')
   assert.ok(fs.existsSync(new URL('../ui/onboard.html', import.meta.url)))
   const ob = read('ui/onboard.js')
-  assert.ok(ob.includes("location.replace('list.html')") && ob.includes('markOnboarded') && ob.includes('setDeviceNameOnboard(invoke, flag, { node: info.node, name })') && ob.includes('authApi.setAccountName'))
+  assert.ok(ob.includes("location.replace('list.html')") && ob.includes('markOnboarded') && ob.includes('setDeviceNameOnboard(invoke, flag, { node: info.node, name, base: info.window_name })') && ob.includes('authApi.setAccountName'))
   const m = read('ui/m.js'), mh = read('ui/m.html')
   assert.ok(m.includes("screen.value = 'onboard'") && m.includes('planOnboarding('))
   assert.match(mh, /v-else-if="screen === 'onboard'"/)

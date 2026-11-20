@@ -5,6 +5,9 @@ import { AsnCore } from './lib/core.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { LineIcon, itemIcon, isDangerItem, tabIcon } from './lib/line-icons.mjs'
 import { FpMark, phoneFpMark } from './lib/fp-mark.mjs'
+import { DeviceIdentity, IDENTITY_TEXT } from './lib/device-identity.mjs'
+import { setNodePlatforms } from './lib/node-platform.mjs'
+import { ACTION_TEXT } from './lib/device-order.mjs'
 import { listTimeText } from './lib/line-chat.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { PinDot } from './lib/pin-dot.mjs'
@@ -33,11 +36,11 @@ import { createHold } from './lib/hold-press.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, clearRun, hideAfterMs, moveRun, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
 import { buildPartnerMenu } from './lib/partner-menu.mjs'
 import { offlineView } from './lib/group-offline.mjs'
-import { OP_LABEL, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
+import { OP_LABEL, OP_PROGRESS_TEXT, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
 import { DEVICE_BUTTON_TEXT, deviceButtons, fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
@@ -50,9 +53,9 @@ import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { STATE } from './lib/device-state.mjs'
 import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
-import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, DEVICE_TEXT } from './lib/device-order.mjs'
+import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, canShowBackRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
-import { acpSwitchChoices, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
+import { acpSwitchChoices, createOpRunner, makeOpRun, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { NOTICE_ID, isMergedAway, isNoticeFriend } from './lib/notice.mjs'
@@ -65,7 +68,7 @@ import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chat
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
-import { joinKnown, deviceNameError, deviceNameOf } from './lib/device-known.mjs'
+import { joinKnown, deviceNameError, deviceNameOf, unnamedLabelOf } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
@@ -77,7 +80,7 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { MEMBER_NOT_FRIEND, copyText, createGroupApi, memberFriendId } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
-import { ReloginBar, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
+import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
@@ -145,7 +148,7 @@ document.title = 'ASN'
 const screen = ref('boot'), fatal = ref('')
 const login = reactive({ phase: 'idle', provider: '', error: '' })
 const onboard = reactive({ steps: [] })   // 首次登入引導要走的步驟（空＝不用）
-const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : setDeviceNameOnboard(invoke, store(ONBOARD_STORE), { node: info.node, name, phone: true })) }
+const onboardApi = { setAccountName: name => authApi.setAccountName(name), setDeviceName: name => (name === info.window_name ? Promise.resolve() : setDeviceNameOnboard(invoke, store(ONBOARD_STORE), { node: info.node, name, phone: true, base: info.window_name })) }
 const finishOnboard = async () => { await markOnboarded(store(ONBOARD_STORE)).catch(() => {}); location.reload() }
 const loginNote = computed(() => (login.phase === 'waiting' ? `${phaseText('waiting', login.provider)}（瀏覽器登入完會自動回到 ASN；沒有回來的話，請自己切回來。）` : phaseText(login.phase, login.provider)))
 
@@ -186,7 +189,7 @@ let memberJump = null
 watch(lastChat, v => { if (memberJump && v !== memberJump.from && v !== memberJump.to) memberJump = null })
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
-const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([]), nodeNames = ref({})   // nodeNames＝節點 → 後台記的設備名（手機自己沒有夥伴列，名字只在這裡）
+const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([]), nodeFacts = ref({}), nodeNames = ref({})   // nodeNames＝節點 → 後台記的設備名（手機自己沒有夥伴列，名字只在這裡）
 // 設備順序與手動顯示的隱藏設備：存在這支手機自己的設定（asn-me.json 的 deviceOrder／deviceShown／deviceRemoved）當離線快取，有登入就與帳號層同步（lib/device-sync.mjs）
 const devPrefs = reactive({ deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })
 const logs = reactive({})
@@ -279,7 +282,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     log: m => console.info('[ASN]', m),
   })
   setLocalArchiver((f, a) => core.setLocalArchived(f, a))   // 後台沒有的舊好友封存時改記在本機
-  const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; nodeNames.value = s.nodeNames ?? {}; for (const f of s.friends) refreshLast(f.id) }
+  const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; nodeNames.value = s.nodeNames ?? {}; nodeFacts.value = s.nodeFacts ?? {}; for (const f of s.friends) refreshLast(f.id) }
   const pushLog = id => { logs[id] = core.viewOf(id) }
   core.on('state', sync)
   core.on('log', id => { pushLog(id); refreshLast(id) })
@@ -476,7 +479,7 @@ const app = createApp({
     // 開新夥伴第 2 步還沒送出時也不動（照 3 分鐘的規則走，不在打字到一半時把表單收掉）
     // 看通知最新一則的時間（不看未讀數：名單重載時未讀數會 0→N，不是新通知）
     watch(() => noticeLastAt(friends.value), (n, o) => { if (isNewNotice(o, n) && !cloudSt.created && !lchStep2.value) fourthNav.noticeArrived() })
-    const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? '連不上 ASN，請檢查網路。' : '名單上還沒有夥伴。'))
+    const emptyText = computed(() => (query.value.trim() ? '找不到符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : conn.value === 'connecting' ? ROSTER_CONNECTING_TEXT : '名單上還沒有夥伴。'))
     const avOf = f => avatarSrc(f, { avatars: avatars.value })
     const avById = id => { const f = friends.value.find(x => x.id === id); return f ? avOf(f) : '' }
     const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: info.window_name, avatars: avatars.value }))
@@ -636,7 +639,7 @@ const app = createApp({
     const dn = reactive({ node: '', text: '', busy: false, err: '' })
     const dnBad = computed(() => deviceNameError(dn.text))
     const dnHint = computed(() => (dn.text.trim() === '' ? '' : dnBad.value))   // 還沒打字時不先罵人
-    const devRenameStart = d => { if (dn.busy || !d?.key) return; Object.assign(dn, { node: d.key, text: d.label ?? '', err: '' }) }
+    const devRenameStart = d => { if (dn.busy || !d?.key) return; Object.assign(dn, { node: d.key, text: d.named ? (d.label ?? '') : '', err: '' }) }
     const devRenameCancel = () => { if (dn.busy) return; Object.assign(dn, { node: '', text: '', err: '' }) }
     const devRenameSave = async () => {
       const node = dn.node
@@ -669,7 +672,7 @@ const app = createApp({
         if (!ch) vp.note = KNOWN_TEXT.notReady
         else if (ch.state === 'locked') vp.note = KNOWN_TEXT.locked(ch.minutes)
         else if (ch.state === 'blocked') vp.note = KNOWN_TEXT.blocked
-        else { vp.ch = ch; vp.sheetName = ch.localName === null ? cur.name : (ch.localName || KNOWN_TEXT.unnamed); vp.sheet = true }
+        else { vp.ch = ch; vp.sheetName = ch.localName === null ? cur.name : (ch.localName || unnamedLabelOf(cur.node)); vp.sheet = true }
       } catch (e) { console.info('[ASN] 出指紋題目沒成功', String(e?.message ?? e)); vp.note = knownErrorText(e) } finally { vp.busy = false }
     }
     // 「確認指紋」先選方法：用相機掃電腦上的 QR code（預設），或改用選的（四選一）。掃到的字只在外殼與 Rust 之間，這裡只拿得到結果的狀態字
@@ -792,6 +795,7 @@ const app = createApp({
     // ---------- 開新夥伴（遠端開視窗）：手機只下指令，視窗開在那台電腦上。要本人簽章（Rust 端沒憑證就不送） ----------
     const lch = reactive({ ...initialLaunch(), vphase: 'sending' })
     const lchData = reactive({ machines: {}, loaded: false, error: '' })
+    watch(() => lchData.machines, m => setNodePlatforms(m, { node: info.node, phone: true }), { immediate: true })   // 手機還是電腦只有 node-platform.mjs 一份判斷（#1829）
     const acctSigned = () => (acct.value.known ? acct.value.signed_in : null)   // 還沒查到登入狀態＝null，不是「沒登入」
     const lchCtx = computed(() => ({ machines: lchData.machines, loaded: lchData.loaded, signedIn: acctSigned(), authError: acct.value.error, friends: friends.value }))
     const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, removed: devPrefs.deviceRemoved, ...lchCtx.value }))
@@ -857,7 +861,7 @@ const app = createApp({
     setInterval(() => { if (fourthPage.value?.kind === 'acct' && document.visibilityState === 'visible') void loadRoster() }, ROSTER_POLL_MS)
     const acctMy = computed(() => acctRosterView(acctRoster.value, { friends: friends.value, nodeNames: nodeNames.value, selfNode: info.node }))
     const cloudMem = ref(loadCloudNodes())   // 本機記住「上次判成雲端」的節點，離線時標示才不會消失
-    const acctAllDevs = computed(() => acctDeviceTree({ cloudNodes: cloudMem.value, friends: friends.value, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
+    const acctAllDevs = computed(() => acctDeviceTree({ cloudNodes: cloudMem.value, friends: friends.value, nodeNames: nodeNames.value, nodeFacts: nodeFacts.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, shown: devPrefs.deviceShown, removed: devPrefs.deviceRemoved, selfNode: info.node, reports: acctSw.reports, launchers: lchData.machines, machines: lchData.machines, roster: acctRoster.value }))
     // 整台離線、夥伴全封存、沒未讀的設備不列頁籤；收在「已隱藏的設備」，可手動顯示
     watch(acctAllDevs, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
     const acctDevs = computed(() => visibleRows(acctAllDevs.value))   // 列表＝全部設備（含已隱藏，淡色標「已隱藏」）；永久移除的收在底部
@@ -865,7 +869,6 @@ const app = createApp({
     const acctFlags = computed(() => moveFlags(acctDevs.value, info.node))
     // 這支手機自己那一列（名字是後台記的）；認得的電腦紀錄和設備列對起來（列的 key 就是紀錄的 node），不在任何一列的是舊設備紀錄
     const selfDev = computed(() => acctAllDevs.value.find(d => d.self) ?? null)
-    const selfDevName = computed(() => (selfDev.value && selfDev.value.label !== KNOWN_TEXT.thisPhone ? selfDev.value.label : me.nick))   // 設備頁的名字沒讀到（還是標籤）時，個人頁退回視窗名
     // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」
     const joined = computed(() => { const j = joinKnown(acctDevs.value, kp.list); return acctAllDevs.value.length ? j : { ...j, old: [] } })
     const curKnown = computed(() => (acctCur.value ? joined.value.byNode[acctCur.value.key] ?? null : null))
@@ -874,6 +877,7 @@ const app = createApp({
     const acctTitle = computed(() => acctPageTitle(acctCur.value ? 'devices' : acctSw.tab))   // 標題跟著分頁（看某台細部時是「設備」）
     const acctCur = computed(() => (acctSw.page === 'detail' ? acctDevs.value.find(d => d.key === acctSw.node) ?? null : null))
     const acctCanRemove = computed(() => canRemoveRow(acctCur.value))
+    const acctCanShowBack = computed(() => canShowBackRow(acctCur.value))   // 和電腦版同一個函式（#1829）
     // 設備活過來（又有在線視窗或未讀）就自動從永久移除名單解除
     watch([() => friends.value, () => devPrefs.deviceRemoved], () => { const next = pruneRemoved(devPrefs.deviceRemoved, friends.value, { selfNode: info.node }); if (next.length !== devPrefs.deviceRemoved.length) devPrefs.deviceRemoved = next }, { deep: true })
     const acctLabel = computed(() => acctCur.value?.label ?? '')
@@ -1104,7 +1108,7 @@ const app = createApp({
     // 被隱藏的設備：顯示回名單／永久移除（要先看過二次確認）／恢復
     const acctShowBack = () => { if (acctCur.value) showHiddenDevice(acctCur.value.key) }
     const acctAskRemove = () => { if (acctSw.phase === 'pick' && acctCanRemove.value) acctSw.phase = 'rm' }
-    const acctRemoveText = computed(() => DEVICE_TEXT.confirmRemove(acctCur.value?.label))
+    const acctRemoveText = computed(() => DEVICE_TEXT.confirmRemove(acctCur.value?.identity?.title))
     function acctRemoveNow() {
       if (acctSw.phase !== 'rm' || !acctCanRemove.value) return
       devPrefs.deviceRemoved = removeDevice(devPrefs.deviceRemoved, acctCur.value.key, { selfNode: info.node })
@@ -1113,7 +1117,7 @@ const app = createApp({
     const acctRestore = key => { devPrefs.deviceRemoved = restoreDevice(devPrefs.deviceRemoved, key) }
     // 排序：每列左邊有「排序把手」，只有按住把手才會拖（把手 touch-action:none），其餘地方照常捲動、點一下進細部頁；把手聚焦後也能用上下鍵移動
     const acctDrag = reactive({ key: '', over: '', after: false })
-    // 點一列才展開它的按鈕（#1539：小良哥「滑動畫面的時候會按到按鈕」）。捲動、拖拉、長按都不算點（lib/tap-select.mjs）；點同一列收起，點別列換過去
+    // 點一列才展開它的按鈕（#1539：擁有者「滑動畫面的時候會按到按鈕」）。捲動、拖拉、長按都不算點（lib/tap-select.mjs）；點同一列收起，點別列換過去
     const devSel = ref('')
     const devTap = createTapGuard()
     const devRowTap = (key, e) => { if (devTap.isTap(e)) devSel.value = toggleSelected(devSel.value, key) }
@@ -1281,33 +1285,47 @@ const app = createApp({
       if (acpList.length && !acpList.some(m => m.id === input.model)) { ops.error = '請從清單選一個模型'; return }
       const err = opFormError(f, op, input, item)
       if (err) { ops.error = err; return }
-      const token = ++opsToken
       const inSheet = showsInSheet(op)
       if (inSheet) ops.phase = 'info'
       else history.back()
-      const set = v => { if (inSheet) { if (token === opsToken) ops.view = v } else opsRuns.value = setRun(opsRuns.value, f.id, { op, view: v }) }
-      set({ phase: 'sent', done: false, text: '正在發送指令…' })
-      const v = await runPartnerOp(opsTransport, f, op, input, { onUpdate: set, cancelled: () => inSheet && token !== opsToken })
-      if (!inSheet && v?.phase === 'done') {
-        await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
-        const next = renamedChatId(f, op, input, v)
-        if (next) opsRuns.value = moveRun(opsRuns.value, f.id, next)   // 進度跟著新名字走，舊名字那格清掉
-        if (next) prefs.chatPins = renamedPinId(prefs.chatPins, f.id, next)   // 釘選跟著換成新的對話位址（#1479）
-        if (next && lastChat.value === f.id && core.friends.get(next)) lastChat.value = next   // 只有正在看的那一位才跟著跳；從名單改別人的名字不動對話頁
-      }
+      await execOp(f, op, input)
     }
-    // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用名單上方的一行字說明（對話頁在進度條上顯示）
+    // 送出並顯示進度（#1800）：詳情的進度留在選單裡；其他動作就地顯示在對話頁頂端，成功幾秒後自己消失、失敗附「重試」。
+    // 非詳情的操作（含封存）與電腦版共用同一份 createOpRunner：連按只認最後一次、重試、自動消失都在那裡
+    const opsRunState = { get runs() { return opsRuns.value }, set runs(v) { opsRuns.value = v } }
     let archiveNoteTimer = null
-    async function setArchived(f, archived) {
-      if (!f) return
-      const r = await runArchive(opsTransport, f, archived)
+    // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果也用名單上方的一行字說明
+    const onArchived = async r => {
       if (r.ok) await core.refreshRoster()
       archiveNote.value = r.text
       clearTimeout(archiveNoteTimer)
       archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
-      opsRuns.value = setRun(opsRuns.value, f.id, { op: 'archive', view: { phase: r.ok ? 'done' : 'failed', done: true, text: r.text } })
     }
-    const dismissRun = () => { opsRuns.value = clearRun(opsRuns.value, chatFriend.value?.id) }
+    const opRunner = createOpRunner({ api: opsTransport, state: opsRunState, run: makeOpRun({ onArchived }), onDone: d => { void afterOpDone(d) } })
+    async function afterOpDone({ op, view, friend: f, input }) {
+      if (op === 'archive' || op === 'unarchive') return
+      await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
+      const next = renamedChatId(f, op, input, view)
+      if (!next) return
+      opsRuns.value = moveRun(opsRuns.value, f.id, next)   // 進度跟著新名字走，舊名字那格清掉
+      prefs.chatPins = renamedPinId(prefs.chatPins, f.id, next)   // 釘選跟著換成新的對話位址（#1479）
+      if (lastChat.value === f.id && core.friends.get(next)) lastChat.value = next   // 只有正在看的那一位才跟著跳；從名單改別人的名字不動對話頁
+      const ms = hideAfterMs(view)
+      if (ms > 0) setTimeout(() => { if (runFor(opsRuns.value, next)?.view === view) opsRuns.value = clearRun(opsRuns.value, next) }, ms)
+    }
+    async function execOp(f, op, input) {
+      if (!showsInSheet(op)) { await opRunner.start(f, op, input); return }
+      const token = ++opsToken
+      await runPartnerOp(opsTransport, f, op, input, {
+        onUpdate: v => { if (token === opsToken) ops.view = v },
+        cancelled: () => token !== opsToken,
+      })
+    }
+    const setArchived = (f, archived) => (f ? opRunner.start(f, archived ? 'archive' : 'unarchive', {}) : Promise.resolve(null))
+    // 失敗後「重試」：用上一次送出的內容再送一次（詳情在選單裡重試）
+    const retryRun = () => { const f = chatFriend.value; if (f) void opRunner.retry(f.id) }
+    const retryInfo = () => { const f = opsFriend.value; if (f) void execOp(f, 'info', {}) }
+    const dismissRun = () => { const f = chatFriend.value; if (f) opRunner.dismiss(f.id) }
     // 喚醒找不到對話紀錄：收起橫幅，開「開新夥伴」並預選原夥伴所在的電腦
     const launchNewFromBanner = () => { const node = chatFriend.value?.node || ''; dismissRun(); openLaunch(node) }
     // ---------- 別台電腦／雲端代理要密碼（#26 第二期）：跳出確認面板，本人輸入後在 Rust 端加密才送出 ----------
@@ -1567,9 +1585,6 @@ const app = createApp({
     }
 
     // 「我」：大頭貼（裁成正方形縮成 96×96 上傳）。設備名稱不在這裡改（#1803）：只有設備頁一個改名入口，這裡一行連結帶過去
-    const renameAfterOpen = ref(false)
-    const goDeviceRename = () => { renameAfterOpen.value = true; openSetting('devices') }
-    watch([renameAfterOpen, () => fourthPage.value?.kind, selfDev], () => { if (renameAfterOpen.value && fourthPage.value?.kind === 'acct' && selfDev.value) { renameAfterOpen.value = false; devRenameStart(selfDev.value) } })
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
     const selfHasUpload = computed(() => isAvatarDataUrl(avatars.value[info.node]))
     const say = t => { avMsg.value = t; setTimeout(() => { if (avMsg.value === t) avMsg.value = '' }, 6000) }
@@ -1637,16 +1652,16 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, selfDevName, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, dismissRun, launchNewFromBanner, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryRun, retryInfo, OP_PROGRESS_TEXT, dismissRun, launchNewFromBanner, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
-      devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
+      devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, goDeviceRename, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })
@@ -1659,6 +1674,7 @@ app.component('onboard-card', OnboardCard)
 app.component('guide-doc', GuideDoc)
 app.component('line-icon', LineIcon)
 app.component('fp-mark', FpMark)
+app.component('device-identity', DeviceIdentity)
 app.component('ptr-zone', PtrZone)
 app.component('relogin-bar', ReloginBar)
 app.mount('#app')

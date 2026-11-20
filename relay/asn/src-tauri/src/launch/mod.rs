@@ -26,6 +26,7 @@ pub(crate) mod stuck_notice;
 pub(crate) mod awaiting;
 pub mod auto_resume;
 pub mod mux_watch;
+pub mod mux_round;
 #[cfg(all(feature = "gui", not(test)))]
 pub use auto_resume::{boot_ms, probe_window};
 mod subagents;

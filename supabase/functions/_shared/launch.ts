@@ -1,4 +1,4 @@
-// 遠端開 Claude 視窗（#64，規劃見 docs/relay/LAUNCHER.md）共用邏輯：irori-relay（節點金鑰）與 irori-api（小良哥登入）共用。
+// 遠端開 Claude 視窗（#64，規劃見 docs/relay/LAUNCHER.md）共用邏輯：irori-relay（節點金鑰）與 irori-api（擁有者登入）共用。
 // 最後一道關在 supabase/sql/07_launch.sql 的函式（owner 限定、名稱、profile、cwd 白名單、重名、每小時上限）；
 // 這裡負責：輸入整理與第一層格式檢查、節點動作的分派、錯誤碼對應。機器橋執行前還會再驗一次（relay/machine/launcher.mjs）。
 

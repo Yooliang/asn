@@ -1,0 +1,116 @@
+{
+ "version": 1,
+ "min": 44,
+ "total": 9,
+ "scenarios": {
+  "m-set-about-360": 0,
+  "m-set-about-aero": 0,
+  "m-set-about-line": 0,
+  "m-set-about-modern": 0,
+  "m-set-accounts-aero": 3,
+  "m-set-accounts-empty": 0,
+  "m-set-accounts-error": 0,
+  "m-set-accounts-line": 3,
+  "m-set-accounts-modern": 3,
+  "m-set-cloud-aero": 0,
+  "m-set-cloud-busy": 0,
+  "m-set-cloud-empty": 0,
+  "m-set-cloud-error": 0,
+  "m-set-cloud-line": 0,
+  "m-set-cloud-modern": 0,
+  "m-set-devices-aero": 0,
+  "m-set-devices-empty": 0,
+  "m-set-devices-error": 0,
+  "m-set-devices-line": 0,
+  "m-set-devices-modern": 0,
+  "m-set-look-360": 0,
+  "m-set-look-aero": 0,
+  "m-set-look-line": 0,
+  "m-set-look-modern": 0,
+  "m-set-me-aero": 0,
+  "m-set-me-line": 0,
+  "m-set-me-modern": 0,
+  "m-set-notify-360": 0,
+  "m-set-notify-aero": 0,
+  "m-set-notify-line": 0,
+  "m-set-notify-modern": 0,
+  "m-set-update-360": 0,
+  "m-set-update-aero": 0,
+  "m-set-update-line": 0,
+  "m-set-update-modern": 0
+ },
+ "violations": [
+  {
+   "scenario": "m-set-accounts-aero",
+   "tag": "button",
+   "text": "辦公室",
+   "cls": "m-dv-dev",
+   "w": 78,
+   "h": 40
+  },
+  {
+   "scenario": "m-set-accounts-aero",
+   "tag": "button",
+   "text": "辦公室",
+   "cls": "m-dv-dev",
+   "w": 78,
+   "h": 40
+  },
+  {
+   "scenario": "m-set-accounts-aero",
+   "tag": "button",
+   "text": "這支手機",
+   "cls": "m-dv-dev",
+   "w": 94,
+   "h": 40
+  },
+  {
+   "scenario": "m-set-accounts-line",
+   "tag": "button",
+   "text": "辦公室",
+   "cls": "m-dv-dev",
+   "w": 78,
+   "h": 40
+  },
+  {
+   "scenario": "m-set-accounts-line",
+   "tag": "button",
+   "text": "辦公室",
+   "cls": "m-dv-dev",
+   "w": 78,
+   "h": 40
+  },
+  {
+   "scenario": "m-set-accounts-line",
+   "tag": "button",
+   "text": "這支手機",
+   "cls": "m-dv-dev",
+   "w": 94,
+   "h": 40
+  },
+  {
+   "scenario": "m-set-accounts-modern",
+   "tag": "button",
+   "text": "辦公室",
+   "cls": "m-dv-dev",
+   "w": 78,
+   "h": 40
+  },
+  {
+   "scenario": "m-set-accounts-modern",
+   "tag": "button",
+   "text": "辦公室",
+   "cls": "m-dv-dev",
+   "w": 78,
+   "h": 40
+  },
+  {
+   "scenario": "m-set-accounts-modern",
+   "tag": "button",
+   "text": "這支手機",
+   "cls": "m-dv-dev",
+   "w": 94,
+   "h": 40
+  }
+ ]
+}

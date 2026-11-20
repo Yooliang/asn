@@ -1,5 +1,5 @@
 // 手機版（ui/m.html）的純邏輯：單欄導覽、名單分組、提示規則、安卓外殼橋。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。
-// 手機四個大分頁：夥伴、對話、設定、通知（#1429，小良哥 2026-11-13 定；原本是對話、夥伴、通知、設定）。沒有多視窗、系統匣。
+// 手機四個大分頁：夥伴、對話、設定、通知（#1429，擁有者 2026-11-13 定；原本是對話、夥伴、通知、設定）。沒有多視窗、系統匣。
 import { groupItems } from './dims.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, pinnedRecentOrder, sortFriends } from './search.mjs'
 import { isAsnWindow, withoutAsn } from './roster.mjs'
@@ -12,7 +12,7 @@ import { EMPTY_PINS, normalizePins } from './chat-pins.mjs'
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'chats' | 'list' | 'notice' | 'me' | 'page', sheet: '' | 'ops' | …, chat: true | false }。sheet＝蓋在分頁上的一層：「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框、換內頁前的確認（leave）。
 // 四個固定分頁（和電腦版同樣的字、同樣的順序；#1429 起）：夥伴（list）、對話（chats）、設定（me）、通知（notice）。
-// 對話分頁直接就是最後在聊的那一則（#1438，小良哥選 B，回到 0.2.17 的做法）；還沒有最後一則時顯示提示，請到「夥伴」挑一位。
+// 對話分頁直接就是最後在聊的那一則（#1438，擁有者選 B，回到 0.2.17 的做法）；還沒有最後一則時顯示提示，請到「夥伴」挑一位。
 // nav.chat 只在「⋯」選單等浮層開著時是 true（那幾筆記錄沿用 chatNav），一般不會再多推一層。
 // 'page'＝內頁（設備與帳號、設定的某一項、使用指引、開新夥伴；見 lib/mobile-fourth.mjs）：暫時佔用第四格（通知那一格），分頁字換成內頁的標題，
 // 能左右滑過去、滑回來；離開滿 3 分鐘、或這段時間有新通知進來，第四格就變回「通知」（0.2.17 的做法，#1429 改回來）。
@@ -33,7 +33,7 @@ export const noticeLastAt = friends => { const f = (Array.isArray(friends) ? fri
 // 前後兩次的時間：兩次都有、而且變新了，才算新通知（從沒有變成有＝名單剛載入或重載，不算）
 export const isNewNotice = (prev, next) => Number.isFinite(prev) && Number.isFinite(next) && next > prev
 export const chatsUnread = friends => Math.max(0, totalUnread(friends) - noticeUnread(friends))
-// 聊天的未讀紅點（chats＝對話清單的未讀，chatRowsUnread 那一份，含群組）掛在「夥伴」分頁，不掛「對話」（#1429，小良哥定：對話分頁打開的是最後那一則，紅點掛那裡看不出是誰傳的）；
+// 聊天的未讀紅點（chats＝對話清單的未讀，chatRowsUnread 那一份，含群組）掛在「夥伴」分頁，不掛「對話」（#1429，擁有者定：對話分頁打開的是最後那一則，紅點掛那裡看不出是誰傳的）；
 // 通知的紅點掛在第四格（內頁佔著第四格時照樣亮在那一格）
 // 「設定」分頁（me）：Play 上有新版（update＝true，lib/play-update.mjs 判斷）時亮
 export const tabDot = (t, { chats = 0, notice = 0, update = false } = {}) => (t === 'list' ? chats > 0 : t === 'notice' || t === PAGE_TAB ? notice > 0 : t === 'me' ? update === true : false)
@@ -150,7 +150,7 @@ export function backfillQueue(friendsInOrder, { lastOf, tried = new Set(), max =
 }
 
 // ---------- 名字：兩層 ----------
-// 「我的名字」＝帳號層（租戶稱呼，所有設備共用，例如「啟良」）：對話裡自己的訊息、「我」分頁頂端都用它。
+// 「我的名字」＝帳號層（租戶稱呼，所有設備共用，例如「擁有者」）：對話裡自己的訊息、「我」分頁頂端都用它。
 // 「這台設備的名稱」＝這支手機自己的名字（就是視窗名／節點顯示名，例如「手機」）：只用在「從 手機」小標與名單上的設備群組標題。
 // 帳號層的名字目前唯讀（後台「改帳號名」的動作上線後再接）。後台沒有取到、或還是建租戶時的預設稱呼「朋友」，退而用 email 的帳號部分，再沒有就「我」。
 export const PLACEHOLDER_NAMES = ['朋友', '主人']

@@ -6,7 +6,7 @@ import { handleNodeRoomAction, type RoomDeps, type RoomMember, fallbackWake, sil
 
 // 今晚的情形：「40珊宜」以數字開頭，固定順位字串排序排在「工作佩佩」前面，但它已經關機
 const AIS: RoomMember[] = [
-  { key: "~owner", name: "啟良", kind: "owner" },
+  { key: "~owner", name: "擁有者", kind: "owner" },
   { key: "w02~佩佩", name: "工作佩佩", label: "工作佩佩", kind: "window", online: true },
   { key: "n40~珊宜", name: "40珊宜", label: "40珊宜", kind: "window", online: false },
   { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis", kind: "claude", online: true },

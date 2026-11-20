@@ -6,7 +6,7 @@
 
 export const MIN_THRESHOLD = 0.012
 export const MAX_THRESHOLD = 0.06
-export const END_SILENCE_SECONDS = 1.0     // 小良哥要求停頓約 0.8～1.2 秒收一句
+export const END_SILENCE_SECONDS = 1.0     // 擁有者要求停頓約 0.8～1.2 秒收一句
 export const MIN_SPEECH_SECONDS = 0.15     // 持續這麼久的聲音才算開始說話（擋掉單一聲喀）
 export const MAX_UTTERANCE_SECONDS = 30    // 一句最長；一直講不停就強制切一刀
 

@@ -80,7 +80,7 @@ node relay/cloud-agent/preflight.mjs
 
 會印出**後台主機代號**（Supabase 專案代號，不是完整網址）、本節點 whoami 是否成功、名冊上各節點是否在線。
 
-節點 `grok`（名稱「Grok 雲端」、kind grok）已註冊，金鑰由小良哥設成 `ASN_RELAY_KEY`，所以這邊不用也不能註冊。
+節點 `grok`（名稱「Grok 雲端」、kind grok）已註冊，金鑰由擁有者設成 `ASN_RELAY_KEY`，所以這邊不用也不能註冊。
 （註冊用 `relay/machine/register.mjs`，在管理者自己的電腦跑，不是在雲端環境跑；roster 權限見 `supabase/sql/29_grok_roster.sql`，2026-10-20 已手動套用。）
 
 ## 三、讓它開機自動跑

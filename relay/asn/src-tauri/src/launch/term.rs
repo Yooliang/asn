@@ -5121,7 +5121,7 @@ mod tests {
         assert_eq!(count_cmd(&rig.runner, "send-text"), 0);
     }
 
-    /// pi 1.4 的信任提問（#483，照 #475 驗收時小良哥截圖的畫面）：選中那行是「→ 」，其他選項只縮排
+    /// pi 1.4 的信任提問（#483，照 #475 驗收時擁有者截圖的畫面）：選中那行是「→ 」，其他選項只縮排
     const PI_TRUST_SCREEN: &str = "────────────────\n\n Trust project folder?\n C:\\Users\\u\\proj\n\n This allows pi to load .pi settings and resources, install missing project\n packages, and execute project extensions.\n\n → Trust\n   Trust parent folder (C:\\Users\\u)\n   Trust (this session only)\n   Do not trust\n   Do not trust (this session only)\n\n ↑↓ navigate  enter select  escape/ctrl+c cancel\n";
 
     fn pi_rig() -> (Rig, String) {
@@ -5466,11 +5466,11 @@ mod tests {
             assert!(err.contains("標題"), "{bad:?}: {err}");
         }
         assert_eq!(count_cmd(&rig.runner, "set-tab-title"), before, "不合法標題不可呼叫 set-tab-title");
-        rig.svc.rename(&id, "  小良  ").unwrap();
+        rig.svc.rename(&id, "  擁有者  ").unwrap();
         let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
-        assert_eq!(titles.last().unwrap(), &vec!["cli".to_string(), "--no-auto-start".into(), "set-tab-title".into(), "--pane-id".into(), "7".into(), "ASN:1 小良".into()]);
+        assert_eq!(titles.last().unwrap(), &vec!["cli".to_string(), "--no-auto-start".into(), "set-tab-title".into(), "--pane-id".into(), "7".into(), "ASN:1 擁有者".into()]);
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
-        assert_eq!(v["terms"][0]["title"], "ASN:1 小良");
+        assert_eq!(v["terms"][0]["title"], "ASN:1 擁有者");
         let ok = "名".repeat(40);
         rig.svc.rename(&id, &ok).unwrap();
         let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
@@ -6044,7 +6044,7 @@ mod tests {
         assert!(rig.runner.killed().is_empty());
 
         let rig = make(default_profiles(), vec![]);
-        *rig.runner.inner.list_json.borrow_mut() = one_pane("default", "ASN:1 小良", 7, 1);
+        *rig.runner.inner.list_json.borrow_mut() = one_pane("default", "ASN:1 擁有者", 7, 1);
         write_store(&rig.store, 1, &row("1", "grok", "1000", ""));
         rig.svc.reclaim().unwrap();
         assert_eq!(rig.svc.list().len(), 1, "分頁標題前綴對上就可以認領，不必再猜 workspace");
@@ -6418,6 +6418,163 @@ mod tests {
         use crate::launch::mux;
 
         const MUX_PID: u32 = 4000;
+
+        /// #1818 端到端：終端服務崩潰、ASN 自己還握著它的 handle（程序已結束、建立時間還讀得到）。
+        /// 走真的 mux_snapshot（live_pid）→ 監看一輪（run_round）→ 事故、紀錄、通知 → 接回（resume_entries，和重開機接回同一套 run）。
+        /// 拿掉 live_pid 的 alive 檢查：崩潰後一直被當活著，沒有事故（紅）；拿掉接回或通知任一段也紅
+        #[cfg(feature = "gui")]
+        mod t1818 {
+            use super::*;
+            use crate::bridge::known::{KnownEntry, WindowFacts};
+            use crate::launch::auto_resume::{crash_entries, resume_entries, Deps, Login, Status};
+            use crate::launch::mux_round::{read_resume_notice, run_round, Round, Sink};
+            use crate::launch::mux_watch::{read_notice, ProcHandle, Tracker, Watch, TICK_MS};
+            use std::cell::{Cell, RefCell};
+
+            struct Held;
+            impl ProcHandle for Held {
+                fn exit_code(&self) -> Option<u32> {
+                    Some(0xC000_00FD)
+                }
+            }
+
+            #[derive(Default)]
+            struct Out {
+                records: RefCell<Vec<String>>,
+                resumes: RefCell<Vec<(Vec<String>, bool)>>,
+            }
+            impl Sink for Out {
+                fn open(&self, _pid: u32) -> Option<Box<dyn ProcHandle>> {
+                    Some(Box::new(Held))
+                }
+                fn event_text(&self, _pid: Option<u32>) -> Option<String> {
+                    None
+                }
+                fn record(&self, line: &str) {
+                    self.records.borrow_mut().push(line.to_string());
+                }
+                fn resume(&self, partners: Vec<String>, resume: bool) {
+                    self.resumes.borrow_mut().push((partners, resume));
+                }
+            }
+
+            struct Dp {
+                now: Cell<u64>,
+                launched: RefCell<Vec<String>>,
+                never_up: Vec<String>,
+            }
+            impl Deps for Dp {
+                fn now(&self) -> u64 {
+                    self.now.get()
+                }
+                fn sleep(&self, ms: u64) {
+                    self.now.set(self.now.get() + ms);
+                }
+                fn free_bytes(&self) -> Option<u64> {
+                    None
+                }
+                fn login(&self) -> Login {
+                    Login::In
+                }
+                fn live(&self, _n: &str, _s: &str) -> bool {
+                    false
+                }
+                fn launch(&self, e: &KnownEntry) -> Result<(), String> {
+                    self.launched.borrow_mut().push(e.name.clone());
+                    Ok(())
+                }
+                fn appeared(&self, n: &str) -> bool {
+                    !self.never_up.iter().any(|x| x == n)
+                }
+                fn reveal(&self, _e: &KnownEntry) -> bool {
+                    false
+                }
+                fn report(&self, _s: &Status) {}
+            }
+
+            fn known(name: &str, n: u32) -> KnownEntry {
+                KnownEntry { name: name.into(), engine: "claude".into(), facts: WindowFacts { session: format!("0000000{n}-0000-4000-8000-000000000000"), cwd: "D:/w".into(), asn_opened: true, perm: vec![], hidden: false } }
+            }
+
+            /// 開兩位夥伴（小乙、小丙）在共用服務裡
+            fn two_partners(rig: &Rig) {
+                open_partner(rig);
+                *rig.runner.inner.spawn_out.borrow_mut() = "10\n".into();
+                let args: Vec<String> = vec!["-n".into(), "小丙".into(), "--resume".into(), "sid-2".into()];
+                let env: BTreeMap<String, String> = [("PATH".to_string(), "C:/bin".to_string())].into();
+                let spec = crate::launch::win_term::spec_for("小丙", "C:/bin/claude.exe", &args, false, env);
+                rig.svc.start_window(Path::new(&rig.cwd), &spec).unwrap();
+                *rig.runner.inner.list_json.borrow_mut() = format!("[{},{}]", &one_pane("asn-1", "ASN:1", 9, 0)[1..one_pane("asn-1", "ASN:1", 9, 0).len() - 1], &one_pane("asn-2", "ASN:2", 10, 0)[1..one_pane("asn-2", "ASN:2", 10, 0).len() - 1]);
+            }
+
+            /// 跑完「活著兩輪、崩潰後三輪」，回（事故, 接收端, 工作資料夾）
+            fn crash_rounds(rig: &Rig) -> (Option<crate::launch::mux_watch::Incident>, Out, tempfile::TempDir) {
+                let dir = tempfile::tempdir().unwrap();
+                let file = dir.path().join(crate::launch::mux_watch::STATE_FILE);
+                let (mut w, mut tr, out) = (Watch::default(), Tracker::new(true), Out::default());
+                let ctx = Round { state_file: &file, work_dir: dir.path(), uptime_secs: 60 };
+                let mut found = None;
+                let mut t = 1_000_000u64;
+                for _ in 0..2 {
+                    let o = snap(&rig.svc).unwrap();
+                    assert_eq!(o.partners.len(), 2, "崩潰前看得到兩位");
+                    run_round(&mut w, &mut tr, &o, &[], t, &ctx, &out);
+                    t += TICK_MS;
+                }
+                // 崩潰：程序結束了，但建立時間還查得到（ASN 握著 handle）
+                *rig.runner.inner.proc_dead.borrow_mut() = true;
+                for _ in 0..3 {
+                    let o = snap(&rig.svc).unwrap();
+                    if let Some(inc) = run_round(&mut w, &mut tr, &o, &[], t, &ctx, &out) {
+                        found = Some(inc);
+                    }
+                    t += TICK_MS;
+                }
+                (found, out, dir)
+            }
+
+            fn resume_all(dir: &Path, partners: &[String], never_up: &[&str]) -> (Status, Vec<String>) {
+                let entries = crash_entries(partners, vec![known("小乙", 1), known("小丙", 2)], &Default::default());
+                let dp = Dp { now: Cell::new(5_000_000), launched: RefCell::new(vec![]), never_up: never_up.iter().map(|s| s.to_string()).collect() };
+                let st = resume_entries(dir, entries, true, &dp, || ());
+                let launched = dp.launched.borrow().clone();
+                (st, launched)
+            }
+
+            #[test]
+            fn t1818_服務崩潰但_asn_握著_handle_自動偵測_通知_兩位都接回() {
+                let (rig, _) = mux_rig();
+                two_partners(&rig);
+                let (inc, out, dir) = crash_rounds(&rig);
+                let inc = inc.expect("崩潰後兩輪內要算出事故（拿掉 live_pid 的 alive 檢查就看不到）");
+                assert_eq!(inc.partners, vec!["小乙".to_string(), "小丙".to_string()]);
+                assert!(inc.resume);
+                let line = out.records.borrow().join("\n");
+                assert!(line.contains("終端服務中斷：2 位夥伴（小乙、小丙），自動接回") && line.contains("崩潰（0xC00000FD"), "{line}");
+                assert_eq!(read_notice(dir.path()).map(|n| (n.0, n.1)), Some((2, true)), "事故當下那則通知排出去了");
+                assert_eq!(*out.resumes.borrow(), vec![(inc.partners.clone(), true)], "交給接回");
+                // 接回：兩位都開起來，結果通知寫明斷了 2、接回 2、沒有人沒接回
+                let (st, launched) = resume_all(dir.path(), &inc.partners, &[]);
+                assert_eq!(launched, vec!["小乙".to_string(), "小丙".to_string()]);
+                assert_eq!((st.total, st.resumed.len(), st.failed.len()), (2, 2, 0));
+                let n = read_resume_notice(dir.path()).expect("接回結果通知排出去了");
+                assert_eq!((n.0, n.1, n.2), (2, 2, vec![]));
+            }
+
+            #[test]
+            fn t1818_有人接不回來_結果通知寫出斷了幾位_接回幾位_誰沒接回() {
+                let (rig, _) = mux_rig();
+                two_partners(&rig);
+                let (inc, _out, dir) = crash_rounds(&rig);
+                let (st, _) = resume_all(dir.path(), &inc.unwrap().partners, &["小丙"]);
+                assert_eq!((st.resumed.clone(), st.failed.len()), (vec!["小乙".to_string()], 1));
+                let n = read_resume_notice(dir.path()).unwrap();
+                assert_eq!((n.0, n.1, n.2), (2, 1, vec!["小丙".to_string()]), "名字進通知；原因只進 ui.log");
+                let log = std::fs::read_to_string(dir.path().join("ui.log")).unwrap_or_default();
+                assert!(log.contains("沒接回：小丙"), "{log}");
+            }
+
+        }
 
         /// 開著 mux 模式的 rig：mux 檔案放在暫存資料夾、pid 檔記著一個建立時間對得上的 mux、連線檔「存在」，
         /// `cli spawn` 印出窗格 9

@@ -1,7 +1,7 @@
 // 冒煙探測「設備名稱只有一份」（probe.devname，#1803）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
 // 重現擁有者回報的畫面：這支手機在名單裡在線、底下沒有夥伴，後台記的名字是「測試手機」。
 //   m-devices：手機 設定 → 設備：頂部的名字、清單第一列都要寫「測試手機」（「這支手機」只是旁邊的小標籤），整張清單沒有「未命名設備」，同一台只有一列
-//   m-me：手機 設定 → 個人：沒有設備名稱輸入欄，只有「到設備頁改名」連結；按了會到設備頁並打開改名框（框裡是目前的名字）
+//   m-me：手機 設定 → 個人：設備名稱只放設備頁（#1855），個人頁沒有設備名稱的輸入欄、那一列、說明，也沒有「到設備頁改名」按鈕
 //   d-devices：電腦 設定 → 設備：本機（名單裡沒有夥伴）也寫真名，不寫「這台電腦」，沒有「未命名設備」
 // 截圖用：環境變數 ASN_DEVNAME_NOCHECK=1 時只把畫面走到位、不判斷（舊程式上用它拍「改前」）
 
@@ -43,13 +43,12 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
       if (!check) return { ok: true, why: '' };
       const labelHit = [...document.querySelectorAll('label')].find(l => l.textContent.includes('這台設備的名稱') && l.querySelector('input'));
       if (labelHit) return { ok: false, why: '個人頁還有可以改設備名稱的輸入欄' };
-      const link = [...document.querySelectorAll('button')].find(b => vis(b) && b.textContent.includes('到設備頁改名'));
-      if (!link) return { ok: false, why: '個人頁沒有「到設備頁改名」連結' };
-      if (kind === 'm-me-page') return { ok: true, why: '' };
-      link.click();
-      const inp = await wait(() => [...document.querySelectorAll('.m-known-edit input')].find(vis), 80);
-      if (!inp) return { ok: false, why: '按了「到設備頁改名」，設備頁沒有打開改名框' };
-      if (inp.value !== ${JSON.stringify(NAME_M)}) return { ok: false, why: '改名框裡寫的是「' + inp.value + '」，要是目前的名字' };
+      // 設備名稱只放設備頁（#1855）：個人頁不能出現設備名稱的任何一列、說明或「到設備頁改名」按鈕
+      const page = document.querySelector('.m-pgin') || document.body;
+      const text = page.textContent;
+      if (text.includes('這台設備的名稱') || text.includes('設備名稱只在設備頁')) return { ok: false, why: '個人頁還有設備名稱那一列或說明' };
+      if ([...document.querySelectorAll('button')].some(b => vis(b) && b.textContent.includes('到設備頁改名'))) return { ok: false, why: '個人頁還有「到設備頁改名」按鈕' };
+      if (!text.includes('我的名字')) return { ok: false, why: '沒有走到個人頁（找不到「我的名字」）' };
       return { ok: true, why: '' };
     }
     // ---- 改名流程（手機）：假的 Tauri 外殼包一層，模擬「後台記住新名字、重讀名單就帶新名字」 ----

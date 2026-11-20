@@ -350,7 +350,9 @@ fn week_cross(home: &Path, st: &mut state::State, email: &str, c: merge::Cross, 
 /// 沒額度、輸入太大、沒身分、取不到資料時間、兩條都判斷成不收或寫檔失敗回 false。
 pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
     let cfg = owner::config_dir(home, std::env::var_os("CLAUDE_CONFIG_DIR"));
-    hook_in(home, &cfg, input, now_ms)
+    // 有沒有設環境變數（含明確設成 ~/.claude）要明確傳下去，不能拿路徑去猜（#1880）
+    let env_set = std::env::var_os("CLAUDE_CONFIG_DIR").is_some_and(|v| !v.is_empty());
+    hook_in(home, &cfg, env_set, input, now_ms)
 }
 
 /// 同 [`hook`]，指定 Claude 設定資料夾（測試不碰真實環境變數）。
@@ -359,7 +361,7 @@ pub fn hook(home: &Path, input: &str, now_ms: i64) -> bool {
 /// - 帶了但解不出身分（還沒寫出 session-owner、被擠出檔尾、格式壞、路徑不安全）或取不到最後一筆 assistant 回應的時間戳：這次不記。
 /// - 都有：還要這個視窗自己的 `.claude.json` oauthAccount 的 uuid 跟對話紀錄的一致才收；一致時額度記到那份 oauthAccount 裡的 email 底下
 ///   （不查帳號庫，帳號庫可能存錯，只順便檢查、有問題寫一行 log），資料時間用那個時間戳；比記著的舊就不收（閒置的視窗會一直重送舊數字）。
-pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool {
+pub(crate) fn hook_in(home: &Path, cfg: &Path, env_set: bool, input: &str, now_ms: i64) -> bool {
     if input.len() > MAX_INPUT {
         return false;
     }
@@ -376,7 +378,7 @@ pub(crate) fn hook_in(home: &Path, cfg: &Path, input: &str, now_ms: i64) -> bool
     // 所以再看這個視窗自己的登入設定（.claude.json 的 oauthAccount）：uuid 一致才收，不一致或讀不到都不記。
     // 一致時，記到哪個帳號底下直接用同一份 oauthAccount 裡的 email，不查帳號庫（帳號庫可能存錯）。
     // 不一致時（換帳號後的舊視窗）看這筆讀數的每週重置時間屬於哪個帳號，見 `window_email`。
-    let Some((email, uuid)) = window_email(home, cfg, input, &o, &parsed, now_ms) else { return false };
+    let Some((email, uuid)) = window_email(home, cfg, env_set, input, &o, &parsed, now_ms) else { return false };
     hook_owned(home, &email, &uuid, parsed, read_ms, now_ms)
 }
 
@@ -425,8 +427,8 @@ fn week_match(home: &Path, st: &state::State, cur_email: &str, transcript_uuid: 
 /// - 目前登入讀不到：不記。
 /// 不記的、與不一致時記到哪邊的，都寫一行 log（只有 uuid 與視窗路徑雜湊的前 6 碼；同一個原因連續發生只記一次）。
 /// 順便記下這次看到的登入身分（uuid → email），之後換帳號了還能知道舊 uuid 是誰。
-fn window_email(home: &Path, cfg: &Path, input: &str, o: &owner::Owner, parsed: &Parsed, now_ms: i64) -> Option<(String, String)> {
-    let cur = owner::window_identity(home, cfg);
+fn window_email(home: &Path, cfg: &Path, env_set: bool, input: &str, o: &owner::Owner, parsed: &Parsed, now_ms: i64) -> Option<(String, String)> {
+    let cur = owner::window_identity(home, cfg, env_set);
     let mut st = state::load(home);
     let before = st.clone();
     if let Some((cu, ce)) = &cur {
@@ -675,7 +677,7 @@ mod tests {
         let mut v: serde_json::Value = serde_json::from_str(&status_json).unwrap();
         v["transcript_path"] = json!(f.to_string_lossy());
         owner::test_set_window_identity(h.path(), email, uuid);
-        hook_in(h.path(), &h.path().join(".claude"), &v.to_string(), now)
+        hook_in(h.path(), &h.path().join(".claude"), true, &v.to_string(), now)
     }
 
     #[test]

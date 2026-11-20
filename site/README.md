@@ -64,5 +64,5 @@ cd site
 firebase deploy --only hosting --project asnmessenger
 ```
 
-**部署前要小良哥確認**；不要放 exe 等執行檔（免費方案不適合），下載區等開放時另行處理。
+**部署前要擁有者確認**；不要放 exe 等執行檔（免費方案不適合），下載區等開放時另行處理。
 `shots/` 是本機截圖，已列入 .gitignore。

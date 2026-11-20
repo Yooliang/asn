@@ -343,7 +343,7 @@ test('名字兩層、頭像圓角方形：我的名字（帳號層、唯讀）�
   assert.doesNotMatch(html.replace(/<input[^>]*m-cloud-key[^>]*>/, ''), /readonly/, '不再唯讀（雲端代理金鑰顯示欄本來就只能看，不算）')
   assert.match(js, /authApi\.setAccountName\(c\.name\)/, '改名字走帳號名稱指令')
   assert.doesNotMatch(html, /<label>這台設備的名稱<input/, '個人頁不再有設備名稱輸入欄（#1803：只在設備頁改）')
-  assert.match(html, /@click="goDeviceRename">到設備頁改名/, '個人頁只留一行連結帶去設備頁')
+  assert.doesNotMatch(html, /goDeviceRename|selfDevName|到設備頁改名|這台設備的名稱|設備名稱只在設備頁/, '設備名稱只放設備頁（#1855）：個人頁連一列、一行說明、一個連結都沒有')
   assert.doesNotMatch(html, /暱稱（也是對外的名字）/)
   assert.match(html, /<chat-pane v-if="chatFriend" :friend="chatFriend" :me="meForChat"/, '對話裡自己的名字用帳號名')
   assert.match(js, /meForChat = computed\(\(\) => \(\{ \.\.\.me, nick: myName\.value \}\)\)/)

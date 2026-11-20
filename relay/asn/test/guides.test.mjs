@@ -37,7 +37,7 @@ test('守門：說明裡沒有金鑰、內部網址與後台網址、使用者�
   assert.ok(!/sk-[A-Za-z0-9]{10,}|eyJ[A-Za-z0-9_-]{20,}|[A-Za-z0-9+/]{40,}={0,2}/.test(all), '不像金鑰的長字串')
   assert.ok(!/[A-Za-z]:\Users\|cwen0708|D:\Github|C:\Users/.test(all), '不放個人路徑')
   assert.ok(all.includes('%USERPROFILE%'), '用 %USERPROFILE% 的通用寫法')
-  assert.ok(!all.includes('收發室'), '對使用者不說「收發室」（小良哥 #38、#104）：說「ASN」或實際做什麼')
+  assert.ok(!all.includes('收發室'), '對使用者不說「收發室」（擁有者 #38、#104）：說「ASN」或實際做什麼')
   for (const g of GUIDES) for (const b of g.blocks) assert.ok(!/<[a-z/][^>]*>/i.test(b.t), `${g.key} 不放 HTML`)
 })
 

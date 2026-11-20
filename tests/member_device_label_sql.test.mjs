@@ -56,9 +56,9 @@ async function boot({ mutate } = {}) {
   }
   await db.exec(`
     insert into auth.users(id, email) values ('${U1}', 'a@x.y'), ('${U2}', 'b@x.y');
-    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '小良'), ('${T2}', '${U2}', '財務員');
+    insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '擁有者'), ('${T2}', '${U2}', '財務員');
     insert into relay.nodes(id, name, key_hash, bell_topic, role, tenant_id, owner_user, status, machine) values
-      ('${P1}', '小良的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
+      ('${P1}', '擁有者的手機', 'k1', 'bell-p1', 'member', '${T1}', '${U1}', 'active', '手機'),
       ('${W1}', '家用機', 'k2', 'bell-w1', 'member', '${T1}', '${U1}', 'active', '工作機'),
       ('${Q2}', '財務室電腦', 'k3', 'bell-q2', 'member', '${T2}', '${U2}', 'active', '電腦');
     insert into relay.roster(node, name, engine) values ('${W1}', '財務', 'claude'), ('${W1}', '管理', 'claude'), ('${Q2}', '助理', 'claude');`)
@@ -96,7 +96,7 @@ test('實跑：自己帳號下的夥伴＝夥伴名（設備名）；label 維�
   const mem = (await membersAs(db, { node: P1, room, signed: U1 })).members
   const a = byName(mem, '財務')
   assert.equal(a.display_label, '財務（家用機）')
-  assert.equal(a.label, '財務（小良）', '舊用戶端看的 label 不變')
+  assert.equal(a.label, '財務（擁有者）', '舊用戶端看的 label 不變')
   assert.equal(byName(mem, '管理').display_label, '管理（家用機）')
   const human = mem.find(m => m.member_kind === 'human')
   assert.equal(human.display_label, human.label, '真人不變')
@@ -122,9 +122,9 @@ test('實跑：別的帳號的夥伴＝夥伴名（主人名），不外洩別�
   await joinU2(db, room)
   await db.exec(`update relay.room_members set display_name = null where room_id = '${room}'`)
   const seen = (await membersAs(db, { node: Q2, room, signed: U2 })).members
-  assert.equal(byName(seen, '財務').display_label, '財務（小良）')
-  assert.equal(byName(seen, '財務').label, '財務（小良）')
-  assert.doesNotMatch(JSON.stringify(seen), /家用機|小良的手機/, '外部成員看不到對方帳號的設備名')
+  assert.equal(byName(seen, '財務').display_label, '財務（擁有者）')
+  assert.equal(byName(seen, '財務').label, '財務（擁有者）')
+  assert.doesNotMatch(JSON.stringify(seen), /家用機|擁有者的手機/, '外部成員看不到對方帳號的設備名')
   const host = (await membersAs(db, { node: P1, room, signed: U1 })).members
   assert.equal(byName(host, '財務').display_label, '財務（家用機）')
 })
@@ -138,7 +138,7 @@ test('實跑：訊息與回覆引用的作者標示跟成員清單同一個字�
   const host = await readAs(db, { node: P1, room, signed: U1 })
   const m1 = host.messages.find(m => m.seq === first.seq)
   assert.equal(m1.from_display_label, '財務（家用機）')
-  assert.equal(m1.from_label, '財務（小良）', '舊欄位不變')
+  assert.equal(m1.from_label, '財務（擁有者）', '舊欄位不變')
   const m2 = host.messages.find(m => m.seq === rep.seq)
   assert.equal(m2.from_display_label, m2.from_label, '真人不變')
   assert.equal(m2.reply_to.from_display_label, '財務（家用機）')
@@ -146,8 +146,8 @@ test('實跑：訊息與回覆引用的作者標示跟成員清單同一個字�
   assert.equal(m1.from_display_label, byName(hostMem, '財務').display_label)
   const ext = await readAs(db, { node: Q2, room, signed: U2 })
   const e2 = ext.messages.find(m => m.seq === rep.seq)
-  assert.equal(e2.reply_to.from_display_label, '財務（小良）')
-  assert.equal(ext.messages.find(m => m.seq === first.seq).from_display_label, '財務（小良）')
+  assert.equal(e2.reply_to.from_display_label, '財務（擁有者）')
+  assert.equal(ext.messages.find(m => m.seq === first.seq).from_display_label, '財務（擁有者）')
   assert.doesNotMatch(JSON.stringify(ext), /家用機/)
 })
 

@@ -4,13 +4,13 @@ import { handleNodeRoomAction, type RoomDeps, type RoomMember, wakeOrder } from 
 import { cachedBy, makeJevScorer, rankConfig, rankFromEnv, rankStats, resetRankStats, scoreWake, type RankInput } from "./wake_rank.ts";
 
 const AIS: RoomMember[] = [
-  { key: "~owner", name: "啟良", kind: "owner" },
-  { key: "w02", name: "W02", label: "W02（啟良）", kind: "claude" },
-  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（啟良）", kind: "claude" },
-  { key: "H~H-主線", name: "H-主線", label: "H-主線（啟良）", kind: "window" },
+  { key: "~owner", name: "擁有者", kind: "owner" },
+  { key: "w02", name: "W02", label: "W02（擁有者）", kind: "claude" },
+  { key: "aegis", name: "牧陽 Aegis", label: "牧陽 Aegis（擁有者）", kind: "claude" },
+  { key: "H~H-主線", name: "H-主線", label: "H-主線（擁有者）", kind: "window" },
 ];
 const OWNER_MSG = { from: "~owner", trust: "owner", mentions: [] as string[] };
-const L = { w: "W02（啟良）", a: "牧陽 Aegis（啟良）", h: "H-主線（啟良）" };
+const L = { w: "W02（擁有者）", a: "牧陽 Aegis（擁有者）", h: "H-主線（擁有者）" };
 const rankOf = (scores: Record<string, number>, selfKey: string, msg: Parameters<typeof wakeOrder>[0] = OWNER_MSG, min = 0.5) =>
   wakeOrder(msg, AIS, selfKey, { scores, min, exemptMentioned: true });
 

@@ -45,7 +45,7 @@ async function boot() {
     create function public.asn_person_alias(p_user uuid) returns text language sql immutable as
       $$ select case when p_user is null then null else 'u:' || substr(md5('asn-person:' || p_user::text), 1, 12) end $$;
     insert into relay.nodes(id, tenant_id, owner_user, name) values
-      ('H','${T1}','${U1}','小良的家用機'), ('P','${T1}','${U1}','Oppo 手機'), ('W','${T1}','${U1}','公司機'), ('M','${T1}',null,'AI 機器'), ('X','${T2}','${U2}','別人');`)
+      ('H','${T1}','${U1}','擁有者的家用機'), ('P','${T1}','${U1}','Oppo 手機'), ('W','${T1}','${U1}','公司機'), ('M','${T1}',null,'AI 機器'), ('X','${T2}','${U2}','別人');`)
   await db.exec(sqlOld)
   await db.exec(sqlNew)
   const q = async (text, args) => (await db.query(text, args)).rows

@@ -28,7 +28,7 @@ relay send(reply_to) <──── bridge.mjs <──stdout── 收發室 <─
    - 收發室回報 `SENT <id>` 才 ack；失敗（`FAIL`）、找不到 session、轉交逾時（2 分鐘），都寄一封說明給原寄件人再 ack。
    - 對方回覆（收發室收到的 `<cross-session-message>` 那一輪）→ `relay send` 帶 `reply_to` 寄回原寄件人，`from_agent` 填對方 session 名。
      之後同一 session 的追加回覆（10 分鐘內）也一併轉寄。
-   - **不再通知寄件人「沒有回覆」**（小良哥 10/22 裁示：寄件人看已讀狀態就知道）。逾時（預設 10 分鐘）沒收到回覆，只是把這封信轉成「等遲到回覆」並記 log
+   - **不再通知寄件人「沒有回覆」**（擁有者 10/22 裁示：寄件人看已讀狀態就知道）。逾時（預設 10 分鐘）沒收到回覆，只是把這封信轉成「等遲到回覆」並記 log
      `reply wait over id=… -> 收件視窗: no notice to sender`；已經回了（`replied/<id>` 記號）或收件視窗在轉交後寄過信給原寄件人（`sent/` 記號）就直接清掉，也記 log。
    - **收件視窗提醒**：`reply=yes` 的信轉交後 `ASN_NUDGE_MS`（預設 5 分鐘）還沒回、收件視窗狀態是 `idle` → 提醒收件視窗一次：
      `（收發室提醒）你還沒回覆 <寄件人說明> 的信 <信件id>，若已處理完請用 asn_send 寄回結果`（log `nudged window`）。忙碌（或狀態不是 idle，例如使用者正在打字）不插話，下一輪再看；已回覆就不提醒；`reply=no` 的信、收發室系統信不提醒。
@@ -83,7 +83,7 @@ powershell -File install-task.ps1 -Uninstall           # 移除
 
 排程用 `conhost.exe --headless` 跑 `run-bridge.ps1`（沒有視窗，不會被誤關；橋掛掉 15 秒後自動重啟；撞到另一個執行個體則停手）。**目前沒有安裝**。
 
-### 自己更新、自己重啟（`self-update.mjs`，小良哥 10/06）
+### 自己更新、自己重啟（`self-update.mjs`，擁有者 10/06）
 
 收發室不用再靠別的 AI 幫它更新重啟（那個 AI 又得靠收發室傳指令，會互相卡住）：
 

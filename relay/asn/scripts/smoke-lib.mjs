@@ -52,6 +52,7 @@ export { photoBackProbeSource } from './smoke-probes/photoBack.mjs'
 export { photoZoomProbeSource } from './smoke-probes/photoZoom.mjs'
 export { quotaProbeSource } from './smoke-probes/quota.mjs'
 export { skinProbeSource } from './smoke-probes/skinCheck.mjs'
+export { SET_PHONE_360, SET_SCENARIOS, SET_SKINS, SET_STATE_GAPS, SET_STATE_MATRIX, SET_STATES, setPageProbeSource } from './smoke-probes/zSetPage.mjs'
 import { TASKMGR_RESUMING_SID } from './smoke-probes/taskmgr.mjs'
 export { TASKMGR_RESUMING_SID, taskmgrProbeSource } from './smoke-probes/taskmgr.mjs'
 export { UPD_DL_TOTAL, updDlProbeSource } from './smoke-probes/updDl.mjs'
@@ -127,7 +128,7 @@ export const MASK_PROBES = {
 export const PARTNER_MEMBERS = [{ id: 'P', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }]
 // 設備多於 6 台（左邊設備頁籤第 6 格變「⋯」）：8 台別的電腦，各一位在線的夥伴
 export const MANY_DEVICES = Array.from({ length: 8 }, (_, i) => ({ id: `D${i + 1}`, name: `電腦${i + 1}`, agents: [{ name: `夥伴${i + 1}`, status: 'idle', cwd_label: 'w' }] }))
-// 「⋯」小清單點外面、按 Esc、切分頁都會收起（小良哥 11-12）。用真的滑鼠與按鍵（__smokeInput 由測試程式用偵錯協定送）
+// 「⋯」小清單點外面、按 Esc、切分頁都會收起（擁有者 11-12）。用真的滑鼠與按鍵（__smokeInput 由測試程式用偵錯協定送）
 export const DEVMORE_PROBE = { devMore: true }
 // LINE 手機（#1536）：一則很寬的表格（對方的回覆，markdown）、一句長的文字（看泡泡最大寬度）、自己一句長的
 export const LINE_TABLE_MSGS = [
@@ -146,7 +147,7 @@ export const PHOTO_ZOOM_FULL = "data:image/svg+xml;utf8,<svg xmlns='http://www.w
 // 設備頁精簡（#1499）：列上只留名字和「電腦／手機・在線／離線」，「已確認／未確認」換成指紋小圖示。
 // desk＝電腦版設定的設備頁（兩支手機：一支記住了指紋、一支還沒）；phone＝手機設定的設備頁（兩台電腦：一台確認過、一台還沒，長按看說明）
 export const FPMARK_MEMBERS = {
-  desk: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'M1', name: '小良的手機', agents: [{ name: 'm1', status: 'idle', cwd_label: 'm' }] }, { id: 'M2', name: '舊手機', agents: [{ name: 'm2', status: 'idle', cwd_label: 'm' }] }],
+  desk: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'M1', name: '擁有者的手機', agents: [{ name: 'm1', status: 'idle', cwd_label: 'm' }] }, { id: 'M2', name: '舊手機', agents: [{ name: 'm2', status: 'idle', cwd_label: 'm' }] }],
   phone: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }, { id: 'R', name: '工作機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }],
 }
 export const PARTNER_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: 'P/demo' }], active: { id: 'P/demo' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }
@@ -286,7 +287,7 @@ export const MLAYOUT_PROBES = {
   devicesBig: { mlayout: true, tab: 'devices', big: true },
   accountsBig: { mlayout: true, tab: 'accounts', big: true },
 }
-// 帳號卡片的設備按鈕（小良哥 11-09）：用過這個帳號的每台一顆；使用中＝黃色、選中（aria-pressed）、有勾與「使用中」（不能只靠顏色）、
+// 帳號卡片的設備按鈕（擁有者 11-09）：用過這個帳號的每台一顆；使用中＝黃色、選中（aria-pressed）、有勾與「使用中」（不能只靠顏色）、
 // 不停用但按了不做事（不發出任何切換指令）；「用在：」一行與「切換到…」按鈕都拿掉；按鈕不超出卡片；手機不能切換自己
 // 工作管理員（0.2.21）：設定 → 設備 → 這台電腦 → 工作管理員。兩個同名的 asn真（重複）、一般視窗、pi、內建工作者、自己開的前景程式、終端服務、ASN 本體
 export const TASKMGR_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'devices' }, windows: [], panelWindows: [] } }
@@ -324,7 +325,7 @@ export const MPANE_CHAT_PROBES = { single: { mpane: true, chat: true, single: tr
 // 手機四個分頁（0.2.18；#1429 改順序與第四格；#1438 對話分頁直接是那一則）：開 App 先看「對話」＝上次那一則（沒有清單）；設定裡打開「關於」，內頁暫時佔第四格（字換成「關於」），
 // 切到夥伴、再點第四格回到內頁；分頁列的字與順序和電腦版一樣
 export const MTABS_PROBE = { mtabs: true }
-// 手機對話頂端左上的「返回」（0.2.21 小良哥拍板加回來）：一對一、群組都有；現代外觀名牌照樣置中、不和返回鈕重疊；按下去切到「夥伴」分頁
+// 手機對話頂端左上的「返回」（0.2.21 擁有者拍板加回來）：一對一、群組都有；現代外觀名牌照樣置中、不和返回鈕重疊；按下去切到「夥伴」分頁
 export const MCHAT_BACK_PROBE = { mchatBack: true }
 export const DTABS_PROBE = { dtabs: true }
 // 外觀「現代」（0.2.18）：存檔選了現代，畫面一開就是現代（<html data-skin="modern">、主色變青綠），而且沒有橫向捲動；截圖給人看整體樣子
@@ -459,9 +460,9 @@ export const MTERMVIEW_PROBES = {
   cancel: { mtermview: true, gate: 'cancel' },
   noLock: { mtermview: true, gate: 'no_lock' },
   late: { mtermview: true, gate: 'late' },
-  // 停在對話畫面截圖：看切換鈕在這排最後面、寫「終端」、沒有選中樣式（小良哥 11-10）
+  // 停在對話畫面截圖：看切換鈕在這排最後面、寫「終端」、沒有選中樣式（擁有者 11-10）
   toggle: { mtermview: true, big: false, stayChat: true },
-  // 看終端時輸入框要照樣在最下面（小良哥 11-10）；kb＝鍵盤開著（視窗高度縮小、輸入框取得焦點）
+  // 看終端時輸入框要照樣在最下面（擁有者 11-10）；kb＝鍵盤開著（視窗高度縮小、輸入框取得焦點）
   composer: { mtermview: true, composer: true, kb: false },
   composerKb: { mtermview: true, composer: true, kb: true },
   follow: { mtermview: true, follow: true },
@@ -566,7 +567,7 @@ const BASE_SCENARIOS = [
   { name: 'm-term-view-cancel', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'cancel' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.cancel, shot: 'm-term-view-cancel.png' },
   { name: 'm-term-view-nolock', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'no_lock' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.noLock, shot: 'm-term-view-nolock.png' },
   { name: 'm-term-view-late', page: 'm.html', width: 360, state: { signedIn: true, mtermview: 'late' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.late, shot: 'm-term-view-late.png' },
-  // 對話／終端合成一顆、放在最後面（小良哥 11-10）：停在對話畫面截圖，412、360 兩種寬度
+  // 對話／終端合成一顆、放在最後面（擁有者 11-10）：停在對話畫面截圖，412、360 兩種寬度
   { name: 'm-term-toggle', page: 'm.html', state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.toggle, shot: 'm-term-toggle-412.png' },
   { name: 'm-term-toggle-360', page: 'm.html', width: 360, state: { signedIn: true, mtermview: true }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.toggle, shot: 'm-term-toggle-360.png' },
   // 看終端時輸入框照樣在最下面、終端縮到它上面不重疊；412、360 寬各兩種：鍵盤收著（高 800）、鍵盤開著（高 420、輸入框聚焦）
@@ -645,6 +646,20 @@ const BASE_SCENARIOS = [
   { name: 'm-photo-back', page: 'm.html', state: { signedIn: true, mbar: 'offline', photoMsg: true }, ready: '#app.m .m-chat .chatpane', probe: { photoBack: true }, shot: 'm-photo-back.png' },
   { name: 'm-photo-back-modern', page: 'm.html', state: { signedIn: true, mbar: 'offline', photoMsg: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { photoBack: true }, shot: 'm-photo-back-modern.png' },
   { name: 'm-photo-back-line', page: 'm.html', state: { signedIn: true, mbar: 'offline', photoMsg: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { photoBack: true }, shot: 'm-photo-back-line.png' },
+  // #1808：名單讀不到（連不上 ASN）電腦與手機同一句話；三種外觀各一張截圖
+  { name: 'm-roster-fail', page: 'm.html', state: { signedIn: true, rosterFail: true }, ready: '#app.m .empty-list', shot: 'm-roster-fail.png' },
+  { name: 'list-roster-fail', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterFail: true }, ready: '#app.win .empty-list', shot: 'list-roster-fail.png' },
+  { name: 'm-roster-fail-modern', page: 'm.html', state: { signedIn: true, rosterFail: true, skin: 'modern' }, ready: '#app.m .empty-list', shot: 'm-roster-fail-modern.png' },
+  { name: 'list-roster-fail-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterFail: true, skin: 'modern' }, ready: '#app.win .empty-list', shot: 'list-roster-fail-modern.png' },
+  { name: 'm-roster-fail-line', page: 'm.html', state: { signedIn: true, rosterFail: true, skin: 'line' }, ready: '#app.m .empty-list', shot: 'm-roster-fail-line.png' },
+  { name: 'list-roster-fail-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterFail: true, skin: 'line' }, ready: '#app.win .empty-list', shot: 'list-roster-fail-line.png' },
+  // 名單還在連線中：假後台的名單與收信指令一直不回，核心停在連線中；同一句「正在連上 ASN…」
+  { name: 'm-roster-connecting', page: 'm.html', state: { signedIn: true, rosterConnecting: true }, ready: '#app.m .empty-list', shot: 'm-roster-connecting.png' },
+  { name: 'list-roster-connecting', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true }, ready: '#app.win .empty-list', shot: 'list-roster-connecting.png' },
+  { name: 'm-roster-connecting-modern', page: 'm.html', state: { signedIn: true, rosterConnecting: true, skin: 'modern' }, ready: '#app.m .empty-list', shot: 'm-roster-connecting-modern.png' },
+  { name: 'list-roster-connecting-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true, skin: 'modern' }, ready: '#app.win .empty-list', shot: 'list-roster-connecting-modern.png' },
+  { name: 'm-roster-connecting-line', page: 'm.html', state: { signedIn: true, rosterConnecting: true, skin: 'line' }, ready: '#app.m .empty-list', shot: 'm-roster-connecting-line.png' },
+  { name: 'list-roster-connecting-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, rosterConnecting: true, skin: 'line' }, ready: '#app.win .empty-list', shot: 'list-roster-connecting-line.png' },
   { name: 'list-dev-fpmark', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark.png' },
   { name: 'list-dev-fpmark-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, fpMark: 'desk', skin: 'modern' }, ready: '#app.win .dv-set', probe: { fpMark: 'desk' }, shot: 'list-dev-fpmark-modern.png' },
   { name: 'm-dev-select', page: 'm.html', height: 420, state: { signedIn: true, fpMark: 'phone' }, ready: '#app.m .m-row-btn', probe: { devSel: true }, shot: 'm-dev-select.png' },
@@ -794,7 +809,7 @@ export const tableFor = scenario => {
     t.relay_list = { members: FPMARK_MEMBERS.desk }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(TASKMGR_ME) } }
     t.relay_launchers = { machines: [{ node: 'M1', platform: 'android', launcher: null }, { node: 'M2', platform: 'android', launcher: null }] }
-    t.device_known_list = { peers: [{ node: 'M1', name: '小良的手機', fingerprint: '3fa2c91b7d0e4a5f8c6b2d1e0f9a8b7c', first_seen_ms: 1763000000000 }] }
+    t.device_known_list = { peers: [{ node: 'M1', name: '擁有者的手機', fingerprint: '3fa2c91b7d0e4a5f8c6b2d1e0f9a8b7c', first_seen_ms: 1763000000000 }] }
   }
   if (scenario.state.fpMark === 'phone') {   // 設備頁精簡（#1499）：手機
     t.relay_list = { members: FPMARK_MEMBERS.phone }
@@ -967,6 +982,13 @@ export const tableFor = scenario => {
   }
   if (scenario.state.mroster) { t.android_acct_roster = scenario.state.mroster === 'cards' ? cardsRoster() : ROSTER_GEMINI; t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(MROSTER_ME) } } }
   // 探測檔自帶的假後台欄位（#1540）：table(scenario, t) 回傳要蓋上去的欄位，沒有就回 undefined
+  // 名單讀不到：後台的名單指令不給回應（假後台對沒登記的指令會丟錯），核心判成連不上（#1808）
+  if (scenario.state.rosterConnecting) t.__hang = ['relay_list', 'relay_inbox']
+  if (scenario.state.rosterFail || scenario.state.rosterConnecting) {
+    if (scenario.state.rosterFail) { delete t.relay_list; delete t.relay_inbox }
+    // 手機要停在「夥伴」分頁才看得到名單的空白說明
+    t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ ...JSON.parse(t.store_load?.values?.me ?? '{}'), navTab: 'list' }) } }
+  }
   t = withProbeTables(t, scenario, PROBES)
   // 外觀「現代」（0.2.18）：存檔裡的外觀（電腦 me.skin、手機 me.mobilePrefs.skin）設成 skin，其他存檔照各情境
   if (scenario.state.skin) {
@@ -999,8 +1021,11 @@ export const injectSource = table => `(() => {
     },
     window: { getCurrentWindow: () => ({ startResizeDragging() {}, label: 'smoke' }) },
     core: { invoke: async (cmd, args) => {
+      if (T.__fail && Object.prototype.hasOwnProperty.call(T.__fail, cmd)) { (globalThis.__smokeCalls ||= []).push([cmd, args]); throw T.__fail[cmd] }   // 後台回錯誤（#1763 T3）：表裡的 __fail[指令]＝錯誤文字
+      if (T.__hang && T.__hang.indexOf(cmd) >= 0) { (globalThis.__smokeCalls ||= []).push([cmd, args]); return new Promise(() => {}) }   // 讀取中的畫面（#1763 T3）：這個指令永遠不回
       if (!Object.prototype.hasOwnProperty.call(T, cmd)) { missing.push(cmd); throw 'command ' + cmd + ' not found' }
       (globalThis.__smokeCalls ||= []).push([cmd, args]);
+      if (Array.isArray(T.__hang) && T.__hang.includes(cmd)) return new Promise(() => {});   // 一直不回：核心停在連線中
       // 本機終端的假後台（__tvLive）：開了就每 100 毫秒推一幅，paused 時不推、恢復時補推一幅；__smokeTv.sent＝一共推了幾幅
       if (tv) {
         if (cmd === 'term_view_open') { clearInterval(tv.timer); tv.timer = setInterval(() => { if (!tv.paused) tvSend() }, 100); setTimeout(tvSend, 50); return tv.id }

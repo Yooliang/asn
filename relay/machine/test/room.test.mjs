@@ -15,9 +15,9 @@ import { createRooms } from '../rooms.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url))
 const ROOM = path.join(here, '..', 'room.mjs'), WINDOW = path.join(here, 'fake-window.mjs')
 
-const msgs = n => Array.from({ length: n }, (_, i) => ({ seq: i + 1, from: i % 2 ? '~owner' : 'W~W-政策', from_name: i % 2 ? '小良哥' : '政策', trust: i % 2 ? 'owner' : 'member', body: `內文-${i + 1}${i === 2 ? '\n第二行' : ''}`, mentions: [], at: '2026-10-02T03:00:00Z' }))
+const msgs = n => Array.from({ length: n }, (_, i) => ({ seq: i + 1, from: i % 2 ? '~owner' : 'W~W-政策', from_name: i % 2 ? '擁有者' : '政策', trust: i % 2 ? 'owner' : 'member', body: `內文-${i + 1}${i === 2 ? '\n第二行' : ''}`, mentions: [], at: '2026-10-02T03:00:00Z' }))
 const ROOMS = [
-  { id: 'R1', name: 'Irori 開發', last_seq: 30, last_from_name: '小良哥', last_body: '內文-30', mine: [{ member: 'T~T-視窗甲', read_seq: 0, unread: 30 }, { member: 'T', read_seq: 0 }], messages: msgs(30) },
+  { id: 'R1', name: 'Irori 開發', last_seq: 30, last_from_name: '擁有者', last_body: '內文-30', mine: [{ member: 'T~T-視窗甲', read_seq: 0, unread: 30 }, { member: 'T', read_seq: 0 }], messages: msgs(30) },
   { id: 'R2', name: '別的群', last_seq: 3, mine: [{ member: 'T~T-視窗乙', read_seq: 0 }], messages: msgs(3) },
 ]
 
@@ -73,7 +73,7 @@ test('--rooms：只列我（T~視窗甲）在的群組，帶新訊息數與最�
   try {
     const r = await asWindow(home, st, 'T-視窗甲', ['--rooms'])
     assert.equal(r.code, 0, r.err)
-    assert.match(r.out, /^R1　Irori 開發　共 30 則，新訊息 30 則　最後：小良哥：內文-30/m)
+    assert.match(r.out, /^R1　Irori 開發　共 30 則，新訊息 30 則　最後：擁有者：內文-30/m)
     assert.doesNotMatch(r.out, /別的群/)
     assert.ok(st.reqs.every(q => q.key === 'fake-machine-key'))
     assert.equal(reads(st).length, 0)
@@ -88,7 +88,7 @@ test('--room-read：預設最近 20 則、一定帶 since 不帶 mark、as_agent
     assert.deepEqual(reads(st).map(x => [x.q.room, x.q.as_agent, x.q.since, x.q.limit, x.q.mark]), [['R1', 'T-視窗甲', '10', '20', undefined]])
     assert.match(r.out, /^\[群組 Irori 開發\]（R1）第 11～30 則，共 30 則/)
     assert.equal((r.out.match(/^#\d+ /gm) || []).length, 20)
-    assert.match(r.out, /^#30 .*小良哥（owner）：\n {4}內文-30/m)
+    assert.match(r.out, /^#30 .*擁有者（owner）：\n {4}內文-30/m)
     const again = await asWindow(home, st, 'T-視窗甲', ['--rooms'])
     assert.match(again.out, /新訊息 0 則/)
     // 群組名也可以（不分大小寫）；--since 3 從第 4 則起；--last 2 只兩則；--json 一行一則

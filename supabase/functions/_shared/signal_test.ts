@@ -320,6 +320,6 @@ Deno.test("敲門鈴的 b 節點：寫 b/<hash> ＝ { at }，沒有任何內容"
   assertEquals(JSON.parse(String(w.init?.body)), { at: T0 });
 });
 
-Deno.test("保底輪詢間隔是 300 秒（前端 signal.poll_s；小良哥裁示 5 分鐘）", () => {
+Deno.test("保底輪詢間隔是 300 秒（前端 signal.poll_s；擁有者裁示 5 分鐘）", () => {
   assertEquals(POLL_S, 300);
 });

@@ -92,7 +92,7 @@
             <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
               <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
               <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人" enterkeyhint="search"></div>
-              <!-- 未讀（#1438，小良哥定）：只放有未讀的夥伴與群組，最新的在前，每一列標未讀數字；讀完就離開這一組，全部讀完整組不顯示。「夥伴」分頁的紅點用同一份算 -->
+              <!-- 未讀（#1438，擁有者定）：只放有未讀的夥伴與群組，最新的在前，每一列標未讀數字；讀完就離開這一組，全部讀完整組不顯示。「夥伴」分頁的紅點用同一份算 -->
               <div class="m-group m-recent" :class="grp.cls" v-for="grp in topGroups" :key="grp.key">
                 <button class="m-ghead" type="button" :aria-expanded="!collapsed[grp.key]" @click="collapsed[grp.key] = !collapsed[grp.key]">
                   <span class="m-caret" :class="{ open: !collapsed[grp.key] }">▸</span>{{ grp.label }}（{{ grp.rows.length }}）
@@ -173,11 +173,11 @@
             </div>
           </section>
 
-          <!-- 對話：直接就是最後在聊的那一則（#1438，小良哥選 B，回到 0.2.17 的做法；不先列清單）。還沒有最後一則時顯示提示，請到「夥伴」挑一位。對話內容上方不放按鈕列，管理項目都在右上角「⋯」 -->
+          <!-- 對話：直接就是最後在聊的那一則（#1438，擁有者選 B，回到 0.2.17 的做法；不先列清單）。還沒有最後一則時顯示提示，請到「夥伴」挑一位。對話內容上方不放按鈕列，管理項目都在右上角「⋯」 -->
           <section class="m-pg m-chat" :class="{ shake, 'is-room': chatFriend && chatFriend.room }" aria-label="對話">
             <header class="m-head m-chathead" :class="{ 'is-busy': chatFriend && headTone(chatFriend.status, chatFriend) === 'busy', 'is-offline': chatFriend && !chatFriend.room && headTone(chatFriend.status, chatFriend) === 'offline', 'm-plate-head': chatFriend }">
               <template v-if="chatFriend">
-                <!-- 左上「返回」（小良哥 0.2.21 拍板加回來）：切到「夥伴」分頁。「對話」是瀏覽記錄的最底層，所以走 goTab，不用 history.back()；Aero 與現代、一對一與群組都有 -->
+                <!-- 左上「返回」（擁有者 0.2.21 拍板加回來）：切到「夥伴」分頁。「對話」是瀏覽記錄的最底層，所以走 goTab，不用 history.back()；Aero 與現代、一對一與群組都有 -->
                 <button class="m-icon-btn m-back" type="button" aria-label="回夥伴" title="回夥伴" @click="goTab('list')"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
                 <!-- 現代外觀（#1421 B 之三）：置中名牌＋右邊「看終端」；點名牌開「⋯」選單。復古 Aero 下這兩顆不顯示（mobile.css），照舊是下面的頭像、名字、「⋯」 -->
                 <button class="m-plate" type="button" :class="{ 'is-offline': chatPlate.offline }" :aria-label="(opsItems.length || groupItems.length) ? chatPlate.aria + '，更多操作' : chatPlate.aria" :disabled="!opsItems.length && !groupItems.length" @click="openOps"><img class="m-plate-pic" :class="'st-' + chatFriend.status" :src="avOf(chatFriend)" alt="" width="28" height="28"><b class="m-plate-name" v-html="emo(chatPlate.name)"></b><small class="m-plate-sub" v-if="chatPlate.sub"><template v-if="prefs.skin === 'line' && chatPlate.busy">{{ chatPlate.machine }}{{ chatPlate.machine ? '・' : '' }}<span class="l-busy">{{ chatPlate.state }}</span></template><template v-else>{{ chatPlate.sub }}</template></small><small class="m-plate-count" v-if="prefs.skin === 'line' && chatFriend.room && chatFriend.psm">{{ chatFriend.psm }}</small></button>
@@ -205,7 +205,8 @@
               <ol class="m-ops-steps" v-if="opsBanner.steps.length"><li v-for="s in opsBanner.steps" :key="s.key" :class="'is-' + s.state"><b aria-hidden="true">{{ s.mark }}</b>{{ s.text }}</li></ol>
               <p class="m-ops-run-more" v-for="l in opsBanner.extra" :key="l">{{ l }}</p>
               <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.action && opsBanner.action.kind === 'launch-new'" @click="launchNewFromBanner">開新夥伴</button>
-              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">知道了</button>
+              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.retry" @click="retryRun">{{ OP_PROGRESS_TEXT.retry }}</button>
+              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">{{ OP_PROGRESS_TEXT.dismiss }}</button>
             </div>
             <p class="m-err m-room-note" v-if="roomNote && chatFriend && chatFriend.room" role="alert">{{ roomNote }}</p>
             <div class="m-peer-strip" v-if="chatFriend && peerStrip" role="status">
@@ -354,14 +355,21 @@
             <template v-else-if="acctSw.phase === 'pick'">
               <section class="m-dv-node" role="region" :aria-label="acctCur.label">
                 <div class="m-dv-dh">
-                  <h3 class="m-dv-name">{{ acctCur.label }}</h3>
-                  <span class="m-dv-tag">{{ acctCur.kind }}</span>
+                  <h3 class="m-dv-name">{{ acctCur.identity.title }}</h3>
+                  <span class="m-dv-tag">{{ acctCur.kindLabel || acctCur.kind }}</span>
                   <span class="m-dv-tag" :class="acctCur.online ? 'on' : 'off'">{{ acctCur.onlineText }}</span>
                   <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
                   <span class="m-dv-tag hid" v-if="acctCur.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                 </div>
                 <div class="m-dv-info" v-if="acctSw.sub === 'info'">
-                  <div class="m-dv-nameline"><b class="m-dv-curname">{{ acctCur.label }}</b><button class="m-btn" type="button" v-if="dn.node !== acctCur.key" :disabled="dn.busy" @click="devRenameStart(acctCur)">{{ KNOWN_TEXT.rename }}</button></div>
+                  <h4 class="m-dv-sech">{{ IDENTITY_TEXT.title }}</h4>
+                  <device-identity :identity="acctCur.identity" :note="acctCur.noReport ? acctCur.stateLine : ''"></device-identity>
+                  <template v-if="!acctCur.self && curKnown">
+                    <p class="m-dv-fprow" v-if="curKnown.confirmed"><fp-mark kind="confirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span><template v-if="curKnown.fpShow"> <code class="m-dv-fp" :aria-label="KNOWN_TEXT.fpLabel">{{ curKnown.fpShow }}</code></template></p>
+                    <p class="m-dv-fprow" v-else><fp-mark kind="unconfirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span> <button class="m-btn" type="button" v-if="!curKnown.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(curKnown)">{{ KNOWN_TEXT.confirmButton }}</button></p>
+                    <p class="m-fine" v-if="curKnown.firstSeen">{{ KNOWN_TEXT.firstSeen(curKnown.firstSeen) }}</p>
+                  </template>
+                  <h4 class="m-dv-sech">{{ ACTION_TEXT.title }}</h4>
                   <form class="m-known-edit" v-if="dn.node === acctCur.key" @submit.prevent="devRenameSave">
                     <input class="m-input" type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="dn.text" :aria-label="KNOWN_TEXT.renameLabel" />
                     <small class="m-fine">{{ KNOWN_TEXT.renameHint }}</small>
@@ -369,21 +377,14 @@
                     <small class="m-err" v-if="dn.err" role="alert">{{ dn.err }}</small>
                     <span class="m-dv-btns"><button class="m-btn" type="submit" :disabled="dn.busy || !!dnBad">{{ KNOWN_TEXT.renameSave }}</button><button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameCancel">{{ KNOWN_TEXT.renameCancel }}</button></span>
                   </form>
-                  <template v-if="acctCur.self"></template>
-                  <p class="m-dv-fprow" v-else-if="curKnown && curKnown.confirmed"><fp-mark kind="confirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span><template v-if="curKnown.fpShow"> <code class="m-dv-fp" :aria-label="KNOWN_TEXT.fpLabel">{{ curKnown.fpShow }}</code></template></p>
-                  <p class="m-dv-fprow" v-else-if="curKnown"><fp-mark kind="unconfirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span> <button class="m-btn" type="button" v-if="!curKnown.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(curKnown)">{{ KNOWN_TEXT.confirmButton }}</button></p>
-                  <p class="m-fine" v-else-if="(acctCur.kindLabel || acctCur.kind) === '電腦'">{{ KNOWN_TEXT.neverSeen }}</p>
-                  <p class="m-fine m-dv-state" v-if="acctCur.stateLine">{{ acctCur.stateLine }}</p>
-                  <p class="m-fine" v-if="curKnown && curKnown.firstSeen">{{ KNOWN_TEXT.firstSeen(curKnown.firstSeen) }}</p>
-                  <div class="m-dv-hid-act" v-if="acctCanRemove">
-                    <button type="button" class="m-dv-refresh" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
-                    <button type="button" class="m-dv-refresh m-dv-danger" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
+                  <div class="m-dv-btns m-dv-actions" v-else>
+                    <button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameStart(acctCur)">{{ ACTION_TEXT.rename }}</button>
+                    <button type="button" class="m-dv-refresh" v-if="acctCanShowBack" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
+                    <button type="button" class="m-dv-refresh m-dv-danger" v-if="!acctCur.self" :disabled="!acctCanRemove" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
+                    <button class="m-btn m-dv-danger" type="button" v-if="curKnown" :disabled="kp.busy" @click="forgetKnown(curKnown.node)">{{ KNOWN_TEXT.forgetThis }}</button>
                   </div>
-                  <p class="m-fine" v-if="acctCur.reportedText">{{ acctCur.reportedText }}</p>
-                  <template v-if="curKnown">
-                    <button class="m-btn m-dv-danger" type="button" :disabled="kp.busy" @click="forgetKnown(curKnown.node)">{{ KNOWN_TEXT.forgetThis }}</button>
-                    <p class="m-fine">{{ KNOWN_TEXT.forgetNote }}</p>
-                  </template>
+                  <p class="m-fine dvid-why" v-if="!acctCur.self && !acctCanRemove">{{ ACTION_TEXT.removeOnline }}</p>
+                  <p class="m-fine" v-if="curKnown">{{ KNOWN_TEXT.forgetNote }}</p>
                   <p class="m-err" v-if="kp.error" role="alert">{{ kp.error }}</p>
                   <p class="m-err" v-if="vp.note && vp.noteOwn" role="alert">{{ vp.note }}</p>
                 </div>
@@ -486,7 +487,7 @@
             <template v-else>
               <p class="m-prog" :class="acctSw.view ? 'is-' + acctSw.view.phase : ''" role="status">{{ acctSw.view ? acctSw.view.text : '' }}</p>
               <div class="m-bar" v-if="acctSw.view && !acctSw.view.done" aria-hidden="true"><i></i></div>
-              <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ acctSw.view && acctSw.view.done ? ACCT_TEXT.close : ACCT_TEXT.later }}</button>
+              <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ acctSw.view && acctSw.view.done ? ACCT_TEXT.close : ACCT_TEXT.backToList }}</button>
             </template>
           </div>
             </template>
@@ -513,8 +514,6 @@
                         <p class="m-err" v-if="wakeErr" role="alert">{{ wakeErr }}</p>
                         <p class="m-acct">{{ accountText }}</p>
                         <p class="m-fine" v-if="sealNote">{{ sealNote }}</p>
-                        <p class="m-dv-selfname"><span class="m-fine">這台設備的名稱</span> <b>{{ selfDevName }}</b> <button class="m-btn" type="button" @click="goDeviceRename">到設備頁改名</button></p>
-                        <small class="m-fine">設備名稱只在設備頁改。別台設備看到你從這裡寄信時，會標「從 {{ me.nick }}」。</small>
                         <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>
                         <label>個人訊息<input class="set-input" v-model="me.psm" maxlength="60" placeholder="輸入個人訊息" enterkeyhint="done" @keydown.enter="$event.target.blur()"></label>
                       </div>
@@ -720,7 +719,7 @@
                   <div class="m-bar" v-if="lch.vphase === 'sending' || lch.vphase === 'opening' || lch.vphase === 'waiting'" aria-hidden="true"><i></i></div>
                   <button class="m-btn m-btn-big" type="button" v-if="lch.vphase === 'done'" @click="openLaunched">開始對話</button>
                   <button class="m-btn" type="button" v-if="lch.vphase === 'failed'" @click="lch.phase = 'form'">再試一次</button>
-                  <button class="m-btn" type="button" @click="closeLaunch">{{ lch.vphase === 'done' || lch.vphase === 'failed' ? '關閉' : '先關閉（會在背景繼續）' }}</button>
+                  <button class="m-btn" type="button" @click="closeLaunch">{{ OP_PROGRESS_TEXT.close }}</button>
                 </template>
               </div>
             </div>
@@ -795,7 +794,8 @@
           <dl class="m-ops-rows" v-if="ops.view && ops.view.rows && ops.view.rows.length"><template v-for="r in ops.view.rows" :key="r.label"><dt>{{ r.label }}</dt><dd>{{ r.value }}</dd></template></dl>
           <p class="m-note" v-if="ops.view && ops.view.rows && !ops.view.rows.length">沒有更多資料。</p>
           <div class="m-bar" v-if="ops.view && !ops.view.done" aria-hidden="true"><i></i></div>
-          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ ops.view && ops.view.done ? '關閉' : '先關掉（照常進行）' }}</button>
+          <button type="button" class="m-btn m-btn-big" v-if="ops.view && ops.view.phase === 'failed'" @click="retryInfo">{{ OP_PROGRESS_TEXT.retry }}</button>
+          <button type="button" class="m-btn m-ops-cancel" @click="back">{{ OP_PROGRESS_TEXT.close }}</button>
         </template>
       </section>
     </div>

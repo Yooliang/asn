@@ -5,6 +5,7 @@
 // 不能說成「沒登入」；也不知道有沒有裝時不亂說「未安裝」。
 // 資料來源都是現有的，沒有新的後台回報：帳號回報（reports[node]）、啟動器回報（launchers[node].profiles）、名單的引擎、本機偵測。
 import { loginFailed } from './claude-accounts.mjs'
+import { isPhoneDevice } from './node-platform.mjs'
 
 /** 帳號回報超過這麼久沒更新就當「還沒收到回報」（每 5 分鐘回報一次，夠寬；電腦睡眠醒來不會閃，要實機看一次） */
 export const REPORT_FRESH_MS = 15 * 60 * 1000
@@ -45,22 +46,12 @@ export const STATE_TEXT = Object.freeze({
   [STATE.NO_REPORT]: '還沒收到這台的回報',
 })
 
-const PHONE_KINDS = new Set(['phone', 'mobile', 'android'])
-const PHONE_PLATFORMS = new Set(['android', 'ios'])
-const DESKTOP_PLATFORMS = new Set(['windows', 'macos', 'linux'])
-
-/** 這台是不是手機：後台回報的平台優先（#652），沒有再退回名單的種類（舊版手機的平台是空的） */
-export function isPhoneDevice({ platform = '', kinds = [] } = {}) {
-  const p = String(platform ?? '').toLowerCase()
-  if (PHONE_PLATFORMS.has(p)) return true
-  if (DESKTOP_PLATFORMS.has(p)) return false   // 後台說是電腦就是電腦，不管名單的種類寫什麼
-  return (kinds ?? []).some(k => PHONE_KINDS.has(String(k ?? '').toLowerCase()))
-}
+export { isPhoneDevice }   // 判斷只有 node-platform.mjs 一份（#1829）
 
 /**
  * 這台是不是「雲端夥伴」（#930，0.2.15）：**沒有電腦版 ASN、只有橋或雲端代理的節點**。
  * 例：Grok 雲端代理、牧陽 Aegis 的轉接橋、日本VM（無畫面 Linux，只有橋＋代理）。手機不算；有電腦版 ASN 的實體電腦不算。
- * 規則若要改（小良哥決定），只改這一個函式；電腦版與手機版的設備分組都呼叫它。
+ * 規則若要改（擁有者決定），只改這一個函式；電腦版與手機版的設備分組都呼叫它。
  *
  * 用到的資料（電腦版、手機版都拿得到，不需要新的後台回報）：
  *   - phone：isPhoneDevice 的結果（後台平台優先、再看名單種類）
@@ -102,12 +93,12 @@ export function isCloudNode({ phone = false, self = false, asnOnline = false, re
 
 /**
  * 設備列「種類」那一段的字（#930，0.2.15）：手機／電腦；雲端節點在後面加「雲端」（例如「電腦 · 雲端」）。
- * 雲端節點照一般設備各自一列，只在這裡標示，不另開分類（小良哥 11-07）。cloud 是 null（資料還不夠）就不標示，照舊是電腦。
+ * 雲端節點照一般設備各自一列，只在這裡標示，不另開分類（擁有者 11-07）。cloud 是 null（資料還不夠）就不標示，照舊是電腦。
  * 手機和電腦版都用這一個函式，兩邊字一樣。
  */
 export const CLOUD_TAG = '雲端'
 export function deviceKindLabel({ kind = '電腦', cloud = null } = {}) {
-  return cloud === true ? CLOUD_TAG : kind   // 雲端夥伴只寫「雲端」（小良哥看過手機截圖），不再是「電腦 · 雲端」
+  return cloud === true ? CLOUD_TAG : kind   // 雲端夥伴只寫「雲端」（擁有者看過手機截圖），不再是「電腦 · 雲端」
 }
 
 /** 雲端夥伴那一列的第三行說明（電腦、手機共用）。原本是「還沒收到這台的回報」，雲端本來就不會有帳號回報 */
