@@ -6,6 +6,10 @@
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVYT1FUVnFxZXBwbXpxQ0xPclFreEJVa053Q1lKeUNwcFFVNnNTSytvdm5FbXNZV3FMNjNaRFFIY2hWL0ZkM0t3SzVPdEdVM2V1bEZlNnc5RmNnbHcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjQ5OTg3CWZpbGU6QVNOXzAuMi40N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQ3CjU1akppRzR3Q3lndEtLMWtPNHhFU3ZVWlMyUkl6aFVuUWowYnZqSEY0NWNkditiREpUeTI3TjUzWFh2ci82VVZaRFF2My92YTJqc1NyQmptTU9tN0FnPT0K",
       "url": "https://asnmessenger.web.app/update/ASN_0.2.47_x64-setup.exe"
+    },
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFDRmkvc2FqcmNFQ0kzdVZmZGJmTlBaVVFteHdNaWUvTElmbUs4Znh6Zzloelh3eFgvVVE5dkJmb1ZmR0l6a3dzbUl0ZUlOejlyaWRjeGh3TFRnQ1EwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjUwNDc0CWZpbGU6QVNOXzAuMi40N19hbWQ2NC5BcHBJbWFnZQo5bE1ic1JoY2FhR2I3bWtrZG1ZbWpEWlZiWXY3N0x6MnVrRk1CNmpZNXR2bnB4UUFYbjJGYm1UeG4xMWFvWUxUYVVObDZDOFFhS2VXVnVqejJ0UkVBUT09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.47_amd64.AppImage"
     }
   }
 }
