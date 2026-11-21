@@ -31,6 +31,10 @@
     { "glob": "relay/asn/package-lock.json", "platforms": ["desktop", "linux", "android"], "說明": "前端依賴鎖定，三個平台共用；領隊 #4501 定" },
     { "glob": "relay/shared/**", "platforms": ["desktop", "linux", "android"], "說明": "共用程式；領隊 #4501 定三個都打" },
     { "glob": "site/**", "platforms": [], "說明": "官網與更新清單，打標籤之後才由 local_sign_publish 提交、另外部署；不列的話每一版都會被它拖成三個都打" },
+    { "glob": "relay/asn/scripts/wezterm-pins.json", "platforms": ["desktop", "linux"], "說明": "WezTerm 版本與雜湊：電腦版打包、Linux 按需下載都讀它；Android 不編 wezterm_fetch（cfg(desktop)）。領隊 #2010 定" },
+    { "glob": "relay/asn/scripts/fetch-wezterm.mjs", "platforms": ["desktop"], "說明": "Windows 打包時抓 WezTerm，只影響電腦版。領隊 #2010 定" },
+    { "glob": "patches/wezterm/**", "platforms": [], "說明": "WezTerm 修補本身不進產品，要等 pins 改指向新版才生效，平台由 pins 那條帶出。領隊 #2010 定" },
+    { "glob": ".gitattributes", "platforms": [], "說明": "repo 設定。領隊 #2010 定" },
     { "glob": "supabase/**", "platforms": [], "說明": "後台（migration、Edge Function）另外部署，不進安裝檔" }
   ]
 }
