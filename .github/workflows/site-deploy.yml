@@ -1,0 +1,68 @@
+# 官網部署「演練」（#1947 ②）：只做部署前檢查與設定檔檢查，不碰任何金鑰、不部署。
+# 真部署（environment site-deploy＋firebase deploy）是 #1947 ④，不在這一版。
+name: site-deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'site/**'
+      - 'tools/release/site_predeploy.mjs'
+      - 'tools/release/legacy-installers.json'
+      - '.github/workflows/site-deploy.yml'
+  pull_request:
+    paths:
+      - 'site/**'
+      - 'tools/release/site_predeploy.mjs'
+      - 'tools/release/legacy-installers.json'
+      - '.github/workflows/site-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-deploy-dryrun-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  site-dryrun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      # 唯讀：下載線上的下載區 zip、對 GitHub 發 HEAD 核對舊版安裝檔；只寫 site/public/download/*.zip（已 gitignore）
+      - name: 部署前檢查（site_predeploy）
+        run: |
+          set -euo pipefail
+          node tools/release/site_predeploy.mjs --site site
+
+      # firebase deploy --dry-run 要登入（Failed to authenticate），這一版沒有金鑰，所以不跑；
+      # 改驗：固定版本的 firebase-tools 抓得到、能執行；firebase.json 能解析、public 目錄存在
+      - name: firebase 設定檢查（不登入）
+        run: |
+          set -euo pipefail
+          FB_VER="$(grep -v '^#' tools/release/FIREBASE_TOOLS_VERSION | tr -d '[:space:]')"
+          echo "firebase-tools 固定版本：$FB_VER"
+          test "$(npx --yes "firebase-tools@$FB_VER" --version)" = "$FB_VER"
+          node --input-type=module -e '
+            import fs from "node:fs"
+            import path from "node:path"
+            const cfg = JSON.parse(fs.readFileSync("site/firebase.json", "utf8"))
+            const h = cfg.hosting
+            if (!h || typeof h.public !== "string") throw new Error("firebase.json 沒有 hosting.public")
+            const dir = path.join("site", h.public)
+            if (!fs.statSync(dir).isDirectory()) throw new Error("public 目錄不存在：" + dir)
+            if (!fs.existsSync(path.join(dir, "update", "latest.json"))) throw new Error("缺 update/latest.json")
+            const rc = JSON.parse(fs.readFileSync("site/.firebaserc", "utf8"))
+            if (rc.projects?.default !== "asnmessenger") throw new Error(".firebaserc 的預設專案不是 asnmessenger")
+            console.log("firebase.json 可解析；public =", dir, "；redirects =", (h.redirects ?? []).length)
+          '
