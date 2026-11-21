@@ -216,10 +216,11 @@ test('2 secrets：電腦版 workflow、演練檔與 .github/actions/ 沒有任�
   assert.ok(others.includes(DESKTOP))
   for (const f of others) {
     const s = stripComments(read(f))
-    // site-deploy.yml（#1947 ④）只准用官網部署金鑰這一個，而且只在 site-deploy job 的 env（細節由 site-deploy-workflow-guard 守）
-    const allowed = f === '.github/workflows/site-deploy.yml' ? ['secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER'] : []
+    // 只准下面兩個檔用 secret（細節各由專屬守門守）：site-deploy.yml（#1947 ④）只准官網部署金鑰；電腦版（#2022 ②-1）只准 desktop-sign 用更新簽章的兩個 secret、掛 environment: release
+    const allowed = f === '.github/workflows/site-deploy.yml' ? ['secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER'] : f === DESKTOP ? ['secrets.TAURI_SIGNING_PRIVATE_KEY', 'secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD'] : []
     assert.deepEqual([...s.matchAll(/secrets\.(?!GITHUB_TOKEN\b)\w+/g)].map(m => m[0]), allowed, f)
-    if (f === DESKTOP || f.includes('rehearsal')) assert.doesNotMatch(s, /^\s*environment\s*:/m, f)
+    if (f === DESKTOP) assert.deepEqual([...s.matchAll(/^\s*environment\s*:\s*(\S+)/gm)].map(m => m[1]), ['release'], f)
+    if (f.includes('rehearsal')) assert.doesNotMatch(s, /^\s*environment\s*:/m, f)
   }
   const actions = fs.readdirSync(new URL('.github/actions/', root), { recursive: true }).map(String).filter(f => /\.ya?ml$/.test(f))
   assert.ok(actions.length >= 1)
