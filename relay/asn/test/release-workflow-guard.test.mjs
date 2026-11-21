@@ -1,4 +1,4 @@
-// #1892 正式發版 workflow（asn-release.yml）的守門，規格第 6 節。這一版只接電腦版與官網（Play 拆到後續）：沒有 secrets、沒有 environment。風格比照 ci-workflow-guard／release-rehearsal-guard（字串與正則，不引入 yaml 套件）。通則：
+// #1892 正式發版 workflow（asn-release.yml）的守門，規格第 6 節。這一版只接電腦版與官網（Play 拆到後續）。#2022：只有 desktop-sign 一個 job 可以掛 environment: release、可以用 TAURI_SIGNING_* 兩個 secret（且只在簽章那一步的 env:）；其餘 job 沒有 secrets、沒有 environment。風格比照 ci-workflow-guard／release-rehearsal-guard（字串與正則，不引入 yaml 套件）。通則：
 //   1. 先正規化換行（本機 autocrlf）、再剝註解才比對；
 //   2. flow-style 的 on／permissions／needs（[a, b]、{…}）一律判失敗——解析器不支援，不猜；
 //   3. 每條規則附「至少命中 N 次」計數，避免規則靜默失效（一律用 >=）；
@@ -77,17 +77,82 @@ const secretsOf = text => [...new Set([...text.matchAll(/secrets\.(?!GITHUB_TOKE
 const sorted = o => Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}: ${v}`).join(', ')
 
 // ---- 規格 3.2 的白名單表 ----
-const ALL_JOBS = ['guard', 'desktop', 'attest', 'site-draft', 'notify']
+const ALL_JOBS = ['guard', 'desktop', 'attest', 'desktop-sign', 'site-draft', 'notify']
+const NOTIFY_JOBS = ['guard', 'desktop', 'attest', 'site-draft'] // #2022 ②-1 不動 notify：desktop-sign 還沒接進通知
+const SIGN_JOB = 'desktop-sign'
+const SIGN_SECRETS = ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD']
 const TABLE = {
   guard: { perms: { contents: 'read', actions: 'read' } },
   desktop: { perms: { contents: 'read' } },
   attest: { perms: { contents: 'read', 'id-token': 'write', attestations: 'write' } },
+  'desktop-sign': { perms: { contents: 'read' } },
   'site-draft': { perms: { contents: 'read' } },
   notify: { perms: { contents: 'read', issues: 'write' } },
 }
 const AUTO_IF = "if: needs.guard.outputs.auto == 'true'"
 const AUTO_GATED = ['desktop', 'site-draft'] // attest 靠 needs: desktop 連帶略過；notify 是 always()
 const FORBIDDEN_TRIGGERS = ['branches', 'pull_request', 'pull_request_target', 'workflow_dispatch', 'schedule', 'workflow_run', 'workflow_call', 'repository_dispatch', 'release']
+
+/** job 文字切成步驟（以 6 空白的 "- " 開頭）；第 0 段是步驟之前的 job 欄位 */
+const stepsOf = text => text.split(/\n(?= {6}- )/)
+/** 簽章步驟：含 secrets. 的步驟 */
+const signStepsOf = text => stepsOf(text).filter(st => /secrets\./.test(st))
+/** 這個 job 有沒有把私鑰落地成檔案（有就要 chmod 600＋if: always() 刪除） */
+const usesKeyFile = t => /signer\s+sign\b[^\n]*\s(?:-f|--private-key-path)\b/.test(t) || /(?:echo|printf|cat)[^\n]*TAURI_SIGNING_PRIVATE_KEY[^\n]*>/.test(t) || /RUNNER_TEMP[^\n]*\.key\b/.test(t)
+
+/** #2022 desktop-sign 的專屬規則（secrets、environment、金鑰檔、步驟順序）；回違規訊息陣列 */
+const checkSign = (src, jobs) => {
+  const bad = []
+  // environment：只有 desktop-sign，值是 release，剛好一次
+  for (const [name, t] of Object.entries(jobs)) {
+    const envs = [...t.matchAll(/^\s*environment\s*:.*$/gm)].map(m => m[0].trim())
+    if (name === SIGN_JOB) { if (envs.join('|') !== 'environment: release' || envOf(t) !== 'release') bad.push('desktop-sign 要剛好有 environment: release，現在是 [' + envs.join(' | ') + ']') }
+    else if (envs.length) bad.push('只有 desktop-sign 可以掛 environment，但 ' + name + ' 有（' + envs.join(' | ') + '）')
+  }
+  // secrets：只有 desktop-sign 的簽章步驟，只准那兩個名字，且只在該步驟的 env: 區塊
+  for (const [name, t] of Object.entries(jobs)) {
+    if (name === SIGN_JOB) continue
+    for (const x of secretsOf(t)) bad.push('不准出現 secrets.' + x + '（只有 desktop-sign 的簽章步驟可以）')
+    if (/TAURI_SIGNING/.test(t)) bad.push('TAURI_SIGNING_* 只能出現在 desktop-sign（' + name + ' 有）')
+  }
+  const sj = jobs[SIGN_JOB]
+  if (sj !== undefined) {
+    const used = secretsOf(sj)
+    if (used.join() !== [...SIGN_SECRETS].sort().join()) bad.push('desktop-sign 用到的 secrets 要剛好是 ' + SIGN_SECRETS.join('、') + '，現在是 [' + used.join(', ') + ']')
+    const steps = signStepsOf(sj)
+    if (steps.length !== 1) bad.push('含 secrets 的步驟要剛好 1 個（簽章），現在是 ' + steps.length + ' 個')
+    for (const st of steps) {
+      const lines = st.split('\n')
+      const ei = lines.findIndex(l => /^ {8}env:\s*$/.test(l))
+      const envBody = []
+      if (ei >= 0) for (let j = ei + 1; j < lines.length && /^ {10}\S/.test(lines[j]); j++) envBody.push(lines[j])
+      for (const l of lines) if (/secrets\./.test(l) && !envBody.includes(l)) bad.push('secrets 只能在簽章步驟的 env: 底下：' + l.trim().slice(0, 60))
+      for (const k of SIGN_SECRETS) if (!envBody.some(l => new RegExp('^ {10}' + k + ':\\s*\\$\\{\\{\\s*secrets\\.' + k + '\\s*\\}\\}\\s*$').test(l))) bad.push('簽章步驟的 env: 缺 ' + k)
+      if (!/signer\s+sign\b/.test(st)) bad.push('含 secrets 的步驟要是 tauri signer sign')
+      if (/signer\s+sign\b[^\n]*\s(?:-k|--private-key|-p|--password)(?:\s|=)/.test(st)) bad.push('私鑰與密碼不准放在命令列參數（行程列表看得到）；改走環境變數')
+    }
+    // 簽章後才驗、驗完才上傳；步驟順序
+    const idx = k => sj.indexOf(k)
+    const order = ['actions/checkout@', 'npm ci --ignore-scripts', 'name: asn-installer-unsigned', 'sha256sum -c SHA256SUMS.txt', 'signer sign', 'tools/release/ci_verify_sig.mjs', 'name: asn-installer-signed']
+    order.forEach((k, i) => { if (idx(k) < 0) bad.push('desktop-sign 缺 ' + k); else if (i > 0 && idx(order[i - 1]) >= 0 && idx(k) < idx(order[i - 1])) bad.push('desktop-sign 的順序不對：' + k + ' 要在 ' + order[i - 1] + ' 之後') })
+    if (!/persist-credentials:\s*false/.test(sj)) bad.push('desktop-sign 的 checkout 要 persist-credentials: false')
+    const signed = sj.slice(Math.max(0, idx('name: asn-installer-signed')))
+    if (!/retention-days:\s*14\b/.test(signed)) bad.push('asn-installer-signed 的保留天數要跟 unsigned 一樣是 14')
+    if (/contents:\s*write|id-token|attestations/.test(sj)) bad.push('desktop-sign 的權限只有 contents: read')
+    if (needsOf(sj).slice().sort().join() !== 'attest,desktop') bad.push('desktop-sign 的 needs 要剛好是 desktop、attest')
+    if (/gh release|create-release|action-gh-release|site\/public|firebase/.test(sj)) bad.push('desktop-sign 不建 Release、不動官網')
+    // 金鑰如果落地成檔：chmod 600，且之後有 if: always() 的刪除步驟
+    if (usesKeyFile(sj)) {
+      if (!/chmod\s+600\b/.test(sj)) bad.push('私鑰暫存檔要 chmod 600')
+      if (!/RUNNER_TEMP/.test(sj)) bad.push('私鑰暫存檔要放在 RUNNER_TEMP')
+      const all = stepsOf(sj)
+      const si = all.findIndex(st => /secrets\./.test(st))
+      const cleanup = all.findIndex((st, i) => i > si && /^ {8}if:\s*always\(\)\s*$/m.test(st) && /\brm\s+-f?\b|\bshred\b/.test(st))
+      if (cleanup < 0) bad.push('私鑰暫存檔要有簽章步驟之後、if: always() 的刪除步驟')
+    }
+  }
+  return bad
+}
 
 /** 檢查一份發版 workflow；回違規訊息陣列，空陣列＝通過 */
 export const checkRelease = raw => {
@@ -108,7 +173,7 @@ export const checkRelease = raw => {
     for (const k of FORBIDDEN_TRIGGERS) if (new RegExp(`(^|\\W)${k}\\s*:`).test(on.join('\n'))) bad.push(`on: 不准有 ${k}`)
   }
   // 禁字
-  for (const s of ['--skip-smoke', 'ASN_SKIP_WEZTERM', 'ACTIONS_STEP_DEBUG', 'pull_request_target', 'workflow_dispatch']) if (src.includes(s)) bad.push(`不准出現 ${s}`)
+  for (const s of ['--skip-smoke', 'ASN_SKIP_WEZTERM', 'ACTIONS_STEP_DEBUG', 'pull_request', 'workflow_dispatch']) if (src.includes(s)) bad.push(`不准出現 ${s}`)
   if (/\bset\s+-[A-Za-z]*x/.test(src) || /\bbash\s+-[A-Za-z]*x/.test(src)) bad.push('不准 set -x')
   if (/secrets\s*:\s*inherit/.test(src)) bad.push('不准 secrets: inherit')
   if (/write-all/.test(src)) bad.push('不准 write-all')
@@ -122,9 +187,8 @@ export const checkRelease = raw => {
 
   const jobs = jobsOf(src)
   if (Object.keys(jobs).sort().join() !== [...ALL_JOBS].sort().join()) bad.push(`job 清單不對：[${Object.keys(jobs).join(', ')}]`)
-  // 2、3. 全檔不得有 secrets.（GITHUB_TOKEN 例外）與 environment:；逐 job 比對權限與 timeout
-  for (const m of src.matchAll(/secrets\.(?!GITHUB_TOKEN\b)[A-Za-z0-9_]+/g)) bad.push(`不准出現 ${m[0]}（這一版沒有 secrets）`)
-  if (/^\s*environment\s*:/m.test(src)) bad.push('不准出現 environment:（這一版沒有 environment）')
+  // 2、3. secrets.（GITHUB_TOKEN 例外）與 environment: 只准 desktop-sign（細則在 checkSign）；逐 job 比對權限與 timeout
+  bad.push(...checkSign(src, jobs))
   for (const name of ALL_JOBS) {
     const t = jobs[name]
     if (t === undefined) continue
@@ -150,7 +214,7 @@ export const checkRelease = raw => {
   const nt = jobs.notify
   if (nt !== undefined) {
     if (!/^ {4}if:\s*always\(\)\s*$/m.test(nt)) bad.push('notify 要有 if: always()')
-    const want = ALL_JOBS.filter(j => j !== 'notify')
+    const want = NOTIFY_JOBS
     const got = needsOf(nt)
     for (const j of want) if (!got.includes(j)) bad.push(`notify 的 needs 缺 ${j}`)
   }
@@ -190,15 +254,44 @@ test('1 只吃標籤：on 只有 push＋tags 一條規則（至少命中 1 條�
   for (const k of FORBIDDEN_TRIGGERS) assert.doesNotMatch(on.join('\n'), new RegExp(`(^|\\W)${k}\\s*:`), k)
 })
 
-test('2 沒有 secrets、沒有 environment：全檔 secrets.（GITHUB_TOKEN 例外）＝0、environment:＝0；github.token 至少命中 3 次', () => {
+test('2 secrets 與 environment：只有 desktop-sign（environment: release；secrets 只有 TAURI_SIGNING_* 兩個、只在簽章步驟的 env:）；其餘 5 個 job 都沒有；github.token 至少命中 3 次', () => {
   const src = stripComments(release)
-  assert.deepEqual([...src.matchAll(/secrets\.(?!GITHUB_TOKEN\b)[A-Za-z0-9_]+/g)].map(m => m[0]), [])
-  assert.doesNotMatch(src, /^\s*environment\s*:/m)
+  assert.deepEqual([...new Set([...src.matchAll(/secrets\.(?!GITHUB_TOKEN\b)[A-Za-z0-9_]+/g)].map(m => m[0]))].sort(), SIGN_SECRETS.map(k => 'secrets.' + k).sort())
+  assert.equal([...src.matchAll(/^\s*environment\s*:/gm)].length, 1)
   assert.doesNotMatch(src, /secrets\s*:\s*inherit/)
   const tokens = [...src.matchAll(/\$\{\{\s*github\.token\s*\}\}/g)]
-  assert.ok(tokens.length >= 3, `github.token 只找到 ${tokens.length} 處，規則可能失效`)
+  assert.ok(tokens.length >= 3, 'github.token 只找到 ' + tokens.length + ' 處，規則可能失效')
   const jobs = jobsOf(src)
-  for (const j of ALL_JOBS) { assert.deepEqual(secretsOf(jobs[j]), [], j); assert.equal(envOf(jobs[j]), null, j) }
+  for (const j of ALL_JOBS.filter(x => x !== SIGN_JOB)) { assert.deepEqual(secretsOf(jobs[j]), [], j); assert.equal(envOf(jobs[j]), null, j); assert.doesNotMatch(jobs[j], /TAURI_SIGNING/, j) }
+  assert.equal(envOf(jobs[SIGN_JOB]), 'release')
+  assert.deepEqual(secretsOf(jobs[SIGN_JOB]), [...SIGN_SECRETS].sort())
+  // secrets 全部落在簽章那一步的 env: 底下（8 空白的 env:、10 空白的鍵）
+  const st = signStepsOf(jobs[SIGN_JOB])
+  assert.equal(st.length, 1)
+  assert.equal([...st[0].matchAll(/^ {10}TAURI_SIGNING_PRIVATE_KEY(?:_PASSWORD)?:\s*\$\{\{\s*secrets\.TAURI_SIGNING_PRIVATE_KEY(?:_PASSWORD)?\s*\}\}\s*$/gm)].length, 2)
+  assert.ok(/^ {8}env:\s*$/m.test(st[0]))
+})
+
+test('#2022 desktop-sign：needs desktop＋attest；權限只有 contents: read；順序、上傳 artifact、不碰 Release 與官網；tauri 版本走 package-lock', () => {
+  const jobs = jobsOf(stripComments(release))
+  const d = jobs[SIGN_JOB]
+  assert.deepEqual(needsOf(d), ['desktop', 'attest'])
+  assert.equal(sorted(permsOf(d)), 'contents: read')
+  assert.match(d, /name:\s*asn-installer-signed/)
+  assert.match(d, /npm ci --ignore-scripts/)
+  assert.doesNotMatch(d, /npx\b/)
+  assert.deepEqual(checkSign(stripComments(release), jobs), [])
+  const lock = JSON.parse(read('relay/asn/package-lock.json'))
+  assert.ok(lock.packages['node_modules/@tauri-apps/cli-linux-x64-gnu'], 'package-lock 沒有 linux x64 的 tauri cli 原生套件，Linux runner 會裝不到')
+})
+
+test('#2022 不准 pull_request 類觸發：全檔（去註解後）沒有 pull_request（含 _target）', () => {
+  assert.doesNotMatch(stripComments(release), /pull_request/)
+})
+
+test('#2022 私鑰暫存檔規則：目前不落地（走環境變數）；若將來改成檔案，要 chmod 600、放 RUNNER_TEMP、之後有 if: always() 的刪除步驟', () => {
+  const sj = jobsOf(stripComments(release))[SIGN_JOB]
+  assert.equal(usesKeyFile(sj), false)
 })
 
 test('2 secrets：除 asn-release-android.yml 外，其他 workflow 與 .github/actions/ 沒有任何 secrets.（GITHUB_TOKEN 例外）；演練檔與 actions 沒有 environment: release、contents: write', () => {
@@ -216,9 +309,9 @@ test('2 secrets：除 asn-release-android.yml 外，其他 workflow 與 .github/
   }
 })
 
-test('3 權限白名單：逐 job 比對 3.2 表；頂層只有 contents: read；全檔無 contents: write（5 個 job 各一份 permissions）', () => {
+test('3 權限白名單：逐 job 比對 3.2 表；頂層只有 contents: read；全檔無 contents: write（6 個 job 各一份 permissions）', () => {
   const src = stripComments(release)
-  assert.equal([...src.matchAll(/^ {4}permissions:\s*$/gm)].length, 5)
+  assert.equal([...src.matchAll(/^ {4}permissions:\s*$/gm)].length, 6)
   const jobs = jobsOf(src)
   for (const j of ALL_JOBS) assert.equal(sorted(permsOf(jobs[j])), sorted(TABLE[j].perms), j)
   assert.equal(topBlock(src, 'permissions').map(l => l.trim()).join('|'), 'contents: read')
@@ -230,7 +323,7 @@ test('3 權限白名單：逐 job 比對 3.2 表；頂層只有 contents: read�
   }
 })
 
-test('3 timeout：desktop 90 分鐘，其餘 4 個 job 各 20 分鐘', () => {
+test('3 timeout：desktop 90 分鐘，其餘 5 個 job 各 20 分鐘', () => {
   const jobs = jobsOf(stripComments(release))
   for (const j of ALL_JOBS) assert.equal(Number(/^ {4}timeout-minutes:\s*(\d+)\s*$/m.exec(jobs[j])?.[1]), j === 'desktop' ? 90 : 20, j)
 })
@@ -244,14 +337,14 @@ test('4 action 釘 SHA：asn-release.yml 的 uses: 至少 10 個、全是 40 位
 
 test('5 notify：always()、needs 含其他全部 job、無 environment；順序（attest 在 desktop 之後；site-draft 不依賴 desktop）', () => {
   const jobs = jobsOf(stripComments(release))
-  assert.deepEqual(needsOf(jobs.notify), ALL_JOBS.filter(j => j !== 'notify'))
+  assert.deepEqual(needsOf(jobs.notify), NOTIFY_JOBS)
   assert.match(jobs.notify, /^ {4}if:\s*always\(\)\s*$/m)
   assert.equal(envOf(jobs.notify), null)
   assert.ok(needsOf(jobs.attest).includes('desktop'))
   assert.deepEqual(needsOf(jobs['site-draft']), ['guard'])
   assert.deepEqual(needsOf(jobs.desktop), ['guard'])
   // notify_run 只傳實際在 needs 的 job：workflow 的 job（扣掉 guard、notify）都要是 notify_status 認得的
-  const real = ALL_JOBS.filter(j => j !== 'guard' && j !== 'notify')
+  const real = NOTIFY_JOBS.filter(j => j !== 'guard')
   assert.deepEqual(real.filter(j => !JOBS.includes(j)), [], 'notify_status 的 job 清單與 workflow 不一致')
 })
 
@@ -356,8 +449,8 @@ test('壞例子 2：任何 job 加 secrets.ASN_X、加 environment: release、se
   const tagStep = '          TAG: ${{ github.ref_name }}\n        run: |\n          set -euo pipefail\n          node tools/release/tag_check.mjs'
   assert.ok(flagged(mutate(tagStep, tagStep.replace('        run: |', '          X: ${{ secrets.ASN_X }}\n        run: |')), /不准出現 secrets\.ASN_X/))
   assert.ok(flagged(mutate('          set -euo pipefail\n          node scripts/release-ci.mjs', '          set -euo pipefail\n          echo ${{ secrets.ASN_X }}\n          node scripts/release-ci.mjs'), /不准出現 secrets\.ASN_X/))
-  assert.ok(flagged(mutate('    timeout-minutes: 90\n', '    environment: release\n    timeout-minutes: 90\n'), /不准出現 environment:/))
-  assert.ok(flagged(mutate('  notify:\n    needs:', '  notify:\n    environment: release\n    needs:'), /不准出現 environment:/))
+  assert.ok(flagged(mutate('    timeout-minutes: 90\n', '    environment: release\n    timeout-minutes: 90\n'), /只有 desktop-sign 可以掛 environment/))
+  assert.ok(flagged(mutate('  notify:\n    needs:', '  notify:\n    environment: release\n    needs:'), /只有 desktop-sign 可以掛 environment/))
   assert.ok(flagged(`${release}\n    secrets: inherit\n`, /secrets: inherit/))
   assert.ok(!flagged(`${release}\n# secrets.ASN_X environment: release 只是註解\n`, /secrets|environment/), '註解裡的不算')
   assert.ok(!flagged(`${release}\n# x: \${{ secrets.GITHUB_TOKEN }}\n`, /不准出現 secrets/), 'GITHUB_TOKEN 例外')
@@ -510,4 +603,58 @@ test('#1892 壞例子：run 內加 ${{ }}、|| true、set +e、continue-on-error
   assert.equal(runBodies(`jobs:\n  a:\n    steps:\n      - run: |2\n            echo hi\n`).length, 1, '|2 縮排指示符的 run 區塊要抓得到')
   // 不誤傷：註解裡提到不算
   assert.deepEqual(runProblems(`${W}\n# echo "\${{ github.ref_name }}" || true; set +e; continue-on-error\n`), [])
+})
+
+// ---- #2022 desktop-sign 的壞例子：每條新規則都要真的會紅 ----
+const SIGN_RUN = '          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then echo "沒有拿到簽章私鑰（environment release 的 secret）" >&2; exit 1; fi\n'
+const SIGN_STEP_NAME = '      - name: 驗簽、反向驗證、簽章前後雜湊\n'
+// 只回 checkRelease 與 run 區塊規則合併後的訊息（run 裡的 ${{ }} 由 runProblems 守）
+const allProblems = src => [...checkRelease(src), ...runProblems(src)]
+const hit = (src, re) => allProblems(src).some(m => re.test(m))
+
+test('#2022 壞例子：secret 寫進 run、secret 出現在簽章步驟 env 以外、換名字、多一個 secret 都會紅', () => {
+  assert.deepEqual(allProblems(release), [])
+  assert.ok(hit(mutate(SIGN_RUN, `${SIGN_RUN}          echo "\${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}"\n`), /run 內不准|secrets 只能在簽章步驟的 env/))
+  // 別的步驟（驗簽）的 env 放 secret
+  assert.ok(hit(mutate('          BEFORE_SHA: ${{ steps.pre.outputs.sha }}\n', '          BEFORE_SHA: ${{ steps.pre.outputs.sha }}\n          K: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n'), /含 secrets 的步驟要剛好 1 個/))
+  // 別的 job 用到 TAURI_SIGNING 的 secret，或任何別的 secret
+  assert.ok(hit(mutate('          GH_TOKEN: ${{ github.token }}\n        run: |\n          set -euo pipefail\n          node scripts/release-ci.mjs', '          GH_TOKEN: ${{ github.token }}\n          K: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n        run: |\n          set -euo pipefail\n          node scripts/release-ci.mjs'), /只有 desktop-sign 的簽章步驟可以|TAURI_SIGNING_\* 只能出現在 desktop-sign/))
+  assert.ok(hit(mutate('          INSTALLER: ${{ steps.pre.outputs.name }}\n        run: |\n          set -euo pipefail\n          if [ -z', '          INSTALLER: ${{ steps.pre.outputs.name }}\n          OTHER: ${{ secrets.ASN_X }}\n        run: |\n          set -euo pipefail\n          if [ -z'), /secrets 要剛好是|用到的 secrets/))
+  assert.ok(hit(mutate('TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}'), /簽章步驟的 env: 缺 TAURI_SIGNING_PRIVATE_KEY_PASSWORD/))
+  // 私鑰放在命令列參數
+  assert.ok(hit(mutate('tauri.js signer sign "$INSTALLER"', 'tauri.js signer sign -k "$TAURI_SIGNING_PRIVATE_KEY" "$INSTALLER"'), /命令列參數/))
+})
+
+test('#2022 壞例子：environment 掛到 desktop／別的 job、desktop-sign 少了或改值、權限變大都會紅', () => {
+  assert.ok(hit(mutate('    timeout-minutes: 90\n', '    environment: release\n    timeout-minutes: 90\n'), /只有 desktop-sign 可以掛 environment，但 desktop 有/))
+  assert.ok(hit(mutate('  site-draft:\n    needs: guard', '  site-draft:\n    environment: release\n    needs: guard'), /只有 desktop-sign 可以掛 environment，但 site-draft 有/))
+  assert.ok(hit(mutate('    environment: release\n', ''), /desktop-sign 要剛好有 environment: release/))
+  assert.ok(hit(mutate('    environment: release\n', '    environment: staging\n'), /desktop-sign 要剛好有 environment: release/))
+  assert.ok(hit(mutate('    environment: release\n    permissions:\n      contents: read\n', '    environment: release\n    permissions:\n      contents: read\n      id-token: write\n'), /job desktop-sign 的 permissions|id-token 只能在 attest|權限只有 contents: read/))
+  assert.ok(hit(mutate('    environment: release\n    permissions:\n      contents: read\n', '    environment: release\n    permissions:\n      contents: write\n'), /contents: write|job desktop-sign 的 permissions/))
+})
+
+test('#2022 壞例子：pull_request 觸發、desktop-sign 的 needs 少一個、順序顛倒、建 Release 都會紅', () => {
+  assert.ok(hit(mutate('on:\n  push:', 'on:\n  pull_request:\n  push:'), /pull_request/))
+  assert.ok(hit(mutate('    needs:\n      - desktop\n      - attest\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    environment', '    needs:\n      - desktop\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    environment'), /desktop-sign 的 needs/))
+  assert.ok(hit(mutate('          test -s "$INSTALLER.sig"\n', '          test -s "$INSTALLER.sig"\n          gh release create v1 "$INSTALLER"\n'), /不建 Release/))
+})
+
+test('#2022 壞例子：私鑰落地成檔案時，沒有 chmod 600／沒有 if: always() 的刪除步驟會紅；補齊就放行', () => {
+  const write = '          printf \'%s\' "$TAURI_SIGNING_PRIVATE_KEY" > "$RUNNER_TEMP/asn.key"\n'
+  const file = mutate(SIGN_RUN, `${SIGN_RUN}${write}`)
+  assert.ok(hit(file, /chmod 600/), '沒 chmod 600 要紅')
+  assert.ok(hit(file, /if: always\(\) 的刪除步驟/), '沒刪除步驟要紅')
+  const chmod = file.replace(write, `${write}          chmod 600 "$RUNNER_TEMP/asn.key"\n`)
+  assert.ok(!hit(chmod, /chmod 600/) && hit(chmod, /if: always\(\) 的刪除步驟/))
+  const cleanup = '      - name: 刪掉私鑰暫存檔\n        if: always()\n        run: |\n          set -euo pipefail\n          rm -f "$RUNNER_TEMP/asn.key"\n\n'
+  // 刪除步驟放在簽章之前（順序錯）：不算數
+  const before = chmod.replace('      - name: 簽章（私鑰只在這一步的 env）\n', `${cleanup}      - name: 簽章（私鑰只在這一步的 env）\n`)
+  assert.ok(hit(before, /if: always\(\) 的刪除步驟/))
+  const ok = chmod.replace(SIGN_STEP_NAME, `${cleanup}${SIGN_STEP_NAME}`)
+  assert.deepEqual(checkRelease(ok).filter(m => /暫存檔/.test(m)), [])
+  // 有 always() 但沒有 rm：不算數
+  assert.ok(hit(ok.replace('rm -f "$RUNNER_TEMP/asn.key"', 'echo done'), /if: always\(\) 的刪除步驟/))
+  // 有 rm 但沒有 always()：不算數
+  assert.ok(hit(ok.replace('        if: always()\n        run: |\n          set -euo pipefail\n          rm', '        run: |\n          set -euo pipefail\n          rm'), /if: always\(\) 的刪除步驟/))
 })
