@@ -1,15 +1,11 @@
 {
-  "version": "0.2.52",
-  "notes": "- 新功能：對話頁右上角，夥伴離線但可以喚醒時，通話鈕會換成紅色的喚醒圖示，按一下就能叫醒夥伴。（#1866、#2057、#2059）",
-  "pub_date": "2026-11-21T18:45:39.683Z",
+  "version": "0.2.53",
+  "notes": "- 改善：Linux 上需要時才下載的終端機 WezTerm，改從 ASN 自己建置、發版前驗過雜湊與來源的版本下載，含上游的修正。（#1258、#2053）",
+  "pub_date": "2026-11-21T19:29:50.440Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJFMjdvU2lVMEpoWU8zeUtxUVpHRVcvTGhzYkg4QzhSWEs5UjJOdEtPNTlIU3RNbk83WG5yUXl2cFRYanQvd1ZERWE3Wk1YclBuZHRGSDkrNTVwWHdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mjg2NzM5CWZpbGU6QVNOXzAuMi41Ml94NjQtc2V0dXAuZXhlCldJemMyeFpxN1FkNnJLam8zNVFqRU9wTEJBbGVpdHJGMmxNRm9PNE9IU0ttU0NJd2lPYUczSG0vbUxSWmtjWUMzNW1vMS80SUpGK3VVdWM0WEJld0RRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.52_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjQ1aVFNMTh5WVU3c1pmZlJWUEhDbFZBUERjcjlwZHFCZE5pK0NBdGkxcFJVWkZMckJ1U2l4S1JPWlJRWS9vY2Y1bitTRkxIY0g1UkJFTVJ1STJqTndjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mjg3MTU0CWZpbGU6QVNOXzAuMi41Ml9hbWQ2NC5BcHBJbWFnZQo3ekJXMWZ3dW1mVGFUYjJ6cFVkV1Z1TEh0eXRVTi9ZQ3VxSWVDbEh4R0RUVUJVbWRJd1FYUXVqTHVIa1QxcklBbDEyZ3lqNmVYVlhxMmFaYkJoUkVCQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.52_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndJZEp2a2JmVGZlMlVabnJ3RjhRUisyekN1TWlpMHkrblZsRTZNbEpoZ05QQ3FOajJoRjFrZE1LODU4YjBSdmxQS0gzK2IxKzFteDRIRHpLK1J5SkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mjg5MzkwCWZpbGU6QVNOXzAuMi41M194NjQtc2V0dXAuZXhlClVEaFlPR0tnT1g0UWpFYTY2cFp3S21kMUU3TWJBelEyVmtORmQ4YzFpVmxyRVRVN2FCZzZFc01GK1VBTStiOTBZTGVkdC9PcHA5YVdDOWRtWkpTN0JBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.53_x64-setup.exe"
     }
   }
 }
