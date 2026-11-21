@@ -13,6 +13,11 @@ use std::sync::Mutex;
 use std::time::Duration;
 use zeroize::Zeroizing;
 
+/// 遠端請求確認窗編號的標記位元（#2075）。編號會放進視窗網址 `askpass.html?id=…`，前端用 JS 的 Number 解析、而且網址只收最多 16 位數的正整數，
+/// 所以編號必須在 2^53 之內（JS 能精確表示）且不超過 16 位數；原本用 1<<62（19 位數、超過 2^53）會讓視窗顯示「這個視窗的網址不正確」。
+/// 本機 git／ssh 小幫手的編號是從 1 起算的小流水號，到不了 2^40，兩邊不會撞。
+pub const REMOTE_ID_BASE: u64 = 1 << 40;
+
 /// 確認窗最多開多久（也不會超過請求本身剩下的時間）
 pub const DIALOG_MAX: Duration = Duration::from_secs(120);
 
@@ -34,7 +39,7 @@ impl Seen {
     }
     fn dialog_id(&self) -> u64 {
         // 與本機小幫手的確認窗編號分開（高位元標記），視窗標籤才不會撞
-        (1u64 << 62) | self.next.fetch_add(1, Ordering::SeqCst)
+        REMOTE_ID_BASE | self.next.fetch_add(1, Ordering::SeqCst)
     }
 }
 
@@ -130,5 +135,25 @@ pub async fn answer_from_ui(be: &dyn Backend, token: Option<&str>, id: &str, sec
         Some(s) if !s.is_empty() && s.len() <= MAX_SECRET => answer(be, token, req, Some(s.as_bytes())).await,
         Some(_) => Err("密碼是空的或太長".into()),
         None => answer(be, token, req, None).await,
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+
+    /// #2075：遠端請求的確認窗編號要能通過前端 parseId（最多 16 位數的正整數）、JS Number 精確表示（≤ 2^53），而且每次不同
+    #[test]
+    fn 遠端確認窗編號_前端認得_js_數字精確_彼此不同() {
+        let s = Seen::default();
+        let a = s.dialog_id();
+        let b = s.dialog_id();
+        assert_ne!(a, b);
+        for id in [a, b] {
+            assert!(id.to_string().len() <= 16, "前端 parseId 只收最多 16 位數：{id}");
+            assert!(id <= (1u64 << 53), "JS 的 Number 要能精確表示：{id}");
+            assert_eq!(id as f64 as u64, id, "經過浮點數來回不變（JS 的 Number 就是 f64）：{id}");
+            assert!(id >= REMOTE_ID_BASE, "要與本機小幫手的小流水號分開：{id}");
+        }
     }
 }
