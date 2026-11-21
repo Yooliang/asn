@@ -6,11 +6,14 @@
 
 use super::mux::Disposal;
 use super::mux_heartbeat::Hb;
-use super::mux_watch::{empty_normal_exit, incident_line, queue_notice, queue_stuck, Incident, Observed, ProcHandle, Tracker, Watch};
+use super::mux_watch::{empty_normal_exit, incident_line, queue_notice, Incident, Observed, ProcHandle, Tracker, Watch};
 use std::path::Path;
 
 /// 卡死處置取消或失敗之後，這段時間內不再重判同一個終端服務（#1897 ④）
 pub const STUCK_COOLDOWN_MS: u64 = 300_000;
+
+/// 接回額度未到、卡死的終端服務這次不結束時，寫進紀錄的白話
+pub const STUCK_HELD_TEXT: &str = "終端服務卡住了，10 分鐘內已經接回過一次，這次先不重啟；請稍後再看，或手動重開 ASN";
 
 /// 卡死處置的記憶體狀態（不存檔）：上次取消的時間、已經通知過的終端服務
 #[derive(Debug, Default)]
@@ -68,8 +71,11 @@ pub fn run_round_stuck(w: &mut Watch, tracker: &mut Tracker, guard: &mut StuckGu
     if !w.resume_quota_ok(now) {
         if guard.notified != Some(mux) {
             guard.notified = Some(mux);
-            sink.record(&format!("終端服務卡住（心跳停了超過 {secs} 秒），但十分鐘內剛接回過，這次沒有結束它，只通知"));
-            queue_stuck(ctx.work_dir, now);
+            // 走現有的事故通知管道（只帶人數與「沒有接回」，後台文字固定）；白話說明寫進 mux.log 與 ui.log
+            let line = format!("{STUCK_HELD_TEXT}（心跳停了超過 {secs} 秒）");
+            sink.record(&line);
+            let _ = crate::ui_log::append(ctx.work_dir, &[format!("{} info [ASN] {line}", crate::quota_core::iso_secs(now as i64))]);
+            queue_notice(ctx.work_dir, o.partners.len(), false, now);
         }
         return round(w, tracker, o, exited, now, ctx, sink, false);
     }
@@ -201,7 +207,7 @@ mod tests {
 
     // ---- #1897 ④ 判斷切換＋卡死處置 ----
 
-    use super::super::mux_watch::{read_stuck, TICK_MS};
+    use super::super::mux_watch::{clear_notice, read_notice, TICK_MS};
     use std::cell::{Cell, RefCell};
 
     const M1: (u32, u64) = (100, 20_000_000);
@@ -292,14 +298,15 @@ mod tests {
         for i in 0..4 {
             assert_eq!(e.round(&obs(Some(M1), Hb::Stale { secs: 120 }), STALE_AT + i * TICK_MS, &rig), None);
             if i == 0 {
-                assert!(read_stuck(e.dir.path()).is_some(), "通知本人");
-                crate::launch::mux_watch::clear_stuck(e.dir.path());
+                assert_eq!(read_notice(e.dir.path()).map(|n| (n.0, n.1)), Some((2, false)), "走現有的事故通知：2 位夥伴、沒有接回");
+                clear_notice(e.dir.path());
             }
         }
         assert_eq!(rig.disposed.get(), 0, "額度未到不結束程序");
-        assert_eq!(read_stuck(e.dir.path()), None, "只通知一次");
+        assert_eq!(read_notice(e.dir.path()), None, "只通知一次");
+        assert!(std::fs::read_to_string(e.dir.path().join("ui.log")).unwrap_or_default().contains(STUCK_HELD_TEXT), "白話說明寫進 ui.log");
         assert_eq!(rig.records.borrow().len(), 1, "mux.log 也只寫一行：{}", rig.log());
-        assert!(rig.log().contains("卡住"), "{}", rig.log());
+        assert!(rig.log().contains(STUCK_HELD_TEXT), "{}", rig.log());
     }
 
     #[test]

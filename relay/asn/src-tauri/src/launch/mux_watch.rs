@@ -297,32 +297,6 @@ pub fn clear_blind(work_dir: &Path) {
     let _ = std::fs::remove_file(work_dir.join(BLIND_FILE));
 }
 
-/// 「終端服務卡住了」的通知檔（工作資料夾，#1897 ④）：接回額度未到、這次沒有結束它時，請後台通知本人一次。只存時間，後台文字固定
-pub const STUCK_FILE: &str = "mux-stuck.json";
-
-pub fn queue_stuck(work_dir: &Path, now_ms: u64) {
-    if work_dir.as_os_str().is_empty() {
-        return;
-    }
-    let tmp = work_dir.join(format!("{STUCK_FILE}.tmp"));
-    if std::fs::write(&tmp, serde_json::json!({ "at": now_ms }).to_string()).is_ok() {
-        let _ = std::fs::rename(&tmp, work_dir.join(STUCK_FILE));
-    }
-}
-/// 排著的「卡住了」通知的時間；沒有或壞掉回 None（壞檔順手刪掉）
-pub fn read_stuck(work_dir: &Path) -> Option<u64> {
-    let f = work_dir.join(STUCK_FILE);
-    let text = std::fs::read_to_string(&f).ok()?;
-    let at = serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v.get("at").and_then(serde_json::Value::as_u64));
-    if at.is_none() {
-        let _ = std::fs::remove_file(&f);
-    }
-    at
-}
-pub fn clear_stuck(work_dir: &Path) {
-    let _ = std::fs::remove_file(work_dir.join(STUCK_FILE));
-}
-
 /// 排一則通知：只存人數與有沒有接回，不存夥伴名字（後台文字固定）
 pub fn queue_notice(work_dir: &Path, count: usize, resumed: bool, now_ms: u64) {
     if work_dir.as_os_str().is_empty() {

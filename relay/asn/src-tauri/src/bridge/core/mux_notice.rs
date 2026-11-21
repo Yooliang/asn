@@ -14,9 +14,6 @@ const RESUME_GIVE_UP_MS: u64 = 3_600_000;
 /// 「監看看不到終端服務」的通知過了這麼久還沒送成就放棄
 const BLIND_GIVE_UP_MS: u64 = 3_600_000;
 
-/// 「終端服務卡住了」的通知過了這麼久還沒送成就放棄
-const STUCK_GIVE_UP_MS: u64 = 3_600_000;
-
 /// 後台收的夥伴名字長度上限（Edge 以 UTF-16 單位算）
 const NAME_MAX_UNITS: usize = 64;
 const NAME_EMPTY: &str = "未命名夥伴";
@@ -77,43 +74,6 @@ impl Core {
             Err(e) => {
                 self.mux_blind_retry_at = now + RETRY_MS;
                 self.log.line(&format!("mux-blind failed: {e}"));
-            }
-        }
-    }
-
-    /// 終端服務卡住、但接回額度未到所以沒有結束它（launch/mux_round 排了通知檔，#1897 ④）：請後台寄一則通知給本人。
-    /// 做法同 `mux_blind_tick`：舊後台（404）、參數不合（400）、節點停用（403）只記 log 不重試；寄送失敗隔一分鐘再試，過一小時放棄
-    pub async fn mux_stuck_tick(&mut self, now: u64) {
-        if self.cfg.respond.is_some() || now < self.mux_stuck_retry_at {
-            return;
-        }
-        let dir = self.cfg.work_dir.clone();
-        let Some(at) = mux_watch::read_stuck(&dir) else { return };
-        if crate::heartbeat::now_ms().saturating_sub(at) > STUCK_GIVE_UP_MS {
-            self.log.line("mux-stuck: 過了一小時，不再通知");
-            mux_watch::clear_stuck(&dir);
-            return;
-        }
-        match self.relay.api_status("mux_stuck_notice", json!({})).await {
-            Ok((200, v)) => {
-                let notify = v.get("notify").and_then(Value::as_str).unwrap_or("");
-                self.log.line(&format!("mux-stuck notify={notify}"));
-                match notify {
-                    "sent" | "skipped" | "rate_limited" => mux_watch::clear_stuck(&dir),
-                    _ => self.mux_stuck_retry_at = now + RETRY_MS,
-                }
-            }
-            Ok((status @ (400 | 403 | 404), _)) => {
-                self.log.line(&format!("mux-stuck: 後台回 {status}，只留本機紀錄"));
-                mux_watch::clear_stuck(&dir);
-            }
-            Ok((status, _)) => {
-                self.mux_stuck_retry_at = now + RETRY_MS;
-                self.log.line(&format!("mux-stuck: 後台回 {status}，稍後再試"));
-            }
-            Err(e) => {
-                self.mux_stuck_retry_at = now + RETRY_MS;
-                self.log.line(&format!("mux-stuck failed: {e}"));
             }
         }
     }
