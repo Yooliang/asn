@@ -22,6 +22,18 @@ export const FILES = {
   changelog: 'relay/asn/CHANGELOG.md',
 }
 export const COMMIT_PATHS = Object.values(FILES)
+export const PINS_PATH = 'relay/asn/scripts/wezterm-pins.json'
+export const WEZTERM_WORKFLOW = '.github/workflows/wezterm-build.yml'
+
+// #2001：pins 的 windows_bundle.tag 必須等於 wezterm-build.yml 的 RELEASE_TAG；不同就回說明（相同回 ''）
+export function pinsWorkflowProblem(pinsText, wfText) {
+  let tag
+  try { tag = JSON.parse(pinsText)?.windows_bundle?.tag } catch { return `讀不懂 ${PINS_PATH}` }
+  const rel = /^\s*RELEASE_TAG: '([^']+)'/m.exec(String(wfText))?.[1]
+  if (!tag || !rel) return `讀不到 WezTerm 版本：${PINS_PATH} 的 windows_bundle.tag 或 ${WEZTERM_WORKFLOW} 的 RELEASE_TAG`
+  if (tag !== rel) return `WezTerm 新版已建（${rel}）但 pins 還指著 ${tag}：先更新 ${PINS_PATH} 再發版，不然電腦版會附上舊的 WezTerm`
+  return ''
+}
 export const TAG_PREFIX = { desktop: 'v', linux: 'linux-v', android: 'android-v' }
 export const ITEM_RE = /^(修正|改善|新功能)(?:（([^）]*)）)?[：:]/
 export const MARK_ANDROID_ONLY = '只有手機版'
@@ -238,6 +250,12 @@ export async function releaseTag(opts, deps) {
     if (tagList.length === 0) stop('① 判斷三個平台都不打：不佔版本的改動不該走到發版這一步')
     const markProblems = checkMarks(items, tags)
     if (markProblems.length) stop(`條目與平台判斷對不上：${markProblems.join('；')}`)
+    // #2001：電腦版安裝檔附的 WezTerm 由 pins 決定；守門只放寬到「pins 落後 workflow 一號」供過渡，發版時必須相等，
+    // 不然會悄悄附上沒帶最新補丁的 WezTerm
+    if (tags.desktop) {
+      const why = pinsWorkflowProblem(readFile(PINS_PATH), readFile(WEZTERM_WORKFLOW))
+      if (why) stop(why)
+    }
 
     const date = taipeiDate(now())
     const eol = eolOf(texts.changelog)
