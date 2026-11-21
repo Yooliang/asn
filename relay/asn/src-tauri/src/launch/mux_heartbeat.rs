@@ -77,6 +77,13 @@ fn parse(bytes: &[u8]) -> Option<Beat> {
     serde_json::from_slice(bytes).ok()
 }
 
+/// 卡死處置（#1897 ④）用：讀心跳檔，只取（`pid`, `seq`）。讀不到、超過上限、壞檔、`v`≠1 都回 None
+pub fn peek_file(path: &Path) -> Option<(u64, u64)> {
+    let FileRead::Bytes(b) = read_file(path) else { return None };
+    let beat = parse(&b)?;
+    (beat.v == 1).then_some((beat.pid, beat.seq))
+}
+
 /// 單一 mux（以程序編號＋建立時間為 key）的記憶體狀態
 #[derive(Debug)]
 struct State {

@@ -22,6 +22,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod stuck;
+pub use stuck::Disposal;
+
 #[cfg(windows)]
 pub const MUX_EXE: &str = "wezterm-mux-server.exe";
 /// 其他平台（Linux）：執行檔沒有副檔名，和 wezterm（cli）放在同一個資料夾

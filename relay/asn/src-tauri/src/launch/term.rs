@@ -1472,6 +1472,20 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir), record: m.recorded(), hb })
     }
 
+    /// 卡死處置（#1897 ④）：心跳停了、程序還在時，確認後結束記錄的那個終端服務並清檔。九步與取消條件見 `mux::stuck`
+    pub fn dispose_stuck_mux(&self) -> super::mux::Disposal {
+        let dir = match self.dir() {
+            Ok(d) => d,
+            Err(e) => return super::mux::Disposal::Cancelled(format!("找不到終端服務的程式（{e}）")),
+        };
+        let m = match self.mux_handle(&dir, BTreeMap::new()) {
+            Ok(m) => m,
+            Err(e) => return super::mux::Disposal::Cancelled(e),
+        };
+        let hb = super::mux::heartbeat_path(&m.paths.dir);
+        m.dispose_stuck(&|| super::mux_heartbeat::peek_file(&hb))
+    }
+
     /// 讀終端服務心跳檔，轉成 [`Hb`](super::mux_heartbeat::Hb)。單調時鐘取自 `now`（相對第一次呼叫），牆上時鐘取系統時間；
     /// 要寫進 mux.log 的行這裡寫。找不到使用者資料夾或沒有 pid 檔記錄＝沒有心跳
     fn read_heartbeat(&self, now: Instant) -> super::mux_heartbeat::Hb {
