@@ -24,10 +24,13 @@ struct Fake {
     survive_kill: Cell<bool>,
     /// 已經結束、但還有人握著 handle 所以建立時間照樣查得到的程序（#1818）
     exited: RefCell<Vec<u32>>,
+    /// 心跳檔：spawn 時先記下「這時檔案在不在」，再當作新 mux 寫出檔案（#1897）
+    hb_file: RefCell<Option<PathBuf>>,
+    hb_before_spawn: RefCell<Vec<bool>>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]), hb_file: RefCell::new(None), hb_before_spawn: RefCell::new(vec![]) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -46,6 +49,10 @@ impl Runner for Fake {
     }
     fn spawn_detached(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
         self.calls.borrow_mut().push((program.to_string_lossy().into(), args.to_vec(), env.clone()));
+        if let Some(f) = self.hb_file.borrow().as_ref() {
+            self.hb_before_spawn.borrow_mut().push(f.exists());
+            std::fs::write(f, "{}").unwrap();
+        }
         let pid = 4000 + self.started.borrow().len() as u32;
         self.started.borrow_mut().push(pid);
         if !self.no_birth {
@@ -146,7 +153,7 @@ fn 連不上才起_用脫離方式_窗格_0_立刻結束_設定檔只設_socket(
     assert_eq!(&args[2..], ["--", "cmd.exe", "/c", "exit"], "窗格 0 不常駐");
     #[cfg(not(windows))]
     assert_eq!(&args[2..], ["--", "/bin/sh", "-c", "exit 0"], "窗格 0 不常駐");
-    assert_eq!(env, &base(), "mux 的環境只有白名單，不帶 socket 以外的任何東西");
+    assert_eq!(env, &server_env(&base(), &m.paths.dir), "mux 的環境只有白名單加心跳檔位置");
     let cfg = std::fs::read_to_string(&m.paths.config).unwrap();
     assert!(cfg.contains(&format!("socket_path = [[{}]]", m.paths.sock.display())), "{cfg}");
     assert_eq!(std::fs::read_to_string(&m.paths.pid).unwrap(), "4000 777");
@@ -867,4 +874,131 @@ fn t1867_pid_檔記的_mux_已結束_開窗不等它_直接起新的() {
     r.exited.borrow_mut().push(3999);
     let e = m.ensure().expect("已結束的 mux 不能當成「別人剛起」白等 15 秒再報錯，換班接手的新視窗會因此退回原生主控台");
     assert_eq!(e, Ensure::Started { pid: 4000 });
+}
+
+// ---- #1897 心跳檔位置與清檔 ----
+
+fn hb_of(m: &Mux) -> PathBuf {
+    heartbeat_path(&m.paths.dir)
+}
+fn hb_tmp_of(m: &Mux) -> PathBuf {
+    hb_of(m).with_file_name("heartbeat.json.tmp")
+}
+fn plant_old_heartbeat(m: &Mux) {
+    std::fs::create_dir_all(&m.paths.dir).unwrap();
+    std::fs::write(hb_of(m), "{\"v\":1}").unwrap();
+    std::fs::write(hb_tmp_of(m), "{").unwrap();
+}
+
+#[test]
+fn t1897_心跳檔在_mux_資料夾裡_與_sock_同一層() {
+    let p = paths(Path::new(r"C:\Users\u\AppData\Local")).unwrap();
+    assert_eq!(heartbeat_path(&p.dir), p.sock.with_file_name("heartbeat.json"));
+    assert_eq!(heartbeat_path(&p.dir).parent(), p.pid.parent());
+}
+
+#[test]
+fn t1897_只有起_mux_server_那一次帶心跳變數_cli_與窗格環境沒有() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    let m = mux(&r, d.path());
+    assert_eq!(m.ensure(), Ok(Ensure::Started { pid: 4000 }));
+    m.pane_count().ok();
+    let calls = r.calls.borrow();
+    let want = hb_of(&m).to_string_lossy().into_owned();
+    let (_, _, srv) = calls.iter().find(|c| c.0.ends_with(MUX_EXE)).unwrap();
+    assert_eq!(srv.get(HEARTBEAT_ENV), Some(&want));
+    let clis: Vec<_> = calls.iter().filter(|c| c.0.ends_with("wezterm.exe")).collect();
+    assert!(!clis.is_empty());
+    for (_, _, env) in clis {
+        assert!(!env.contains_key(HEARTBEAT_ENV), "cli 的環境不能有：{env:?}");
+    }
+    // base_env 是窗格環境的來源：不能被加進變數
+    assert!(!m.base_env.contains_key(HEARTBEAT_ENV));
+    assert!(!cli_env(&m.base_env, &m.paths.sock).contains_key(HEARTBEAT_ENV));
+}
+
+#[test]
+fn t1897_ensure_起新_mux_之前先刪掉舊心跳檔與_tmp() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    let m = mux(&r, d.path());
+    plant_old_heartbeat(&m);
+    *r.hb_file.borrow_mut() = Some(hb_of(&m));
+    assert_eq!(m.ensure(), Ok(Ensure::Started { pid: 4000 }));
+    assert_eq!(*r.hb_before_spawn.borrow(), vec![false], "起新 mux 的那一刻，舊檔已經不在");
+    assert!(!hb_tmp_of(&m).exists());
+}
+
+#[test]
+fn t1897_連得上就沿用_不動心跳檔() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    r.alive_after.set(Some(0));
+    let m = mux(&r, d.path());
+    plant_old_heartbeat(&m);
+    assert_eq!(m.ensure(), Ok(Ensure::Reused));
+    assert!(hb_of(&m).exists(), "沿用現有的 mux：它的心跳檔不能刪");
+}
+
+#[test]
+fn t1897_stop_會刪心跳檔() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    let m = mux(&r, d.path());
+    m.ensure().unwrap();
+    plant_old_heartbeat(&m);
+    assert_eq!(m.stop(), Ok(()));
+    assert!(!hb_of(&m).exists() && !hb_tmp_of(&m).exists());
+}
+
+#[test]
+fn t1897_stop_沒結束成功_心跳檔留著() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    let m = mux(&r, d.path());
+    m.ensure().unwrap();
+    plant_old_heartbeat(&m);
+    r.survive_kill.set(true);
+    assert!(m.stop().is_err());
+    assert!(hb_of(&m).exists(), "還活著的 mux 還在寫它");
+}
+
+#[test]
+fn t1897_起來後查不到建立時間_結束它時也刪心跳檔() {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = Fake::new();
+    r.no_birth = true;
+    let m = mux(&r, d.path());
+    // 模擬剛起的 mux 已經寫出檔案（spawn 時寫），這條路徑要把它清掉
+    *r.hb_file.borrow_mut() = Some(hb_of(&m));
+    std::fs::create_dir_all(&m.paths.dir).unwrap();
+    assert!(m.ensure().is_err());
+    assert!(!hb_of(&m).exists());
+}
+
+#[test]
+fn t1897_起了卻一直連不上_清掉自己剛起那個寫出的心跳檔() {
+    let d = tempfile::tempdir().unwrap();
+    let mut r = Fake::new();
+    r.alive_once_started = false;
+    let m = mux(&r, d.path());
+    *r.hb_file.borrow_mut() = Some(hb_of(&m));
+    std::fs::create_dir_all(&m.paths.dir).unwrap();
+    assert!(m.ensure().unwrap_err().contains("起不來"));
+    assert!(!hb_of(&m).exists());
+}
+
+#[test]
+fn t1897_刪不掉心跳檔_只寫_log_起與停照常() {
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    let m = mux(&r, d.path());
+    // 讓 heartbeat.json 是個有東西的資料夾：remove_file 一定失敗
+    std::fs::create_dir_all(hb_of(&m)).unwrap();
+    std::fs::write(hb_of(&m).join("x"), "").unwrap();
+    assert_eq!(m.ensure(), Ok(Ensure::Started { pid: 4000 }), "刪不掉不影響起");
+    assert_eq!(m.stop(), Ok(()), "刪不掉不影響停");
+    let log = std::fs::read_to_string(m.paths.dir.join("mux.log")).unwrap();
+    assert!(log.contains("心跳檔沒刪掉"), "{log}");
 }

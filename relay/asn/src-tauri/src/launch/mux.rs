@@ -38,6 +38,9 @@ const POLL: Duration = Duration::from_millis(200);
 const BIRTH_RETRIES: u32 = 5;
 /// 結束程序之後，等它真的消失的次數（每次隔 `POLL`）。Windows 結束程序是非同步的，立刻查可能還在
 const GONE_RETRIES: u32 = 10;
+/// 告訴 mux-server 心跳檔位置的環境變數（舊版或上游原版的 mux-server 不認得，會直接忽略）
+pub const HEARTBEAT_ENV: &str = "ASN_MUX_HEARTBEAT";
+const HEARTBEAT_FILE: &str = "heartbeat.json";
 const CLI_TIMEOUT: Duration = Duration::from_secs(10);
 /// 啟動鎖的內容還沒寫好（空的或看不懂）超過這麼久，才當作寫鎖的程序起到一半當掉了
 const LOCK_STALE: Duration = Duration::from_secs(60);
@@ -119,6 +122,19 @@ pub fn cli_env(base: &BTreeMap<String, String>, sock: &Path) -> BTreeMap<String,
 }
 
 /// 每條 cli 的參數：一律 `cli --no-auto-start <子命令…>`
+/// 終端服務心跳檔（#1897）：與 `sock`、`mux.pid` 同資料夾。服務自己寫它；ASN 只負責給位置與清掉舊檔
+pub fn heartbeat_path(dir: &Path) -> PathBuf {
+    dir.join(HEARTBEAT_FILE)
+}
+
+/// 起終端服務那一次的環境：白名單環境加上心跳檔位置。只給 mux-server 用，絕不能放進 `base_env`
+/// （它同時是 cli 與所有窗格的環境來源，窗格裡的程式不該看到這個變數）
+pub fn server_env(base: &BTreeMap<String, String>, dir: &Path) -> BTreeMap<String, String> {
+    let mut e = base.clone();
+    e.insert(HEARTBEAT_ENV.to_string(), heartbeat_path(dir).to_string_lossy().into_owned());
+    e
+}
+
 pub fn cli_args(sub: &[&str]) -> Vec<String> {
     ["cli", "--no-auto-start"].iter().chain(sub.iter()).map(|s| s.to_string()).collect()
 }
@@ -279,6 +295,22 @@ impl Mux<'_> {
         }
     }
 
+    /// 刪掉舊的心跳檔（含寫到一半的 .tmp）：新 mux 起來前、結束 mux 時都要清，才不會把舊檔讀成新服務的心跳。
+    /// 檔案本來就不存在不算失敗；刪不掉只記 log，不影響起、停（沒有心跳就走舊的判斷）
+    fn clear_heartbeat(&self) {
+        let hb = heartbeat_path(&self.paths.dir);
+        let tmp = hb.with_file_name(format!("{HEARTBEAT_FILE}.tmp"));
+        for f in [hb, tmp] {
+            if let Err(e) = std::fs::remove_file(&f) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    let line = format!("終端服務：舊的心跳檔沒刪掉（{}）：{e}", f.display());
+                    elog!("{line}");
+                    note(&self.paths.dir, &line);
+                }
+            }
+        }
+    }
+
     /// pid 檔記的 mux 還活著（建立時間對得上，防程式編號被回收）
     fn recorded_alive(&self) -> Option<u32> {
         let (pid, at) = read_pid(&self.paths.pid)?;
@@ -328,7 +360,9 @@ impl Mux<'_> {
             return if self.wait_alive(START_WAIT) { Ok(Ensure::Reused) } else { Err("終端服務已經在啟動，但一直連不上；請稍後再試".into()) };
         }
         std::fs::write(&self.paths.config, config_text(&self.paths.sock)).map_err(|e| format!("寫入終端服務設定失敗：{e}"))?;
-        let pid = self.runner.spawn_detached(&self.server, &server_args(&self.paths.config), &self.base_env)?;
+        // 持著啟動鎖、確定要起新的了：先清舊心跳檔（#1897）
+        self.clear_heartbeat();
+        let pid = self.runner.spawn_detached(&self.server, &server_args(&self.paths.config), &server_env(&self.base_env, &self.paths.dir))?;
         // 查不到建立時間就寫不了 pid 檔，之後停不了它、起不來也清不掉，會成為孤兒：短暫重試，還是查不到就結束它
         // （剛起的這一刻編號不可能已經被回收）
         let mut at = self.runner.started_ms(pid);
@@ -341,6 +375,7 @@ impl Mux<'_> {
         }
         let Some(at) = at else {
             self.runner.kill_tree(pid);
+            self.clear_heartbeat();
             return Err("終端服務起來了，但查不到它的建立時間，無法確認之後停的是同一個，已結束它".into());
         };
         let _ = std::fs::write(&self.paths.pid, format!("{pid} {at}"));
@@ -354,6 +389,7 @@ impl Mux<'_> {
             self.runner.kill_tree(pid);
         }
         let _ = std::fs::remove_file(&self.paths.pid);
+        self.clear_heartbeat();
         Err(format!("終端服務起不來（{} 秒內都連不上）", START_WAIT.as_secs()))
     }
 
@@ -371,6 +407,7 @@ impl Mux<'_> {
             // 不然收成功了卻回「沒有結束」、pid 檔留著，之後開窗被它擋住
             if self.runner.started_ms(pid) != at || !self.runner.alive(pid) {
                 let _ = std::fs::remove_file(&self.paths.pid);
+                self.clear_heartbeat();
                 return Ok(());
             }
             self.runner.sleep(POLL);
