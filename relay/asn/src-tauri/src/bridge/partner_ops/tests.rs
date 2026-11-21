@@ -2516,6 +2516,55 @@ fn pi_喚醒_開不起來回失敗_沒登記上回未確認_都附手動接回�
 }
 
 #[test]
+fn pi_喚醒_會登記正在開_同一位已在開時第二次回正在開啟中_不開第二個() {
+    let r = rig(Opt::default());
+    put_pi_file(&r, SID_A, SID_A);
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    // 先登記（等於另一條路剛開了這一位）：pi 喚醒不能再開
+    assert!(r.env.claim_opening(SID_A, "Pi妹妹"));
+    let res = resume(&r, "Pi妹妹", SID_A);
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains(crate::launch::opening::BUSY), "{}", res.detail);
+    assert!(r.env.pi_launched.lock().unwrap().is_empty(), "不能呼叫開 pi");
+    // 解除後開得了，而且開完登記還在：第二次喚醒被擋
+    r.env.release_opening(SID_A, "Pi妹妹");
+    assert_eq!(resume(&r, "Pi妹妹", SID_A).status, "ok");
+    assert!(!r.env.claim_opening(SID_A, "Pi妹妹"), "pi 喚醒有登記");
+}
+
+#[test]
+fn pi_喚醒_開不起來或沒上線_解除登記_之後能再喚醒() {
+    for launch_fails in [true, false] {
+        let r = rig(Opt::default());
+        put_pi_file(&r, SID_A, SID_A);
+        *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+        if launch_fails {
+            r.env.pi_launch_fail.store(true, Ordering::SeqCst);
+        } else {
+            r.env.pi_launch_registers.store(false, Ordering::SeqCst);
+        }
+        assert_ne!(resume(&r, "Pi妹妹", SID_A).status, "ok");
+        assert!(r.env.claim_opening(SID_A, "Pi妹妹"), "失敗就解除了登記，這裡才登記得到");
+        r.env.release_opening(SID_A, "Pi妹妹");
+        r.env.pi_launch_fail.store(false, Ordering::SeqCst);
+        r.env.pi_launch_registers.store(true, Ordering::SeqCst);
+        assert_eq!(resume(&r, "Pi妹妹", SID_A).status, "ok", "之後再喚醒不被擋");
+    }
+}
+
+#[test]
+fn pi_喚醒_與_claude_共用登記_同名正在開_也被擋() {
+    let r = rig(Opt::default());
+    put_pi_file(&r, SID_A, SID_A);
+    *r.env.cfg.lock().unwrap() = Ok(pi_adopt_cfg(&r));
+    // Claude 那條路用別的對話編號、同一個名字登記：名字鍵相同就擋
+    assert!(r.env.claim_opening("claude-sid-other", "Pi妹妹"));
+    let res = resume(&r, "Pi妹妹", SID_A);
+    assert!(res.status == "failed" && res.detail.contains(crate::launch::opening::BUSY), "{}", res.detail);
+    assert!(r.env.pi_launched.lock().unwrap().is_empty());
+}
+
+#[test]
 fn pi_喚醒守門_資料夾不在白名單_沒有_pi_設定_遠端開關關著_同名在線_都不開() {
     let r = rig(Opt::default());
     put_pi_file(&r, SID_A, SID_A);

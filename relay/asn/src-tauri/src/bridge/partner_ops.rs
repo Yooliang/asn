@@ -1651,10 +1651,17 @@ impl PartnerOps {
         if !self.env.allow_remote() {
             return failed(CONSENT_OFF);
         }
+        // 別條路（Claude 夥伴的喚醒、自動接回）剛登記要開同一位、視窗還沒上線：不開第二個（和 Claude 夥伴共用同一份登記）
+        if !self.env.claim_opening(&found.session_id, name) {
+            return failed(format!("{}，請稍候幾秒再看名單", crate::launch::opening::BUSY));
+        }
         let session = crate::launch::local::strip_verbatim_prefix(&found.path.to_string_lossy());
         let pid = match self.env.launch_pi_session(&config, name, &req.cwd, &session) {
             Ok(p) => p,
-            Err(e) => return failed(format!("pi 沒開起來（{e}）。對話檔還在，可以手動接回：{manual}")),
+            Err(e) => {
+                self.env.release_opening(&found.session_id, name);
+                return failed(format!("pi 沒開起來（{e}）。對話檔還在，可以手動接回：{manual}"));
+            }
         };
         let os = self.env.os();
         let home = self.env.pi_home();
@@ -1662,6 +1669,7 @@ impl PartnerOps {
             super::engines::pi_control::window_session_id(&home, name, self.env.now_ms(), |p| os.alive(p)).is_some()
         });
         if !appeared {
+            self.env.release_opening(&found.session_id, name);
             return unconfirmed(format!("pi 開了，但還沒出現在名單上（可能卡在啟動，或 ASN 的 pi 擴充沒載入）。對話檔還在，可以手動接回：{manual}"));
         }
         ok("已喚醒：用同一段對話開了由 ASN 管理的 pi", Some(json!({ "kind": "pi_resume", "pid": pid, "session_id": found.session_id })))
