@@ -6,6 +6,9 @@
 // deno-lint-ignore no-explicit-any
 type Json = any;
 
+import { recordAcct } from "./auth_observe.ts";
+import type { SigState } from "./owner_sign.ts";
+
 export const NODE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // 跟 ASN 的 normalize_email、資料庫的 asn_relay_acct_email_ok 同一條規則（小寫、一個 @、不含空白／控制字元／檔名禁用字元）
@@ -200,7 +203,7 @@ async function rosterReport(deps: AcctDeps, node: string, accounts: ReportedAcco
 //   acct_roster：本人的帳號列表（#374），一定要本人簽章，只回自己的；沒簽章不呼叫資料庫
 // signedUser：本人簽章驗過的使用者 id（只有 acct_list／acct_switch 會收；手機節點是 member，靠簽章證明「這個節點與租戶都是這個人的」才准）。
 // 沒簽章就不帶 p_signed_user，行為與以前完全相同（只有 role = owner 的節點准）。
-export async function handleAcctAction(deps: AcctDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null): Promise<Reply> {
+export async function handleAcctAction(deps: AcctDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null, sigState: SigState = signedUser ? "valid" : "absent"): Promise<Reply> {
   const signedArg = signedUser ? { p_signed_user: signedUser } : {};
   if (action === "acct_report") {
     const accounts = parseReport(params);
@@ -234,7 +237,9 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
   if (action === "acct_list") {
     if (typeof params?.node !== "string" || !NODE_ID_RE.test(params.node)) return fail("bad_request");
     const r = await call(deps, "asn_relay_acct_list", { p_actor: me.id, p_node: params.node, ...signedArg });
-    return isReply(r) ? r : { status: 200, body: r.data };
+    if (isReply(r)) return r;
+    await recordAcct(deps.rpc, { action, node: me.id, user: signedUser, state: sigState }); // 只記次數與通過方式（#500），失敗不影響回應
+    return { status: 200, body: r.data };
   }
   if (action === "acct_switch") {
     const req = parseSwitch(params);
@@ -242,6 +247,7 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
     const r = await call(deps, "asn_relay_acct_switch", { p_actor: me.id, p_node: req.node, p_vendor: req.vendor, p_email: req.email, ...signedArg });
     if (isReply(r)) return r;
     await deps.ring(r.data.bell_topic);
+    await recordAcct(deps.rpc, { action, node: me.id, user: signedUser, state: sigState }); // 只記次數與通過方式（#500），失敗不影響回應
     return { status: 200, body: { id: r.data.id } };
   }
   if (action === "acct_switch_pending") {

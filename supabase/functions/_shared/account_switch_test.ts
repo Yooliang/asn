@@ -100,7 +100,7 @@ Deno.test("acct_switch：actor 由金鑰決定；通過就敲對方門鈴、回�
   const { deps, calls, rings } = fakeDeps();
   const r = await handleAcctAction(deps, { id: "H" }, "acct_switch", { node: "W", vendor: "claude", email: "B@x.test", requested_by: "偽造" });
   assertEquals(r, { status: 200, body: { id: ID } });
-  assertEquals(calls, [{ fn: "asn_relay_acct_switch", args: { p_actor: "H", p_node: "W", p_vendor: "claude", p_email: "b@x.test" } }]);
+  assertEquals(calls.filter((c) => c.fn !== "asn_relay_auth_observe"), [{ fn: "asn_relay_acct_switch", args: { p_actor: "H", p_node: "W", p_vendor: "claude", p_email: "b@x.test" } }]); // 通過方式記錄另有 auth_observe_test.ts
   assertEquals(rings, ["bell-W"]);
 });
 

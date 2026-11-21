@@ -1,4 +1,5 @@
 // Relay broker. Node key goes in the x-relay-key header; the sender node is decided by the key.
+import { recordRoleOnly } from "../_shared/auth_observe.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 import { handleNodeRoomAction, type RoomDeps, syncNodeAuto } from "../_shared/rooms.ts";
 import { rankFromEnv } from "../_shared/wake_rank.ts";
@@ -184,6 +185,7 @@ Deno.serve(async (req) => {
     if (error) { console.error(error); return json(500, { error: "internal" }); }
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });
+    await recordRoleOnly(async (fn, args) => await db.rpc(fn, args), action, me.id); // 只記次數與通過方式（#500）
     return json(200, { invite: code, expires_at: data.expires_at, prefix: data.prefix });
   }
   if (action === "reissue" && req.method === "POST") {
@@ -197,6 +199,7 @@ Deno.serve(async (req) => {
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error === "not_found") return json(404, { error: "not_found" });
     if (data?.error) return json(400, { error: data.error });
+    await recordRoleOnly(async (fn, args) => await db.rpc(fn, args), action, me.id); // 只記次數與通過方式（#500）
     return json(200, { code, expires_at: data.expires_at });
   }
   // 視窗自己收信：帶 agent 參數時只看／只 ack 寄給該視窗的信（見 _shared/agent_inbox.ts）；沒帶 agent 的走下面原本的節點信箱
