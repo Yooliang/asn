@@ -89,6 +89,7 @@ const TOP_USAGE: &str = "用法：
   asn usage  report (--file <hourly.json> | --input-tokens N ... --rounds N) / list [--since <ISO>]   （無頭節點自己回報每小時用量）
   asn site   release --version <x.y.z> --date <YYYY-MM-DD> --item \"…\" / meeting --file <meeting.json> / item --key <項目代號> ...   （寫官網的發版、會議、藍圖；限官網寫入名單上的帳號）
   asn-cli claude-usage --shape   （除錯用：向額度端點查一次，只印回應的欄位結構，不印任何值）
+  asn-cli claude-usage --profile-shape   （除錯用：向帳號資料端點查一次，只印欄位結構；只有方案、計費類型等固定代碼欄位印值，email、uuid 一律不印）
   asn claude-quota --chain < 狀態列資料   （舊版的狀態列串接，只剩把輸入交給原本的狀態列；額度已改由 ASN 直接查詢）
   asn forward-gate --dir <worker 資料夾> < hook 輸入   （收發室 worker 的 PreToolUse hook：核對轉交對象，使用者不用自己呼叫）
   asn gemini-quota  < 狀態列資料   （ASN 開的 agy 視窗自動帶上：記下目前 Gemini 帳號的剩餘額度，印一行狀態）
