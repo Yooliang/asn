@@ -207,6 +207,15 @@ test('全流程：順序是 簽章→Release→部署→官網紀錄→貼群組
   assert.ok(x.w.events.find(e => e.k === 'git commit').a.includes('--'))
 })
 
+test('#2061 CI 多了 asn-installer-signed（desktop-sign 的產物）：允許存在、照常發佈，而且不下載它（本機照舊用未簽章那包自己簽）', async () => {
+  const x = await run(w => { w.artifacts.push({ ...w.artifacts[0], id: 5, name: 'asn-installer-signed' }) })
+  assert.equal(x.r.ok, true, x.r.error)
+  const downloaded = x.w.events.filter(e => e.k === 'gh artifact').map(e => e.a[0])
+  assert.ok(!downloaded.includes(5), `不該下載已簽章那包：${downloaded}`)
+  assert.ok(downloaded.includes(1), '還是要下載未簽章那包')
+  assert.ok(kinds(x.w).includes('sign'), '本機照舊簽章')
+})
+
 test('官網紀錄的平台：--with-play no 只寫官網；auto 看最新 attempt 的 android-upload；yes 直接寫 Play', async () => {
   const plat = x => { const a = x.w.events.find(e => e.k === 'asn-cli site').a; return a.filter((_, i) => a[i - 1] === '--platform') }
   assert.deepEqual(plat(await run(null, { withPlay: 'no' })), ['官網'])

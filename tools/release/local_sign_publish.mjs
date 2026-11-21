@@ -29,7 +29,9 @@ import { onlineAheadOfMain } from './abort_notice.mjs'
 
 export const REPO = 'Yooliang/asn'
 export const WORKFLOW = '.github/workflows/asn-release.yml'
-export const ARTIFACT_WHITELIST = ['asn-installer-unsigned', 'asn-site-draft', 'asn-aab', 'asn-debug']
+// asn-installer-signed：#2024 起 CI 的 desktop-sign 會多產這一包（GitHub 上簽好的安裝檔）。這裡只允許它存在、不使用，
+// 本機照舊下載 asn-installer-unsigned 自己簽（#2061）
+export const ARTIFACT_WHITELIST = ['asn-installer-unsigned', 'asn-installer-signed', 'asn-site-draft', 'asn-aab', 'asn-debug']
 export const SITE_FILES = ['site/public/update/latest.json', 'site/public/index.html']
 export const SITE_BASE = SHARED_SITE_BASE
 const FIREBASE_PROJECT = 'asnmessenger'
