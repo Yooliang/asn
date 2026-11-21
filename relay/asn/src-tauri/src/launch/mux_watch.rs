@@ -39,6 +39,8 @@ pub struct Observed {
     /// 終端服務記錄檔（pid 檔）裡記的（程序編號, 建立時間）；沒有記錄檔就是 None（#1887）。
     /// 和監看記著的 mux 對不上，代表記著的那個一定不在了（記錄被換掉、或編號被別的程序佔用），不必再等第二輪
     pub record: Option<(u32, u64)>,
+    /// 終端服務心跳（#1897 ③）。只讀不判：`Watch::tick` 完全不看它，下一張才切換
+    pub hb: super::mux_heartbeat::Hb,
 }
 
 /// 一次事故
@@ -809,6 +811,32 @@ mod tests {
 
     fn obs(live: Option<(u32, u64)>, names: &[&str]) -> Observed {
         Observed { live, partners: names.iter().map(|s| s.to_string()).collect(), stopped: None, ..Default::default() }
+    }
+
+    /// #1897 ③ 守門：心跳只讀不判。同一串觀察，`hb` 填任何值，`Watch::tick` 的每一輪結果都和 `hb` 預設值時一模一樣
+    #[test]
+    fn t1897_tick_對_hb_的任何值結果都不變() {
+        use crate::launch::mux_heartbeat::Hb;
+        let all = [Hb::NotSupported, Hb::Fresh, Hb::Stale { secs: 500 }, Hb::Unreadable];
+        // 活著、停了、換成別的 mux、又回來，各種情境都走一遍
+        let script: Vec<Observed> = vec![
+            obs(Some(M1), &["甲", "乙"]),
+            obs(Some(M1), &["甲", "乙"]),
+            obs(None, &[]),
+            obs(None, &[]),
+            obs(Some(M2), &["甲"]),
+            Observed { live: None, record: Some(M1), ..Default::default() },
+            Observed { live: None, record: Some(M1), ..Default::default() },
+        ];
+        let run = |hb: Hb| {
+            let mut w = Watch::default();
+            script.iter().enumerate().map(|(i, o)| w.tick(&Observed { hb, ..o.clone() }, i as u64 * TICK_MS)).collect::<Vec<_>>()
+        };
+        let base = run(Hb::default());
+        assert!(base.iter().any(|r| r.is_some()), "劇本要真的出過事故，不然這個守門是空的");
+        for hb in all {
+            assert_eq!(run(hb), base, "hb={hb:?} 不能影響判斷");
+        }
     }
 
     #[test]
