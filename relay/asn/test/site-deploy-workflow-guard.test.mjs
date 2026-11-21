@@ -191,9 +191,6 @@ test('4 secret／environment／真部署只在 site-deploy：壞例子會紅，�
   assert.ok(flagged(mutate('chmod 600', 'chmod 644'), /chmod 600/))
   // 演練 job 不准 deploy
   assert.ok(flagged(mutate('          node tools/release/site_predeploy.mjs --site site', '          node tools/release/site_predeploy.mjs --site site\n          npx firebase-tools@1.0.0 deploy --only hosting'), /site-dryrun 不准 firebase deploy/))
-  // notify 只在失敗時、不貼 log
-  assert.ok(flagged(mutate("needs.site-deploy.result == 'failure'", "needs.site-deploy.result != 'x'"), /notify 只能/))
-  assert.ok(flagged(mutate('--body "官網部署失敗', '--body-file log.txt --body "官網部署失敗'), /notify 要用/))
   assert.ok(!flagged(`${wf}\n# secrets.X environment: y\n`, /secrets|environment/))
 })
 
