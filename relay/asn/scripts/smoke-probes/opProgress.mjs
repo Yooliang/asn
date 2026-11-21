@@ -1,6 +1,6 @@
 // 冒煙探測「夥伴操作進度就地顯示」（probe.opProgress，#1800）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
 // 對一位在線的夥伴按「關閉視窗」→ 確認：對話框要立刻收起、進度顯示在畫面上（電腦＝功能列下方的提示列、手機＝對話頁頂端），
-// 進行中沒有任何擋畫面的框、也沒有只有一顆「先關掉」的按鈕；成功顯示結果；失敗用白話說明並附「重試」。
+// 進行中沒有任何擋畫面的框、也沒有只有一顆「先關掉」的按鈕；成功顯示結果；失敗用白話說明，不放按鈕（#1907，留著直到下一個操作蓋掉）。
 // 後台假資料：partner_op 回一個 id；partner_ops 依情境一直 pending（進行中）、回 ok（成功）、回 failed（失敗）。
 
 export const opProgressProbeSource = ({ mode, want }) => `(async () => {
@@ -46,9 +46,7 @@ export const opProgressProbeSource = ({ mode, want }) => `(async () => {
   }
   if (!/沒有成功/.test(t)) return { ok: false, why: '失敗應用白話說明：' + t };
   if (/HTTP|partner_op|found|error/i.test(t)) return { ok: false, why: '失敗訊息露出英文原文：' + t };
-  const names = btns();
-  if (!names.includes('重試')) return { ok: false, why: '失敗要有「重試」：' + names.join('、') };
-  if (!names.includes('關閉')) return { ok: false, why: '失敗要能收起：' + names.join('、') };
+  if (btns().length) return { ok: false, why: '失敗時狀態列不放任何按鈕（#1907）：' + btns().join('、') }
   if (blocker()) return { ok: false, why: '失敗時不該有擋畫面的框' };
   return { ok: true, why: '' };
   } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
