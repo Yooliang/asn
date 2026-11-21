@@ -203,8 +203,20 @@ async function rosterReport(deps: AcctDeps, node: string, accounts: ReportedAcco
 //   acct_roster：本人的帳號列表（#374），一定要本人簽章，只回自己的；沒簽章不呼叫資料庫
 // signedUser：本人簽章驗過的使用者 id（只有 acct_list／acct_switch 會收；手機節點是 member，靠簽章證明「這個節點與租戶都是這個人的」才准）。
 // 沒簽章就不帶 p_signed_user，行為與以前完全相同（只有 role = owner 的節點准）。
-export async function handleAcctAction(deps: AcctDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null, sigState: SigState = signedUser ? "valid" : "absent"): Promise<Reply> {
+// requireSigned（#500 ③，預設關）：後台旗標 ASN_REQUIRE_SIGNED_ACCT 開啟時，acct_list／acct_switch 沒有「驗證通過且 asn_user_owns_node 為真」的簽章一律 403，不呼叫原本的資料庫函式。
+export const SIGNED_ONLY_DETAIL = "請在這台電腦登入本人帳號後再試";
+/** 旗標值解析：只有恰好 "1" 才算開（未設定、空、0、false、true、前後有空白、打錯一律當關） */
+export const requireSignedFlag = (v: string | null | undefined): boolean => v === "1";
+export async function handleAcctAction(deps: AcctDeps, me: { id: string }, action: string, params: Json, signedUser: string | null = null, sigState: SigState = signedUser ? "valid" : "absent", requireSigned = false): Promise<Reply> {
   const signedArg = signedUser ? { p_signed_user: signedUser } : {};
+  if (requireSigned && (action === "acct_list" || action === "acct_switch")) {
+    const owns = signedUser ? await deps.rpc("asn_user_owns_node", { p_user: signedUser, p_node: me.id }) : null;
+    if (owns && owns.error) {
+      console.error("asn_user_owns_node", owns.error);
+      return fail("internal");
+    }
+    if (!owns || owns.data !== true) return { status: 403, body: { ...fail("forbidden").body, detail: SIGNED_ONLY_DETAIL } };
+  }
   if (action === "acct_report") {
     const accounts = parseReport(params);
     if (!accounts) return fail("bad_request");

@@ -31,7 +31,7 @@ import * as signal from "../_shared/signal.ts";
 import { roomPostAgent, touchActive } from "../_shared/last_active.ts";
 import { handleNodeLaunchAction, LAUNCH_ACTIONS, sanitizeLauncher } from "../_shared/launch.ts";
 import { handleNodePartnerOpAction, PARTNER_OP_ACTIONS } from "../_shared/partner_ops.ts";
-import { ACCT_ACTIONS, handleAcctAction } from "../_shared/account_switch.ts";
+import { ACCT_ACTIONS, handleAcctAction, requireSignedFlag } from "../_shared/account_switch.ts";
 import { handleQuotaRead, handleQuotaShare, QUOTA_READ_ACTION, QUOTA_SHARE_ACTIONS } from "../_shared/quota_read.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
@@ -834,7 +834,7 @@ async function handle(req: Request): Promise<Response> {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     // 手機（member 節點）靠本人簽章才准看別台清單、送切換；帳號列表（acct_roster，#374）只認簽章；其他動作不讀簽章
     const signedAcct = (action === "acct_list" || action === "acct_switch" || action === "acct_roster") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
-    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedAcct, sigStateOf(signedAcct, req.headers.get(SIGN_HEADER)));
+    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedAcct, sigStateOf(signedAcct, req.headers.get(SIGN_HEADER)), requireSignedFlag(Deno.env.get("ASN_REQUIRE_SIGNED_ACCT")));
     return json(r.status, r.body);
   }
   // 手機確認終端送字／代答（見 _shared/term_request.ts）：桌面用節點金鑰建立、領取、回報；手機用本人簽章列出與決定（沒簽章一律 403）
