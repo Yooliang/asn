@@ -25,13 +25,21 @@ export const COMMIT_PATHS = Object.values(FILES)
 export const PINS_PATH = 'relay/asn/scripts/wezterm-pins.json'
 export const WEZTERM_WORKFLOW = '.github/workflows/wezterm-build.yml'
 
-// #2001：pins 的 windows_bundle.tag 必須等於 wezterm-build.yml 的 RELEASE_TAG；不同就回說明（相同回 ''）
-export function pinsWorkflowProblem(pinsText, wfText) {
-  let tag
-  try { tag = JSON.parse(pinsText)?.windows_bundle?.tag } catch { return `讀不懂 ${PINS_PATH}` }
+// #2001／#1258：pins 的 windows_bundle.tag（電腦版附的）與 linux_tag（Linux 按需下載的）都必須等於 wezterm-build.yml 的 RELEASE_TAG；
+// 不同就回說明（相同回 ''）。platforms 指這次要發哪幾個平台（預設只查電腦版，維持舊行為）
+export function pinsWorkflowProblem(pinsText, wfText, platforms = ['desktop']) {
+  let pins
+  try { pins = JSON.parse(pinsText) } catch { return `讀不懂 ${PINS_PATH}` }
   const rel = /^\s*RELEASE_TAG: '([^']+)'/m.exec(String(wfText))?.[1]
-  if (!tag || !rel) return `讀不到 WezTerm 版本：${PINS_PATH} 的 windows_bundle.tag 或 ${WEZTERM_WORKFLOW} 的 RELEASE_TAG`
-  if (tag !== rel) return `WezTerm 新版已建（${rel}）但 pins 還指著 ${tag}：先更新 ${PINS_PATH} 再發版，不然電腦版會附上舊的 WezTerm`
+  const checks = [
+    ['desktop', 'windows_bundle.tag', pins?.windows_bundle?.tag, '電腦版會附上舊的 WezTerm'],
+    ['linux', 'linux_tag', pins?.linux_tag, 'Linux 版會下載到舊的 WezTerm'],
+  ]
+  for (const [plat, field, tag, harm] of checks) {
+    if (!platforms.includes(plat)) continue
+    if (!tag || !rel) return `讀不到 WezTerm 版本：${PINS_PATH} 的 ${field} 或 ${WEZTERM_WORKFLOW} 的 RELEASE_TAG`
+    if (tag !== rel) return `WezTerm 新版已建（${rel}）但 pins 還指著 ${tag}（${field}）：先更新 ${PINS_PATH} 再發版，不然${harm}`
+  }
   return ''
 }
 export const TAG_PREFIX = { desktop: 'v', linux: 'linux-v', android: 'android-v' }
@@ -252,8 +260,9 @@ export async function releaseTag(opts, deps) {
     if (markProblems.length) stop(`條目與平台判斷對不上：${markProblems.join('；')}`)
     // #2001：電腦版安裝檔附的 WezTerm 由 pins 決定；守門只放寬到「pins 落後 workflow 一號」供過渡，發版時必須相等，
     // 不然會悄悄附上沒帶最新補丁的 WezTerm
-    if (tags.desktop) {
-      const why = pinsWorkflowProblem(readFile(PINS_PATH), readFile(WEZTERM_WORKFLOW))
+    // #1258：Linux 版按需下載的 WezTerm 也由 pins 的 linux_tag 決定，發 Linux 版同樣要相等
+    if (tags.desktop || tags.linux) {
+      const why = pinsWorkflowProblem(readFile(PINS_PATH), readFile(WEZTERM_WORKFLOW), ['desktop', 'linux'].filter(p => tags[p]))
       if (why) stop(why)
     }
 
