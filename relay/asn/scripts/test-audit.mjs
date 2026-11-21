@@ -13,7 +13,8 @@
 //  「import ui 模組」＝ import … from '../ui/…'：當模組用，不算讀原始碼字串，另列欄位。
 //  「字串斷言」（只有在讀了 ui 原始碼時才算；全檔粗估）＝ assert.match／assert.doesNotMatch／.match(／.includes(／.indexOf(／.split( 的出現次數。
 //  分類（依序判定，第一個符合者為主分類）：
-//   C 要真瀏覽器：出現 puppeteer、Runtime.evaluate、--headless、Page.navigate，或用 spawn／execFile 起 smoke-*.mjs。→ 轉成 scripts/smoke-probes 探測。
+//   C 要真瀏覽器：出現 puppeteer、Runtime.evaluate、--headless、Page.navigate，或用 spawn／execFile 起 scripts/smoke-*.mjs 且那支腳本本身會啟動瀏覽器（看腳本內容，不看檔名；
+//     例如只讀清單檔的彙總守門 smoke-shard-gate.mjs 不算）。→ 轉成 scripts/smoke-probes 探測。
 //   B 可渲染：出現 vue/server-renderer、renderToString、createSSRApp（含讀原始碼的混合，notes 註明另有 N 條字串斷言）。→ 用渲染結果查，三種 caps 各渲染。
 //   D 原始碼字串：讀 ui 原始碼、無渲染、且字串斷言 >= 1。→ 只留架構守門類，其餘消滅或等該類搬家 PR 一併換成渲染測試。
 //   A 純邏輯：其餘（只 import 模組、或不碰 ui）。保留。（讀了 ui 檔但沒有字串斷言者，notes 註明。）
@@ -26,7 +27,25 @@ import { fileURLToPath } from 'node:url'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.join(HERE, '..')
 const UI_DIR = path.join(ROOT, 'ui')
+const SCRIPTS_DIR = HERE
 const FRAGILE = ['ui/m.html', 'ui/lib/settings-panel.mjs', 'ui/list.html', 'ui/m.js']
+/** 腳本內容有這些字，就是會自己啟動／操作瀏覽器（smoke-ui 靠 findBrowser 找 Chrome）。 */
+const BROWSER_SCRIPT_RE = /findBrowser|puppeteer|--headless|Page\.navigate|Runtime\.evaluate/
+const SPAWN_SMOKE_RE = /(?:spawn|spawnSync|execFile|execFileSync|fork)\([^)]*?(smoke-[\w-]+\.mjs)/g
+
+/**
+ * 測試是否用 spawn 系列起了「會開瀏覽器」的 smoke 腳本。
+ * 只看腳本內容：讀得到腳本就以內容為準；讀不到（檔名打錯、搬走）保守算會開，避免漏抓。
+ */
+export function spawnsBrowserScript(src, scriptsDir = SCRIPTS_DIR) {
+  for (const m of src.matchAll(SPAWN_SMOKE_RE)) {
+    let body
+    try { body = fs.readFileSync(path.join(scriptsDir, m[1]), 'utf8') } catch { return true }
+    if (BROWSER_SCRIPT_RE.test(body)) return true
+  }
+  return false
+}
+
 export const CLASS_NAMES = { A: '純邏輯', B: '可渲染', C: '真瀏覽器', D: '原始碼字串' }
 
 /** 列出 ui/ 底下所有檔（相對 ui 的 / 路徑），略過 vendor。 */
@@ -61,8 +80,9 @@ function normalizeUi(s) {
  * @param {string} source 測試檔內容
  * @param {string} fileName 檔名（只用於回傳）
  * @param {Set<string>} [uiFiles] 實際存在的 ui 檔（相對 ui）；預設掃真實 ui/
+ * @param {string} [scriptsDir] smoke-*.mjs 所在資料夾；預設真實 scripts/
  */
-export function analyzeTest(source, fileName, uiFiles = listUiFiles()) {
+export function analyzeTest(source, fileName, uiFiles = listUiFiles(), scriptsDir = SCRIPTS_DIR) {
   const src = source.replace(/\r\n/g, '\n')
   // 1) import（模組）：抽出 ui 的 import，之後把 import 行從字面值掃描中拿掉
   const importsUi = new Set()
@@ -106,7 +126,7 @@ export function analyzeTest(source, fileName, uiFiles = listUiFiles()) {
 
   // 5) 渲染／瀏覽器
   const render = /vue\/server-renderer|renderToString|createSSRApp/.test(src)
-  const browser = /puppeteer|Runtime\.evaluate|--headless|Page\.navigate|(?:spawn|spawnSync|execFile|execFileSync|fork)\([^)]*smoke-[\w-]+\.mjs/.test(src)
+  const browser = /puppeteer|Runtime\.evaluate|--headless|Page\.navigate/.test(src) || spawnsBrowserScript(src, scriptsDir)
 
   // 6) 分類
   const notes = []

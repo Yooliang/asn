@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 import { analyzeTest, auditDir, renderTable, summarize } from '../scripts/test-audit.mjs'
 
@@ -70,6 +73,36 @@ test('分類 C：真瀏覽器', () => {
   const r = run("const p = spawnSync(process.execPath, ['scripts/smoke-ui.mjs'])\nconst c = 'Runtime.evaluate'")
   assert.equal(r.class, 'C')
   assert.ok(r.browser)
+})
+
+test('#1975 分類 C 看被起的腳本內容：起「只讀清單檔」的守門腳本不算真瀏覽器，起會開瀏覽器的腳本照樣抓到', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-audit-scripts-'))
+  try {
+    fs.writeFileSync(path.join(dir, 'smoke-fake-gate.mjs'), "import fs from 'node:fs'\nconsole.log(fs.readdirSync('.'))\n")
+    fs.writeFileSync(path.join(dir, 'smoke-fake-ui.mjs'), "import { findBrowser } from './smoke-lib.mjs'\nfindBrowser({})\n")
+    const runIn = src => analyzeTest(src, 'x.test.mjs', UI, dir)
+    // 原本誤判的寫法（檔名叫 smoke-*.mjs 就算瀏覽器）：現在不算
+    const gate = runIn("const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'smoke-fake-gate.mjs'), d])")
+    assert.equal(gate.browser, false)
+    assert.equal(gate.class, 'A')
+    // 路徑先組成變數再傳也不受影響（判斷看腳本內容，不看寫法）
+    assert.equal(runIn("const p = spawnSync(process.execPath, ['scripts/smoke-fake-gate.mjs'])").class, 'A')
+    // 真的啟動瀏覽器的腳本：照樣抓到
+    const ui = runIn("const r = spawnSync(process.execPath, [path.join(root, 'scripts', 'smoke-fake-ui.mjs')])")
+    assert.equal(ui.browser, true)
+    assert.equal(ui.class, 'C')
+    // 一支測試同時起兩支：只要有一支會開瀏覽器就算
+    assert.equal(runIn("spawnSync(x, ['smoke-fake-gate.mjs'])\nexecFileSync(x, ['smoke-fake-ui.mjs'])").class, 'C')
+    // 讀不到腳本（打錯字、被搬走）：保守算會開瀏覽器，不能因為讀不到就漏抓
+    assert.equal(runIn("spawnSync(x, ['scripts/smoke-not-there.mjs'])").class, 'C')
+    // 寫在測試裡的瀏覽器關鍵字照舊
+    assert.equal(runIn("const c = 'Page.navigate'").class, 'C')
+  } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('#1975 真實的彙總守門腳本不算真瀏覽器、真實的 smoke-ui 算', () => {
+  assert.equal(analyzeTest("spawnSync(process.execPath, [path.join(root, 'scripts', 'smoke-shard-gate.mjs')])", 'a.test.mjs', UI).class, 'A')
+  assert.equal(analyzeTest("spawnSync(process.execPath, ['scripts/smoke-ui.mjs'])", 'b.test.mjs', UI).class, 'C')
 })
 
 test('分類 D：原始碼字串', () => {
