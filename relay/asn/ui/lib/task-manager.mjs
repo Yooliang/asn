@@ -53,7 +53,7 @@ export const TEXT = {
   compactNote: '壓縮次數只算這次開視窗之後；交接成功重開的新視窗從 0 次算起。不是 Claude 的視窗顯示「—」。',
 }
 
-export const COLUMNS = ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '來源', '操作']
+export const COLUMNS = ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '運行位置', '操作']
 
 const ENGINE_TEXT = { claude: 'Claude', pi: 'pi', codex: 'Codex', gemini: 'Gemini', agy: 'agy', grok: 'Grok', asn: 'ASN', acp: '內建工作者' }
 export const engineText = e => {
@@ -189,13 +189,19 @@ export function stopRequest(row, ctx = {}) {
 
 // ---------- 畫面用的列與確認框 ----------
 
+// 「運行位置」欄（#1909）：夥伴視窗照後台給的 term 顯示；缺欄位或沒看過的值一律「不明」，不猜
+const SELF_OPENED = '自己開的終端'
+export const NATIVE_TEXT = '原生主控台'
+const TERM_TEXT = { mux: '終端服務', native: NATIVE_TEXT, unknown: '不明' }
+const termText = r => TERM_TEXT[r.term] ?? TERM_TEXT.unknown
+
 const sourceText = r => {
   switch (r.kind) {
-    case 'claude': case 'pi': return r.by_asn ? 'ASN 開的' : '自己開的'
+    case 'claude': case 'pi': return r.by_asn ? termText(r) : SELF_OPENED
     case 'acp': return 'ASN 內建'
-    case 'resuming': case 'awaiting': return 'ASN 開的'
+    case 'resuming': case 'awaiting': return termText(r)
     case 'terminal': return r.by_asn === false ? '自己開的（已接手）' : 'ASN 開的終端'
-    case 'process': return '自己開的'
+    case 'process': return SELF_OPENED
     case 'mux': return 'ASN 的終端服務'
     case 'asn': return r.name === 'ASN' ? 'ASN 本體' : 'ASN 自己的視窗'
     default: return DASH
@@ -228,6 +234,7 @@ export function viewRow(r, now, ctx) {
     uptime: formatUptime(r.started_ms, now),
     status: r.kind === 'mux' && typeof r.inside === 'number' ? `${r.inside} 個視窗` : statusText(r.status),
     source: sourceText(r),
+    native: sourceText(r) === NATIVE_TEXT,   // 只有「運行位置」那一欄用黃標籤標出來
     cmpText: cmp.text,
     cmpTag: cmp.tag,
     cmpState: cmp.state,

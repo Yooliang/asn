@@ -65,7 +65,7 @@ test('工作管理員：停止走 term_stop，多帶夥伴名給電腦端再驗�
 
 test('工作管理員：這一列的顯示、確認框與「看畫面」', () => {
   const v = viewRow(row(), NOW, ctx([]))
-  assert.deepEqual([v.name, v.engine, v.status, v.source, v.canStop, v.canView, v.viewOnly], ['小乙', 'Claude', '等你按確認', 'ASN 開的', true, true, false])
+  assert.deepEqual([v.name, v.engine, v.status, v.source, v.canStop, v.canView, v.viewOnly], ['小乙', 'Claude', '等你按確認', '不明', true, true, false])
   assert.equal(viewRow(row({ kind: 'claude', term_id: null }), NOW, ctx([])).canView, false)
   const c = confirmView(row(), [], NOW)
   assert.match(c.title, /等確認/)

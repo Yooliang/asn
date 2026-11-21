@@ -33,8 +33,8 @@ test('次數夾在 2～10，缺值或不是數字用 3（和 Rust 同一個範�
   assert.match(rs, /N_DEFAULT: u32 = 3;/)
 })
 
-test('壓縮次數欄：位置在「狀態」之後、「來源」之前', () => {
-  assert.deepEqual(COLUMNS, ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '來源', '操作'])
+test('壓縮次數欄：位置在「狀態」之後、「運行位置」之前', () => {
+  assert.deepEqual(COLUMNS, ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '運行位置', '操作'])
 })
 
 test('壓縮次數欄：0 次、N 次、交接中、請交接；沒資料與非 Claude 是「—」', () => {
@@ -145,5 +145,5 @@ test('三種外觀都有樣式：標籤、窄版欄位、次數輸入', () => {
   assert.match(css, /\.tm-tag\.cmp-warn\{/)
   assert.match(css, /\.tm-tag\.cmp-go\{/)
   assert.match(css, /\.chk-num\{/)
-  assert.match(css, /\.tm-table th:nth-child\(8\),\.tm-table td:nth-child\(8\)\{display:none\}\.tm-table td\.cmp\{min-width:110px\}/, '窄版收掉引擎、程序編號、記憶體、開了多久與來源')
+  assert.match(css, /\.tm-table th:nth-child\(8\),\.tm-table td:nth-child\(8\)\{display:none\}\.tm-table td\.cmp\{min-width:110px\}/, '窄版收掉引擎、程序編號、記憶體、開了多久與運行位置')
 })

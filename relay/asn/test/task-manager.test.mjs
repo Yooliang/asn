@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DASH, PATH, REFRESH_MS, TEXT, confirmView, createTaskManager, dupBanner, dupGroups, formatMemory, formatUptime, initialState, markDuplicates, mergeRows, stopPlan, stopRequest, viewRow } from '../ui/lib/task-manager.mjs'
+import { COLUMNS, DASH, PATH, REFRESH_MS, TEXT, confirmView, createTaskManager, dupBanner, dupGroups, formatMemory, formatUptime, initialState, markDuplicates, mergeRows, stopPlan, stopRequest, viewRow } from '../ui/lib/task-manager.mjs'
 
 const NOW = 1_800_000_000_000
 const SELF = 'P'
@@ -366,7 +366,7 @@ test('接回中：列的來源、狀態與按鈕文字', () => {
   const stuck = viewRow(resuming(), NOW, c)
   assert.equal(young.status, '接回中')
   assert.equal(stuck.status, '可能卡住了')
-  assert.equal(stuck.source, 'ASN 開的')
+  assert.equal(stuck.source, '不明')   // 這筆測試資料沒有運行位置欄位
   assert.equal(stuck.canStop, true)
   assert.equal(stuck.viewOnly, false)
   assert.equal(stuck.name, '小乙')
@@ -394,4 +394,34 @@ test('接回中：控制器按確認走 termStop（帶 resuming_sid），不走 
   assert.deepEqual(calls.runOp, [])
   assert.deepEqual(calls.mail, [])
   assert.equal(tm.view().confirm, null)
+})
+
+test('#1909 運行位置欄：三種值各自的字、缺欄位落「不明」、只有原生主控台有黃標籤', () => {
+  const c = ctx([friend()])
+  const where = o => viewRow(row(o), NOW, c)
+  assert.equal(where({ term: 'mux' }).source, '終端服務')
+  assert.equal(where({ term: 'native' }).source, '原生主控台')
+  assert.equal(where({ term: 'unknown' }).source, '不明')
+  assert.equal(where({}).source, '不明', '欄位缺失（舊版後台）')
+  assert.equal(where({ term: 'whatever' }).source, '不明', '沒看過的值也不猜')
+  assert.equal(where({ kind: 'pi', engine: 'pi', term: 'native' }).source, '原生主控台')
+  assert.deepEqual(['mux', 'native', 'unknown', undefined].map(t => where({ term: t }).native), [false, true, false, false])
+  // 非夥伴列
+  assert.equal(viewRow(row({ kind: 'process', by_asn: null, term: 'native' }), NOW, c).source, '自己開的終端')
+  assert.equal(viewRow(row({ by_asn: false, term: 'mux' }), NOW, c).source, '自己開的終端')
+  assert.equal(viewRow(row({ kind: 'mux' }), NOW, c).source, 'ASN 的終端服務')
+  assert.equal(viewRow(row({ kind: 'asn', name: 'ASN' }), NOW, c).source, 'ASN 本體')
+  assert.equal(viewRow(row({ kind: 'acp' }), NOW, c).source, 'ASN 內建')
+  assert.ok(['claude', 'pi', 'process', 'mux', 'asn', 'acp', 'resuming', 'awaiting'].every(k => !/mux|native|unknown/.test(viewRow(row({ kind: k, term: 'native' }), NOW, c).source)), '畫面字串不出現程式識別碼')
+  assert.equal(COLUMNS[7], '運行位置')
+})
+
+test('#1909 運行位置：黃標籤只在那一欄，窄版名字下有小字，其餘不加料', () => {
+  const panel = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../ui/lib/settings-panel.mjs'), 'utf8')
+  const css = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../ui/style.css'), 'utf8')
+  assert.equal((panel.match(/tm-tag native" v-if="r\.native"/g) || []).length, 2, '運行位置欄一處、窄版小字一處')
+  assert.match(panel, /<small class="tm-where">/)
+  assert.doesNotMatch(panel, /tr[^>]*native/, '不標整列')
+  assert.match(css, /\.tm-tag\.native\{[^}]*#e0c36b/)
+  assert.match(css, /\.tm-where\{display:none[^}]*\}\s*@container \(max-width:480px\)\{\.tm-where\{display:block\}\}/)
 })
