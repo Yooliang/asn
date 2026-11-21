@@ -1,15 +1,11 @@
 {
-  "version": "0.2.55",
-  "notes": "- 改善：終端服務卡死時，ASN 會自動結束它並把夥伴接回來，不用再手動重開。（#1897、#2060、#2062、#2063、#2064、#2072）",
-  "pub_date": "2026-11-21T22:17:00.675Z",
+  "version": "0.2.56",
+  "notes": "- 改善：設定頁的「分頁與分組」併進「外觀」，目前外觀用不到的選項會自動藏起來。（#1547、#2076）",
+  "pub_date": "2026-11-21T23:11:26.398Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnlyd0F6bmFOV1d2TElNNUxzOExrV2U5aDRxak40b05WNXRRVDZKNE9UallJaVBZNWt6UlFrblVRQ0pmQWhzcUJ0Q0p2UjlmVkR1ZW50UmU4dG1jdGdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mjk5NDIwCWZpbGU6QVNOXzAuMi41NV94NjQtc2V0dXAuZXhlClhZWGlUN0ZoSFVFL0dwRnhyZTUzSTJFcHBicFNXMmptZE9XMi9Bc0VqVVh1Tm9MM2FWZEtnUVhIM3h3OTd1cTlpUXJrUXI2QVRSek9JWGZtYnY4UEF3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.55_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjE5RTg0L1lMbWo2dFgyU2VCZkxLVU1HTjc1UTNXWmRBZ1NEOXJwVlJJNnVDbmlYb1ZyS09rck5mcDZXL0R3djd2RElac3FUVmN2TDFoUHZ4ZUlYL2dzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mjk5OTQ3CWZpbGU6QVNOXzAuMi41NV9hbWQ2NC5BcHBJbWFnZQpOR0NuTkVQUGR5eVlxVjI1VGpWQU4rVUgwQStPR2RCdmluZFYrZFQzS0duWHJIbGYwVldoUmpZQnllSUZ3U01qaFJNdFdEV1dZRkhjS21ZVnlJSUlCZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.55_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdlZjJqR3NDSzhSMlpxRXZoZlExZVFvSlU2Qm1qNWxYUndQcnUyTGJZWnR3S3ZLbk9zWnpnMnErdGtEeEhEOTFDY0hQb0pzaGdvSnBuYmJLM2JSRWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzAyNjg1CWZpbGU6QVNOXzAuMi41Nl94NjQtc2V0dXAuZXhlCmgxZlh4L2M2dWQ5ZjExMFFVWE1kMnk3OFhmWnkyYzJaOFMxUzVWcDRaVTJUYlZYOXZ0bjh6VXhyZVN2dEl6R3dIV1NBL0NnN1RQY1MzeUZvTEpweURRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.56_x64-setup.exe"
     }
   }
 }
