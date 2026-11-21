@@ -121,6 +121,8 @@ test('真的 patches/wezterm：清單和 .patch 一一對應，numstat 解析的
   assert.ok(decl.has('0001-procinfo-build-proc-iterative.patch'))
   assert.ok(decl.has('0002-procinfo-parent-start-time.patch'), '#1914：0002 要列在清單')
   assert.deepEqual(decl.get('0002-procinfo-parent-start-time.patch'), ['procinfo/src/windows.rs'])
+  assert.ok(decl.has('0003-mux-server-heartbeat.patch'), '#1897：0003 要列在清單')
+  assert.deepEqual(decl.get('0003-mux-server-heartbeat.patch'), ['wezterm-mux-server/src/asn_heartbeat.rs', 'wezterm-mux-server/src/main.rs'])
   for (const p of onDisk) {
     const r = git(os.tmpdir(), 'apply', '--numstat', path.join(REAL_DIR, p))
     assert.equal(r.status, 0, r.stderr)
@@ -162,4 +164,25 @@ test('#2008 Linux SOURCE.txt 的修補清單：兩份以上用「、」接起來
   assert.equal(r.status, 0, String(r.stderr))
   const out = new TextDecoder('utf-8', { fatal: true }).decode(r.stdout).trim() // 壞的 UTF-8 會在這裡丟錯
   assert.equal(out, '0001-a.patch、0002-b.patch')
+})
+
+test('#1897 補丁 0003：窗格環境守門與心跳實測接進 workflow（拿掉就紅）', () => {
+  const rd = p => fs.readFileSync(new URL(`../../../${p}`, import.meta.url), 'utf8')
+  const patch = rd('patches/wezterm/0003-mux-server-heartbeat.patch')
+  // 讀完立刻移除環境變數、而且在 SimpleExecutor::new() 之後才啟動
+  assert.match(patch, /std::env::remove_var\(ENV_NAME\)/, '讀完要立刻 remove_var，窗格才不會繼承')
+  assert.match(patch, /\+\s+let asn_heartbeat_path = asn_heartbeat::take_env\(\);/)
+  const iExec = patch.indexOf('SimpleExecutor::new()'), iStart = patch.indexOf('asn_heartbeat::start(asn_heartbeat_path)')
+  assert.ok(iExec > 0 && iStart > iExec, 'start 必須排在 SimpleExecutor::new() 之後')
+  assert.match(patch, /spawn_into_main_thread\(async move \{ task\(\) \}\)\.detach\(\)/, '要 detach，否則任務會被取消')
+  // 不新增相依
+  assert.ok(!/Cargo\.(toml|lock)/.test(patch), '補丁不能動 Cargo.toml／Cargo.lock')
+  const wf = rd('.github/workflows/wezterm-build.yml'), lin = rd('.github/scripts/wezterm-build-linux.sh')
+  assert.match(wf, /cargo test --locked --release -p wezterm-mux-server --bin wezterm-mux-server asn_heartbeat/)
+  assert.match(wf, /wezterm-heartbeat-test\.sh "\$rel\/wezterm\.exe" "\$rel\/wezterm-mux-server\.exe" .* --windows/)
+  assert.match(lin, /cargo test --locked --release -p wezterm-mux-server --bin wezterm-mux-server asn_heartbeat/)
+  assert.match(lin, /wezterm-heartbeat-test\.sh" "\$WEZ" "\$MUX"/)
+  const t = rd('.github/scripts/wezterm-heartbeat-test.sh')
+  assert.match(t, /HBENV_ABSENT/, '要驗窗格環境沒有 ASN_MUX_HEARTBEAT')
+  assert.match(t, /案例 B：沒設/, '要驗沒設變數不產生檔案')
 })

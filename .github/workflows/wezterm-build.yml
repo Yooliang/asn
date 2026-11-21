@@ -1,6 +1,6 @@
 name: WezTerm 自建（20240203 正式版＋上游 #7706＋ASN 修補）
 
-# 從上游 tag 自己建一份 WezTerm，只多套用上游 #7706（procinfo 父子 PID 循環造成的堆疊溢位）與 patches/wezterm/ 的 ASN 修補（#1896 build_proc 改迭代），
+# 從上游 tag 自己建一份 WezTerm，只多套用上游 #7706（procinfo 父子 PID 循環造成的堆疊溢位）與 patches/wezterm/ 的 ASN 修補（#1896 build_proc 改迭代、#1897 mux-server 心跳），
 # 打包成 Windows zip 與各 Linux 發行版 tar.xz，附 SHA256SUMS 與建置來源證明（artifact attestation）。
 #   - pull_request（只在這支 workflow 或它用的腳本變動時）：只建置與測試，不發佈。
 #   - workflow_dispatch：建置與測試；只有在 main 上手動觸發時，才會跑最後的「發佈」job。
@@ -24,8 +24,8 @@ env:
   # 1.76.0：tag 自帶的 Cargo.lock 裡 time 0.3.31 在更新的 Rust 編不過
   RUST_VERSION: '1.76.0'
   # 換新後綴＝發新的 release（同一個 tag 不重建）；pins 要等新 release 發出後再跟上（見 wezterm-bundle.test.mjs）
-  ASN_SUFFIX: 'asn.3'
-  RELEASE_TAG: 'wezterm-20240203-110809-5046fc22-asn.3'
+  ASN_SUFFIX: 'asn.4'
+  RELEASE_TAG: 'wezterm-20240203-110809-5046fc22-asn.4'
   # 上游官方 Windows 壓縮檔（用來核對四個現成的二進位檔）；與 relay/asn/scripts/wezterm-pins.json 的值相同
   OFFICIAL_ZIP_SHA256: '57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4'
   OFFICIAL_ZIP_SIZE: '66162319'
@@ -149,6 +149,9 @@ jobs:
             ${{ runner.temp }}/wez-out/get-deps.log
             ${{ runner.temp }}/wez-out/smoke/*.log
             ${{ runner.temp }}/wez-out/smoke/*.err
+            ${{ runner.temp }}/wez-out/heartbeat/*/*.log
+            ${{ runner.temp }}/wez-out/heartbeat/*/*.err
+            ${{ runner.temp }}/wez-out/heartbeat/*/*.json
           if-no-files-found: ignore
 
   build-windows:
@@ -213,6 +216,17 @@ jobs:
         run: |
           rel="$WEZ_SRC/target/release"
           bash .github/scripts/wezterm-mux-smoke.sh "$rel/wezterm.exe" "$rel/wezterm-mux-server.exe" "$WEZ_OUT/smoke" --windows
+      - name: 心跳單元測試（#1897 補丁 0003）
+        run: |
+          set -euo pipefail
+          export PATH="/c/Strawberry/perl/bin:$PATH"
+          cd "$WEZ_SRC"
+          export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
+          cargo test --locked --release -p wezterm-mux-server --bin wezterm-mux-server asn_heartbeat
+      - name: 心跳實測（#1897 補丁 0003：檔案、pid、seq、窗格環境、沒設變數不產生）
+        run: |
+          rel="$WEZ_SRC/target/release"
+          bash .github/scripts/wezterm-heartbeat-test.sh "$rel/wezterm.exe" "$rel/wezterm-mux-server.exe" "$WEZ_OUT/heartbeat" --windows
       - name: 核對四個現成的二進位檔（與官方壓縮檔裡的同名檔逐一比對）
         run: |
           set -euo pipefail
@@ -251,7 +265,7 @@ jobs:
           cat > "$pkg/SOURCE.txt" <<TXT
           WezTerm ${UPSTREAM_TAG}（ASN 自行建置，多套用上游 #7706 與 ASN 修補）
           上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
-          額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）；ASN 修補 patches/wezterm/0001-procinfo-build-proc-iterative.patch（#1896，只改 procinfo/src/windows.rs：build_proc 改迭代、深度上限 64）
+          額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）；ASN 修補 patches/wezterm/0001-procinfo-build-proc-iterative.patch（#1896，只改 procinfo/src/windows.rs：build_proc 改迭代、深度上限 64）、0003-mux-server-heartbeat.patch（#1897，只改 wezterm-mux-server/src/main.rs 並新增 asn_heartbeat.rs：設了環境變數 ASN_MUX_HEARTBEAT 才定時寫出存活訊號，內容不含使用者資料）
           Rust：${RUST_VERSION}（cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server，用 tag 自帶的 Cargo.lock）
           建置環境：GitHub Actions windows-2022 runner（映像版本 ${ImageVersion:-未知}）
           建置紀錄：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -302,6 +316,9 @@ jobs:
             C:/w/out/versions-and-dependents.txt
             C:/w/out/smoke/*.log
             C:/w/out/smoke/*.err
+            C:/w/out/heartbeat/*/*.log
+            C:/w/out/heartbeat/*/*.err
+            C:/w/out/heartbeat/*/*.json
           if-no-files-found: ignore
 
   # 發佈前演練：PR（或不在 main 的手動觸發）時跑，步驟與 publish 相同（同一支腳本、同樣的 download pattern），只跳過 attest 與建 release

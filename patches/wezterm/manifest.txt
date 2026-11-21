@@ -2,3 +2,4 @@
 # 補丁資料夾裡的 .patch 必須和這裡一一對應；套用時會核對補丁實際動到的檔案等於這裡宣告的（wezterm-apply-patches.sh）
 0001-procinfo-build-proc-iterative.patch	procinfo/src/windows.rs
 0002-procinfo-parent-start-time.patch	procinfo/src/windows.rs
+0003-mux-server-heartbeat.patch	wezterm-mux-server/src/asn_heartbeat.rs,wezterm-mux-server/src/main.rs

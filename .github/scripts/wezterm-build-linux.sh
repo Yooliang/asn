@@ -62,6 +62,10 @@ ldd "$MUX" | grep -Eq 'libssl\.so' || { echo "::error::mux-server 沒有動態�
 
 bash "$SCRIPTS/wezterm-mux-smoke.sh" "$WEZ" "$MUX" "$OUT/smoke"
 
+# #1897 補丁 0003：心跳單元測試與實測
+cargo test --locked --release -p wezterm-mux-server --bin wezterm-mux-server asn_heartbeat
+bash "$SCRIPTS/wezterm-heartbeat-test.sh" "$WEZ" "$MUX" "$OUT/heartbeat"
+
 # ---- 打包：wezterm、wezterm-mux-server、LICENSE.md（上游 tag 原檔）、SOURCE.txt ----
 PKG="$OUT/pkg"; rm -rf "$PKG"; mkdir -p "$PKG"
 install -m 0755 "$WEZ" "$PKG/wezterm"
