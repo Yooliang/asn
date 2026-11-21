@@ -18,6 +18,22 @@ pub const ENTER_DELAY: Duration = Duration::from_millis(150);
 pub const MAX_LINE_CHARS: usize = 4000;
 /// 執行檔本身起不來時錯誤訊息的開頭（呼叫端靠它分辨「根本沒執行」與「執行了但逾時」）
 pub const CANNOT_RUN: &str = "無法執行";
+
+/// 程序表夠不夠用來判斷「不殺 ASN 自己與祖先、不殺比 mux 早的程序」：讀不到、是空的、表裡找不到 ASN 自己、找不到 mux 本身，
+/// 這兩道保護都會一起失效，所以都回錯（呼叫端取消處置）。`table`＝讀到的所有程序編號；讀取失敗給 None
+pub fn table_check(table: Option<&[u32]>, me: u32, mux: u32) -> Result<(), String> {
+    let Some(t) = table else { return Err("讀不到程序表".into()) };
+    if t.is_empty() {
+        return Err("程序表是空的".into());
+    }
+    if !t.contains(&me) {
+        return Err("程序表裡找不到 ASN 自己".into());
+    }
+    if !t.contains(&mux) {
+        return Err(format!("程序表裡找不到終端服務（程序 {mux}）"));
+    }
+    Ok(())
+}
 const TRUNC_MARK: &str = "…（已截斷）";
 /// WezTerm 建不起視窗時 log 裡的那句（桌面斷線、OpenGL 太舊都是這句；英文原文只用來比對，不給人看）
 const NO_WINDOW_MARK: &str = "Failed to create window";
@@ -83,6 +99,10 @@ pub trait Runner {
     /// 建立時間比 pid 早的要由呼叫端自己濾掉（編號可能被重用）。預設沒有（測試的假 runner 不用改）
     fn descendants_of(&self, _pid: u32) -> Vec<u32> {
         Vec::new()
+    }
+    /// 結束程序樹之前先確認程序表可信（見 [`table_check`]）。預設可信（測試的假 runner 不用改）
+    fn check_process_table(&self, _mux: u32) -> Result<(), String> {
+        Ok(())
     }
     /// ASN 自己和它的祖先（沿著父程序編號往上，含自己）。結束一棵程序樹之前，確認這些都不在樹裡。預設只有自己
     fn self_ancestors(&self) -> Vec<u32> {
@@ -233,6 +253,12 @@ impl Runner for RealRunner {
 
     fn alive(&self, pid: u32) -> bool {
         crate::heartbeat::pid_alive(pid)
+    }
+
+    fn check_process_table(&self, mux: u32) -> Result<(), String> {
+        // process_table 讀取失敗時回空表（分不出「失敗」與「空」，兩者都不可信）
+        let pids: Vec<u32> = crate::bridge::orphans::process_table().keys().copied().collect();
+        table_check(Some(&pids), std::process::id(), mux)
     }
 
     fn self_ancestors(&self) -> Vec<u32> {

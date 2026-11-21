@@ -39,10 +39,12 @@ struct Fake {
     run_err: RefCell<Option<String>>,
     /// 每次下 cli 時順手做的事（模擬連線測試那 10 秒裡，世界變了）
     on_run: RefCell<Option<Box<dyn Fn(&Fake)>>>,
+    /// 程序表：None＝照預設（可信）；Some(None)＝讀取失敗；Some(Some(list))＝讀到這些程序編號
+    table: RefCell<Option<Option<Vec<u32>>>>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]), hb_file: RefCell::new(None), hb_before_spawn: RefCell::new(vec![]), kids: RefCell::new(vec![]), stay: RefCell::new(vec![]), on_kill: RefCell::new(None), anc: RefCell::new(vec![]), cannot_run: Cell::new(false), run_err: RefCell::new(None), on_run: RefCell::new(None) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]), hb_file: RefCell::new(None), hb_before_spawn: RefCell::new(vec![]), kids: RefCell::new(vec![]), stay: RefCell::new(vec![]), on_kill: RefCell::new(None), anc: RefCell::new(vec![]), cannot_run: Cell::new(false), run_err: RefCell::new(None), on_run: RefCell::new(None), table: RefCell::new(None) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -95,6 +97,12 @@ impl Runner for Fake {
     }
     fn descendants_of(&self, _pid: u32) -> Vec<u32> {
         self.kids.borrow().clone()
+    }
+    fn check_process_table(&self, mux: u32) -> Result<(), String> {
+        match self.table.borrow().as_ref() {
+            None => Ok(()),
+            Some(t) => crate::launch::wezterm::table_check(t.as_deref(), std::process::id(), mux),
+        }
     }
     fn self_ancestors(&self) -> Vec<u32> {
         let mut v = vec![std::process::id()];
@@ -1214,6 +1222,32 @@ mod stuck {
         let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
         assert!(why.contains("結束前再確認"), "{why}");
         assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_程序表讀不到_是空的_沒有_asn_自己_沒有_mux_都取消() {
+        let me = std::process::id();
+        let cases: [(&str, Option<Vec<u32>>, &str); 5] = [
+            ("讀取失敗", None, "讀不到"),
+            ("空表", Some(vec![]), "空的"),
+            ("表裡沒有 ASN 自己", Some(vec![4000, 4101]), "ASN 自己"),
+            ("表裡沒有 mux", Some(vec![me, 4101]), "終端服務"),
+            ("只有別人", Some(vec![1, 2, 3]), "ASN 自己"),
+        ];
+        for (name, table, hint) in cases {
+            let d = tempfile::tempdir().unwrap();
+            let (r, m) = rig(d.path());
+            *r.table.borrow_mut() = Some(table);
+            let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("{name}：要取消") };
+            assert!(why.contains("程序表不可信") && why.contains(hint), "{name}：{why}");
+            assert!(r.killed.borrow().is_empty() && m.paths.pid.exists(), "{name}");
+        }
+        // 表完整（有 ASN 自己、有 mux）才處置
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.table.borrow_mut() = Some(Some(vec![me, 4000, 4101]));
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+        assert_eq!(*r.killed.borrow(), vec![4000]);
     }
 
     #[test]

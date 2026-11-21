@@ -77,6 +77,10 @@ impl Mux<'_> {
             Some((p, s)) if p == hb_pid && s == seq0 => {}
             _ => return Disposal::Cancelled("確認期間心跳又動了（或讀不到），沒有結束".into()),
         }
+        // 程序表讀不到、是空的、找不到 ASN 自己或 mux：「不殺 ASN 自己與祖先」「不殺比 mux 早的程序」兩道保護都會失效，不處置
+        if let Err(e) = self.runner.check_process_table(pid) {
+            return Disposal::Cancelled(format!("程序表不可信（{e}），沒有結束"));
+        }
         // 6. 蒐集要結束的樹，核對過才結束。前面的核對隔了連線測試最久 10 秒，所以結束前緊接著再驗一次 pid、建立時間、執行檔
         let tree = self.runner.descendants_of(pid);
         let mut protect = self.runner.self_ancestors();
