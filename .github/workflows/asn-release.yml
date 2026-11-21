@@ -7,6 +7,8 @@ name: ASN 發版（標籤觸發）
 # 簽章（#2022）：只有 desktop-sign 這一個 job 掛 environment: release，更新簽章的私鑰與密碼（TAURI_SIGNING_*）只從它簽章那一步的 env: 進來；
 # 其餘 job 沒有 secrets、沒有 environment（只用 github.token）。desktop-sign 只產 artifact，不建 Release、不動官網。
 # 發佈（#2022 ②-2）：desktop-publish 用 CI 建 GitHub Release、產 latest.json／index.html（artifact asn-site-files）；權限只有 contents: write，仍沒有 secrets、沒有 environment。
+# 官網檔回 main（#2022 ②-3）：site-publish（同一個休眠開關，needs desktop-publish）把 asn-site-files 推回 main 再觸發 site-deploy.yml；全檔只有它有 actions: write，contents: write 只有它與 desktop-publish。
+#   desktop-publish 本身仍不推 main、不部署。
 #   它是休眠的：只有 repo variable ASN_CI_PUBLISH 恰為 true 才跑（現在沒有這個變數＝略過，現行發版流程不變）；④ 退役本機常駐程式時才設。不推 main、不部署官網。
 # 開關：repo variable ASN_RELEASE_AUTO，只有值恰為 true 才開；未設定一律視為 false，下游全略過。
 on:
@@ -390,6 +392,65 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           overwrite: true
+
+  # ---- 2d. 官網檔回 main 並觸發部署（#2022 ②-3）：把 desktop-publish 產的 latest.json／index.html 直接推 main（不開 PR），再明確觸發 site-deploy.yml ----
+  # 同一個休眠開關（vars.ASN_CI_PUBLISH），needs desktop-publish：它被略過，這個 job 也跟著略過。
+  # 權限只有 contents: write（推 main）與 actions: write（觸發 workflow）；不掛 environment、不用任何 secrets，token 只用 github.token，只在需要的那一步的 env:。
+  # 為什麼要另外觸發：用 GITHUB_TOKEN 推上去的提交不會觸發其他 workflow。
+  # 推送與版本不退檢查全在 tools/release/ci_site_push.mjs（最多 3 次、不強推、只推 HEAD:main、token 不進命令列與 log）。失敗不另外發通知，看這個 job 的 log。
+  # notify 不接這個 job。
+  site-publish:
+    needs:
+      - desktop-publish
+    if: vars.ASN_CI_PUBLISH == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: main
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: asn-site-files
+          path: site-in
+
+      - name: 確認標籤格式
+        id: ver
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "標籤格式不對：$TAG" >&2; exit 1; fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: 版本不退檢查並推回 main（最多 3 次）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          node tools/release/ci_site_push.mjs --version "$VERSION" --files site-in
+
+      - name: 觸發官網部署
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run site-deploy.yml --ref main
 
   # ---- 3. 官網紀錄草稿：只放 artifact，不寫入任何地方；不依賴電腦版 ----
   site-draft:
