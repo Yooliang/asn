@@ -14,4 +14,6 @@ createApp({
     return { t, open: () => invoke('toast_click', { cid: t.cid }) }
   },
 }).mount('#app')
+// 掛載後等兩個畫面更新，再回報「這扇畫好了」：--shot 截圖等它才拍（慢的機器上透明視窗可能還沒出內容，#1953）；正式使用只是多一次呼叫
+requestAnimationFrame(() => requestAnimationFrame(() => { invoke('toast_painted').catch(() => { /* 回報不到只是 --shot 截圖多等到上限，不影響提示本身 */ }) }))
 blockContextMenu(document)
