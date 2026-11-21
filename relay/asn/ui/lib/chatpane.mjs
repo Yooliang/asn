@@ -736,7 +736,7 @@ export const ChatPane = {
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :op-slot="opSlotEl" :friend="friend" :self-node="selfNode" :api="agentApi" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')" @member="jumpMember"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :op-slot="opSlotEl" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')" @member="jumpMember"></action-bar>
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <p class="term-reopen-note term-stuck-note" v-if="!noBar && !isRoom && stuckNoteText" role="note">{{ stuckNoteText }}</p>
   <p class="term-reopen-note term-confirm-note" v-if="confirmNote" role="note">{{ confirmNote }}</p>

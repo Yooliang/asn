@@ -424,7 +424,7 @@ test('#1907 失敗但再按也沒用（找不到對話紀錄）：不接「再�
 test('#1907 位置守門：電腦版 teleport 到 chatpane 最下面的 .op-slot；手機橫幅在 chat-pane 之後；不再蓋在功能列下面', () => {
   const chat = read('ui/lib/chatpane.mjs'), bar = read('ui/lib/actionbar.mjs'), html = read('ui/m.html'), css = read('ui/style.css') + read('ui/skin-common.css')
   assert.ok(chat.indexOf('<div class="typing"') < chat.indexOf('<div class="op-slot" ref="opSlotEl">'), '.op-slot 在最下面那條狀態列（.typing）之後')
-  assert.match(chat, /<action-bar :op-slot="opSlotEl"/)
+  assert.match(chat, /<action-bar [^>]*:op-slot="opSlotEl"/)
   assert.match(bar, /<teleport :to="opSlot" :disabled="!opSlot"><partner-op-strip /)
   assert.doesNotMatch(css, /\.actionbar \.op-strip\s*[{,]/, '不再用 absolute 蓋在功能列下面')
   const ci = html.indexOf('<chat-pane v-if="chatFriend"'), bi = html.indexOf('class="m-ops-run"')
