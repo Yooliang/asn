@@ -342,17 +342,17 @@
 
 ## Linux 按需取得 WezTerm（#893 第 3 張）
 
-Linux 沒有安裝檔可以附帶 WezTerm。本人開了夥伴共用終端服務、而 `ASN_WEZTERM_DIR` 與 PATH 都找不到 wezterm 時，ASN 在背景從官方 GitHub release 取得固定版本（`launch/wezterm_fetch.rs`），取好後重開 ASN 才會用上。
+Linux 沒有安裝檔可以附帶 WezTerm。本人開了夥伴共用終端服務、而 `ASN_WEZTERM_DIR` 與 PATH 都找不到 wezterm 時，ASN 在背景從本 repo 自建的 GitHub release（上游版本加 ASN 修補，與 Windows 同一批）取得固定版本（`launch/wezterm_fetch.rs`），取好後重開 ASN 才會用上。
 
 - 版本與雜湊：唯一來源是 `relay/asn/scripts/wezterm-pins.json`（Windows 的 `fetch-wezterm.mjs`、Rust、CI 探測腳本都讀它或有測試核對）。
 - 發行版：讀 `/etc/os-release` 的 `ID`、`VERSION_ID`；Ubuntu 20.04／22.04／24.04、Debian 10／11／12，僅 x86_64。其他的不下載，回「請用套件管理員安裝 wezterm，或設定 ASN_WEZTERM_DIR」。
-- 流程：檢查磁碟空間 → 下載到私有暫存資料夾（只連官方 GitHub 主機、有逾時與大小上限）→ 核對 SHA-256（不符就刪檔、不重試）→ 解 xz → 只取 `wezterm`、`wezterm-mux-server` 兩個一般檔案 → 跑 `--version`（雜湊核對之後才執行）→ 原子改名到 `<資料目錄>/ASN/wezterm/<版本>-<發行版>/`。任何失敗都清掉暫存資料夾。
+- 流程：檢查磁碟空間 → 下載到私有暫存資料夾（只連官方 GitHub 主機、有逾時與大小上限）→ 核對 SHA-256（不符就刪檔、不重試）→ 解 xz → 只取 `wezterm`、`wezterm-mux-server` 兩個一般檔案 → 跑 `--version`（雜湊核對之後才執行）→ 原子改名到 `<資料目錄>/ASN/wezterm/<版本>-asn.<N>-<發行版>/`。任何失敗都清掉暫存資料夾。
 - 找程式的順序（`wezterm::locate`）：`ASN_WEZTERM_DIR`（設了就只認它）→ PATH → 這裡取得的。沒有 `wezterm-gui` 時 `WezTermDir.gui` 是 `None`，要開 GUI 的地方回「這台電腦沒有安裝 WezTerm 桌面版」。
 - 不做：自動更新版本、重試、預先下載、arm64／macOS／其他發行版。
 
 ### 取得失敗的顯示與退避（#893 第 4 張）
 
-- Linux 的網址統一用官方正式路徑 `wezterm/wezterm`（`wez/wezterm` 只是轉址）；基底網址在 `wezterm-pins.json` 的 `release_base`。Rust 端還會核對它必須等於程式內的常數，改了 json 也導不到別處。
+- Linux 的網址取自本 repo 的自建 release（tag 為 `wezterm-<版本>-asn.<N>`，記在 `wezterm-pins.json` 的 `linux_tag`；包是平的結構，直接放 `wezterm`、`wezterm-mux-server`）；基底網址在 `release_base`。資料夾名稱帶 `asn.<N>`，換修補版時舊資料夾不會被沿用。Rust 端還會核對它必須等於程式內的常數，改了 json 也導不到別處。
 - Windows 安裝檔附的 WezTerm 改取本 repo 自建的 release（pins 的 `windows_bundle`：上游同版本加上上游 #7706 與 ASN 修補 0001、0002，修 mux-server 的堆疊溢位與 PID 重用錯接；0.2.45 起是 asn.2、0.2.46 起是 asn.3，修改清單見 [WEZTERM-自建修改清單.md](WEZTERM-自建修改清單.md)）。`fetch-wezterm.mjs` 先用 `gh attestation verify --repo Yooliang/asn --signer-workflow …/wezterm-build.yml --source-ref refs/heads/main` 驗建置來源證明，再核對 SHA-256 與大小，任何一項不符就刪快取、讓建置失敗，不退回上游。pins 頂層的 `windows_zip_sha256`／`windows_zip_size` 是上游官方壓縮檔，只給 CI 自建時核對現成檔用。
 - 大小核對：實收位元組數必須等於 pins 的 `size`（Windows 是 `windows_bundle.size`），不等就當失敗，和雜湊不符一樣刪檔、報錯。
 - 失敗會記下原因分類與時間（`<資料目錄>/ASN/wezterm/fetch-state.json`），一天內不自動重下；設定頁按「重試」才忽略退避。成功就清掉紀錄。

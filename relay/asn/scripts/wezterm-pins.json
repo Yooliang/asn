@@ -1,7 +1,8 @@
 {
-  "_comment": "WezTerm 固定版本與雜湊的唯一來源。Windows 的 fetch-wezterm.mjs、Linux 的 wezterm_fetch.rs（編譯時讀入）、CI 的探測腳本都以這裡為準；換版本要全部一起換並重新做真機驗證。",
+  "_comment": "WezTerm 固定版本與雜湊的唯一來源。Windows 的 fetch-wezterm.mjs、Linux 的 wezterm_fetch.rs（編譯時讀入，取自本 repo 自建 release 的 linux_tag）、CI 的探測腳本都以這裡為準；換版本要全部一起換並重新做真機驗證。",
   "version": "20240203-110809-5046fc22",
-  "release_base": "https://github.com/wezterm/wezterm/releases/download",
+  "release_base": "https://github.com/Yooliang/asn/releases/download",
+  "linux_tag": "wezterm-20240203-110809-5046fc22-asn.3",
   "raw_base": "https://raw.githubusercontent.com/wezterm/wezterm",
   "license_sha256": "37db33bbbd7348969eda397b89a16f252d56c1ca7481b6ccaf56ccdcbab5dcca",
   "windows_zip_sha256": "57e5d03b585303d81e8b8e96d1230362852eb39aca92b3b29c7a42cfb82f9ac4",
@@ -16,10 +17,10 @@
     "size": 46658062
   },
   "linux": {
-    "ubuntu-22.04": { "tarball": "wezterm-20240203-110809-5046fc22.Ubuntu22.04.tar.xz", "sha256": "142cb46de648200b852cc4b1d932e6b8f2a9d3c55f6dc5af44b6d4eeb9385f5c", "size": 30508792 },
-    "ubuntu-20.04": { "tarball": "wezterm-20240203-110809-5046fc22.Ubuntu20.04.tar.xz", "sha256": "1d15105d53cdd409e251034b35a9f2dec7146fad06e2b9642553b2b3e02ed224", "size": 30515256 },
-    "debian-12": { "tarball": "wezterm-20240203-110809-5046fc22.Debian12.tar.xz", "sha256": "f1c9144b5cf04e942bc4f47239233a0f643b9625a55c8e9e7540e713c2dadc3b", "size": 30433096 },
-    "debian-11": { "tarball": "wezterm-20240203-110809-5046fc22.Debian11.tar.xz", "sha256": "83b942dcf682d4973807b0245ea9fa734bb73553e2e5d586d8efbbe7ccf0e17a", "size": 30445432 },
-    "debian-10": { "tarball": "wezterm-20240203-110809-5046fc22.Debian10.tar.xz", "sha256": "b68f54bb7271fc8de2f8a379c852036e3dc8d36cf456ade7eb79e26f116c84ee", "size": 30440576 }
+    "ubuntu-22.04": { "tarball": "wezterm-20240203-110809-5046fc22-asn.3.Ubuntu22.04.tar.xz", "sha256": "1c3633f64fcd63573e8b2bc1e2c42794be43bb060c2d5541b9538b985ac08c58", "size": 15811292 },
+    "ubuntu-20.04": { "tarball": "wezterm-20240203-110809-5046fc22-asn.3.Ubuntu20.04.tar.xz", "sha256": "388a0c50f164d70ec578e9a4593fb7bb2092bb1d9a6ff6ba7ced68b1bc8f05de", "size": 15771120 },
+    "debian-12": { "tarball": "wezterm-20240203-110809-5046fc22-asn.3.Debian12.tar.xz", "sha256": "70f026f8c27cc67455a394cf760a063c0b83687938ad679608787ea346a84054", "size": 15816652 },
+    "debian-11": { "tarball": "wezterm-20240203-110809-5046fc22-asn.3.Debian11.tar.xz", "sha256": "05133dcab7dc28c55cabe355549aeb6ad58cb997ca43ec8589f06b04e167a3a7", "size": 15733624 },
+    "debian-10": { "tarball": "wezterm-20240203-110809-5046fc22-asn.3.Debian10.tar.xz", "sha256": "2a9667d406f6e094055e60f1d97ef664d4d2af4e1ab9e45bd4185b8addc21360", "size": 15713920 }
   }
 }
