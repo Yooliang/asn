@@ -204,7 +204,9 @@ test('2 沒有 secrets、沒有 environment：全檔 secrets.（GITHUB_TOKEN 例
 test('2 secrets：除 asn-release-android.yml 外，其他 workflow 與 .github/actions/ 沒有任何 secrets.（GITHUB_TOKEN 例外）；演練檔與 actions 沒有 environment: release、contents: write', () => {
   const others = [...listFiles('.github/workflows/'), ...listFiles('.github/actions/')].filter(f => f !== RELEASE && f !== RELEASE_ANDROID)
   assert.ok(others.length >= 3, `其他檔只找到 ${others.length} 個，規則可能失效`)
-  for (const f of others) assert.deepEqual([...stripComments(read(f)).matchAll(/secrets\.(?!GITHUB_TOKEN\b)\w+/g)].map(m => m[0]), [], f)
+  // site-deploy.yml（#1947 ④）只准用官網部署金鑰這一個，而且只在 site-deploy job 的 env（細節由 site-deploy-workflow-guard 守）
+  const allowedOf = f => (f === '.github/workflows/site-deploy.yml' ? ['secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER'] : [])
+  for (const f of others) assert.deepEqual([...stripComments(read(f)).matchAll(/secrets\.(?!GITHUB_TOKEN\b)\w+/g)].map(m => m[0]), allowedOf(f), f)
   const strict = ['.github/workflows/asn-release-rehearsal.yml', ...listFiles('.github/actions/')]
   assert.ok(strict.length >= 2)
   for (const f of strict) {
