@@ -12,8 +12,8 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const read = f => fs.readFileSync(path.join(root, f), 'utf8')
 
 test('參數：預設值、--only、--timeout、--browser，不認得的就報錯', () => {
-  assert.deepEqual(parseSmokeArgs([]), { only: [], timeoutMs: 15000, browser: '', verbose: false })
-  assert.deepEqual(parseSmokeArgs(['--only', 'list,chat', '--only=login', '--timeout=3000', '--browser', 'X:/b.exe', '--verbose']), { only: ['list', 'chat', 'login'], timeoutMs: 3000, browser: 'X:/b.exe', verbose: true })
+  assert.deepEqual(parseSmokeArgs([]), { only: [], timeoutMs: 15000, browser: '', verbose: false, shard: null, manifest: '' })
+  assert.deepEqual(parseSmokeArgs(['--only', 'list,chat', '--only=login', '--timeout=3000', '--browser', 'X:/b.exe', '--verbose']), { only: ['list', 'chat', 'login'], timeoutMs: 3000, browser: 'X:/b.exe', verbose: true, shard: null, manifest: '' })
   assert.throws(() => parseSmokeArgs(['--nope']), /不認得的參數/)
   assert.throws(() => parseSmokeArgs(['--timeout', '5']), /--timeout/)
   assert.throws(() => parseSmokeArgs(['--only']), /--only/)

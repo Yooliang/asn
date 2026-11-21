@@ -2,6 +2,7 @@
 // 等 Vue 掛上，收集 console 錯誤與未捕捉例外；任何一頁出錯或沒掛上就失敗（結束碼 1），並印出是哪一頁、錯誤原文。
 //   npm run smoke:ui                       全部情境
 //   npm run smoke:ui -- --only m-signed-in  只跑指定情境（逗號分隔）
+//   --shard=i/N                            只跑第 i 片（共 N 片，依情境順序輪流分；i 從 1 起算）；--manifest 檔案  結束時把「實際跑了哪些情境」寫成 JSON（CI 彙總守門用）
 //   --timeout 毫秒（每頁等掛上的上限，預設 15000）、--browser 路徑、--verbose（印被拒絕的未註冊指令）
 // 只用 --headless；不下載瀏覽器；伺服器只綁 127.0.0.1。瀏覽器程序只關自己記下 PID 的那一棵。
 import fs from 'node:fs'
@@ -11,14 +12,14 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { readDevToolsPort } from './devtools-port.mjs'
-import { mpaneWidenProbeSource, motionMedia, findBrowser, injectSource, mountCheckSource, makeStableTracker, pagerSettleSource, quietMsFor, settleSnapshotSource, waitUntil, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
+import { mpaneWidenProbeSource, motionMedia, findBrowser, injectSource, mountCheckSource, makeStableTracker, pagerSettleSource, quietMsFor, settleSnapshotSource, waitUntil, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shardScenarios, shotPath, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
 const fatal = m => { console.error(`冒煙測試無法執行：${m}`); process.exit(2) }
 
-let opts, scenarios, browserPath
-try { opts = parseSmokeArgs(process.argv.slice(2)); scenarios = selectScenarios(opts.only); browserPath = findBrowser({ explicit: opts.browser }) } catch (e) { fatal(e.message) }
+let opts, scenarios, allCount, browserPath
+try { opts = parseSmokeArgs(process.argv.slice(2)); const selected = selectScenarios(opts.only); allCount = selected.length; scenarios = shardScenarios(selected, opts.shard); browserPath = findBrowser({ explicit: opts.browser }) } catch (e) { fatal(e.message) }
 
 // ui/vendor 由 prep 產生（vue、DiceBear、更新記錄）；沒有就先產生，產不出來就清楚報錯
 if (!fs.existsSync(path.join(ui, 'vendor', 'vue.global.prod.js'))) {
@@ -280,6 +281,7 @@ async function runScenario(cdp, sc, base) {
 }
 
 let failed = 0
+const ran = []   // 這一片實際跑過的情境名（含失敗的），結束時寫進清單
 try {
   await new Promise((r, j) => { server.once('error', j); server.listen(0, '127.0.0.1', r) })
   const base = `http://127.0.0.1:${server.address().port}`
@@ -298,6 +300,7 @@ try {
   for (const sc of scenarios) {
     const t0 = Date.now()
     let r
+    ran.push(sc.name)
     try { r = await runScenario(cdp, sc, base) } catch (e) { r = { problems: [`測試程序出錯：${e.message}`], missing: [] } }
     const sec = ((Date.now() - t0) / 1000).toFixed(1)
     if (r.problems.length) {
@@ -315,5 +318,13 @@ try {
 } finally {
   cleanup()
 }
+// 清單：片號、總片數、全部情境數、本片實際跑的情境名。沒有走到這裡（程序被砍、崩潰）就不會有檔，彙總守門會把那一片算成沒回報
+if (opts.manifest) {
+  try {
+    fs.mkdirSync(path.dirname(path.resolve(opts.manifest)), { recursive: true })
+    fs.writeFileSync(opts.manifest, JSON.stringify({ shard: opts.shard?.index ?? 1, of: opts.shard?.count ?? 1, total: allCount, names: ran }, null, 2))
+  } catch (e) { console.error(`清單寫不出來：${e.message}`); failed = failed || 1 }
+}
+if (opts.shard) console.log(`第 ${opts.shard.index}/${opts.shard.count} 片：跑了 ${ran.length} 個情境（全部共 ${allCount} 個）`)
 console.log(failed ? `冒煙測試失敗：${failed} 個情境有問題` : `冒煙測試通過：${scenarios.length} 個情境`)
 process.exit(failed ? 1 : 0)
