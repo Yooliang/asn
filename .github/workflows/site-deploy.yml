@@ -1,6 +1,6 @@
 # 官網部署（#1947）：site-dryrun＝演練（PR 與 push 都跑，不碰金鑰、不部署）；
 # site-deploy＝真部署＋線上核對（#1947 ④），只在 main 的 push／手動觸發時跑，掛 environment site-deploy 取金鑰；
-# notify＝只在 site-deploy 失敗時到發版紀錄 issue 留言（唯一有 issues: write 的 job）。
+# 失敗不另寫通知（擁有者 11-21：GitHub 上的失敗看 GitHub 日誌）；線上核對與重試保留，是確認部署真的生效。
 name: site-deploy
 
 on:
@@ -117,28 +117,3 @@ jobs:
         run: |
           set -euo pipefail
           rm -f "$RUNNER_TEMP/firebase-sa.json"
-
-  # 只在 site-deploy 失敗時留言：固定中文文字加 run 連結，不貼 log
-  notify:
-    needs: site-deploy
-    if: always() && needs.site-deploy.result == 'failure'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - name: 在發版紀錄 issue 留言
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE: ${{ vars.ASN_RELEASE_ISSUE }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          if ! [[ "${ISSUE:-}" =~ ^[0-9]+$ ]]; then
-            echo "沒有設定 ASN_RELEASE_ISSUE：這次沒有留言。" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          if ! gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "官網部署失敗（部署或線上核對沒過），請看這次 run：$RUN_URL"; then
-            echo "留言到發版紀錄 issue 失敗。" >> "$GITHUB_STEP_SUMMARY"
-          fi

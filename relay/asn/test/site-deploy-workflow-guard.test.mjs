@@ -1,5 +1,5 @@
 // 官網部署 workflow（site-deploy.yml，#1947 ②④）的守門：演練 job 不碰金鑰；真部署 job 只在 main、只有它掛 environment 與用 secret（只經 env:）；
-// 權限最小（只有 notify 有 issues: write）、action 釘 SHA、憑證暫存檔 always() 刪除。
+// 權限最小（全檔只有 contents: read；失敗不另寫通知，擁有者 11-21）、action 釘 SHA、憑證暫存檔 always() 刪除。
 // 風格比照 release-linux-workflow-guard（字串與正則、先剝註解）；每條規則附壞例子，證明會紅。
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -74,19 +74,20 @@ export const checkSite = raw => {
   if (listOf(partOf('pull_request'), 'paths')?.join() !== PATHS.join()) bad.push('pull_request.paths 不是規定的四條')
   if (/^ {4}tags:/m.test(onText)) bad.push('不准 tags 觸發')
   if (topBlock(src, 'permissions')?.map(l => l.trim()).join('|') !== 'contents: read') bad.push('頂層 permissions 只能是 contents: read')
-  const dry = jobBlock(src, 'site-dryrun'), dep = jobBlock(src, 'site-deploy'), nt = jobBlock(src, 'notify')
+  const dry = jobBlock(src, 'site-dryrun'), dep = jobBlock(src, 'site-deploy')
   const jobsText = (topBlock(src, 'jobs') ?? []).join('\n')
-  if (jobNames(src).join() !== 'site-dryrun,site-deploy,notify') bad.push(`job 清單只能是 site-dryrun,site-deploy,notify，現在是 [${jobNames(src).join()}]`)
-  // 權限：只有 notify 可另設，且正好是 contents: read＋issues: write；site-deploy 繼承頂層 contents: read
+  if (jobNames(src).join() !== 'site-dryrun,site-deploy') bad.push(`job 清單只能是 site-dryrun,site-deploy（失敗不另寫通知），現在是 [${jobNames(src).join()}]`)
+  // 權限：job 層一律不另設，全部繼承頂層 contents: read；不准任何 write
   const jobPerms = [...jobsText.matchAll(/^\s+permissions:/gm)].length
-  if (jobPerms !== 1 || !/^ {4}permissions:\n {6}contents: read\n {6}issues: write\n(?! {6})/m.test(nt)) bad.push('job 層 permissions 只有 notify 可設，且只能是 contents: read＋issues: write')
-  if (/write-all/.test(src) || /:\s*write\b/.test(src.replace(nt, ''))) bad.push('不准 notify 以外的 write 權限')
+  if (jobPerms !== 0) bad.push('job 層 permissions 不准另設')
+  if (/write-all/.test(src) || /:\s*write\b/.test(src)) bad.push('不准任何 write 權限')
+  if (/gh issue comment|ASN_RELEASE_ISSUE/.test(src)) bad.push('失敗不另寫通知（擁有者 11-21：看 GitHub 日誌）')
   if (/id-token/.test(src)) bad.push('不准 id-token')
   // secret：只在 site-deploy job 的 env: 底下、只有一處、只准那個名字；不在 run、不在 dryrun／notify
   const allLines = src.split('\n')
   const secretLines = allLines.map((l, i) => ({ l, i })).filter(x => /secrets\./.test(x.l))
   if (secretLines.length !== 1) bad.push(`secrets. 只准出現一次（site-deploy 的 env），現在 ${secretLines.length} 次`)
-  if (/secrets\./.test(dry) || /secrets\./.test(nt)) bad.push('secrets. 不准出現在 site-dryrun 或 notify')
+  if (/secrets\./.test(dry)) bad.push('secrets. 不准出現在 site-dryrun')
   for (const x of secretLines) {
     const ind = x.l.search(/\S/)
     let k = x.i - 1
@@ -103,14 +104,12 @@ export const checkSite = raw => {
   if (!/^ {4}needs: site-dryrun$/m.test(dep)) bad.push('site-deploy 必須 needs: site-dryrun')
   if (!/^ {4}concurrency:\n {6}group: \S+\n {6}cancel-in-progress: false$/m.test(dep)) bad.push('site-deploy 要有 job 層 concurrency 且 cancel-in-progress: false')
   // 真部署只在 site-deploy；演練與 notify 不准 deploy
-  for (const [n, b] of [['site-dryrun', dry], ['notify', nt]]) if (/\bdeploy\b/.test(b) && /firebase/.test(b)) bad.push(`${n} 不准 firebase deploy`)
+  for (const [n, b] of [['site-dryrun', dry]]) if (/\bdeploy\b/.test(b) && /firebase/.test(b)) bad.push(`${n} 不准 firebase deploy`)
   if (!/npx --yes "firebase-tools@\$FB_VER" deploy --only hosting --project asnmessenger --non-interactive/.test(dep)) bad.push('site-deploy 要跑固定版本 firebase-tools 的 deploy --only hosting --project asnmessenger --non-interactive')
   if (!/FIREBASE_TOOLS_VERSION/.test(dep)) bad.push('site-deploy 的 firebase-tools 版本要來自 FIREBASE_TOOLS_VERSION')
   if (!dep.includes('node tools/release/site_verify_online.mjs --site site')) bad.push('site-deploy 要跑 site_verify_online.mjs 線上核對')
   if (!dep.includes('GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/') || !dep.includes('chmod 600')) bad.push('憑證要寫到 RUNNER_TEMP、chmod 600、設 GOOGLE_APPLICATION_CREDENTIALS')
   if (!/- name: [^\n]*\n {8}if: always\(\)\n {8}run: \|\n(?: {10}.*\n)* {10}rm -f "\$RUNNER_TEMP\/firebase-sa\.json"/.test(dep + '\n')) bad.push('site-deploy 要有 if: always() 的刪憑證暫存檔步驟')
-  if (!/^ {4}if: always\(\) && needs\.site-deploy\.result == 'failure'$/m.test(nt) || !/^ {4}needs: site-deploy$/m.test(nt)) bad.push('notify 只能在 site-deploy 失敗時跑')
-  if (/--body-file/.test(nt) || !nt.includes('gh issue comment')) bad.push('notify 要用 gh issue comment 留固定文字，不貼 log')
   const uses = [...src.matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].map(m => m[1])
   if (uses.length < 2) bad.push('uses 命中數太少')
   for (const u of uses) if (!/^[\w.-]+\/[\w.\/-]+@[0-9a-f]{40}$/.test(u)) bad.push(`action 沒鎖到 40 位 commit：${u}`)
@@ -134,7 +133,7 @@ const mutate = (from, to) => { assert.ok(wf.includes(from), `壞例子替換目�
 
 test('前提：真的讀到 job 與 run 區塊、uses 至少 2 個', () => {
   assert.ok(wf.length > 1500)
-  assert.deepEqual(jobNames(strip(wf)), ['site-dryrun', 'site-deploy', 'notify'])
+  assert.deepEqual(jobNames(strip(wf)), ['site-dryrun', 'site-deploy'])
   assert.ok(jobBlock(strip(wf), 'site-deploy').includes('environment: site-deploy'))
   assert.ok(runBlocks(strip(wf)).length >= 2)
   assert.ok([...strip(wf).matchAll(/^\s*-?\s*uses:\s*(\S+)/gm)].length >= 2)
@@ -155,8 +154,9 @@ test('1 觸發：只有 main 的 push、pull_request、workflow_dispatch；paths
 test('2 權限只有頂層 contents: read；壞例子會紅', () => {
   assert.ok(flagged(mutate('permissions:\n  contents: read', 'permissions:\n  contents: write'), /頂層 permissions|write/))
   assert.ok(flagged(mutate('    timeout-minutes: 15\n', '    timeout-minutes: 15\n    permissions:\n      contents: read\n'), /job 層 permissions/))
-  assert.ok(flagged(mutate('      issues: write', '      issues: write\n      contents: write'), /job 層 permissions|write/))
-  assert.ok(flagged(mutate('    timeout-minutes: 30\n    environment', '    timeout-minutes: 30\n    permissions:\n      issues: write\n    environment'), /job 層 permissions/))
+  assert.ok(flagged(mutate('    timeout-minutes: 30\n    environment', '    timeout-minutes: 30\n    permissions:\n      issues: write\n    environment'), /job 層 permissions|write/))
+  // 擁有者 11-21：GitHub 上的失敗看 GitHub 日誌，不另寫失敗通知
+  assert.ok(flagged(wf + '\n  notify:\n    needs: site-deploy\n    runs-on: ubuntu-latest\n    steps:\n      - name: 留言\n        run: gh issue comment 1 --body x\n', /job 清單|失敗不另寫通知/))
   assert.ok(flagged(mutate('permissions:\n  contents: read', 'permissions:\n  contents: read\n  id-token: write'), /頂層 permissions|write/))
 })
 
@@ -171,7 +171,7 @@ test('4 secret／environment／真部署只在 site-deploy：壞例子會紅，�
   // secret 寫進 dryrun 的 env、寫進 run、多一處、inherit
   assert.ok(flagged(mutate(dryRun, '        env:\n          X: ${{ secrets.X }}\n' + dryRun), /secrets\./))
   assert.ok(flagged(mutate('printf \'%s\' "$SA_JSON"', 'printf \'%s\' "${{ secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER }}"'), /secret 只能寫在|secrets\.|run 區塊裡不准有/))
-  assert.ok(flagged(mutate('          GH_TOKEN: ${{ github.token }}', '          GH_TOKEN: ${{ github.token }}\n          X: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER }}'), /secrets\./))
+  assert.ok(flagged(mutate('          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER }}', '          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER }}\n          X: ${{ secrets.OTHER }}'), /secrets\./))
   assert.ok(flagged(`${wf}\n    secrets: inherit\n`, /inherit/))
   // environment 掛到 dryrun、從 site-deploy 拿掉、值改掉
   assert.ok(flagged(mutate('    timeout-minutes: 15\n', '    timeout-minutes: 15\n    environment: site-deploy\n'), /environment/))
