@@ -20,8 +20,8 @@ const phoneNames = MOBILE_SETTING_KEYS.flatMap(k => SKINS.map(sk => `m-set-${k}-
 const phone360 = PHONE_360.map(k => `m-set-${k}-360`)
 const stateNames = STATE_CATS.flatMap(c => STATES.filter(st => !(`${c}:${st}` in SET_STATE_GAPS)).flatMap(st => [`list-set-${c}-${st}`, `m-set-${c}-${st}`]))
 
-test('分類來源：電腦 13 類、手機 8 類、手機的類都在電腦那份裡（來源改了這支要跟著看）', () => {
-  assert.equal(SETTING_CATS.length, 13)
+test('分類來源：電腦 12 類、手機 8 類、手機的類都在電腦那份裡（來源改了這支要跟著看）', () => {
+  assert.equal(SETTING_CATS.length, 12)
   assert.equal(MOBILE_SETTING_KEYS.length, 8)
   for (const k of MOBILE_SETTING_KEYS) assert.ok(SETTING_CATS.some(c => c.key === k), `手機的 ${k} 電腦那份沒有`)
   for (const k of PHONE_360) assert.ok(MOBILE_SETTING_KEYS.includes(k), `${k} 不是手機的設定類`)
@@ -29,7 +29,7 @@ test('分類來源：電腦 13 類、手機 8 類、手機的類都在電腦那�
 })
 
 test('覆蓋清單：每一類 × 三套外觀（電腦 900、手機 412）、手機四類再加 360，都在 SCENARIOS 裡', () => {
-  assert.equal(deskNames.length, 39)
+  assert.equal(deskNames.length, 36)
   assert.equal(phoneNames.length, 24)
   assert.equal(phone360.length, 4)
   const missing = [...deskNames, ...phoneNames, ...phone360].filter(n => !byName.has(n))

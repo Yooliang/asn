@@ -44,24 +44,23 @@ test('切到 LINE 再切回：使用者存的頭像模式、文字底色不變�
   assert.doesNotMatch(read('ui/list.html'), /:dp-mode="ui\.dpMode"/)
 })
 
-test('設定頁摘要：LINE 外觀寫實際生效的頭像與底色，其他外觀照使用者的值', () => {
-  const base = { frame: 'custom', mode: 'merged', toolbar: 'top', dpMode: 'left', bubble: 'none' }
+test('設定頁摘要（#1547）：LINE 外觀不列被藏起來的頭像、底色、分頁依；有作用的工具列與分組依照列', () => {
+  const base = { frame: 'custom', mode: 'merged', toolbar: 'top', dpMode: 'left', bubble: 'none', tabDim: 'device', groupDim: 'status' }
   const line = catSummary('look', { ...base, skin: 'line' }), modern = catSummary('look', { ...base, skin: 'modern' })
-  assert.match(line, /^LINE 風格/); assert.match(line, /頭像.*(旁|內)/); assert.doesNotMatch(line, /頭像左/)
-  assert.match(modern, /^現代/); assert.match(modern, /頭像左/)
+  assert.match(line, /^LINE 風格/); assert.doesNotMatch(line, /頭像|底色|分頁依/); assert.match(line, /工具列輸入框上方/); assert.match(line, /分組依活躍度/)
+  assert.match(modern, /^現代/); assert.match(modern, /頭像左/); assert.doesNotMatch(modern, /工具列/)
 })
 
-test('設定頁：LINE 外觀下頭像模式與文字底色停用並附說明，其他外觀不停用', () => {
+test('設定頁（#1547）：被當前外觀用不到的選項整個藏起來，不再變灰加說明；選單顯示存檔的原值', () => {
   const panel = read('ui/lib/settings-panel.mjs')
-  assert.equal((panel.match(/:disabled="st\.skin === 'line'"/g) || []).length, 2)
-  assert.equal((panel.match(/<small class="set-note" id="set-note-(dp|bubble)" v-if="st\.skin === 'line'">/g) || []).length, 2)
-  assert.match(panel, /LINE 風格固定頭像在訊息旁/)
-  // 停用時選單顯示「實際生效的值」（頭像在訊息旁、底色自動），不是使用者存的值；存檔的值不動，切回其他外觀仍顯示原值
-  assert.match(panel, /:value="effectiveLook\(st\.skin, st\)\.dpMode"/); assert.match(panel, /:value="effectiveLook\(st\.skin, st\)\.bubble"/)
+  assert.doesNotMatch(panel, /:disabled="st\.skin === '(line|modern)'"/, '不再用變灰')
+  assert.doesNotMatch(panel, /set-note-(dp|bubble|toolbar)/, '不再有變灰的說明')
+  for (const [label, key] of [['頭像模式', 'dpMode'], ['工具列位置', 'toolbar'], ['文字底色', 'bubble'], ['分頁依', 'tabDim']]) assert.ok(panel.includes(`<label v-if="lookShows(st.skin, '${key}')">${label}
+`), `${label} 依外觀藏起來`)
+  assert.match(panel, /:value="st\.dpMode"/); assert.match(panel, /:value="st\.bubble"/)
   const st = { skin: 'line', dpMode: 'left', bubble: 'none' }
-  assert.deepEqual([effectiveLook(st.skin, st).dpMode, effectiveLook(st.skin, st).bubble], ['inline', 'auto'])
+  assert.deepEqual([effectiveLook(st.skin, st).dpMode, effectiveLook(st.skin, st).bubble], ['inline', 'auto'], '對話畫面仍用 effectiveLook 的有效值')
   assert.deepEqual(st, { skin: 'line', dpMode: 'left', bubble: 'none' }, '快照沒被改')
-  for (const k of ['modern', 'aero']) assert.deepEqual([effectiveLook(k, { ...st, skin: k }).dpMode, effectiveLook(k, { ...st, skin: k }).bubble], ['left', 'none'], `切回${k}仍顯示原值`)
 })
 
 test('skin-boot.js：認得 line，壞值回復古 Aero（在假的視窗裡真的跑一次）', () => {
@@ -111,34 +110,4 @@ test('LINE 情境：電腦清單、一對一、群組、設定；手機清單、
   assert.equal(lookMe.dpMode, 'left'); assert.equal(lookMe.bubble, 'none'); assert.equal(lookMe.session.panel.setting, 'look')
   const groupMsgs = tableFor(sc.find(s => s.name === 'list-line-group')).relay_room_read.messages
   assert.ok(groupMsgs.some(m => m.relation === 'mine') && groupMsgs.some(m => m.relation === 'system'))
-})
-
-test('設定頁：LINE 下停用的選單，說明另放帶 id 的元素、select 用 aria-describedby 指過去，不包在 label 裡（螢幕閱讀器不會把說明念成標籤）', () => {
-  const panel = read('ui/lib/settings-panel.mjs')
-  for (const [label, id] of [['頭像模式', 'set-note-dp'], ['文字底色', 'set-note-bubble']]) {
-    const i = panel.indexOf(`<label>${label}\n`)
-    assert.ok(i > 0, `找不到 ${label} 那一列`)
-    const end = panel.indexOf('</label>', i)
-    const inside = panel.slice(i, end)
-    assert.doesNotMatch(inside, /<small class="set-note"/, `${label}：說明不該在 label 裡`)
-    assert.match(inside, new RegExp(String.raw`:aria-describedby="st\.skin === 'line' \? '${id}' : null"`), `${label}：select 要指向說明（只在 LINE 才有，其他外觀不多屬性）`)
-    assert.match(panel.slice(end, end + 260), new RegExp(String.raw`<small class="set-note" id="${id}" v-if="st\.skin === 'line'">`), `${label}：說明在 label 後面、帶 id、只在 LINE 出現`)
-  }
-})
-
-// 現代外觀的輸入區是一顆膠囊，工具收在「＋」裡、沒有獨立的工具列：「工具列位置」選了也沒作用，所以停用並說明（和 LINE 鎖頭像、底色同一種寫法）
-test('設定頁：現代外觀下工具列位置停用並附說明（說明帶 id、select 指過去、不包在 label 裡），其他外觀不停用', () => {
-  const panel = read('ui/lib/settings-panel.mjs')
-  const i = panel.indexOf('<label>工具列位置\n')
-  assert.ok(i > 0, '找不到工具列位置那一列')
-  const end = panel.indexOf('</label>', i)
-  const inside = panel.slice(i, end)
-  assert.match(inside, /:disabled="st\.skin === 'modern'"/, '只在現代外觀停用')
-  assert.doesNotMatch(inside, /<small class="set-note"/, '說明不該在 label 裡')
-  assert.match(inside, /:aria-describedby="st\.skin === 'modern' \? 'set-note-toolbar' : null"/, 'select 指向說明（只在現代才有）')
-  const note = panel.slice(end, end + 300)
-  assert.match(note, /<small class="set-note" id="set-note-toolbar" v-if="st\.skin === 'modern'">/, '說明在 label 後面、帶 id、只在現代出現')
-  assert.match(note, /現代外觀的工具收在輸入框的「＋」裡，這裡先不能改；換回其他外觀就能再調/)
-  // LINE 的工具列位置有作用（#1790），不能跟著停用
-  assert.doesNotMatch(inside, /st\.skin === 'line'/)
 })

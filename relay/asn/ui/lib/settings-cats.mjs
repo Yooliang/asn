@@ -3,7 +3,7 @@
 import { FRAME_LABEL, CLOSE_LABEL, notifySummary } from './prefs.mjs'
 import { MODE_LABEL, DP_LABEL, TOOLBAR_LABEL, BUBBLE_LABEL } from './merge.mjs'
 import { DIMS } from './dims.mjs'
-import { SKIN_SHORT, effectiveLook } from './skin.mjs'
+import { SKIN_SHORT } from './skin.mjs'
 import { deviceSummary } from './device-tree.mjs'
 import { AUTO_LABEL, STT_LANG_LABEL } from './voice-prefs.mjs'
 
@@ -15,7 +15,6 @@ export const SETTING_CATS = [
   // 雲端代理自己一類，跟手機設定列表同一個位置（原本放在「設備」頁的清單底下）
   { key: 'cloud', title: '雲端代理', icon: 'M7 18a4 4 0 1 1 1-7.9A5.5 5.5 0 0 1 18.5 11 3.5 3.5 0 0 1 18 18z' },
   { key: 'look', title: '外觀', icon: 'M12 3a9 9 0 1 0 0 18c1.5 0 2-1 1.5-2s0-2 1.5-2h2a3 3 0 0 0 3-3c0-5-4-11-8-11z' },
-  { key: 'tabs', title: '分頁與分組', icon: 'M3 6h7l2 2h9v11H3z' },
   { key: 'notify', title: '提醒與聲音', icon: 'M6 9a6 6 0 0 1 12 0c0 6 2 7 2 7H4s2-1 2-7zM10 19a2 2 0 0 0 4 0' },
   { key: 'voice', title: '語音', icon: 'M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4' },
   { key: 'window', title: '視窗與系統匣', icon: 'M3 5h18v14H3zM3 9h18' },
@@ -30,6 +29,14 @@ export const SETTING_KEYS = SETTING_CATS.map(c => c.key)
 const CAT_ALIAS = {}
 export const normalizeCatKey = key => CAT_ALIAS[key] ?? key
 export const catByKey = key => { const k = normalizeCatKey(key); return SETTING_CATS.find(c => c.key === k) ?? null }
+
+// 「外觀」分類裡的選項，照畫面上的順序（#1547：原「分頁與分組」的分頁依、分組依併進來）。
+// 用不到的選項依所選外觀整個藏起來（不是變灰）：現代沒有獨立工具列；LINE 固定頭像與底色、沒有左側頁籤欄。
+// 藏起來只是不顯示，存檔裡的值原封不動（只讀不寫），換回別的外觀還是原來的設定。
+export const LOOK_OPTIONS = ['skin', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim', 'ghRefs']
+export const LOOK_HIDDEN_BY_SKIN = Object.freeze({ modern: ['toolbar'], line: ['dpMode', 'bubble', 'tabDim'] })
+export const lookShows = (skin, key) => !(LOOK_HIDDEN_BY_SKIN[skin] ?? []).includes(key)
+export const lookOptions = skin => LOOK_OPTIONS.filter(k => lookShows(skin, k))
 
 const onOff = v => (v ? '開' : '關')
 const dimLabel = k => DIMS.find(d => d.key === k)?.label ?? ''
@@ -54,12 +61,13 @@ export function catSummary(key, s = {}) {
     case 'cloud':
       return '讓雲端 AI 代理加入好友名單'
     case 'look': {
-      // LINE 風格固定頭像與底色：摘要寫實際生效的，不列使用者另外存的值
-      const eff = effectiveLook(s.skin, { dpMode: s.dpMode, bubble: s.bubble })
-      return join([SKIN_SHORT[s.skin] ?? SKIN_SHORT.aero, FRAME_LABEL[s.frame] ?? FRAME_LABEL.custom, MODE_LABEL[s.mode], `頭像${DP_LABEL[eff.dpMode] ?? ''}`, `工具列${TOOLBAR_LABEL[s.toolbar] ?? ''}`, `底色${BUBBLE_LABEL[eff.bubble] ?? ''}`])
+      // 摘要只列畫面上看得到的選項；被當前外觀藏起來的不顯示原值（#1547）
+      const sk = s.skin
+      const show = k => lookShows(sk, k)
+      return join([SKIN_SHORT[sk] ?? SKIN_SHORT.aero, FRAME_LABEL[s.frame] ?? FRAME_LABEL.custom, MODE_LABEL[s.mode],
+        show('dpMode') && `頭像${DP_LABEL[s.dpMode] ?? ''}`, show('toolbar') && `工具列${TOOLBAR_LABEL[s.toolbar] ?? ''}`, show('bubble') && `底色${BUBBLE_LABEL[s.bubble] ?? ''}`,
+        show('tabDim') && `分頁依${dimLabel(s.tabDim)}`, show('groupDim') && `分組依${dimLabel(s.groupDim)}`])
     }
-    case 'tabs':
-      return `分頁依${dimLabel(s.tabDim)}、分組依${dimLabel(s.groupDim)}`
     case 'notify':
       return notifySummary(s.notify)
     case 'voice': {

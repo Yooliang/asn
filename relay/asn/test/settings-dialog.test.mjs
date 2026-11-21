@@ -11,9 +11,9 @@ import { closesDialog } from '../ui/lib/dialog.mjs'
 
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('分類：十三類（設備與帳號拆成設備、帳號；雲端代理自己一類，跟手機一樣）、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
-  assert.deepEqual(SETTING_KEYS, ['me', 'devices', 'accounts', 'cloud', 'look', 'tabs', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
-  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備', '帳號', '雲端代理', '外觀', '分頁與分組', '提醒與聲音', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
+test('分類：十二類（設備與帳號拆成設備、帳號；雲端代理自己一類，跟手機一樣）、順序與鍵固定、標題與圖示都有、鍵不重複', () => {
+  assert.deepEqual(SETTING_KEYS, ['me', 'devices', 'accounts', 'cloud', 'look', 'notify', 'voice', 'window', 'launch', 'usage', 'update', 'about'])
+  assert.deepEqual(SETTING_CATS.map(c => c.title), ['個人', '設備', '帳號', '雲端代理', '外觀', '提醒與聲音', '語音', '視窗與系統匣', '啟動設定', '用量', '更新', '關於'])
   assert.equal(new Set(SETTING_KEYS).size, SETTING_CATS.length)
   for (const c of SETTING_CATS) assert.ok(/^M[0-9A-Za-z .,-]+$/.test(c.icon), `${c.key} 圖示`)
   assert.equal(catByKey('voice').title, '語音')
@@ -37,9 +37,9 @@ test('摘要：照目前的值顯示', () => {
   assert.equal(catSummary('accounts', { accountCount: 0 }), '還沒有加入過帳號')
   assert.equal(catSummary('devices', { devices: [{ online: true }], accountCount: 2, accountCurrent: 'a@x.test' }), '1 台設備，1 台在線')
   assert.equal(catSummary('accounts', { devices: [{ online: true }], accountCount: 2, accountCurrent: 'a@x.test' }), '2 個 Claude 帳號，使用中：a@x.test')
-  const look = catSummary('look', { frame: 'native', mode: 'merged', dpMode: 'side', toolbar: 'top', bubble: 'bubble' })
+  const look = catSummary('look', { frame: 'native', mode: 'merged', dpMode: 'side', toolbar: 'top', bubble: 'bubble', tabDim: 'device', groupDim: 'status' })
   assert.ok(look.includes('Windows 原生'), look)
-  assert.equal(catSummary('tabs', { tabDim: 'device', groupDim: 'status' }), '分頁依設備、分組依活躍度')
+  assert.ok(look.includes('分頁依設備、分組依活躍度'), look)   // #1547：分頁依、分組依併進外觀的摘要
   assert.equal(catSummary('notify', { notify: { toast: true, msg: true, nudge: false, file: false } }), '右下角通知、通知聲音')
   assert.equal(catSummary('notify', { notify: { toast: false, msg: false, nudge: false, file: false } }), '全部關閉')
   assert.equal(catSummary('voice', { voiceEnabled: false }), '念出訊息尚未啟用')
@@ -100,8 +100,7 @@ test('設定表單：每一類都轉得出來，各類原本的項目都在', as
     accounts: ['現在讀不到帳號列表'],
     // 雲端代理：自己一類（跟手機一樣），邀請鈕在這裡
     cloud: ['雲端代理', '邀請雲端代理'],
-    look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色'],
-    tabs: ['分頁依', '分組依'],
+    look: ['視窗外框', '視窗模式', '頭像模式', '工具列位置', '文字底色', '分頁依', '分組依'],
     notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],
     voice: ['念出訊息的聲音', '收到新訊息自動念', '語音輸入的語言', '語音辨識模型', '下載語音辨識', '曉曉', '尚未安裝'],
     window: ['關閉視窗時', '登入時自動啟動 ASN'],

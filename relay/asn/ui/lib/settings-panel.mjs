@@ -11,13 +11,13 @@ import { NAME_MAX, deviceNameError, joinKnown, shortFp } from './device-known.mj
 import { FpQrCanvas, QR_TEXT } from './fp-qr.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
-import { SKINS, SKIN_LABEL, effectiveLook } from './skin.mjs'
+import { SKINS, SKIN_LABEL } from './skin.mjs'
 import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from './prefs.mjs'
 import { DIMS, groupOptions } from './dims.mjs'
 import { LoginPanel, LogoutPanel } from './login-panel.mjs'
 import { CloudInvitePanel } from './cloud-invite.mjs'
 import { accountLine, INCOMPLETE_LABEL, INCOMPLETE_REASON, loginIncomplete, usableAtText } from './claude-accounts.mjs'
-import { catByKey, normalizeCatKey } from './settings-cats.mjs'
+import { catByKey, lookShows, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { aboutView } from './about-info.mjs'
@@ -184,7 +184,7 @@ export const SettingsPanel = {
       fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
-      MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, effectiveLook, GH_REFS_LABEL, GH_REFS_NOTE,
+      MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, lookShows, GH_REFS_LABEL, GH_REFS_NOTE,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
     }
   },
@@ -648,26 +648,29 @@ export const SettingsPanel = {
             <span class="chk"><input type="radio" name="skin" :value="k" :checked="(st.skin || 'aero') === k" @change="act('skin', k)" /><span>{{ SKIN_LABEL[k] }}</span></span>
           </label>
         </fieldset>
-        <label class="chk"><input type="checkbox" :checked="st.ghRefs === true" @change="act('gh-refs', $event.target.checked)" :aria-label="GH_REFS_LABEL" /><span>{{ GH_REFS_LABEL }}</span></label>
-        <small class="set-note">{{ GH_REFS_NOTE }}</small>
         <label>視窗外框
           <select class="set-sel" :value="st.frame" @change="act('frame', $event.target.value)" aria-label="視窗外框"><option v-for="f in FRAMES" :key="f" :value="f">{{ FRAME_LABEL[f] }}</option></select>
         </label>
         <label>視窗模式
           <select class="set-sel" :value="st.mode" @change="act('mode', $event.target.value)" aria-label="視窗模式"><option v-for="m in MODES" :key="m" :value="m">{{ MODE_LABEL[m] }}</option></select>
         </label>
-        <label>頭像模式
-          <select class="set-sel" :value="effectiveLook(st.skin, st).dpMode" :disabled="st.skin === 'line'" @change="act('dpMode', $event.target.value)" aria-label="頭像模式" :aria-describedby="st.skin === 'line' ? 'set-note-dp' : null"><option v-for="m in DP_MODES" :key="m" :value="m">{{ DP_LABEL[m] }}</option></select>
+        <label v-if="lookShows(st.skin, 'dpMode')">頭像模式
+          <select class="set-sel" :value="st.dpMode" @change="act('dpMode', $event.target.value)" aria-label="頭像模式"><option v-for="m in DP_MODES" :key="m" :value="m">{{ DP_LABEL[m] }}</option></select>
         </label>
-        <small class="set-note" id="set-note-dp" v-if="st.skin === 'line'">LINE 風格固定頭像在訊息旁，這裡先不能改；換回其他外觀就能再調，原本的選擇還在。</small>
-        <label>工具列位置
-          <select class="set-sel" :value="st.toolbar" :disabled="st.skin === 'modern'" @change="act('toolbar', $event.target.value)" aria-label="工具列位置" :aria-describedby="st.skin === 'modern' ? 'set-note-toolbar' : null"><option v-for="b in TOOLBARS" :key="b" :value="b">{{ TOOLBAR_LABEL[b] }}</option></select>
+        <label v-if="lookShows(st.skin, 'toolbar')">工具列位置
+          <select class="set-sel" :value="st.toolbar" @change="act('toolbar', $event.target.value)" aria-label="工具列位置"><option v-for="b in TOOLBARS" :key="b" :value="b">{{ TOOLBAR_LABEL[b] }}</option></select>
         </label>
-        <small class="set-note" id="set-note-toolbar" v-if="st.skin === 'modern'">現代外觀的工具收在輸入框的「＋」裡，這裡先不能改；換回其他外觀就能再調，原本的選擇還在。</small>
-        <label>文字底色
-          <select class="set-sel" :value="effectiveLook(st.skin, st).bubble" :disabled="st.skin === 'line'" @change="act('bubble', $event.target.value)" aria-label="文字底色" :aria-describedby="st.skin === 'line' ? 'set-note-bubble' : null"><option v-for="b in BUBBLES" :key="b" :value="b">{{ BUBBLE_LABEL[b] }}</option></select>
+        <label v-if="lookShows(st.skin, 'bubble')">文字底色
+          <select class="set-sel" :value="st.bubble" @change="act('bubble', $event.target.value)" aria-label="文字底色"><option v-for="b in BUBBLES" :key="b" :value="b">{{ BUBBLE_LABEL[b] }}</option></select>
         </label>
-        <small class="set-note" id="set-note-bubble" v-if="st.skin === 'line'">LINE 風格的訊息底色固定（對方白色、自己綠色），換回其他外觀就能再調。</small>
+        <label v-if="lookShows(st.skin, 'tabDim')">分頁依
+          <select class="set-sel" :value="st.tabDim" @change="act('tabDim', $event.target.value)" aria-label="分頁依"><option v-for="d in DIMS" :key="d.key" :value="d.key">{{ d.label }}</option></select>
+        </label>
+        <label>分組依
+          <select class="set-sel" :value="st.groupDim" @change="act('groupDim', $event.target.value)" aria-label="分組依"><option v-for="d in groupOptions(st.tabDim)" :key="d.key" :value="d.key">{{ d.label }}</option></select>
+        </label>
+        <label class="chk"><input type="checkbox" :checked="st.ghRefs === true" @change="act('gh-refs', $event.target.checked)" :aria-label="GH_REFS_LABEL" /><span>{{ GH_REFS_LABEL }}</span></label>
+        <small class="set-note">{{ GH_REFS_NOTE }}</small>
       </template>
       <template v-if="catKey === 'window'">
         <label>關閉視窗時
@@ -744,14 +747,6 @@ export const SettingsPanel = {
             <ul><li v-for="(l, i) in e.lines" :key="i">{{ l }}</li></ul>
           </article>
         </section>
-      </template>
-      <template v-if="catKey === 'tabs'">
-        <label>分頁依
-          <select class="set-sel" :value="st.tabDim" @change="act('tabDim', $event.target.value)" aria-label="分頁依"><option v-for="d in DIMS" :key="d.key" :value="d.key">{{ d.label }}</option></select>
-        </label>
-        <label>分組依
-          <select class="set-sel" :value="st.groupDim" @change="act('groupDim', $event.target.value)" aria-label="分組依"><option v-for="d in groupOptions(st.tabDim)" :key="d.key" :value="d.key">{{ d.label }}</option></select>
-        </label>
       </template>
       <template v-if="catKey === 'launch'">
         <div class="launch-set">
