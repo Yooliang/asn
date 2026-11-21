@@ -300,3 +300,15 @@ test('版號格式錯：compareVersions 丟錯；decide 略過那一筆並記在
   assert.match(d.notes[0], /abc/)
   assert.deepEqual(decide({ runs: [run('desktop', 'abc')], state: seededState(), now: T0 }).action, 'wait')
 })
+
+test('#4562 seeded:true 但 done 看不到起點（手改、寫到一半）→ 當成沒播種，不從最舊的綠燈重發', () => {
+  const st = { ...emptyState(), seeded: true }
+  const runs = [run('desktop', '0.2.40'), run('desktop', '0.2.45')]
+  const d = decide({ runs, state: st, now: T0 })
+  assert.equal(d.action, 'report')
+  assert.equal(d.result, 'unseeded')
+  assert.equal(decide({ runs, state: d.state, now: T0 }).action, 'wait', '只報一次')
+  // 只有一個平台有起點也不算
+  const half = { ...emptyState(), seeded: true, done: { 'desktop@0.2.44': { result: 'seeded', at: 'x', runId: null } } }
+  assert.equal(decide({ runs, state: half, now: T0 }).action, 'report')
+})

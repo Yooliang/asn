@@ -129,7 +129,10 @@ function decideInner({ runs = [], state, now }, notes) {
   const st = clone(state)
   const t = ms(now)
 
-  if (!st.seeded) {
+  // 播種要「看得到起點」才算數：seeded:true 但某平台在 done 裡沒有 seeded 紀錄（手改過、寫到一半），當成沒播種，
+  // 否則會從最舊的綠燈 run 開始重發舊版（調查員 #4562 實測會發 desktop@0.2.40）
+  const seedVisible = PLATFORMS.every(p => Object.entries(st.done).some(([k, v]) => k.startsWith(`${p}@`) && v?.result === 'seeded'))
+  if (!st.seeded || !seedVisible) {
     if (st.seedNoticed) return wait(st, '尚未播種')
     st.seedNoticed = true
     return { action: 'report', key: null, result: 'unseeded', state: st,
