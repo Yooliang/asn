@@ -1,15 +1,11 @@
 {
-  "version": "0.2.45",
-  "notes": "- 修正（只有電腦版）：終端服務在視窗很多、行程很深時不再因為反覆往上找父行程而當掉（內建的 WezTerm 換成修過的版本）。（#1318、#1896）",
-  "pub_date": "2026-11-21T02:13:46.180Z",
+  "version": "0.2.46",
+  "notes": "- 修正（只有電腦版）：開著很多視窗、行程進出頻繁時，終端服務不會再把某個視窗誤認成別的程式底下，畫面與視窗清單更準（內建的 WezTerm 換成修過的版本）。（#1914、#2026）",
+  "pub_date": "2026-11-21T07:00:40.852Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9FTEhpTGgvR3Y0dGVuTmV6cVdIQVhDNkFSanY5UDVwZXpmVXh0dVpJOUNrMjdabzBDUFNibHplZlFuUzBhQXgxVnBCa2dBcCsraHlsTW80R2p4M0FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjI3MjI1CWZpbGU6QVNOXzAuMi40NV94NjQtc2V0dXAuZXhlCjk1VlVuYzllb1dkcS82anFST2xTZXJuWUx1WDJvZzNtaVE1MDVmM1gvVWZGYUpzQng2NFF3OTZsT0ZjSHlmNWNVTUR2SzJNMC9uZ2lobzRzVWkwZ0NnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.45_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndoRXpNU2NVVXJhQmo1eDM2ci9lVWNnVFNhK2ZQMHhaUnkxT2ZCR3RiWllYM1ZOL1R4RjBPdGx5NXVhWTNHQVkxRVc3TmVQcWMzV2VrbE9WdkZkd3dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjI3ODIyCWZpbGU6QVNOXzAuMi40NV9hbWQ2NC5BcHBJbWFnZQpaZFFUeHhMQVRUKzVqNGZmOWsyOW5KUXZRVnJBNGRySUlTREpTMzJudDRRUTdtZnM1OW1WUEkyYkx5MFFFNEQ5b3EweFc0MU0vdHIzR0VDZHBWcVJBdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.45_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitIbFV5KzlJMTUydmEzdm5QaWJ6V25yMWpFendVR3JyQmd1VHZVOEFndUlHK1c1c2JUbWJKZWc0Vm9Hejczc0hVS0NrWGI0WVVZY08zN0tzM0tNOHdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjQ0NDQwCWZpbGU6QVNOXzAuMi40Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQ2CkU3SHMwTHBTU3hHeEwrWHZ5OTRkdFdpay9iZUc4c1FXQTR6S3U1UjhMRjhJci84WWV2eFZlMXJuSG9KNmZQK0dYOXRIaW1Eb2R0OW5JQmdDMnZxbEFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.46_x64-setup.exe"
     }
   }
 }
