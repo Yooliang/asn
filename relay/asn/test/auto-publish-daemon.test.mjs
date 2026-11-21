@@ -1,10 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { runOnce, toRuns, parseArgs, checkWorktree, checkStartup, runCommand, realDeps, acquireLock, WORKFLOWS, REQUIRED_DEPS, BLOCKED_NOTICE_MS, GH_FAIL_NOTICE_MS } from '../../../tools/release/auto_publish.mjs'
+import { runOnce, toRuns, parseArgs, checkWorktree, checkStartup, runCommand, realDeps, resolveStatePath, REPO_ROOT, acquireLock, WORKFLOWS, REQUIRED_DEPS, BLOCKED_NOTICE_MS, GH_FAIL_NOTICE_MS } from '../../../tools/release/auto_publish.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
+const REPO = path.resolve('/repo')
+const inRepo = (p) => path.join(REPO, p)
 const STATE = '/w/state.json'
 const LOCK = `${STATE}.lock`
 const SECRET = '子程序原文-不可貼群組-ABC123'
@@ -17,13 +20,13 @@ const seededState = (extra = {}) => ({ v: 1, done: { 'desktop@0.2.44': { result:
 
 // 假環境：檔案、gh、git、子程序、asn-cli 全是假的
 function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver = {}, spawnStatus = 0, ghStatus = 0, noDeps = false, noState = false, online = '0.2.43' } = {}) {
-  const fsMap = new Map(Object.entries(files))
+  const fsMap = new Map(Object.entries(files).map(([k, v]) => [path.isAbsolute(k) ? k : inRepo(k), v]))
   if (!noState && !fsMap.has(STATE)) fsMap.set(STATE, JSON.stringify(seededState()))
   const clock = { t: T0 }
-  if (!noDeps) for (const p of REQUIRED_DEPS) fsMap.set(p, 'x')
+  if (!noDeps) for (const p of REQUIRED_DEPS) fsMap.set(inRepo(p), 'x')
   const calls = { gh: [], git: [], spawn: [], posts: [], fetch: [], logs: [], unlinks: [], ops: [] }
   const deps = {
-    pid: 4242, now: () => clock.t,
+    pid: 4242, repoRoot: REPO, now: () => clock.t,
     gh: (args) => {
       calls.gh.push(args)
       if (ghStatus) return { status: ghStatus, stdout: '', stderr: 'boom' }
@@ -36,7 +39,7 @@ function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver
       for (const [pat, fn] of Object.entries(gitOver)) if (k.startsWith(pat)) return fn(k)
       return { status: 0, stdout: '', stderr: '' }
     },
-    spawn: (bin, args) => { calls.spawn.push([bin, args]); return { status: spawnStatus, stdout: SECRET, stderr: SECRET } },
+    spawn: (bin, args, o) => { calls.spawn.push([bin, args, o]); return { status: spawnStatus, stdout: SECRET, stderr: SECRET } },
     asnCli: (args) => { calls.posts.push(args[args.indexOf('--body') + 1]); return { status: 0, stdout: '', stderr: '' } },
     exists: (p) => fsMap.has(p),
     readFile: (p) => { if (!fsMap.has(p)) throw Object.assign(new Error('no'), { code: 'ENOENT' }); return fsMap.get(p) },
@@ -589,4 +592,44 @@ test('finally 還鎖：取鎖後鎖被換成別人的，不能刪別人的鎖；
   const e2 = env({ desktopRows: [row('v0.2.45')] })
   await runOnce(opts, e2.deps)
   assert.equal(e2.fsMap.has(LOCK), false)
+})
+
+test('#2003c 從別的 cwd 呼叫：spawn 帶 cwd=repoRoot、腳本路徑與相依檢查都以 repoRoot 為基準', async () => {
+  const e = env({ desktopRows: [row('v0.2.45', 111)] })
+  const elsewhere = path.resolve('/某個別的啟動目錄')
+  assert.notEqual(elsewhere, REPO)
+  const checked = []
+  const ex = e.deps.exists
+  e.deps.exists = (p) => { checked.push(p); return ex(p) }
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'dryRun')
+  const [bin, args, o] = e.calls.spawn[0]
+  assert.equal(bin, 'node')
+  assert.deepEqual(o, { cwd: REPO }, 'spawn 一定要帶 cwd: repoRoot')
+  assert.equal(args[0], path.join(REPO, 'tools', 'release', 'local_sign_publish.mjs'))
+  assert.ok(path.isAbsolute(args[0]), '腳本路徑是絕對路徑')
+  for (const p of REQUIRED_DEPS) assert.ok(checked.includes(inRepo(p)), `相依檢查以 repoRoot 為基準：${p}`)
+  assert.ok(!checked.some((p) => REQUIRED_DEPS.includes(p)), '不准用相對路徑檢查相依')
+})
+
+test('#2003c resolveStatePath：相對路徑以啟動目錄解析並留說明；絕對路徑不動；realDeps 預設 repoRoot 取自腳本位置', () => {
+  const cwd = path.resolve('/launch')
+  const a = resolveStatePath('s/state.json', cwd)
+  assert.equal(a.state, path.resolve(cwd, 's/state.json'))
+  assert.ok(a.note.includes(a.state) && a.note.includes('相對路徑'))
+  const abs = path.resolve('/x/state.json')
+  assert.deepEqual(resolveStatePath(abs, cwd), { state: abs, note: null })
+  assert.equal(REPO_ROOT, path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'))
+  assert.equal(realDeps({ state: abs }).repoRoot, REPO_ROOT)
+})
+
+test('#2003c 運行手冊存在、涵蓋關鍵字，且手冊裡每個 --參數 parseArgs 都認得', () => {
+  const doc = fs.readFileSync(new URL('../../../docs/release/自動發佈運行手冊.md', import.meta.url), 'utf8')
+  for (const k of ['--seed', '--yes', '--ack', '--dry-run-only', '備援']) assert.ok(doc.includes(k), `手冊要提到 ${k}`)
+  const flags = [...new Set(doc.match(/--[a-z][a-z-]*/g))]
+  const needsVal = new Set(['--interval', '--state', '--room', '--seed', '--seed-desktop', '--seed-linux', '--ack'])
+  for (const f of flags) {
+    const o = parseArgs(needsVal.has(f) ? [f, f === '--interval' ? '120' : 'x'] : [f])
+    assert.equal(o.error, null, `手冊提到的 ${f} 程式要認得：${o.error}`)
+  }
 })
