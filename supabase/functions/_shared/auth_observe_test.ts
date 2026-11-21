@@ -4,7 +4,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import { handleAcctAction } from "./account_switch.ts";
 import { handleAttachAction } from "./attachments.ts";
 import { nodeAction } from "./relay_ops.ts";
-import { signedUserId, signedUserState } from "./owner_sign.ts";
+import { sigStateOf, signedUserId, signedUserState } from "./owner_sign.ts";
 
 type Call = { fn: string; args: Record<string, unknown> };
 const USER = "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d";
@@ -102,6 +102,11 @@ Deno.test("signedUserId 舊回傳值不變；signedUserState 回三種狀態", a
   assertEquals(await signedUserState(good, `Bearer ${"b".repeat(30)}`), { user: null, state: "invalid" });
   assertEquals(await signedUserState(() => Promise.reject(new Error("x")), `Bearer ${jwt}`), { user: null, state: "invalid" });
   assertEquals(await signedUserState(good, `Bearer ${jwt}`), { user: USER, state: "valid" });
+  // index.ts 用的推導（不再驗證一次）：與 signedUserState 的狀態一致
+  for (const h of [undefined, "", "garbage", `Bearer ${"b".repeat(30)}`, `Bearer ${jwt}`]) {
+    const s = await signedUserState(good, h);
+    assertEquals(sigStateOf(s.user, h), s.state);
+  }
 });
 
 // invite／reissue／attach_sweep：只有角色路徑，各記一筆 role／absent；回應與沒記錄時相同
@@ -151,5 +156,5 @@ Deno.test("relay／irori-relay 的 invite、reissue 入口都有記錄呼叫；r
     }
   }
   const acct = Deno.readTextFileSync(new URL("../relay/index.ts", import.meta.url));
-  assert(acct.includes("signedUserState(") && acct.includes("signedAcct, signedState.state)"));
+  assert(acct.includes("sigStateOf(signedAcct, req.headers.get(SIGN_HEADER))"));
 });

@@ -48,7 +48,7 @@ import {
   ACTIONS as ATTACH_ACTIONS, bindAttachments, handleAttachAction, parseAttachmentIds, prepareAttachments, reconcileAttachments, sendReply, type StorageDeps, withAttachments,
   withRoomAttachments,
 } from "../_shared/attachments.ts";
-import { SIGN_HEADER, signedArgs, signedUserId, signedUserState } from "../_shared/owner_sign.ts";
+import { SIGN_HEADER, signedArgs, sigStateOf, signedUserId } from "../_shared/owner_sign.ts";
 import { recordRoleOnly } from "../_shared/auth_observe.ts";
 import { requestReadSync } from "../_shared/read_sync.ts";
 import { approveCorsHeaders, DEVICE_CODE_ACTIONS, handleDeviceCodeAction, randomUserCode } from "../_shared/device_code.ts";
@@ -833,9 +833,8 @@ async function handle(req: Request): Promise<Response> {
     const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     // 手機（member 節點）靠本人簽章才准看別台清單、送切換；帳號列表（acct_roster，#374）只認簽章；其他動作不讀簽章
-    const signedState = (action === "acct_list" || action === "acct_switch" || action === "acct_roster") ? await signedUserState(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : { user: null, state: "absent" as const };
-    const signedAcct = signedState.user;
-    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedAcct, signedState.state);
+    const signedAcct = (action === "acct_list" || action === "acct_switch" || action === "acct_roster") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedAcct, sigStateOf(signedAcct, req.headers.get(SIGN_HEADER)));
     return json(r.status, r.body);
   }
   // 手機確認終端送字／代答（見 _shared/term_request.ts）：桌面用節點金鑰建立、領取、回報；手機用本人簽章列出與決定（沒簽章一律 403）

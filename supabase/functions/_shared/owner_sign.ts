@@ -11,6 +11,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type SigState = "absent" | "invalid" | "valid";
 
+/** 不再驗證一次：由 signedUserId 的結果與標頭推出簽章狀態（有使用者＝valid；沒有但標頭有值＝invalid；標頭空＝absent）。 */
+export const sigStateOf = (user: string | null, header: string | null | undefined): SigState =>
+  user ? "valid" : header && header.trim() ? "invalid" : "absent";
+
 /** 同 signedUserId，另回傳簽章狀態（沒帶標頭／驗證失敗／驗證通過），供觀測記錄用（#500）。標頭有值但格式不對算驗證失敗。 */
 export async function signedUserState(
   verifyJwt: (token: string) => Promise<AuthUser | null>,
