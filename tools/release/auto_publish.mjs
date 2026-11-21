@@ -3,6 +3,8 @@
 // 用法：node tools/release/auto_publish.mjs [--once] [--interval 120] [--state <檔>] [--room <群組代號>] [--dry-run-only]
 //   首次：node tools/release/auto_publish.mjs --seed <版號>（或 --seed-desktop <版號> --seed-linux <版號>）播種後結束
 //   人工確認一筆失敗：node tools/release/auto_publish.mjs --ack <平台@版號>，存檔後結束
+//   ⚠ 運行手冊：電腦版自動那條紅了、改走備援手動發版之後，要對那一版下 --ack desktop@<版號>（Linux 若被標 blocked 也要 --ack linux@<版號>），
+//     否則有未清除的失敗，兩個平台的新版都會一直暫停（西川 #4561）
 // 必須在專用 worktree 內執行，不可在主 checkout。不用 gh run watch（它會每 3 秒查一次、燒光 API 額度）。
 import fs from 'node:fs'
 import os from 'node:os'
