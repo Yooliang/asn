@@ -40,15 +40,28 @@ export function autoResumeNotice(s) {
   }
 }
 
+/** 結果是不是終端服務中斷後的接回：後端只有這條路會寫 cause 欄位（重開機的結果檔沒有，見 auto_resume.rs 的 Status） */
+export const isMuxCrashResult = s => typeof s?.cause === 'string' && s.cause !== ''
+
+/** 提示框上要不要放記錄檔路徑：接回相關的提示（hideLogPath）不放，其他提示照舊 */
+export const launchNoticeLogPath = (notice, logPath) => (notice?.hideLogPath ? '' : logPath || '')
+
 /** 定時查；查失敗（舊版後端沒有這個命令）就略過這一輪 */
-export function createAutoResumePoller({ fetch, show, intervalMs = AUTO_RESUME_POLL_MS, setTimer = setInterval }) {
+export function createAutoResumePoller({ fetch, show, log = () => {}, intervalMs = AUTO_RESUME_POLL_MS, setTimer = setInterval }) {
   let seen = ''
   async function tick() {
     try {
-      const n = autoResumeNotice(await fetch())
+      const s = await fetch()
+      const n = autoResumeNotice(s)
       if (n && n.key !== seen) {
         seen = n.key
-        show({ title: n.title, body: n.body })
+        if (isMuxCrashResult(s)) {
+          // 終端服務中斷後的接回（#1895）：結果由雲端寄到通知頁，電腦版不跳框；摘要留在 ui.log，不能無聲略過
+          log(`接回結果已改由通知頁呈現，電腦版不再跳出提示框。摘要：${n.title}｜${n.body.replace(/\n/g, '；')}`)
+          return
+        }
+        // 重開機後的接回：目前沒有通知（#2027），框是唯一的提示，先保留；記錄檔路徑不放在框上
+        show({ title: n.title, body: n.body, hideLogPath: true })
       }
     } catch { /* 下一輪再查 */ }
   }
