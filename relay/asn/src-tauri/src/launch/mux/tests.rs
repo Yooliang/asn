@@ -27,10 +27,24 @@ struct Fake {
     /// 心跳檔：spawn 時先記下「這時檔案在不在」，再當作新 mux 寫出檔案（#1897）
     hb_file: RefCell<Option<PathBuf>>,
     hb_before_spawn: RefCell<Vec<bool>>,
+    /// 卡死處置（#1897 ④）：mux 底下的子孫編號（建立時間記在 birth）；kill_tree 時一起消失，`stay` 裡的除外
+    kids: RefCell<Vec<u32>>,
+    stay: RefCell<Vec<u32>>,
+    /// kill_tree 時順手做的事（例如把 pid 檔換成新 mux）
+    on_kill: RefCell<Option<Box<dyn Fn()>>>,
+    /// ASN 自己的祖先（self_ancestors 回的）
+    anc: RefCell<Vec<u32>>,
+    /// 真＝cli 跑不起來（缺檔、被擋）；`run_err`＝cli 回別的錯（例如逾時）
+    cannot_run: Cell<bool>,
+    run_err: RefCell<Option<String>>,
+    /// 每次下 cli 時順手做的事（模擬連線測試那 10 秒裡，世界變了）
+    on_run: RefCell<Option<Box<dyn Fn(&Fake)>>>,
+    /// 程序表：None＝照預設（可信）；Some(None)＝讀取失敗；Some(Some(list))＝讀到這些程序編號
+    table: RefCell<Option<Option<Vec<u32>>>>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]), hb_file: RefCell::new(None), hb_before_spawn: RefCell::new(vec![]) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]), hb_file: RefCell::new(None), hb_before_spawn: RefCell::new(vec![]), kids: RefCell::new(vec![]), stay: RefCell::new(vec![]), on_kill: RefCell::new(None), anc: RefCell::new(vec![]), cannot_run: Cell::new(false), run_err: RefCell::new(None), on_run: RefCell::new(None), table: RefCell::new(None) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -39,6 +53,15 @@ impl Fake {
 impl Runner for Fake {
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, _t: Duration) -> Result<RunOutput, String> {
         self.calls.borrow_mut().push((program.to_string_lossy().into(), args.to_vec(), env.clone()));
+        if let Some(f) = self.on_run.borrow().as_ref() {
+            f(self);
+        }
+        if self.cannot_run.get() {
+            return Err(format!("{} {}：拒絕存取", crate::launch::wezterm::CANNOT_RUN, program.display()));
+        }
+        if let Some(e) = self.run_err.borrow().clone() {
+            return Err(e);
+        }
         let n = self.tries.get();
         self.tries.set(n + 1);
         let up = self.alive_after.get().is_some_and(|k| n >= k) || (self.alive_once_started && !self.started.borrow().is_empty());
@@ -62,9 +85,29 @@ impl Runner for Fake {
     }
     fn kill_tree(&self, pid: u32) {
         self.killed.borrow_mut().push(pid);
+        if let Some(f) = self.on_kill.borrow().as_ref() {
+            f();
+        }
         if !self.survive_kill.get() {
             self.birth.borrow_mut().remove(&pid);
+            for k in self.kids.borrow().iter().filter(|k| !self.stay.borrow().contains(k)) {
+                self.birth.borrow_mut().remove(k);
+            }
         }
+    }
+    fn descendants_of(&self, _pid: u32) -> Vec<u32> {
+        self.kids.borrow().clone()
+    }
+    fn check_process_table(&self, mux: u32) -> Result<(), String> {
+        match self.table.borrow().as_ref() {
+            None => Ok(()),
+            Some(t) => crate::launch::wezterm::table_check(t.as_deref(), std::process::id(), mux),
+        }
+    }
+    fn self_ancestors(&self) -> Vec<u32> {
+        let mut v = vec![std::process::id()];
+        v.extend(self.anc.borrow().iter().copied());
+        v
     }
     fn started_ms(&self, pid: u32) -> Option<u64> {
         if pid == std::process::id() {
@@ -1001,4 +1044,351 @@ fn t1897_刪不掉心跳檔_只寫_log_起與停照常() {
     assert_eq!(m.stop(), Ok(()), "刪不掉不影響停");
     let log = std::fs::read_to_string(m.paths.dir.join("mux.log")).unwrap();
     assert!(log.contains("心跳檔沒刪掉"), "{log}");
+}
+
+// ---- #1897 ④ 卡死處置 ----
+
+mod stuck {
+    use super::*;
+
+    /// 卡死的 mux：pid 檔、建立時間、執行檔、心跳檔都對得上；連不上。
+    /// Mux 借著 Fake，這裡洩漏一個 Fake 讓借用活到測試結束（測試程序很短命）
+    fn rig(d: &Path) -> (&'static Fake, Mux<'static>) {
+        let r: &'static Fake = Box::leak(Box::new(Fake::new()));
+        let m = mux(r, d);
+        std::fs::create_dir_all(&m.paths.dir).unwrap();
+        std::fs::write(&m.paths.pid, "4000 777").unwrap();
+        std::fs::write(hb_of(&m), "{}").unwrap();
+        r.birth.borrow_mut().insert(4000, 777);
+        r.exe.borrow_mut().insert(4000, PathBuf::from(SERVER));
+        (r, m)
+    }
+    /// 心跳檔：pid 是記錄的、seq 不動
+    fn hb_still(pid: u64) -> impl Fn() -> Option<(u64, u64)> {
+        move || Some((pid, 50))
+    }
+
+    #[test]
+    fn t1897_心跳停_連不上_只結束記錄的_pid_清掉_pid_檔與心跳檔() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+        assert_eq!(*r.killed.borrow(), vec![4000], "只結束記錄的那個");
+        assert!(!m.paths.pid.exists() && !hb_of(&m).exists());
+        assert!(!m.paths.lock.exists() && !m.paths.open_lock.exists(), "兩把鎖用完都放掉");
+    }
+
+    #[test]
+    fn t1897_連得上就取消_什麼都不動() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        r.alive_after.set(Some(0));
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("連得上要取消") };
+        assert!(why.contains("連得上"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists() && hb_of(&m).exists());
+    }
+
+    #[test]
+    fn t1897_確認期間_seq_動了就取消() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        let n = Cell::new(0u64);
+        let moving = || {
+            n.set(n.get() + 1);
+            Some((4000u64, 50 + n.get()))
+        };
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &moving), Disposal::Cancelled(_)));
+        // 第二次讀不到也取消
+        let calls = Cell::new(0);
+        let vanishing = || {
+            calls.set(calls.get() + 1);
+            (calls.get() == 1).then_some((4000u64, 50))
+        };
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &vanishing), Disposal::Cancelled(_)));
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_執行檔不對或查不到_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        r.exe.borrow_mut().insert(4000, PathBuf::from("C:\\其他\\notepad.exe"));
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)));
+        r.exe.borrow_mut().clear();
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)), "查不到也不結束");
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_記錄對不上_心跳檔是別的_pid_建立時間不符_程序已不在_都不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(9999)), Disposal::Cancelled(_)), "心跳檔是別的 pid");
+        r.birth.borrow_mut().insert(4000, 888);
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)), "建立時間對不上（編號被回收）");
+        r.birth.borrow_mut().insert(4000, 777);
+        r.exited.borrow_mut().push(4000);
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)), "程序已結束");
+        std::fs::remove_file(&m.paths.pid).unwrap();
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)), "沒有記錄");
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_子孫一起確認消失() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.kids.borrow_mut() = vec![4101, 4102];
+        for (k, b) in [(4101u32, 800u64), (4102, 900)] {
+            r.birth.borrow_mut().insert(k, b);
+        }
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+        assert_eq!(*r.killed.borrow(), vec![4000], "只對 mux 下 kill_tree");
+        assert!(r.birth.borrow().get(&4101).is_none() && r.birth.borrow().get(&4102).is_none(), "確認過子孫都消失了才算完成");
+    }
+
+    #[test]
+    fn t1897_樹裡有建立時間早於_mux_的程序_整棵不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 4103 的建立時間早於 mux：編號被重用的別人，結束整棵樹（taskkill /T）會連它一起帶走，所以不動
+        *r.kids.borrow_mut() = vec![4101, 4103];
+        r.birth.borrow_mut().insert(4101, 800);
+        r.birth.borrow_mut().insert(4103, 100);
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("早於終端服務"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists());
+    }
+
+    #[test]
+    fn t1897_asn_自己在要結束的樹裡_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.kids.borrow_mut() = vec![4101, std::process::id()];
+        r.birth.borrow_mut().insert(4101, 800);
+        r.birth.borrow_mut().insert(std::process::id(), 900);
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("ASN 自己"), "{why}");
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_asn_的祖先在要結束的樹裡_不結束_兩種平台的程序表形狀() {
+        // Windows：ASN 是從終端服務底下的外殼一路開起來的，taskkill /T 會沿著父程序編號把整串帶走
+        // Linux：ASN 在 wezterm-mux-server → bash → asn 的鏈上（proc_tree 只擋 ASN 本人，不擋中間的祖先）
+        for (shape, kids, ancestors) in [("Windows", vec![4101u32, 4102], vec![4102u32, 4101]), ("Linux", vec![4201, 4202], vec![4201])] {
+            let d = tempfile::tempdir().unwrap();
+            let (r, m) = rig(d.path());
+            for (i, k) in kids.iter().enumerate() {
+                r.birth.borrow_mut().insert(*k, 800 + i as u64);
+            }
+            *r.kids.borrow_mut() = kids;
+            *r.anc.borrow_mut() = ancestors;
+            let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("{shape}：要取消") };
+            assert!(why.contains("ASN 自己或它的上層"), "{shape}：{why}");
+            assert!(r.killed.borrow().is_empty(), "{shape}");
+        }
+    }
+
+    #[test]
+    fn t1897_mux_本身是_asn_的祖先_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.anc.borrow_mut() = vec![4000];
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)));
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_連線測試的那段時間裡_建立時間變了_結束前再驗_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 連線測試時（最久 10 秒）程序死了、編號被別的程序拿走
+        *r.on_run.borrow_mut() = Some(Box::new(|f: &Fake| {
+            f.birth.borrow_mut().insert(4000, 888);
+        }));
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("結束前再確認"), "{why}");
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_連線測試的那段時間裡_執行檔變了_結束前再驗_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.on_run.borrow_mut() = Some(Box::new(|f: &Fake| {
+            f.exe.borrow_mut().insert(4000, PathBuf::from("C:\\別的\\notepad.exe"));
+        }));
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("結束前再確認"), "{why}");
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_程序表讀不到_是空的_沒有_asn_自己_沒有_mux_都取消() {
+        let me = std::process::id();
+        let cases: [(&str, Option<Vec<u32>>, &str); 5] = [
+            ("讀取失敗", None, "讀不到"),
+            ("空表", Some(vec![]), "空的"),
+            ("表裡沒有 ASN 自己", Some(vec![4000, 4101]), "ASN 自己"),
+            ("表裡沒有 mux", Some(vec![me, 4101]), "終端服務"),
+            ("只有別人", Some(vec![1, 2, 3]), "ASN 自己"),
+        ];
+        for (name, table, hint) in cases {
+            let d = tempfile::tempdir().unwrap();
+            let (r, m) = rig(d.path());
+            *r.table.borrow_mut() = Some(table);
+            let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("{name}：要取消") };
+            assert!(why.contains("程序表不可信") && why.contains(hint), "{name}：{why}");
+            assert!(r.killed.borrow().is_empty() && m.paths.pid.exists(), "{name}");
+        }
+        // 表完整（有 ASN 自己、有 mux）才處置
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.table.borrow_mut() = Some(Some(vec![me, 4000, 4101]));
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+        assert_eq!(*r.killed.borrow(), vec![4000]);
+    }
+
+    /// 只實作必要方法（外加讓前面幾步過關的 exe_path）、沒有覆寫 check_process_table 的 runner
+    struct Minimal;
+    impl Runner for Minimal {
+        fn run(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>, _t: Duration) -> Result<RunOutput, String> {
+            Ok(RunOutput { success: false, stdout: String::new(), stderr: String::new() })
+        }
+        fn spawn(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>) -> Result<u32, String> {
+            unreachable!()
+        }
+        fn kill_tree(&self, _pid: u32) {
+            panic!("沒有實作程序表檢查的 runner 不能被拿來結束程序");
+        }
+        fn started_ms(&self, pid: u32) -> Option<u64> {
+            (pid == 4000).then_some(777)
+        }
+        fn exe_path(&self, _pid: u32) -> Option<PathBuf> {
+            Some(PathBuf::from(SERVER))
+        }
+        fn sleep(&self, _d: Duration) {}
+    }
+
+    #[test]
+    fn t1897_runner_沒有覆寫程序表檢查_處置取消() {
+        let d = tempfile::tempdir().unwrap();
+        let r = Minimal;
+        let m = Mux { runner: &r, cli: PathBuf::from("W/wezterm.exe"), server: PathBuf::from(SERVER), paths: paths(d.path()).unwrap(), base_env: base() };
+        std::fs::create_dir_all(&m.paths.dir).unwrap();
+        std::fs::write(&m.paths.pid, "4000 777").unwrap();
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("沒有實作程序表檢查"), "{why}");
+        assert!(m.paths.pid.exists());
+    }
+
+    #[test]
+    fn t1897_cli_跑不起來_取消_不當成連不上() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        r.cannot_run.set(true);
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("跑不起來"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists());
+        // 真的連線逾時：算連不上，照常處置
+        r.cannot_run.set(false);
+        *r.run_err.borrow_mut() = Some("執行逾時（10 秒）".into());
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+    }
+
+    #[test]
+    fn t1897_子孫沒消失_取消_保留記錄() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.kids.borrow_mut() = vec![4101];
+        r.birth.borrow_mut().insert(4101, 800);
+        *r.stay.borrow_mut() = vec![4101];
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("子孫還在要取消") };
+        assert!(why.contains("沒有結束乾淨"), "{why}");
+        assert!(m.paths.pid.exists() && hb_of(&m).exists(), "記錄留著，之後可以再試");
+    }
+
+    #[test]
+    fn t1897_心跳停的是舊_mux_pid_檔現在已是新_mux_不處置() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 判斷「心跳停了」時看到的是 4000；持鎖之後 pid 檔已經換成新的 mux（心跳檔也剛好是新的）
+        std::fs::write(&m.paths.pid, "4500 999").unwrap();
+        r.birth.borrow_mut().insert(4500, 999);
+        r.exe.borrow_mut().insert(4500, PathBuf::from(SERVER));
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4500)) else { panic!("對不上要取消") };
+        assert!(why.contains("被換掉"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists());
+        // 同一個編號、建立時間不同（編號被回收）也不處置
+        let d2 = tempfile::tempdir().unwrap();
+        let (r2, m2) = rig(d2.path());
+        std::fs::write(&m2.paths.pid, "4000 888").unwrap();
+        r2.birth.borrow_mut().insert(4000, 888);
+        assert!(matches!(m2.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)));
+        assert!(r2.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_判停那一輪的_seq_和處置時讀到的不同_取消() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 判停時 seq 停在 49；處置時讀到 50：這中間 mux 動過（剛醒來），不結束
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 49, &hb_still(4000)) else { panic!("seq 不同要取消") };
+        assert!(why.contains("又動了"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists());
+    }
+
+    #[test]
+    fn t1897_mux_自己殺不掉_取消_保留記錄() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        r.survive_kill.set(true);
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)));
+        assert!(m.paths.pid.exists() && hb_of(&m).exists());
+    }
+
+    #[test]
+    fn t1897_刪檔前_pid_檔已換成新_mux_不刪() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        let pid_file = m.paths.pid.clone();
+        *r.on_kill.borrow_mut() = Some(Box::new(move || std::fs::write(&pid_file, "4500 999").unwrap()));
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+        assert_eq!(std::fs::read_to_string(&m.paths.pid).unwrap(), "4500 999", "新 mux 的記錄不能被刪");
+        assert!(hb_of(&m).exists(), "新 mux 的心跳檔也不刪");
+    }
+
+    #[test]
+    fn t1897_舊的_stopped_記號被清掉_不寫新記號() {
+        let d = tempfile::tempdir().unwrap();
+        let (_, m) = rig(d.path());
+        let mark = m.paths.dir.join(STOPPED_FILE);
+        std::fs::write(&mark, "4000 123").unwrap();
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+        assert!(!mark.exists(), "同一個 pid 的舊記號要清掉，不然這次事故會被當成 ASN 自己收的；也不能寫新記號");
+        // 別的 pid 的記號不動
+        let d2 = tempfile::tempdir().unwrap();
+        let (_, m2) = rig(d2.path());
+        let mark2 = m2.paths.dir.join(STOPPED_FILE);
+        std::fs::write(&mark2, "3000 123").unwrap();
+        assert_eq!(m2.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+        assert!(mark2.exists());
+    }
+
+    #[test]
+    fn t1897_啟動鎖或開窗鎖被別人拿著_不處理_也不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 鎖的內容是「這個測試程序＋它的建立時間」：鎖沒過期
+        r.birth.borrow_mut().insert(std::process::id(), 0);
+        let held = format!("{} 0", std::process::id());
+        std::fs::write(&m.paths.lock, &held).unwrap();
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Busy);
+        std::fs::remove_file(&m.paths.lock).unwrap();
+        std::fs::write(&m.paths.open_lock, &held).unwrap();
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Busy);
+        assert!(!m.paths.lock.exists(), "拿到一把、另一把拿不到：已拿的要放掉");
+        assert!(r.killed.borrow().is_empty());
+    }
 }
