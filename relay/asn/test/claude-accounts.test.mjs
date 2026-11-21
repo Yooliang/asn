@@ -92,9 +92,18 @@ test('遠端：對方沒同意、失敗、離線的訊息', async () => {
   const off = mk({ acct_remote_list: { accounts: [], asn_online: false } }).ui
   await off.remoteSelect('W')
   assert.match(off.state.remote.msg, /沒有在線/)
-  const err = mk({ acct_remote_request: new Error('acct_switch HTTP 403 forbidden'), acct_remote_list: { accounts: [{ vendor: 'claude', email: 'w@x.test' }], asn_online: true } }).ui
+  const logs = []
+  const err = mk({ acct_remote_request: new Error('acct_switch HTTP 403 forbidden'), acct_remote_list: { accounts: [{ vendor: 'claude', email: 'w@x.test' }], asn_online: true } }, { log: (...a) => logs.push(a.join(' ')) }).ui
   await err.remoteSelect('W'); await err.remoteSwitch('w@x.test')
-  assert.match(err.state.remote.msg, /403/)
+  assert.match(err.state.remote.msg, /本人.*登入|登入.*本人/, '403 顯示白話')
+  assert.doesNotMatch(err.state.remote.msg, /403|HTTP|forbidden/, '畫面不出現原始 403')
+  assert.ok(logs.some(l => l.includes('HTTP 403 forbidden')), '原文寫進 log')
+  const lst = mk({ acct_remote_list: new Error('acct_list HTTP 403 forbidden') }, { log: () => {} }).ui
+  await lst.remoteSelect('W')
+  assert.doesNotMatch(lst.state.remote.msg, /403|HTTP|forbidden/, '列出別台帳號的 403 也是白話')
+  const other = mk({ acct_remote_list: { accounts: [{ vendor: 'claude', email: 'w@x.test' }], asn_online: true }, acct_remote_request: new Error('請先登入') }).ui
+  await other.remoteSelect('W'); await other.remoteSwitch('w@x.test')
+  assert.equal(other.state.remote.msg, '請先登入', '其他錯誤照原樣顯示')
   assert.equal(remoteStatusText({ status: 'zzz' }), '')
   assert.ok(isFinalStatus('ok') && isFinalStatus('denied') && !isFinalStatus('taken'))
 })

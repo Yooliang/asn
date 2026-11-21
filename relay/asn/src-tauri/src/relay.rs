@@ -2004,36 +2004,34 @@ b", "op": "close" }),
 
     #[cfg(desktop)]
     #[tokio::test]
-    async fn 電腦版查啟動設定與帳號清單_有登入帶簽章_沒登入照舊不帶() {
-        // #380：成員角色的電腦不帶簽章，後台回 403；有登入就要帶，沒登入（擁有者角色的電腦）照舊
+    async fn 電腦版查啟動設定與帳號清單_有登入帶簽章_帳號清單沒登入不打後台() {
+        // #380：成員角色的電腦不帶簽章，後台回 403；有登入就要帶。#500：帳號清單� 登入就不送（就地提示）；啟動設定沒登入照舊
         let (url, seen) = fake_server(200);
         let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
         crate::launch::relay_launchers(&r, None, Some("usertoken-9")).await.unwrap();
-        crate::acct_remote::remote_list(&r, "W", Some("usertoken-9")).await.unwrap();
+        crate::acct_remote::remote_list(&r, "W", Ok("usertoken-9".into())).await.unwrap();
         crate::launch::relay_launchers(&r, None, None).await.unwrap();
-        crate::acct_remote::remote_list(&r, "W", Some("")).await.unwrap();
+        assert!(crate::acct_remote::remote_list(&r, "W", Err(crate::auth_notice::SigningFail::NotSignedIn)).await.is_err());
         let s = seen.lock().unwrap();
-        assert_eq!(s.len(), 4);
+        assert_eq!(s.len(), 3, "沒登入的帳號清單不打後台");
         assert!(s[0].contains("action=launchers") && s[1].contains("action=acct_list"));
         assert!(s[..2].iter().all(|x| x.to_lowercase().contains("x-asn-user: bearer usertoken-9")), "{s:?}");
-        assert!(s[2..].iter().all(|x| !x.to_lowercase().contains("x-asn-user")), "沒登入或空憑證不帶簽章標頭：{s:?}");
+        assert!(!s[2].to_lowercase().contains("x-asn-user"), "啟動設定沒登入照舊不帶簽章標頭：{s:?}");
     }
 
     #[cfg(desktop)]
     #[tokio::test]
-    async fn 電腦版送切換帳號_有登入帶簽章_沒登入照舊不帶() {
-        // 成員角色的電腦（例如 40家用）不帶簽章，後台回 403 forbidden；有登入就要帶，擁有者角色的電腦沒登入照舊
+    async fn 電腦版送切換帳號_有登入帶簽章_沒登入不打後台() {
+        // 成員角色的電腦（例如 40家用）不帶簽章，後台回 403 forbidden；有登入就要帶。#500：沒登入就不送，就地提示
         let (url, seen) = fake_server(200);
         let r = Relay::new(url, "secret-key".into(), "P".into(), "P-ASN".into());
-        crate::acct_remote::remote_request(&r, "W", "b@x.test", "claude", Some("usertoken-9")).await.unwrap();
-        crate::acct_remote::remote_request(&r, "W", "b@x.test", "grok", Some("usertoken-9")).await.unwrap();
-        crate::acct_remote::remote_request(&r, "W", "b@x.test", "claude", None).await.unwrap();
-        crate::acct_remote::remote_request(&r, "W", "b@x.test", "claude", Some("")).await.unwrap();
+        crate::acct_remote::remote_request(&r, "W", "b@x.test", "claude", Ok("usertoken-9".into())).await.unwrap();
+        crate::acct_remote::remote_request(&r, "W", "b@x.test", "grok", Ok("usertoken-9".into())).await.unwrap();
+        assert!(crate::acct_remote::remote_request(&r, "W", "b@x.test", "claude", Err(crate::auth_notice::SigningFail::NotSignedIn)).await.is_err());
         let s = seen.lock().unwrap();
-        assert_eq!(s.len(), 4);
+        assert_eq!(s.len(), 2, "沒登入不打後台");
         assert!(s.iter().all(|x| x.contains("action=acct_switch")), "{s:?}");
-        assert!(s[..2].iter().all(|x| x.to_lowercase().contains("x-asn-user: bearer usertoken-9")), "{s:?}");
-        assert!(s[2..].iter().all(|x| !x.to_lowercase().contains("x-asn-user")), "沒登入或空憑證不帶簽章標頭：{s:?}");
+        assert!(s.iter().all(|x| x.to_lowercase().contains("x-asn-user: bearer usertoken-9")), "{s:?}");
     }
 
     #[cfg(desktop)]
