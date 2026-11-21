@@ -46,6 +46,67 @@ pub(crate) struct TaskRow {
     pub live: bool,
     /// 終端服務：裡面有幾個視窗
     pub inside: Option<usize>,
+    /// 這個視窗開在哪種終端（#1909）：`mux`＝ASN 共用的終端服務、`native`＝系統自己的原生主控台、`unknown`＝看不出來。
+    /// 只對夥伴視窗（claude／pi／resuming／awaiting 與 ASN 自己的視窗）判斷；其他列一律 `unknown`（不套用，畫面也不讀）。
+    /// `native` 一定要有正面證據（見 `term_of`），找不到絕不當成原生
+    pub term: &'static str,
+}
+
+/// `TaskRow.term` 的三個值（序列化後的穩定字串）
+pub(crate) const TERM_MUX: &str = "mux";
+pub(crate) const TERM_NATIVE: &str = "native";
+pub(crate) const TERM_UNKNOWN: &str = "unknown";
+
+/// 往上追到根還算「完整」的系統程序（它們的父程序常已結束，編號懸空）。小寫執行檔名
+const CHAIN_ROOTS: &[&str] = &["explorer.exe", "services.exe", "wininit.exe", "winlogon.exe", "svchost.exe", "system"];
+
+/// 判斷視窗開在哪種終端。只用傳進來的程序表與 Os，不呼叫 wezterm、不啟動任何東西。
+/// - 程序表空（含非 Windows）、pid 不在表裡 → unknown
+/// - 上層鏈裡有終端服務：對照表認得（`mux_session_of`）→ mux；對不上 → unknown
+/// - 沒有終端服務，而且鏈完整（追到 ppid 0／自己，或已知系統程序）、至少有一層上層、也不是 ASN 自帶 GUI → native
+/// - 其餘（鏈中斷、父程序比子程序晚建立＝pid 被重用、自帶 GUI 等）→ unknown
+///
+/// 防 pid 重用：每走一層，父程序的建立時間若晚於子程序，視為鏈中斷（兩邊查得到才比；查不到不拒絕，同 `tree_pids`）
+pub(crate) fn term_of(os: &dyn Os, table: &[Proc], pid: u32) -> &'static str {
+    if !table.iter().any(|p| p.pid == pid) {
+        return TERM_UNKNOWN;
+    }
+    let mut chain: Vec<&Proc> = Vec::new();
+    let mut cur = pid;
+    let mut complete = false;
+    loop {
+        let me = match table.iter().find(|p| p.pid == cur) {
+            Some(p) => p,
+            None => break,
+        };
+        if me.ppid == 0 || me.ppid == me.pid {
+            complete = true;
+            break;
+        }
+        let parent = match table.iter().find(|p| p.pid == me.ppid) {
+            Some(p) => p,
+            None => {
+                // 父程序已不在表裡：自己是已知系統程序才算追到頂，否則是鏈中斷
+                complete = !chain.is_empty() && CHAIN_ROOTS.contains(&me.name.as_str());
+                break;
+            }
+        };
+        if matches!((os.started_ms(parent.pid), os.started_ms(me.pid)), (Some(par), Some(child)) if par > child) {
+            break; // pid 被重用：這個「父程序」其實是後來才出現的別人
+        }
+        if chain.iter().any(|c| c.pid == parent.pid) || chain.len() >= 32 {
+            break; // 有環／太深：不當完整
+        }
+        chain.push(parent);
+        cur = parent.pid;
+    }
+    if chain.iter().any(|p| p.name == switch::MUX_SERVER) {
+        return if os.mux_session_of(pid).is_some() { TERM_MUX } else { TERM_UNKNOWN };
+    }
+    if !complete || chain.is_empty() || chain.iter().any(|p| p.name == switch::WEZ_GUI) {
+        return TERM_UNKNOWN;
+    }
+    TERM_NATIVE
 }
 
 /// 認得但目前沒在跑的名字（折疊區用）
@@ -161,6 +222,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             term_id: None,
             live: true,
             inside: None,
+            term: term_of(os, &table, w.pid),
         };
         listed.push((row, mux_of(w.pid)));
     }
@@ -181,6 +243,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             term_id: Some(s.partner.id.clone()),
             live: true,
             inside: None,
+            term: term_of(os, &table, s.root_pid),
         };
         listed.push((row, mux_of(s.root_pid)));
     }
@@ -201,6 +264,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             term_id: Some(a.partner.id.clone()),
             live: true,
             inside: None,
+            term: term_of(os, &table, a.root_pid),
         };
         listed.push((row, mux_of(a.root_pid)));
     }
@@ -223,6 +287,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             term_id: Some(t.id.clone()),
             live: true,
             inside: None,
+            term: TERM_UNKNOWN,
         };
         listed.push((row, if is_mux { Some(t.pid) } else { mux_of(t.pid) }));
     }
@@ -243,6 +308,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             term_id: None,
             live: true,
             inside: None,
+            term: TERM_UNKNOWN,
         };
         listed.push((row, None));
     }
@@ -265,6 +331,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             term_id: None,
             live: true,
             inside: Some(inside),
+            term: TERM_UNKNOWN,
         });
     }
     if src.own_pid != 0 {
@@ -283,6 +350,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             term_id: None,
             live: true,
             inside: None,
+            term: TERM_UNKNOWN,
         });
     }
     rows.truncate(ROWS_MAX);
@@ -348,6 +416,8 @@ mod tests {
         mem: HashMap<u32, u64>,
         started: HashMap<u32, u64>,
         cmd: HashMap<u32, String>,
+        /// 對照表認得的終端服務窗格（pid）
+        mux_known: Vec<u32>,
     }
 
     impl Os for FakeOs {
@@ -356,6 +426,9 @@ mod tests {
         }
         fn processes(&self) -> Vec<Proc> {
             self.table.clone()
+        }
+        fn mux_session_of(&self, pid: u32) -> Option<String> {
+            self.mux_known.contains(&pid).then(|| "t-mux".to_string())
         }
         fn alive(&self, pid: u32) -> bool {
             self.table.iter().any(|p| p.pid == pid)
@@ -375,7 +448,7 @@ mod tests {
     }
 
     fn os(table: Vec<Proc>, mem: &[(u32, u64)], started: &[(u32, u64)]) -> FakeOs {
-        FakeOs { table, mem: mem.iter().copied().collect(), started: started.iter().copied().collect(), cmd: HashMap::new() }
+        FakeOs { table, mem: mem.iter().copied().collect(), started: started.iter().copied().collect(), cmd: HashMap::new(), mux_known: vec![] }
     }
 
     fn src(claude: Vec<Window>) -> Sources {
@@ -687,5 +760,94 @@ mod tests {
         let snap = build(&o, &resuming_src());
         assert_eq!(snap.rows.iter().filter(|r| r.kind == "resuming").count(), 1);
         assert!(snap.rows.iter().all(|r| r.kind != "awaiting"));
+    }
+
+    // ---- #1909 term：視窗開在哪種終端（只回報，畫面不讀）
+
+    /// 原生主控台的真實形狀：claude → cmd → conhost 風格殼 → explorer（父程序已結束，ppid 懸空）
+    fn native_table() -> Vec<Proc> {
+        vec![p(40, 999, "explorer.exe"), p(41, 40, "cmd.exe"), p(42, 41, "claude.exe")]
+    }
+
+    fn mux_table() -> Vec<Proc> {
+        vec![p(40, 999, "explorer.exe"), p(50, 40, switch::MUX_SERVER), p(51, 50, "openconsole.exe"), p(52, 51, "claude.exe")]
+    }
+
+    #[test]
+    fn term_終端服務底下而且對照表認得_是mux() {
+        let mut o = os(mux_table(), &[], &[]);
+        o.mux_known = vec![52];
+        assert_eq!(term_of(&o, &o.table, 52), TERM_MUX);
+    }
+
+    #[test]
+    fn term_終端服務底下但對照表對不上_是不明() {
+        let o = os(mux_table(), &[], &[]);
+        assert_eq!(term_of(&o, &o.table, 52), TERM_UNKNOWN, "別人開的終端服務、認不回來的，不能算成 mux 也不能算原生");
+    }
+
+    #[test]
+    fn term_鏈完整而且沒有終端服務_是原生() {
+        let o = os(native_table(), &[], &[]);
+        assert_eq!(term_of(&o, &o.table, 42), TERM_NATIVE);
+    }
+
+    #[test]
+    fn term_鏈追到ppid為0也算完整() {
+        let o = os(vec![p(10, 0, "init"), p(11, 10, "bash"), p(12, 11, "claude.exe")], &[], &[]);
+        assert_eq!(term_of(&o, &o.table, 12), TERM_NATIVE);
+    }
+
+    #[test]
+    fn term_程序表空_是不明() {
+        let o = os(vec![], &[], &[]);
+        assert_eq!(term_of(&o, &o.table, 42), TERM_UNKNOWN);
+    }
+
+    #[test]
+    fn term_pid不在表裡_是不明() {
+        let o = os(native_table(), &[], &[]);
+        assert_eq!(term_of(&o, &o.table, 4242), TERM_UNKNOWN);
+    }
+
+    #[test]
+    fn term_鏈中斷_父程序已不在表裡_是不明() {
+        // cmd 的父程序消失、而且 cmd 不是已知系統程序：看不出它往上是什麼，不能算原生
+        let o = os(vec![p(41, 777, "cmd.exe"), p(42, 41, "claude.exe")], &[], &[]);
+        assert_eq!(term_of(&o, &o.table, 42), TERM_UNKNOWN);
+    }
+
+    #[test]
+    fn term_沒有任何上層_是不明() {
+        let o = os(vec![p(42, 777, "claude.exe")], &[], &[]);
+        assert_eq!(term_of(&o, &o.table, 42), TERM_UNKNOWN);
+    }
+
+    #[test]
+    fn term_pid被重用_父程序比子程序晚建立_是不明() {
+        // cmd(41) 其實是 claude 之後才用到這個編號的別人：往上的鏈不可信
+        let o = os(native_table(), &[], &[(40, 1_000), (41, 9_000), (42, 5_000)]);
+        assert_eq!(term_of(&o, &o.table, 42), TERM_UNKNOWN);
+        let ok = os(native_table(), &[], &[(40, 1_000), (41, 2_000), (42, 5_000)]);
+        assert_eq!(term_of(&ok, &ok.table, 42), TERM_NATIVE, "對照：時間順序正常就是原生");
+    }
+
+    #[test]
+    fn term_asn自帶的gui底下_不是原生也不是mux_是不明() {
+        let o = os(vec![p(40, 999, "explorer.exe"), p(60, 40, switch::WEZ_GUI), p(61, 60, "claude.exe")], &[], &[]);
+        assert_eq!(term_of(&o, &o.table, 61), TERM_UNKNOWN);
+    }
+
+    #[test]
+    fn term_清單每列都帶值_夥伴列照判斷_其他列是不明() {
+        let mut o = os(native_table(), &[], &[]);
+        o.table.push(p(70, 999, "asn.exe"));
+        let mut s = src(vec![claude("小東", 42)]);
+        s.own_pid = 70;
+        let snap = build(&o, &s);
+        assert_eq!(snap.rows.iter().find(|r| r.kind == "claude").unwrap().term, TERM_NATIVE);
+        assert_eq!(snap.rows.iter().find(|r| r.kind == "asn").unwrap().term, TERM_UNKNOWN, "非夥伴列不套用");
+        let json = serde_json::to_value(&snap).unwrap();
+        assert_eq!(json["rows"][0]["term"], "native", "序列化的欄位名與值是穩定字串");
     }
 }
