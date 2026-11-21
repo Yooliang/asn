@@ -2,7 +2,7 @@
 // 讓 Tauri 隨 Windows 安裝檔一起打包（內建終端機用；裝好後在安裝資料夾的 wezterm 底下，ASN 預設從那裡找）。
 //   node scripts/fetch-wezterm.mjs           下載（有快取就用快取）→ 驗建置來源證明（attestation）→ 核對雜湊與大小 → 解出 7 個檔與授權文字
 //   ASN_SKIP_WEZTERM=1                       略過（不打包 WezTerm；例如只想快速試別的）。會清空 resources/wezterm；發版（release.mjs）不准略過
-// 來源是本 repo 的 wezterm-build.yml 建出來的 release（上游 20240203 加上上游 #7706 與 ASN 補丁 0001：build_proc 改迭代、深度上限 64，修 mux-server 的堆疊溢位；清單見 docs/design/WEZTERM-自建修改清單.md）。
+// 來源是本 repo 的 wezterm-build.yml 建出來的 release（上游 20240203 加上上游 #7706 與 ASN 修補 0001（build_proc 改迭代、深度上限 64，修 mux-server 的堆疊溢位）、0002（父行程啟動時間要早於子行程，PID 重用不錯接）；清單見 docs/design/WEZTERM-自建修改清單.md）。
 // 來源證明、雜湊、大小任何一項不符都讓建置失敗，不退回上游官方版。驗來源證明要用 gh CLI（發版機本來就有）。只在 Windows 上做。
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -30,7 +30,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = path.join(root, 'src-tauri', 'resources', 'wezterm')
 const cacheDir = path.join(root, '.cache', 'wezterm')
 
-const SOURCE_TEXT = `WezTerm ${WEZTERM_VERSION}（ASN 自行建置，多套用上游 #7706 與 ASN 補丁 0001：build_proc 改迭代、深度上限 64）
+const SOURCE_TEXT = `WezTerm ${WEZTERM_VERSION}（ASN 自行建置，多套用上游 #7706 與 ASN 修補 0001、0002：build_proc 改迭代、深度上限 64；父行程啟動時間要早於子行程）
 來源：${WEZTERM_ZIP_URL}
 壓縮檔 SHA-256：${WEZTERM_ZIP_SHA256}
 建置來源證明：gh attestation verify <壓縮檔> -R ${WEZTERM_BUNDLE_REPO} --signer-workflow ${WEZTERM_SIGNER_WORKFLOW}
