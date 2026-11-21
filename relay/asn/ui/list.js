@@ -50,7 +50,7 @@ import { TERM_CLOSE_KEY, TERM_CLOSE_NOTE, closeTermRun, termBarBlocked, termClos
 import { ruleSegments as ruleSegs } from './lib/perm-ask.mjs'
 import { HOLD_TIP, createPartnerNoticePoller, noticeStillFor, permissionView } from './lib/partner-notice.mjs'
 import { createHold } from './lib/hold-press.mjs'
-import { createAutoResumePoller } from './lib/auto-resume.mjs'
+import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
@@ -436,7 +436,7 @@ const launchNotice = reactive({ open: false, title: '', body: '', logPath: '' })
 const launchLogPaths = reactive({ bridgeLog: '', machineDir: '' })
 void invoke('relay_log_paths').then(p => { if (p) Object.assign(launchLogPaths, p) }).catch(() => {})
 function showLaunchNotice(notice) {
-  Object.assign(launchNotice, { open: true, logPath: launchLogPaths.bridgeLog || '', title: notice.title, body: notice.body })
+  Object.assign(launchNotice, { open: true, logPath: launchNoticeLogPath(notice, launchLogPaths.bridgeLog), title: notice.title, body: notice.body })
 }
 function closeLaunchNotice() { launchNotice.open = false }
 // 別台正在看這台（#597）：一定顯示，不能關，只能按結束。Rust 在傳第一幅之前就會通知這裡
@@ -1578,7 +1578,7 @@ function closeGoneNotice(item) {
 }
 if (!info.shot) { void refreshKnown(); setInterval(() => void refreshKnown(), 60_000) }
 if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice, onItem: openPermissionDlg, onGone: closeGoneNotice }).start()
-if (!info.shot && transport.autoResumeStatus) createAutoResumePoller({ fetch: () => transport.autoResumeStatus(), show: showLaunchNotice }).start()
+if (!info.shot && transport.autoResumeStatus) createAutoResumePoller({ fetch: () => transport.autoResumeStatus(), show: showLaunchNotice, log: line => console.info('[ASN]', line) }).start()
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
 let termSince = {}
 const termPoller = info.shot ? null : createTermPoller({
