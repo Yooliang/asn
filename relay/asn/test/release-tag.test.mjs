@@ -102,12 +102,12 @@ test('不是加一 → 停；加 --allow-skip 可以', async () => {
   assert.equal(readVersions({ packageJson: read(s2.dir, FILES.packageJson), tauriConf: read(s2.dir, FILES.tauriConf), cargoToml: read(s2.dir, FILES.cargoToml), pluginJson: read(s2.dir, FILES.pluginJson), cargoLock: read(s2.dir, FILES.cargoLock) }).cargoLock, skip)
 })
 
-test('不在 main → 停', async () => {
-  const s = setup({ branch: 'feat/x' })
+test('分離的 HEAD（工作機的發版工作樹）也能發：不看分支名，只要 HEAD 等於最新 origin/main', async () => {
+  const s = setup({ branch: 'HEAD' })
   const r = await releaseTag(opts(), s.deps)
-  assert.equal(r.ok, false)
-  assert.match(s.logs.join('\n'), /不在 main/)
-  assert.equal(writes(s.calls).filter(c => c.kind !== 'git' || c.args[0] !== 'fetch').length, 0)
+  assert.equal(r.ok, true, s.logs.join(' / '))
+  assert.ok(!/不在 main/.test(s.logs.join(' / ')))
+  assert.ok(s.calls.some(c => c.kind === 'git' && c.args.join(' ') === 'push origin HEAD:main'), '推送用 HEAD:main，不需要本機 main 分支')
 })
 
 test('工作樹髒 → 停', async () => {
@@ -327,7 +327,7 @@ test('--items-file 指到不存在的檔 → 停，訊息帶完整路徑；壞 J
 })
 
 test('--dry-run：不寫檔、不跑子程序、無任何 git 寫入；印出完整計畫', async () => {
-  const s = setup({ branch: 'feat/x' }) // dry-run 在非 main 也能印計畫，只提醒
+  const s = setup({ dirty: ' M relay/asn/ui/x.js' }) // dry-run 在工作樹髒時也能印計畫，只提醒
   const before = COMMIT_PATHS.map(p => read(s.dir, p))
   const r = await releaseTag(opts({ dryRun: true }), s.deps)
   assert.equal(r.ok, true)
