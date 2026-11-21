@@ -85,3 +85,44 @@ test('releaseCreateLines：LF、CRLF 的續行都接得起來，旗標在第二�
   }
   assert.equal(releaseCreateLines('# gh release create x').length, 0)
 })
+
+// #1973 冒煙測試是獨立 job（與 build 並行）：搬出去不能變成「沒人跑冒煙」，也不能在 build 裡又跑一次。
+const linuxBuildWf = () => workflows.find(([f]) => f === 'asn-linux-build.yml')[1].replace(/\r\n/g, '\n')
+const jobText = (src, name) => {
+  const m = src.match(new RegExp(String.raw`^  ${name}:\n([\s\S]*?)(?=^  [A-Za-z0-9_-]+:\n|(?![\s\S]))`, 'm'))
+  return m ? m[1] : null
+}
+const smokeJobProblems = src => {
+  const problems = []
+  const smoke = jobText(src, 'smoke-ui')
+  const build = jobText(src, 'build')
+  if (smoke === null) problems.push('沒有 smoke-ui job')
+  else {
+    if (!/^\s+run: node scripts\/smoke-ui\.mjs\s*$/m.test(smoke)) problems.push('smoke-ui job 沒有跑整支 node scripts/smoke-ui.mjs')
+    if (/--only|continue-on-error|\|\| true/.test(smoke)) problems.push('smoke-ui job 不准只跑部分情境或吞掉失敗')
+    if (!/node scripts\/prep\.mjs/.test(smoke)) problems.push('smoke-ui job 沒有先跑 prep.mjs（沒有 ui/vendor）')
+    if (!/apt-install\.sh[^\n]*fonts-droid-fallback/.test(smoke) || !/fc-list :lang=zh/.test(smoke)) problems.push('smoke-ui job 沒有安裝並檢查中文字型（冒煙靠它量長名字省略號）')
+    if (/^\s+needs:/m.test(smoke)) problems.push('smoke-ui job 不能 needs 別的 job（要和 build 並行）')
+  }
+  if (build === null) problems.push('沒有 build job')
+  else if (/smoke-ui\.mjs|smoke:ui/.test(build)) problems.push('build job 不該再跑冒煙（已搬到 smoke-ui）')
+  return problems
+}
+
+test('#1973 smoke-ui 是獨立 job：跑整支 smoke-ui.mjs、先 prep、不 needs build；build 不再重複跑冒煙', () => {
+  assert.deepEqual(smokeJobProblems(linuxBuildWf()), [])
+})
+
+test('#1973 守門本身會紅：拿掉 smoke-ui job、或 build 又跑冒煙、或只跑部分情境，都要被抓到', () => {
+  const src = linuxBuildWf()
+  const smoke = jobText(src, 'smoke-ui')
+  assert.ok(smoke)
+  const without = src.replace(`  smoke-ui:\n${smoke}`, '')
+  assert.ok(smokeJobProblems(without).some(p => /沒有 smoke-ui job/.test(p)))
+  const dup = src.replace('      - name: 上傳成品', '      - name: 冒煙\n        run: node scripts/smoke-ui.mjs\n\n      - name: 上傳成品')
+  assert.ok(smokeJobProblems(dup).some(p => /build job 不該再跑冒煙/.test(p)))
+  const nofont = src.replace('no-install-recommends fonts-droid-fallback', 'no-install-recommends fonts-dejavu-core')
+  assert.ok(smokeJobProblems(nofont).some(p => /中文字型/.test(p)))
+  const partial = src.replace('run: node scripts/smoke-ui.mjs', 'run: node scripts/smoke-ui.mjs --only m-signed-in')
+  assert.ok(smokeJobProblems(partial).length > 0)
+})

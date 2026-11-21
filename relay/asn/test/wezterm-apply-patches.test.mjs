@@ -134,3 +134,30 @@ test('#1992 長鏈紅燈對照用明確的 #7706 commit，不靠 HEAD~1（多一
   assert.match(s, /git log -1 --format=%s "\$PATCH_SHA"/, '要核對它就是 #7706 的 cherry-pick')
   assert.match(s, /git checkout "\$ONLY_7706" -- "\$FILE"/)
 })
+
+test('#2006 產物的 SOURCE.txt 照實寫出 ASN 修補：Linux 包列出套了哪些修補，用詞統一為「ASN 修補」，不再寫「只多套用 #7706」', () => {
+  const rd = p => fs.readFileSync(new URL(`../../../.github/${p}`, import.meta.url), 'utf8')
+  const linux = rd('scripts/wezterm-build-linux.sh'), prep = rd('scripts/wezterm-release-prepare.sh'), wf = rd('workflows/wezterm-build.yml')
+  for (const [n, s] of [['wezterm-build-linux.sh', linux], ['wezterm-release-prepare.sh', prep], ['wezterm-build.yml', wf]]) {
+    assert.ok(!/只多套用上游 #7706）/.test(s), `${n} 還寫「只多套用上游 #7706」`)
+    assert.ok(!/ASN 補丁/.test(s), `${n} 用詞要統一成「ASN 修補」`)
+  }
+  assert.match(linux, /ASN_PATCHES="\$\(git -C "\$SRC" log --format=%s \| sed -n "s\/\^asn patch: \/\/p"/)
+  assert.match(linux, /ASN 修補 \$\{ASN_PATCHES\}/)
+  assert.match(linux, /\[ -n "\$ASN_PATCHES" \] \|\| \{ echo "::error::/, '找不到修補要失敗，不能寫出空白')
+})
+
+test('#2008 Linux SOURCE.txt 的修補清單：兩份以上用「、」接起來是合法 UTF-8（實際跑腳本裡那條管線）', { skip: SKIP }, () => {
+  const src = fs.readFileSync(new URL('../../../.github/scripts/wezterm-build-linux.sh', import.meta.url), 'utf8')
+  const code = src.split(/\r?\n/).filter(l => !/^\s*#/.test(l)).join('\n')
+  assert.ok(!/paste -sd/.test(code), '不能用 paste -sd 接多位元組分隔字（coreutils 8.x 會拆開）')
+  const line = src.split(/\r?\n/).find(l => l.startsWith('ASN_PATCHES='))
+  assert.ok(line, '前提：找得到 ASN_PATCHES 那一行')
+  // 把 git log 換成固定的三個 commit 標題（兩份修補＋一個不相干的），其餘管線原樣跑
+  const pipeline = line.replace(/^ASN_PATCHES="\$\(git -C "\$SRC" log --format=%s/, 'printf \'%s\n\' "asn patch: 0002-b.patch" "其他提交" "asn patch: 0001-a.patch"').replace(/\)"\s*$/, '')
+  assert.ok(pipeline.startsWith('printf'), `前提：替換成功：${pipeline}`)
+  const r = spawnSync(BASH, ['-c', pipeline], { encoding: 'buffer' })
+  assert.equal(r.status, 0, String(r.stderr))
+  const out = new TextDecoder('utf-8', { fatal: true }).decode(r.stdout).trim() // 壞的 UTF-8 會在這裡丟錯
+  assert.equal(out, '0001-a.patch、0002-b.patch')
+})

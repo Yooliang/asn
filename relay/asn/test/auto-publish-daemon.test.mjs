@@ -1,10 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { runOnce, toRuns, parseArgs, checkWorktree, checkStartup, runCommand, realDeps, acquireLock, WORKFLOWS, REQUIRED_DEPS, BLOCKED_NOTICE_MS } from '../../../tools/release/auto_publish.mjs'
+import { runOnce, toRuns, parseArgs, checkWorktree, checkStartup, runCommand, realDeps, resolveStatePath, REPO_ROOT, acquireLock, WORKFLOWS, REQUIRED_DEPS, BLOCKED_NOTICE_MS, GH_FAIL_NOTICE_MS } from '../../../tools/release/auto_publish.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
+const REPO = path.resolve('/repo')
+const inRepo = (p) => path.join(REPO, p)
 const STATE = '/w/state.json'
 const LOCK = `${STATE}.lock`
 const SECRET = '子程序原文-不可貼群組-ABC123'
@@ -17,13 +20,13 @@ const seededState = (extra = {}) => ({ v: 1, done: { 'desktop@0.2.44': { result:
 
 // 假環境：檔案、gh、git、子程序、asn-cli 全是假的
 function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver = {}, spawnStatus = 0, ghStatus = 0, noDeps = false, noState = false, online = '0.2.43' } = {}) {
-  const fsMap = new Map(Object.entries(files))
+  const fsMap = new Map(Object.entries(files).map(([k, v]) => [path.isAbsolute(k) ? k : inRepo(k), v]))
   if (!noState && !fsMap.has(STATE)) fsMap.set(STATE, JSON.stringify(seededState()))
   const clock = { t: T0 }
-  if (!noDeps) for (const p of REQUIRED_DEPS) fsMap.set(p, 'x')
+  if (!noDeps) for (const p of REQUIRED_DEPS) fsMap.set(inRepo(p), 'x')
   const calls = { gh: [], git: [], spawn: [], posts: [], fetch: [], logs: [], unlinks: [], ops: [] }
   const deps = {
-    pid: 4242, now: () => clock.t,
+    pid: 4242, repoRoot: REPO, now: () => clock.t,
     gh: (args) => {
       calls.gh.push(args)
       if (ghStatus) return { status: ghStatus, stdout: '', stderr: 'boom' }
@@ -36,7 +39,7 @@ function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver
       for (const [pat, fn] of Object.entries(gitOver)) if (k.startsWith(pat)) return fn(k)
       return { status: 0, stdout: '', stderr: '' }
     },
-    spawn: (bin, args) => { calls.spawn.push([bin, args]); return { status: spawnStatus, stdout: SECRET, stderr: SECRET } },
+    spawn: (bin, args, o) => { calls.spawn.push([bin, args, o]); return { status: spawnStatus, stdout: SECRET, stderr: SECRET } },
     asnCli: (args) => { calls.posts.push(args[args.indexOf('--body') + 1]); return { status: 0, stdout: '', stderr: '' } },
     exists: (p) => fsMap.has(p),
     readFile: (p) => { if (!fsMap.has(p)) throw Object.assign(new Error('no'), { code: 'ENOENT' }); return fsMap.get(p) },
@@ -299,9 +302,61 @@ test('連續被鎖住超過 30 分鐘：只貼一次群組；取到鎖之後清�
   e.clock.t = T0 + BLOCKED_NOTICE_MS + 60_000
   await runOnce(opts, e.deps)
   assert.equal(e.calls.posts.length, 1)
+  const BP = `${STATE}.blocked-since-4242`
+  assert.ok(e.fsMap.has(BP), '被擋計時記在自己 pid 的檔')
   e.fsMap.delete(LOCK)
   await runOnce(opts, e.deps)
-  assert.ok(!('blockedSince' in JSON.parse(e.fsMap.get(`${STATE}.notices.json`))))
+  assert.ok(!e.fsMap.has(BP), '取到鎖後清掉自己的計時檔')
+})
+
+test('#2003 被鎖住時不寫 notices（沒持鎖不准碰 notices 檔，計時只寫自己 pid 的檔）', async () => {
+  const NP = `${STATE}.notices.json`
+  const e = env({ files: { [LOCK]: lk(777, T0), [NP]: JSON.stringify({ badState: true, prep: 'x' }) }, alive: [777] })
+  const before = e.fsMap.get(NP)
+  for (const dt of [0, BLOCKED_NOTICE_MS + 1000, BLOCKED_NOTICE_MS + 2000]) { e.clock.t = T0 + dt; await runOnce(opts, e.deps) }
+  assert.equal(e.calls.posts.length, 1)
+  assert.equal(e.fsMap.get(NP), before, 'notices 內容不變')
+  assert.ok(!e.calls.ops.some((o) => o.includes('.notices.json')), '沒有對 notices 的任何寫入或改名')
+  assert.ok(!e.calls.unlinks.some((o) => o.includes('.notices.json')))
+})
+
+const GH_MSG = '自動發佈連續 30 分鐘查不到 GitHub 上的發版狀態，請檢查 gh 登入或網路'
+const noticesOf = (e) => JSON.parse(e.fsMap.get(`${STATE}.notices.json`))
+const ghEnv = () => { const e = env(); let fail = true; e.deps.gh = (args) => { e.calls.gh.push(args); return fail ? { status: 1, stdout: '', stderr: `HTTP 403 rate limit ${SECRET}` } : { status: 0, stdout: '[]', stderr: '' } }; e.setFail = (v) => { fail = v }; return e }
+
+test('#2003 gh 連續失敗未滿 30 分鐘：不貼群組', async () => {
+  const e = ghEnv()
+  for (const dt of [0, 10 * 60_000, GH_FAIL_NOTICE_MS - 1000]) { e.clock.t = T0 + dt; assert.equal((await runOnce(opts, e.deps)).outcome, 'gh-failed') }
+  assert.equal(e.calls.posts.length, 0)
+  assert.equal(noticesOf(e).ghFailSince, T0)
+})
+
+test('#2003 gh 連續失敗超過 30 分鐘：只貼一次，群組文字固定、不含 stderr', async () => {
+  const e = ghEnv()
+  for (const dt of [0, GH_FAIL_NOTICE_MS + 1000, GH_FAIL_NOTICE_MS + 120_000, GH_FAIL_NOTICE_MS + 600_000]) { e.clock.t = T0 + dt; await runOnce(opts, e.deps) }
+  assert.deepEqual(e.calls.posts, [GH_MSG])
+  assert.ok(!e.calls.posts[0].includes(SECRET) && !e.calls.posts[0].includes('403'))
+  assert.equal(e.fsMap.has(LOCK), false)
+})
+
+test('#2003 gh 恢復後：計時清掉並寫 log，下次再失敗重新計時', async () => {
+  const e = ghEnv()
+  await runOnce(opts, e.deps)
+  e.clock.t = T0 + GH_FAIL_NOTICE_MS + 1000
+  await runOnce(opts, e.deps)
+  assert.equal(e.calls.posts.length, 1)
+  e.setFail(false)
+  e.clock.t = T0 + GH_FAIL_NOTICE_MS + 2000
+  await runOnce(opts, e.deps)
+  assert.ok(e.calls.logs.some((l) => l.includes('gh 已恢復')))
+  assert.ok(!('ghFailSince' in noticesOf(e)) && !('ghFailNoticed' in noticesOf(e)))
+  e.setFail(true)
+  e.clock.t = T0 + GH_FAIL_NOTICE_MS + 3000
+  await runOnce(opts, e.deps)
+  assert.equal(noticesOf(e).ghFailSince, T0 + GH_FAIL_NOTICE_MS + 3000, '重新計時')
+  e.clock.t += GH_FAIL_NOTICE_MS - 1000
+  await runOnce(opts, e.deps)
+  assert.equal(e.calls.posts.length, 1, '重新計時後未滿 30 分鐘不再貼')
 })
 
 test('準備失敗：不進 done、下一輪再試、文案是「準備失敗，尚未發佈」、同原因只貼一次，成功後清掉', async () => {
@@ -361,6 +416,27 @@ test('state 讀不懂：不覆寫、連續出現只貼一次群組；恢復後�
   e.fsMap.set(STATE, '{又壞')
   await runOnce(opts, e.deps)
   assert.equal(e.calls.posts.length, 2)
+})
+
+test('state 能解析但結構不對：當 bad-state，不覆寫、不發佈、只貼一次群組', async () => {
+  const bads = ['{}', 'null', '[]', '5', '"字串"', JSON.stringify({ done: {} }), JSON.stringify({ seeded: true }), JSON.stringify({ seeded: true, done: [] }), JSON.stringify({ seeded: true, done: null })]
+  for (const text of bads) {
+    const e = env({ desktopRows: [row('v0.2.45', 111)], files: { [STATE]: text } })
+    assert.equal((await runOnce(opts, e.deps)).outcome, 'bad-state', text)
+    assert.equal((await runOnce(opts, e.deps)).outcome, 'bad-state', text)
+    assert.equal(e.calls.posts.length, 1, text)
+    assert.equal(e.fsMap.get(STATE), text, `不覆寫：${text}`)
+    assert.ok(!e.calls.ops.some((o) => o.includes(STATE) && !o.includes('.notices.json') && !o.includes('.lock')), text)
+    assert.equal(e.calls.spawn.length, 0, `不呼叫 local_sign_publish：${text}`)
+    assert.equal(e.calls.gh.length, 0, text)
+  }
+})
+
+test('只有 notices 檔、沒有 state：拒絕啟動', () => {
+  const e = env({ noState: true, files: { [`${STATE}.notices.json`]: '{}' } })
+  const c = checkStartup(opts, e.deps)
+  assert.equal(c.ok, false)
+  assert.ok(c.why.includes('拒絕啟動') && c.why.includes('notices'), c.why)
 })
 
 test('沒播種、沒痕跡：啟動提示要先 --seed；runOnce 不自動建 state', async () => {
@@ -516,4 +592,52 @@ test('finally 還鎖：取鎖後鎖被換成別人的，不能刪別人的鎖；
   const e2 = env({ desktopRows: [row('v0.2.45')] })
   await runOnce(opts, e2.deps)
   assert.equal(e2.fsMap.has(LOCK), false)
+})
+
+test('#2003c 從別的 cwd 呼叫：spawn 帶 cwd=repoRoot、腳本路徑與相依檢查都以 repoRoot 為基準', async () => {
+  const e = env({ desktopRows: [row('v0.2.45', 111)] })
+  const elsewhere = path.resolve('/某個別的啟動目錄')
+  assert.notEqual(elsewhere, REPO)
+  const checked = []
+  const ex = e.deps.exists
+  e.deps.exists = (p) => { checked.push(p); return ex(p) }
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'dryRun')
+  const [bin, args, o] = e.calls.spawn[0]
+  assert.equal(bin, 'node')
+  assert.deepEqual(o, { cwd: REPO }, 'spawn 一定要帶 cwd: repoRoot')
+  assert.equal(args[0], path.join(REPO, 'tools', 'release', 'local_sign_publish.mjs'))
+  assert.ok(path.isAbsolute(args[0]), '腳本路徑是絕對路徑')
+  for (const p of REQUIRED_DEPS) assert.ok(checked.includes(inRepo(p)), `相依檢查以 repoRoot 為基準：${p}`)
+  assert.ok(!checked.some((p) => REQUIRED_DEPS.includes(p)), '不准用相對路徑檢查相依')
+})
+
+test('#2003c resolveStatePath：相對路徑以啟動目錄解析並留說明；絕對路徑不動；realDeps 預設 repoRoot 取自腳本位置', () => {
+  const cwd = path.resolve('/launch')
+  const a = resolveStatePath('s/state.json', cwd)
+  assert.equal(a.state, path.resolve(cwd, 's/state.json'))
+  assert.ok(a.note.includes(a.state) && a.note.includes('相對路徑'))
+  const abs = path.resolve('/x/state.json')
+  assert.deepEqual(resolveStatePath(abs, cwd), { state: abs, note: null })
+  assert.equal(REPO_ROOT, path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'))
+  assert.equal(realDeps({ state: abs }).repoRoot, REPO_ROOT)
+})
+
+test('#2003c 運行手冊存在、涵蓋關鍵字，且手冊裡每個 --參數 parseArgs 都認得', () => {
+  const doc = fs.readFileSync(new URL('../../../docs/release/自動發佈運行手冊.md', import.meta.url), 'utf8')
+  for (const k of ['--seed', '--yes', '--ack', '--dry-run-only', '備援']) assert.ok(doc.includes(k), `手冊要提到 ${k}`)
+  const flags = [...new Set(doc.match(/--[a-z][a-z-]*/g))]
+  const needsVal = new Set(['--interval', '--state', '--room', '--seed', '--seed-desktop', '--seed-linux', '--ack'])
+  for (const f of flags) {
+    const o = parseArgs(needsVal.has(f) ? [f, f === '--interval' ? '120' : 'x'] : [f])
+    assert.equal(o.error, null, `手冊提到的 ${f} 程式要認得：${o.error}`)
+  }
+})
+
+test('#2003 (c) 核心的「需要播種」訊息講的是程式真的認得的參數（--seed／--yes），不是不存在的 --since', () => {
+  const src = fs.readFileSync(new URL('../../../tools/release/auto_publish_core.mjs', import.meta.url), 'utf8')
+  const msgs = [...src.matchAll(/message: '([^']*)'/g)].map(m => m[1])
+  for (const m of msgs) for (const flag of m.match(/--[a-z][a-z-]*/g) ?? []) assert.ok(parseArgs([flag, ...(flag === '--seed' ? ['0.0.1'] : [])]).error == null || !/不認得|未知/.test(String(parseArgs([flag]).error)), `核心訊息提到 ${flag}，程式卻不認得`)
+  assert.ok(msgs.some(m => /--seed/.test(m) && /--yes/.test(m)), '需要播種的訊息要寫出 --seed 與 --yes')
+  assert.ok(!msgs.some(m => /--since/.test(m)), '不能再寫 --since')
 })

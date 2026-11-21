@@ -24,6 +24,17 @@ export function emptyState() {
   return { v: STATE_VERSION, done: {}, pending: {}, inflight: null, seeded: false, since: null, seedNoticed: false, pausedNoticed: false }
 }
 
+// 結構檢查：能解析成 JSON 不代表是 state。必須是物件（非 null／陣列）、seeded 是布林、done 是物件（非 null／陣列）。
+// 放核心而不放常駐程式：「state 長什麼樣」是核心定義的（emptyState／clone），檢查跟著定義走，常駐程式與 --ack 共用。
+// 回 { ok: true } 或 { ok: false, why }
+export function validateState(state) {
+  const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x)
+  if (!isObj(state)) return { ok: false, why: `最外層不是物件（${state === null ? 'null' : Array.isArray(state) ? '陣列' : typeof state}）` }
+  if (typeof state.seeded !== 'boolean') return { ok: false, why: 'seeded 欄位缺少或不是布林' }
+  if (!isObj(state.done)) return { ok: false, why: 'done 欄位缺少或不是物件' }
+  return { ok: true }
+}
+
 function ms(t) {
   return t instanceof Date ? t.getTime() : typeof t === 'number' ? t : Date.parse(t)
 }
@@ -139,7 +150,7 @@ function decideInner({ runs = [], state, now }, notes) {
     if (st.seedNoticed) return wait(st, '尚未播種')
     st.seedNoticed = true
     return { action: 'report', key: null, result: 'unseeded', state: st,
-      message: '自動發佈還沒有播種（不知道哪些舊版已經處理過），不會做任何發佈。請先指定起點版號（例如 --since 0.2.44）播種。' }
+      message: '自動發佈還沒有播種（不知道哪些舊版已經處理過），不會做任何發佈。請先指定起點版號播種：node tools/release/auto_publish.mjs --seed <線上版號> --yes（見 docs/release/自動發佈運行手冊.md）。' }
   }
 
   // 重入保護：上一輪子程序還在跑（或程式中途當掉），不准開始別的事

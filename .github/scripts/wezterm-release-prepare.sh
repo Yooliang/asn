@@ -16,9 +16,9 @@ done
 unzip -p WezTerm-windows-*.zip LICENSE.md > LICENSE.md
 [ "$(sha256sum LICENSE.md | cut -d' ' -f1)" = "$LICENSE_SHA256" ] || { echo "::error::LICENSE.md 雜湊不符" >&2; exit 1; }
 cat > SOURCE.txt <<TXT
-WezTerm ${UPSTREAM_TAG}（ASN 自行建置 ${ASN_SUFFIX}，多套用上游 #7706 與 ASN 補丁）
+WezTerm ${UPSTREAM_TAG}（ASN 自行建置 ${ASN_SUFFIX}，多套用上游 #7706 與 ASN 修補）
 上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
-額外套用：上游 commit ${PATCH_SHA}（#7706）；ASN 補丁 patches/wezterm/（清單見 docs/design/WEZTERM-自建修改清單.md）
+額外套用：上游 commit ${PATCH_SHA}（#7706）；ASN 修補 patches/wezterm/（清單見 docs/design/WEZTERM-自建修改清單.md）
 Rust：${RUST_VERSION}；cargo build --locked --release
 建置紀錄：${RUN_URL}（commit ${COMMIT_SHA}）
 驗證：gh attestation verify <檔案> -R ${REPO}

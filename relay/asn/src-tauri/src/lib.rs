@@ -3320,6 +3320,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .manage(wins::Slots::default())
+        .manage(wins::Painted::default())
         .manage(Arc::new(TermViews::default()))
         .manage(Arc::new(BeingViewed::default()))
         .manage(Arc::new(view_remote::RemoteViews::default()))
@@ -3353,7 +3354,7 @@ pub fn run() {
             acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, claude_login_failed, agent_setup_remote_allow_set, agent_setup_start, agent_setup_plan, agent_setup_cancel,
             voice_cfg_get, voice_cfg_set, tts::tts_voices, tts::tts_speak, stt::stt_status, stt::stt_install, stt::stt_transcribe,
             agent_tools::ai_cli_detect, agent_tools::ai_cli_install, agent_tools::ai_cli_login, stt::stt_cancel,
-            wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_click, wins::setup_progress_snapshot, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
+            wins::open_chat, wins::open_panel, wins::close_panels, wins::chat_visible, wins::close_chats, wins::open_windows, wins::main_visible, wins::show_main, wins::main_layout, wins::shake, wins::show_toast, wins::toast_painted, wins::toast_click, wins::setup_progress_snapshot, wins::win_ctl, wins::frame_native, wins::set_frame, wins::take_shot, capture_ui_ready,
             account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_chat_pins_get, account::auth_chat_pins_set, account::auth_bind, account::auth_skip_login, account::update_remote_request, account::update_remote_status, account::setup_remote_request, account::setup_remote_status,
             cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
             site_releases::site_releases, tray::set_close_to_tray, tray::set_tray_unread, tray::tray_available, tray::autostart_supported, tray::autostart_get, tray::autostart_blocked, guard::guard_get, guard::guard_set, guard::guard_resume, tray::autostart_set, updater::update_check, updater::update_install,

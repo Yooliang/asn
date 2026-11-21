@@ -153,3 +153,23 @@ test('#1979 二審：搬檔（rename）時舊路徑也要算進去（真的 git�
     assert.deepEqual(tagged(plan(files.map(file => ({ file })))), [...PLATFORMS])
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
 })
+
+test('#2010 WezTerm 相關路徑：pins＝電腦＋Linux、fetch-wezterm＝只有電腦、patches/wezterm 與 .gitattributes＝不發', () => {
+  assert.deepEqual(tagged(plan([{ file: 'relay/asn/scripts/wezterm-pins.json' }])), ['desktop', 'linux'])
+  assert.deepEqual(tagged(plan([{ file: 'relay/asn/scripts/fetch-wezterm.mjs' }])), ['desktop'])
+  for (const f of ['patches/wezterm/0001-procinfo-build-proc-iterative.patch', 'patches/wezterm/manifest.txt', '.gitattributes']) {
+    const r = plan([{ file: f }])
+    assert.deepEqual(r.unknown, [], f)
+    assert.deepEqual(tagged(r), [], f)
+  }
+})
+
+test('#2010 驗收：v0.2.44..v0.2.45 這段改動（真的 git）判成電腦＋Linux，不是三平台全打', (t) => {
+  const g = args => execFileSync('git', ['-c', 'core.quotepath=off', ...args], { encoding: 'utf8' })
+  try { g(['rev-parse', '--verify', 'v0.2.44^{commit}']); g(['rev-parse', '--verify', 'v0.2.45^{commit}']) } catch { t.skip('本機沒有 v0.2.44／v0.2.45 標籤（淺複本）'); return }
+  // 以 v0.2.45 當 HEAD：只看這兩個標籤之間的改動
+  const files = changedFilesSince(args => g(args.map(a => a === 'v0.2.44..HEAD' ? 'v0.2.44..v0.2.45' : a)), 'v0.2.44')
+  const r = plan(files.map(file => ({ file })))
+  assert.deepEqual(r.unknown, [], `不該有判斷不出來的檔：${r.unknown}`)
+  assert.deepEqual(tagged(r), ['desktop', 'linux'], `依據：${JSON.stringify(r.platforms)}`)
+})
