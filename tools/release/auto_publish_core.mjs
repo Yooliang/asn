@@ -5,6 +5,7 @@
 //     pending: { '平台@版號': { platform, tag, runId, at } },   // 試跑已過、待正式
 //     inflight: null | { key, step: 'dryRun'|'publish', startedAt, pid, platform, tag, runId },
 //     seeded: boolean,          // 是否播種過；沒播種的 state 一律不處理任何版本
+//     since: { desktop, linux } | null,  // 播種起點；seeded 為 true 卻沒有合法的 since 一律當成沒播種（#4563）
 //     seedNoticed: boolean,     // 已回報過「需要播種」
 //     pausedNoticed: boolean }  // 已回報過「有未處理失敗而暫停」
 // done 的每筆可再有 ackedAt（人工確認清除失敗的時間，見 acknowledge）
@@ -20,7 +21,7 @@ const PLATFORMS = ['desktop', 'linux']
 const PLATFORM_NAME = { desktop: '電腦版', linux: 'Linux 版' }
 
 export function emptyState() {
-  return { v: STATE_VERSION, done: {}, pending: {}, inflight: null, seeded: false, seedNoticed: false, pausedNoticed: false }
+  return { v: STATE_VERSION, done: {}, pending: {}, inflight: null, seeded: false, since: null, seedNoticed: false, pausedNoticed: false }
 }
 
 function ms(t) {
@@ -36,6 +37,7 @@ function clone(state) {
     pending: { ...(s.pending || {}) },
     inflight: s.inflight ? { ...s.inflight } : null,
     seeded: s.seeded === true,
+    since: s.since && PLATFORMS.every(p => isVersion(s.since[p])) ? { desktop: s.since.desktop, linux: s.since.linux } : null,
     seedNoticed: s.seedNoticed === true,
     pausedNoticed: s.pausedNoticed === true,
   }
@@ -95,6 +97,7 @@ export function seed(state, { since, now } = {}) {
   }
   for (const p of PLATFORMS) st.done[keyOf(p, since[p])] = { result: 'seeded', at: iso(now), runId: null }
   st.seeded = true
+  st.since = { desktop: since.desktop, linux: since.linux }
   return { ok: true, state: st }
 }
 
@@ -129,10 +132,9 @@ function decideInner({ runs = [], state, now }, notes) {
   const st = clone(state)
   const t = ms(now)
 
-  // 播種要「看得到起點」才算數：seeded:true 但某平台在 done 裡沒有 seeded 紀錄（手改過、寫到一半），當成沒播種，
-  // 否則會從最舊的綠燈 run 開始重發舊版（調查員 #4562 實測會發 desktop@0.2.40）
-  const seedVisible = PLATFORMS.every(p => Object.entries(st.done).some(([k, v]) => k.startsWith(`${p}@`) && v?.result === 'seeded'))
-  if (!st.seeded || !seedVisible) {
+  // 播種要有合法的起點（state.since）才算數：seeded:true 卻沒有 since（手改過、寫到一半），當成沒播種，
+  // 否則會從最舊的綠燈 run 開始重發舊版（調查員 #4562 實測會發 desktop@0.2.40；領隊 #4563 定做法）
+  if (!st.seeded || !st.since) {
     if (st.seedNoticed) return wait(st, '尚未播種')
     st.seedNoticed = true
     return { action: 'report', key: null, result: 'unseeded', state: st,
@@ -166,7 +168,9 @@ function decideInner({ runs = [], state, now }, notes) {
   }
 
   for (const platform of PLATFORMS) {
-    const maxDone = maxDoneVersion(st.done, platform)
+    // 起點與 done 取大：done 被手改清空也不會回頭發 since 以前的版本（#4563）
+    const fromDone = maxDoneVersion(st.done, platform)
+    const maxDone = fromDone === null || compareVersions(st.since[platform], fromDone) > 0 ? st.since[platform] : fromDone
     // 每個版號取 createdAt 最新的 run；舊版本與已處理的不理
     const latest = new Map()
     for (const r of runs) {

@@ -312,3 +312,16 @@ test('#4562 seeded:true 但 done 看不到起點（手改、寫到一半）→ �
   const half = { ...emptyState(), seeded: true, done: { 'desktop@0.2.44': { result: 'seeded', at: 'x', runId: null } } }
   assert.equal(decide({ runs, state: half, now: T0 }).action, 'report')
 })
+
+test('#4563 起點存在 state.since：done 被清空也不回頭發 since 以前的版本；maxDone 取 since 與 done 的最大值', () => {
+  const st = seed(emptyState(), { since: { desktop: '0.2.44', linux: '0.2.44' }, now: 0 }).state
+  assert.deepEqual(st.since, { desktop: '0.2.44', linux: '0.2.44' })
+  const wiped = { ...st, done: {} } // 手改把 done 清掉
+  const d1 = decide({ runs: [run('desktop', '0.2.40'), run('desktop', '0.2.44')], state: wiped, now: T0 })
+  assert.equal(d1.action, 'wait', 'since 以前（含）不發')
+  const d2 = decide({ runs: [run('desktop', '0.2.40'), run('desktop', '0.2.45')], state: wiped, now: T0 })
+  assert.equal(d2.action, 'dryRun')
+  assert.equal(d2.tag, 'v0.2.45')
+  // since 格式壞掉 → 當成沒播種
+  assert.equal(decide({ runs: [], state: { ...st, since: { desktop: 'x', linux: '0.2.44' } }, now: T0 }).result, 'unseeded')
+})
