@@ -1065,6 +1065,46 @@ export const mountCheckSource = (ready, expectedPath) => `(() => {
   return { ok: true, why: '' };
 })()`
 
+// #1974：冒煙「等條件成立就往下」，取代每個情境固定 sleep。
+// 版面穩定＝頁面載入完成、字型載入完成、連續 SETTLE_STABLE_POLLS 次量到的高度／寬度／元素數／字數都一樣；
+// 穩定後再留一小段靜默窗 SETTLE_QUIET_MS：錯誤（未捕捉例外、console.error）由偵錯協定整段持續收集，
+// 所以「啟動後的非同步例外」只要在版面穩定期間或靜默窗內冒出來，仍會被記成這個情境的失敗。
+export const SETTLE_POLL_MS = 50
+export const SETTLE_STABLE_POLLS = 3
+export const SETTLE_QUIET_MS = 300
+// 取捨：多數情境靜默窗只留 300ms，晚於 300ms 才冒出的啟動例外由「代表情境」把關：
+// 每個 ui 頁面挑一個代表情境，穩定後多等 SETTLE_QUIET_LATE_MS（同舊版固定睡一秒的覆蓋）。
+export const SETTLE_QUIET_LATE_MS = 1000
+export const LATE_QUIET_SCENARIOS = Object.freeze(['m-signed-in', 'list', 'chat', 'onboard', 'login', 'panel', 'askpass', 'toast', 'setup-progress'])
+export const quietMsFor = name => (LATE_QUIET_SCENARIOS.includes(name) ? SETTLE_QUIET_LATE_MS : SETTLE_QUIET_MS)
+export const SETTLE_TIMEOUT_MS = 5000
+export const settleSnapshotSource = () => `(() => {
+  const d = document, b = d.body, e = d.documentElement;
+  return { rs: d.readyState, fonts: d.fonts ? d.fonts.status : 'loaded', h: e.scrollHeight, w: e.scrollWidth, n: d.getElementsByTagName('*').length, t: b ? b.innerText.length : 0 };
+})()`
+// 回傳一個函式：每次丟進一份快照，連續 need 次「已就緒且和上一份完全相同」才回 true
+export const makeStableTracker = (need = SETTLE_STABLE_POLLS) => {
+  let prev = '', same = 0
+  return snap => {
+    if (!snap || snap.rs !== 'complete' || snap.fonts === 'loading') { prev = ''; same = 0; return false }
+    const cur = JSON.stringify(snap)
+    same = cur === prev ? same + 1 : 1
+    prev = cur
+    return same >= need
+  }
+}
+// 每 intervalMs 取一次值、isDone(值) 成立就回傳；到 timeoutMs 還不成立就丟錯，訊息寫明情境與在等什麼
+export const waitUntil = async ({ scenario, what, poll, isDone, timeoutMs = SETTLE_TIMEOUT_MS, intervalMs = SETTLE_POLL_MS, sleep = ms => new Promise(r => setTimeout(r, ms)), now = Date.now }) => {
+  const deadline = now() + timeoutMs
+  let last
+  for (;;) {
+    last = await poll()
+    if (isDone(last)) return last
+    if (now() >= deadline) throw new Error(`情境 ${scenario} 等不到「${what}」（等了 ${timeoutMs} 毫秒）；最後一次量到：${JSON.stringify(last)}`)
+    await sleep(intervalMs)
+  }
+}
+
 // 截圖前等手機滑頁停下來（#1565）：探測一切到別的分頁就回結果的話，截圖會拍到 0.28 秒轉場的半途，每次停在不同格。
 // 停下來＝pager 沒有進行中的動畫、而且已經拿掉 will-change（轉場結束才拿掉）；再等兩格畫面讓內頁重畫到整像素。沒有 pager 的頁面直接過
 export const PAGER_SETTLE_WAIT_MS = 3000
