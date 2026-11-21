@@ -1,15 +1,11 @@
 {
-  "version": "0.2.49",
-  "notes": "- 修正：聊天紀錄很多、存檔超過 8 MB 時新的對話存不進去的問題；現在存檔前先量大小，超過就從最久沒聯絡的夥伴開始只留較新的訊息，新對話一定存得進去。（#2043、#2046）",
-  "pub_date": "2026-11-21T12:37:28.251Z",
+  "version": "0.2.50",
+  "notes": "- 改善：工作管理員的「來源」欄改成「運行位置」，直接寫出每位夥伴是在終端服務、原生主控台還是不明的地方跑。（#1909、#2031、#2050）",
+  "pub_date": "2026-11-21T14:52:29.791Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJwMDJKbS9IRnNNODJ5ak1sWG9KOFl6bWhpZDVmbGpsL0UvY0lxZ3ByNjNnQlQwakh4QU1TanNmdUd4WEdhbmg0NHl6emkwR0JSQzA0WVpWSmpmRFFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjY0NjQ4CWZpbGU6QVNOXzAuMi40OV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQ5CmtCS1Fpak1YeGVXNmpoU3RmK1JnYnp3VTF2SWtWVkFqYit5ekY5NzliRjB2MTQ1Mm1CdmFnQ0ZOWGxRbmh5dUVXeHc5YnFwYU9kb3hRWHhEbExzMENRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.49_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjY1dHJnSEF3MUI3Y2RNZm1kSUhadWN4OGpuSnl5QWEydVFTQ2JYdWgyd3RLYmZhTXo1SEFSSm9udjBtVVBFZWZaUlRkRk9ubmNMK3JWTGFqRlJFN3dnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjY1MzAzCWZpbGU6QVNOXzAuMi40OV9hbWQ2NC5BcHBJbWFnZQo3enBHQWhRTFQxL2FXSG9IVkFmRW0vUDZmY1RCTUVsaUZxKzJPR241ZXVDczViMFhGaWpYamJCYWZXK1hsVnlPSzZQcUQ5TXFYZU1hZXF4NFM1VzREUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.49_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlwSUVqRGdzQTlUY2hJMUt1QWlBcmZyMGtRK3E1WGJRMnN4aXk1UytmbDNHZHM5enZCaDZ5cGo0MlFZby80VENnelJ3cXVWQ2lmS3RnZ0ZkS2djb1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjcyNzQ5CWZpbGU6QVNOXzAuMi41MF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjUwClpZcmlTNE5xanhKZUZ5eXJCTUJ5aDVyRGNoSVlhVlRybVBWb1I4cER0aStLNXU5MDdsdlZGbS82QkdFTnRpLzBzL0dDS3hFRi9UWGp4aC9NRlVXUkFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.50_x64-setup.exe"
     }
   }
 }
