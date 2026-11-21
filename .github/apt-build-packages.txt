@@ -1,4 +1,4 @@
-# build job「安裝系統依賴」的套件清單（改這裡會讓 apt 快取換新 key）
+# build、rust-test 兩個 job「安裝系統依賴」的套件清單（改這裡會讓 apt 快取換新 key；兩個 job 共用同一個快取鍵）
 build-essential
 pkg-config
 libssl-dev

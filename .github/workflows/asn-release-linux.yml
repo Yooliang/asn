@@ -103,7 +103,7 @@ jobs:
           fi
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
-  # ---- 1. Linux 版：無 environment、無 secrets。建置步驟照 asn-linux-build.yml 的 build job；測試全跑、不略過 ----
+  # ---- 1. Linux 版：無 environment、無 secrets。建置步驟照 asn-linux-build.yml 的 build job（建置＋端到端）與 rust-test job（單元測試）；測試全跑、不略過 ----
   linux:
     needs: guard
     if: needs.guard.outputs.auto == 'true'

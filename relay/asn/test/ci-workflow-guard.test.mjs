@@ -155,3 +155,81 @@ test('#1975 冒煙分片守門：matrix 4 片、fail-fast: false、每片上傳�
   assert.ok(has(mut('--shards 4', '--shards 3'), /不一致/))
   assert.ok(has(mut('!= "success"', '!= "never"'), /分片本身/))
 })
+
+// #1977 Rust／Node 單元測試（rust-test）與建置＋端到端（build）是兩個並行 job：拆開不能變成「有的測試沒人跑」，也不能兩邊都跑一次。
+const splitJobProblems = src => {
+  const problems = []
+  const rust = jobText(src, 'rust-test')
+  const build = jobText(src, 'build')
+  if (rust === null) problems.push('沒有 rust-test job')
+  if (build === null) problems.push('沒有 build job')
+  if (rust === null || build === null) return problems
+  for (const [name, text] of [['rust-test', rust], ['build', build]]) {
+    if (/^\s+needs:/m.test(text)) problems.push(`${name} job 不能 needs 別的 job（兩個要並行）`)
+    if (!/uses: Swatinem\/rust-cache@/.test(text)) problems.push(`${name} job 沒有 rust-cache`)
+    if (!/apt-install\.sh/.test(text)) problems.push(`${name} job 沒有走 apt-install.sh 安裝系統依賴`)
+    if (!/^\s+run: npm ci\s*$/m.test(text)) problems.push(`${name} job 沒有 npm ci`)
+    // 失敗不能被吞掉：job 層級的 continue-on-error 會讓單元測試紅了、PR 還是綠的（小悠 #2019 一審）
+    if (/^\s*continue-on-error:/m.test(text)) problems.push(`${name} job 不准有 continue-on-error（測試失敗要讓 job 變紅）`)
+  }
+  // rust-test 的單元測試三步（npm test、test:rust、keyring）不准被條件略過或吞掉失敗：if:、continue-on-error、|| true（含 || 換行接 true）、set +e／set +eu
+  for (const re of [/^\s+run: (?:[^\n]*[;&|]\s*)?npm test\b/m, /^\s+run: (?:[^\n]*[;&|]\s*)?npm run test:rust\b/m, /keystore::linux -- --ignored/]) {
+    const i = rust.search(re)
+    if (i < 0) continue   // 少了這一步，下面「少了…」那條會報
+    const start = rust.lastIndexOf('\n      - ', i)
+    const next = rust.indexOf('\n      - ', i)
+    const step = rust.slice(start < 0 ? 0 : start, next < 0 ? rust.length : next)
+    const label = step.trim().split('\n')[0]
+    if (/^\s+if:/m.test(step)) problems.push(`rust-test 的單元測試步驟不准有 if:（會被略過）：${label}`)
+    if (/^\s+continue-on-error:/m.test(step)) problems.push(`rust-test 的單元測試步驟不准 continue-on-error：${label}`)
+    if (/\|\|\s*(?:true|:)\b|\|\|\s*\n\s*true\b|\bset\s+\+[a-z]*e/.test(step)) problems.push(`rust-test 的單元測試步驟不准 || true／set +e（會吞掉失敗）：${label}`)
+  }
+  // rust-test：Node 單元測試 → Rust 單元測試 → keyring 整合測試，順序不能變（npm test 的 pretest 先產 ui/vendor，之後才 cargo test）
+  const order = [/^\s+run: npm test\s*$/m, /^\s+run: npm run test:rust\s*$/m, /keystore::linux -- --ignored/]
+  const at = order.map(re => rust.search(re))
+  if (at.some(i => i < 0)) problems.push('rust-test 少了 npm test、npm run test:rust 或 keyring 整合測試')
+  else if (at[0] > at[1] || at[1] > at[2]) problems.push('rust-test 的順序要是 npm test → test:rust → keyring')
+  if (/npm run build|xvfb-run|upload-artifact/.test(rust)) problems.push('rust-test 不該做打包、端到端或上傳成品（那是 build 的事）')
+  // build：打包、端到端、上傳成品；不再重複跑單元測試
+  if (!/npm run build/.test(build)) problems.push('build 沒有打包（npm run build）')
+  if (!/xvfb-run -a node --test .*test\/e2e\.test\.mjs/.test(build)) problems.push('build 沒有端到端測試')
+  if (!/uses: actions\/upload-artifact@/.test(build)) problems.push('build 沒有上傳成品')
+  if (/^\s+run: npm test\s*$/m.test(build) || /npm run test:rust|keystore::linux/.test(build)) problems.push('build 不該再跑單元測試或 keyring（已搬到 rust-test）')
+  return problems
+}
+
+test('#1977 rust-test 與 build 是兩個並行 job，各自步驟齊全、不重複', () => {
+  assert.deepEqual(splitJobProblems(linuxBuildWf()), [])
+})
+
+test('#1977 守門本身會紅：拿掉 rust-test、串起兩個 job、少一步、順序顛倒、build 又跑單元測試，都要被抓到', () => {
+  const src = linuxBuildWf()
+  const rust = jobText(src, 'rust-test')
+  assert.ok(rust)
+  assert.ok(splitJobProblems(src.replace(`  rust-test:\n${rust}`, '')).some(p => /沒有 rust-test job/.test(p)))
+  assert.ok(splitJobProblems(src.replace('  build:\n    runs-on: ubuntu-24.04\n', '  build:\n    needs: rust-test\n    runs-on: ubuntu-24.04\n')).some(p => /needs/.test(p)))
+  assert.ok(splitJobProblems(src.replace('run: npm run test:rust', 'run: echo skip')).some(p => /少了/.test(p)))
+  assert.ok(splitJobProblems(src.replace('keystore::linux -- --ignored', 'keystore::linux --')).some(p => /少了/.test(p)))
+  const swapped = src.replace('        run: npm test\n', '        run: npm run test:rust\n').replace('        run: npm run test:rust\n\n      # 系統金鑰庫', '        run: npm test\n\n      # 系統金鑰庫')
+  assert.ok(splitJobProblems(swapped).some(p => /順序/.test(p)), '順序顛倒要被抓到')
+  const dup = src.replace('      - name: 建置 deb 與 AppImage', '      - name: 重複的 Rust 測試\n        run: npm run test:rust\n\n      - name: 建置 deb 與 AppImage')
+  assert.ok(splitJobProblems(dup).some(p => /build 不該再跑單元測試/.test(p)))
+  assert.ok(splitJobProblems(src.replace('        run: npm run build\n', '        run: echo\n').replace(/npm run build/g, 'echo')).some(p => /build 沒有打包/.test(p)))
+  // #2019 一審：吞掉失敗的寫法都要被抓到（job 層級與步驟層級的 continue-on-error、if:、|| true、set +e）
+  const head = '  rust-test:\n    runs-on: ubuntu-24.04\n'
+  assert.ok(src.includes(head), '找不到 rust-test 開頭，壞例子無從替換')
+  assert.ok(splitJobProblems(src.replace(head, head + '    continue-on-error: true\n')).some(p => /rust-test job 不准有 continue-on-error/.test(p)), 'rust-test job 層級 continue-on-error')
+  assert.ok(splitJobProblems(src.replace('  build:\n    runs-on: ubuntu-24.04\n', '  build:\n    continue-on-error: true\n    runs-on: ubuntu-24.04\n')).some(p => /build job 不准有 continue-on-error/.test(p)), 'build job 層級 continue-on-error')
+  // 步驟層級：只在 rust-test 的文字範圍內替換（同樣的指令別的 job 也有，不能替換到別處）
+  const viaRust = (from, to) => { assert.ok(rust.includes(from), `rust-test 裡找不到：${from.trim()}`); return src.replace(rust, rust.replace(from, () => to)) }
+  for (const cmd of ['        run: npm test\n', '        run: npm run test:rust\n']) {
+    assert.ok(splitJobProblems(viaRust(cmd, cmd + '        continue-on-error: true\n')).some(p => /步驟不准 continue-on-error/.test(p)), `${cmd.trim()} 加 continue-on-error`)
+    assert.ok(splitJobProblems(viaRust(cmd, cmd.replace('        run:', '        if: always()\n        run:'))).some(p => /不准有 if:/.test(p)), `${cmd.trim()} 加 if:`)
+    assert.ok(splitJobProblems(viaRust(cmd, cmd.replace('\n', ' || true\n'))).some(p => /\|\| true／set \+e/.test(p)), `${cmd.trim()} 加 || true`)
+    assert.ok(splitJobProblems(viaRust(cmd, cmd.replace('        run: ', '        run: set +e; '))).some(p => /\|\| true／set \+e/.test(p)), `${cmd.trim()} 加 set +e`)
+  }
+  const kr = 'cargo test --locked --lib keystore::linux -- --ignored --test-threads=1'
+  assert.ok(splitJobProblems(viaRust(kr, kr + ' || true')).some(p => /\|\| true／set \+e/.test(p)), 'keyring 加 || true')
+  assert.ok(splitJobProblems(viaRust(kr, 'set +e; ' + kr)).some(p => /\|\| true／set \+e/.test(p)), 'keyring 加 set +e')
+  assert.ok(splitJobProblems(viaRust('        working-directory: relay/asn/src-tauri\n', '        working-directory: relay/asn/src-tauri\n        if: always()\n')).some(p => /不准有 if:/.test(p)), 'keyring 步驟加 if:')
+})
