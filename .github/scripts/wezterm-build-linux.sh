@@ -63,7 +63,9 @@ ldd "$MUX" | grep -Eq 'libssl\.so' || { echo "::error::mux-server 沒有動態�
 bash "$SCRIPTS/wezterm-mux-smoke.sh" "$WEZ" "$MUX" "$OUT/smoke"
 
 # #1897 補丁 0003：心跳單元測試與實測
-cargo test --locked --release -p wezterm-mux-server --bin wezterm-mux-server asn_heartbeat
+cargo test --locked --release -p wezterm-mux-server --bin wezterm-mux-server asn_heartbeat 2>&1 | tee "$OUT/hb-unit.log"
+# 用名稱過濾：測試模組被改名會跑 0 個測試卻回 0，所以要確認真的有測試通過
+grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$OUT/hb-unit.log" || { echo "::error::心跳單元測試沒有任何通過的項目" >&2; exit 1; }
 bash "$SCRIPTS/wezterm-heartbeat-test.sh" "$WEZ" "$MUX" "$OUT/heartbeat"
 
 # ---- 打包：wezterm、wezterm-mux-server、LICENSE.md（上游 tag 原檔）、SOURCE.txt ----

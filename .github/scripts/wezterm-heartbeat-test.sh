@@ -128,6 +128,11 @@ else
 fi
 kill "$B_PID" 2>/dev/null || true
 
+# 實測 log 與心跳檔內容直接印進 CI log（不上傳 artifact：mux 的 umask 會讓檔案權限是 0600，runner 使用者讀不到，打包會失敗）
+for f in a/mux.log a-hb/heartbeat.json b/mux.log a/text.log; do
+  echo "::group::[heartbeat] $f"; cat "$OUT/$f" 2>&1 | head -c 4000; echo; echo "::endgroup::"
+done
+
 if [ "${#fails[@]}" -eq 0 ]; then result=PASS; detail='檔案出現、格式與 pid 正確、seq 增加、窗格環境無該變數；沒設變數時不產生檔案'; else result=FAIL; detail="$(printf '%s；' "${fails[@]}")"; fi
 {
   echo "#### 心跳實測：$result"

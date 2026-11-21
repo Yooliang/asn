@@ -149,9 +149,6 @@ jobs:
             ${{ runner.temp }}/wez-out/get-deps.log
             ${{ runner.temp }}/wez-out/smoke/*.log
             ${{ runner.temp }}/wez-out/smoke/*.err
-            ${{ runner.temp }}/wez-out/heartbeat/*/*.log
-            ${{ runner.temp }}/wez-out/heartbeat/*/*.err
-            ${{ runner.temp }}/wez-out/heartbeat/*/*.json
           if-no-files-found: ignore
 
   build-windows:
@@ -222,7 +219,9 @@ jobs:
           export PATH="/c/Strawberry/perl/bin:$PATH"
           cd "$WEZ_SRC"
           export CARGO_PROFILE_RELEASE_DEBUG=line-tables-only
-          cargo test --locked --release -p wezterm-mux-server --bin wezterm-mux-server asn_heartbeat
+          cargo test --locked --release -p wezterm-mux-server --bin wezterm-mux-server asn_heartbeat 2>&1 | tee "$RUNNER_TEMP/hb-unit.log"
+          # 用名稱過濾：測試模組被改名會跑 0 個測試卻回 0，所以要確認真的有測試通過
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/hb-unit.log" || { echo "::error::心跳單元測試沒有任何通過的項目" >&2; exit 1; }
       - name: 心跳實測（#1897 補丁 0003：檔案、pid、seq、窗格環境、沒設變數不產生）
         run: |
           rel="$WEZ_SRC/target/release"
@@ -265,7 +264,7 @@ jobs:
           cat > "$pkg/SOURCE.txt" <<TXT
           WezTerm ${UPSTREAM_TAG}（ASN 自行建置，多套用上游 #7706 與 ASN 修補）
           上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
-          額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）；ASN 修補 patches/wezterm/0001-procinfo-build-proc-iterative.patch（#1896，只改 procinfo/src/windows.rs：build_proc 改迭代、深度上限 64）、0003-mux-server-heartbeat.patch（#1897，只改 wezterm-mux-server/src/main.rs 並新增 asn_heartbeat.rs：設了環境變數 ASN_MUX_HEARTBEAT 才定時寫出存活訊號，內容不含使用者資料）
+          額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）；ASN 修補 patches/wezterm/0001-procinfo-build-proc-iterative.patch（#1896，只改 procinfo/src/windows.rs：build_proc 改迭代、深度上限 64）、0002-procinfo-parent-start-time.patch（#1914，只改 procinfo/src/windows.rs：PID 被重用時不接錯父行程）、0003-mux-server-heartbeat.patch（#1897，只改 wezterm-mux-server/src/main.rs 並新增 asn_heartbeat.rs：設了環境變數 ASN_MUX_HEARTBEAT 才定時寫出存活訊號，內容不含使用者資料）
           Rust：${RUST_VERSION}（cargo build --locked --release -p wezterm -p wezterm-gui -p wezterm-mux-server，用 tag 自帶的 Cargo.lock）
           建置環境：GitHub Actions windows-2022 runner（映像版本 ${ImageVersion:-未知}）
           建置紀錄：${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -316,9 +315,6 @@ jobs:
             C:/w/out/versions-and-dependents.txt
             C:/w/out/smoke/*.log
             C:/w/out/smoke/*.err
-            C:/w/out/heartbeat/*/*.log
-            C:/w/out/heartbeat/*/*.err
-            C:/w/out/heartbeat/*/*.json
           if-no-files-found: ignore
 
   # 發佈前演練：PR（或不在 main 的手動觸發）時跑，步驟與 publish 相同（同一支腳本、同樣的 download pattern），只跳過 attest 與建 release
