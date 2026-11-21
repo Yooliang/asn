@@ -58,8 +58,16 @@ export { TASKMGR_RESUMING_SID, taskmgrProbeSource } from './smoke-probes/taskmgr
 export { UPD_DL_TOTAL, updDlProbeSource } from './smoke-probes/updDl.mjs'
 
 const badTimeout = () => new Error('--timeout 要是不小於 1000 的毫秒數')
+// --shard=i/N：i 從 1 起算、1 <= i <= N，N 是正整數；格式不對一律報錯，不當成「不分片」
+export const parseShard = v => {
+  const m = /^(\d+)\/(\d+)$/.exec(String(v ?? ''))
+  const index = m ? Number(m[1]) : 0, count = m ? Number(m[2]) : 0
+  if (!m || count < 1 || index < 1 || index > count) throw new Error(`--shard 格式不對：「${v ?? ''}」（要寫成 i/N，例如 2/4：1 <= i <= N、N >= 1）`)
+  return { index, count }
+}
+
 export const parseSmokeArgs = argv => {
-  const o = { only: [], timeoutMs: 15000, browser: '', verbose: false }
+  const o = { only: [], timeoutMs: 15000, browser: '', verbose: false, shard: null, manifest: '' }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--verbose') o.verbose = true
@@ -69,6 +77,10 @@ export const parseSmokeArgs = argv => {
     else if (a.startsWith('--timeout=')) { o.timeoutMs = Number(a.slice(10)); if (!(o.timeoutMs >= 1000)) throw badTimeout() }
     else if (a === '--browser') { o.browser = argv[++i] ?? ''; if (!o.browser) throw new Error('--browser 後面要接瀏覽器執行檔路徑') }
     else if (a.startsWith('--browser=')) o.browser = a.slice(10)
+    else if (a === '--shard') o.shard = parseShard(argv[++i])
+    else if (a.startsWith('--shard=')) o.shard = parseShard(a.slice(8))
+    else if (a === '--manifest') { o.manifest = argv[++i] ?? ''; if (!o.manifest) throw new Error('--manifest 後面要接清單檔路徑') }
+    else if (a.startsWith('--manifest=')) { o.manifest = a.slice(11); if (!o.manifest) throw new Error('--manifest 後面要接清單檔路徑') }
     else throw new Error(`不認得的參數：${a}`)
   }
   return o
@@ -1124,6 +1136,10 @@ export const selectScenarios = (only, all = SCENARIOS) => {
   if (bad.length) throw new Error(`沒有這些情境：${bad.join('、')}（可用：${all.map(s => s.name).join('、')}）`)
   return all.filter(s => only.includes(s.name))
 }
+
+// 依情境順序輪流分片：第 k 個（從 0 起算）歸第 (k % N)+1 片。選輪流而不選連續區塊，是因為相鄰情境常是同一頁的同類量測，
+// 連續切會讓某一片全是慢的量測型情境；輪流切每片的類型與耗時較平均。N=1 就是全部；不整除時前面幾片多一個，不漏不重。
+export const shardScenarios = (all, shard) => (shard ? all.filter((_, k) => k % shard.count === shard.index - 1) : all)
 
 // ---- 找系統已安裝的 Chrome／Edge（不下載） ----
 export const browserCandidates = (platform, env) => {

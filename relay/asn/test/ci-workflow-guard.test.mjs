@@ -92,17 +92,33 @@ const jobText = (src, name) => {
   const m = src.match(new RegExp(String.raw`^  ${name}:\n([\s\S]*?)(?=^  [A-Za-z0-9_-]+:\n|(?![\s\S]))`, 'm'))
   return m ? m[1] : null
 }
+const shardCount = smoke => { const m = smoke.match(/^\s+shard: \[([^\]]*)\]/m); return m ? m[1].split(',').filter(x => x.trim()).length : 0 }
 const smokeJobProblems = src => {
   const problems = []
   const smoke = jobText(src, 'smoke-ui')
   const build = jobText(src, 'build')
   if (smoke === null) problems.push('沒有 smoke-ui job')
   else {
-    if (!/^\s+run: node scripts\/smoke-ui\.mjs\s*$/m.test(smoke)) problems.push('smoke-ui job 沒有跑整支 node scripts/smoke-ui.mjs')
+    if (!/^\s+run: node scripts\/smoke-ui\.mjs --shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ strategy\.job-total \}\} --manifest=.+$/m.test(smoke)) problems.push('smoke-ui job 沒有用 --shard=<片>/<總片數> 與 --manifest 跑 node scripts/smoke-ui.mjs')
     if (/--only|continue-on-error|\|\| true/.test(smoke)) problems.push('smoke-ui job 不准只跑部分情境或吞掉失敗')
+    // #1975：4 片並行、fail-fast: false（一片紅其他片照跑完）、每片都上傳清單（不論紅綠）
+    if (shardCount(smoke) !== 4) problems.push('smoke-ui job 的 matrix.shard 不是 4 片')
+    if (!/^\s+fail-fast: false\s*$/m.test(smoke)) problems.push('smoke-ui job 沒有 fail-fast: false')
+    if (!/if: always\(\)\n\s+uses: actions\/upload-artifact@[^\n]*\n\s+with:\n\s+name: smoke-manifest-\$\{\{ matrix\.shard \}\}/.test(smoke)) problems.push('smoke-ui job 沒有（不論紅綠都）上傳本片的情境清單')
     if (!/node scripts\/prep\.mjs/.test(smoke)) problems.push('smoke-ui job 沒有先跑 prep.mjs（沒有 ui/vendor）')
     if (!/apt-install\.sh[^\n]*fonts-droid-fallback/.test(smoke) || !/fc-list :lang=zh/.test(smoke)) problems.push('smoke-ui job 沒有安裝並檢查中文字型（冒煙靠它量長名字省略號）')
     if (/^\s+needs:/m.test(smoke)) problems.push('smoke-ui job 不能 needs 別的 job（要和 build 並行）')
+  }
+  const gate = jobText(src, 'smoke-ui-gate')
+  if (gate === null) problems.push('沒有 smoke-ui-gate 彙總 job')
+  else {
+    if (!/^    needs: smoke-ui\s*$/m.test(gate)) problems.push('smoke-ui-gate 沒有 needs: smoke-ui')
+    if (!/^    if: always\(\)\s*$/m.test(gate)) problems.push('smoke-ui-gate 沒有 if: always()（分片紅了就不會跑，守門等於消失）')
+    const n = gate.match(/smoke-shard-gate\.mjs[^\n]*--shards (\d+)/)?.[1]
+    if (Number(n) !== shardCount(smoke ?? '')) problems.push(`smoke-ui-gate 的 --shards（${n}）和 matrix 片數（${shardCount(smoke ?? '')}）不一致`)
+    if (!/needs\.smoke-ui\.result/.test(gate) || !/!= "success"/.test(gate)) problems.push('smoke-ui-gate 沒有檢查分片本身是否全部成功')
+    if (!/download-artifact@[0-9a-f]{40}/.test(gate) || !/smoke-manifest-\*/.test(gate)) problems.push('smoke-ui-gate 沒有下載各片清單')
+    if (/continue-on-error|\|\| true/.test(gate.replace(/continue-on-error: true   # 一份都沒有[^\n]*/, '').replace(/\|\| rc=1/g, ''))) problems.push('smoke-ui-gate 不准吞掉失敗')
   }
   if (build === null) problems.push('沒有 build job')
   else if (/smoke-ui\.mjs|smoke:ui/.test(build)) problems.push('build job 不該再跑冒煙（已搬到 smoke-ui）')
@@ -123,6 +139,19 @@ test('#1973 守門本身會紅：拿掉 smoke-ui job、或 build 又跑冒煙、
   assert.ok(smokeJobProblems(dup).some(p => /build job 不該再跑冒煙/.test(p)))
   const nofont = src.replace('no-install-recommends fonts-droid-fallback', 'no-install-recommends fonts-dejavu-core')
   assert.ok(smokeJobProblems(nofont).some(p => /中文字型/.test(p)))
-  const partial = src.replace('run: node scripts/smoke-ui.mjs', 'run: node scripts/smoke-ui.mjs --only m-signed-in')
+  const partial = src.replace('--manifest=', '--only m-signed-in --manifest=')
   assert.ok(smokeJobProblems(partial).length > 0)
+})
+
+test('#1975 冒煙分片守門：matrix 4 片、fail-fast: false、每片上傳清單、彙總 job 一定跑且檢查分片結果；拿掉任何一項都要被抓到', () => {
+  const src = linuxBuildWf()
+  const has = (s, re) => smokeJobProblems(s).some(p => re.test(p))
+  const mut = (a, b) => { assert.ok(src.includes(a), `找不到要改的文字：${a}`); return src.replace(a, b) }
+  assert.ok(has(mut('shard: [1, 2, 3, 4]', 'shard: [1, 2, 3]'), /不是 4 片|不一致/))
+  assert.ok(has(mut('fail-fast: false\n      matrix:', 'fail-fast: true\n      matrix:'), /fail-fast/))
+  assert.ok(has(mut('        if: always()\n        uses: actions/upload-artifact', '        uses: actions/upload-artifact'), /上傳本片/))
+  assert.ok(has(src.replace(/^  smoke-ui-gate:\n[\s\S]*?(?=^  build:)/m, ''), /沒有 smoke-ui-gate/))
+  assert.ok(has(mut('    needs: smoke-ui\n    if: always()', '    needs: smoke-ui'), /if: always/))
+  assert.ok(has(mut('--shards 4', '--shards 3'), /不一致/))
+  assert.ok(has(mut('!= "success"', '!= "never"'), /分片本身/))
 })

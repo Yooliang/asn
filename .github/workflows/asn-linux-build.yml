@@ -404,10 +404,17 @@ jobs:
   # 冒煙只用 runner 自帶的無頭 Chrome 開 relay/asn/ui/*.html，只需要 prep.mjs 產的 vendor，不需要 Rust 成品、
   # 也不需要 apt 系統依賴（gtk／webkit／xvfb 都用不到），所以不裝它們、不載 rust-cache；只補中文字型（見下）。
   # 原本排在 build 最後一步，冒煙約 22 分鐘串在 Rust 建置之後；現在兩邊同時跑，PR 牆鐘約等於較慢的那一個。
-  # 情境與斷言一個不少：腳本本身沒動，仍是整支 node scripts/smoke-ui.mjs（全部情境，任何一個失敗結束碼 1）。
+  # 情境與斷言一個不少：每片仍是 node scripts/smoke-ui.mjs（任何一個失敗結束碼 1），只是用 --shard=i/N 切成 4 片並行（#1975）：
+  # 每片各一台機器、各自的 Chrome 與 profile（不共用同一個 Chrome 開多分頁，避免量測型情境互相干擾）。
+  # fail-fast: false：某一片紅了其他片照跑完，一次看到全部問題。切片是否不漏不重由下面的 smoke-ui-gate 彙總把關。
   smoke-ui:
+    name: smoke-ui (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     defaults:
       run:
         working-directory: relay/asn
@@ -438,8 +445,54 @@ jobs:
       - name: 產生 ui/vendor（prep）
         run: node scripts/prep.mjs
 
-      - name: 冒煙測試（畫面啟動）
-        run: node scripts/smoke-ui.mjs
+      - name: 冒煙測試（畫面啟動，本片）
+        run: node scripts/smoke-ui.mjs --shard=${{ matrix.shard }}/${{ strategy.job-total }} --manifest="${{ runner.temp }}/smoke-manifest.json"
+
+      # 不論本片紅綠都要上傳清單；沒有清單（程序被砍、崩潰）彙總守門會把這一片算成沒回報
+      - name: 上傳本片的情境清單
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-manifest-${{ matrix.shard }}
+          path: ${{ runner.temp }}/smoke-manifest.json
+          if-no-files-found: warn
+
+  # 冒煙分片的總數守門（#1975）：四片加起來要剛好是全部情境，無重複、無遺漏、四片都有回報。
+  # if: always()：分片紅、被取消也照跑；分片本身不是 success 就讓這個 job 也紅，整體不會因為「清單看起來對」就綠。
+  smoke-ui-gate:
+    needs: smoke-ui
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: relay/asn
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - name: 下載各片的情境清單
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: smoke-manifest-*
+          path: ${{ runner.temp }}/smoke-manifests
+        continue-on-error: true   # 一份都沒有時下載會失敗；交給下一步判成「沒有任何清單」而紅，不在這裡先死
+
+      - name: 檢查四片加總等於全部情境
+        env:
+          SHARDS_RESULT: ${{ needs.smoke-ui.result }}
+        run: |
+          set -u
+          rc=0
+          node scripts/smoke-shard-gate.mjs "${{ runner.temp }}/smoke-manifests" --shards 4 || rc=1
+          if [ "$SHARDS_RESULT" != "success" ]; then
+            echo "冒煙分片本身不是全部成功（結果：$SHARDS_RESULT）" >&2
+            rc=1
+          fi
+          exit $rc
 
   build:
     runs-on: ubuntu-24.04
