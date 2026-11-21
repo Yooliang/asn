@@ -29,6 +29,7 @@ function mkTmp() {
   // #2001：預設讓 pins 等於 workflow 的 RELEASE_TAG，測試不受 repo 過渡期（pins 落後一號）影響；要測落後的另外改
   const pinsFile = path.join(dir, PINS_PATH), pins = JSON.parse(fs.readFileSync(pinsFile, 'utf8'))
   pins.windows_bundle.tag = /^\s*RELEASE_TAG: '([^']+)'/m.exec(fs.readFileSync(path.join(dir, WEZTERM_WORKFLOW), 'utf8'))[1]
+  pins.linux_tag = pins.windows_bundle.tag // #1258：Linux 版也比對 linux_tag
   fs.writeFileSync(pinsFile, JSON.stringify(pins, null, 2))
   return dir
 }
@@ -353,8 +354,8 @@ test('taipeiDate：UTC 16:00 之後就是台北隔天', () => {
 })
 
 // ---- #2001 pins 必須等於 wezterm-build.yml 的 RELEASE_TAG
-const setPinsTag = (dir, tag) => {
-  const p = path.join(dir, PINS_PATH); const j = JSON.parse(fs.readFileSync(p, 'utf8')); j.windows_bundle.tag = tag; fs.writeFileSync(p, JSON.stringify(j, null, 2))
+const setPinsTag = (dir, tag, linux) => {
+  const p = path.join(dir, PINS_PATH); const j = JSON.parse(fs.readFileSync(p, 'utf8')); j.windows_bundle.tag = tag; if (linux) j.linux_tag = linux; fs.writeFileSync(p, JSON.stringify(j, null, 2))
 }
 const wfTag = dir => /^\s*RELEASE_TAG: '([^']+)'/m.exec(fs.readFileSync(path.join(dir, WEZTERM_WORKFLOW), 'utf8'))[1]
 const prevSuffix = t => t.replace(/asn\.(\d+)$/, (_, n) => `asn.${Number(n) - 1}`)
@@ -383,6 +384,41 @@ test('#2001 只打手機（不打電腦版）時不檢查 pins', async () => {
   const s = setup({ changed: ['relay/asn/src-tauri/gen/android/a.kt'] })
   setPinsTag(s.dir, prevSuffix(wfTag(s.dir)))
   fs.writeFileSync(path.join(s.dir, 'items.json'), JSON.stringify(['修正（只有手機版）：測試條目。（#2001）']))
+  const r = await releaseTag(opts(), s.deps)
+  assert.equal(r.ok, true, s.logs.join(' / '))
+})
+
+// ---- #1258 發 Linux 版（linux-v*）時也比對 pins 的 linux_tag
+test('#1258 pinsWorkflowProblem：Linux 平台比對 linux_tag，訊息帶出兩個值；電腦版 tag 對、linux_tag 落後仍擋', () => {
+  const wf = "  RELEASE_TAG: 'wezterm-x-asn.2'\n"
+  const pins = (win, lin) => JSON.stringify({ windows_bundle: { tag: win }, linux_tag: lin })
+  assert.equal(pinsWorkflowProblem(pins('wezterm-x-asn.2', 'wezterm-x-asn.2'), wf, ['linux']), '')
+  const why = pinsWorkflowProblem(pins('wezterm-x-asn.2', 'wezterm-x-asn.1'), wf, ['linux'])
+  assert.match(why, /WezTerm 新版已建（wezterm-x-asn\.2）但 pins 還指著 wezterm-x-asn\.1（linux_tag）/)
+  assert.match(why, /Linux 版會下載到舊的 WezTerm/)
+  assert.match(pinsWorkflowProblem(JSON.stringify({ windows_bundle: { tag: 'wezterm-x-asn.2' } }), wf, ['linux']), /讀不到 WezTerm 版本.*linux_tag/)
+  // 電腦版原有比對不受影響：只發電腦版時不看 linux_tag；沒給平台參數維持舊行為
+  assert.equal(pinsWorkflowProblem(pins('wezterm-x-asn.2', 'wezterm-x-asn.1'), wf, ['desktop']), '')
+  assert.equal(pinsWorkflowProblem(pins('wezterm-x-asn.2', 'wezterm-x-asn.1'), wf), '')
+  assert.match(pinsWorkflowProblem(pins('wezterm-x-asn.1', 'wezterm-x-asn.2'), wf, ['desktop', 'linux']), /（windows_bundle\.tag）/)
+})
+
+test('#1258 發 Linux 版標籤時 linux_tag 落後 workflow → 停，不寫檔不推送；相等照常', async () => {
+  const s = setup()
+  setPinsTag(s.dir, wfTag(s.dir), prevSuffix(wfTag(s.dir)))
+  const r = await releaseTag(opts(), s.deps)
+  assert.equal(r.ok, false)
+  assert.match(s.logs.join(' / '), new RegExp(`${esc(wfTag(s.dir))}.*但 pins 還指著 ${esc(prevSuffix(wfTag(s.dir)))}（linux_tag）`))
+  assert.equal(s.calls.filter(c => c.kind === 'write' || (c.kind === 'git' && ['commit', 'push', 'tag'].includes(c.args[0]) && c.args[1] !== '--list')).length, 0)
+  const ok = setup()
+  setPinsTag(ok.dir, wfTag(ok.dir), wfTag(ok.dir))
+  assert.equal((await releaseTag(opts(), ok.deps)).ok, true)
+})
+
+test('#1258 只打手機時不檢查 linux_tag', async () => {
+  const s = setup({ changed: ['relay/asn/src-tauri/gen/android/a.kt'] })
+  setPinsTag(s.dir, wfTag(s.dir), prevSuffix(wfTag(s.dir)))
+  fs.writeFileSync(path.join(s.dir, 'items.json'), JSON.stringify(['修正（只有手機版）：測試條目。（#1258）']))
   const r = await releaseTag(opts(), s.deps)
   assert.equal(r.ok, true, s.logs.join(' / '))
 })
