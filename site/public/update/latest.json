@@ -1,15 +1,11 @@
 {
-  "version": "0.2.48",
-  "notes": "- 改善：夥伴操作的進度與結果改成畫面最下方狀態列的一行字，不再有蓋在對話上、不會自己消失的提示條，也不再秀出交接檔路徑。（#1907、#2035、#2042）",
-  "pub_date": "2026-11-21T10:06:20.106Z",
+  "version": "0.2.49",
+  "notes": "- 修正：聊天紀錄很多、存檔超過 8 MB 時新的對話存不進去的問題；現在存檔前先量大小，超過就從最久沒聯絡的夥伴開始只留較新的訊息，新對話一定存得進去。（#2043、#2046）",
+  "pub_date": "2026-11-21T12:37:28.251Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjh6T0xNd3pWMi8rTVNsTVVHZHdHYTJUeVVOV05qajRpYm9McTVHODF6dTkzdU5VUVdHWWhQVzljdS9aZXMrYVpBcWNJRitDZFNLb2tVc1Y3ZEJCUHd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjU1NTgwCWZpbGU6QVNOXzAuMi40OF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQ4CmZzdUZpRERaNGc1MnpEWXg0cHduMmpmYyszQmgvRkJPcEptTlJVSXdOazZ0ZjRNZEVaeGMzWjlDbFNJWm1ab1hMZDdXYmxoMCtwcmUwM2h0WEFoNERBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.48_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBvc1I1UGZ1Z2hrancvYnZyUy9jV1Myc2RMaXRXVmVqc1FZaTNqbFNYY1RDWVVGNDg3bjVDUUJhSnJNMlE1Rnp1NnF2L3JaTUFBTFMwR2xCb280d3drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjU2MTQ0CWZpbGU6QVNOXzAuMi40OF9hbWQ2NC5BcHBJbWFnZQovbTNFYWIxQllWMUJuS3hJSVY3UWFVZlNJL0ZDOFdHTlFUZk9IN2xrOGtsNENhY0pHQ281b3haYWk5c2pta2RVanZPNTlBTEtTMzd0ejdsYWxQVmtBUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.48_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJwMDJKbS9IRnNNODJ5ak1sWG9KOFl6bWhpZDVmbGpsL0UvY0lxZ3ByNjNnQlQwakh4QU1TanNmdUd4WEdhbmg0NHl6emkwR0JSQzA0WVpWSmpmRFFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjY0NjQ4CWZpbGU6QVNOXzAuMi40OV94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQ5CmtCS1Fpak1YeGVXNmpoU3RmK1JnYnp3VTF2SWtWVkFqYit5ekY5NzliRjB2MTQ1Mm1CdmFnQ0ZOWGxRbmh5dUVXeHc5YnFwYU9kb3hRWHhEbExzMENRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.49_x64-setup.exe"
     }
   }
 }
