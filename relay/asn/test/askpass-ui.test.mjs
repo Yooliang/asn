@@ -93,3 +93,16 @@ test('守門：安裝程式更新時也會替小幫手讓路（它可能正被 g
   assert.ok(nsh.includes('asn-askpass.exe') && nsh.includes('asn-askpass.old'))
   assert.ok(read('../src-tauri/Cargo.toml').includes('name = "asn-askpass"'))
 })
+
+// #2075：遠端密碼請求的確認窗編號由 Rust 的 REMOTE_ID_BASE | 流水號產生，網址上的 id 要通過前端 parseId，而且經過 JS Number 不失真
+test('#2075 遠端請求的確認窗編號：Rust 的標記位元產生的網址 id，前端 parseId 認得、Number 不失真', () => {
+  const rs = fs.readFileSync(new URL('../src-tauri/src/secret_remote/confirm.rs', import.meta.url), 'utf8')
+  const m = /pub const REMOTE_ID_BASE: u64 = 1 << (\d+);/.exec(rs)
+  assert.ok(m, '找得到 REMOTE_ID_BASE')
+  for (const n of [0n, 1n, 2n, 1000n, 999_999n]) {
+    const id = (1n << BigInt(m[1])) | n   // 與 Rust 的 dialog_id 同一個算法
+    assert.equal(parseId('?id=' + id), Number(id), '前端 parseId 要認得：' + id)
+    assert.equal(BigInt(Number(id)), id, 'JS Number 要能精確表示：' + id)
+  }
+  assert.doesNotMatch(rs, /1u64 << 62/, '不再用會超過 2^53 的標記位元')
+})
