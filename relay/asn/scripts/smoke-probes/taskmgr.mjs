@@ -12,10 +12,10 @@ export const taskmgrProbeSource = () => `(async () => {
   const entry = await waitFor(() => [...document.querySelectorAll('.dv-tabs .dv-tasks')].find(vis));
   if (!entry) return { ok: false, why: '這台電腦的詳情頁沒有「工作管理員」入口' };
   entry.click();
-  const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-table tbody tr')]; return r.length >= 8 ? r : null });
-  if (!rows) return { ok: false, why: '工作管理員沒有列出 8 列程式（實際 ' + document.querySelectorAll('.tm-table tbody tr').length + ' 列）' };
+  const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-table tbody tr')]; return r.length >= 9 ? r : null });
+  if (!rows) return { ok: false, why: '工作管理員沒有列出 9 列程式（實際 ' + document.querySelectorAll('.tm-table tbody tr').length + ' 列）' };
   const heads = [...document.querySelectorAll('.tm-table th')].map(h => h.textContent.trim()).join('、');
-  for (const c of ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '來源']) if (!heads.includes(c)) return { ok: false, why: '表頭缺「' + c + '」：' + heads };
+  for (const c of ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '運行位置']) if (!heads.includes(c)) return { ok: false, why: '表頭缺「' + c + '」：' + heads };
   const dups = [...document.querySelectorAll('.tm-table tbody tr.dup')];
   if (dups.length !== 2) return { ok: false, why: '「重複」列應該有 2 列，實際 ' + dups.length };
   if (!dups.every(r => r.querySelector('.tm-tag.dup')?.textContent.trim() === '重複')) return { ok: false, why: '重複的列沒有「重複」標記' };
@@ -45,7 +45,7 @@ export const taskmgrProbeSource = () => `(async () => {
   const rrow = () => kindRow('resuming');
   if (!rrow()) return { ok: false, why: '沒有「接回中」那一列' };
   const rtext = rrow().textContent;
-  if (!rtext.includes('小乙') || !rtext.includes('可能卡住了') || !rtext.includes('ASN 開的') || !rtext.includes('23100')) return { ok: false, why: '接回中那一列的內容不對：' + rtext.slice(0, 120) };
+  if (!rtext.includes('小乙') || !rtext.includes('可能卡住了') || !rtext.includes('終端服務') || !rtext.includes('23100')) return { ok: false, why: '接回中那一列的內容不對：' + rtext.slice(0, 120) };
   if (rtext.includes('11111111')) return { ok: false, why: '接回中那一列不該顯示對話編號' };
   const askResuming = async () => {
     const b = await waitFor(() => { const x = rrow() && rrow().querySelector('.tm-stop'); return x && !x.disabled ? x : null });

@@ -414,8 +414,8 @@ export const SettingsPanel = {
                   <thead><tr><th v-for="c in TM_COLUMNS" :key="c" scope="col">{{ c }}</th></tr></thead>
                   <tbody>
                     <tr v-for="r in st.taskMgr.rows" :key="r.key" :class="{ dup: r.dup, view: r.viewOnly }" :data-kind="r.kind">
-                      <td class="tm-name"><b>{{ r.name }}</b><span class="tm-tag dup" v-if="r.dup">{{ TM.dupTag }}</span><small class="tm-dupnote" v-if="r.dupNote">{{ r.dupNote }}</small></td>
-                      <td>{{ r.engine }}</td><td>{{ r.pid }}</td><td>{{ r.memory }}</td><td>{{ r.uptime }}</td><td>{{ r.status }}</td><td class="cmp">{{ r.cmpText }}<template v-if="r.cmpTag"> <span class="tm-tag" :class="r.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ r.cmpTag }}</span></template></td><td>{{ r.source }}</td>
+                      <td class="tm-name"><b>{{ r.name }}</b><span class="tm-tag dup" v-if="r.dup">{{ TM.dupTag }}</span><small class="tm-dupnote" v-if="r.dupNote">{{ r.dupNote }}</small><small class="tm-where"><span class="tm-tag native" v-if="r.native">{{ r.source }}</span><template v-else>{{ r.source }}</template></small></td>
+                      <td>{{ r.engine }}</td><td>{{ r.pid }}</td><td>{{ r.memory }}</td><td>{{ r.uptime }}</td><td>{{ r.status }}</td><td class="cmp">{{ r.cmpText }}<template v-if="r.cmpTag"> <span class="tm-tag" :class="r.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ r.cmpTag }}</span></template></td><td><span class="tm-tag native" v-if="r.native">{{ r.source }}</span><template v-else>{{ r.source }}</template></td>
                       <td class="tm-act">
                         <button class="aero-btn tm-stop" type="button" v-if="!r.viewOnly && !r.handing" :disabled="!r.canStop || st.taskMgr.busy" :title="r.why" :aria-label="TM.stop + ' ' + r.name" @click="act('tm-ask', r.key)">{{ TM.stop }}</button>
                         <small class="tm-viewonly" v-else-if="r.showViewOnly" :title="r.why">{{ TM.viewOnly }}</small>

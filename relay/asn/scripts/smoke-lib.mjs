@@ -310,11 +310,13 @@ export const TASKMGR_MEMBERS = [{ id: 'P', agents: [
 export const taskmgrSnapshot = (now = Date.now()) => ({
   now_ms: now,
   rows: [
-    { kind: 'claude', name: 'asn真', engine: 'claude', pid: 18420, memory_bytes: 412 * 1024 * 1024, started_ms: now - (3 * 60 + 12) * 60_000, status: 'idle', detail: null, by_asn: true, cwd: 'G:\\Yooliang\\asn', session_id: 's1', term_id: null, live: true, inside: null },
+    { kind: 'claude', name: 'asn真', engine: 'claude', pid: 18420, memory_bytes: 412 * 1024 * 1024, started_ms: now - (3 * 60 + 12) * 60_000, status: 'idle', detail: null, by_asn: true, cwd: 'G:\\Yooliang\\asn', session_id: 's1', term_id: null, live: true, inside: null, term: 'mux' },
     { kind: 'claude', name: 'asn真', engine: 'claude', pid: 21096, memory_bytes: 380 * 1024 * 1024, started_ms: now - 41 * 60_000, status: 'idle', detail: null, by_asn: false, cwd: 'G:\\Yooliang\\asn', session_id: 's2', term_id: null, live: true, inside: null },
-    { kind: 'claude', name: '西川', engine: 'claude', pid: 3001, memory_bytes: 520 * 1024 * 1024, started_ms: now - 5 * 3600_000, status: 'busy', detail: null, by_asn: true, cwd: 'G:\\Yooliang\\asn', session_id: 's3', term_id: null, live: true, inside: null },
-    { kind: 'pi', name: '小東', engine: 'pi', pid: 4002, memory_bytes: 210 * 1024 * 1024, started_ms: now - 90 * 60_000, status: 'idle', detail: null, by_asn: true, cwd: 'G:\\work', session_id: null, term_id: null, live: true, inside: null },
-    { kind: 'resuming', name: '小乙', engine: 'claude', pid: 23100, memory_bytes: 96 * 1024 * 1024, started_ms: now - 8 * 60_000, status: 'stuck', detail: null, by_asn: true, cwd: 'G:\\work', session_id: TASKMGR_RESUMING_SID, term_id: '7', live: true, inside: null },
+    { kind: 'claude', name: '西川', engine: 'claude', pid: 3001, memory_bytes: 520 * 1024 * 1024, started_ms: now - 5 * 3600_000, status: 'busy', detail: null, by_asn: true, cwd: 'G:\\Yooliang\\asn', session_id: 's3', term_id: null, live: true, inside: null, term: 'native' },
+    // 後台沒給運行位置欄位的舊資料：要落在「不明」
+    { kind: 'claude', name: '小雙', engine: 'claude', pid: 4410, memory_bytes: 520 * 1024 * 1024, started_ms: now - 5 * 3600_000, status: 'busy', detail: null, by_asn: true, cwd: 'G:\\Yooliang\\asn', session_id: 's5', term_id: null, live: true, inside: null },
+    { kind: 'pi', name: '小東', engine: 'pi', pid: 4002, memory_bytes: 210 * 1024 * 1024, started_ms: now - 90 * 60_000, status: 'idle', detail: null, by_asn: true, cwd: 'G:\\work', session_id: null, term_id: null, live: true, inside: null, term: 'mux' },
+    { kind: 'resuming', name: '小乙', engine: 'claude', pid: 23100, memory_bytes: 96 * 1024 * 1024, started_ms: now - 8 * 60_000, status: 'stuck', detail: null, by_asn: true, cwd: 'G:\\work', session_id: TASKMGR_RESUMING_SID, term_id: '7', live: true, inside: null, term: 'mux' },
     { kind: 'process', name: 'pi #5120（前景）', engine: 'pi', pid: 5120, memory_bytes: null, started_ms: null, status: 'running', detail: null, by_asn: null, cwd: '', session_id: null, term_id: null, live: true, inside: null },
     { kind: 'mux', name: '終端服務', engine: '', pid: 6000, memory_bytes: 98 * 1024 * 1024, started_ms: now - 2 * 86400_000, status: 'running', detail: null, by_asn: true, cwd: '', session_id: null, term_id: null, live: true, inside: 2 },
     { kind: 'asn', name: 'ASN', engine: 'asn', pid: 7000, memory_bytes: 310 * 1024 * 1024, started_ms: now - 6 * 3600_000, status: 'running', detail: null, by_asn: true, cwd: '', session_id: null, term_id: null, live: true, inside: null },

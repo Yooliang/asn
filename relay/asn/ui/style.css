@@ -1160,6 +1160,10 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .tm-tag.dup{border:1px solid #d79a95;background:#fff4f3;color:#b3261e}
 /* 壓縮次數欄（#1852）：「請交接」黃、「交接中」藍；三種外觀的標籤底色沿用各自的 .tm-tag 規則 */
 .tm-tag.cmp-warn{border:1px solid #e0c36b;background:#fff7dc;color:#6b4f00}
+.tm-tag.native{border:1px solid #e0c36b;background:#fff7dc;color:#6b4f00}
+/* 運行位置（#1909）：窄版那一欄被收掉，名字下面補一行小字；寬版不顯示 */
+.tm-where{display:none;flex:1 0 100%;color:var(--muted);font-size:11px}
+@container (max-width:480px){.tm-where{display:block}}
 .tm-tag.cmp-go{border:1px solid #9fc3e8;background:#eef6ff;color:#1b5ea8}
 .chk-num{display:flex;flex-direction:row;align-items:center;gap:6px}
 .chk-num .num{width:56px;flex:none;text-align:center}
@@ -1181,7 +1185,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .tm-hint{display:block;color:var(--muted)}
 .tm-facts{padding:8px 10px;border-radius:6px;background:var(--panel-head);margin-bottom:8px}
 .tm-facts p{margin:2px 0;font-size:12px}
-@media (prefers-color-scheme:dark){.tm-tag.cmp-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-tag.cmp-go{background:#17283a;color:#9cc8f2;border-color:#2f5679}.tm-tag.dup{background:#3a1f1d;color:#ff9a90;border-color:#7a3b36}.tm-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-err,.tm-dupnote{color:#ff9a90}.tm-table tr.dup td{background:#2c2220}}
+@media (prefers-color-scheme:dark){.tm-tag.native,.tm-tag.cmp-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-tag.cmp-go{background:#17283a;color:#9cc8f2;border-color:#2f5679}.tm-tag.dup{background:#3a1f1d;color:#ff9a90;border-color:#7a3b36}.tm-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-err,.tm-dupnote{color:#ff9a90}.tm-table tr.dup td{background:#2c2220}}
 .tm-table td:not(.tm-name):not(.tm-act){white-space:nowrap}
 /* #1461 線條圖示（lib/line-icons.mjs）只給現代外觀；復古 Aero 一律不顯示，照舊用原本的圖（版面與像素不變） */
 .lic{display:none}
