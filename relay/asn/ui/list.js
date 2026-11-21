@@ -807,7 +807,6 @@ function closeOpDlg() { opDlg.open = false }
 const opRun = reactive({ runs: {} })
 const opRunner = createOpRunner({ api: transport, state: opRun, onDone: d => onPartnerOpDone({ op: d.op, newName: d.input?.newName, friend: d.friend }) })
 const onOpRun = e => { void opRunner.start(opDlg.friend, e.op, e.input) }
-const launchNewFromRun = e => { const f = friends.value.find(x => x.id === e?.id); openPartnerDlg(f?.node || '') }
 // 喚醒找不到對話紀錄：關掉操作對話框，改開「新增夥伴」，預選原夥伴所在的電腦
 function launchNewFromOp(e) { closeOpDlg(); openPartnerDlg(e?.node || '') }
 // 右鍵選單立刻出現（固定有「開啟對話」）；主控台切換項目先顯示「檢查中…」，查到才可按，逾時／查不到就停用
@@ -2200,7 +2199,7 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission, permHold, permPress, permHoldStart, permHoldKey, HOLD_TIP,
-      opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, launchNewFromRun, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,

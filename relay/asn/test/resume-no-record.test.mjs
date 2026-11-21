@@ -1,4 +1,5 @@
-// 喚醒找不到對話紀錄時附「開新夥伴」（#1614）：progressView 給 action，電腦版對話框與手機橫幅各多一顆按鈕
+// 喚醒找不到對話紀錄（#1614，#1907 改）：狀態列只有一行字、不放按鈕，所以 progressView 不再給 action、手機橫幅與電腦提示列都沒有「開新夥伴」鈕；
+// 操作對話框（partner-op-dialog）原本的「開新夥伴」不受影響。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -6,18 +7,18 @@ import { NO_RECORD_TEXT, progressView } from '../ui/lib/partner-ops.mjs'
 import { runPartnerOp } from '../ui/lib/partner-ops-ui.mjs'
 import { runBanner } from '../ui/lib/mobile-ops.mjs'
 
-const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const read = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('喚醒找不到對話紀錄（電腦端原句或後台代號）：附開新夥伴動作', () => {
-  for (const detail of [NO_RECORD_TEXT, 'no_session', ` ${NO_RECORD_TEXT} `]) {
+test('喚醒找不到對話紀錄（電腦端原句或後台代號）：view 只有一行字（含找不到紀錄的白話），沒有 action', () => {
+  for (const detail of [NO_RECORD_TEXT, 'no_session', ' ' + NO_RECORD_TEXT + ' ']) {
     const v = progressView({ status: 'failed', detail }, { op: 'resume' })
-    assert.deepEqual(v.action, { kind: 'launch-new' }, detail)
-    assert.equal(v.text, `沒有成功：${NO_RECORD_TEXT}`)
-    assert.equal(v.phase, 'failed')
+    assert.deepEqual(v, { phase: 'failed', done: true, text: '沒有成功：' + NO_RECORD_TEXT }, detail)
+    assert.equal(v.action, undefined, detail)
+    assert.match(v.text, new RegExp(NO_RECORD_TEXT))
   }
 })
 
-test('其他失敗、其他動作都不附開新夥伴', () => {
+test('其他失敗、其他動作也都沒有 action（一律只有一行字）', () => {
   assert.equal(progressView({ status: 'failed', detail: '這位夥伴已經在線上' }, { op: 'resume' }).action, undefined)
   assert.equal(progressView({ status: 'failed', detail: 'expired' }, { op: 'resume' }).action, undefined)
   assert.equal(progressView({ status: 'failed', detail: NO_RECORD_TEXT }, { op: 'handover' }).action, undefined)
@@ -31,29 +32,42 @@ test('常數和 Rust 的 NO_RECORD 逐字相同', () => {
   assert.equal(m[1], NO_RECORD_TEXT)
 })
 
-test('送出時後台就回 no_session：失敗畫面也附動作；其他錯誤不附', async () => {
+test('送出時後台就回 no_session：失敗畫面是對話紀錄白話、沒有 action；其他錯誤也沒有', async () => {
   const api = msg => ({ partnerOp: async () => { throw new Error(msg) }, partnerOps: async () => ({ ops: [] }) })
   const f = { id: 'H/A', node: 'H', agent: 'A', nick: 'A', engine: 'claude', status: 'offline' }
   const v = await runPartnerOp(api('partner_op HTTP 409 no_session'), f, 'resume', {}, { onUpdate: () => {} })
-  assert.deepEqual(v.action, { kind: 'launch-new' })
+  assert.equal(v.phase, 'failed')
+  assert.match(v.text, /對話紀錄/)
+  assert.doesNotMatch(v.text, /no_session|HTTP|409/, '畫面不放原文')
+  assert.equal(v.action, undefined)
   const w = await runPartnerOp(api('partner_op HTTP 409 busy'), f, 'resume', {}, { onUpdate: () => {} })
   assert.equal(w.action, undefined)
 })
 
-test('手機橫幅帶出 action', () => {
+test('手機橫幅：只有 phase／done／text／hideMs，沒有 action', () => {
   const v = progressView({ status: 'failed', detail: NO_RECORD_TEXT }, { op: 'resume' })
-  assert.deepEqual(runBanner({ op: 'resume', view: v }).action, { kind: 'launch-new' })
-  assert.equal(runBanner({ op: 'close', view: { phase: 'done', done: true, text: 'x' } }).action, null)
+  const b = runBanner({ op: 'resume', view: v })
+  assert.equal(b.action, undefined)
+  assert.deepEqual(Object.keys(b).sort(), ['done', 'hideMs', 'phase', 'text'])
+  assert.equal(b.text, '沒有成功：' + NO_RECORD_TEXT)
 })
 
-test('模板：電腦版對話框與手機橫幅有開新夥伴鈕並接到既有入口', () => {
+test('模板：電腦提示列與手機橫幅沒有開新夥伴鈕、沒有 launch-new 接線；對話框的開新夥伴照舊', () => {
   const ui = read('ui/lib/partner-ops-ui.mjs')
+  // 狀態列（提示列／手機橫幅）：沒有
+  assert.doesNotMatch(ui, /v-if="it\.b\.action/, '提示列沒有開新夥伴鈕')
+  assert.doesNotMatch(ui, /launchNew\(it\.id\)/)
+  assert.doesNotMatch(read('ui/list.html'), /@launch-new="launchNewFromRun"/)
+  assert.doesNotMatch(read('ui/list.js'), /launchNewFromRun/)
+  assert.doesNotMatch(read('ui/lib/actionbar.mjs'), /<partner-op-strip [^>]*@launch-new/)
+  const runBlock = read('ui/m.html').match(/<div class="m-ops-run"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? ''
+  assert.ok(runBlock.includes('m-ops-run-tx'))
+  assert.doesNotMatch(runBlock, /launchNewFromBanner|開新夥伴|<button/)
+  assert.doesNotMatch(read('ui/m.html'), /launchNewFromBanner/)
+  assert.doesNotMatch(read('ui/m.js'), /launchNewFromBanner/)
+  // 對話框：原本的鈕與接線仍在
   assert.match(ui, /v-if="st\.view && st\.view\.action && st\.view\.action\.kind === 'launch-new'" @click="launchNew">\{\{ T\.launchNew \}\}</)
   assert.match(ui, /emits: \['close', 'done', 'launch-new', 'run'\]/)
-  assert.match(ui, /v-if="it\.b\.action && it\.b\.action\.kind === 'launch-new'" @click="launchNew\(it\.id\)">\{\{ T\.launchNew \}\}</, '提示列也有開新夥伴鈕')
-  assert.match(read('ui/list.html'), /@launch-new="launchNewFromRun"/)
   assert.match(read('ui/list.html'), /@launch-new="launchNewFromOp"/)
   assert.match(read('ui/list.js'), /function launchNewFromOp\(e\) \{ closeOpDlg\(\); openPartnerDlg\(e\?\.node \|\| ''\) \}/)
-  assert.match(read('ui/m.html'), /v-if="opsBanner\.action && opsBanner\.action\.kind === 'launch-new'" @click="launchNewFromBanner">開新夥伴</)
-  assert.match(read('ui/m.js'), /const node = chatFriend\.value\?\.node \|\| ''; dismissRun\(\); openLaunch\(node\)/)
 })

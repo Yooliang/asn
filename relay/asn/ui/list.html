@@ -104,7 +104,7 @@
             <button class="search-plus" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
           </div>
           <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
-          <partner-op-strip :runner="opRunner" :runs="opRun.runs" @launch-new="launchNewFromRun"></partner-op-strip>
+          <partner-op-strip :runner="opRunner" :runs="opRun.runs"></partner-op-strip>
           <p class="archive-note env-notice" v-if="envNotice" role="status">{{ envNotice }}</p>
           <div class="list">
             <div v-for="g in shown" :key="g.key">

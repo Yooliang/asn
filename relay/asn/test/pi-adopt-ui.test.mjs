@@ -36,7 +36,10 @@ test('對話框照實寫：會先關掉原本的 pi、正在回覆會中斷、�
   for (const re of [/會先關掉原本的 pi（終端機留著），再用同一段對話開一個由 ASN 管理的 pi。原本的 pi 如果正在回覆，這一輪會中斷/, /不只一段就不會接手，什麼都不關/, /先在 pi 裡講一句/, /手動接回的指令/]) assert.match(all, re)
 })
 
-test('完成的文字：說明原本的已關閉、新的名字', () => {
+test('完成的文字：一行說用同一段對話開了新的 pi 與名字；原本的 pi 是否留著只進 log', () => {
   const v = progressView({ status: 'ok', result: { kind: 'pi_adopt', name: 'pi-專案', kept_terminal: true } }, { op: 'handover' })
-  assert.match(v.text, /原本的 pi 已關閉（終端機留著）.*「pi-專案」/)
+  assert.equal(v.text, '已接手，用同一段對話開了新的 pi「pi-專案」')
+  assert.match(v.log.join(''), /原本的 pi 已關閉（終端機留著）.*「pi-專案」/)
+  assert.doesNotMatch(v.text, /終端機/)
+  assert.match(progressView({ status: 'ok', result: { kind: 'pi_adopt', name: 'p', kept_terminal: false } }, { op: 'handover' }).log.join(''), /原本的 pi 已關閉，用同一段/, '終端機沒留著就不寫「留著」')
 })

@@ -201,13 +201,8 @@
                 <div class="m-head-tx"><div class="m-title">對話</div></div>
               </template>
             </header>
-            <div class="m-ops-run" v-if="opsBanner" :class="'is-' + opsBanner.phase" role="status">
+            <div class="m-ops-run" v-if="opsBanner" :class="'is-' + opsBanner.phase" role="status" @touchstart.passive="holdRun" @touchend="releaseRun" @touchcancel="releaseRun">
               <p class="m-ops-run-tx">{{ opsBanner.text }}</p>
-              <ol class="m-ops-steps" v-if="opsBanner.steps.length"><li v-for="s in opsBanner.steps" :key="s.key" :class="'is-' + s.state"><b aria-hidden="true">{{ s.mark }}</b>{{ s.text }}</li></ol>
-              <p class="m-ops-run-more" v-for="l in opsBanner.extra" :key="l">{{ l }}</p>
-              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.action && opsBanner.action.kind === 'launch-new'" @click="launchNewFromBanner">開新夥伴</button>
-              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.retry" @click="retryRun">{{ OP_PROGRESS_TEXT.retry }}</button>
-              <button class="m-btn m-ops-run-btn" type="button" v-if="opsBanner.done" @click="dismissRun">{{ OP_PROGRESS_TEXT.dismiss }}</button>
             </div>
             <p class="m-err m-room-note" v-if="roomNote && chatFriend && chatFriend.room" role="alert">{{ roomNote }}</p>
             <div class="m-peer-strip" v-if="chatFriend && peerStrip" role="status">

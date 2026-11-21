@@ -54,16 +54,19 @@ test('改名完成：對話跳到新名字；沒完成或不是改名不動', ()
   assert.equal(renamedChatId(f, 'close', { newName: '小文二' }, { phase: 'done' }), '')
 })
 
-test('頂端進度條：主句、換班接手分段（✓／…／○）、交接檔位置；沒有進度不顯示', () => {
+test('狀態列：只有 phase／done／text／hideMs，沒有步驟、補充、動作、重試；沒有進度不顯示', () => {
   assert.equal(runBanner(null), null); assert.equal(runBanner({ op: 'close' }), null)
-  const b = runBanner({ op: 'handover', view: { phase: 'working', done: false, text: '關閉前任視窗中…', steps: [{ key: 'handoff', text: '請前任寫交接', state: 'done' }, { key: 'closing', text: '關閉前任視窗', state: 'active' }, { key: 'opening', text: '開新視窗', state: 'todo' }] } })
-  assert.deepEqual(b.steps.map(s => s.mark), ['✓', '…', '○']); assert.equal(b.done, false)
-  const d = runBanner({ op: 'handover', view: { phase: 'done', done: true, text: '換班接手完成，新視窗開好了。', extra: ['交接檔：x'] } })
-  assert.equal(d.done, true); assert.deepEqual(d.extra, ['交接檔：x'])
+  const b = runBanner({ op: 'handover', view: { phase: 'working', done: false, text: '關閉前任視窗中…（第 2／3 步）' } })
+  assert.deepEqual(b, { phase: 'working', done: false, text: '關閉前任視窗中…（第 2／3 步）', hideMs: 0 })
+  const d = runBanner({ op: 'handover', view: { phase: 'done', done: true, text: '已換班，新視窗接手了', log: ['交接檔：x'] } })
+  assert.deepEqual(d, { phase: 'done', done: true, text: '已換班，新視窗接手了', hideMs: 4000 }, 'log 不上畫面')
+  // 就算 view 還帶著舊欄位，狀態列也不外露
+  const old = runBanner({ op: 'x', view: { phase: 'failed', done: true, text: '沒有成功：x', steps: [{ key: 'a' }], extra: ['e'], action: { kind: 'launch-new' }, retry: true } })
+  assert.deepEqual(Object.keys(old).sort(), ['done', 'hideMs', 'phase', 'text'])
 })
 
 // ---------- #928：進度綁在下指令的那位夥伴 ----------
-const handoverRun = step => ({ op: 'handover', view: { phase: 'working', done: false, text: `${step}中…`, steps: [{ key: 'handoff', text: '請前任寫交接', state: 'active' }] } })
+const handoverRun = step => ({ op: 'handover', view: { phase: 'working', done: false, text: `${step}中…` } })
 const modelRun = { op: 'model', view: { phase: 'working', done: false, text: '切換模型中…' } }
 
 test('#928 進度只在下指令那位的對話：換班接手（重啟）切到別位看不到，回來還在、步驟照常前進', () => {
@@ -73,7 +76,7 @@ test('#928 進度只在下指令那位的對話：換班接手（重啟）切到
   runs = setRun(runs, 'w02/A', { op: 'handover', view: { phase: 'working', done: false, text: '開新視窗中…' } })
   assert.equal(runBanner(runFor(runs, 'w02/A')).text, '開新視窗中…', '步驟前進只更新 A')
   runs = clearRun(runs, 'w02/A')
-  assert.deepEqual(runs, {}, '按「知道了」只清 A，不殘留')
+  assert.deepEqual(runs, {}, '自動消失（dismiss）只清 A，不殘留')
 })
 
 test('#928 切換模型與封存也各自綁在自己的夥伴；兩位同時在跑各自保留，互不覆蓋', () => {
@@ -110,7 +113,12 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
   assert.match(js, /const opsRunState = \{ get runs\(\) \{ return opsRuns\.value \}, set runs\(v\) \{ opsRuns\.value = v \} \}/)
   assert.match(js, /createOpRunner\(\{ api: opsTransport, state: opsRunState, run: makeOpRun\(\{ onArchived \}\)/)
   assert.match(js, /opsRuns\.value = moveRun\(opsRuns\.value, f\.id, next\)/, '改名搬位址')
-  assert.match(js, /const dismissRun = \(\) => \{ const f = chatFriend\.value; if \(f\) opRunner\.dismiss\(f\.id\) \}/)
+  // #1907：狀態列沒有按鈕，retryRun／dismissRun／launchNewFromBanner 全刪；手指按著暫停倒數，帶的是目前對話那位的位址
+  assert.doesNotMatch(js, /\bretryRun\b|\bdismissRun\b|\blaunchNewFromBanner\b/)
+  assert.match(js, /const holdRun = \(\) => \{ const f = chatFriend\.value; if \(f\) opRunner\.hold\(f\.id\) \}/)
+  assert.match(js, /const releaseRun = \(\) => \{ const f = chatFriend\.value; if \(f\) opRunner\.release\(f\.id\) \}/)
+  assert.match(js, /retryInfo = \(\) => \{ const f = opsFriend\.value; if \(f\) void execOp\(f, 'info', \{\}\) \}/, '詳情的重試照舊')
+  assert.match(read('ui', 'm.html'), /@touchstart\.passive="holdRun" @touchend="releaseRun" @touchcancel="releaseRun"/)
 })
 
 // ---------- 頁面接線 ----------

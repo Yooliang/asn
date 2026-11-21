@@ -392,11 +392,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-ops-run{flex:none;display:flex;flex-direction:column;gap:6px;padding:10px 14px;background:#e6f1fc;border-bottom:1px solid var(--line);color:var(--title-fg)}
 .m-ops-run.is-failed{background:#fde8e6;color:#7a1710}
 .m-ops-run.is-done{background:#e4f5e6}
-.m-ops-run-tx,.m-ops-run-more{margin:0;font-size:15px;line-height:1.45;overflow-wrap:anywhere}
-.m-ops-steps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px;font-size:14px}
-.m-ops-steps li{display:flex;gap:8px;color:var(--muted)} .m-ops-steps li.is-active{color:var(--title-fg);font-weight:700} .m-ops-steps li.is-done{color:#1f7a2a}
-.m-ops-steps b{width:1.2em;text-align:center}
-.m-ops-run-btn{align-self:flex-start;min-height:44px}
+.m-ops-run-tx{margin:0;font-size:15px;line-height:1.45;overflow-wrap:anywhere}
 .m-logout{display:flex;flex-direction:column;align-items:stretch;margin-top:32px;padding:0 16px 24px}
 /* 通話畫面（#99）：用 teleport 放在 body 底下的全螢幕層（不在會位移的分頁排裡，才真的滿版）；按鈕都在 44px 以上 */
 body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-area-inset-top,0px) + 14px) 18px calc(env(safe-area-inset-bottom,0px) + 18px);gap:12px;font-family:var(--font-ui);color:var(--fg)}
