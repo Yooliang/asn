@@ -22,6 +22,11 @@ import { READ_DEBOUNCE_MS, batchOf, cleanMarks, lastIncomingAt, readKey, readSyn
 
 export const MAX_BODY = 20000
 const LOG_KEEP = 2000   // 存檔最多留幾列（往上捲載入的也算）
+// 存檔文字的位元組上限（#2043）：Rust 端 store_save 超過 8,000,000 位元組就整筆不存，所以前端先量好，超過就把每位夥伴留的列數往下縮，
+// 絕不送出會被拒絕的存檔；記憶體裡的往來記錄不動，更舊的之後可以再向後台取。
+export const SAVE_BUDGET = 6_000_000
+export const LOG_KEEP_MIN = 50
+const byteLength = s => new TextEncoder().encode(s).length   // 中文一字 3 位元組，不能用字串長度
 export const VIEW_BASE = 200   // 畫面預設顯示最近幾列；往上載入更舊的之後，依載入範圍加寬
 const STATUS_POLL_MS = 15_000
 const HISTORY_MIN_GAP_MS = 20_000   // 同一位夥伴的往來記錄，兩次向後台取的最短間隔（強制重取除外）
@@ -706,12 +711,17 @@ export class AsnCore {
   async flush() {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null }
     const withLog = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
+    const build = keep => ({
+      friends: withLog.map(savedFriendOf),
+      logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-keep)])),
+      ...(Object.keys(this.readDirty).length ? { readDirty: this.readDirty } : {}),
+    })
     try {
-      await withTimeout(this.store.save({
-        friends: withLog.map(savedFriendOf),
-        logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-LOG_KEEP)])),
-        ...(Object.keys(this.readDirty).length ? { readDirty: this.readDirty } : {}),
-      }), this.stepMs, 'save')
+      let keep = LOG_KEEP, data = build(keep)
+      while (keep > LOG_KEEP_MIN && byteLength(JSON.stringify(data)) > SAVE_BUDGET) { keep = Math.max(LOG_KEEP_MIN, Math.floor(keep * 0.75)); data = build(keep) }
+      if (keep < LOG_KEEP && keep !== this.savedKeep) this.log(`save trimmed: 存檔太大，每位夥伴只存最近 ${keep} 列`)
+      this.savedKeep = keep
+      await withTimeout(this.store.save(data), this.stepMs, 'save')
     } catch (e) { this.log(`save failed: ${e.message}`) }
   }
 }
