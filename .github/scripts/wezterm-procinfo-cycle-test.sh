@@ -50,6 +50,10 @@ else:
                     v.push(mk(5000000 + n, 5000000 + n - 1));
                 }
                 v
+            } else if std::env::var("PROCINFO_FAKE").as_deref() == Ok("reuse") {
+                // PID 重用（#1914）：根 6000001（啟動 50）底下掛 A=6000002（100，正常）、B=6000003（10，比父早啟動＝原父已結束、PID 被重用）、
+                // D=6000005（拿不到時間，照舊接上）；C=6000004 掛在 B 底下（B 不接上，C 也跟著不在樹上）。啟動時間見下面的 proc_start_time 注入。
+                vec![mk(6000001, 1), mk(6000002, 6000001), mk(6000003, 6000001), mk(6000004, 6000003), mk(6000005, 6000001)]
             } else {
                 vec![mk(4000001, 4000002), mk(4000002, 4000001)]
             }
@@ -57,6 +61,23 @@ else:
 '''
 assert s.count(anchor) == 1, "找不到注入點（上游程式碼變了？）"
 s = s.replace(anchor, anchor + fake)
+if plat == 'windows':
+    # 假的啟動時間（只在 cfg(test) 且 PROCINFO_FAKE=reuse 生效）。沒有 0002 的版本沒有這個函式，就略過（那種版本也不會去查啟動時間）
+    hook_anchor = "fn proc_start_time(pid: u32) -> Option<u64> {" + chr(10)
+    if hook_anchor in s:
+        s = s.replace(hook_anchor, hook_anchor + '''            #[cfg(test)]
+            {
+                if std::env::var("PROCINFO_FAKE").as_deref() == Ok("reuse") {
+                    return match pid {
+                        6000001 => Some(50),
+                        6000002 => Some(100),
+                        6000003 => Some(10),
+                        6000004 => Some(20),
+                        _ => None,
+                    };
+                }
+            }
+''')
 s += '''
 #[cfg(test)]
 mod cycle_probe {
@@ -78,6 +99,16 @@ mod cycle_probe {
         let info = LocalProcessInfo::with_root_pid(5000001).expect("root");
         assert_eq!(count(&info), 65);
     }
+
+    // 只在 windows 的測試複本有用：PID 重用（PROCINFO_FAKE=reuse）。B 比父早啟動，不能接在根底下（連同它的子行程 C）；A、D 要在。
+    #[test]
+    fn pid_reuse_not_attached() {
+        let info = LocalProcessInfo::with_root_pid(6000001).expect("root");
+        let mut kids: Vec<u32> = info.children.keys().copied().collect();
+        kids.sort();
+        assert_eq!(kids, vec![6000002, 6000005], "父比子晚啟動的 6000003 不該被接上");
+        assert_eq!(count(&info), 3);
+    }
 }
 '''
 open(p, 'w', encoding='utf-8', newline='\n').write(s)
@@ -91,6 +122,7 @@ PY
 
 run_test() { cargo test --locked -p procinfo --no-default-features parent_child_cycle_terminates -- --nocapture; }
 # 長鏈測試要設 PROCINFO_FAKE=chain（只有 windows 用到）；--exact 避免被別的測試名誤匹配
+run_reuse_test() { PROCINFO_FAKE=reuse cargo test --locked -p procinfo --no-default-features pid_reuse_not_attached -- --nocapture; }
 run_chain_test() { PROCINFO_FAKE=chain cargo test --locked -p procinfo --no-default-features long_chain_terminates -- --nocapture; }
 
 echo "::group::綠燈：已套修補"
@@ -173,5 +205,42 @@ if [ "$PLATFORM" = "windows" ]; then
     echo
     echo "- 綠燈（#7706＋ASN 修補）：通過"
     echo "- 紅燈對照（只套 #7706）：因堆疊溢位失敗，結束碼 $rc2"
+  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+  # ---- PID 重用（#1914）：綠燈＝已套 0002；紅燈對照＝只套到 0001（用明確 commit，不靠 HEAD~1）----
+  echo "::group::PID 重用綠燈：已套 #7706、0001、0002"
+  ONLY_0001="$(git log -1 --format=%H --grep='^asn patch: 0001' HEAD)"
+  [ -n "$ONLY_0001" ] || { echo "::error::找不到 0001 那個 asn patch 的 commit" >&2; exit 1; }
+  [ "$(git log -1 --format=%s "$ONLY_0001")" = "asn patch: 0001-procinfo-build-proc-iterative.patch" ] || { echo "::error::$ONLY_0001 不是 0001 的 asn patch" >&2; exit 1; }
+  [ "$ONLY_0001" != "$(git rev-parse HEAD)" ] || { echo "::error::HEAD 就是 0001：還沒套 0002，沒有東西可以驗" >&2; exit 1; }
+  inject
+  if ! run_reuse_test 2>&1 | tee "$LOGDIR/reuse-green.log"; then
+    echo "::error::PID 重用綠燈失敗：已套 0002 的版本沒有通過" >&2; exit 1
+  fi
+  grep -q "windows::cycle_probe::pid_reuse_not_attached ... ok" "$LOGDIR/reuse-green.log"     || { echo "::error::PID 重用綠燈：找不到測試通過的那一行（測試可能根本沒跑）" >&2; exit 1; }
+  echo "::endgroup::"
+  git checkout -- "$FILE" procinfo/Cargo.toml
+
+  echo "::group::PID 重用紅燈對照：只套到 0001（$ONLY_0001），預期子行程被錯接而斷言失敗"
+  git checkout "$ONLY_0001" -- "$FILE"
+  inject
+  set +e
+  run_reuse_test > "$LOGDIR/reuse-red.log" 2>&1
+  rc3=$?
+  set -e
+  cat "$LOGDIR/reuse-red.log"
+  echo "::endgroup::"
+  git checkout HEAD -- "$FILE" procinfo/Cargo.toml
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "::error::PID 重用還原後工作樹不乾淨" >&2; git status --short >&2; exit 1
+  fi
+  [ "$rc3" -ne 0 ] || { echo "::error::PID 重用紅燈對照沒有失敗：只套到 0001 的版本竟然通過了" >&2; exit 1; }
+  grep -q "父比子晚啟動的 6000003 不該被接上" "$LOGDIR/reuse-red.log"     || { echo "::error::PID 重用紅燈對照雖然失敗了（結束碼 $rc3），但不是因為子行程被錯接" >&2; exit 1; }
+  echo "PID 重用紅燈對照如預期：只套到 0001 的版本把父比子晚啟動的行程錯接上去（結束碼 $rc3）"
+  {
+    echo "### procinfo PID 重用測試（windows）"
+    echo
+    echo "- 綠燈（#7706＋0001＋0002）：通過"
+    echo "- 紅燈對照（只套到 0001）：子行程被錯接而斷言失敗，結束碼 $rc3"
   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 fi
