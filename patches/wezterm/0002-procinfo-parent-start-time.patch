@@ -1,0 +1,49 @@
+diff --git a/procinfo/src/windows.rs b/procinfo/src/windows.rs
+index 986acda..4bd9840 100644
+--- a/procinfo/src/windows.rs
++++ b/procinfo/src/windows.rs
+@@ -408,10 +408,17 @@ impl LocalProcessInfo {
+             }
+         }
+ 
++        // 取行程啟動時間；開不起來（權限不足、已結束）回 None（ASN 修補，見 #1914）
++        fn proc_start_time(pid: u32) -> Option<u64> {
++            ProcHandle::new(pid)?.start_time()
++        }
++
+         // 迭代版（不遞迴）：先以廣度優先找出整棵樹，再由最後發現的節點往回組裝。
+         fn build_proc(root: &PROCESSENTRY32W, procs: &[PROCESSENTRY32W]) -> LocalProcessInfo {
+             let mut visited = HashSet::new();
+             visited.insert(root.th32ProcessID);
++            // pid -> 啟動時間的快取，每個 pid 最多開一次（None＝拿不到）
++            let mut start_times: HashMap<u32, Option<u64>> = HashMap::new();
+             // (在 procs 裡的位置, 父節點在 order 裡的位置, 深度)
+             let mut order: Vec<(Option<usize>, Option<usize>, usize)> = vec![(None, None, 0)];
+             let mut i = 0;
+@@ -433,6 +440,26 @@ impl LocalProcessInfo {
+                             );
+                             break;
+                         }
++                        // PID 被重用時，子行程的原父行程已結束、PID 被較晚啟動的新行程拿走；
++                        // 父的啟動時間晚於子就不是真的父子（兩邊都拿得到才判斷，拿不到照舊接上）
++                        let parent_start = *start_times
++                            .entry(this_pid)
++                            .or_insert_with(|| proc_start_time(this_pid));
++                        let kid_start = *start_times
++                            .entry(kid.th32ProcessID)
++                            .or_insert_with(|| proc_start_time(kid.th32ProcessID));
++                        if let (Some(ps), Some(ks)) = (parent_start, kid_start) {
++                            if ps > ks {
++                                log::debug!(
++                                    "procinfo: pid {} (start {}) started later than child pid {} (start {}); pid reused, not attaching",
++                                    this_pid,
++                                    ps,
++                                    kid.th32ProcessID,
++                                    ks
++                                );
++                                continue;
++                            }
++                        }
+                         visited.insert(kid.th32ProcessID);
+                         order.push((Some(n), Some(i), depth + 1));
+                     }
