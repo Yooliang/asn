@@ -71,10 +71,9 @@ pub fn run_round_stuck(w: &mut Watch, tracker: &mut Tracker, guard: &mut StuckGu
     if !w.resume_quota_ok(now) {
         if guard.notified != Some(mux) {
             guard.notified = Some(mux);
-            // 走現有的事故通知管道（只帶人數與「沒有接回」，後台文字固定）；白話說明寫進 mux.log 與 ui.log
+            // 走現有的事故通知管道（只帶人數與「沒有接回」，後台文字固定）；白話說明經 sink.record 寫進 mux.log（ui_log 只有有畫面的建置才有，這裡不用）
             let line = format!("{STUCK_HELD_TEXT}（心跳停了超過 {secs} 秒）");
             sink.record(&line);
-            let _ = crate::ui_log::append(ctx.work_dir, &[format!("{} info [ASN] {line}", crate::quota_core::iso_secs(now as i64))]);
             queue_notice(ctx.work_dir, o.partners.len(), false, now);
         }
         return round(w, tracker, o, exited, now, ctx, sink, false);
@@ -304,7 +303,6 @@ mod tests {
         }
         assert_eq!(rig.disposed.get(), 0, "額度未到不結束程序");
         assert_eq!(read_notice(e.dir.path()), None, "只通知一次");
-        assert!(std::fs::read_to_string(e.dir.path().join("ui.log")).unwrap_or_default().contains(STUCK_HELD_TEXT), "白話說明寫進 ui.log");
         assert_eq!(rig.records.borrow().len(), 1, "mux.log 也只寫一行：{}", rig.log());
         assert!(rig.log().contains(STUCK_HELD_TEXT), "{}", rig.log());
     }
