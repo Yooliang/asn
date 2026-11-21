@@ -325,3 +325,13 @@ test('#4563 起點存在 state.since：done 被清空也不回頭發 since 以�
   // since 格式壞掉 → 當成沒播種
   assert.equal(decide({ runs: [], state: { ...st, since: { desktop: 'x', linux: '0.2.44' } }, now: T0 }).result, 'unseeded')
 })
+
+test('acknowledge 只准清失敗類：published／seeded 拒絕，五種失敗都可清', () => {
+  for (const result of ['ci-failed', 'dryrun-failed', 'publish-failed', 'stale', 'blocked']) {
+    const s = seededState(); s.done['desktop@0.2.45'] = { result, at: 'x', runId: '1' }
+    assert.ok(acknowledge(s, 'desktop@0.2.45', T0).done['desktop@0.2.45'].ackedAt, result)
+  }
+  const s = seededState(); s.done['desktop@0.2.45'] = { result: 'published', at: 'x', runId: '1' }
+  assert.throws(() => acknowledge(s, 'desktop@0.2.45', T0), /不是失敗類/)
+  assert.throws(() => acknowledge(s, 'desktop@0.0.0', T0), /不是失敗類/)
+})
