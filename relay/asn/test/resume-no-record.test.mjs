@@ -12,7 +12,7 @@ const read = f => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8').r
 test('喚醒找不到對話紀錄（電腦端原句或後台代號）：view 只有一行字（含找不到紀錄的白話），沒有 action', () => {
   for (const detail of [NO_RECORD_TEXT, 'no_session', ' ' + NO_RECORD_TEXT + ' ']) {
     const v = progressView({ status: 'failed', detail }, { op: 'resume' })
-    assert.deepEqual(v, { phase: 'failed', done: true, text: '沒有成功：' + NO_RECORD_TEXT }, detail)
+    assert.deepEqual(v, { phase: 'failed', done: true, text: '沒有成功：' + NO_RECORD_TEXT, noRetry: true }, detail)
     assert.equal(v.action, undefined, detail)
     assert.match(v.text, new RegExp(NO_RECORD_TEXT))
   }
@@ -40,6 +40,8 @@ test('送出時後台就回 no_session：失敗畫面是對話紀錄白話、沒
   assert.match(v.text, /對話紀錄/)
   assert.doesNotMatch(v.text, /no_session|HTTP|409/, '畫面不放原文')
   assert.equal(v.action, undefined)
+  assert.equal(v.noRetry, true)
+  assert.doesNotMatch(runBanner({ op: 'resume', view: v }).text, /再按一次/, '沒有對話紀錄時狀態列不接重試句')
   const w = await runPartnerOp(api('partner_op HTTP 409 busy'), f, 'resume', {}, { onUpdate: () => {} })
   assert.equal(w.action, undefined)
 })

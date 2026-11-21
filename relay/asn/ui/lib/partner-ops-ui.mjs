@@ -4,7 +4,7 @@
 import { AsnDialog } from './dialog.mjs'
 import { machinesByNode } from './mobile-launch.mjs'
 import { launchersErrorText } from './launcher-poll.mjs'
-import { ACP_NEWCONV_LABEL, ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, OP_PROGRESS_TEXT, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
+import { NO_RECORD_CODE, ACP_NEWCONV_LABEL, ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, OP_PROGRESS_TEXT, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
 import { runArchive } from './archive.mjs'
 import { clearRun, moveRun, runBanner, runFor, setRun } from './mobile-ops.mjs'
@@ -39,6 +39,7 @@ export async function runPartnerOp(api, friend, op, input, { onUpdate = () => {}
     console.info('[ASN] 夥伴操作送出失敗', op, rawText(e))   // 原文進 log，畫面只講白話
     // 後台在送出時就回 no_session（這位夥伴沒有可接回的對話紀錄）：opErrorText 已寫成白話；#1907 狀態列不放按鈕，所以不再附「開新夥伴」
     const v = failView(opErrorText(e?.message))
+    if (String(e?.message ?? '').includes(NO_RECORD_CODE)) v.noRetry = true   // 沒有對話紀錄：再按一次也沒用，狀態列不接重試句
     onUpdate(v); return v
   }
   if (!id) { const v = failView('送出失敗，請稍後再試'); onUpdate(v); return v }
