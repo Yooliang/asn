@@ -150,7 +150,7 @@ function decideInner({ runs = [], state, now }, notes) {
     if (st.seedNoticed) return wait(st, '尚未播種')
     st.seedNoticed = true
     return { action: 'report', key: null, result: 'unseeded', state: st,
-      message: '自動發佈還沒有播種（不知道哪些舊版已經處理過），不會做任何發佈。請先指定起點版號（例如 --since 0.2.44）播種。' }
+      message: '自動發佈還沒有播種（不知道哪些舊版已經處理過），不會做任何發佈。請先指定起點版號播種：node tools/release/auto_publish.mjs --seed <線上版號> --yes（見 docs/release/自動發佈運行手冊.md）。' }
   }
 
   // 重入保護：上一輪子程序還在跑（或程式中途當掉），不准開始別的事

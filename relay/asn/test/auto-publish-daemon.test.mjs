@@ -633,3 +633,11 @@ test('#2003c 運行手冊存在、涵蓋關鍵字，且手冊裡每個 --參數 
     assert.equal(o.error, null, `手冊提到的 ${f} 程式要認得：${o.error}`)
   }
 })
+
+test('#2003 (c) 核心的「需要播種」訊息講的是程式真的認得的參數（--seed／--yes），不是不存在的 --since', () => {
+  const src = fs.readFileSync(new URL('../../../tools/release/auto_publish_core.mjs', import.meta.url), 'utf8')
+  const msgs = [...src.matchAll(/message: '([^']*)'/g)].map(m => m[1])
+  for (const m of msgs) for (const flag of m.match(/--[a-z][a-z-]*/g) ?? []) assert.ok(parseArgs([flag, ...(flag === '--seed' ? ['0.0.1'] : [])]).error == null || !/不認得|未知/.test(String(parseArgs([flag]).error)), `核心訊息提到 ${flag}，程式卻不認得`)
+  assert.ok(msgs.some(m => /--seed/.test(m) && /--yes/.test(m)), '需要播種的訊息要寫出 --seed 與 --yes')
+  assert.ok(!msgs.some(m => /--since/.test(m)), '不能再寫 --since')
+})
