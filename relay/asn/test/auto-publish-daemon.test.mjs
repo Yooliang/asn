@@ -363,6 +363,27 @@ test('state 讀不懂：不覆寫、連續出現只貼一次群組；恢復後�
   assert.equal(e.calls.posts.length, 2)
 })
 
+test('state 能解析但結構不對：當 bad-state，不覆寫、不發佈、只貼一次群組', async () => {
+  const bads = ['{}', 'null', '[]', '5', '"字串"', JSON.stringify({ done: {} }), JSON.stringify({ seeded: true }), JSON.stringify({ seeded: true, done: [] }), JSON.stringify({ seeded: true, done: null })]
+  for (const text of bads) {
+    const e = env({ desktopRows: [row('v0.2.45', 111)], files: { [STATE]: text } })
+    assert.equal((await runOnce(opts, e.deps)).outcome, 'bad-state', text)
+    assert.equal((await runOnce(opts, e.deps)).outcome, 'bad-state', text)
+    assert.equal(e.calls.posts.length, 1, text)
+    assert.equal(e.fsMap.get(STATE), text, `不覆寫：${text}`)
+    assert.ok(!e.calls.ops.some((o) => o.includes(STATE) && !o.includes('.notices.json') && !o.includes('.lock')), text)
+    assert.equal(e.calls.spawn.length, 0, `不呼叫 local_sign_publish：${text}`)
+    assert.equal(e.calls.gh.length, 0, text)
+  }
+})
+
+test('只有 notices 檔、沒有 state：拒絕啟動', () => {
+  const e = env({ noState: true, files: { [`${STATE}.notices.json`]: '{}' } })
+  const c = checkStartup(opts, e.deps)
+  assert.equal(c.ok, false)
+  assert.ok(c.why.includes('拒絕啟動') && c.why.includes('notices'), c.why)
+})
+
 test('沒播種、沒痕跡：啟動提示要先 --seed；runOnce 不自動建 state', async () => {
   const e = env({ noState: true })
   const c = checkStartup(opts, e.deps)

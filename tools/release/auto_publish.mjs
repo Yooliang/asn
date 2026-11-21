@@ -5,13 +5,17 @@
 //   人工確認一筆失敗：node tools/release/auto_publish.mjs --ack <平台@版號>，存檔後結束
 //   ⚠ 運行手冊：電腦版自動那條紅了、改走備援手動發版之後，要對那一版下 --ack desktop@<版號>（Linux 若被標 blocked 也要 --ack linux@<版號>），
 //     否則有未清除的失敗，兩個平台的新版都會一直暫停（西川 #4561）
+// ⚠ 「曾經跑過」的痕跡（auto-publish.log、<state>.lock、<state>.notices.json）和 state 放在同一個資料夾，
+//   state 不見但痕跡還在時拒絕啟動，避免 state 被誤刪後重複發佈舊版。刪掉整個資料夾等於放棄這層保護：
+//   下次要用 --seed <版號> --yes 重新播種（播種會對照線上 latest.json，起點低於線上版就拒絕）。
+// state 能解析但結構不對（非物件、缺 seeded 或 done 等）一律當 bad-state：不覆寫、不發佈、群組只貼一次。
 // 必須在專用 worktree 內執行，不可在主 checkout。不用 gh run watch（它會每 3 秒查一次、燒光 API 額度）。
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { decide, applyResult, seed, acknowledge, compareVersions, STALE_MS } from './auto_publish_core.mjs'
+import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail } from './asn_cli.mjs'
 
 export const WORKFLOWS = [
@@ -214,9 +218,15 @@ export async function runOnce(opts, deps) {
     // 不自動建 state：沒播種的 state 不存在時一律拒絕（要先 --seed）
     if (!deps.exists(opts.state)) { log('state 檔不存在，請先用 --seed <版號> 播種（不自動播種）'); return { outcome: 'no-state' } }
     let state
-    try { state = JSON.parse(deps.readFile(opts.state)) } catch (e) {
-      log(`state 檔讀不懂，停止這一輪（不覆蓋）：${e.message}`)
-      if (!nt.badState) { setN({ badState: true }); post('自動發佈的 state 檔讀不懂，已停止處理且不覆蓋原檔，請檢查') }
+    let badWhy = null
+    try {
+      state = JSON.parse(deps.readFile(opts.state))
+      const v = validateState(state)
+      if (!v.ok) badWhy = `結構不對：${v.why}`
+    } catch (e) { badWhy = `讀不懂：${e.message}` }
+    if (badWhy) {
+      log(`state 檔${badWhy}，停止這一輪（不覆蓋）`)
+      if (!nt.badState) { setN({ badState: true }); post('自動發佈的 state 檔讀不懂或結構不對，已停止處理且不覆蓋原檔，請檢查') }
       return { outcome: 'bad-state' }
     }
     if (nt.badState) setN({ badState: undefined })
@@ -275,10 +285,10 @@ export async function runOnce(opts, deps) {
   }
 }
 
-// 啟動檢查：state 不存在時，有跑過的痕跡（log 或鎖檔）就拒絕，沒痕跡就提示先播種
+// 啟動檢查：state 不存在時，有跑過的痕跡（log、鎖檔、notices 檔）就拒絕，沒痕跡就提示先播種
 export function checkStartup(opts, deps) {
   if (deps.exists(opts.state)) return { ok: true }
-  const traces = [logPathOf(opts), `${opts.state}.lock`].filter((p) => deps.exists(p))
+  const traces = [logPathOf(opts), `${opts.state}.lock`, `${opts.state}.notices.json`].filter((p) => deps.exists(p))
   if (traces.length) return { ok: false, why: `state 檔不存在，但同資料夾看得出以前跑過（${traces.join('、')}），可能是 state 被刪或搬走。為免重複發佈舊版，拒絕啟動也不自動播種；請確認後用 --seed <版號> 手動播種。` }
   return { ok: false, why: '尚未播種：請先執行 --seed <版號>（或 --seed-desktop／--seed-linux）指定起點版號，再啟動常駐程式。' }
 }
@@ -295,6 +305,8 @@ export async function runCommand(opts, deps) {
       if (!deps.exists(opts.state)) return { code: 1, msg: 'state 檔不存在，沒有可確認的紀錄' }
       let st
       try { st = JSON.parse(deps.readFile(opts.state)) } catch (e) { return { code: 1, msg: `state 檔讀不懂：${e.message}` } }
+      const v = validateState(st)
+      if (!v.ok) return { code: 1, msg: `state 檔結構不對：${v.why}` }
       let next
       const before = st?.done?.[opts.ack]?.result
       try { next = acknowledge(st, opts.ack, deps.now()) } catch (e) { return { code: 1, msg: e.message } }

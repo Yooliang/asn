@@ -24,6 +24,17 @@ export function emptyState() {
   return { v: STATE_VERSION, done: {}, pending: {}, inflight: null, seeded: false, since: null, seedNoticed: false, pausedNoticed: false }
 }
 
+// 結構檢查：能解析成 JSON 不代表是 state。必須是物件（非 null／陣列）、seeded 是布林、done 是物件（非 null／陣列）。
+// 放核心而不放常駐程式：「state 長什麼樣」是核心定義的（emptyState／clone），檢查跟著定義走，常駐程式與 --ack 共用。
+// 回 { ok: true } 或 { ok: false, why }
+export function validateState(state) {
+  const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x)
+  if (!isObj(state)) return { ok: false, why: `最外層不是物件（${state === null ? 'null' : Array.isArray(state) ? '陣列' : typeof state}）` }
+  if (typeof state.seeded !== 'boolean') return { ok: false, why: 'seeded 欄位缺少或不是布林' }
+  if (!isObj(state.done)) return { ok: false, why: 'done 欄位缺少或不是物件' }
+  return { ok: true }
+}
+
 function ms(t) {
   return t instanceof Date ? t.getTime() : typeof t === 'number' ? t : Date.parse(t)
 }
