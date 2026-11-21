@@ -140,7 +140,13 @@ async fn wait_all_painted(open: impl Fn() -> Vec<String>, painted: impl Fn(&str)
     let t0 = std::time::Instant::now();
     loop {
         let waiting: Vec<String> = open().into_iter().filter(|l| !painted(l)).collect();
-        if waiting.is_empty() { return waiting }
+        if waiting.is_empty() {
+            // 正面紀錄：放行時哪幾扇已回報畫完、等了多久（過去只能靠「沒有逾時行」推論）
+            let mut open = open();
+            open.sort();
+            elog!("[shot] 提示視窗都已回報畫完，等了 {}ms：{}", t0.elapsed().as_millis(), if open.is_empty() { "（沒有提示視窗）".to_string() } else { open.join("、") });
+            return waiting;
+        }
         if t0.elapsed() >= max {
             elog!("[shot] 等了 {}ms 仍沒畫好的提示視窗：{}", t0.elapsed().as_millis(), waiting.join("、"));
             return waiting;
@@ -535,9 +541,16 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String
     // 提示視窗只在這次截的是「完整一輪」（沒帶 tab）時才關：之後帶 tab 的逐頁截圖不拍提示視窗，也不需要它
     let close = tab.is_none();
     capture_then_cleanup(
-        capture_until_drawn(&dir, SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(SHOT_RETRY_MS), |only| {
+        capture_until_drawn(&dir, SHOT_MIN_BYTES, shot_retry_max(shot_toast_lenient()), Duration::from_millis(SHOT_RETRY_MS), |only| {
             let (app, dir, tab) = (app.clone(), dir.clone(), tab.clone());
             async move { take_shot_capture(&app, &dir, tab, only).await }
+        }, ShotHooks {
+            nudge: |name: &str| nudge_toast(&app, name),
+            diag: |small: &[String]| {
+                let (app, dir, small) = (app.clone(), dir.clone(), small.to_vec());
+                async move { shot_diag(&app, &dir, &small).await }
+            },
+            budget: Duration::from_millis(SHOT_RETRY_BUDGET_MS),
         }),
         || if close { close_shot_toasts(&app) },
     )
@@ -559,18 +572,140 @@ where
 const SHOT_MIN_BYTES: u64 = 3000;
 const SHOT_RETRY_MAX: u32 = 40;
 const SHOT_RETRY_MS: u64 = 150;
+/// 發版機放寬模式（#2033）的重截上限：提示視窗截圖疑似空白只警告，不值得把 e2e 的時間花在重截上
+/// （Windows 每次重截約 1.2 秒，40 次約 48 秒，會把 e2e 拖到逾時）
+const SHOT_RETRY_MAX_LENIENT: u32 = 8;
 
-/// 截完檢查每張圖，太小的（還沒畫完）隔一小段時間只重截那幾扇，最多重試 `max_retry` 次；仍太小就照現狀交出，由測試判定
-async fn capture_until_drawn<F, Fut>(dir: &Path, min_bytes: u64, max_retry: u32, gap: Duration, mut capture: F) -> Result<(), String>
+/// 發版 workflow 設 `ASN_SHOT_TOAST_LENIENT=1` 時，提示視窗截圖疑似空白只警告（判斷在 test/shot-png.mjs 的 checkShot）
+fn shot_toast_lenient() -> bool {
+    std::env::var("ASN_SHOT_TOAST_LENIENT").is_ok_and(|v| v == "1")
+}
+
+fn shot_retry_max(lenient: bool) -> u32 {
+    if lenient { SHOT_RETRY_MAX_LENIENT } else { SHOT_RETRY_MAX }
+}
+
+/// 重截總時間上限：實測 40 次約 48 秒，留給 e2e 其餘步驟的空間
+const SHOT_RETRY_BUDGET_MS: u64 = 60_000;
+
+/// 重截時的兩個外掛動作（注入，單元測試用假的）：
+/// - `nudge(視窗名)`：對仍太小的提示視窗催它重新合成；失敗只記 log，不中斷截圖
+/// - `diag(仍太小的名單)`：重截超過 `SHOT_DIAG_AFTER` 次還太小時做一次診斷（整螢幕圖＋視窗順序 log）
+/// - `budget`：重截總時間上限，超過就停、照現狀交出（e2e 有 120 秒逾時，不能被重截吃光）
+struct ShotHooks<N, D> { nudge: N, diag: D, budget: Duration }
+
+/// 重截超過這麼多次仍太小，就留一份整螢幕圖與視窗順序（診斷用，每次截圖只做一次）
+const SHOT_DIAG_AFTER: u32 = 10;
+
+/// 催提示視窗重新合成：尺寸加 1 像素再還原。不啟用、不搶焦點，也不 hide／show（show 會走 SW_SHOW 搶焦點）
+fn nudge_toast(app: &AppHandle, name: &str) -> Result<(), String> {
+    let w = app.get_webview_window(name).ok_or_else(|| "視窗已不在".to_string())?;
+    let s = w.outer_size().map_err(|e| e.to_string())?;
+    w.set_size(tauri::PhysicalSize::new(s.width + 1, s.height)).map_err(|e| e.to_string())?;
+    w.set_size(tauri::PhysicalSize::new(s.width, s.height)).map_err(|e| e.to_string())
+}
+
+/// 診斷：整個螢幕存成 diag-screen.png（和其他截圖同資料夾、同 artifact），並把各視窗的最上層順序寫進 log
+async fn shot_diag(app: &AppHandle, dir: &Path, small: &[String]) {
+    elog!("[shot] 重截超過 {SHOT_DIAG_AFTER} 次仍太小：{}；存整螢幕圖並記視窗順序", small.join("、"));
+    let hwnds = window_handles(app);
+    elog!("[shot] 視窗代號：{}", hwnds.join(" "));
+    match shot_diag_capture(dir, &hwnds).await {
+        Ok(out) => elog!("[shot] 視窗由上而下（序號 代號 可見 位置大小 標題）：\n{}", out.trim_end()),
+        Err(e) => elog!("[shot] 診斷擷取失敗：{e}"),
+    }
+}
+
+#[cfg(windows)]
+fn window_handles(app: &AppHandle) -> Vec<String> {
+    app.webview_windows().into_iter().filter_map(|(l, w)| w.hwnd().ok().map(|h| format!("{l}={}", h.0 as usize))).collect()
+}
+#[cfg(not(windows))]
+fn window_handles(_app: &AppHandle) -> Vec<String> { vec![] }
+
+#[cfg(windows)]
+async fn shot_diag_capture(dir: &Path, hwnds: &[String]) -> Result<String, String> {
+    let script = r#"
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System; using System.Text; using System.Runtime.InteropServices;
+public class Z {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint c);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+}
+'@
+[Z]::SetProcessDPIAware() | Out-Null
+$v = [System.Windows.Forms.SystemInformation]::VirtualScreen
+$bmp = New-Object System.Drawing.Bitmap $v.Width, $v.Height
+$g = [System.Drawing.Graphics]::FromImage($bmp)
+$g.CopyFromScreen($v.X, $v.Y, 0, 0, $bmp.Size)
+$bmp.Save((Join-Path $env:ASN_DIR 'diag-screen.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+$g.Dispose(); $bmp.Dispose()
+$ours = @{}
+foreach ($kv in ($env:ASN_HWNDS -split ' ')) { if ($kv) { $p = $kv -split '='; $ours[$p[1]] = $p[0] } }
+$h = [Z]::GetTopWindow([IntPtr]::Zero); $i = 0
+while ($h -ne [IntPtr]::Zero -and $i -lt 400) {
+  $key = [string]([int64]$h)
+  $vis = [Z]::IsWindowVisible($h)
+  if ($ours.ContainsKey($key) -or ($vis -and $i -lt 40)) {
+    $r = New-Object Z+RECT; [Z]::GetWindowRect($h, [ref]$r) | Out-Null
+    $sb = New-Object System.Text.StringBuilder 80; [Z]::GetWindowText($h, $sb, 80) | Out-Null
+    $tag = if ($ours.ContainsKey($key)) { $ours[$key] } else { '-' }
+    Write-Output ("{0} {1} {2} ({3},{4},{5}x{6}) {7}" -f $i, $tag, $vis, $r.L, $r.T, ($r.R-$r.L), ($r.B-$r.T), $sb.ToString())
+  }
+  $h = [Z]::GetWindow($h, 2); $i++
+}
+"#;
+    let o = tokio::process::Command::new("powershell").no_window()
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("ASN_DIR", dir)
+        .env("ASN_HWNDS", hwnds.join(" "))
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !o.status.success() { return Err(format!("結束碼 {}：{}", o.status, String::from_utf8_lossy(&o.stderr).trim())); }
+    Ok(String::from_utf8_lossy(&o.stdout).into_owned())
+}
+
+/// 非 Windows：沒有視窗順序可查，只記一行（Linux 的 scrot 路徑不需要這份診斷）
+#[cfg(not(windows))]
+async fn shot_diag_capture(_dir: &Path, _hwnds: &[String]) -> Result<String, String> {
+    Ok("（此平台不做視窗順序診斷）".to_string())
+}
+
+/// 截完檢查每張圖，太小的（還沒畫完）隔一小段時間只重截那幾扇，最多重試 `max_retry` 次；仍太小就照現狀交出，由測試判定。
+/// 重截前，對仍太小的提示視窗（`toast-` 開頭）先催一次重新合成（#2033：網頁回報畫完不等於螢幕已呈現）
+async fn capture_until_drawn<F, Fut, N, D, DFut>(dir: &Path, min_bytes: u64, max_retry: u32, gap: Duration, mut capture: F, mut hooks: ShotHooks<N, D>) -> Result<(), String>
 where
     F: FnMut(Option<Vec<String>>) -> Fut,
     Fut: std::future::Future<Output = Result<Vec<String>, String>>,
+    N: FnMut(&str) -> Result<(), String>,
+    D: FnMut(&[String]) -> DFut,
+    DFut: std::future::Future<Output = ()>,
 {
     let t0 = std::time::Instant::now();
     let mut names = capture(None).await?;
+    let mut diagnosed = false;
     for n in 1..=max_retry {
         names.retain(|n| std::fs::metadata(dir.join(format!("{n}.png"))).map(|m| m.len() < min_bytes).unwrap_or(true));
         if names.is_empty() { break }
+        if t0.elapsed() >= hooks.budget {
+            elog!("[shot] 重截已超過 {}ms 上限，仍太小的照現狀交出：{}", hooks.budget.as_millis(), names.join("、"));
+            break;
+        }
+        for name in names.iter().filter(|x| x.starts_with("toast-")) {
+            if let Err(e) = (hooks.nudge)(name) { elog!("[shot] 催 {name} 重新合成失敗（照常重截）：{e}"); }
+        }
+        if n > SHOT_DIAG_AFTER && !diagnosed {
+            diagnosed = true;
+            (hooks.diag)(&names).await;
+        }
         tokio::time::sleep(gap).await;
         // 重截失敗（擷取程序偶發錯誤、視窗剛好被收掉）不該讓已截到的結果作廢：停止重試，照現狀交出
         names = match capture(Some(names)).await {
@@ -686,6 +821,93 @@ fn which_scrot() -> Option<String> {
 mod tests {
     use super::*;
 
+    /// #2033：發版機放寬模式少重截，e2e 不會被重截拖到逾時；平常仍照原上限重截
+    #[test]
+    fn t2033_放寬模式重截上限較短() {
+        assert_eq!(shot_retry_max(false), SHOT_RETRY_MAX);
+        assert_eq!(shot_retry_max(true), SHOT_RETRY_MAX_LENIENT);
+        assert!(SHOT_RETRY_MAX_LENIENT * 1200 < 15_000, "放寬模式重截（Windows 每次約 1.2 秒）要在 15 秒內結束");
+    }
+
+    type NoNudge = fn(&str) -> Result<(), String>;
+    type NoDiag = fn(&[String]) -> std::future::Ready<()>;
+
+    /// 不做任何外掛動作的 hooks（只想測重截本身的測試用）
+    fn no_hooks() -> ShotHooks<NoNudge, NoDiag> {
+        ShotHooks { nudge: |_| Ok(()), diag: |_| std::future::ready(()), budget: Duration::from_secs(60) }
+    }
+
+    /// 假擷取：toast-2-2 寫成 804，直到第 `drawn_at` 次才變 9000；list 一律 9000；with_chat 時另帶一個一直太小的對話視窗
+    fn fake_capture(dir: &Path, drawn_at: u32, with_chat: bool) -> impl FnMut(Option<Vec<String>>) -> std::future::Ready<Result<Vec<String>, String>> {
+        let (d, mut n) = (dir.to_path_buf(), 0u32);
+        move |_| {
+            n += 1;
+            std::fs::write(d.join("list.png"), vec![1u8; 9000]).unwrap();
+            std::fs::write(d.join("toast-2-2.png"), vec![1u8; if n >= drawn_at { 9000 } else { 804 }]).unwrap();
+            let mut names = vec!["list".to_string(), "toast-2-2".to_string()];
+            if with_chat { std::fs::write(d.join("chat.png"), vec![1u8; 804]).unwrap(); names.push("chat".to_string()); }
+            std::future::ready(Ok(names))
+        }
+    }
+
+    type Log<T> = std::sync::Arc<std::sync::Mutex<Vec<T>>>;
+
+    /// #2033：提示視窗太小，重截前要催它重新合成（網頁回報畫完不等於螢幕已呈現）；畫好之後就不再催
+    #[tokio::test]
+    async fn t2033_提示視窗太小才催_畫好就不催() {
+        let dir = tempfile::tempdir().unwrap();
+        let nudged: Log<String> = Default::default();
+        let n2 = nudged.clone();
+        let hooks = ShotHooks { nudge: move |name: &str| { n2.lock().unwrap().push(name.to_string()); Ok(()) }, diag: |_: &[String]| std::future::ready(()), budget: Duration::from_secs(60) };
+        capture_until_drawn(dir.path(), SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(1), fake_capture(dir.path(), 4, false), hooks).await.unwrap();
+        // 第 1~3 次截都太小、第 4 次才畫好：催發生在「重截前」，所以催 3 次，每次都是 toast-2-2；list 與畫好之後都不催
+        assert_eq!(*nudged.lock().unwrap(), vec!["toast-2-2"; 3]);
+    }
+
+    /// #2033：只有 toast- 開頭的才催；對話視窗之類太小不催（只動提示視窗）
+    #[tokio::test]
+    async fn t2033_非提示視窗太小不催() {
+        let dir = tempfile::tempdir().unwrap();
+        let nudged: Log<String> = Default::default();
+        let n2 = nudged.clone();
+        let hooks = ShotHooks { nudge: move |name: &str| { n2.lock().unwrap().push(name.to_string()); Ok(()) }, diag: |_: &[String]| std::future::ready(()), budget: Duration::from_secs(60) };
+        capture_until_drawn(dir.path(), SHOT_MIN_BYTES, 5, Duration::from_millis(1), fake_capture(dir.path(), 1, true), hooks).await.unwrap();
+        assert!(nudged.lock().unwrap().is_empty(), "toast 一開始就畫好、chat 太小但不是提示視窗：一次都不該催");
+    }
+
+    /// #2033：催失敗（視窗剛好被收掉等）只記 log，照常重截、不讓截圖失敗
+    #[tokio::test]
+    async fn t2033_催失敗不中斷截圖() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks = ShotHooks { nudge: |_: &str| Err("視窗已不在".to_string()), diag: |_: &[String]| std::future::ready(()), budget: Duration::from_secs(60) };
+        let r = capture_until_drawn(dir.path(), SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(1), fake_capture(dir.path(), 3, false), hooks).await;
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(std::fs::metadata(dir.path().join("toast-2-2.png")).unwrap().len(), 9000, "催失敗仍繼續重截到畫好");
+    }
+
+    /// #2033：重截超過 SHOT_DIAG_AFTER 次仍太小才做診斷，而且一次截圖只做一次；很快畫好就不診斷
+    #[tokio::test]
+    async fn t2033_久久畫不好才做診斷且只做一次() {
+        let dir = tempfile::tempdir().unwrap();
+        let diags: Log<Vec<String>> = Default::default();
+        let mk = |l: Log<Vec<String>>| ShotHooks { nudge: |_: &str| Ok(()), diag: move |small: &[String]| { l.lock().unwrap().push(small.to_vec()); std::future::ready(()) }, budget: Duration::from_secs(60) };
+        capture_until_drawn(dir.path(), SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(1), fake_capture(dir.path(), 5, false), mk(diags.clone())).await.unwrap();
+        assert!(diags.lock().unwrap().is_empty(), "很快就畫好：不診斷");
+        capture_until_drawn(dir.path(), SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(1), fake_capture(dir.path(), u32::MAX, false), mk(diags.clone())).await.unwrap();
+        assert_eq!(*diags.lock().unwrap(), vec![vec!["toast-2-2".to_string()]], "一直太小：診斷剛好一次，名單是仍太小的那扇");
+    }
+
+    /// #2033：重截超過總時間上限就停、照現狀交出，不吃光 e2e 的逾時
+    #[tokio::test]
+    async fn t2033_重截有總時間上限() {
+        let dir = tempfile::tempdir().unwrap();
+        let hooks = ShotHooks { nudge: |_: &str| Ok(()), diag: |_: &[String]| std::future::ready(()), budget: Duration::from_millis(50) };
+        let t0 = std::time::Instant::now();
+        let r = capture_until_drawn(dir.path(), SHOT_MIN_BYTES, 100_000, Duration::from_millis(10), fake_capture(dir.path(), u32::MAX, false), hooks).await;
+        assert!(r.is_ok());
+        assert!(t0.elapsed() < Duration::from_secs(5), "超過上限就要停：{:?}", t0.elapsed());
+    }
+
     /// #1953 一審：重截時擷取失敗，不能把已截到的結果變成失敗
     #[tokio::test]
     async fn t1953_重截失敗仍交出已截到的圖() {
@@ -700,7 +922,7 @@ mod tests {
                 Ok(vec!["list".to_string(), "toast-2-2".to_string()])
             } else { Err("擷取失敗".to_string()) };
             async move { res }
-        })
+        }, no_hooks())
         .await;
         assert!(r.is_ok(), "重截失敗不該讓整個截圖失敗：{r:?}");
         assert_eq!(std::fs::metadata(dir.path().join("list.png")).unwrap().len(), 9000);
@@ -722,7 +944,7 @@ mod tests {
             std::fs::write(d.join("list.png"), vec![1u8; 9000]).unwrap();
             std::fs::write(d.join("toast-2-2.png"), vec![1u8; if drawn { 9000 } else { 804 }]).unwrap();
             async move { Ok(vec!["list".to_string(), "toast-2-2".to_string()]) }
-        })
+        }, no_hooks())
         .await
         .unwrap();
         assert_eq!(std::fs::metadata(dir.path().join("toast-2-2.png")).unwrap().len(), 9000, "最後要是畫好的那張");

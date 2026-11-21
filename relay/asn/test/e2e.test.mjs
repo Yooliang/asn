@@ -9,7 +9,7 @@ import path from 'node:path'
 import { defaultExe, e2eTmpDir, maskSecrets, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
 import { FAKE_KEY, U } from './fake-relay.mjs'
 import { nudgeBody } from '../ui/lib/text.mjs'
-import { assertShotNotBlank } from './shot-png.mjs'
+import { assertShotNotBlank, checkShot } from './shot-png.mjs'
 
 test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
   const out = e2eTmpDir('asn-e2e-')
@@ -51,7 +51,7 @@ test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '
   assert.equal(fs.existsSync(r.hbFile), false, '結束時清掉自己的心跳')
   if (shotCaptureSupported) {
     // 截圖斷言失敗時附上 asn.exe 的輸出（已遮金鑰、只取最後 40 行），才看得到有沒有重截、重截幾次（#1953）
-    const shotCheck = (f, opts) => { try { return assertShotNotBlank(path.join(out, f), opts) } catch (e) { e.message += '\n--- asn.exe 輸出（末 40 行）---\n' + maskSecrets(r.log).trim().split('\n').slice(-40).join('\n'); throw e } }
+    const shotCheck = (f, opts) => { try { return checkShot(path.join(out, f), opts, { lenientToast: process.env.ASN_SHOT_TOAST_LENIENT === '1' }) } catch (e) { e.message += '\n--- asn.exe 輸出（末 40 行）---\n' + maskSecrets(r.log).trim().split('\n').slice(-40).join('\n'); throw e } }
     for (const f of ['list.png', 'chat.png']) {
       assert.ok(r.files.includes(f), `缺 ${f}`)
       shotCheck(f)

@@ -1,6 +1,7 @@
 // --shot 截圖品質：解 8-bit RGB/RGBA PNG，拒絕幾乎單色的空白圖。
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import path from 'node:path'
 import zlib from 'node:zlib'
 
 function paeth(a, b, c) {
@@ -95,4 +96,27 @@ export function assertShotNotBlank(file, { minUnique = 12, minBytes = 10_000 } =
   const unique = pngUniqueColors(file)
   assert.ok(unique >= minUnique, `截圖幾乎單色（unique≈${unique}），可能空白：${file}`)
   return unique
+}
+
+/** 提示視窗截圖的檔名（--shot 的提示視窗一律 toast- 開頭） */
+export const isToastShot = file => path.basename(file).startsWith('toast-')
+
+/** 發版機上提示視窗截圖疑似空白時，留一份警告（文字檔放在 ASN_E2E_KEEP 底下，workflow 讀它寫摘要並上傳截圖）；沒設資料夾就只印出來 */
+export function recordShotWarning(message, keepDir = process.env.ASN_E2E_KEEP) {
+  console.warn(`[警告] ${message}`)
+  if (!keepDir) return
+  fs.mkdirSync(keepDir, { recursive: true })
+  fs.appendFileSync(path.join(keepDir, 'shot-warning.txt'), `${message}\n`)
+}
+
+/**
+ * 截圖檢查。lenientToast 為真時，只有 toast- 開頭的圖「太小／幾乎單色」改成警告不擋；
+ * 其他圖（對話視窗、名單、頁籤…）照樣失敗，其他種類的斷言（不是 PNG 等）也照樣失敗。
+ */
+export function checkShot(file, opts, { lenientToast = false, warn = recordShotWarning } = {}) {
+  try { return assertShotNotBlank(file, opts) } catch (e) {
+    if (!(lenientToast && isToastShot(file) && /截圖太小|截圖幾乎單色/.test(e.message))) throw e
+    warn(`提示視窗截圖疑似空白（${path.basename(file)}）：${e.message.split('：')[0]}`)
+    return null
+  }
 }

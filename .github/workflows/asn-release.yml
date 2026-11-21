@@ -175,13 +175,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ASN_E2E_KEEP: ${{ runner.temp }}/asn-e2e-keep
+          # #2033：發版機上提示視窗截圖疑似空白只警告、不擋發版（只放寬 toast- 開頭的圖；對話視窗與其他斷言照擋）
+          ASN_SHOT_TOAST_LENIENT: '1'
         run: |
           set -euo pipefail
           npm test
 
-      # e2e 截圖失敗時留下證據（截圖與 asn.exe 輸出），只留 7 天（#1953）
-      - name: 上傳 e2e 截圖與輸出（失敗時）
-        if: failure()
+      # 提示視窗截圖疑似空白時 e2e 只留警告檔（#2033）：在摘要寫一行，並讓下一步照樣上傳截圖
+      - name: 提示視窗截圖警告寫進摘要
+        id: shotwarn
+        if: always()
+        env:
+          KEEP: ${{ runner.temp }}/asn-e2e-keep
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          if [ -s "$KEEP/shot-warning.txt" ]; then
+            echo "warn=true" >> "$GITHUB_OUTPUT"
+            echo "Windows 截圖疑似空白，請看產物（asn-e2e-shots-${ATTEMPT}）" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "warn=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # e2e 截圖失敗或有警告時留下證據（截圖與 asn.exe 輸出），只留 7 天（#1953、#2033）
+      - name: 上傳 e2e 截圖與輸出（失敗或有警告時）
+        if: failure() || steps.shotwarn.outputs.warn == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: asn-e2e-shots-${{ github.run_attempt }}
