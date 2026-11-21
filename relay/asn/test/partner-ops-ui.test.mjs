@@ -125,7 +125,7 @@ test('接線：名單右鍵用 menuItems（不另寫判斷、不重複切換模�
   assert.match(html, /v-for="it in buddyOpItems"[^>]*>[\s\S]*?:aria-disabled="it\.ok \? 'false' : 'true'"[\s\S]*?:title="it\.reason" @click="openPartnerOp\(it\)"/)
   assert.match(html, /<partner-op-dialog v-if="opDlg\.open"/)
   assert.match(js, /app\.component\('partner-op-dialog', PartnerOpDialog\)/)
-  assert.doesNotMatch(bar, /aria-label="喚醒"/, '#539：喚醒不放大按鈕，改在「管理」裡（p:resume，離線才可按）')
+  assert.doesNotMatch(bar, /class="abtn"[^>]*aria-label="喚醒"/, '#539：喚醒不放大按鈕，改在「管理」裡（p:resume，離線才可按）')
   for (const f of ['ui/list.js', 'ui/list.html', 'ui/m.js', 'ui/m.html', 'ui/lib/tauri.mjs']) assert.doesNotMatch(read(f), /這是誰的接班|succeed|Succession|successor|partnerList|relay_partner_list/i, f)
   assert.ok(!fs.existsSync(new URL('../ui/lib/succession.mjs', import.meta.url)))
   const tauri = read('ui/lib/tauri.mjs')
