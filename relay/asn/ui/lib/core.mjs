@@ -22,6 +22,11 @@ import { READ_DEBOUNCE_MS, batchOf, cleanMarks, lastIncomingAt, readKey, readSyn
 
 export const MAX_BODY = 20000
 const LOG_KEEP = 2000   // 存檔最多留幾列（往上捲載入的也算）
+// 存檔文字的位元組上限（#2043）：Rust 端 store_save 超過 8,000,000 位元組就整筆不存，所以前端先量好，超過就把每位夥伴留的列數往下縮，
+// 絕不送出會被拒絕的存檔；記憶體裡的往來記錄不動，更舊的之後可以再向後台取。
+export const SAVE_BUDGET = 6_000_000
+export const LOG_KEEP_MIN = 50
+const byteLength = s => new TextEncoder().encode(s).length   // 中文一字 3 位元組，不能用字串長度
 export const VIEW_BASE = 200   // 畫面預設顯示最近幾列；往上載入更舊的之後，依載入範圍加寬
 const STATUS_POLL_MS = 15_000
 const HISTORY_MIN_GAP_MS = 20_000   // 同一位夥伴的往來記錄，兩次向後台取的最短間隔（強制重取除外）
@@ -706,12 +711,28 @@ export class AsnCore {
   async flush() {
     if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null }
     const withLog = [...this.friends.values()].filter(f => this.logs.has(f.id) || f.known)
+    const build = keep => ({
+      friends: withLog.map(savedFriendOf),
+      logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-keep)])),
+      ...(Object.keys(this.readDirty).length ? { readDirty: this.readDirty } : {}),
+    })
     try {
-      await withTimeout(this.store.save({
-        friends: withLog.map(savedFriendOf),
-        logs: Object.fromEntries(withLog.filter(f => this.logs.has(f.id)).map(f => [f.id, this.logs.get(f.id).slice(-LOG_KEEP)])),
-        ...(Object.keys(this.readDirty).length ? { readDirty: this.readDirty } : {}),
-      }), this.stepMs, 'save')
+      let keep = LOG_KEEP, data = build(keep), size = byteLength(JSON.stringify(data))
+      while (keep > LOG_KEEP_MIN && size > SAVE_BUDGET) { keep = Math.max(LOG_KEEP_MIN, Math.floor(keep * 0.75)); data = build(keep); size = byteLength(JSON.stringify(data)) }
+      // 縮到最少列數還是超過（夥伴很多、訊息很長）：從最久沒往來的夥伴開始，把他的往來記錄從存檔拿掉（記憶體保留），拿到低於預算為止
+      const dropped = []
+      if (size > SAVE_BUDGET) {
+        const lastT = id => data.logs[id].at(-1)?.t ?? 0
+        for (const id of Object.keys(data.logs).sort((a, b) => lastT(a) - lastT(b))) {
+          if (size <= SAVE_BUDGET) break
+          size -= byteLength(JSON.stringify(data.logs[id])) + byteLength(JSON.stringify(id)) + 2
+          delete data.logs[id]; dropped.push(id)
+        }
+      }
+      const note = dropped.length ? `save dropped: 存檔仍太大，這幾位的往來記錄先不存（記憶體保留）：${dropped.join('、')}` : keep < LOG_KEEP ? `save trimmed: 存檔太大，每位夥伴只存最近 ${keep} 列` : ''
+      if (note && note !== this.savedNote) this.log(note)
+      this.savedNote = note
+      await withTimeout(this.store.save(data), this.stepMs, 'save')
     } catch (e) { this.log(`save failed: ${e.message}`) }
   }
 }
