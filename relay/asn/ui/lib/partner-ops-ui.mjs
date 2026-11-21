@@ -80,6 +80,7 @@ export function createOpRunner({ api, state, onDone = () => {}, run = runPartner
   const timers = new Map()
   const due = new Map()      // 夥伴位址 → { at: 預定消失的時間, held: 被暫停時剩下的毫秒 }
   const token = new Map()    // 同一位連按時，只認最後一次
+  let current = null         // 狀態列只有一格：現在顯示的是哪一位。被蓋掉的那位只是不再顯示，背景照常做完、onDone 照常跑
   const holding = new Set()  // 滑鼠／手指目前停在哪幾列上：新結果蓋掉舊結果時 mouseenter 不會再觸發，要自己記得
   const dropTimer = id => { if (timers.has(id)) { clearTimer(timers.get(id)); timers.delete(id) } due.delete(id) }
   const arm = (id, ms) => {
@@ -88,18 +89,19 @@ export function createOpRunner({ api, state, onDone = () => {}, run = runPartner
   }
   async function start(friend, op, input) {
     const id = friend.id
-    for (const other of Object.keys(state.runs ?? {})) if (other !== id) dismiss(other)   // 狀態列只有一格：任何夥伴的新操作蓋掉上一則，不同夥伴的失敗不會疊起來
+    for (const other of Object.keys(state.runs ?? {})) if (other !== id) { dropTimer(other); holding.delete(other); state.runs = clearRun(state.runs, other) }   // 任何夥伴的新操作蓋掉上一則（只清畫面，不動 token）
+    current = id
     reqs.set(id, { friend, op, input: { ...input } })
     dropTimer(id)
     const mine = (token.get(id) ?? 0) + 1
     token.set(id, mine)
     const name = friend.nick || friend.agent || ''
-    const put = view => { if (token.get(id) === mine) state.runs = setRun(state.runs, id, { op, name, view }) }
+    const put = view => { if (token.get(id) === mine && current === id) state.runs = setRun(state.runs, id, { op, name, view }) }
     put(progressView(null, { op }))
     const v = await run(api, friend, op, input, { onUpdate: put, cancelled: () => token.get(id) !== mine })
     if (token.get(id) !== mine || !v) return v
     const ms = runBanner({ view: v }).hideMs
-    if (ms > 0) arm(id, ms)
+    if (ms > 0 && current === id) arm(id, ms)
     if (v.phase === 'done') onDone({ op, view: v, friend, input })
     return v
   }
@@ -122,6 +124,7 @@ export function createOpRunner({ api, state, onDone = () => {}, run = runPartner
   // 改名成功：進度、重試用的內容、倒數都跟著新位址走（舊位址那格清掉），按住暫停才找得到
   function move(from, to) {
     if (from === to) return
+    if (current === from) current = to
     const d = due.get(from), wasHeld = holding.has(from)
     dropTimer(from); holding.delete(from)
     if (reqs.has(from)) { reqs.set(to, reqs.get(from)); reqs.delete(from) }

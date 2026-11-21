@@ -63,8 +63,8 @@ const FAIL_NEXT_STEP = '，再按一次就會重試'
 export function runBanner(run) {
   const v = run?.view
   if (!v) return null
-  // 失敗後面接一句能做的事（沒有按鈕可按，要說清楚下一步）
-  const text = v.phase === 'failed' ? `${String(v.text ?? '').trim().replace(/[。.]$/, '')}${FAIL_NEXT_STEP}` : v.text
+  // 失敗後面接一句能做的事（沒有按鈕可按，要說清楚下一步；再按也沒用的失敗，例如找不到對話紀錄，view.noRetry 就不接）
+  const text = v.phase === 'failed' && !v.noRetry ? `${String(v.text ?? '').trim().replace(/[。.]$/, '')}${FAIL_NEXT_STEP}` : v.text
   return { phase: v.phase, done: v.done === true, text, hideMs: hideAfterMs(v) }
 }
 // 成功 4 秒後自己消失；「已送出、還沒確認」15 秒後消失（沒有按鈕可按，不能留到按）；失敗與進行中不消失。

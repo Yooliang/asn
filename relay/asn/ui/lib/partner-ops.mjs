@@ -416,7 +416,7 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
     }
     case 'failed':
       // 喚醒找不到對話紀錄：一樣只寫原因（#1907：狀態列不放按鈕，要開新夥伴請從名單的「新增」）
-      if (op === 'resume' && isNoRecord(row.detail)) return { phase: 'failed', done: true, text: `沒有成功：${NO_RECORD_TEXT}` }
+      if (op === 'resume' && isNoRecord(row.detail)) return { phase: 'failed', done: true, text: `沒有成功：${NO_RECORD_TEXT}`, noRetry: true }   // 再按一次也沒用，狀態列不接「再按一次就會重試」
       return { phase: 'failed', done: true, text: `沒有成功：${reasonText(row.detail)}` }
     case 'unconfirmed': {
       const v = { phase: 'unconfirmed', done: true, text: '已經送出，但還沒確認結果；稍後看看名單。' }

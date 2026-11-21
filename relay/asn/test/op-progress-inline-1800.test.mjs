@@ -396,3 +396,26 @@ test('#1907 狀態列只有一格：任何夥伴的新操作蓋掉上一則；�
   await runner.start(b, 'close', {})
   assert.deepEqual(Object.keys(state.runs), [b.id], '另一位夥伴的新操作蓋掉上一則，不疊起來')
 })
+
+// 小悠複看（#2035）：只留一格＝只清畫面；被蓋掉那位的背景工作做完時 onDone 照跑（名單、對話分頁、釘選才會更新）
+test('#1907 被蓋掉的操作：畫面不再顯示它，但做完時 onDone 照跑，也不把畫面搶回來', async () => {
+  const state = { runs: {} }
+  const done = []
+  let finishA
+  const run = (a, f, op, input, o) => f.nick === '甲'
+    ? new Promise(res => { finishA = () => { const v = { phase: 'done', done: true, text: '已改名。' }; o.onUpdate(v); res(v) } })
+    : (async () => { const v = { phase: 'working', done: false, text: '正在處理…' }; o.onUpdate(v); return v })()
+  const runner = createOpRunner({ api: {}, state, run, setTimer: () => 0, clearTimer: () => {}, onDone: d => done.push(d.friend.id) })
+  const a = F('H', '甲'), b = F('H', '乙')
+  const pa = runner.start(a, 'rename', { newName: 'x' })
+  await runner.start(b, 'close', {})
+  assert.deepEqual(Object.keys(state.runs), [b.id], '畫面只剩後來的那一位')
+  finishA(); await pa
+  assert.deepEqual(done, [a.id], '被蓋掉的改名做完，onDone 照跑')
+  assert.deepEqual(Object.keys(state.runs), [b.id], '不把畫面搶回來')
+})
+
+test('#1907 失敗但再按也沒用（找不到對話紀錄）：不接「再按一次就會重試」', () => {
+  assert.equal(runBanner({ view: { phase: 'failed', done: true, text: '沒有成功：x', noRetry: true } }).text, '沒有成功：x')
+  assert.equal(runBanner({ view: { phase: 'failed', done: true, text: '沒有成功：x' } }).text, '沒有成功：x，再按一次就會重試')
+})
