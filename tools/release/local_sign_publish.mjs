@@ -32,6 +32,10 @@ export const WORKFLOW = '.github/workflows/asn-release.yml'
 // asn-installer-signed：#2024 起 CI 的 desktop-sign 會多產這一包（GitHub 上簽好的安裝檔）。這裡只允許它存在、不使用，
 // 本機照舊下載 asn-installer-unsigned 自己簽（#2061）
 export const ARTIFACT_WHITELIST = ['asn-installer-unsigned', 'asn-installer-signed', 'asn-site-draft', 'asn-aab', 'asn-debug']
+// asn-e2e-shots-<重跑次數>：e2e 提示視窗截圖疑似空白時只留警告、照樣上傳截圖（#2033、#2049），名字帶 run_attempt。
+// 這裡只允許它存在、不下載不使用（0.2.56 曾因此卡在第 1 步）
+export const ARTIFACT_PATTERNS = [/^asn-e2e-shots-\d+$/]
+export const isAllowedArtifact = name => ARTIFACT_WHITELIST.includes(name) || ARTIFACT_PATTERNS.some(re => re.test(name))
 export const SITE_FILES = ['site/public/update/latest.json', 'site/public/index.html']
 export const SITE_BASE = SHARED_SITE_BASE
 const FIREBASE_PROJECT = 'asnmessenger'
@@ -165,7 +169,7 @@ export async function localSignPublish(opts, deps) {
       const arts = JSON.parse(gh(['api', `repos/${REPO}/actions/runs/${run.id}/artifacts?per_page=100`])).artifacts ?? []
       const seen = new Map()
       for (const x of arts) {
-        if (!ARTIFACT_WHITELIST.includes(x.name)) bad(`artifact 名稱不在白名單：${x.name}`)
+        if (!isAllowedArtifact(x.name)) bad(`artifact 名稱不在白名單：${x.name}`)
         if (x.workflow_run?.id !== run.id) bad(`artifact ${x.name} 不是這個 run 產的`)
         if (x.workflow_run?.head_sha !== S.tagSha) bad(`artifact ${x.name} 的 head_sha 不是標籤的 commit`)
         if (x.expired !== false) bad(`artifact ${x.name} 已過期（14 天）：重打標籤（升版）或重跑 CI`)
