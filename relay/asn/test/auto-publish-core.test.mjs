@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { decide, applyResult, emptyState, seed, acknowledge, compareVersions } from '../../../tools/release/auto_publish_core.mjs'
+import { decide, applyResult, emptyState, seed, acknowledge, compareVersions, validateState } from '../../../tools/release/auto_publish_core.mjs'
 
 // 已播種（起點 0.0.0，等於什麼舊版都不擋）的乾淨 state
 const seededState = () => seed(emptyState(), { since: { desktop: '0.0.0', linux: '0.0.0' }, now: 0 }).state
@@ -334,4 +334,23 @@ test('acknowledge 只准清失敗類：published／seeded 拒絕，五種失敗�
   const s = seededState(); s.done['desktop@0.2.45'] = { result: 'published', at: 'x', runId: '1' }
   assert.throws(() => acknowledge(s, 'desktop@0.2.45', T0), /不是失敗類/)
   assert.throws(() => acknowledge(s, 'desktop@0.0.0', T0), /不是失敗類/)
+})
+
+test('finishAsDone：done 已有同一個 key 時不覆寫（逾時 stale 不能蓋掉已發佈的紀錄）', () => {
+  const s = seededState()
+  s.done['desktop@0.2.45'] = { result: 'published', at: 'orig', runId: 'r-orig' }
+  s.inflight = { key: 'desktop@0.2.45', platform: 'desktop', step: 'publish', runId: 'r1', startedAt: new Date(T0 - 3 * 3600_000).toISOString(), pid: 1 }
+  const d = decide({ runs: [], state: s, now: T0 })
+  assert.equal(d.action, 'report')
+  assert.equal(d.result, 'stale', '前提：確實走到 finishAsDone 的 stale 分支')
+  assert.deepEqual(d.state.done['desktop@0.2.45'], { result: 'published', at: 'orig', runId: 'r-orig' })
+  assert.equal(d.state.inflight, null)
+})
+
+test('validateState：只有物件、seeded 布林、done 物件才算結構正確', () => {
+  assert.equal(validateState(seededState()).ok, true)
+  assert.equal(validateState(emptyState()).ok, true)
+  for (const bad of [{}, null, [], 5, 'x', true, { done: {} }, { seeded: true }, { seeded: true, done: null }, { seeded: true, done: [] }, { seeded: 'yes', done: {} }]) {
+    assert.equal(validateState(bad).ok, false, JSON.stringify(bad))
+  }
 })
