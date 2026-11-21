@@ -1,15 +1,11 @@
 {
-  "version": "0.2.44",
-  "notes": "- 改善：群組清單暫時讀不到時，原位會寫「群組暫時讀不到。」並有「重試」鈕，不會整塊消失；手機和電腦都一樣。（#1764、#1962）",
-  "pub_date": "2026-11-20T23:22:49.755Z",
+  "version": "0.2.45",
+  "notes": "- 修正（只有電腦版）：終端服務在視窗很多、行程很深時不再因為反覆往上找父行程而當掉（內建的 WezTerm 換成修過的版本）。（#1318、#1896）",
+  "pub_date": "2026-11-21T02:13:46.180Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZ0b0ZDdjI3cFZRREh4TTk1ZnBaK1QyZnlCaUl4enNVL2tkNHZ1d05KK0tMaVAvWUVCUit6NDhuQXVCa295bmY3MHBiOUpQdTZnZDFiSk1vZC9teEF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjE2OTY5CWZpbGU6QVNOXzAuMi40NF94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQ0CkJ0OU1EbnV6ZFhJN1ZWUGdIZEF6aVRJSVUxWnhIS0ZES0dyN2pOVDVUbmo2dVpJT0QrV3I3S0VlR0VNcTEwREU4dFFLdENrZTg2T2g3LzJSSGxnNEJ3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.44_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnp3Tk9wK0lLazhiNFByNFpOY3lvMmNUVml3Sy9ucm93UUFiTytmWWduQlpqQlNBTEVHMXZIeVNhUjl6TExZQnBsRGdrWmdaK2Q1TWFBNnVFNndEVWdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjE4MjI5CWZpbGU6QVNOXzAuMi40NF9hbWQ2NC5BcHBJbWFnZQpzYllPVHpQSDcxbVFJMjBUTnZmUkdnZ1RrZzBIRU9oRS81SzVsNHdzWllLTkg4TFNSVHJHdnhnMlJPblZxWGhHN1lkeVlvSTBnRHpydnI4QVFMS3pEQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.44_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9FTEhpTGgvR3Y0dGVuTmV6cVdIQVhDNkFSanY5UDVwZXpmVXh0dVpJOUNrMjdabzBDUFNibHplZlFuUzBhQXgxVnBCa2dBcCsraHlsTW80R2p4M0FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjI3MjI1CWZpbGU6QVNOXzAuMi40NV94NjQtc2V0dXAuZXhlCjk1VlVuYzllb1dkcS82anFST2xTZXJuWUx1WDJvZzNtaVE1MDVmM1gvVWZGYUpzQng2NFF3OTZsT0ZjSHlmNWNVTUR2SzJNMC9uZ2lobzRzVWkwZ0NnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.45_x64-setup.exe"
     }
   }
 }
