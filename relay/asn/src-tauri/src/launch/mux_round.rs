@@ -38,8 +38,8 @@ pub trait Sink {
     fn record(&self, line: &str);
     /// 把夥伴交給自動接回（`resume` 為假＝十分鐘內第二次，只通知）。正式環境丟到另一條執行緒
     fn resume(&self, partners: Vec<String>, resume: bool);
-    /// 卡死處置（#1897 ④）：確認後結束記錄的終端服務。預設不處置（不接這個功能的環境、舊的測試用接收端）
-    fn dispose_stuck(&self) -> Disposal {
+    /// 卡死處置（#1897 ④）：確認後結束記錄的終端服務；`expected`、`seq`＝判成心跳停了那一輪，心跳所屬的（程序編號, 建立時間）與停在的 seq。預設不處置（不接這個功能的環境、舊的測試用接收端）
+    fn dispose_stuck(&self, _expected: (u32, u64), _seq: u64) -> Disposal {
         Disposal::Cancelled("這個環境不處理卡死".to_string())
     }
 }
@@ -63,7 +63,7 @@ pub fn run_round(w: &mut Watch, tracker: &mut Tracker, o: &Observed, exited: &[S
 /// 心跳停了而且程序還在：先處置（在 `Watch::tick` 之前）——
 /// 成功就經「已確認消失」入口直接成事故；取消、失敗、額度未到、冷卻中，這一輪等同心跳還在動（而且不更新 Tracker：它沒有真的活著）
 pub fn run_round_stuck(w: &mut Watch, tracker: &mut Tracker, guard: &mut StuckGuard, o: &Observed, exited: &[String], now: u64, ctx: &Round, sink: &dyn Sink) -> Option<Incident> {
-    let (Hb::Stale { secs }, Some(mux)) = (o.hb, o.live) else { return round(w, tracker, o, exited, now, ctx, sink, true) };
+    let (Hb::Stale { secs }, Some(mux), Some((hb_key, seq))) = (o.hb, o.live, o.hb_at) else { return round(w, tracker, o, exited, now, ctx, sink, true) };
     if guard.cooling(mux, now) {
         return round(w, tracker, o, exited, now, ctx, sink, false);
     }
@@ -78,7 +78,7 @@ pub fn run_round_stuck(w: &mut Watch, tracker: &mut Tracker, guard: &mut StuckGu
         }
         return round(w, tracker, o, exited, now, ctx, sink, false);
     }
-    match sink.dispose_stuck() {
+    match sink.dispose_stuck(hb_key, seq) {
         Disposal::Done => return after_stuck_done(w, tracker, o, mux, secs, exited, now, ctx, sink),
         Disposal::Cancelled(why) => {
             guard.cancelled = Some((mux, now));
@@ -137,8 +137,14 @@ fn after_stuck_done(w: &mut Watch, tracker: &mut Tracker, o: &Observed, mux: (u3
     let gone = Observed { live: None, record: None, stopped: None, ..o.clone() };
     let incident = w.tick_gone(&gone, now);
     w.save(ctx.state_file);
-    let inc = incident?;
-    report(&inc, &format!("終端服務卡住（心跳停了超過 {secs} 秒），已結束並接回"), last_alive, None, now, ctx, sink);
+    let Some(inc) = incident else {
+        // 結束了卻沒有事故（例如記著的是這次開機以前的服務）：留一行，不能靜默
+        sink.record(&format!("終端服務卡住（心跳停了超過 {secs} 秒），已結束；這次不算事故、沒有接回"));
+        return None;
+    };
+    // 只有真的交給接回才寫「並接回」（沒有夥伴、或十分鐘內已接回過就沒有）
+    let tail = if inc.resume { "已結束並接回" } else { "已結束" };
+    report(&inc, &format!("終端服務卡住（心跳停了超過 {secs} 秒），{tail}"), last_alive, None, now, ctx, sink);
     Some(inc)
 }
 
@@ -217,10 +223,12 @@ mod tests {
         disposed: Cell<u32>,
         records: RefCell<Vec<String>>,
         resumes: RefCell<Vec<(Vec<String>, bool)>>,
+        /// 最後一次處置收到的（心跳所屬的 mux, seq）
+        args: Cell<Option<((u32, u64), u64)>>,
     }
     impl Rig {
         fn new(d: Disposal) -> Rig {
-            Rig { dispose: RefCell::new(d), disposed: Cell::new(0), records: RefCell::new(vec![]), resumes: RefCell::new(vec![]) }
+            Rig { dispose: RefCell::new(d), disposed: Cell::new(0), records: RefCell::new(vec![]), resumes: RefCell::new(vec![]), args: Cell::new(None) }
         }
         fn log(&self) -> String {
             self.records.borrow().join("\n")
@@ -239,14 +247,16 @@ mod tests {
         fn resume(&self, partners: Vec<String>, resume: bool) {
             self.resumes.borrow_mut().push((partners, resume));
         }
-        fn dispose_stuck(&self) -> Disposal {
+        fn dispose_stuck(&self, expected: (u32, u64), seq: u64) -> Disposal {
+            self.args.set(Some((expected, seq)));
             self.disposed.set(self.disposed.get() + 1);
             self.dispose.borrow().clone()
         }
     }
 
     fn obs(live: Option<(u32, u64)>, hb: Hb) -> Observed {
-        Observed { live, partners: if live.is_some() { vec!["甲".to_string(), "乙".to_string()] } else { vec![] }, hb, ..Default::default() }
+        let hb_at = matches!(hb, Hb::Stale { .. }).then_some((M1, 50));
+        Observed { live, partners: if live.is_some() { vec!["甲".to_string(), "乙".to_string()] } else { vec![] }, hb, hb_at, ..Default::default() }
     }
 
     struct Env {
@@ -287,6 +297,20 @@ mod tests {
         assert_eq!(*rig.resumes.borrow(), vec![(inc.partners, true)], "交給接回");
         assert!(crate::launch::mux_watch::read_notice(e.dir.path()).is_some(), "事故通知排出去了");
         assert_eq!(e.round(&obs(None, Hb::NotSupported), STALE_AT + TICK_MS, &rig), None, "同一次事故不報第二次");
+    }
+
+    #[test]
+    fn t1897_處置收到判停那一輪的_mux_與_seq_沒有就不處置() {
+        let (mut e, rig) = (Env::new(), Rig::new(Disposal::Done));
+        e.warm(&rig);
+        e.round(&obs(Some(M1), Hb::Stale { secs: 120 }), STALE_AT, &rig);
+        assert_eq!(rig.args.get(), Some((M1, 50)), "把心跳所屬的 mux 與停在的 seq 交給處置去核對");
+        // 沒有判停那一輪的資訊：不處置，照舊判斷
+        let (mut e2, rig2) = (Env::new(), Rig::new(Disposal::Done));
+        e2.warm(&rig2);
+        let o = Observed { hb_at: None, ..obs(Some(M1), Hb::Stale { secs: 120 }) };
+        assert_eq!(e2.round(&o, STALE_AT, &rig2), None);
+        assert_eq!(rig2.disposed.get(), 0);
     }
 
     #[test]
@@ -381,10 +405,12 @@ mod tests {
     #[test]
     fn t1897_空的服務卡死_也報一次_不接回() {
         let (mut e, rig) = (Env::new(), Rig::new(Disposal::Done));
-        let empty = |hb| Observed { live: Some(M1), partners: vec![], hb, ..Default::default() };
+        let empty = |hb| Observed { live: Some(M1), partners: vec![], hb, hb_at: matches!(hb, Hb::Stale { .. }).then_some((M1, 50)), ..Default::default() };
         e.round(&empty(Hb::Fresh), 0, &rig);
         let inc = e.round(&empty(Hb::Stale { secs: 120 }), STALE_AT, &rig).expect("沒有夥伴也要有訊號");
         assert!(inc.partners.is_empty() && !inc.resume);
         assert_eq!(rig.resumes.borrow().len(), 0);
+        let line = rig.log();
+        assert!(line.contains("已結束") && !line.contains("已結束並接回"), "沒有接回就不能寫並接回：{line}");
     }
 }

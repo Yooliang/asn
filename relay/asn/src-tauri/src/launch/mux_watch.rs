@@ -41,6 +41,8 @@ pub struct Observed {
     pub record: Option<(u32, u64)>,
     /// 終端服務心跳（#1897 ③）。只讀不判：`Watch::tick` 完全不看它，下一張才切換
     pub hb: super::mux_heartbeat::Hb,
+    /// 判成 `Stale` 的那一輪：心跳所屬的（程序編號, 建立時間）與停在的 seq。卡死處置前用來核對（#1897 ④）；不是 `Stale` 就是 None
+    pub hb_at: Option<((u32, u64), u64)>,
 }
 
 /// 一次事故
@@ -742,8 +744,8 @@ impl super::mux_round::Sink for RealSink {
             super::mux::note(&base.join("ASN").join("m"), line);
         }
     }
-    fn dispose_stuck(&self) -> super::mux::Disposal {
-        self.terms.dispose_stuck_mux()
+    fn dispose_stuck(&self, expected: (u32, u64), seq: u64) -> super::mux::Disposal {
+        self.terms.dispose_stuck_mux(expected, seq)
     }
     fn resume(&self, partners: Vec<String>, resume: bool) {
         let (wd, dd) = (self.work_dir.clone(), self.data_dir.clone());

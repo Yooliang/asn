@@ -1443,7 +1443,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return None;
         }
         // 心跳最先讀（#1897 ③）：早於下面會在服務卡死時各等逾時的 cli 呼叫。只讀不判，結果只放進 Observed.hb
-        let hb = self.read_heartbeat(now);
+        let (hb, hb_at) = self.read_heartbeat(now);
         let dir = self.dir().ok()?;
         // 夥伴自己 /exit 之後窗格因為 Hold 留著：先收掉，才不會被當成還在（服務不收、中斷時又被接回）
         if self.sweep_exited(&dir) > 0 {
@@ -1469,11 +1469,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 .filter(|n| seen.insert(n.clone()))
                 .collect()
         };
-        Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir), record: m.recorded(), hb })
+        Some(super::mux_watch::Observed { live, partners, stopped: super::mux::stopped_mark(&m.paths.dir), record: m.recorded(), hb, hb_at })
     }
 
     /// 卡死處置（#1897 ④）：心跳停了、程序還在時，確認後結束記錄的那個終端服務並清檔。九步與取消條件見 `mux::stuck`
-    pub fn dispose_stuck_mux(&self) -> super::mux::Disposal {
+    pub fn dispose_stuck_mux(&self, expected: (u32, u64), seq: u64) -> super::mux::Disposal {
         let dir = match self.dir() {
             Ok(d) => d,
             Err(e) => return super::mux::Disposal::Cancelled(format!("找不到終端服務的程式（{e}）")),
@@ -1483,26 +1483,30 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             Err(e) => return super::mux::Disposal::Cancelled(e),
         };
         let hb = super::mux::heartbeat_path(&m.paths.dir);
-        m.dispose_stuck(&|| super::mux_heartbeat::peek_file(&hb))
+        m.dispose_stuck(expected, seq, &|| super::mux_heartbeat::peek_file(&hb))
     }
 
     /// 讀終端服務心跳檔，轉成 [`Hb`](super::mux_heartbeat::Hb)。單調時鐘取自 `now`（相對第一次呼叫），牆上時鐘取系統時間；
     /// 要寫進 mux.log 的行這裡寫。找不到使用者資料夾或沒有 pid 檔記錄＝沒有心跳
-    fn read_heartbeat(&self, now: Instant) -> super::mux_heartbeat::Hb {
+    fn read_heartbeat(&self, now: Instant) -> (super::mux_heartbeat::Hb, Option<((u32, u64), u64)>) {
         use super::mux_heartbeat::{read_file, Hb};
         static ANCHOR: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
-        let Some(base) = self.mux_base.as_ref() else { return Hb::NotSupported };
-        let Ok(paths) = super::mux::paths(base) else { return Hb::NotSupported };
+        let Some(base) = self.mux_base.as_ref() else { return (Hb::NotSupported, None) };
+        let Ok(paths) = super::mux::paths(base) else { return (Hb::NotSupported, None) };
         let record = super::mux::recorded_at(&paths);
         let read = if record.is_some() { read_file(&super::mux::heartbeat_path(&paths.dir)) } else { super::mux_heartbeat::FileRead::Missing };
         let mono = now.saturating_duration_since(*ANCHOR.get_or_init(|| now)).as_millis() as u64;
         let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-        let (hb, logs) = self.inner.lock().unwrap().hb.observe(record, read, mono, wall);
+        let (hb, logs, at) = {
+            let mut g = self.inner.lock().unwrap();
+            let (hb, logs) = g.hb.observe(record, read, mono, wall);
+            (hb, logs, if matches!(hb, Hb::Stale { .. }) { g.hb.stale_at() } else { None })
+        };
         for l in logs {
             elog!("{l}");
             super::mux::note(&paths.dir, &l);
         }
-        hb
+        (hb, at)
     }
     /// 已經結束的夥伴窗格（看得到帶暗號的結束標記）：收掉窗格、從對照表拿掉。回收掉幾個。
     /// 只看現行 mux 裡、有暗號的夥伴；讀不到畫面當作還活著，不收。

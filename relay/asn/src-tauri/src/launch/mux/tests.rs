@@ -1043,7 +1043,7 @@ mod stuck {
     fn t1897_心跳停_連不上_只結束記錄的_pid_清掉_pid_檔與心跳檔() {
         let d = tempfile::tempdir().unwrap();
         let (r, m) = rig(d.path());
-        assert_eq!(m.dispose_stuck(&hb_still(4000)), Disposal::Done);
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
         assert_eq!(*r.killed.borrow(), vec![4000], "只結束記錄的那個");
         assert!(!m.paths.pid.exists() && !hb_of(&m).exists());
         assert!(!m.paths.lock.exists() && !m.paths.open_lock.exists(), "兩把鎖用完都放掉");
@@ -1054,7 +1054,7 @@ mod stuck {
         let d = tempfile::tempdir().unwrap();
         let (r, m) = rig(d.path());
         r.alive_after.set(Some(0));
-        let Disposal::Cancelled(why) = m.dispose_stuck(&hb_still(4000)) else { panic!("連得上要取消") };
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("連得上要取消") };
         assert!(why.contains("連得上"), "{why}");
         assert!(r.killed.borrow().is_empty() && m.paths.pid.exists() && hb_of(&m).exists());
     }
@@ -1068,14 +1068,14 @@ mod stuck {
             n.set(n.get() + 1);
             Some((4000u64, 50 + n.get()))
         };
-        assert!(matches!(m.dispose_stuck(&moving), Disposal::Cancelled(_)));
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &moving), Disposal::Cancelled(_)));
         // 第二次讀不到也取消
         let calls = Cell::new(0);
         let vanishing = || {
             calls.set(calls.get() + 1);
             (calls.get() == 1).then_some((4000u64, 50))
         };
-        assert!(matches!(m.dispose_stuck(&vanishing), Disposal::Cancelled(_)));
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &vanishing), Disposal::Cancelled(_)));
         assert!(r.killed.borrow().is_empty());
     }
 
@@ -1084,9 +1084,9 @@ mod stuck {
         let d = tempfile::tempdir().unwrap();
         let (r, m) = rig(d.path());
         r.exe.borrow_mut().insert(4000, PathBuf::from("C:\\其他\\notepad.exe"));
-        assert!(matches!(m.dispose_stuck(&hb_still(4000)), Disposal::Cancelled(_)));
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)));
         r.exe.borrow_mut().clear();
-        assert!(matches!(m.dispose_stuck(&hb_still(4000)), Disposal::Cancelled(_)), "查不到也不結束");
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)), "查不到也不結束");
         assert!(r.killed.borrow().is_empty());
     }
 
@@ -1094,14 +1094,14 @@ mod stuck {
     fn t1897_記錄對不上_心跳檔是別的_pid_建立時間不符_程序已不在_都不結束() {
         let d = tempfile::tempdir().unwrap();
         let (r, m) = rig(d.path());
-        assert!(matches!(m.dispose_stuck(&hb_still(9999)), Disposal::Cancelled(_)), "心跳檔是別的 pid");
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(9999)), Disposal::Cancelled(_)), "心跳檔是別的 pid");
         r.birth.borrow_mut().insert(4000, 888);
-        assert!(matches!(m.dispose_stuck(&hb_still(4000)), Disposal::Cancelled(_)), "建立時間對不上（編號被回收）");
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)), "建立時間對不上（編號被回收）");
         r.birth.borrow_mut().insert(4000, 777);
         r.exited.borrow_mut().push(4000);
-        assert!(matches!(m.dispose_stuck(&hb_still(4000)), Disposal::Cancelled(_)), "程序已結束");
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)), "程序已結束");
         std::fs::remove_file(&m.paths.pid).unwrap();
-        assert!(matches!(m.dispose_stuck(&hb_still(4000)), Disposal::Cancelled(_)), "沒有記錄");
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)), "沒有記錄");
         assert!(r.killed.borrow().is_empty());
     }
 
@@ -1115,7 +1115,7 @@ mod stuck {
             r.birth.borrow_mut().insert(k, b);
         }
         *r.stay.borrow_mut() = vec![4103];
-        assert_eq!(m.dispose_stuck(&hb_still(4000)), Disposal::Done);
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
         assert_eq!(*r.killed.borrow(), vec![4000], "只對 mux 下 kill_tree");
         assert!(r.birth.borrow().get(&4101).is_none() && r.birth.borrow().get(&4102).is_none(), "確認過子孫都消失了才算完成");
     }
@@ -1127,9 +1127,39 @@ mod stuck {
         *r.kids.borrow_mut() = vec![4101];
         r.birth.borrow_mut().insert(4101, 800);
         *r.stay.borrow_mut() = vec![4101];
-        let Disposal::Cancelled(why) = m.dispose_stuck(&hb_still(4000)) else { panic!("子孫還在要取消") };
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("子孫還在要取消") };
         assert!(why.contains("沒有結束乾淨"), "{why}");
         assert!(m.paths.pid.exists() && hb_of(&m).exists(), "記錄留著，之後可以再試");
+    }
+
+    #[test]
+    fn t1897_心跳停的是舊_mux_pid_檔現在已是新_mux_不處置() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 判斷「心跳停了」時看到的是 4000；持鎖之後 pid 檔已經換成新的 mux（心跳檔也剛好是新的）
+        std::fs::write(&m.paths.pid, "4500 999").unwrap();
+        r.birth.borrow_mut().insert(4500, 999);
+        r.exe.borrow_mut().insert(4500, PathBuf::from(SERVER));
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4500)) else { panic!("對不上要取消") };
+        assert!(why.contains("被換掉"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists());
+        // 同一個編號、建立時間不同（編號被回收）也不處置
+        let d2 = tempfile::tempdir().unwrap();
+        let (r2, m2) = rig(d2.path());
+        std::fs::write(&m2.paths.pid, "4000 888").unwrap();
+        r2.birth.borrow_mut().insert(4000, 888);
+        assert!(matches!(m2.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)));
+        assert!(r2.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_判停那一輪的_seq_和處置時讀到的不同_取消() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 判停時 seq 停在 49；處置時讀到 50：這中間 mux 動過（剛醒來），不結束
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 49, &hb_still(4000)) else { panic!("seq 不同要取消") };
+        assert!(why.contains("又動了"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists());
     }
 
     #[test]
@@ -1137,7 +1167,7 @@ mod stuck {
         let d = tempfile::tempdir().unwrap();
         let (r, m) = rig(d.path());
         r.survive_kill.set(true);
-        assert!(matches!(m.dispose_stuck(&hb_still(4000)), Disposal::Cancelled(_)));
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)));
         assert!(m.paths.pid.exists() && hb_of(&m).exists());
     }
 
@@ -1147,7 +1177,7 @@ mod stuck {
         let (r, m) = rig(d.path());
         let pid_file = m.paths.pid.clone();
         *r.on_kill.borrow_mut() = Some(Box::new(move || std::fs::write(&pid_file, "4500 999").unwrap()));
-        assert_eq!(m.dispose_stuck(&hb_still(4000)), Disposal::Done);
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
         assert_eq!(std::fs::read_to_string(&m.paths.pid).unwrap(), "4500 999", "新 mux 的記錄不能被刪");
         assert!(hb_of(&m).exists(), "新 mux 的心跳檔也不刪");
     }
@@ -1158,14 +1188,14 @@ mod stuck {
         let (_, m) = rig(d.path());
         let mark = m.paths.dir.join(STOPPED_FILE);
         std::fs::write(&mark, "4000 123").unwrap();
-        assert_eq!(m.dispose_stuck(&hb_still(4000)), Disposal::Done);
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
         assert!(!mark.exists(), "同一個 pid 的舊記號要清掉，不然這次事故會被當成 ASN 自己收的；也不能寫新記號");
         // 別的 pid 的記號不動
         let d2 = tempfile::tempdir().unwrap();
         let (_, m2) = rig(d2.path());
         let mark2 = m2.paths.dir.join(STOPPED_FILE);
         std::fs::write(&mark2, "3000 123").unwrap();
-        assert_eq!(m2.dispose_stuck(&hb_still(4000)), Disposal::Done);
+        assert_eq!(m2.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
         assert!(mark2.exists());
     }
 
@@ -1177,10 +1207,10 @@ mod stuck {
         r.birth.borrow_mut().insert(std::process::id(), 0);
         let held = format!("{} 0", std::process::id());
         std::fs::write(&m.paths.lock, &held).unwrap();
-        assert_eq!(m.dispose_stuck(&hb_still(4000)), Disposal::Busy);
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Busy);
         std::fs::remove_file(&m.paths.lock).unwrap();
         std::fs::write(&m.paths.open_lock, &held).unwrap();
-        assert_eq!(m.dispose_stuck(&hb_still(4000)), Disposal::Busy);
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Busy);
         assert!(!m.paths.lock.exists(), "拿到一把、另一把拿不到：已拿的要放掉");
         assert!(r.killed.borrow().is_empty());
     }

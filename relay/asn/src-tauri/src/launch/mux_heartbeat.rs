@@ -108,6 +108,12 @@ pub struct HbTracker {
 }
 
 impl HbTracker {
+    /// 目前這個 mux 的（程序編號＋建立時間, 最後看到的 seq）；還沒合格回 None。判成 `Stale` 的那一輪用它記下「停在哪個 seq」，
+    /// 卡死處置時拿來核對（#1897 ④）
+    pub fn stale_at(&self) -> Option<((u32, u64), u64)> {
+        self.state.as_ref().filter(|s| s.qualified).map(|s| (s.key, s.last_seq))
+    }
+
     /// `record`＝pid 檔記的（程序編號, 建立時間）；`mono_ms`／`wall_ms`＝這次讀取當下的單調／牆上時鐘。
     /// 回（結果, 要寫進 mux.log 的行）；每個 mux 每種情況只會回一行
     pub fn observe(&mut self, record: Option<(u32, u64)>, read: FileRead, mono_ms: u64, wall_ms: u64) -> (Hb, Vec<String>) {

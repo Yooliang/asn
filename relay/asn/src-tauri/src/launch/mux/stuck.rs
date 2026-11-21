@@ -26,8 +26,8 @@ fn gone(r: &dyn Runner, pid: u32, born: u64) -> bool {
 }
 
 impl Mux<'_> {
-    /// 卡死處置。`read_hb`＝讀心跳檔，回（pid, seq）；讀不到回 None
-    pub fn dispose_stuck(&self, read_hb: &dyn Fn() -> Option<(u64, u64)>) -> Disposal {
+    /// 卡死處置。`expected`、`seq`＝判成「心跳停了」那一輪，心跳所屬的（程序編號, 建立時間）與停在的 seq；`read_hb`＝讀心跳檔，回（pid, seq），讀不到回 None
+    pub fn dispose_stuck(&self, expected: (u32, u64), seq: u64, read_hb: &dyn Fn() -> Option<(u64, u64)>) -> Disposal {
         if let Err(e) = std::fs::create_dir_all(&self.paths.dir) {
             return Disposal::Cancelled(format!("建立終端服務資料夾失敗：{e}"));
         }
@@ -40,12 +40,19 @@ impl Mux<'_> {
         if self.live_pid() != Some((pid, born)) {
             return Disposal::Cancelled(format!("記錄的終端服務（程序 {pid}）已經不在，沒有結束"));
         }
+        // 判斷「心跳停了」和這裡持鎖之後是兩次讀 pid 檔：中間 mux 被換掉的話，停了的是舊的，不能殺新的
+        if (pid, born) != expected {
+            return Disposal::Cancelled(format!("心跳停了的是程序 {}，但記錄現在是程序 {pid}（服務已被換掉），沒有結束", expected.0));
+        }
         // 2. 執行檔要是這個資料夾的 mux
         if !self.runner.exe_path(pid).is_some_and(|p| is_server_image(&p, &self.server)) {
             return Disposal::Cancelled(format!("程序 {pid} 不是這個資料夾的終端服務執行檔，沒有結束"));
         }
         // 3. 心跳檔的 pid 就是記錄的 pid
         let Some((hb_pid, seq0)) = read_hb() else { return Disposal::Cancelled("讀不到心跳檔，沒有結束".into()) };
+        if seq0 != seq {
+            return Disposal::Cancelled("判成心跳停了之後，心跳又動了，沒有結束".into());
+        }
         if hb_pid != u64::from(pid) {
             return Disposal::Cancelled(format!("心跳檔的程序（{hb_pid}）不是記錄的程序（{pid}），沒有結束"));
         }
