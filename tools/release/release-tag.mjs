@@ -213,8 +213,7 @@ export async function releaseTag(opts, deps) {
       stop(opts.allowSkip ? `版號 ${ver} 必須大於目前版號 ${curVer}` : `版號要正好是目前版號 ${curVer} 加一（${expect}）；要跳號請加 --allow-skip`)
     }
 
-    const branch = firstLine(git(['rev-parse', '--abbrev-ref', 'HEAD']))
-    if (branch !== 'main') problem(`目前不在 main（在 ${branch || '分離的 HEAD'}）`)
+    // 不要求分支名：工作機的發版工作樹是分離的 HEAD（雯 11-21）；要求的是 HEAD 等於最新 origin/main、工作樹乾淨，推送用 HEAD:main
     if (firstLine(git(['status', '--porcelain']))) problem('工作樹不乾淨：先提交或處理掉')
     if (!opts.dryRun) git(['fetch', 'origin', 'main', '--tags', '--quiet'])
     const head = firstLine(git(['rev-parse', 'HEAD']))
