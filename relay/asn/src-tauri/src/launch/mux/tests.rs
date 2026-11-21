@@ -32,10 +32,17 @@ struct Fake {
     stay: RefCell<Vec<u32>>,
     /// kill_tree 時順手做的事（例如把 pid 檔換成新 mux）
     on_kill: RefCell<Option<Box<dyn Fn()>>>,
+    /// ASN 自己的祖先（self_ancestors 回的）
+    anc: RefCell<Vec<u32>>,
+    /// 真＝cli 跑不起來（缺檔、被擋）；`run_err`＝cli 回別的錯（例如逾時）
+    cannot_run: Cell<bool>,
+    run_err: RefCell<Option<String>>,
+    /// 每次下 cli 時順手做的事（模擬連線測試那 10 秒裡，世界變了）
+    on_run: RefCell<Option<Box<dyn Fn(&Fake)>>>,
 }
 impl Fake {
     fn new() -> Self {
-        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]), hb_file: RefCell::new(None), hb_before_spawn: RefCell::new(vec![]), kids: RefCell::new(vec![]), stay: RefCell::new(vec![]), on_kill: RefCell::new(None) }
+        Fake { calls: RefCell::new(vec![]), tries: Cell::new(0), alive_after: Cell::new(None), alive_once_started: true, started: RefCell::new(vec![]), killed: RefCell::new(vec![]), birth: RefCell::new(BTreeMap::new()), list_json: "[]".into(), no_birth: false, reborn: false, birth_queries: Cell::new(0), exe: RefCell::new(BTreeMap::new()), appears_at_lock: RefCell::new(None), survive_kill: Cell::new(false), exited: RefCell::new(vec![]), hb_file: RefCell::new(None), hb_before_spawn: RefCell::new(vec![]), kids: RefCell::new(vec![]), stay: RefCell::new(vec![]), on_kill: RefCell::new(None), anc: RefCell::new(vec![]), cannot_run: Cell::new(false), run_err: RefCell::new(None), on_run: RefCell::new(None) }
     }
     fn cli_calls(&self) -> Vec<Vec<String>> {
         self.calls.borrow().iter().filter(|c| c.0.ends_with("wezterm.exe")).map(|c| c.1.clone()).collect()
@@ -44,6 +51,15 @@ impl Fake {
 impl Runner for Fake {
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, _t: Duration) -> Result<RunOutput, String> {
         self.calls.borrow_mut().push((program.to_string_lossy().into(), args.to_vec(), env.clone()));
+        if let Some(f) = self.on_run.borrow().as_ref() {
+            f(self);
+        }
+        if self.cannot_run.get() {
+            return Err(format!("{} {}：拒絕存取", crate::launch::wezterm::CANNOT_RUN, program.display()));
+        }
+        if let Some(e) = self.run_err.borrow().clone() {
+            return Err(e);
+        }
         let n = self.tries.get();
         self.tries.set(n + 1);
         let up = self.alive_after.get().is_some_and(|k| n >= k) || (self.alive_once_started && !self.started.borrow().is_empty());
@@ -79,6 +95,11 @@ impl Runner for Fake {
     }
     fn descendants_of(&self, _pid: u32) -> Vec<u32> {
         self.kids.borrow().clone()
+    }
+    fn self_ancestors(&self) -> Vec<u32> {
+        let mut v = vec![std::process::id()];
+        v.extend(self.anc.borrow().iter().copied());
+        v
     }
     fn started_ms(&self, pid: u32) -> Option<u64> {
         if pid == std::process::id() {
@@ -1106,18 +1127,107 @@ mod stuck {
     }
 
     #[test]
-    fn t1897_子孫一起確認消失_建立時間早於_mux_的不算() {
+    fn t1897_子孫一起確認消失() {
         let d = tempfile::tempdir().unwrap();
         let (r, m) = rig(d.path());
-        // 4101、4102 是 mux 起來之後才有的；4103 的建立時間早於 mux（編號被重用的別人），不算子孫、殺不掉也不影響
-        *r.kids.borrow_mut() = vec![4101, 4102, 4103];
-        for (k, b) in [(4101u32, 800u64), (4102, 900), (4103, 100)] {
+        *r.kids.borrow_mut() = vec![4101, 4102];
+        for (k, b) in [(4101u32, 800u64), (4102, 900)] {
             r.birth.borrow_mut().insert(k, b);
         }
-        *r.stay.borrow_mut() = vec![4103];
         assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
         assert_eq!(*r.killed.borrow(), vec![4000], "只對 mux 下 kill_tree");
         assert!(r.birth.borrow().get(&4101).is_none() && r.birth.borrow().get(&4102).is_none(), "確認過子孫都消失了才算完成");
+    }
+
+    #[test]
+    fn t1897_樹裡有建立時間早於_mux_的程序_整棵不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 4103 的建立時間早於 mux：編號被重用的別人，結束整棵樹（taskkill /T）會連它一起帶走，所以不動
+        *r.kids.borrow_mut() = vec![4101, 4103];
+        r.birth.borrow_mut().insert(4101, 800);
+        r.birth.borrow_mut().insert(4103, 100);
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("早於終端服務"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists());
+    }
+
+    #[test]
+    fn t1897_asn_自己在要結束的樹裡_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.kids.borrow_mut() = vec![4101, std::process::id()];
+        r.birth.borrow_mut().insert(4101, 800);
+        r.birth.borrow_mut().insert(std::process::id(), 900);
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("ASN 自己"), "{why}");
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_asn_的祖先在要結束的樹裡_不結束_兩種平台的程序表形狀() {
+        // Windows：ASN 是從終端服務底下的外殼一路開起來的，taskkill /T 會沿著父程序編號把整串帶走
+        // Linux：ASN 在 wezterm-mux-server → bash → asn 的鏈上（proc_tree 只擋 ASN 本人，不擋中間的祖先）
+        for (shape, kids, ancestors) in [("Windows", vec![4101u32, 4102], vec![4102u32, 4101]), ("Linux", vec![4201, 4202], vec![4201])] {
+            let d = tempfile::tempdir().unwrap();
+            let (r, m) = rig(d.path());
+            for (i, k) in kids.iter().enumerate() {
+                r.birth.borrow_mut().insert(*k, 800 + i as u64);
+            }
+            *r.kids.borrow_mut() = kids;
+            *r.anc.borrow_mut() = ancestors;
+            let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("{shape}：要取消") };
+            assert!(why.contains("ASN 自己或它的上層"), "{shape}：{why}");
+            assert!(r.killed.borrow().is_empty(), "{shape}");
+        }
+    }
+
+    #[test]
+    fn t1897_mux_本身是_asn_的祖先_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.anc.borrow_mut() = vec![4000];
+        assert!(matches!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Cancelled(_)));
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_連線測試的那段時間裡_建立時間變了_結束前再驗_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        // 連線測試時（最久 10 秒）程序死了、編號被別的程序拿走
+        *r.on_run.borrow_mut() = Some(Box::new(|f: &Fake| {
+            f.birth.borrow_mut().insert(4000, 888);
+        }));
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("結束前再確認"), "{why}");
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_連線測試的那段時間裡_執行檔變了_結束前再驗_不結束() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        *r.on_run.borrow_mut() = Some(Box::new(|f: &Fake| {
+            f.exe.borrow_mut().insert(4000, PathBuf::from("C:\\別的\\notepad.exe"));
+        }));
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("結束前再確認"), "{why}");
+        assert!(r.killed.borrow().is_empty());
+    }
+
+    #[test]
+    fn t1897_cli_跑不起來_取消_不當成連不上() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        r.cannot_run.set(true);
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("跑不起來"), "{why}");
+        assert!(r.killed.borrow().is_empty() && m.paths.pid.exists());
+        // 真的連線逾時：算連不上，照常處置
+        r.cannot_run.set(false);
+        *r.run_err.borrow_mut() = Some("執行逾時（10 秒）".into());
+        assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
     }
 
     #[test]

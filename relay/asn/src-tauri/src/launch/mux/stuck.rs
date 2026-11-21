@@ -3,11 +3,21 @@
 //!
 //! 整段持啟動鎖與開窗鎖，九步依序，任何一步不過就取消（取消＝什麼都沒動，呼叫端這一輪照舊判斷）：
 //! 1. pid 檔記的程序編號＋建立時間對得上而且還活著；2. 該程序是這個資料夾的 mux 執行檔；3. 心跳檔的 pid 等於記錄的 pid；
-//! 4. 跑一次 `alive()`，連得上就取消；5. 跑完之後再讀一次心跳，seq 動了就取消；
+//! 4. 跑一次連線測試（`alive_probe`），連得上、或 cli 跑不起來都取消；5. 跑完之後再讀一次心跳，seq 動了就取消；
 //! 6. 先蒐集子孫（排除建立時間早於 mux 的）再結束，確認 mux 與子孫都消失；
 //! 7. 刪檔前重讀 pid 檔，仍是被結束的那一組才刪 pid 檔與心跳檔；8. 刪掉同一個 pid 的 `stopped` 記號（不寫新記號、不呼叫 `stop()`）；
 //! 9. 交回呼叫端，由監看的「已確認消失」入口接回。
 use super::*;
+
+/// 連線測試的結果
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Probe {
+    Up,
+    /// 真的連線逾時或 cli 回錯
+    Down,
+    /// cli 跑不起來（缺檔、被擋、權限）：不是服務的問題，處置要取消
+    CannotRun(String),
+}
 
 /// 處置的結果
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,16 +67,38 @@ impl Mux<'_> {
             return Disposal::Cancelled(format!("心跳檔的程序（{hb_pid}）不是記錄的程序（{pid}），沒有結束"));
         }
         // 4. 連得上就不是卡死
-        if self.alive() {
-            return Disposal::Cancelled("心跳停了但連得上，沒有結束".into());
+        match self.alive_probe() {
+            Probe::Up => return Disposal::Cancelled("心跳停了但連得上，沒有結束".into()),
+            Probe::CannotRun(e) => return Disposal::Cancelled(format!("連線測試的程式跑不起來（{e}），不能當成連不上，沒有結束")),
+            Probe::Down => {}
         }
         // 5. 跑完連線測試之後再看一次心跳：這段期間動了就取消
         match read_hb() {
             Some((p, s)) if p == hb_pid && s == seq0 => {}
             _ => return Disposal::Cancelled("確認期間心跳又動了（或讀不到），沒有結束".into()),
         }
-        // 6. 先蒐集子孫（排除建立時間早於 mux 的：編號被重用的別人），再結束，確認都消失
-        let kids: Vec<(u32, u64)> = self.runner.descendants_of(pid).into_iter().filter_map(|d| self.runner.started_ms(d).filter(|b| *b >= born).map(|b| (d, b))).collect();
+        // 6. 蒐集要結束的樹，核對過才結束。前面的核對隔了連線測試最久 10 秒，所以結束前緊接著再驗一次 pid、建立時間、執行檔
+        let tree = self.runner.descendants_of(pid);
+        let mut protect = self.runner.self_ancestors();
+        protect.push(std::process::id());
+        if let Some(x) = std::iter::once(&pid).chain(tree.iter()).find(|p| protect.contains(p)) {
+            return Disposal::Cancelled(format!("ASN 自己或它的上層程序（{x}）在要結束的樹裡，沒有結束"));
+        }
+        let mut kids: Vec<(u32, u64)> = Vec::new();
+        for d in tree {
+            // 查不到建立時間＝已經不在了，不用管；建立時間早於 mux 的不可能是它的子孫（編號被重用），整棵樹不動
+            let Some(b) = self.runner.started_ms(d) else { continue };
+            if b < born {
+                return Disposal::Cancelled(format!("要結束的樹裡有建立時間早於終端服務的程序（{d}），沒有結束"));
+            }
+            kids.push((d, b));
+        }
+        if self.runner.started_ms(pid) != Some(born) || !self.runner.alive(pid) {
+            return Disposal::Cancelled(format!("結束前再確認：程序 {pid} 的建立時間變了或已不在，沒有結束"));
+        }
+        if !self.runner.exe_path(pid).is_some_and(|p| is_server_image(&p, &self.server)) {
+            return Disposal::Cancelled(format!("結束前再確認：程序 {pid} 不是這個資料夾的終端服務執行檔，沒有結束"));
+        }
         self.runner.kill_tree(pid);
         let mut cleared = false;
         for _ in 0..GONE_RETRIES {

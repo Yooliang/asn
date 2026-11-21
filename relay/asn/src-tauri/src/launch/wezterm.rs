@@ -84,6 +84,10 @@ pub trait Runner {
     fn descendants_of(&self, _pid: u32) -> Vec<u32> {
         Vec::new()
     }
+    /// ASN 自己和它的祖先（沿著父程序編號往上，含自己）。結束一棵程序樹之前，確認這些都不在樹裡。預設只有自己
+    fn self_ancestors(&self) -> Vec<u32> {
+        vec![std::process::id()]
+    }
     /// 行程的建立時間（毫秒，查不到＝None）：結束行程前用來確認還是當初啟動的那一個，防程式編號被回收後誤殺別人
     fn started_ms(&self, pid: u32) -> Option<u64>;
     /// 程序的執行檔完整路徑（查不到＝None）。結束不是剛起的程序前核對用。預設查不到
@@ -229,6 +233,20 @@ impl Runner for RealRunner {
 
     fn alive(&self, pid: u32) -> bool {
         crate::heartbeat::pid_alive(pid)
+    }
+
+    fn self_ancestors(&self) -> Vec<u32> {
+        let table = crate::bridge::orphans::process_table();
+        let mut out = vec![std::process::id()];
+        let mut cur = out[0];
+        while let Some(parent) = table.get(&cur).copied() {
+            if parent == 0 || out.contains(&parent) {
+                break;
+            }
+            out.push(parent);
+            cur = parent;
+        }
+        out
     }
 
     fn descendants_of(&self, pid: u32) -> Vec<u32> {

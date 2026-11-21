@@ -17,13 +17,13 @@
 //! 我們自己不把 socket 路徑加進任何白名單（`cli_env` 只給下 cli 的那個程序用）。
 #![cfg(desktop)]
 
-use super::wezterm::{RunOutput, Runner};
+use super::wezterm::{RunOutput, Runner, CANNOT_RUN};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod stuck;
-pub use stuck::Disposal;
+pub use stuck::{Disposal, Probe};
 
 #[cfg(windows)]
 pub const MUX_EXE: &str = "wezterm-mux-server.exe";
@@ -204,6 +204,16 @@ impl Mux<'_> {
     /// 連得上就是活著（`--no-auto-start`，連不上不會順手起一個）
     pub fn alive(&self) -> bool {
         self.cli(&["list", "--format", "json"]).map(|o| o.success).unwrap_or(false)
+    }
+
+    /// 同 [`Self::alive`]，但分得出「cli 根本跑不起來」（缺檔、被擋、權限）：那不是「連不上」，不能拿來當 mux 卡死的證據（卡死處置用）
+    pub fn alive_probe(&self) -> Probe {
+        match self.cli(&["list", "--format", "json"]) {
+            Ok(o) if o.success => Probe::Up,
+            Err(e) if e.starts_with(CANNOT_RUN) => Probe::CannotRun(e),
+            // 連線逾時、cli 回錯：都算連不上
+            _ => Probe::Down,
+        }
     }
 
     /// 目前有幾個窗格（停 mux 前告訴使用者會中斷幾個夥伴）

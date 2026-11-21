@@ -65,6 +65,11 @@ pub fn run_round(w: &mut Watch, tracker: &mut Tracker, o: &Observed, exited: &[S
 /// 心跳停了而且程序還在：先處置（在 `Watch::tick` 之前）——
 /// 成功就經「已確認消失」入口直接成事故；取消、失敗、額度未到、冷卻中，這一輪等同心跳還在動（而且不更新 Tracker：它沒有真的活著）
 pub fn run_round_stuck(w: &mut Watch, tracker: &mut Tracker, guard: &mut StuckGuard, o: &Observed, exited: &[String], now: u64, ctx: &Round, sink: &dyn Sink) -> Option<Incident> {
+    // 心跳恢復了：下次再卡住要能再通知、再寫一次（每次卡住通知一次）
+    if o.hb == Hb::Fresh {
+        guard.notified = None;
+        guard.unseen_logged = None;
+    }
     let (Hb::Stale { secs }, Some(mux), Some((hb_key, seq))) = (o.hb, o.live, o.hb_at) else { return round(w, tracker, o, exited, now, ctx, sink, true) };
     if guard.cooling(mux, now) {
         return round(w, tracker, o, exited, now, ctx, sink, false);
@@ -322,6 +327,23 @@ mod tests {
         let o = Observed { hb_at: None, ..obs(Some(M1), Hb::Stale { secs: 120 }) };
         assert_eq!(e2.round(&o, STALE_AT, &rig2), None);
         assert_eq!(rig2.disposed.get(), 0);
+    }
+
+    #[test]
+    fn t1897_心跳恢復後_下次再卡住_再通知一次() {
+        let (mut e, rig) = (Env::new(), Rig::new(Disposal::Done));
+        e.warm(&rig);
+        e.w.last_resume_at = Some(STALE_AT - 60_000);
+        e.round(&obs(Some(M1), Hb::Stale { secs: 120 }), STALE_AT, &rig);
+        assert!(read_notice(e.dir.path()).is_some(), "第一次卡住：通知");
+        clear_notice(e.dir.path());
+        e.round(&obs(Some(M1), Hb::Stale { secs: 150 }), STALE_AT + TICK_MS, &rig);
+        assert_eq!(read_notice(e.dir.path()), None, "同一次卡住只通知一次");
+        // 心跳回來了
+        e.round(&obs(Some(M1), Hb::Fresh), STALE_AT + 2 * TICK_MS, &rig);
+        e.round(&obs(Some(M1), Hb::Stale { secs: 120 }), STALE_AT + 6 * TICK_MS, &rig);
+        assert!(read_notice(e.dir.path()).is_some(), "又卡住了：再通知一次");
+        assert_eq!(rig.disposed.get(), 0);
     }
 
     #[test]
