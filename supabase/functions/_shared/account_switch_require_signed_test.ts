@@ -25,13 +25,13 @@ const PARAMS: Record<string, Record<string, unknown>> = { acct_list: { node: "W"
 const realCalls = (c: Call[]) => c.filter((x) => x.fn !== "asn_user_owns_node" && x.fn !== "asn_relay_auth_observe");
 
 for (const action of ["acct_list", "acct_switch"]) {
-  Deno.test(`旗標開＋無簽章：${action} 回 403＋白話 detail，不呼叫任何資料庫函式`, async () => {
+  Deno.test(`旗標開＋無簽章：${action} 回 403＋白話 detail，不呼叫原資料庫函式（只記觀測）`, async () => {
     const f = fakeDeps(true);
     const r = await handleAcctAction(f.deps, { id: "P" }, action, PARAMS[action], null, "absent", true);
     assertEquals(r.status, 403);
     assertEquals(r.body.error, "forbidden");
     assertEquals(r.body.detail, SIGNED_ONLY_DETAIL);
-    assertEquals(f.calls.length, 0);
+    assertEquals(f.calls.map((c) => c.fn), ["asn_relay_auth_observe"]); // 只記觀測（blocked，#500 3b），沒有別的資料庫呼叫
   });
   Deno.test(`旗標開＋簽章驗證失敗（後台拿到 null）：${action} 回 403，不呼叫原 rpc`, async () => {
     const f = fakeDeps(true);
@@ -44,7 +44,7 @@ for (const action of ["acct_list", "acct_switch"]) {
     const r = await handleAcctAction(f.deps, { id: "P" }, action, PARAMS[action], SIGNED, "valid", true);
     assertEquals(r.status, 403);
     assertEquals(r.body.detail, SIGNED_ONLY_DETAIL);
-    assertEquals(f.calls, [{ fn: "asn_user_owns_node", args: { p_user: SIGNED, p_node: "P" } }]);
+    assertEquals(f.calls.filter((c) => c.fn !== "asn_relay_auth_observe"), [{ fn: "asn_user_owns_node", args: { p_user: SIGNED, p_node: "P" } }]);
   });
   Deno.test(`旗標開＋查擁有者出錯：${action} 不放行（500），不呼叫原 rpc`, async () => {
     const f = fakeDeps("error");
@@ -108,13 +108,8 @@ Deno.test("relay/index.ts：旗標由環境變數讀入並只傳給 handleAcctAc
   assert(src.includes('const signedAcct = (action === "acct_list" || action === "acct_switch" || action === "acct_roster") ? await signedUserId('));
 });
 
-// 觀測（#2067，recordAcct）放在授權與原 rpc 成功「之後」：旗標開啟而被擋下的呼叫沒有成功回應，所以不記；通過的照記一筆
-Deno.test("旗標開被擋下：觀測不記（asn_relay_auth_observe 沒被呼叫）；擁有者簽章通過：記一筆 signed／valid_owner", async () => {
-  for (const [signed, owns] of [[null, true], [SIGNED, false]] as const) {
-    const f = fakeDeps(owns);
-    await handleAcctAction(f.deps, { id: "P" }, "acct_switch", SW, signed, signed ? "valid" : "absent", true);
-    assert(!f.calls.some((c) => c.fn === "asn_relay_auth_observe"), "被擋下不記觀測");
-  }
+// 觀測（#2067，recordAcct）：通過的記 signed／valid_owner；被擋下的另由 #500 3b 記 blocked（見 account_switch_observe_blocked_test.ts）
+Deno.test("擁有者簽章通過：記一筆 signed／valid_owner", async () => {
   const g = fakeDeps(true);
   const r = await handleAcctAction(g.deps, { id: "P" }, "acct_switch", SW, SIGNED, "valid", true);
   assertEquals(r.status, 200);
