@@ -5,6 +5,7 @@
 // #539 之二：群組對話放「群組」一顆（groupMenuItems）；群組沒有「管理」。
 // #539 之三：「工作項目」顯示背景工作件數（從個人訊息讀，遠端也有）；按下去列出本機 Claude 視窗正在跑的背景工作（tasks_query）。
 // 反灰一律用 aria-disabled（不用原生 disabled）：滑鼠停上去看得到 title 的原因、鍵盤 Tab 停得到；點了在 handler 裡擋掉。
+import { headCallView } from './head-call.mjs'
 import { isDisplayOnly } from './display-only.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { itemIcon, isDangerItem } from './line-icons.mjs'
@@ -434,6 +435,7 @@ export const ActionBar = {
     const subView = computed(() => subagentView(subs.q))
     const taskList = computed(() => taskView(tasks.q, slot.value.tasks.count, slot.value.tasks.idle))
     const lite = computed(() => Boolean(props.blocked))
+    const headWake = computed(() => headCallView(props.friend, opsCtx).kind === 'wake')   // 右上角：離線可喚醒時，通話圖示換成紅色喚醒圖示（#1866）
     const opsAll = computed(() => (lite.value ? props.ops.map(i => ({ ...i, ok: true, reason: '' })) : props.api && !isRoom.value ? managePanelItems(props.friend, opsCtx, props.ops) : props.ops.map(i => ({ ...i, ok: true, reason: '' }))))
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
@@ -597,7 +599,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { onLaunchNew, root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { headWake, onLaunchNew, root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -689,7 +691,8 @@ export const ActionBar = {
       <line-icon :name="termOn ? 'msg' : 'term'"></line-icon>
     </button>
     <offline-menu-button v-if="isRoom" :names="offlineNames" @pick="k => $emit('member', k)"></offline-menu-button>
-    <button class="mbtn mbtn-call" type="button" v-if="skin === 'line' && !isRoom && api && callable" data-slot="line-call" :aria-disabled="slot.call.ok ? null : 'true'" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall"><line-icon name="call"></line-icon></button>
+    <button class="mbtn mbtn-call" type="button" v-if="skin === 'line' && !isRoom && api && callable && !headWake" data-slot="line-call" :aria-disabled="slot.call.ok ? null : 'true'" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall"><line-icon name="call"></line-icon></button>
+    <button class="mbtn mbtn-call mbtn-wake" type="button" v-if="skin === 'line' && !isRoom && api && headWake" data-slot="line-wake" aria-label="喚醒" title="喚醒" @click="pickOps('p:resume')"><line-icon name="wake"></line-icon></button>
     <more-menu-button v-if="moreItems.length" :items="moreItems" @pick="pickMore"></more-menu-button>
   </div>
 </div>`,

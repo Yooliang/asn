@@ -309,6 +309,7 @@
 :root[data-skin="line"] .mbtn:hover{background:var(--ls-hover)}
 :root[data-skin="line"] .mbtn.mbtn-offline{border:1px solid var(--line);background:var(--panel)}
 :root[data-skin="line"] .mbtn.mbtn-call[aria-disabled="true"]{opacity:.45;cursor:default}
+:root[data-skin="line"] .mbtn.mbtn-wake{color:#c4463d}   /* 離線可喚醒：紅色喚醒圖示（#1866） */
 :root[data-skin="line"] .shell.only-chat:has(.mbar-back) .tabbar{display:none}
 
 /* ---------- 標題列（手機） ---------- */
@@ -324,6 +325,7 @@
 :root[data-skin="line"] .m-chat .m-plate-head .m-head-term,:root[data-skin="line"] .m-chat .m-plate-head .m-head-call,:root[data-skin="line"] .m-chat .m-plate-head > .m-head-more{display:grid;place-items:center;flex:none;width:40px;height:40px;margin:0;border:0;border-radius:50%;background:transparent;color:var(--fg)}
 :root[data-skin="line"] .m-chat .m-plate-head .m-head-term.on{background:var(--ls-soft);color:var(--accent)}
 :root[data-skin="line"] .m-chat .m-plate-head .m-head-call:disabled{opacity:.45}
+:root[data-skin="line"] .m-chat .m-plate-head .m-head-wake{color:#c4463d}   /* 同上，手機；要排在 .m-head-call 的顏色之後才蓋得過 */
 :root[data-skin="line"] .m-chat .m-plate-head .m-head-offline{flex:none;justify-self:auto}
 :root[data-skin="line"] .m-chat .m-plate-head > .m-head-more .m-ic{width:24px;height:24px}
 /* 通話鈕搬到標題列了，輸入框「＋」選單裡那個收起來（同一個動作，不留兩個入口） */

@@ -63,7 +63,7 @@ test('固定 6 顆（#539）：通話、前台／後台、切換模型、子代�
   assert.match(t, /:data-slot="slotKey"[^>]*:aria-disabled="disabled \? 'true' : null"/)
   assert.match(t, /slotKey: \{ type: String, default: 'manage' \}, label: \{ type: String, default: '管理' \}/, '管理是 OpsMenuButton 的預設')
   assert.doesNotMatch(t, /v-if="(showCall|showConsole|showModel|showSubs|wake\.show)"/, '不再整顆藏起來')
-  assert.doesNotMatch(t, /aria-label="喚醒"/, '喚醒不另放一顆：離線時第 2 格的名稱是喚醒')
+  assert.doesNotMatch(t, /class="abtn"[^>]*aria-label="喚醒"/, '喚醒不另放一顆大按鈕：離線時第 2 格的名稱是喚醒（#1866 右上角的紅色喚醒圖示是 .mbtn，不是大按鈕）')
 })
 
 test('兩種對話視窗都把 transport 與本機節點傳給對話區，對話區放了功能列', () => {
