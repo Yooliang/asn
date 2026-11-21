@@ -353,7 +353,7 @@ Linux 沒有安裝檔可以附帶 WezTerm。本人開了夥伴共用終端服務
 ### 取得失敗的顯示與退避（#893 第 4 張）
 
 - Linux 的網址取自本 repo 的自建 release（tag 為 `wezterm-<版本>-asn.<N>`，記在 `wezterm-pins.json` 的 `linux_tag`；包是平的結構，直接放 `wezterm`、`wezterm-mux-server`）；基底網址在 `release_base`。資料夾名稱帶 `asn.<N>`，換修補版時舊資料夾不會被沿用。Rust 端還會核對它必須等於程式內的常數，改了 json 也導不到別處。
-- Windows 安裝檔附的 WezTerm 改取本 repo 自建的 release（pins 的 `windows_bundle`：上游同版本加上上游 #7706 與 ASN 修補 0001、0002，修 mux-server 的堆疊溢位與 PID 重用錯接；0.2.45 起是 asn.2、0.2.46 起是 asn.3，修改清單見 [WEZTERM-自建修改清單.md](WEZTERM-自建修改清單.md)）。`fetch-wezterm.mjs` 先用 `gh attestation verify --repo Yooliang/asn --signer-workflow …/wezterm-build.yml --source-ref refs/heads/main` 驗建置來源證明，再核對 SHA-256 與大小，任何一項不符就刪快取、讓建置失敗，不退回上游。pins 頂層的 `windows_zip_sha256`／`windows_zip_size` 是上游官方壓縮檔，只給 CI 自建時核對現成檔用。
+- Windows 安裝檔附的 WezTerm 改取本 repo 自建的 release（pins 的 `windows_bundle`：上游同版本加上上游 #7706 與 ASN 修補 0001、0002、0003，修 mux-server 的堆疊溢位與 PID 重用錯接，並加上定時寫存活訊號 heartbeat.json；0.2.45 起是 asn.2、0.2.46 起是 asn.3、asn.4 起含心跳補丁，修改清單見 [WEZTERM-自建修改清單.md](WEZTERM-自建修改清單.md)）。`fetch-wezterm.mjs` 先用 `gh attestation verify --repo Yooliang/asn --signer-workflow …/wezterm-build.yml --source-ref refs/heads/main` 驗建置來源證明，再核對 SHA-256 與大小，任何一項不符就刪快取、讓建置失敗，不退回上游。pins 頂層的 `windows_zip_sha256`／`windows_zip_size` 是上游官方壓縮檔，只給 CI 自建時核對現成檔用。
 - 大小核對：實收位元組數必須等於 pins 的 `size`（Windows 是 `windows_bundle.size`），不等就當失敗，和雜湊不符一樣刪檔、報錯。
 - 失敗會記下原因分類與時間（`<資料目錄>/ASN/wezterm/fetch-state.json`），一天內不自動重下；設定頁按「重試」才忽略退避。成功就清掉紀錄。
 - 原因分類（`network`／`disk`／`mismatch`／`unsupported`／`unrunnable`／`other`）各有一句給使用者看的話（`ui/lib/term-server-setting.mjs`）；網址、雜湊、錯誤碼只寫進 log。
