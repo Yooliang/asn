@@ -1,5 +1,6 @@
-# 官網部署「演練」（#1947 ②）：只做部署前檢查與設定檔檢查，不碰任何金鑰、不部署。
-# 真部署（environment site-deploy＋firebase deploy）是 #1947 ④，不在這一版。
+# 官網部署（#1947）：site-dryrun＝演練（PR 與 push 都跑，不碰金鑰、不部署）；
+# site-deploy＝真部署＋線上核對（#1947 ④），只在 main 的 push／手動觸發時跑，掛 environment site-deploy 取金鑰；
+# 失敗不另寫通知（擁有者 11-21：GitHub 上的失敗看 GitHub 日誌）；線上核對與重試保留，是確認部署真的生效。
 name: site-deploy
 
 on:
@@ -66,3 +67,53 @@ jobs:
             if (rc.projects?.default !== "asnmessenger") throw new Error(".firebaserc 的預設專案不是 asnmessenger")
             console.log("firebase.json 可解析；public =", dir, "；redirects =", (h.redirects ?? []).length)
           '
+
+  site-deploy:
+    needs: site-dryrun
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: site-deploy
+    concurrency:
+      group: site-deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      # 服務帳號 JSON 只經 env 進這一步，寫到 RUNNER_TEMP（權限 600），下一步起用 GOOGLE_APPLICATION_CREDENTIALS 指過去
+      - name: 寫入部署憑證暫存檔
+        env:
+          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER }}
+        run: |
+          set -euo pipefail
+          test -n "$SA_JSON"
+          umask 077
+          printf '%s' "$SA_JSON" > "$RUNNER_TEMP/firebase-sa.json"
+          chmod 600 "$RUNNER_TEMP/firebase-sa.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-sa.json" >> "$GITHUB_ENV"
+
+      # site/firebase.json 的 predeploy 會自動跑 site_predeploy.mjs
+      - name: 部署到 Firebase Hosting
+        run: |
+          set -euo pipefail
+          FB_VER="$(grep -v '^#' tools/release/FIREBASE_TOOLS_VERSION | tr -d '[:space:]')"
+          cd site
+          npx --yes "firebase-tools@$FB_VER" deploy --only hosting --project asnmessenger --non-interactive
+
+      # 失敗（含重試用完仍不一致）就讓 job 變紅
+      - name: 線上核對
+        run: |
+          set -euo pipefail
+          node tools/release/site_verify_online.mjs --site site
+
+      - name: 刪除憑證暫存檔
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/firebase-sa.json"

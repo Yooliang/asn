@@ -216,7 +216,9 @@ test('2 secrets：電腦版 workflow、演練檔與 .github/actions/ 沒有任�
   assert.ok(others.includes(DESKTOP))
   for (const f of others) {
     const s = stripComments(read(f))
-    assert.deepEqual([...s.matchAll(/secrets\.(?!GITHUB_TOKEN\b)\w+/g)].map(m => m[0]), [], f)
+    // site-deploy.yml（#1947 ④）只准用官網部署金鑰這一個，而且只在 site-deploy job 的 env（細節由 site-deploy-workflow-guard 守）
+    const allowed = f === '.github/workflows/site-deploy.yml' ? ['secrets.FIREBASE_SERVICE_ACCOUNT_ASNMESSENGER'] : []
+    assert.deepEqual([...s.matchAll(/secrets\.(?!GITHUB_TOKEN\b)\w+/g)].map(m => m[0]), allowed, f)
     if (f === DESKTOP || f.includes('rehearsal')) assert.doesNotMatch(s, /^\s*environment\s*:/m, f)
   }
   const actions = fs.readdirSync(new URL('.github/actions/', root), { recursive: true }).map(String).filter(f => /\.ya?ml$/.test(f))

@@ -119,6 +119,8 @@ test('真的 patches/wezterm：清單和 .patch 一一對應，numstat 解析的
   assert.ok(onDisk.length >= 1)
   assert.deepEqual([...decl.keys()].sort(), onDisk)
   assert.ok(decl.has('0001-procinfo-build-proc-iterative.patch'))
+  assert.ok(decl.has('0002-procinfo-parent-start-time.patch'), '#1914：0002 要列在清單')
+  assert.deepEqual(decl.get('0002-procinfo-parent-start-time.patch'), ['procinfo/src/windows.rs'])
   for (const p of onDisk) {
     const r = git(os.tmpdir(), 'apply', '--numstat', path.join(REAL_DIR, p))
     assert.equal(r.status, 0, r.stderr)
