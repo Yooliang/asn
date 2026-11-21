@@ -39,6 +39,10 @@ pub struct Observed {
     /// 終端服務記錄檔（pid 檔）裡記的（程序編號, 建立時間）；沒有記錄檔就是 None（#1887）。
     /// 和監看記著的 mux 對不上，代表記著的那個一定不在了（記錄被換掉、或編號被別的程序佔用），不必再等第二輪
     pub record: Option<(u32, u64)>,
+    /// 終端服務心跳（#1897 ③）。只讀不判：`Watch::tick` 完全不看它，下一張才切換
+    pub hb: super::mux_heartbeat::Hb,
+    /// 判成 `Stale` 的那一輪：心跳所屬的（程序編號, 建立時間）與停在的 seq。卡死處置前用來核對（#1897 ④）；不是 `Stale` 就是 None
+    pub hb_at: Option<((u32, u64), u64)>,
 }
 
 /// 一次事故
@@ -111,6 +115,27 @@ impl Watch {
     }
 
     pub fn tick(&mut self, o: &Observed, now: u64) -> Option<Incident> {
+        self.tick_with(o, now, false)
+    }
+
+    /// 「已確認消失」入口（#1897 ④）：呼叫端剛把卡死的終端服務結束、確認它與子程序都消失了。
+    /// 這一輪直接當成消失（略過「連續兩輪」的懷疑）；`o.live` 要已經是 None。
+    /// 原因文字不在這裡：由呼叫端帶入（結束碼是我們自己殺的，沒有意義）
+    pub fn tick_gone(&mut self, o: &Observed, now: u64) -> Option<Incident> {
+        self.tick_with(o, now, true)
+    }
+
+    /// 記著正在看的那個 mux 是不是這一組（程序編號, 建立時間）
+    pub fn seen_mux_is(&self, mux: (u32, u64)) -> bool {
+        self.seen.as_ref().is_some_and(|s| s.mux == mux)
+    }
+
+    /// 接回額度可用（距上次接回已滿 [`RESUME_GAP_MS`]）
+    pub fn resume_quota_ok(&self, now: u64) -> bool {
+        self.last_resume_at.is_none_or(|t| now.saturating_sub(t) >= RESUME_GAP_MS)
+    }
+
+    fn tick_with(&mut self, o: &Observed, now: u64, confirmed_gone: bool) -> Option<Incident> {
         // 同名的又開起來了：不再算已結束。記太久的也拿掉
         self.exited.retain(|(n, at)| !o.partners.iter().any(|p| p == n) && now.saturating_sub(*at) <= LOST_KEEP_MS);
         // 已經回來的（又出現在 mux 裡）、或等太久的，不再算還沒接回
@@ -141,7 +166,7 @@ impl Watch {
         // 消失了：換成別的 mux（確定舊的沒了）馬上算；只是暫時看不到 mux，要連續兩輪。
         // 看不到 mux、但記錄檔記的已經不是我們在看的那個（#1887：編號跟記錄對不上），也是確定舊的沒了，馬上算
         let record_moved = missing && o.record.is_some_and(|r| r != p.mux);
-        if missing && !self.suspect && !record_moved {
+        if missing && !self.suspect && !record_moved && !confirmed_gone {
             self.suspect = true;
             return None;
         }
@@ -157,7 +182,7 @@ impl Watch {
             return None;
         }
         // 沒有夥伴就沒有東西要接回，也不佔「十分鐘一次」的接回額度
-        let resume = !p.partners.is_empty() && self.last_resume_at.is_none_or(|t| now.saturating_sub(t) >= RESUME_GAP_MS);
+        let resume = !p.partners.is_empty() && self.resume_quota_ok(now);
         if resume {
             self.last_resume_at = Some(now);
         }
@@ -702,6 +727,7 @@ fn event_log_text(_pid: Option<u32>) -> Option<String> {
 struct RealSink {
     work_dir: std::path::PathBuf,
     data_dir: std::path::PathBuf,
+    terms: std::sync::Arc<super::term::LiveTerms>,
 }
 
 #[cfg(feature = "gui")]
@@ -717,6 +743,9 @@ impl super::mux_round::Sink for RealSink {
         if let Some(base) = super::mux::default_base() {
             super::mux::note(&base.join("ASN").join("m"), line);
         }
+    }
+    fn dispose_stuck(&self, expected: (u32, u64), seq: u64) -> super::mux::Disposal {
+        self.terms.dispose_stuck_mux(expected, seq)
     }
     fn resume(&self, partners: Vec<String>, resume: bool) {
         let (wd, dd) = (self.work_dir.clone(), self.data_dir.clone());
@@ -742,7 +771,8 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         let mut tracker = Tracker::new(cfg!(windows));
         // 監看自己看不到終端服務時也要有訊號（11-10 30家用：02:22～11:59 每輪都看不到，一行紀錄都沒有）
         let mut blind = Blind::default();
-        let sink = RealSink { work_dir: work_dir.clone(), data_dir: data_dir.clone() };
+        let sink = RealSink { work_dir: work_dir.clone(), data_dir: data_dir.clone(), terms: terms.clone() };
+        let mut guard = super::mux_round::StuckGuard::default();
         loop {
             // 第一輪不等：ASN 重開時收掉的已結束夥伴，要盡快讓收發室知道
             if !first {
@@ -778,7 +808,7 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
             }
             let now = crate::heartbeat::now_ms();
             let ctx = super::mux_round::Round { state_file: &file, work_dir: &work_dir, uptime_secs: started.elapsed().as_secs() };
-            super::mux_round::run_round(&mut w, &mut tracker, &o, &terms.take_exited(), now, &ctx, &sink);
+            super::mux_round::run_round_stuck(&mut w, &mut tracker, &mut guard, &o, &terms.take_exited(), now, &ctx, &sink);
         }
     });
     if let Err(e) = spawned {
@@ -809,6 +839,32 @@ mod tests {
 
     fn obs(live: Option<(u32, u64)>, names: &[&str]) -> Observed {
         Observed { live, partners: names.iter().map(|s| s.to_string()).collect(), stopped: None, ..Default::default() }
+    }
+
+    /// #1897 ③ 守門：心跳只讀不判。同一串觀察，`hb` 填任何值，`Watch::tick` 的每一輪結果都和 `hb` 預設值時一模一樣
+    #[test]
+    fn t1897_tick_對_hb_的任何值結果都不變() {
+        use crate::launch::mux_heartbeat::Hb;
+        let all = [Hb::NotSupported, Hb::Fresh, Hb::Stale { secs: 500 }, Hb::Unreadable];
+        // 活著、停了、換成別的 mux、又回來，各種情境都走一遍
+        let script: Vec<Observed> = vec![
+            obs(Some(M1), &["甲", "乙"]),
+            obs(Some(M1), &["甲", "乙"]),
+            obs(None, &[]),
+            obs(None, &[]),
+            obs(Some(M2), &["甲"]),
+            Observed { live: None, record: Some(M1), ..Default::default() },
+            Observed { live: None, record: Some(M1), ..Default::default() },
+        ];
+        let run = |hb: Hb| {
+            let mut w = Watch::default();
+            script.iter().enumerate().map(|(i, o)| w.tick(&Observed { hb, ..o.clone() }, i as u64 * TICK_MS)).collect::<Vec<_>>()
+        };
+        let base = run(Hb::default());
+        assert!(base.iter().any(|r| r.is_some()), "劇本要真的出過事故，不然這個守門是空的");
+        for hb in all {
+            assert_eq!(run(hb), base, "hb={hb:?} 不能影響判斷");
+        }
     }
 
     #[test]
