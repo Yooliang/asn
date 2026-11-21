@@ -134,3 +134,15 @@ test('#1992 長鏈紅燈對照用明確的 #7706 commit，不靠 HEAD~1（多一
   assert.match(s, /git log -1 --format=%s "\$PATCH_SHA"/, '要核對它就是 #7706 的 cherry-pick')
   assert.match(s, /git checkout "\$ONLY_7706" -- "\$FILE"/)
 })
+
+test('#2006 產物的 SOURCE.txt 照實寫出 ASN 修補：Linux 包列出套了哪些修補，用詞統一為「ASN 修補」，不再寫「只多套用 #7706」', () => {
+  const rd = p => fs.readFileSync(new URL(`../../../.github/${p}`, import.meta.url), 'utf8')
+  const linux = rd('scripts/wezterm-build-linux.sh'), prep = rd('scripts/wezterm-release-prepare.sh'), wf = rd('workflows/wezterm-build.yml')
+  for (const [n, s] of [['wezterm-build-linux.sh', linux], ['wezterm-release-prepare.sh', prep], ['wezterm-build.yml', wf]]) {
+    assert.ok(!/只多套用上游 #7706）/.test(s), `${n} 還寫「只多套用上游 #7706」`)
+    assert.ok(!/ASN 補丁/.test(s), `${n} 用詞要統一成「ASN 修補」`)
+  }
+  assert.match(linux, /ASN_PATCHES="\$\(git -C "\$SRC" log --format=%s \| sed -n "s\/\^asn patch: \/\/p"/)
+  assert.match(linux, /ASN 修補 \$\{ASN_PATCHES\}/)
+  assert.match(linux, /\[ -n "\$ASN_PATCHES" \] \|\| \{ echo "::error::/, '找不到修補要失敗，不能寫出空白')
+})

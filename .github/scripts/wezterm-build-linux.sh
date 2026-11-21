@@ -67,10 +67,13 @@ PKG="$OUT/pkg"; rm -rf "$PKG"; mkdir -p "$PKG"
 install -m 0755 "$WEZ" "$PKG/wezterm"
 install -m 0755 "$MUX" "$PKG/wezterm-mux-server"
 git -C "$SRC" cat-file blob "${UPSTREAM_SHA}:LICENSE.md" > "$PKG/LICENSE.md"
+# #2006：Linux 包也照實寫出套了哪些 ASN 修補（src-prepare 每份修補各一個「asn patch: <檔名>」commit）
+ASN_PATCHES="$(git -C "$SRC" log --format=%s | sed -n "s/^asn patch: //p" | sort | paste -sd "、" -)"
+[ -n "$ASN_PATCHES" ] || { echo "::error::原始碼裡找不到 ASN 修補的 commit" >&2; exit 1; }
 cat > "$PKG/SOURCE.txt" <<TXT
-WezTerm ${UPSTREAM_TAG}（ASN 自行建置，只多套用上游 #7706）
+WezTerm ${UPSTREAM_TAG}（ASN 自行建置，多套用上游 #7706 與 ASN 修補）
 上游：https://github.com/wezterm/wezterm  tag ${UPSTREAM_TAG}  commit ${UPSTREAM_SHA}
-額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）
+額外套用：上游 commit ${PATCH_SHA}（#7706，只改 procinfo/src/{linux,macos,windows}.rs）；ASN 修補 ${ASN_PATCHES}（patches/wezterm/，清單見 docs/design/WEZTERM-自建修改清單.md）
 Rust：${RUST_VERSION}（cargo build --locked --release -p wezterm -p wezterm-mux-server，用 tag 自帶的 Cargo.lock）
 建置環境：容器映像 ${IMAGE}（主機 runner：ubuntu-22.04）；動態連結系統的 libssl，沒有內建 OpenSSL
 建置紀錄：${RUN_URL}
