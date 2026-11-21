@@ -1,5 +1,5 @@
 //! Linux：按需取得 WezTerm（#893 第 3 張）。無畫面主機沒有 Windows 那樣的安裝檔可以附帶，本人又未必裝了 wezterm，
-//! 所以在「開了夥伴共用終端服務、卻找不到 wezterm」時，從官方 GitHub release 下載固定版本的 tar.xz 到使用者資料夾。
+//! 所以在「開了夥伴共用終端服務、卻找不到 wezterm」時，從本 repo 自建的 GitHub release（上游版本加 ASN 修補）下載固定版本的 tar.xz 到使用者資料夾。
 //!
 //! 版本與雜湊的唯一來源是 `scripts/wezterm-pins.json`（編譯時讀入；Windows 的 fetch-wezterm.mjs 與 CI 探測腳本也讀同一份）。
 //! 流程：判斷發行版 → 檢查磁碟空間 → 下載到私有暫存資料夾（有大小上限與逾時，只跟官方 GitHub 主機往來）→ **核對 SHA-256**
@@ -17,21 +17,23 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const PINS_JSON: &str = include_str!("../../../scripts/wezterm-pins.json");
-/// 下載基底網址（官方正式路徑；`wez/wezterm` 只是轉址）。pins 裡的 `release_base` 必須等於它，網址不接受環境變數覆寫
-pub(crate) const DOWNLOAD_BASE: &str = "https://github.com/wezterm/wezterm/releases/download";
+/// 下載基底網址（本 repo 自建的 release）。pins 裡的 `release_base` 必須等於它，網址不接受環境變數覆寫
+pub(crate) const DOWNLOAD_BASE: &str = "https://github.com/Yooliang/asn/releases/download";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(600);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 const MIB: u64 = 1024 * 1024;
 /// 開始前至少要有這麼多可用空間（下載 + 解開的 tar + 取出的兩個檔，留餘裕）
 const NEED_FREE: u64 = 512 * MIB;
-/// 要取的成員（tar 裡的路徑 → 存成的檔名）。其餘成員一律略過，不展開
-const WANTED: [(&str, &str); 2] = [("wezterm/usr/bin/wezterm", "wezterm"), ("wezterm/usr/bin/wezterm-mux-server", "wezterm-mux-server")];
+/// 要取的成員（tar 裡的路徑 → 存成的檔名）。自建包是平的結構；其餘成員一律略過，不展開
+const WANTED: [(&str, &str); 2] = [("wezterm", "wezterm"), ("wezterm-mux-server", "wezterm-mux-server")];
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct Pins {
     pub version: String,
     pub release_base: String,
+    /// 自建 release 的 tag：`wezterm-<version>-asn.<N>`。安裝資料夾名稱帶 `asn.<N>`，換了修補版就不會沿用舊的
+    pub linux_tag: String,
     pub linux: BTreeMap<String, Pin>,
 }
 
@@ -119,13 +121,25 @@ pub(crate) fn pin_key(os: &OsRelease, arch: &str) -> Result<&'static str, String
 
 // ---------- 網址 ----------
 
-/// 下載網址：tarball 檔名只准英數與 `._-`，版本同理，免得資料被改壞時組出奇怪的網址
-pub(crate) fn download_url(release_base: &str, version: &str, tarball: &str) -> Result<String, String> {
+/// 下載網址：tarball 檔名只准英數與 `._-`，tag 同理，免得資料被改壞時組出奇怪的網址
+pub(crate) fn download_url(release_base: &str, tag: &str, tarball: &str) -> Result<String, String> {
     let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
-    if release_base != DOWNLOAD_BASE || !ok(version) || !ok(tarball) {
+    if release_base != DOWNLOAD_BASE || !ok(tag) || !ok(tarball) {
         return Err("內建的 WezTerm 版本資料不合法".into());
     }
-    Ok(format!("{DOWNLOAD_BASE}/{version}/{tarball}"))
+    Ok(format!("{DOWNLOAD_BASE}/{tag}/{tarball}"))
+}
+
+/// 安裝資料夾名稱的版本段：`<version>-asn.<N>`。tag 必須是 `wezterm-<version>-asn.<N>`（N 為數字），否則資料不合法。
+/// 納入 `asn.<N>` 是為了讓舊命名（上游版、不含 asn）的資料夾不會被當成已安裝而沿用
+pub(crate) fn build_stem(pins: &Pins) -> Result<String, String> {
+    let bad = || "內建的 WezTerm 版本資料不合法".to_string();
+    let stem = pins.linux_tag.strip_prefix("wezterm-").ok_or_else(bad)?;
+    let n = stem.strip_prefix(&format!("{}-asn.", pins.version)).ok_or_else(bad)?;
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(bad());
+    }
+    Ok(stem.to_string())
 }
 
 /// 重新導向只跟 GitHub 自己的主機（release 檔實際放在 githubusercontent.com）
@@ -691,7 +705,8 @@ async fn ensure_inner<H: Downloader>(http: &H, root: &Path, force: bool, now_ms:
     let pins = &plan.pins;
     let key = pin_key(&plan.os, &plan.arch).map_err(|e| FetchError::new(FailKind::Unsupported, e))?;
     let pin = pins.linux.get(key).ok_or_else(|| FetchError::new(FailKind::Other, "內建的 WezTerm 版本資料缺這個發行版"))?;
-    let final_dir = root.join(format!("{}-{key}", pins.version));
+    let stem = build_stem(pins).map_err(|e| FetchError::new(FailKind::Other, e))?;
+    let final_dir = root.join(format!("{stem}-{key}"));
     if dir_usable(&final_dir) {
         return Ok(final_dir);
     }
@@ -702,7 +717,7 @@ async fn ensure_inner<H: Downloader>(http: &H, root: &Path, force: bool, now_ms:
             }
         }
     }
-    let url = download_url(&pins.release_base, &pins.version, &pin.tarball).map_err(|e| FetchError::new(FailKind::Other, e))?;
+    let url = download_url(&pins.release_base, &pins.linux_tag, &pin.tarball).map_err(|e| FetchError::new(FailKind::Other, e))?;
     std::fs::create_dir_all(root).map_err(|e| FetchError::new(FailKind::Disk, format!("建立資料夾失敗：{e}")))?;
     clean_stale(root);
     check_space(free_bytes(root), NEED_FREE).map_err(|e| FetchError::new(FailKind::Disk, e))?;
@@ -735,7 +750,8 @@ pub(crate) async fn ensure(base: &Path, force: bool) -> Result<PathBuf, FetchErr
 /// 這台已經取得過的資料夾（版本相符的）。給 `wezterm::locate` 當第三順位
 pub(crate) fn fetched_dirs(base: &Path) -> Vec<PathBuf> {
     let Ok(pins) = pins() else { return vec![] };
-    let prefix = format!("{}-", pins.version);
+    let Ok(stem) = build_stem(&pins) else { return vec![] };
+    let prefix = format!("{stem}-");
     let Ok(rd) = std::fs::read_dir(base.join("ASN").join("wezterm")) else { return vec![] };
     let mut v: Vec<PathBuf> = rd.flatten().filter(|e| e.file_name().to_string_lossy().starts_with(&prefix)).map(|e| e.path()).filter(|p| dir_usable(p)).collect();
     v.sort();
@@ -839,27 +855,31 @@ mod tests {
         assert_eq!(p.version, "20240203-110809-5046fc22");
         for (k, pin) in &p.linux {
             assert!(pin.sha256.len() == 64 && pin.sha256.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()), "{k}");
-            assert!(pin.tarball.starts_with(&format!("wezterm-{}.", p.version)) && pin.tarball.ends_with(".tar.xz"), "{k}");
+            assert!(pin.tarball.starts_with(&format!("wezterm-{}-asn.", p.version)) && pin.tarball.ends_with(".tar.xz"), "{k}");
             assert!(pin.size > 1_000_000 && pin.size < 64 * MIB, "{k}");
-            assert!(download_url(&p.release_base, &p.version, &pin.tarball).is_ok());
+            assert!(download_url(&p.release_base, &p.linux_tag, &pin.tarball).is_ok());
+            assert!(pin.tarball.starts_with(&format!("{}.", p.linux_tag)), "{k}：檔名要以 tag 開頭");
         }
         // 探測腳本（CI）用同一組版本與雜湊，不能漂開
         let probe = include_str!("../../../../../.github/scripts/linux-wezterm-probe.sh");
         let u = &p.linux["ubuntu-22.04"];
         assert!(probe.contains(&format!("WEZTERM_VERSION='{}'", p.version)), "探測腳本的版本要等於 pins");
         assert!(probe.contains(&format!("TAR_SHA256='{}'", u.sha256)), "探測腳本的雜湊要等於 pins");
-        assert!(probe.contains("github.com/wezterm/wezterm/releases/download"), "探測腳本也用正式路徑");
+        assert!(probe.contains(&format!("WEZTERM_TAG='{}'", p.linux_tag)), "探測腳本的 tag 要等於 pins");
+        assert!(probe.contains("github.com/Yooliang/asn/releases/download"), "探測腳本也取自建 release");
+        assert!(!probe.contains("github.com/wezterm/wezterm"), "探測腳本不再取上游");
+        build_stem(&p).expect("linux_tag 要是 wezterm-<版本>-asn.<N>");
         // Windows 的腳本讀同一份（版本、網址都不手抄）
         let mjs = include_str!("../../../scripts/fetch-wezterm.mjs");
         assert!(mjs.contains("wezterm-pins.json") && !mjs.contains(&p.version), "fetch-wezterm.mjs 不能再手抄版本");
         assert!(!mjs.contains("github.com/wez/") && !mjs.contains("githubusercontent.com/wez/"), "網址統一用 wezterm/wezterm，且放在 pins 裡");
-        // 全部用官方正式路徑（wez/wezterm 只是轉址）
+        // 全部取自本 repo 自建 release
         assert_eq!(p.release_base, DOWNLOAD_BASE);
     }
 
     #[test]
     fn 網址只組官方_github_前綴_檔名不合法就拒絕() {
-        assert_eq!(download_url(DOWNLOAD_BASE, "v1", "a.tar.xz").unwrap(), "https://github.com/wezterm/wezterm/releases/download/v1/a.tar.xz");
+        assert_eq!(download_url(DOWNLOAD_BASE, "v1", "a.tar.xz").unwrap(), "https://github.com/Yooliang/asn/releases/download/v1/a.tar.xz");
         for bad in ["", "../x", "a/b", "a b", "a?b", "a#b", "a%2f"] {
             assert!(download_url(DOWNLOAD_BASE, "v1", bad).is_err(), "{bad}");
             assert!(download_url(DOWNLOAD_BASE, bad, "a.tar.xz").is_err(), "{bad}");
@@ -867,6 +887,8 @@ mod tests {
         // pins 裡的基底網址被改成別處也不行
         assert!(download_url("https://example.com/x", "v1", "a.tar.xz").is_err());
         assert!(download_url("https://github.com/wez/wezterm/releases/download", "v1", "a.tar.xz").is_err());
+        // 上游官方的下載路徑現在不接受了
+        assert!(download_url("https://github.com/wezterm/wezterm/releases/download", "v1", "a.tar.xz").is_err());
         for ok in ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"] {
             assert!(allowed_redirect_host(ok), "{ok}");
         }
@@ -985,14 +1007,16 @@ mod tests {
         let mut h = tar::Header::new_gnu();
         h.set_size(1);
         h.set_cksum();
-        b.append_data(&mut h, "wezterm/usr/bin/wezterm", &b"x"[..]).unwrap();
+        b.append_data(&mut h, "wezterm", &b"x"[..]).unwrap();
         let e = extract_members(std::io::Cursor::new(b.into_inner().unwrap()), tempfile::tempdir().unwrap().path(), &lim()).unwrap_err();
         assert!(e.contains("找不到 wezterm-mux-server"), "{e}");
         // 路徑穿越不算要的成員
-        assert_eq!(wanted_name(Path::new("./wezterm/usr/bin/wezterm")), Some("wezterm"));
-        assert_eq!(wanted_name(Path::new("../wezterm/usr/bin/wezterm")), None);
-        assert_eq!(wanted_name(Path::new("/wezterm/usr/bin/wezterm")), None);
-        assert_eq!(wanted_name(Path::new("wezterm/usr/bin/wezterm-gui")), None);
+        assert_eq!(wanted_name(Path::new("./wezterm")), Some("wezterm"));
+        assert_eq!(wanted_name(Path::new("../wezterm")), None);
+        assert_eq!(wanted_name(Path::new("/wezterm")), None);
+        assert_eq!(wanted_name(Path::new("wezterm-gui")), None);
+        // 上游舊包的巢狀路徑現在不算要的成員
+        assert_eq!(wanted_name(Path::new("wezterm/usr/bin/wezterm")), None);
     }
 
     #[test]
@@ -1123,7 +1147,7 @@ mod tests {
     fn plan(os_id: &str, os_ver: &str, check: &'static dyn Fn(&Path) -> CheckResult) -> Plan<'static> {
         let mut linux = BTreeMap::new();
         linux.insert("ubuntu-22.04".to_string(), Pin { tarball: "wezterm-v1.Ubuntu22.04.tar.xz".into(), sha256: hex(GOOD), size: GOOD.len() as u64 });
-        let pins = Pins { version: "v1".into(), release_base: DOWNLOAD_BASE.into(), linux };
+        let pins = Pins { version: "v1".into(), release_base: DOWNLOAD_BASE.into(), linux_tag: "wezterm-v1-asn.1".into(), linux };
         Plan { pins, os: OsRelease { id: os_id.into(), version_id: os_ver.into(), pretty: format!("{os_id} {os_ver}") }, arch: "x86_64".into(), check, lim: lim() }
     }
 
@@ -1186,6 +1210,53 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn 舊命名_上游版_的資料夾不沿用_會去取自建版() {
+        let base = tempfile::tempdir().unwrap();
+        let root = root_of(base.path());
+        let old = root.join("v1-ubuntu-22.04");
+        std::fs::create_dir_all(&old).unwrap();
+        for n in ["wezterm", "wezterm-mux-server"] {
+            std::fs::write(old.join(n), b"old").unwrap();
+        }
+        assert!(dir_usable(&old));
+        let http = FakeHttp::ok();
+        let dir = ensure_with(&http, base.path(), false, NOW, &ubuntu()).await.unwrap();
+        assert_eq!(http.calls.get(), 1, "舊命名的資料夾不能當成已安裝");
+        assert_eq!(dir, root.join("v1-asn.1-ubuntu-22.04"));
+        assert_eq!(std::fs::read(dir.join("wezterm")).unwrap(), b"#!/bin/sh
+echo wezterm
+", "裝的是新包的內容");
+        // 第二次就沿用新的
+        assert_eq!(ensure_with(&http, base.path(), false, NOW, &ubuntu()).await.unwrap(), dir);
+        assert_eq!(http.calls.get(), 1);
+    }
+
+    #[test]
+    fn 已取得清單只認帶_asn_編號的資料夾() {
+        let base = tempfile::tempdir().unwrap();
+        let p = pins().unwrap();
+        let root = base.path().join("ASN").join("wezterm");
+        let new = root.join(format!("{}-ubuntu-22.04", build_stem(&p).unwrap()));
+        let old = root.join(format!("{}-ubuntu-22.04", p.version));
+        for d in [&new, &old] {
+            std::fs::create_dir_all(d).unwrap();
+            for n in ["wezterm", "wezterm-mux-server"] {
+                std::fs::write(d.join(n), b"x").unwrap();
+            }
+        }
+        assert_eq!(fetched_dirs(base.path()), vec![new]);
+    }
+
+    #[test]
+    fn tag_要是_wezterm_版本_asn_數字() {
+        let mk = |t: &str| Pins { version: "v1".into(), release_base: DOWNLOAD_BASE.into(), linux_tag: t.into(), linux: BTreeMap::new() };
+        assert_eq!(build_stem(&mk("wezterm-v1-asn.12")).unwrap(), "v1-asn.12");
+        for bad in ["", "v1-asn.1", "wezterm-v1", "wezterm-v1-asn.", "wezterm-v1-asn.x", "wezterm-v2-asn.1", "wezterm-v1-asn.1-x", "wezterm-v1-asn.1/.."] {
+            assert!(build_stem(&mk(bad)).is_err(), "{bad}");
+        }
+    }
+
+    #[tokio::test]
     async fn 按重試_忽略退避馬上連網() {
         let base = tempfile::tempdir().unwrap();
         let root = root_of(base.path());
@@ -1235,7 +1306,7 @@ mod tests {
         let e = ensure_with(&http, base.path(), false, NOW, &plan("ubuntu", "22.04", &BAD_CHECK)).await.unwrap_err();
         assert_eq!(e.kind, FailKind::Unrunnable);
         assert_eq!(read_fail(&root_of(base.path())), Some((FailKind::Unrunnable, NOW)));
-        assert!(!root_of(base.path()).join("v1-ubuntu-22.04").exists(), "跑不起來的不留在正式位置");
+        assert!(!root_of(base.path()).join("v1-asn.1-ubuntu-22.04").exists(), "跑不起來的不留在正式位置");
         // 不支援的發行版：不連網
         let base = tempfile::tempdir().unwrap();
         let http = FakeHttp::ok();

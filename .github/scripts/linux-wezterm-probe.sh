@@ -9,9 +9,10 @@
 set -u
 
 WEZTERM_VERSION='20240203-110809-5046fc22'
-TAR_NAME="wezterm-${WEZTERM_VERSION}.Ubuntu22.04.tar.xz"
-TAR_SHA256='142cb46de648200b852cc4b1d932e6b8f2a9d3c55f6dc5af44b6d4eeb9385f5c'
-TAR_URL="https://github.com/wezterm/wezterm/releases/download/${WEZTERM_VERSION}/${TAR_NAME}"
+WEZTERM_TAG='wezterm-20240203-110809-5046fc22-asn.3'
+TAR_NAME="${WEZTERM_TAG}.Ubuntu22.04.tar.xz"
+TAR_SHA256='1c3633f64fcd63573e8b2bc1e2c42794be43bb060c2d5541b9538b985ac08c58'
+TAR_URL="https://github.com/Yooliang/asn/releases/download/${WEZTERM_TAG}/${TAR_NAME}"
 
 OUT="${PROBE_OUT:-${RUNNER_TEMP:-/tmp}/wezprobe}"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
@@ -60,8 +61,8 @@ else
   exit 1
 fi
 mkdir -p wz && tar -xJf "$TAR_NAME" -C wz
-MUX="$OUT/wz/wezterm/usr/bin/wezterm-mux-server"
-WEZ="$OUT/wz/wezterm/usr/bin/wezterm"
+MUX="$OUT/wz/wezterm-mux-server"
+WEZ="$OUT/wz/wezterm"
 if [ ! -x "$MUX" ] || [ ! -x "$WEZ" ]; then
   note "解壓縮" "✖ 找不到 wezterm 或 wezterm-mux-server" "$(find wz -name 'wezterm*' -type f | head -5 | tr '\n' ' ')"
   exit 1
