@@ -154,6 +154,7 @@ test('#1975 冒煙分片守門：matrix 4 片、fail-fast: false、每片上傳�
   assert.ok(has(mut('    needs: smoke-ui\n    if: always()', '    needs: smoke-ui'), /if: always/))
   assert.ok(has(mut('--shards 4', '--shards 3'), /不一致/))
   assert.ok(has(mut('!= "success"', '!= "never"'), /分片本身/))
+})
 
 // #1977 Rust／Node 單元測試（rust-test）與建置＋端到端（build）是兩個並行 job：拆開不能變成「有的測試沒人跑」，也不能兩邊都跑一次。
 const splitJobProblems = src => {
