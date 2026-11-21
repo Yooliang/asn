@@ -5,9 +5,10 @@ use crate::{App, BROWSER_ARGS};
 use serde::Deserialize;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
 
 const TOAST_W: f64 = 270.0;
 const TOAST_H: f64 = 96.0;
@@ -113,6 +114,40 @@ pub fn close_setup_progress(app: &AppHandle, round: u64) {
 
 #[derive(Default)]
 pub struct Slots(Mutex<[bool; TOAST_MAX]>);
+
+/// 已經畫完（頁面回報過 `toast_painted`）的提示視窗 label；視窗關閉時清掉（#1953）
+#[derive(Default)]
+pub struct Painted(Mutex<HashSet<String>>);
+
+impl Painted {
+    fn mark(&self, label: &str) { self.0.lock().unwrap().insert(label.to_string()); }
+    fn forget(&self, label: &str) { self.0.lock().unwrap().remove(label); }
+    fn has(&self, label: &str) -> bool { self.0.lock().unwrap().contains(label) }
+}
+
+/// 提示頁掛載並等過兩個畫面更新後呼叫：回報「這扇已經畫出內容」。--shot 截圖前靠它判斷能不能拍
+#[tauri::command]
+pub fn toast_painted(window: Window, painted: State<'_, Painted>) {
+    if window.label().starts_with("toast-") { painted.mark(window.label()); }
+}
+
+const PAINT_WAIT_MS: u64 = 10_000;
+const PAINT_POLL_MS: u64 = 100;
+
+/// 等 `open()` 列出的每一扇都 `painted(label)` 為真，最多等 `max`；回傳逾時時還沒畫好的 label（全好就是空的）。
+/// 逾時不當錯誤：照常擷取，由測試門檻判定；沒畫好的是哪一扇寫進 log
+async fn wait_all_painted(open: impl Fn() -> Vec<String>, painted: impl Fn(&str) -> bool, max: Duration, poll: Duration) -> Vec<String> {
+    let t0 = std::time::Instant::now();
+    loop {
+        let waiting: Vec<String> = open().into_iter().filter(|l| !painted(l)).collect();
+        if waiting.is_empty() { return waiting }
+        if t0.elapsed() >= max {
+            elog!("[shot] 等了 {}ms 仍沒畫好的提示視窗：{}", t0.elapsed().as_millis(), waiting.join("、"));
+            return waiting;
+        }
+        tokio::time::sleep(poll).await;
+    }
+}
 
 /// 視窗外框：false＝自訂（ASN 自己畫 Aero 風標題列與邊框，預設）、true＝Windows 原生。
 /// 開機時讀資料夾裡 asn-me.json 的 frame 欄位（前端存的設定），之後由設定頁透過 set_frame 即時改。
@@ -430,10 +465,15 @@ pub async fn show_toast(app: AppHandle, slots: State<'_, Slots>, state: State<'_
     if let Some((x, y, sf)) = origin {
         builder = builder.position(x as f64 / sf, y as f64 / sf);
     }
+    // 視窗不論怎麼關（自動關、點掉、截圖後統一關）都清掉「已畫完」記錄
     let w = match builder.build() {
         Ok(w) => w,
         Err(e) => { release(&app, slot); return Err(e.to_string()); }
     };
+    let (a_ev, l_ev) = (app.clone(), label.clone());
+    w.on_window_event(move |ev| {
+        if let WindowEvent::Destroyed = ev { a_ev.state::<Painted>().forget(&l_ev); }
+    });
     if let Some((x, y, _)) = origin {
         let _ = w.set_position(PhysicalPosition::new(x, y));   // 建窗時的位置是邏輯座標；多螢幕縮放不同時這裡校正
     }
@@ -482,6 +522,16 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String
     if let Some((_, c)) = wins.iter().find(|(k, _)| k.starts_with("chat-")) { let _ = c.set_position(PhysicalPosition::new(420, 40)); let _ = c.set_always_on_top(true); }
     for (label, p) in &wins { if is_panel_label(label) { let _ = p.set_position(PhysicalPosition::new(420, 40)); let _ = p.set_always_on_top(true); } }
     tokio::time::sleep(Duration::from_millis(900)).await;
+    // 先等開著的提示視窗都回報畫完（上限約 10 秒）；逾時只記 log，照常擷取，由測試門檻判定
+    {
+        let a = app.clone();
+        wait_all_painted(
+            || a.webview_windows().into_keys().filter(|l| l.starts_with("toast-")).collect(),
+            |l| a.state::<Painted>().has(l),
+            Duration::from_millis(PAINT_WAIT_MS),
+            Duration::from_millis(PAINT_POLL_MS),
+        ).await;
+    }
     // 提示視窗只在這次截的是「完整一輪」（沒帶 tab）時才關：之後帶 tab 的逐頁截圖不拍提示視窗，也不需要它
     let close = tab.is_none();
     capture_then_cleanup(
@@ -516,16 +566,20 @@ where
     F: FnMut(Option<Vec<String>>) -> Fut,
     Fut: std::future::Future<Output = Result<Vec<String>, String>>,
 {
+    let t0 = std::time::Instant::now();
     let mut names = capture(None).await?;
-    for _ in 0..max_retry {
+    for n in 1..=max_retry {
         names.retain(|n| std::fs::metadata(dir.join(format!("{n}.png"))).map(|m| m.len() < min_bytes).unwrap_or(true));
         if names.is_empty() { break }
         tokio::time::sleep(gap).await;
         // 重截失敗（擷取程序偶發錯誤、視窗剛好被收掉）不該讓已截到的結果作廢：停止重試，照現狀交出
         names = match capture(Some(names)).await {
-            Ok(n) => n,
+            Ok(done) => done,
             Err(e) => { elog!("[shot] 重截失敗，保留已截到的圖：{e}"); break }
         };
+        // 每次重截都留一行：哪幾扇、現在多大、距離第一次截多久（排查「畫不出來」還是「時間不夠」用）
+        let sizes: Vec<String> = names.iter().map(|x| format!("{x}={}", std::fs::metadata(dir.join(format!("{x}.png"))).map(|m| m.len().to_string()).unwrap_or_else(|_| "無檔".into()))).collect();
+        elog!("[shot] 重截 {n}：{} 耗時 {}ms", sizes.join(" "), t0.elapsed().as_millis());
     }
     Ok(())
 }
@@ -541,6 +595,7 @@ async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>, onl
         if only.as_ref().is_some_and(|o| !o.contains(&name)) { continue }
         if let (Ok(p), Ok(s)) = (w.outer_position(), w.outer_size()) {
             names.push(name.clone());
+            if only.is_some() { elog!("[shot] 重截目標 {name}：visible={:?} 位置=({},{}) 大小={}x{}", w.is_visible(), p.x, p.y, s.width, s.height); }
             specs.push(format!("{name}|{}|{}|{}|{}", p.x, p.y, s.width, s.height));
         }
     }
@@ -598,6 +653,7 @@ async fn take_shot_capture(app: &AppHandle, dir: &Path, tab: Option<String>, onl
         if s.width == 0 || s.height == 0 {
             continue;
         }
+        if only.is_some() { elog!("[shot] 重截目標 {name}：visible={:?} 位置=({},{}) 大小={}x{}", w.is_visible(), p.x, p.y, s.width, s.height); }
         let out = dir.join(format!("{name}.png"));
         let area = format!("{},{},{},{}", p.x, p.y, s.width, s.height);
         let status = tokio::process::Command::new(&scrot).no_window()
@@ -697,6 +753,37 @@ mod tests {
         let l4 = l3.clone();
         let r = capture_then_cleanup(async { Err("擷取失敗".to_string()) }, move || *l4.lock().unwrap() = true).await;
         assert!(r.is_err() && *l3.lock().unwrap(), "截圖失敗也要關，且錯誤照原樣回傳");
+    }
+
+    /// #1953：已回報畫完的立刻放行；沒回報的等到上限，並回傳是哪一扇；中途回報了就放行
+    #[tokio::test]
+    async fn t1953_等提示視窗畫完() {
+        let ms = Duration::from_millis;
+        let open = || vec!["toast-0-0".to_string(), "toast-1-1".to_string()];
+        let t = std::time::Instant::now();
+        assert!(wait_all_painted(open, |_| true, ms(2000), ms(5)).await.is_empty());
+        assert!(t.elapsed() < ms(500), "都畫好了就不該等");
+        let t = std::time::Instant::now();
+        let left = wait_all_painted(open, |l| l == "toast-0-0", ms(120), ms(10)).await;
+        assert_eq!(left, vec!["toast-1-1".to_string()], "逾時要回傳沒畫好的那一扇");
+        assert!(t.elapsed() >= ms(120), "沒回報就要等到上限");
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let f2 = flag.clone();
+        tokio::spawn(async move { tokio::time::sleep(ms(60)).await; f2.store(true, Ordering::SeqCst); });
+        let left = wait_all_painted(|| vec!["toast-2-2".to_string()], |_| flag.load(Ordering::SeqCst), ms(3000), ms(10)).await;
+        assert!(left.is_empty(), "等待中回報了就放行");
+        assert!(wait_all_painted(Vec::new, |_| false, ms(50), ms(5)).await.is_empty(), "沒有提示視窗就不用等");
+    }
+
+    /// #1953：回報記錄只認 toast 視窗；關窗後清掉
+    #[test]
+    fn t1953_關窗會清掉已畫完記錄() {
+        let p = Painted::default();
+        assert!(!p.has("toast-2-2"));
+        p.mark("toast-2-2");
+        assert!(p.has("toast-2-2"));
+        p.forget("toast-2-2");
+        assert!(!p.has("toast-2-2"));
     }
 
     #[test]
