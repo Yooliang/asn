@@ -1,14 +1,9 @@
-// 自動發佈常駐程式（#1980 第二小項）：輪詢發版 run，全綠就依序跑 local_sign_publish（先 dry-run 再正式）。
-// 判斷規則全在 auto_publish_core.mjs；這支只負責呼叫端：取鎖、讀 gh、準備工作樹、跑子程序、存 state、貼群組。
+// 自動發佈常駐程式（#1980、#2003）：輪詢發版 run，全綠就依序跑 local_sign_publish（先 dry-run 再正式）。
+// 運行手冊（第一次上線、--seed、--ack、各檔案用途、回報訊息怎麼處理、怎麼停止）：docs/release/自動發佈運行手冊.md
 // 用法：node tools/release/auto_publish.mjs [--once] [--interval 120] [--state <檔>] [--room <群組代號>] [--dry-run-only]
-//   首次：node tools/release/auto_publish.mjs --seed <版號>（或 --seed-desktop <版號> --seed-linux <版號>）播種後結束（需加 --yes 才會執行；會先對照 gh 最新成功版號與線上 latest.json，起點低於線上版就拒絕）
-//   人工確認一筆失敗：node tools/release/auto_publish.mjs --ack <平台@版號>，存檔後結束
-//   ⚠ 運行手冊：電腦版自動那條紅了、改走備援手動發版之後，要對那一版下 --ack desktop@<版號>（Linux 若被標 blocked 也要 --ack linux@<版號>），
-//     否則有未清除的失敗，兩個平台的新版都會一直暫停（西川 #4561）
-// ⚠ 「曾經跑過」的痕跡（auto-publish.log、<state>.lock、<state>.notices.json）和 state 放在同一個資料夾，
-//   state 不見但痕跡還在時拒絕啟動，避免 state 被誤刪後重複發佈舊版。刪掉整個資料夾等於放棄這層保護：
-//   下次要用 --seed <版號> --yes 重新播種（播種會對照線上 latest.json，起點低於線上版就拒絕）。
-// state 能解析但結構不對（非物件、缺 seeded 或 done 等）一律當 bad-state：不覆寫、不發佈、群組只貼一次。
+//   播種：--seed <版號>（或 --seed-desktop／--seed-linux）--yes；人工確認一筆失敗：--ack <平台@版號>
+// 判斷規則全在 auto_publish_core.mjs；這支只負責呼叫端：取鎖、讀 gh、準備工作樹、跑子程序、存 state、貼群組。
+// 所有相對路徑與子程序（git、gh、node）都以 repo 根目錄為基準，不受啟動目錄影響；--state 給相對路徑則以啟動目錄解析成絕對路徑。
 // 必須在專用 worktree 內執行，不可在主 checkout。不用 gh run watch（它會每 3 秒查一次、燒光 API 額度）。
 import fs from 'node:fs'
 import os from 'node:os'
@@ -17,6 +12,10 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail } from './asn_cli.mjs'
+
+// repo 根目錄取自這支腳本自己的位置，不用 git rev-parse：後者要靠 cwd 才知道在哪個 repo，而 cwd 正是會漂移的東西；
+// 腳本在哪個 worktree 裡，根目錄就是那個 worktree（checkWorktree 再確認它不是主 checkout）。
+export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
 export const WORKFLOWS = [
   { platform: 'desktop', file: 'asn-release.yml', re: /^v(\d+\.\d+\.\d+)$/ },
@@ -78,7 +77,9 @@ export function checkWorktree(git) {
 }
 
 // local_sign_publish 正式那步要用的相依（簽章、firebase）；dry-run 不會用到，所以要在這裡先擋（雯 #4536）
+// 這裡放相對於 repo 根目錄的路徑，檢查時以 deps.repoRoot 為基準
 export const REQUIRED_DEPS = ['relay/asn/node_modules/@tauri-apps/cli/tauri.js']
+const rootOf = (deps) => deps.repoRoot ?? REPO_ROOT
 
 // 跑 local_sign_publish 之前把工作樹整理乾淨；回 { ok, why, cat }
 // why 含 git 原文（可能帶 remote URL／token），只能進 log；cat 是固定的類別文案，群組只准貼這個
@@ -98,7 +99,7 @@ export function prepareWorktree(deps) {
   for (const p of dirty) {
     const show = git(['show', `origin/main:${p}`])
     let mine
-    try { mine = readFile(p) } catch { mine = null }
+    try { mine = readFile(path.join(rootOf(deps), p)) } catch { mine = null }
     if (show.status !== 0 || mine === null || norm(show.stdout) !== norm(mine)) {
       return fail('site 檔與 main 不一致（不只是換行差異），不自動清理', `${p} 的內容和 origin/main 不一致（不只是換行差異），不自動清理`)
     }
@@ -110,7 +111,7 @@ export function prepareWorktree(deps) {
   const c = git(['checkout', '--detach', 'origin/main'])
   if (c.status !== 0) return fail('切到 origin/main 失敗', `切到 origin/main 失敗（${String(c.stderr).trim().slice(0, 200)}）`)
   const exists = deps.exists ?? ((p) => fs.existsSync(p))
-  const missing = REQUIRED_DEPS.filter((p) => !exists(p))
+  const missing = REQUIRED_DEPS.filter((p) => !exists(path.join(rootOf(deps), p)))
   if (missing.length) return fail('專用工作樹缺相依，請先在 relay/asn 跑 npm ci（dry-run 不會用到所以要先擋）', `專用工作樹缺相依（${missing.join('、')}）`)
   return { ok: true }
 }
@@ -294,13 +295,14 @@ export async function runOnce(opts, deps) {
     }
     if (nt.prep !== undefined) setN({ prep: undefined })
 
-    const args = ['tools/release/local_sign_publish.mjs']
+    const root = rootOf(deps)
+    const args = [path.join(root, 'tools', 'release', 'local_sign_publish.mjs')]
     if (d.platform === 'linux') args.push('--platform', 'linux', '--tag', d.tag, '--run-id', String(d.runId))
     else args.push('--tag', d.tag, '--run-id', String(d.runId), '--with-play', 'no')
     if (d.action === 'dryRun') args.push('--dry-run')
     if (opts.room) args.push('--room', opts.room)
     log(`執行：node ${args.join(' ')}`)
-    const r = spawn('node', args)
+    const r = spawn('node', args, { cwd: root })
     log(`子程序結束碼 ${r.status}\n--- stdout ---\n${r.stdout ?? ''}\n--- stderr ---\n${r.stderr ?? ''}`)
     return finish(r.status === 0, `local_sign_publish 結束碼 ${r.status}，細節看 auto-publish.log`)
   } finally {
@@ -370,14 +372,22 @@ export async function runCommand(opts, deps) {
   }
 }
 
-export function realDeps(opts) {
-  const cmd = (bin) => (args) => {
-    const r = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+// --state 給相對路徑時，以啟動目錄解析成絕對路徑；回 { state, note }，note 非 null 時要寫進 log
+export function resolveStatePath(state, cwd) {
+  if (path.isAbsolute(state)) return { state, note: null }
+  const abs = path.resolve(cwd, state)
+  return { state: abs, note: `--state 給的是相對路徑 ${state}，以啟動目錄 ${cwd} 解析，實際使用：${abs}` }
+}
+
+export function realDeps(opts, repoRoot = REPO_ROOT) {
+  const cmd = (bin) => (args, o = {}) => {
+    const r = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: repoRoot, ...o })
     return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: (r.stderr ?? '') + (r.error ? String(r.error.message) : '') }
   }
   const logPath = logPathOf(opts)
   return {
-    gh: cmd('gh'), git: cmd('git'), spawn: (bin, args) => cmd(bin)(args),
+    repoRoot,
+    gh: cmd('gh'), git: cmd('git'), spawn: (bin, args, o) => cmd(bin)(args, o),
     asnCli: makeAsnCli(),
     fetch: (u) => fetch(u, { signal: AbortSignal.timeout(15000) }),
     now: () => Date.now(), pid: process.pid,
@@ -404,7 +414,10 @@ export function realDeps(opts) {
 async function main() {
   const opts = parseArgs(process.argv.slice(2))
   if (opts.error) { console.error(opts.error); process.exit(2) }
+  const rs = resolveStatePath(opts.state, process.cwd())
+  opts.state = rs.state
   const deps = realDeps(opts)
+  if (rs.note) deps.log(rs.note)
   if (opts.ack || opts.seedDesktop || opts.seedLinux) {
     const r = await runCommand(opts, deps)
     ;(r.code === 0 ? console.log : console.error)(r.msg)
