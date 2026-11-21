@@ -2,7 +2,7 @@
 // 檔名開頭的 z 是為了排在最後：探測檔自帶的情境照檔名順序接在 smoke-lib 的 SCENARIOS 後面，這支排最後，既有情境的順序就完全不變。
 // 本檔自給自足（不 import smoke-lib）：設定頁基準情境用的假後台資料都在這裡，不跟別的情境共用，別人改共用資料不會讓這組基準跟著變。
 //
-// 情境：從 SETTING_CATS（電腦 13 類）、MOBILE_SETTING_KEYS（手機 8 類）算出來，每一類 × 三套外觀；手機 look／update／notify／about 另加 360 寬。
+// 情境：從 SETTING_CATS（電腦 12 類）、MOBILE_SETTING_KEYS（手機 8 類）算出來，每一類 × 三套外觀；手機 look／update／notify／about 另加 360 寬。
 // 設備、帳號、雲端代理三類另補「空、錯誤、忙碌」狀態（有資料＝每類每外觀那一組）；忙碌只有雲端代理做得出來（見 SET_STATE_GAPS）。
 // 名稱：電腦 list-set-<類>-<外觀>、手機 m-set-<類>-<外觀>、手機 360 m-set-<類>-360、狀態 list-set-<類>-<empty|error|busy>、m-set-<類>-<empty|error|busy>
 // 每個情境都帶 shot（進 ui-shots 比對），並用本檔的探測等到該類的標題與代表字（沒畫出來就失敗，不會拍到空白頁，R9）：
@@ -23,7 +23,7 @@ export const SET_STATE_GAPS = {
 export const SET_PHONE_360 = ['look', 'update', 'notify', 'about']
 // 每一類畫面上固定會出現的字（電腦：設定頁內容區；手機：內頁內容區）。標題另外驗（「設定：<分類名>」／手機內頁標題）
 const SET_WANT_DESK = {
-  me: ['我的名字'], devices: ['這台'], accounts: ['我的帳號'], cloud: ['邀請雲端代理'], look: ['復古 Aero', 'LINE 風格'], tabs: ['分頁依', '分組依'], notify: ['通知聲音'],
+  me: ['我的名字'], devices: ['這台'], accounts: ['我的帳號'], cloud: ['邀請雲端代理'], look: ['復古 Aero', 'LINE 風格', '分組依'], notify: ['通知聲音'],
   voice: ['念出訊息的聲音'], window: ['關閉視窗時'], launch: ['每小時開新夥伴上限'], usage: ['重新整理'], update: ['自動檢查更新'], about: ['隱私權政策'],
 }
 const SET_WANT_PHONE = { me: ['我的名字'], devices: ['這支手機'], accounts: ['我的帳號'], cloud: ['邀請雲端代理'], look: ['復古 Aero', '現代'], notify: ['收到新訊息時輕輕震一下'], update: ['版本紀錄'], about: ['隱私權政策'] }

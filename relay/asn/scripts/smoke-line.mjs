@@ -389,20 +389,15 @@ export const lineProbeSource = kind => `(async () => {
   // desk-settings
   if (!(await wait(() => radios().length === 3))) return { ok: false, why: 'LINE 外觀：' + '電腦外觀頁不是三選一：' + radios().length };
   const sel = label => document.querySelector('.set-sel[aria-label="' + label + '"]');
-  if (!sel('頭像模式') || !sel('文字底色')) return { ok: false, why: 'LINE 外觀：' + '找不到頭像模式／文字底色選單' };
-  // 存檔的值是 left／none；LINE 下停用的選單顯示「實際生效的值」（頭像在訊息旁、底色自動），切回其他外觀仍顯示並保留存檔的原值
-  const SAVED = ['left', 'none'], EFFECTIVE = ['inline', 'auto'];
-  const shown = () => [sel('頭像模式').value, sel('文字底色').value];
-  const disabled = () => sel('頭像模式').disabled && sel('文字底色').disabled;
-  const notes = () => document.querySelectorAll('#set-note-dp, #set-note-bubble').length;   // 只數 LINE 那兩行說明（頭像、底色）；外觀頁還有別的說明（#1530 的 GitHub 開關、現代外觀的工具列位置 #1790）
-  if (shown().join() !== EFFECTIVE.join()) return { ok: false, why: 'LINE 外觀：' + '停用的選單要顯示實際生效的值（頭像在訊息旁、底色自動）：' + shown().join('／') };
-  if (!disabled() || notes() < 2) return { ok: false, why: 'LINE 外觀：' + 'LINE 外觀下，頭像模式與文字底色要停用並附說明：' + disabled() + ' ' + notes() };
-  for (const v of ['modern', 'aero', 'line']) {
+  // #1547：外觀頁依所選外觀把用不到的選項整個藏起來（不是變灰）：現代藏工具列位置；LINE 藏頭像模式、文字底色、分頁依
+  const HIDE = { line: ['頭像模式', '文字底色', '分頁依'], modern: ['工具列位置'], aero: [] };
+  const ALL = ['頭像模式', '工具列位置', '文字底色', '分頁依', '分組依'];
+  const stateOf = () => ALL.filter(l => !sel(l)).join('、');
+  for (const v of ['line', 'modern', 'aero', 'line']) {
     const w = await pickSkin(v); if (w) return { ok: false, why: 'LINE 外觀：' + w };
     await sleep(300);
-    const want = v === 'line' ? EFFECTIVE : SAVED;
-    if (shown().join() !== want.join()) return { ok: false, why: 'LINE 外觀：' + '切到「' + v + '」後，頭像模式／文字底色顯示 ' + shown().join('／') + '，應該是 ' + want.join('／') };
-    if (v === 'line' ? !disabled() || notes() < 2 : (sel('頭像模式').disabled || sel('文字底色').disabled || notes() > 0)) return { ok: false, why: 'LINE 外觀：' + '切到「' + v + '」後，停用狀態不對' };
+    if (stateOf() !== HIDE[v].join('、')) return { ok: false, why: 'LINE 外觀：' + '切到「' + v + '」後，被藏起來的選項應是「' + HIDE[v].join('、') + '」，實際是「' + stateOf() + '」' };
+    if (document.querySelectorAll('.set-sel[disabled]').length) return { ok: false, why: 'LINE 外觀：' + '外觀頁不該再有變灰的選單' };
   }
   return { ok: true, why: '' };
   } catch (e) { return { ok: false, why: 'LINE 外觀：' + '探測出錯：' + e.message } }
