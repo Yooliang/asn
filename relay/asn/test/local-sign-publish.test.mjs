@@ -216,6 +216,22 @@ test('#2061 CI 多了 asn-installer-signed（desktop-sign 的產物）：允許�
   assert.ok(kinds(x.w).includes('sign'), '本機照舊簽章')
 })
 
+test('CI 多了 asn-e2e-shots-<次數>（e2e 截圖警告的產物）：允許存在、照常發佈，而且不下載它', async () => {
+  const x = await run(w => { w.artifacts.push({ ...w.artifacts[0], id: 6, name: 'asn-e2e-shots-1' }) })
+  assert.equal(x.r.ok, true, x.r.error)
+  const downloaded = x.w.events.filter(e => e.k === 'gh artifact').map(e => e.a[0])
+  assert.ok(!downloaded.includes(6), `不該下載截圖那包：${downloaded}`)
+  assert.ok(kinds(x.w).includes('sign'), '本機照舊簽章')
+})
+
+test('白名單樣式只放 asn-e2e-shots-<數字>：名字變形的照樣擋下', async () => {
+  for (const name of ['asn-e2e-shots-', 'asn-e2e-shots-1x', 'xasn-e2e-shots-1', 'asn-e2e-shots-1/../asn-installer-unsigned']) {
+    const x = await run(w => { w.artifacts.push({ ...w.artifacts[0], id: 7, name }) })
+    assert.equal(x.r.ok, false, name)
+    assert.match(x.r.error, /不在白名單/, name)
+  }
+})
+
 test('官網紀錄的平台：--with-play no 只寫官網；auto 看最新 attempt 的 android-upload；yes 直接寫 Play', async () => {
   const plat = x => { const a = x.w.events.find(e => e.k === 'asn-cli site').a; return a.filter((_, i) => a[i - 1] === '--platform') }
   assert.deepEqual(plat(await run(null, { withPlay: 'no' })), ['官網'])
