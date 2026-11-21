@@ -7,7 +7,7 @@ import { launchersErrorText } from './launcher-poll.mjs'
 import { ACP_NEWCONV_LABEL, ADOPT_ACK, PI_ADOPT_ACK, OP_LABEL, OP_POLL_MS, OP_PROGRESS_TEXT, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, SELF_PULL_LABEL, buildOpRequest, dialogEngine, infoRows, opErrorText, opFormError, piModelChoices, progressView, selfPullPid } from './partner-ops.mjs'
 import { cleanPiModels } from './pi-models.mjs'
 import { runArchive } from './archive.mjs'
-import { clearRun, runBanner, runFor, setRun } from './mobile-ops.mjs'
+import { clearRun, moveRun, runBanner, runFor, setRun } from './mobile-ops.mjs'
 import { switchModelsFor } from './model-catalog.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
@@ -72,7 +72,7 @@ export const makeOpRun = ({ onArchived = async () => {}, archive = runArchive } 
 }
 
 // 夥伴操作的「就地進度」（#1800、#1907）：送出後對話框收起，進度與結果只用一行字顯示在狀態列，不放任何按鈕；成功 4 秒、「已送出還沒確認」15 秒後自己消失，
-// 失敗留在原位，用白話說發生什麼，直到這位夥伴的下一個操作結果把它蓋掉（要重試就再按一次原本的操作）。手機與電腦用同一份狀態形狀、同一份文字。
+// 失敗留在原位，用白話說發生什麼、後面接「再按一次就會重試」，直到下一個操作（任何夥伴）把它蓋掉；狀態列只有一格。手機與電腦用同一份狀態形狀、同一份文字。
 // 滑鼠停在狀態列上、手指按著時：hold(id) 暫停倒數，release(id) 從剩下的時間繼續。
 // state＝{ runs }（電腦版傳 reactive 物件）；runs 的形狀與手機相同：{ [夥伴位址]: { op, name, view } }
 export function createOpRunner({ api, state, onDone = () => {}, run = runPartnerOp, setTimer = (f, ms) => setTimeout(f, ms), clearTimer = t => clearTimeout(t), now = Date.now } = {}) {
@@ -80,10 +80,15 @@ export function createOpRunner({ api, state, onDone = () => {}, run = runPartner
   const timers = new Map()
   const due = new Map()      // 夥伴位址 → { at: 預定消失的時間, held: 被暫停時剩下的毫秒 }
   const token = new Map()    // 同一位連按時，只認最後一次
+  const holding = new Set()  // 滑鼠／手指目前停在哪幾列上：新結果蓋掉舊結果時 mouseenter 不會再觸發，要自己記得
   const dropTimer = id => { if (timers.has(id)) { clearTimer(timers.get(id)); timers.delete(id) } due.delete(id) }
-  const arm = (id, ms) => { due.set(id, { at: now() + ms, held: null }); timers.set(id, setTimer(() => { timers.delete(id); due.delete(id); dismiss(id) }, ms)) }
+  const arm = (id, ms) => {
+    if (holding.has(id)) { due.set(id, { at: now() + ms, held: ms }); return }   // 正被停著：直接進入暫停，放開才開始倒數
+    due.set(id, { at: now() + ms, held: null }); timers.set(id, setTimer(() => { timers.delete(id); due.delete(id); dismiss(id) }, ms))
+  }
   async function start(friend, op, input) {
     const id = friend.id
+    for (const other of Object.keys(state.runs ?? {})) if (other !== id) dismiss(other)   // 狀態列只有一格：任何夥伴的新操作蓋掉上一則，不同夥伴的失敗不會疊起來
     reqs.set(id, { friend, op, input: { ...input } })
     dropTimer(id)
     const mine = (token.get(id) ?? 0) + 1
@@ -98,21 +103,34 @@ export function createOpRunner({ api, state, onDone = () => {}, run = runPartner
     if (v.phase === 'done') onDone({ op, view: v, friend, input })
     return v
   }
-  function dismiss(id) { dropTimer(id); token.set(id, (token.get(id) ?? 0) + 1); state.runs = clearRun(state.runs, id) }
+  function dismiss(id) { holding.delete(id); dropTimer(id); token.set(id, (token.get(id) ?? 0) + 1); state.runs = clearRun(state.runs, id) }
   const retry = id => { const r = reqs.get(id); return r ? start(r.friend, r.op, r.input) : Promise.resolve(null) }
   // 暫停倒數：滑鼠停在狀態列上、手指按著時。沒有在倒數的（進行中、失敗）什麼都不做
   function hold(id) {
+    holding.add(id)
     const d = due.get(id)
     if (!d || d.held !== null) return
     clearTimer(timers.get(id)); timers.delete(id)
     due.set(id, { at: d.at, held: Math.max(0, d.at - now()) })
   }
   function release(id) {
+    holding.delete(id)
     const d = due.get(id)
     if (!d || d.held === null) return
     arm(id, d.held)
   }
-  return { start, retry, dismiss, hold, release, runFor: id => runFor(state.runs, id) }
+  // 改名成功：進度、重試用的內容、倒數都跟著新位址走（舊位址那格清掉），按住暫停才找得到
+  function move(from, to) {
+    if (from === to) return
+    const d = due.get(from), wasHeld = holding.has(from)
+    dropTimer(from); holding.delete(from)
+    if (reqs.has(from)) { reqs.set(to, reqs.get(from)); reqs.delete(from) }
+    if (token.has(from)) { token.set(to, token.get(from)); token.delete(from) }
+    state.runs = moveRun(state.runs, from, to)
+    if (wasHeld) holding.add(to)
+    if (d) arm(to, d.held ?? Math.max(0, d.at - now()))
+  }
+  return { start, retry, dismiss, hold, release, move, runFor: id => runFor(state.runs, id) }
 }
 
 // 狀態列元件（#1907）：夥伴操作的進度與結果，每筆只有一行字，不放任何按鈕、步驟、路徑。不擋畫面、不是對話框；

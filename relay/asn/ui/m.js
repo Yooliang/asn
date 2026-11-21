@@ -36,7 +36,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, clearRun, hideAfterMs, moveRun, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
 import { buildPartnerMenu } from './lib/partner-menu.mjs'
 import { offlineView } from './lib/group-offline.mjs'
@@ -1307,11 +1307,9 @@ const app = createApp({
       await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
       const next = renamedChatId(f, op, input, view)
       if (!next) return
-      opsRuns.value = moveRun(opsRuns.value, f.id, next)   // 進度跟著新名字走，舊名字那格清掉
+      opRunner.move(f.id, next)   // 進度與自動消失的倒數都跟著新名字走，舊名字那格清掉
       prefs.chatPins = renamedPinId(prefs.chatPins, f.id, next)   // 釘選跟著換成新的對話位址（#1479）
       if (lastChat.value === f.id && core.friends.get(next)) lastChat.value = next   // 只有正在看的那一位才跟著跳；從名單改別人的名字不動對話頁
-      const ms = hideAfterMs(view)
-      if (ms > 0) setTimeout(() => { if (runFor(opsRuns.value, next)?.view === view) opsRuns.value = clearRun(opsRuns.value, next) }, ms)
     }
     async function execOp(f, op, input) {
       if (!showsInSheet(op)) { await opRunner.start(f, op, input); return }

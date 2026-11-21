@@ -59,10 +59,13 @@ export function moveRun(runs, from, to) {
 
 // 夥伴操作的狀態列（#1907）：run＝{ op, name, view }；回 null＝不顯示。只有一行字（text），不放步驟、不放補充、不放任何按鈕。
 // 擁有者 11-21：狀態列裡不放按鈕；失敗的那一行留著，直到下一個操作的結果把它蓋掉（要重試就再按一次原本的操作）
+const FAIL_NEXT_STEP = '，再按一次就會重試'
 export function runBanner(run) {
   const v = run?.view
   if (!v) return null
-  return { phase: v.phase, done: v.done === true, text: v.text, hideMs: hideAfterMs(v) }
+  // 失敗後面接一句能做的事（沒有按鈕可按，要說清楚下一步）
+  const text = v.phase === 'failed' ? `${String(v.text ?? '').trim().replace(/[。.]$/, '')}${FAIL_NEXT_STEP}` : v.text
+  return { phase: v.phase, done: v.done === true, text, hideMs: hideAfterMs(v) }
 }
 // 成功 4 秒後自己消失；「已送出、還沒確認」15 秒後消失（沒有按鈕可按，不能留到按）；失敗與進行中不消失。
 // 有 rows（詳情）的成功結果是給對話框看的，不在狀態列自動收

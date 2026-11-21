@@ -112,7 +112,7 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
   // #1800：非詳情的操作（含封存）改走電腦版共用的 createOpRunner，進度存在下指令那位（連同送出的內容，重試用）；行為測試在 op-progress-inline-1800.test.mjs
   assert.match(js, /const opsRunState = \{ get runs\(\) \{ return opsRuns\.value \}, set runs\(v\) \{ opsRuns\.value = v \} \}/)
   assert.match(js, /createOpRunner\(\{ api: opsTransport, state: opsRunState, run: makeOpRun\(\{ onArchived \}\)/)
-  assert.match(js, /opsRuns\.value = moveRun\(opsRuns\.value, f\.id, next\)/, '改名搬位址')
+  assert.match(js, /opRunner\.move\(f\.id, next\)/, '改名搬位址')
   // #1907：狀態列沒有按鈕，retryRun／dismissRun／launchNewFromBanner 全刪；手指按著暫停倒數，帶的是目前對話那位的位址
   assert.doesNotMatch(js, /\bretryRun\b|\bdismissRun\b|\blaunchNewFromBanner\b/)
   assert.match(js, /const holdRun = \(\) => \{ const f = chatFriend\.value; if \(f\) opRunner\.hold\(f\.id\) \}/)

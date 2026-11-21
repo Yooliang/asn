@@ -139,7 +139,7 @@ test('#1800 手機與電腦共用同一份元件與文字：按鈕字只來自 O
   assert.match(js, /OP_PROGRESS_TEXT/)
   // 進度的狀態（重試、幾秒後消失）只有一份實作：runBanner／hideAfterMs 在 mobile-ops.mjs，兩邊都從那裡取
   assert.match(mob, /export const hideAfterMs/)
-  assert.match(ui, /from '\.\/mobile-ops\.mjs'/); assert.match(js, /hideAfterMs/)
+  assert.match(ui, /from '\.\/mobile-ops\.mjs'/); assert.match(js, /opRunner\.move\(f\.id, next\)/, '手機改名後倒數也由 runner 搬，不另設計時器')
   assert.doesNotMatch(ui + js, /OP_DONE_HIDE_MS|6000\) *\/\/ 成功/, '消失時間不在兩邊各寫一份')
 })
 
@@ -341,4 +341,58 @@ test('#1907 runPartnerOp：完成且有 log 才寫進 ui.log（原文不吞掉�
     await runPartnerOp(fakeApi([{ status: 'ok' }]), F('H', '小文'), 'close', {}, { ...c, pollMs: 3000 })
     assert.deepEqual(logs.filter(l => l.includes('夥伴操作結果')), [])
   })
+})
+
+// 小悠一審（#2035）必修 1：改名成功後，手機的按住暫停要管到新位址上的倒數
+test('#1907 runner.move：改名後倒數跟著搬到新位址，按住暫停找得到，舊位址不再倒數', async () => {
+  const state = { runs: {} }
+  let t = 0, seq = 0
+  const timers = new Map()
+  const run = async (a, f, op, input, o) => { const v = { phase: 'done', done: true, text: '已改名。' }; o.onUpdate(v); return v }
+  const runner = createOpRunner({ api: {}, state, run, now: () => t, setTimer: (fn, ms) => { timers.set(++seq, { fn, ms }); return seq }, clearTimer: id => timers.delete(id) })
+  const f = F('H', '舊名')
+  await runner.start(f, 'rename', { newName: '新名' })
+  t += 1000
+  runner.move(f.id, 'H/新名')
+  assert.deepEqual(Object.keys(state.runs), ['H/新名'], '進度搬到新位址')
+  assert.deepEqual([...timers.values()].map(x => x.ms), [OP_DONE_HIDE_MS - 1000], '剩餘時間跟著搬，不是整段重來')
+  runner.hold('H/新名')
+  assert.equal(timers.size, 0, '用新位址 hold 得到')
+  t += 60_000
+  assert.ok(state.runs['H/新名'], '按著不消失')
+  runner.release('H/新名')
+  const fire = [...timers.values()][0].fn
+  timers.clear(); fire()
+  assert.deepEqual(state.runs, {}, '放開後到期才消失')
+})
+
+// 必修 2：滑鼠一直停在列上，新結果蓋掉舊結果時 mouseenter 不會再觸發
+test('#1907 滑鼠一直停著：新結果蓋掉舊結果後，新的倒數也是暫停的，mouseleave 才開始', async () => {
+  const state = { runs: {} }
+  let seq = 0
+  const timers = new Map()
+  const run = async (a, f, op, input, o) => { const v = { phase: 'done', done: true, text: '好了。' }; o.onUpdate(v); return v }
+  const runner = createOpRunner({ api: {}, state, run, now: () => 0, setTimer: (fn, ms) => { timers.set(++seq, { fn, ms }); return seq }, clearTimer: id => timers.delete(id) })
+  const f = F('H', '小文')
+  await runner.start(f, 'close', {})
+  runner.hold(f.id)            // 滑鼠停上去
+  await runner.start(f, 'close', {})   // 新結果蓋掉舊結果；沒有再觸發 mouseenter
+  assert.equal(timers.size, 0, '新倒數一開始就是暫停的')
+  assert.ok(state.runs[f.id])
+  runner.release(f.id)
+  assert.deepEqual([...timers.values()].map(x => x.ms), [OP_DONE_HIDE_MS], '滑鼠移開才開始倒數')
+})
+
+// asn真裁示：狀態列只有一格；失敗後面接一句能做的事（不放按鈕）
+test('#1907 狀態列只有一格：任何夥伴的新操作蓋掉上一則；失敗留著並接「再按一次就會重試」', async () => {
+  const state = { runs: {} }
+  const run = async (a, f, op, input, o) => { const v = f.nick === '甲' ? { phase: 'failed', done: true, text: '沒有成功：電腦不在線' } : { phase: 'done', done: true, text: '已關閉。' }; o.onUpdate(v); return v }
+  const runner = createOpRunner({ api: {}, state, run, setTimer: () => 0, clearTimer: () => {} })
+  const a = F('H', '甲'), b = F('H', '乙')
+  await runner.start(a, 'close', {})
+  assert.deepEqual(Object.keys(state.runs), [a.id], '失敗留著')
+  assert.equal(runBanner(state.runs[a.id]).text, '沒有成功：電腦不在線，再按一次就會重試')
+  assert.equal(runBanner({ view: { phase: 'done', done: true, text: '已關閉。' } }).text, '已關閉。', '成功的文字不動')
+  await runner.start(b, 'close', {})
+  assert.deepEqual(Object.keys(state.runs), [b.id], '另一位夥伴的新操作蓋掉上一則，不疊起來')
 })
