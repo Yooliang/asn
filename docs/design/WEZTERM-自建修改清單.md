@@ -22,6 +22,7 @@
 | 1 | cherry-pick 上游 #7706（`29d01fc8e53f4d0fe0c1cf4f31b64b49358a2ff8`）：`build_proc` 加 visited，防父子 PID 成環時無限遞迴 | `procinfo/src/{linux,macos,windows}.rs` | mux-server 堆疊溢位（0xc00000fd）；上游 20240203 沒有這個修正 | #1318 | **有**：上游 main 2026-06-07 合入。換到含這個 commit 的上游 tag 時就不用再 cherry-pick。 |
 | 2 | ASN 補丁 `0001-procinfo-build-proc-iterative.patch`：Windows 的 `build_proc` 改成迭代（廣度優先找樹、再由後往前組裝），深度上限 64，超過不再展開並記 `log::warn!` | `procinfo/src/windows.rs` | #7706 只防成環。一條很長、不成環的鏈照樣一路遞迴，工作機崩潰時約 857 層就溢位（dmp 結論見 #1318 issuecomment-7029219309） | #1896（PR #1971） | **沒有**：2026-11-21 查上游 main（最新動到這個檔的 commit 是 `d2f3f05b38`，2026-09-06），`build_proc` 仍然是遞迴。合上游時要確認補丁還套得上，並重跑紅燈測試。 |
 | 3 | ASN 補丁 `0002-procinfo-parent-start-time.patch`：Windows 的 `build_proc` 收集子行程時，父的啟動時間（GetProcessTimes）晚於子就不接上去並記 `log::debug!`；任何一邊拿不到時間照舊接上；每個 pid 的啟動時間在一次 `build_proc` 內只查一次（HashMap 快取） | `procinfo/src/windows.rs` | Windows 會重用 PID：子行程的原父行程結束後 PID 被較晚啟動的新行程拿走，子行程就被錯接到它底下（家用機、工作機各實測 2 條，沒有造成長鏈）。讓行程樹內容正確；當機已由第 2 項（0001）解決 | #1914 | **沒有**：2026-11-21 查上游 main 沒有對應修正。合上游時要確認補丁還套得上，並重跑「PID 重用」紅燈測試。 |
+| 4 | ASN 補丁 `0003-mux-server-heartbeat.patch`：mux-server 在環境變數 `ASN_MUX_HEARTBEAT`（完整檔案路徑）有設時，每 5 秒把一個「計數加一」的小任務丟進主執行緒（`spawn_into_main_thread(...).detach()`），另一條執行緒看到計數前進才寫 `{"v":1,"pid":…,"started_ms":…,"seq":…,"at_ms":…}`（先寫 .tmp 再改名）。讀完立刻 `remove_var`（窗格不會繼承）；沒設就完全不動作；在 `SimpleExecutor::new()` 之後才啟動；只用 std 與既有相依，不動 Cargo.toml／Cargo.lock | `wezterm-mux-server/src/main.rs`（只加幾行）、新增 `wezterm-mux-server/src/asn_heartbeat.rs` | ASN 判斷終端服務死活只能靠程序建立時間，服務「卡住但程序還在」時判不出來；心跳只用來把「活著」降級成「卡死」，內容不含使用者資料 | #1897 | **沒有**：上游沒有這類存活訊號。合上游時確認 `main.rs` 的 `remove_var` 段與 `SimpleExecutor::new()` 附近還套得上，並重跑心跳實測。 |
 
 - linux.rs、macos.rs 沒有加補丁 2：Linux 主執行緒的堆疊有 8MB，2000 層也不會溢位，做不出紅燈對照，目前也沒有崩潰實例。要改請另開單、先拿到證據。
 - 每份 ASN 補丁會動到哪些檔，宣告在 `patches/wezterm/manifest.txt`；`wezterm-apply-patches.sh` 會逐份核對：套用前比對 `git apply --numstat`，commit 之後比對 diff。
@@ -45,6 +46,7 @@
 | 成環不會無限遞迴（綠燈）；只有上游 tag 原版會溢位（紅燈對照） | `.github/scripts/wezterm-procinfo-cycle-test.sh`（Linux、Windows） |
 | 2000 層長鏈：套了補丁 2 會停在 64 層（綠燈）；只套 #7706 會溢位（紅燈對照） | 同上，只有 Windows（`PROCINFO_FAKE=chain`） |
 | 補丁和 manifest 一一對應，動到的檔等於宣告 | `relay/asn/test/wezterm-apply-patches.test.mjs` |
+| 心跳（補丁 0003）：單元測試（格式、seq 遞增、原子寫入、沒設變數不寫、旗標在任務取消／panic 時復位、寫檔只能經注入的主執行緒排程器觸發）；實測（起建好的 mux-server：檔案出現、格式與 pid 正確、seq 增加、窗格環境沒有 `ASN_MUX_HEARTBEAT`、沒設變數不產生檔案） | `wezterm-mux-server/src/asn_heartbeat.rs` 的 `#[cfg(test)]`、`.github/scripts/wezterm-heartbeat-test.sh`（接在 `wezterm-build.yml` 的 build-windows 與 `wezterm-build-linux.sh`；Linux 五個發行版、Windows 都跑）；守門的宣告檢查在 `wezterm-apply-patches.test.mjs` |
 | PDB 有產生、對得上 exe、不會被撿進 release | `relay/asn/test/wezterm-pdb-artifact.test.mjs` |
 
 ## 合上游時的步驟

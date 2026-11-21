@@ -1,0 +1,529 @@
+diff --git a/wezterm-mux-server/src/asn_heartbeat.rs b/wezterm-mux-server/src/asn_heartbeat.rs
+new file mode 100644
+index 0000000..dfffb01
+--- /dev/null
++++ b/wezterm-mux-server/src/asn_heartbeat.rs
+@@ -0,0 +1,492 @@
++//! ASN 修補 0003（#1897）：mux-server 定時寫出存活訊號。
++//!
++//! 只有環境變數 `ASN_MUX_HEARTBEAT`（完整檔案路徑）有設才會動作；沒設就完全不啟動任何執行緒。
++//! 設計重點：
++//! - 計時執行緒每 5 秒把一個只做「計數加一」的小任務丟進主執行緒（排程器可注入，測試用）。
++//! - 另一條寫檔執行緒只在計數前進時才寫檔：主執行緒卡死 → 計數不動 → 檔案不更新；
++//!   寫檔卡住（網路磁碟、防毒）不會拖住主執行緒。
++//! - 「上一個任務還沒執行就不再丟」的旗標用 guard 復位：任務執行完、被取消（沒執行就被丟棄）、panic 都會復位。
++//! - 內容是手寫的一行 JSON，不含任何使用者資料；先寫 .tmp 再改名蓋過。
++//! - 只用 std 與 promise（本來就是相依），不新增相依。
++
++use std::ffi::OsString;
++use std::fs;
++use std::io::Write;
++use std::path::{Path, PathBuf};
++use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
++use std::sync::Arc;
++use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
++
++/// 指定心跳檔完整路徑的環境變數名稱
++pub const ENV_NAME: &str = "ASN_MUX_HEARTBEAT";
++/// 每隔多久丟一個任務進主執行緒
++const TICK_INTERVAL: Duration = Duration::from_secs(5);
++/// 寫檔執行緒多久看一次計數
++const WRITE_POLL: Duration = Duration::from_secs(1);
++/// 寫檔失敗的 log 最多每多久一行
++const LOG_INTERVAL: Duration = Duration::from_secs(300);
++
++/// 要在主執行緒執行的小任務
++pub type MainThreadTask = Box<dyn FnOnce() + Send + 'static>;
++
++/// 把任務排到 mux 的主執行緒。正式環境用 [`PromiseScheduler`]；單元測試注入假的。
++pub trait MainThreadScheduler: Send + Sync + 'static {
++    fn schedule(&self, task: MainThreadTask);
++}
++
++/// 正式的排程器：`spawn_into_main_thread(...).detach()`。
++/// 必須在 `SimpleExecutor::new()` 設好排程器之後才能呼叫，否則 promise 會 panic。
++pub struct PromiseScheduler;
++
++impl MainThreadScheduler for PromiseScheduler {
++    fn schedule(&self, task: MainThreadTask) {
++        // 不 detach 的話 Task 一被丟棄任務就被取消
++        promise::spawn::spawn_into_main_thread(async move { task() }).detach();
++    }
++}
++
++/// 「已丟出、還沒跑完」旗標的 guard：被丟棄（跑完、取消、panic）時復位
++struct PendingGuard(Arc<Heartbeat>);
++
++impl Drop for PendingGuard {
++    fn drop(&mut self) {
++        self.0.pending.store(false, Ordering::SeqCst);
++    }
++}
++
++/// 主執行緒存活計數
++pub struct Heartbeat {
++    counter: AtomicU64,
++    pending: AtomicBool,
++}
++
++impl Heartbeat {
++    pub fn new() -> Arc<Self> {
++        Arc::new(Heartbeat {
++            counter: AtomicU64::new(0),
++            pending: AtomicBool::new(false),
++        })
++    }
++
++    /// 目前的計數（主執行緒跑過幾次任務）
++    pub fn counter(&self) -> u64 {
++        self.counter.load(Ordering::SeqCst)
++    }
++
++    /// 丟一個「計數加一」的任務給主執行緒；上一個還沒跑完就不丟。回傳有沒有丟出去。
++    pub fn tick(self: &Arc<Self>, scheduler: &dyn MainThreadScheduler) -> bool {
++        if self.pending.swap(true, Ordering::SeqCst) {
++            return false;
++        }
++        let guard = PendingGuard(Arc::clone(self));
++        scheduler.schedule(Box::new(move || {
++            let guard = guard; // 整個 guard 搬進任務：任務被丟棄時它才會被丟棄
++            guard.0.counter.fetch_add(1, Ordering::SeqCst);
++        }));
++        true
++    }
++}
++
++/// 讀取並移除環境變數（必須在第一個窗格產生之前，窗格才不會繼承到）。
++/// 沒設、或設成空字串都回 None（完全不動作）。
++pub fn take_env() -> Option<PathBuf> {
++    let value = std::env::var_os(ENV_NAME);
++    if value.is_some() {
++        std::env::remove_var(ENV_NAME);
++    }
++    parse_env(value)
++}
++
++fn parse_env(value: Option<OsString>) -> Option<PathBuf> {
++    value.filter(|v| !v.is_empty()).map(PathBuf::from)
++}
++
++fn now_ms() -> u64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_millis() as u64)
++        .unwrap_or(0)
++}
++
++/// 一行 JSON；全是數字，不需要跳脫
++fn render(pid: u32, started_ms: u64, seq: u64, at_ms: u64) -> String {
++    format!(
++        "{{\"v\":1,\"pid\":{},\"started_ms\":{},\"seq\":{},\"at_ms\":{}}}",
++        pid, started_ms, seq, at_ms
++    )
++}
++
++/// 先寫 `<path>.tmp` 再改名蓋過；任何一步失敗都回錯誤（呼叫端下次再寫）
++fn write_atomic(path: &Path, content: &str) -> std::io::Result<()> {
++    let mut tmp_name = path.as_os_str().to_os_string();
++    tmp_name.push(".tmp");
++    let tmp = PathBuf::from(tmp_name);
++    {
++        let mut f = fs::File::create(&tmp)?;
++        f.write_all(content.as_bytes())?;
++        f.write_all(b"\n")?;
++        f.flush()?;
++    }
++    fs::rename(&tmp, path)
++}
++
++/// 限速：兩次放行之間至少隔 `interval`
++struct RateLimit {
++    interval: Duration,
++    last: Option<Instant>,
++}
++
++impl RateLimit {
++    fn new(interval: Duration) -> Self {
++        RateLimit {
++            interval,
++            last: None,
++        }
++    }
++
++    fn allow(&mut self, now: Instant) -> bool {
++        match self.last {
++            Some(prev) if now.saturating_duration_since(prev) < self.interval => false,
++            _ => {
++                self.last = Some(now);
++                true
++            }
++        }
++    }
++}
++
++/// 寫檔端：看到計數前進才寫
++struct Writer {
++    path: PathBuf,
++    pid: u32,
++    started_ms: u64,
++    last_written: Option<u64>,
++    log_limit: RateLimit,
++}
++
++impl Writer {
++    fn new(path: PathBuf, pid: u32, started_ms: u64) -> Self {
++        Writer {
++            path,
++            pid,
++            started_ms,
++            last_written: None,
++            log_limit: RateLimit::new(LOG_INTERVAL),
++        }
++    }
++
++    /// 以目前的計數嘗試寫一次。回傳這次有沒有寫成功。
++    /// 計數為 0（主執行緒還沒跑過任務）或沒前進都不寫；失敗不更新 last_written，下次再寫。
++    fn step(&mut self, seq: u64, at_ms: u64, now: Instant) -> bool {
++        if seq == 0 || self.last_written == Some(seq) {
++            return false;
++        }
++        let line = render(self.pid, self.started_ms, seq, at_ms);
++        match write_atomic(&self.path, &line) {
++            Ok(()) => {
++                self.last_written = Some(seq);
++                true
++            }
++            Err(err) => {
++                if self.log_limit.allow(now) {
++                    log::warn!(
++                        "asn heartbeat: cannot write {}: {:#}",
++                        self.path.display(),
++                        err
++                    );
++                }
++                false
++            }
++        }
++    }
++}
++
++/// 啟動心跳（兩條執行緒）。`path` 為 None 就什麼都不做。
++/// 必須在 `SimpleExecutor::new()` 之後呼叫。
++pub fn start(path: Option<PathBuf>) {
++    if let Some(path) = path {
++        start_with(path, Arc::new(PromiseScheduler));
++    }
++}
++
++fn start_with(path: PathBuf, scheduler: Arc<dyn MainThreadScheduler>) {
++    let hb = Heartbeat::new();
++    let started_ms = now_ms();
++    log::info!("asn heartbeat: writing to {}", path.display());
++
++    let timer_hb = Arc::clone(&hb);
++    let spawned = std::thread::Builder::new()
++        .name("asn-heartbeat-tick".to_string())
++        .spawn(move || loop {
++            timer_hb.tick(&*scheduler);
++            std::thread::sleep(TICK_INTERVAL);
++        });
++    if let Err(err) = spawned {
++        log::error!("asn heartbeat: cannot start tick thread: {:#}", err);
++        return;
++    }
++
++    let mut writer = Writer::new(path, std::process::id(), started_ms);
++    let spawned = std::thread::Builder::new()
++        .name("asn-heartbeat-write".to_string())
++        .spawn(move || loop {
++            std::thread::sleep(WRITE_POLL);
++            writer.step(hb.counter(), now_ms(), Instant::now());
++        });
++    if let Err(err) = spawned {
++        log::error!("asn heartbeat: cannot start write thread: {:#}", err);
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::panic::{catch_unwind, AssertUnwindSafe};
++    use std::sync::Mutex;
++
++    /// 任務只排隊、由測試決定何時「在主執行緒」跑
++    #[derive(Default)]
++    struct ManualScheduler {
++        queue: Mutex<Vec<MainThreadTask>>,
++    }
++
++    impl ManualScheduler {
++        fn run_all(&self) {
++            let tasks: Vec<MainThreadTask> = std::mem::take(&mut *self.queue.lock().unwrap());
++            for t in tasks {
++                t();
++            }
++        }
++        fn drop_all(&self) {
++            self.queue.lock().unwrap().clear();
++        }
++        fn queued(&self) -> usize {
++            self.queue.lock().unwrap().len()
++        }
++    }
++
++    impl MainThreadScheduler for ManualScheduler {
++        fn schedule(&self, task: MainThreadTask) {
++            self.queue.lock().unwrap().push(task);
++        }
++    }
++
++    fn temp_dir(tag: &str) -> PathBuf {
++        static N: AtomicU64 = AtomicU64::new(0);
++        let dir = std::env::temp_dir().join(format!(
++            "asn-hb-test-{}-{}-{}",
++            tag,
++            std::process::id(),
++            N.fetch_add(1, Ordering::SeqCst)
++        ));
++        fs::create_dir_all(&dir).unwrap();
++        dir
++    }
++
++    fn field(json: &str, name: &str) -> u64 {
++        let key = format!("\"{}\":", name);
++        let start = json.find(&key).unwrap() + key.len();
++        let digits: String = json[start..]
++            .chars()
++            .take_while(|c| c.is_ascii_digit())
++            .collect();
++        digits.parse().unwrap()
++    }
++
++    #[test]
++    fn render_is_one_line_json_with_fixed_shape() {
++        assert_eq!(
++            render(4321, 1700000000000, 7, 1700000035000),
++            "{\"v\":1,\"pid\":4321,\"started_ms\":1700000000000,\"seq\":7,\"at_ms\":1700000035000}"
++        );
++    }
++
++    #[test]
++    fn env_unset_or_empty_means_disabled() {
++        assert_eq!(parse_env(None), None);
++        assert_eq!(parse_env(Some(OsString::new())), None);
++        assert_eq!(
++            parse_env(Some(OsString::from("/x/heartbeat.json"))),
++            Some(PathBuf::from("/x/heartbeat.json"))
++        );
++    }
++
++    #[test]
++    fn start_without_path_does_nothing() {
++        // 沒路徑：不起執行緒、不碰排程器（promise 沒設排程器時碰到會 panic，所以沒 panic 就代表沒碰）
++        start(None);
++    }
++
++    #[test]
++    fn threads_write_and_advance_with_injected_scheduler() {
++        struct Inline;
++        impl MainThreadScheduler for Inline {
++            fn schedule(&self, task: MainThreadTask) {
++                task();
++            }
++        }
++        let dir = temp_dir("threads");
++        let path = dir.join("heartbeat.json");
++        start_with(path.clone(), Arc::new(Inline));
++        let deadline = Instant::now() + Duration::from_secs(15);
++        let mut first = None;
++        while Instant::now() < deadline {
++            if let Ok(text) = fs::read_to_string(&path) {
++                let seq = field(&text, "seq");
++                match first {
++                    None => first = Some(seq),
++                    Some(f) if seq > f => {
++                        assert_eq!(field(&text, "pid"), std::process::id() as u64);
++                        return;
++                    }
++                    _ => {}
++                }
++            }
++            std::thread::sleep(Duration::from_millis(200));
++        }
++        panic!("heartbeat file did not appear and advance: {:?}", first);
++    }
++
++    #[test]
++    fn file_is_written_only_after_scheduler_runs_the_task() {
++        let dir = temp_dir("sched");
++        let path = dir.join("heartbeat.json");
++        let sched = ManualScheduler::default();
++        let hb = Heartbeat::new();
++        let mut w = Writer::new(path.clone(), 99, 1000);
++
++        // 計數為 0：不寫
++        assert!(!w.step(hb.counter(), 2000, Instant::now()));
++        assert!(!path.exists());
++
++        // 任務丟出去了但「主執行緒」還沒跑（卡死）：計數不動，不寫
++        assert!(hb.tick(&sched));
++        assert_eq!(sched.queued(), 1);
++        assert!(!w.step(hb.counter(), 3000, Instant::now()));
++        assert!(!path.exists());
++
++        // 上一個還沒跑就不再丟
++        assert!(!hb.tick(&sched));
++        assert_eq!(sched.queued(), 1);
++
++        // 主執行緒跑了任務：計數前進，才寫得出檔
++        sched.run_all();
++        assert_eq!(hb.counter(), 1);
++        assert!(w.step(hb.counter(), 4000, Instant::now()));
++        let text = fs::read_to_string(&path).unwrap();
++        assert_eq!(text, "{\"v\":1,\"pid\":99,\"started_ms\":1000,\"seq\":1,\"at_ms\":4000}\n");
++
++        // 計數沒前進就不重寫
++        assert!(!w.step(hb.counter(), 5000, Instant::now()));
++        assert_eq!(fs::read_to_string(&path).unwrap(), text);
++        fs::remove_dir_all(&dir).ok();
++    }
++
++    #[test]
++    fn seq_increases_with_each_main_thread_run() {
++        let dir = temp_dir("seq");
++        let path = dir.join("heartbeat.json");
++        let sched = ManualScheduler::default();
++        let hb = Heartbeat::new();
++        let mut w = Writer::new(path.clone(), std::process::id(), 1);
++        let mut seen = Vec::new();
++        for i in 0..3u64 {
++            assert!(hb.tick(&sched));
++            sched.run_all();
++            assert!(w.step(hb.counter(), 10 + i, Instant::now()));
++            let text = fs::read_to_string(&path).unwrap();
++            assert_eq!(field(&text, "pid"), std::process::id() as u64);
++            seen.push(field(&text, "seq"));
++        }
++        assert_eq!(seen, vec![1, 2, 3]);
++        fs::remove_dir_all(&dir).ok();
++    }
++
++    #[test]
++    fn write_is_atomic_no_tmp_left_and_overwrites() {
++        let dir = temp_dir("atomic");
++        let path = dir.join("heartbeat.json");
++        write_atomic(&path, "first").unwrap();
++        write_atomic(&path, "second").unwrap();
++        assert_eq!(fs::read_to_string(&path).unwrap(), "second\n");
++        let names: Vec<String> = fs::read_dir(&dir)
++            .unwrap()
++            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
++            .collect();
++        assert_eq!(names, vec!["heartbeat.json".to_string()]);
++        fs::remove_dir_all(&dir).ok();
++    }
++
++    #[test]
++    fn failed_write_is_retried_next_time() {
++        let dir = temp_dir("retry");
++        let missing = dir.join("not-yet");
++        let path = missing.join("heartbeat.json");
++        let mut w = Writer::new(path.clone(), 1, 1);
++        assert!(!w.step(1, 10, Instant::now())); // 資料夾不存在：失敗
++        assert_eq!(w.last_written, None);
++        fs::create_dir_all(&missing).unwrap();
++        assert!(w.step(1, 11, Instant::now())); // 同一個 seq 照樣補寫
++        assert_eq!(field(&fs::read_to_string(&path).unwrap(), "seq"), 1);
++        fs::remove_dir_all(&dir).ok();
++    }
++
++    #[test]
++    fn pending_flag_resets_when_task_runs() {
++        let sched = ManualScheduler::default();
++        let hb = Heartbeat::new();
++        assert!(hb.tick(&sched));
++        assert!(hb.pending.load(Ordering::SeqCst));
++        sched.run_all();
++        assert!(!hb.pending.load(Ordering::SeqCst));
++        assert!(hb.tick(&sched)); // 可以再丟
++    }
++
++    #[test]
++    fn pending_flag_resets_when_task_is_cancelled() {
++        let sched = ManualScheduler::default();
++        let hb = Heartbeat::new();
++        assert!(hb.tick(&sched));
++        sched.drop_all(); // 任務沒執行就被丟棄（Task 被取消）
++        assert!(!hb.pending.load(Ordering::SeqCst));
++        assert_eq!(hb.counter(), 0);
++        assert!(hb.tick(&sched));
++    }
++
++    #[test]
++    fn pending_flag_resets_when_task_panics() {
++        let hb = Heartbeat::new();
++        hb.pending.store(true, Ordering::SeqCst);
++        let guard = PendingGuard(Arc::clone(&hb));
++        let result = catch_unwind(AssertUnwindSafe(move || {
++            let _guard = guard;
++            panic!("task panicked");
++        }));
++        assert!(result.is_err());
++        assert!(!hb.pending.load(Ordering::SeqCst));
++    }
++
++    #[test]
++    fn rate_limit_allows_once_per_interval() {
++        let mut r = RateLimit::new(Duration::from_secs(300));
++        let t0 = Instant::now();
++        assert!(r.allow(t0));
++        assert!(!r.allow(t0 + Duration::from_secs(10)));
++        assert!(!r.allow(t0 + Duration::from_secs(299)));
++        assert!(r.allow(t0 + Duration::from_secs(300)));
++        assert!(!r.allow(t0 + Duration::from_secs(301)));
++    }
++
++    #[test]
++    fn write_failures_are_rate_limited_but_still_retried() {
++        let dir = temp_dir("limit");
++        let path = dir.join("gone").join("heartbeat.json");
++        let mut w = Writer::new(path, 1, 1);
++        let t0 = Instant::now();
++        // 連續失敗：每次都會重試寫（回傳 false），log 限速由 RateLimit 控制
++        assert!(!w.step(1, 1, t0));
++        assert!(!w.step(1, 2, t0 + Duration::from_secs(1)));
++        assert!(w.log_limit.last == Some(t0));
++        fs::remove_dir_all(&dir).ok();
++    }
++}
+diff --git a/wezterm-mux-server/src/main.rs b/wezterm-mux-server/src/main.rs
+index 56dcfe9..c79cff2 100644
+--- a/wezterm-mux-server/src/main.rs
++++ b/wezterm-mux-server/src/main.rs
+@@ -12,6 +12,7 @@ use std::thread;
+ use wezterm_gui_subcommands::*;
+ use wezterm_mux_server_impl::update_mux_domains_for_server;
+ 
++mod asn_heartbeat;
+ mod daemonize;
+ 
+ #[derive(Debug, Parser)]
+@@ -200,6 +201,8 @@ fn run() -> anyhow::Result<()> {
+     for name in &config::configuration().mux_env_remove {
+         std::env::remove_var(name);
+     }
++    // ASN 修補 0003（#1897）：讀完立刻移除，窗格才不會繼承；沒設就什麼都不做
++    let asn_heartbeat_path = asn_heartbeat::take_env();
+ 
+     wezterm_blob_leases::register_storage(Arc::new(
+         wezterm_blob_leases::simple_tempdir::SimpleTempDir::new()?,
+@@ -227,6 +230,9 @@ fn run() -> anyhow::Result<()> {
+ 
+     let executor = promise::spawn::SimpleExecutor::new();
+ 
++    // ASN 修補 0003（#1897）：必須在排程器設好（上一行）之後才能啟動
++    asn_heartbeat::start(asn_heartbeat_path);
++
+     spawn_listener().map_err(|e| {
+         log::error!("problem spawning listeners: {:?}", e);
+         e
