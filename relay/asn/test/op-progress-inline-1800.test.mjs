@@ -419,3 +419,22 @@ test('#1907 失敗但再按也沒用（找不到對話紀錄）：不接「再�
   assert.equal(runBanner({ view: { phase: 'failed', done: true, text: '沒有成功：x', noRetry: true } }).text, '沒有成功：x')
   assert.equal(runBanner({ view: { phase: 'failed', done: true, text: '沒有成功：x' } }).text, '沒有成功：x，再按一次就會重試')
 })
+
+// #1907 位置：夥伴操作的狀態列在畫面最下面（電腦＝對話窗最下面的 .op-slot；手機＝輸入區下面、導覽列上面）
+test('#1907 位置守門：電腦版 teleport 到 chatpane 最下面的 .op-slot；手機橫幅在 chat-pane 之後；不再蓋在功能列下面', () => {
+  const chat = read('ui/lib/chatpane.mjs'), bar = read('ui/lib/actionbar.mjs'), html = read('ui/m.html'), css = read('ui/style.css') + read('ui/skin-common.css')
+  assert.ok(chat.indexOf('<div class="typing"') < chat.indexOf('<div class="op-slot" ref="opSlotEl">'), '.op-slot 在最下面那條狀態列（.typing）之後')
+  assert.match(chat, /<action-bar [^>]*:op-slot="opSlotEl"/)
+  assert.match(bar, /<teleport :to="opSlot" :disabled="!opSlot"><partner-op-strip /)
+  // 每個 action-bar 都要有 :op-slot，而且指到實際存在的 .op-slot（含終端分頁）：沒有的話狀態列會留在功能列裡、擠開按鈕或蓋在內容上
+  const list = read('ui/list.html')
+  const bars = [...(list + read('ui/chat.html') + chat).matchAll(/<action-bar [^>]*>/g)].map(m => m[0])
+  assert.ok(bars.length >= 2, '找得到 action-bar')
+  for (const x of bars) assert.match(x, /:op-slot=/, '每個功能列都要有 :op-slot：' + x.slice(0, 60))
+  assert.match(list, /:op-slot="termOpSlotEl"/); assert.match(list, /<div class="op-slot" ref="termOpSlotEl">/, '終端分頁最下面有 .op-slot')
+  assert.match(read('ui/list.js'), /termOpSlotEl,\s*\n?\s*version:/, 'list.js 有把 termOpSlotEl 交給範本')
+  assert.doesNotMatch(css, /\.actionbar \.op-strip\s*[{,]/, '不再用 absolute 蓋在內容上')
+  const ci = html.indexOf('<chat-pane v-if="chatFriend"'), bi = html.indexOf('class="m-ops-run"')
+  assert.ok(ci > 0 && bi > ci, '手機橫幅在 chat-pane 之後')
+  assert.ok(bi < html.indexOf('</section>', bi), '仍在對話頁的 section 裡（導覽列之上）')
+})

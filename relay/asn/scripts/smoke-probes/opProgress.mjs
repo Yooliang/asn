@@ -26,6 +26,9 @@ export const opProgressProbeSource = ({ mode, want }) => `(async () => {
   if (blocker()) return { ok: false, why: '送出後還有擋住畫面的框（進度應該就地顯示）' };
   const box = await find(boxSel, '');
   if (!box) return { ok: false, why: '送出後畫面上沒有就地的進度' };
+  // 位置（#1907）：電腦＝對話窗最下面那一格（.op-slot，在最下面的狀態列之後）；手機＝輸入區下面、在對話內容之後
+  if (phone) { const pane = document.querySelector('.m-chat .chatpane'); if (!pane || !(pane.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING)) return { ok: false, why: '手機的狀態列要在對話與輸入區之後（最下面）' } }
+  else { const slot = box.closest('.op-slot'); const typing = slot?.parentElement?.querySelector(':scope > .typing'); if (!slot || !typing || !(typing.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING)) return { ok: false, why: '電腦的狀態列要在對話窗最下面（最下面那條狀態列之後）' } }
   const text = () => (document.querySelector(boxSel)?.textContent ?? '').replace(/\\s+/g, ' ').trim();
   if (/先關掉（照常進行）/.test(document.body.textContent)) return { ok: false, why: '畫面上不該再有「先關掉（照常進行）」' };
   const btns = () => [...document.querySelectorAll(boxSel + ' button')].map(b => b.textContent.trim());

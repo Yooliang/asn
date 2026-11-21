@@ -190,7 +190,11 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .op-strip-tx{flex:1 1 140px;overflow-wrap:anywhere}
 .op-strip-bar{flex:0 0 36px;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--muted) 0 40%,transparent 40%);background-size:200% 100%;animation:op-strip-run 1.2s linear infinite}
 @keyframes op-strip-run{from{background-position:100% 0}to{background-position:-100% 0}}
-.actionbar .op-strip{position:absolute;z-index:20;left:8px;top:100%;margin:2px 0 0;max-width:min(520px,calc(100% - 16px))}
+/* 夥伴操作的進度與結果（#1907）：放在對話窗最下面（.op-slot），跟最下面那條狀態列一樣的寬度與字級，不蓋住對話或輸入區 */
+.op-slot{flex:none}
+.op-slot:empty{display:none}
+.op-slot .op-strip{margin:0;gap:0}
+.op-slot .op-strip-row{border-radius:0;padding:3px 14px;font-size:12px;border-top:1px solid var(--line)}
 .archive-note{margin:4px 8px 0;padding:6px 10px;border-radius:6px;background:#e4f5e6;color:var(--title-fg);font-size:12px;line-height:1.5}
 .c-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 8px;border-top:1px solid var(--line);background:var(--panel-soft);font-size:12px;color:var(--muted)}
 .conn{display:flex;align-items:center;gap:5px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

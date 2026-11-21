@@ -396,6 +396,7 @@ export const ActionBar = {
   name: 'ActionBar',
   components: { AsnDialog, PartnerOpDialog, PartnerOpStrip, OpsMenuButton, MoreMenuButton, OfflineMenuButton, AsnAvatar },
   props: {
+    opSlot: { type: Object, default: null },   // 夥伴操作狀態列要放的位置（對話窗最下面，#1907）；沒給就留在功能列裡
     friend: { type: Object, default: null },
     selfNode: { type: String, default: '' },
     api: { type: Object, default: null },        // 要有 partnerConsoleQuery／partnerConsoleSet／modelSwitchQuery／modelSwitchRun（lib/tauri.mjs 的 transport）；沒給就不放一對一的 6 格
@@ -653,7 +654,7 @@ export const ActionBar = {
     </div>
   </template>
   <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :self-node="selfNode" :pi-models="piModels" @close="opDlg.open = false" @run="onOpRun" @launch-new="onLaunchNew"></partner-op-dialog>
-  <partner-op-strip :runner="opRunner" :runs="opRun.runs" :only="friend && friend.id"></partner-op-strip>
+  <teleport :to="opSlot" :disabled="!opSlot"><partner-op-strip :runner="opRunner" :runs="opRun.runs" :only="friend && friend.id"></partner-op-strip></teleport>
   <ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img/ab-group.svg" tip="邀請、加 AI、成員與設定" :items="groupAll" @pick="pickGroup"></ops-menu-button>
   <ops-menu-button v-if="(!isRoom && api) || opsAll.length" :items="opsAll" :disabled="!isRoom && !slot.manage.ok" :reason="slot.manage.reason" @pick="pickOps"></ops-menu-button>
   <span class="ab-note" v-if="archiveNote" role="status">{{ archiveNote }}</span>
