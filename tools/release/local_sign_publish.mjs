@@ -294,7 +294,10 @@ export async function localSignPublish(opts, deps) {
       try {
         const res = await fetchFn(`${SITE_BASE}/update/latest.json?t=${now()}`, { headers: { 'cache-control': 'no-cache' } })
         if (!res.ok) bad(`讀不到線上 latest.json（HTTP ${res.status}）`)
-        online = JSON.parse(await res.text()).version
+        const onlineObj = JSON.parse(await res.text())
+        online = onlineObj.version
+        // #1964：記下線上目前有沒有 Linux 項（電腦版產的 latest.json 只有 windows-x86_64，部署後 Linux 項會暫時消失）
+        S.onlineHadLinux = !!onlineObj?.platforms?.['linux-x86_64']
       } catch (e) { if (e instanceof StepError) throw e; bad('讀不到線上 latest.json，無法確認版本不退') }
       if (!/^\d+\.\d+\.\d+$/.test(online ?? '')) bad('線上 latest.json 的 version 格式不對')
       const c = compareVersions(version, online)
@@ -317,9 +320,21 @@ export async function localSignPublish(opts, deps) {
       })
     })
 
+    // #1964：latest.json 只有一個 version，舊的 Linux 項不能留（Linux 端會看到新版、裝到舊檔，無限更新），所以電腦版部署後 Linux 項會暫時沒有。
+    // 不靜默：每次都寫 log；這版沒打 linux-v 標籤（不發 Linux）時另貼群組。有發 Linux 時空窗只有幾分鐘（常駐程式接著跑），不貼群組以免洗版（領隊 #1964 定 A）
+    const noteLinuxGap = async () => {
+      if (!S.onlineHadLinux) return
+      let linuxTag = ''
+      try { linuxTag = String(git(['tag', '--list', `linux-v${version}`])).trim() } catch { linuxTag = '' }
+      const releasing = !!linuxTag
+      log(`latest.json 的 Linux 項已暫時移除（電腦版 v${version} 只帶 windows-x86_64）：${releasing ? `這版有 linux-v${version}，等 Linux 發佈補回` : `這版沒有 linux-v${version}，Linux 使用者停在上一版`}`)
+      if (!releasing) await post(`【Linux 更新資訊暫停】v${version}：這版不發 Linux，Linux 使用者停在上一版，直到下一個有 Linux 的版本。`)
+    }
+
     // ---- 8 firebase 部署（predeploy 照舊由 firebase.json 觸發）
     await step(8, 'firebase 部署', async () => {
       await firebase({ version: S.firebaseVersion, args: ['deploy', '--only', 'hosting', '--project', FIREBASE_PROJECT], cwd: path.join(repoRoot, 'site') })
+      await noteLinuxGap()
     })
 
     // ---- 9 線上核對
