@@ -717,10 +717,21 @@ export class AsnCore {
       ...(Object.keys(this.readDirty).length ? { readDirty: this.readDirty } : {}),
     })
     try {
-      let keep = LOG_KEEP, data = build(keep)
-      while (keep > LOG_KEEP_MIN && byteLength(JSON.stringify(data)) > SAVE_BUDGET) { keep = Math.max(LOG_KEEP_MIN, Math.floor(keep * 0.75)); data = build(keep) }
-      if (keep < LOG_KEEP && keep !== this.savedKeep) this.log(`save trimmed: 存檔太大，每位夥伴只存最近 ${keep} 列`)
-      this.savedKeep = keep
+      let keep = LOG_KEEP, data = build(keep), size = byteLength(JSON.stringify(data))
+      while (keep > LOG_KEEP_MIN && size > SAVE_BUDGET) { keep = Math.max(LOG_KEEP_MIN, Math.floor(keep * 0.75)); data = build(keep); size = byteLength(JSON.stringify(data)) }
+      // 縮到最少列數還是超過（夥伴很多、訊息很長）：從最久沒往來的夥伴開始，把他的往來記錄從存檔拿掉（記憶體保留），拿到低於預算為止
+      const dropped = []
+      if (size > SAVE_BUDGET) {
+        const lastT = id => data.logs[id].at(-1)?.t ?? 0
+        for (const id of Object.keys(data.logs).sort((a, b) => lastT(a) - lastT(b))) {
+          if (size <= SAVE_BUDGET) break
+          size -= byteLength(JSON.stringify(data.logs[id])) + byteLength(JSON.stringify(id)) + 2
+          delete data.logs[id]; dropped.push(id)
+        }
+      }
+      const note = dropped.length ? `save dropped: 存檔仍太大，這幾位的往來記錄先不存（記憶體保留）：${dropped.join('、')}` : keep < LOG_KEEP ? `save trimmed: 存檔太大，每位夥伴只存最近 ${keep} 列` : ''
+      if (note && note !== this.savedNote) this.log(note)
+      this.savedNote = note
       await withTimeout(this.store.save(data), this.stepMs, 'save')
     } catch (e) { this.log(`save failed: ${e.message}`) }
   }

@@ -50,3 +50,22 @@ test('#2043 守門：預算與 Rust 上限的關係（改 Rust 上限時要一�
   assert.equal(Number(m[1].replaceAll('_', '')), RUST_LIMIT)
   assert.ok(SAVE_BUDGET <= RUST_LIMIT - 1_000_000, '前端預算要比 Rust 上限至少小 1MB（友人資料等不在縮的範圍內）')
 })
+
+// 小悠一審（#2046）：縮到最少列數還是超過時，從最久沒往來的夥伴開始整個拿掉，不能照樣送出去讓 Rust 拒絕
+test('#2043 夥伴很多、訊息很長：縮到最少列數還超過，就拿掉最久沒往來的夥伴，存檔仍在預算內', async () => {
+  const logs = []
+  const long = '很長的中文訊息，'.repeat(150)   // 約 3.6KB 一列
+  const { core, store } = mk(300, 50, long, m => logs.push(m))
+  // 夥伴 i 最後一則的時間隨 i 增加：編號小的最久沒往來
+  for (let c = 0; c < 300; c++) for (const r of core.logs.get(`H/夥伴${c}`)) r.t = 1_790_000_000_000 + c * 1000
+  assert.ok(bytes({ logs: Object.fromEntries([...core.logs]) }) > RUST_LIMIT, '前提：每位只留 50 列也超過 Rust 上限')
+  await core.flush()
+  assert.equal(store.saves, 1)
+  assert.ok(bytes(store.data) <= SAVE_BUDGET, `存檔 ${bytes(store.data)} 位元組要在預算內`)
+  assert.ok(bytes(store.data) <= RUST_LIMIT)
+  assert.equal(store.data.logs['H/夥伴0'], undefined, '最久沒往來的先拿掉')
+  assert.ok(store.data.logs['H/夥伴299'], '最近往來的還在')
+  assert.equal(core.logs.get('H/夥伴0').length, 50, '記憶體保留')
+  assert.equal(store.data.friends.length, 300, '夥伴名單本身不拿掉')
+  assert.ok(logs.some(m => /save dropped/.test(m) && m.includes('H/夥伴0')), '寫進 log 記下拿掉了誰')
+})
