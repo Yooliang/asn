@@ -465,3 +465,12 @@ test('#1966 asn-cli 失敗：stderr 原文只進終端機，貼到群組的中�
   assert.ok(posts.some(p => /asn-cli site release 失敗（結束碼 1/.test(p)))
   assert.ok(c.w.logs.some(l => l.includes(SECRET)), '終端機要印出原文')
 })
+test('#1999 部署之後才中止（推送回 main 用盡）：群組中止訊息標明「線上已是 vX、網站檔沒回 main」；部署前中止不加', async () => {
+  const b = await run(w => { w.pushFailTimes = 99 })
+  const posts = b.w.events.filter(e => e.k === 'asn-cli send').map(e => e.a[4])
+  assert.ok(posts.some(p => /發版中止/.test(p) && /⚠ 線上已是 v\d+\.\d+\.\d+、網站檔沒回 main/.test(p)), posts.join(' | '))
+  const c = await run(w => { w.asnStatus.site = 1 }) // 第 10 步（部署之後）
+  assert.ok(c.w.events.filter(e => e.k === 'asn-cli send').some(e => /線上已是/.test(e.a[4])))
+  const a = await run(w => { w.firebaseDeployFails = true }) // 第 8 步部署本身失敗
+  assert.ok(!a.w.events.filter(e => e.k === 'asn-cli send').some(e => /線上已是/.test(e.a[4])), '部署沒成功不能說線上已更新')
+})

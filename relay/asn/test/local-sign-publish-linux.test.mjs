@@ -458,3 +458,9 @@ test('#1966 貼群組失敗：log 要帶 asn-cli 的錯誤原因（例如找不�
   assert.equal(r.ok, true, r.error)
   assert.ok(y.w.logs.some(l => /貼群組失敗（結束碼 1：找不到 asn-cli/.test(l)), y.w.logs.join('\n'))
 })
+test('#1999 Linux：部署之後推送回 main 用盡→中止訊息標明線上已更新、網站檔沒回 main', async () => {
+  const x = await run(w => { w.pushFailTimes = 9 })
+  aborts(x, 9, /連續被拒 3 次/)
+  const posts = x.w.events.filter(e => e.k === 'asn-cli send').map(e => e.a[4])
+  assert.ok(posts.some(p => /Linux 發版中止/.test(p) && /⚠ 線上已是 v.*網站檔沒回 main/.test(p)), posts.join(' | '))
+})

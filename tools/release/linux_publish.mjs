@@ -12,6 +12,7 @@ import { verifyAll, sigMatchesLatest } from './verify_sig.mjs'
 import { verifyOnlineLinux } from './verify_online.mjs'
 import { listZip } from './zip_lite.mjs'
 import { asnCliFail } from './asn_cli.mjs'
+import { onlineAheadOfMain } from './abort_notice.mjs'
 
 export const LINUX_WORKFLOW = '.github/workflows/asn-release-linux.yml'
 export const LINUX_WORKFLOW_FILE = 'asn-release-linux.yml'
@@ -309,7 +310,7 @@ export async function linuxSignPublish(opts, deps) {
   } catch (e) {
     const known = e instanceof StepError
     const done = completed.length ? completed.join('、') : '（無）'
-    const text = `【Linux 發版中止】v${version}：卡在第 ${st.step} 步（${st.name}）${known ? `：${e.message}` : '（詳見發版機器終端機）'}。已完成：${done}`
+    const text = `【Linux 發版中止】v${version}：卡在第 ${st.step} 步（${st.name}）${known ? `：${e.message}` : '（詳見發版機器終端機）'}。已完成：${done}${onlineAheadOfMain(completed, version)}`
     log(`${text}${known ? '' : `\n原因：${e?.message ?? e}`}`)
     await post(text)
     return { ok: false, dryRun, failedStep: st.step, failedName: st.name, completed, error: e.message }

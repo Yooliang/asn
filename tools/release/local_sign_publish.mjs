@@ -24,6 +24,7 @@ import { listZip } from './zip_lite.mjs'
 import { publishRelease as realPublishRelease, attachToRelease as realAttachToRelease } from './github_release.mjs'
 import { linuxSignPublish } from './linux_publish.mjs'
 import { makeAsnCli, asnCliFail } from './asn_cli.mjs'
+import { onlineAheadOfMain } from './abort_notice.mjs'
 
 export const REPO = 'Yooliang/asn'
 export const WORKFLOW = '.github/workflows/asn-release.yml'
@@ -396,7 +397,7 @@ export async function localSignPublish(opts, deps) {
     const known = e instanceof StepError
     const done = completed.length ? completed.join('、') : '（無）'
     // 只有自己寫的訊息才貼出去；其他錯誤（外部指令的原文）只留終端機
-    const text = `【發版中止】v${version}：卡在第 ${st.step} 步（${st.name}）${known ? `：${e.message}` : '（詳見發版機器終端機）'}。已完成：${done}`
+    const text = `【發版中止】v${version}：卡在第 ${st.step} 步（${st.name}）${known ? `：${e.message}` : '（詳見發版機器終端機）'}。已完成：${done}${onlineAheadOfMain(completed, version)}`
     log(`${text}${known ? '' : `\n原因：${e?.message ?? e}`}`)
     await post(text)
     return { ok: false, dryRun, failedStep: st.step, failedName: st.name, completed, error: e.message }
