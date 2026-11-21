@@ -201,9 +201,6 @@
                 <div class="m-head-tx"><div class="m-title">對話</div></div>
               </template>
             </header>
-            <div class="m-ops-run" v-if="opsBanner" :class="'is-' + opsBanner.phase" role="status" @touchstart.passive="holdRun" @touchend="releaseRun" @touchcancel="releaseRun">
-              <p class="m-ops-run-tx">{{ opsBanner.text }}</p>
-            </div>
             <p class="m-err m-room-note" v-if="roomNote && chatFriend && chatFriend.room" role="alert">{{ roomNote }}</p>
             <div class="m-peer-strip" v-if="chatFriend && peerStrip" role="status">
               <span class="m-peer-strip-tx">{{ KNOWN_TEXT.stripTitle }}</span>
@@ -215,6 +212,10 @@
               @send="(text, opts) => sendTo(chatFriend.id, text, opts)" @nudge="nudgeTo(chatFriend.id)" @attach="(p, cap, done) => sendAttachTo(chatFriend.id, p, cap, done)"
               :room-cards="chatCards" @group-decide="(cid, ok) => decideCard(chatFriend.id, cid, ok)" @viewer="onPhotoViewer" ref="chatPaneEl"></chat-pane>
             <div class="m-scroll" v-else><div class="empty-list">{{ chatEmptyText }}</div></div>
+            <!-- 夥伴操作的進度與結果（#1907）：輸入區下面、導覽列上面，一行字、不放按鈕 -->
+            <div class="m-ops-run" v-if="opsBanner" :class="'is-' + opsBanner.phase" role="status" @touchstart.passive="holdRun" @touchend="releaseRun" @touchcancel="releaseRun">
+              <p class="m-ops-run-tx">{{ opsBanner.text }}</p>
+            </div>
           </section>
 
           <!-- 設定 -->

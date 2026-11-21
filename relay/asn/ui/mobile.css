@@ -389,7 +389,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-ops-rows{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:15px}
 .m-ops-rows dt{color:var(--muted)} .m-ops-rows dd{margin:0;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
 /* 對話頁頂端的進度條 */
-.m-ops-run{flex:none;display:flex;flex-direction:column;gap:6px;padding:10px 14px;background:#e6f1fc;border-bottom:1px solid var(--line);color:var(--title-fg)}
+.m-ops-run{flex:none;display:flex;flex-direction:column;gap:6px;padding:8px 14px;background:#e6f1fc;border-top:1px solid var(--line);color:var(--title-fg)}
 .m-ops-run.is-failed{background:#fde8e6;color:#7a1710}
 .m-ops-run.is-done{background:#e4f5e6}
 .m-ops-run-tx{margin:0;font-size:15px;line-height:1.45;overflow-wrap:anywhere}
