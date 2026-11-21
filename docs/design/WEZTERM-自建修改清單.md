@@ -20,7 +20,7 @@
 | # | 修改 | 動到的檔 | 為什麼 | 單號 | 上游有沒有對應修正 |
 |---|---|---|---|---|---|
 | 1 | cherry-pick 上游 #7706（`29d01fc8e53f4d0fe0c1cf4f31b64b49358a2ff8`）：`build_proc` 加 visited，防父子 PID 成環時無限遞迴 | `procinfo/src/{linux,macos,windows}.rs` | mux-server 堆疊溢位（0xc00000fd）；上游 20240203 沒有這個修正 | #1318 | **有**：上游 main 2026-06-07 合入。換到含這個 commit 的上游 tag 時就不用再 cherry-pick。 |
-| 2 | ASN 補丁 `0001-procinfo-build-proc-iterative.patch`：Windows 的 `build_proc` 改成迭代（廣度優先找樹、再由後往前組裝），深度上限 64，超過不再展開並記 `log::warn!` | `procinfo/src/windows.rs` | #7706 只防成環。一條很長、不成環的鏈照樣一路遞迴，工作機崩潰時約 857 層就溢位（dmp 結論見 #1318 issuecomment-7029219309） | #1896（PR #1971） | **沒有**：2026-11-21 查上游 main（最新動到這個檔的 commit 是 `d2f3f05b38`，2026-09-05），`build_proc` 仍然是遞迴。合上游時要確認補丁還套得上，並重跑紅燈測試。 |
+| 2 | ASN 補丁 `0001-procinfo-build-proc-iterative.patch`：Windows 的 `build_proc` 改成迭代（廣度優先找樹、再由後往前組裝），深度上限 64，超過不再展開並記 `log::warn!` | `procinfo/src/windows.rs` | #7706 只防成環。一條很長、不成環的鏈照樣一路遞迴，工作機崩潰時約 857 層就溢位（dmp 結論見 #1318 issuecomment-7029219309） | #1896（PR #1971） | **沒有**：2026-11-21 查上游 main（最新動到這個檔的 commit 是 `d2f3f05b38`，2026-09-06），`build_proc` 仍然是遞迴。合上游時要確認補丁還套得上，並重跑紅燈測試。 |
 
 - linux.rs、macos.rs 沒有加補丁 2：Linux 主執行緒的堆疊有 8MB，2000 層也不會溢位，做不出紅燈對照，目前也沒有崩潰實例。要改請另開單、先拿到證據。
 - 每份 ASN 補丁會動到哪些檔，宣告在 `patches/wezterm/manifest.txt`；`wezterm-apply-patches.sh` 會逐份核對：套用前比對 `git apply --numstat`，commit 之後比對 diff。
