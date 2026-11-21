@@ -3,7 +3,7 @@
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
 import { switchModelsFor } from './model-catalog.mjs'
 import { friendId } from './roster.mjs'
-import { MENU_KEYS, OP_DONE_HIDE_MS, partnerEngine } from './partner-ops.mjs'
+import { MENU_KEYS, OP_DONE_HIDE_MS, OP_UNCONFIRMED_HIDE_MS, partnerEngine } from './partner-ops.mjs'
 import { isMergedAway } from './notice.mjs'
 
 // ---------- 「對話」分頁：最後使用的那一位 ----------
@@ -57,22 +57,19 @@ export function moveRun(runs, from, to) {
   return setRun(clearRun(runs, from), to, run)
 }
 
-// 對話頁頂端的進度條：run＝{ op, name, view }；回 null＝不顯示。steps 是換班接手的分段，extra 是補充（交接檔位置）
-export const STEP_MARK = { done: '✓', active: '…', todo: '○' }
+// 夥伴操作的狀態列（#1907）：run＝{ op, name, view }；回 null＝不顯示。只有一行字（text），不放步驟、不放補充、不放任何按鈕。
+// 擁有者 11-21：狀態列裡不放按鈕；失敗的那一行留著，直到下一個操作的結果把它蓋掉（要重試就再按一次原本的操作）
+const FAIL_NEXT_STEP = '，再按一次就會重試'
 export function runBanner(run) {
   const v = run?.view
   if (!v) return null
-  return {
-    phase: v.phase, done: v.done === true, text: v.text,
-    steps: (v.steps ?? []).map(s => ({ key: s.key, state: s.state, text: s.text, mark: STEP_MARK[s.state] ?? '' })),
-    extra: v.extra ?? [],
-    action: v.action ?? null,
-    retry: v.phase === 'failed',   // 失敗：可以再送一次
-    hideMs: hideAfterMs(v),
-  }
+  // 失敗後面接一句能做的事（沒有按鈕可按，要說清楚下一步；再按也沒用的失敗，例如找不到對話紀錄，view.noRetry 就不接）
+  const text = v.phase === 'failed' && !v.noRetry ? `${String(v.text ?? '').trim().replace(/[。.]$/, '')}${FAIL_NEXT_STEP}` : v.text
+  return { phase: v.phase, done: v.done === true, text, hideMs: hideAfterMs(v) }
 }
-// 成功、而且沒有補充要看（交接檔位置、提醒）：幾秒後自己消失。失敗、未確認、有補充的留著，等使用者處理
-export const hideAfterMs = v => (v?.phase === 'done' && !(v.extra ?? []).length && !(v.rows ?? []).length ? OP_DONE_HIDE_MS : 0)
+// 成功 4 秒後自己消失；「已送出、還沒確認」15 秒後消失（沒有按鈕可按，不能留到按）；失敗與進行中不消失。
+// 有 rows（詳情）的成功結果是給對話框看的，不在狀態列自動收
+export const hideAfterMs = v => (v?.phase === 'done' && !(v.rows ?? []).length ? OP_DONE_HIDE_MS : v?.phase === 'unconfirmed' ? OP_UNCONFIRMED_HIDE_MS : 0)
 
 // ---------- 「⋯」選單的列 ----------
 // 手機對話頁上方不放大按鈕列，所有管理項目都在「⋯」裡：最常用的喚醒、切換模型排最前面，其餘照 manageItems 的順序。

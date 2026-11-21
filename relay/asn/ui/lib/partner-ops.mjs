@@ -24,7 +24,8 @@ export const OP_PROGRESS_TEXT = Object.freeze({
   close: '關閉',
   launchNew: '開新夥伴',
 })
-export const OP_DONE_HIDE_MS = 6000   // 成功且沒有要看的補充：這麼久之後自己消失
+export const OP_DONE_HIDE_MS = 4000   // 成功：這麼久之後自己消失（#1907，原本 6 秒；滑鼠或手指停著時暫停倒數）
+export const OP_UNCONFIRMED_HIDE_MS = 15000   // 「已送出、還沒確認結果」：狀態列不放按鈕，所以這麼久之後自己消失（#1907）
 export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
 export const OP_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘沒被取走會自己標失敗；這裡多留一分鐘
@@ -348,7 +349,7 @@ const DONE_TEXT = {
   rename: '已改名。',
   model: '已切換模型。',
   close: '視窗已關閉，對話記錄還在。',
-  handover: '換班接手完成，新視窗開好了。',
+  handover: '已換班，新視窗接手了',
   resume: '已喚醒，視窗開好了。',
   restart: '已重開，對話保留。',
 }
@@ -359,10 +360,6 @@ export const HANDOVER_STEPS = [
   { key: 'opening', text: '開新視窗' },
 ]
 const stageOf = detail => /^stage:([a-z]+)$/.exec(String(detail ?? ''))?.[1] ?? ''
-const stepsAt = (stage, allDone = false) => {
-  const at = HANDOVER_STEPS.findIndex(s => s.key === stage)
-  return HANDOVER_STEPS.map((s, i) => ({ ...s, state: allDone || i < at ? 'done' : i === at ? 'active' : 'todo' }))
-}
 // 喚醒找不到對話紀錄：電腦端回報的原句（與 src-tauri/src/bridge/partner_ops.rs 的 NO_RECORD 逐字相同，測試會對照）與後台的代號
 export const NO_RECORD_TEXT = '找不到原本的對話紀錄，只能開新的夥伴'
 export const NO_RECORD_CODE = 'no_session'
@@ -381,8 +378,8 @@ function reasonText(detail) {
 
 // 進度：partner_ops 回的那一筆（status：pending／taken／ok／failed／unconfirmed）。
 // opts：{ op, sentAt（送出時間，毫秒）, now（毫秒）}；等太久還沒結果就當逾時
-// 換班接手的結果補充：交接檔位置、新視窗用的模型（給人看）；前任沒寫完要說
-function handoverExtra(result) {
+// 換班接手的結果細節：交接檔位置、新視窗用的模型、前任沒寫完。#1907：狀態列只放一行字，這些不放畫面，改回 view.log，由呼叫端寫進 ui.log
+function handoverLog(result) {
   const r = result && typeof result === 'object' && !Array.isArray(result) ? result : {}
   const lines = []
   if (typeof r.handoff_path === 'string' && r.handoff_path) lines.push(`交接檔：${short(r.handoff_path, 300)}`)
@@ -391,8 +388,9 @@ function handoverExtra(result) {
   return lines
 }
 
-// 進度：回 { phase, done, text, steps?, extra? }。換班接手處理中依電腦端回報的階段（detail＝stage:代號）分段顯示：
-// 請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成；steps 是各階段的狀態（done／active／todo），完成時附交接檔位置
+// 進度：回 { phase, done, text, log? }。text 是狀態列那一行字（#1907：不放步驟清單、不放按鈕、不放路徑與模型名稱）。
+// 換班接手處理中依電腦端回報的階段（detail＝stage:代號）寫成同一行裡的「（第幾步／共幾步）」：請前任寫交接 → 關閉前任視窗 → 開新視窗；
+// log 是不放畫面、只給呼叫端寫進 ui.log 的細節（交接檔位置、模型、提醒）
 export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() } = {}) {
   const waited = sentAt ? now - sentAt : 0
   const limit = row?.status !== 'taken' ? OP_GIVE_UP_MS : op === 'handover' ? HANDOVER_GIVE_UP_MS : op === 'rename' || op === 'model' ? QUEUE_GIVE_UP_MS : OP_GIVE_UP_MS
@@ -401,37 +399,36 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
       const v = { phase: 'done', done: true, text: DONE_TEXT[op] ?? '完成。' }
       if (op === 'handover' && row.result?.kind === 'pi_adopt') {
         const who = typeof row.result.name === 'string' ? short(row.result.name, 60) : ''
-        v.text = `已接手：原本的 pi 已關閉${row.result.kept_terminal === false ? '' : '（終端機留著）'}，用同一段對話開了由 ASN 管理的 pi${who ? `「${who}」` : ''}。`
-        v.extra = ['之後可以從名單寄信給它，也可以改名、切換模型；要改名字請用「改名」。']
+        v.text = `已接手，用同一段對話開了新的 pi${who ? `「${who}」` : ''}`
+        v.log = [`接手 pi：原本的 pi 已關閉${row.result.kept_terminal === false ? '' : '（終端機留著）'}，用同一段對話開了由 ASN 管理的 pi${who ? `「${who}」` : ''}`]
         return v
       }
       if (op === 'handover' && row.result?.kind === 'adopt') {
-        // 接手 grok：沒有前任、沒有交接檔；提醒先關掉終端機那個 grok
+        // 接手 grok：沒有前任、沒有交接檔。「請先關掉終端機那個 grok」在接手前的確認視窗已經要使用者勾選（ADOPT_ACK），成功後不重複（#1907）
         const who = typeof row.result.name === 'string' ? short(row.result.name, 60) : ''
-        v.text = row.result.already === true ? `已經接手過了${who ? `（專屬工作者「${who}」）` : ''}。` : `已接手${who ? `，專屬工作者「${who}」` : ''}載入了同一段對話。`
-        v.extra = ['請先關掉終端機那個 grok（ASN 不會替你關）：兩邊同時用同一段對話可能互相覆蓋。']
+        v.text = row.result.already === true ? `已經接手過了${who ? `（專屬工作者「${who}」）` : ''}` : `已接手，專屬工作者${who ? `「${who}」` : ''}載入了同一段對話`
         return v
       }
-      if (op === 'close' && row.result?.kind === 'acp') v.text = '工作者已關閉（本次執行；設定檔沒改）。名單上顯示「已停止」，按「重開」或重啟 ASN 後會恢復。'
-      if (op === 'remove') v.text = '已移除：工作者的程序結束了，也從名冊刪掉；工作資料夾的檔案留著。'
-      if (op === 'handover') { v.steps = stepsAt('', true); v.extra = handoverExtra(row.result) }
+      if (op === 'close' && row.result?.kind === 'acp') { v.text = '已關閉，名單上顯示「已停止」，按「重開」可恢復'; v.log = ['關閉內建通道工作者：只結束這次執行的程序，設定檔沒改；按「重開」或重啟 ASN 後會恢復'] }
+      if (op === 'remove') { v.text = '已移除，工作資料夾的檔案留著'; v.log = ['移除內建通道工作者：程序已結束，也從名冊刪掉；工作資料夾的檔案留著'] }
+      if (op === 'handover') { const l = handoverLog(row.result); if (l.length) v.log = l }
       return v
     }
     case 'failed':
-      // 喚醒找不到對話紀錄：多給一個「開新夥伴」動作，畫面照它多放一顆按鈕
-      if (op === 'resume' && isNoRecord(row.detail)) return { phase: 'failed', done: true, text: `沒有成功：${NO_RECORD_TEXT}`, action: { kind: LAUNCH_NEW_ACTION } }
+      // 喚醒找不到對話紀錄：一樣只寫原因（#1907：狀態列不放按鈕，要開新夥伴請從名單的「新增」）
+      if (op === 'resume' && isNoRecord(row.detail)) return { phase: 'failed', done: true, text: `沒有成功：${NO_RECORD_TEXT}`, noRetry: true }   // 再按一次也沒用，狀態列不接「再按一次就會重試」
       return { phase: 'failed', done: true, text: `沒有成功：${reasonText(row.detail)}` }
     case 'unconfirmed': {
       const v = { phase: 'unconfirmed', done: true, text: '已經送出，但還沒確認結果；稍後看看名單。' }
-      if (op === 'handover') v.extra = handoverExtra(row.result)
+      if (op === 'handover') { const l = handoverLog(row.result); if (l.length) v.log = l }
       return v
     }
     case 'taken':
       if (waited > limit) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }
       if (op === 'handover') {
         const stage = stageOf(row.detail)
-        const step = HANDOVER_STEPS.find(s => s.key === stage)
-        return { phase: 'working', done: false, text: step ? `${step.text}中…` : '正在處理…', steps: stepsAt(stage) }
+        const at = HANDOVER_STEPS.findIndex(s => s.key === stage)
+        return { phase: 'working', done: false, text: at >= 0 ? `${HANDOVER_STEPS[at].text}中…（第 ${at + 1}／${HANDOVER_STEPS.length} 步）` : '正在處理…' }
       }
       if (stageOf(row.detail) === 'queued') return { phase: 'working', done: false, text: '排隊中，等它忙完…' }
       return { phase: 'working', done: false, text: '正在處理…' }

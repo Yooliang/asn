@@ -33,8 +33,9 @@ test('送出並輪詢：只送 node／name／op 與該動作的欄位，進度�
   const { v, seen } = await run(api, F('H', '小文'), 'handover', { note: ' 先看 PR ', newName: 'x', model: 'y' })
   assert.deepEqual(api.calls.op, [{ node: 'H', name: '小文', op: 'handover', note: '先看 PR' }])
   assert.deepEqual(api.calls.ops, [['op-1'], ['op-1'], ['op-1'], ['op-1']])
-  assert.deepEqual(seen.map(x => x.text), ['正在發送指令…', '正在發送指令…', '請前任寫交接中…', '關閉前任視窗中…', '換班接手完成，新視窗開好了。'])
-  assert.equal(v.phase, 'done'); assert.deepEqual(v.extra, ['交接檔：D:/h/a.md'])
+  assert.deepEqual(seen.map(x => x.text), ['正在發送指令…', '正在發送指令…', '請前任寫交接中…（第 1／3 步）', '關閉前任視窗中…（第 2／3 步）', '已換班，新視窗接手了'])
+  assert.equal(v.phase, 'done'); assert.deepEqual(v.log, ['交接檔：D:/h/a.md']); assert.equal(v.extra, undefined)
+  assert.doesNotMatch(v.text, /D:|a.md|交接檔/, '畫面那行字不放交接檔路徑')
 })
 
 test('送出失敗：沒登入、後台代碼都翻成中文，不洩漏英文；喚醒走同一個動作', async () => {

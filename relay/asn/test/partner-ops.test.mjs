@@ -50,13 +50,15 @@ test('接手：送出前一定要勾「我已了解」（二次確認），沒�
   assert.deepEqual(buildOpRequest(f, 'handover', { ack: true }), { node: 'H', name: 'grok #65324（前景）', op: 'handover' })
 })
 
-test('接手完成：說明專屬工作者載入了同一段對話並提醒先關掉終端機的 grok；不出現交接檔與「新視窗」的說法', () => {
+test('接手完成：一行字說專屬工作者載入了同一段對話；成功後不再重複「先關掉終端機那個 grok」（接手前確認視窗已有）；不出現交接檔與「新視窗」', () => {
   const v = progressView({ status: 'ok', result: { kind: 'adopt', name: 'grok-接手-專案', already: false } }, { op: 'handover' })
   assert.equal(v.phase, 'done')
-  assert.equal(v.text, '已接手，專屬工作者「grok-接手-專案」載入了同一段對話。')
-  assert.match(v.extra.join(''), /先關掉終端機那個 grok.*互相覆蓋/)
+  assert.equal(v.text, '已接手，專屬工作者「grok-接手-專案」載入了同一段對話')
+  assert.doesNotMatch(v.text, /關掉終端機|新視窗|交接檔/)
+  assert.equal(v.extra, undefined)
   assert.equal(v.steps, undefined)
-  assert.match(progressView({ status: 'ok', result: { kind: 'adopt', name: 'x', already: true } }, { op: 'handover' }).text, /已經接手過了/)
+  assert.equal(v.log, undefined, '接手 grok 沒有要寫進 log 的補充')
+  assert.equal(progressView({ status: 'ok', result: { kind: 'adopt', name: 'x', already: true } }, { op: 'handover' }).text, '已經接手過了（專屬工作者「x」）')
   assert.match(progressView({ status: 'failed', detail: '找不到這個 grok 正在用的對話，所以不接手' }, { op: 'handover' }).text, /沒有成功：找不到這個 grok/)
 })
 
@@ -141,21 +143,22 @@ test('送出前檢查與請求內容：只放該動作的欄位；節點與視�
   assert.equal(opFormError(W('C', 'a'), 'close', {}, blocked), REASON.closed, '反灰的項目不送出')
 })
 
-test('換班接手的進度分段：請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成（附交接檔位置）', () => {
+test('換班接手的進度：請前任寫交接 → 關閉前任視窗 → 開新視窗 → 完成；一行字（第幾步／共三步），交接檔位置與提醒只進 log', () => {
   const t0 = 1_000_000
   const at = (detail, now = t0 + 1000) => progressView({ status: 'taken', detail }, { op: 'handover', sentAt: t0, now })
-  const states = v => v.steps.map(s => s.state)
-  assert.deepEqual([at('stage:handoff').text, states(at('stage:handoff'))], ['請前任寫交接中…', ['active', 'todo', 'todo']])
-  assert.deepEqual([at('stage:closing').text, states(at('stage:closing'))], ['關閉前任視窗中…', ['done', 'active', 'todo']])
-  assert.deepEqual([at('stage:opening').text, states(at('stage:opening'))], ['開新視窗中…', ['done', 'done', 'active']])
+  assert.equal(at('stage:handoff').text, '請前任寫交接中…（第 1／3 步）')
+  assert.equal(at('stage:closing').text, '關閉前任視窗中…（第 2／3 步）')
+  assert.equal(at('stage:opening').text, '開新視窗中…（第 3／3 步）')
+  for (const s of ['handoff', 'closing', 'opening']) assert.deepEqual(Object.keys(at('stage:' + s)).sort(), ['done', 'phase', 'text'], '只有一行字，沒有 steps／extra／action／retry')
   assert.equal(at('').text, '正在處理…', '還沒回報階段')
   assert.equal(at('stage:evil <b>').text, '正在處理…', '看不懂的階段不外露')
   const p = 'C:/Users/x/.asn/handoff/交接/p_1/20261022-101500.md'
   const done = progressView({ status: 'ok', result: { handoff_path: p, handoff_done: true } }, { op: 'handover' })
-  assert.deepEqual([done.phase, done.text, states(done), done.extra], ['done', '換班接手完成，新視窗開好了。', ['done', 'done', 'done'], ['交接檔：' + p]])
+  assert.deepEqual([done.phase, done.text, done.log, done.extra, done.steps], ['done', '已換班，新視窗接手了', ['交接檔：' + p], undefined, undefined])
   const partial = progressView({ status: 'ok', result: { handoff_path: 'D:/h/a.md', handoff_done: false } }, { op: 'handover' })
-  assert.match(partial.extra.join(' '), /前任沒有寫完交接/)
-  assert.deepEqual(progressView({ status: 'ok' }, { op: 'handover' }).extra, [], '沒有結果也不壞')
+  assert.match(partial.log.join(' '), /前任沒有寫完交接/)
+  assert.doesNotMatch(partial.text, /前任沒有寫完|D:/, '畫面那行字不放提醒與路徑')
+  assert.equal(progressView({ status: 'ok' }, { op: 'handover' }).log, undefined, '沒有結果也不壞')
   assert.deepEqual(progressView({ status: 'ok' }, { op: 'resume' }), { phase: 'done', done: true, text: '已喚醒，視窗開好了。' })
   // 處理中的上限：換班接手要等前任寫交接，放寬到 15 分鐘；其他動作仍是 3 分鐘
   assert.equal(at('stage:handoff', t0 + OP_GIVE_UP_MS + 1).done, false)
@@ -197,7 +200,7 @@ test('進度：已送出 → 電腦正在處理 → 完成／失敗原因；等�
   assert.deepEqual(progressView({ status: 'taken' }, { sentAt: t0, now: t0 + 1000 }), { phase: 'working', done: false, text: '正在處理…' })
   assert.equal(progressView({ status: 'ok' }, { op: 'rename' }).text, '已改名。')
   assert.match(progressView({ status: 'ok' }, { op: 'close' }).text, /已關閉/)
-  assert.match(progressView({ status: 'ok' }, { op: 'handover' }).text, /換班接手/)
+  assert.equal(progressView({ status: 'ok' }, { op: 'handover' }).text, '已換班，新視窗接手了')
   assert.equal(progressView({ status: 'ok', op: 'model' }).text, '已切換模型。', 'op 取自那一筆')
   assert.ok(progressView({ status: 'ok' }).done)
   assert.equal(progressView({ status: 'failed', detail: '找不到這個視窗' }).text, '沒有成功：找不到這個視窗')
@@ -291,11 +294,13 @@ test('ACP 工作者的項目也受登入、開放、離線的條件管；離線�
   assert.match(off.find(i => i.key === 'restart').reason, /已離線.*重開/)
 })
 
-test('ACP 工作者的「關閉」：送出的請求只有節點、名字、動作；完成文字說明只停本次、設定檔沒改', () => {
+test('ACP 工作者的「關閉」：送出的請求只有節點、名字、動作；完成文字一行說名單上顯示已停止、可重開；設定檔沒改改放 log', () => {
   const f = W('H', 'Gemini', { engine: 'gemini' })
   assert.deepEqual(buildOpRequest(f, 'close', {}), { node: 'H', name: 'Gemini', op: 'close' })
   const v = progressView({ status: 'ok', result: { kind: 'acp', stopped: true } }, { op: 'close' })
-  assert.match(v.text, /工作者已關閉.*設定檔沒改/)
+  assert.equal(v.text, '已關閉，名單上顯示「已停止」，按「重開」可恢復')
+  assert.doesNotMatch(v.text, /設定檔/)
+  assert.match(v.log.join(''), /設定檔沒改/)
   assert.match(progressView({ status: 'ok' }, { op: 'close' }).text, /視窗已關閉/, 'Claude 視窗的說法不變')
 })
 
@@ -320,17 +325,21 @@ test('ACP 工作者的詳情：引擎、模型、權限、工作資料夾、程�
 
 test('換班接手完成：ACP 工作者沒有請前任寫交接，說明新對話第一句是接班說明、附往來記錄當前情', () => {
   const v = progressView({ status: 'ok', result: { kind: 'acp', handoff_done: false } }, { op: 'handover' })
-  assert.deepEqual(v.extra, ['這類夥伴沒有請前任寫交接；新對話第一句是接班說明，並附上收發室替它記的往來記錄當前情。'])
+  assert.deepEqual(v.log, ['這類夥伴沒有請前任寫交接；新對話第一句是接班說明，並附上收發室替它記的往來記錄當前情。'])
+  assert.equal(v.extra, undefined)
+  assert.doesNotMatch(v.text, /接班說明|往來記錄/)
   const c = progressView({ status: 'ok', result: { handoff_done: false } }, { op: 'handover' })
-  assert.deepEqual(c.extra, ['前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。'])
+  assert.deepEqual(c.log, ['前任沒有寫完交接，新夥伴會以前任的對話紀錄為主。'])
 })
 
 test('換班接手完成：結果說出新視窗用的模型（和前任一樣）；沒回報模型就不寫', () => {
   const v = progressView({ status: 'ok', result: { handoff_path: 'C:/h/x.md', handoff_done: true, model: 'claude-opus-5-5' } }, { op: 'handover' })
-  assert.deepEqual(v.extra, ['交接檔：C:/h/x.md', '新視窗用的模型：claude-opus-5-5（和前任一樣）'])
-  assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: 'opus[1m]', model_basis: 'launch_same' } }, { op: 'handover' }).extra, ['新視窗用的模型：opus[1m]（和前任一樣）'])
-  assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: 'opus', model_basis: 'launch' } }, { op: 'handover' }).extra, ['新視窗用的模型：opus（讀不到前任現在用的，沿用它啟動時的設定）'], '退回啟動參數時不寫「和前任一樣」')
-  assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: null } }, { op: 'handover' }).extra, [])
+  assert.deepEqual(v.log, ['交接檔：C:/h/x.md', '新視窗用的模型：claude-opus-5-5（和前任一樣）'])
+  assert.equal(v.text, '已換班，新視窗接手了')
+  assert.doesNotMatch(v.text, /[/\\]|opus|交接檔/, '畫面文字不含路徑與模型名稱')
+  assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: 'opus[1m]', model_basis: 'launch_same' } }, { op: 'handover' }).log, ['新視窗用的模型：opus[1m]（和前任一樣）'])
+  assert.deepEqual(progressView({ status: 'ok', result: { handoff_done: true, model: 'opus', model_basis: 'launch' } }, { op: 'handover' }).log, ['新視窗用的模型：opus（讀不到前任現在用的，沿用它啟動時的設定）'], '退回啟動參數時不寫「和前任一樣」')
+  assert.equal(progressView({ status: 'ok', result: { handoff_done: true, model: null } }, { op: 'handover' }).log, undefined, '沒回報模型就不寫')
 })
 
 test('內建通道工作者的改名（B5，#266）：在線可用、已停止反灰且說明 20 字內；送出內容與表單檢查同其他夥伴；電腦端的簡短說明照實顯示', () => {

@@ -36,7 +36,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, clearRun, hideAfterMs, moveRun, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
 import { buildPartnerMenu } from './lib/partner-menu.mjs'
 import { offlineView } from './lib/group-offline.mjs'
@@ -1307,11 +1307,9 @@ const app = createApp({
       await core.refreshRoster()   // 狀態與名字變了：重新拉名單；改名後對話分頁跳到新名字
       const next = renamedChatId(f, op, input, view)
       if (!next) return
-      opsRuns.value = moveRun(opsRuns.value, f.id, next)   // 進度跟著新名字走，舊名字那格清掉
+      opRunner.move(f.id, next)   // 進度與自動消失的倒數都跟著新名字走，舊名字那格清掉
       prefs.chatPins = renamedPinId(prefs.chatPins, f.id, next)   // 釘選跟著換成新的對話位址（#1479）
       if (lastChat.value === f.id && core.friends.get(next)) lastChat.value = next   // 只有正在看的那一位才跟著跳；從名單改別人的名字不動對話頁
-      const ms = hideAfterMs(view)
-      if (ms > 0) setTimeout(() => { if (runFor(opsRuns.value, next)?.view === view) opsRuns.value = clearRun(opsRuns.value, next) }, ms)
     }
     async function execOp(f, op, input) {
       if (!showsInSheet(op)) { await opRunner.start(f, op, input); return }
@@ -1322,12 +1320,10 @@ const app = createApp({
       })
     }
     const setArchived = (f, archived) => (f ? opRunner.start(f, archived ? 'archive' : 'unarchive', {}) : Promise.resolve(null))
-    // 失敗後「重試」：用上一次送出的內容再送一次（詳情在選單裡重試）
-    const retryRun = () => { const f = chatFriend.value; if (f) void opRunner.retry(f.id) }
     const retryInfo = () => { const f = opsFriend.value; if (f) void execOp(f, 'info', {}) }
-    const dismissRun = () => { const f = chatFriend.value; if (f) opRunner.dismiss(f.id) }
-    // 喚醒找不到對話紀錄：收起橫幅，開「開新夥伴」並預選原夥伴所在的電腦
-    const launchNewFromBanner = () => { const node = chatFriend.value?.node || ''; dismissRun(); openLaunch(node) }
+    // 狀態列（#1907）：手指按著時暫停自動消失的倒數，放開再繼續
+    const holdRun = () => { const f = chatFriend.value; if (f) opRunner.hold(f.id) }
+    const releaseRun = () => { const f = chatFriend.value; if (f) opRunner.release(f.id) }
     // ---------- 別台電腦／雲端代理要密碼（#26 第二期）：跳出確認面板，本人輸入後在 Rust 端加密才送出 ----------
     // 查清單、取公鑰、加密、送回全在 Rust 端（android_secret_*）；這裡只顯示說明與收輸入。沒登入或後台還沒部署就靜默略過
     const sec = reactive({ cur: null, secret: '', error: '', busy: false, left: 0 })
@@ -1653,7 +1649,7 @@ const app = createApp({
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryRun, retryInfo, OP_PROGRESS_TEXT, dismissRun, launchNewFromBanner, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevButtons, acctDevPress, DEVICE_BUTTON_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
