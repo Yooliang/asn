@@ -154,4 +154,50 @@ test('#1975 冒煙分片守門：matrix 4 片、fail-fast: false、每片上傳�
   assert.ok(has(mut('    needs: smoke-ui\n    if: always()', '    needs: smoke-ui'), /if: always/))
   assert.ok(has(mut('--shards 4', '--shards 3'), /不一致/))
   assert.ok(has(mut('!= "success"', '!= "never"'), /分片本身/))
+
+// #1977 Rust／Node 單元測試（rust-test）與建置＋端到端（build）是兩個並行 job：拆開不能變成「有的測試沒人跑」，也不能兩邊都跑一次。
+const splitJobProblems = src => {
+  const problems = []
+  const rust = jobText(src, 'rust-test')
+  const build = jobText(src, 'build')
+  if (rust === null) problems.push('沒有 rust-test job')
+  if (build === null) problems.push('沒有 build job')
+  if (rust === null || build === null) return problems
+  for (const [name, text] of [['rust-test', rust], ['build', build]]) {
+    if (/^\s+needs:/m.test(text)) problems.push(`${name} job 不能 needs 別的 job（兩個要並行）`)
+    if (!/uses: Swatinem\/rust-cache@/.test(text)) problems.push(`${name} job 沒有 rust-cache`)
+    if (!/apt-install\.sh/.test(text)) problems.push(`${name} job 沒有走 apt-install.sh 安裝系統依賴`)
+    if (!/^\s+run: npm ci\s*$/m.test(text)) problems.push(`${name} job 沒有 npm ci`)
+  }
+  // rust-test：Node 單元測試 → Rust 單元測試 → keyring 整合測試，順序不能變（npm test 的 pretest 先產 ui/vendor，之後才 cargo test）
+  const order = [/^\s+run: npm test\s*$/m, /^\s+run: npm run test:rust\s*$/m, /keystore::linux -- --ignored/]
+  const at = order.map(re => rust.search(re))
+  if (at.some(i => i < 0)) problems.push('rust-test 少了 npm test、npm run test:rust 或 keyring 整合測試')
+  else if (at[0] > at[1] || at[1] > at[2]) problems.push('rust-test 的順序要是 npm test → test:rust → keyring')
+  if (/npm run build|xvfb-run|upload-artifact/.test(rust)) problems.push('rust-test 不該做打包、端到端或上傳成品（那是 build 的事）')
+  // build：打包、端到端、上傳成品；不再重複跑單元測試
+  if (!/npm run build/.test(build)) problems.push('build 沒有打包（npm run build）')
+  if (!/xvfb-run -a node --test .*test\/e2e\.test\.mjs/.test(build)) problems.push('build 沒有端到端測試')
+  if (!/uses: actions\/upload-artifact@/.test(build)) problems.push('build 沒有上傳成品')
+  if (/^\s+run: npm test\s*$/m.test(build) || /npm run test:rust|keystore::linux/.test(build)) problems.push('build 不該再跑單元測試或 keyring（已搬到 rust-test）')
+  return problems
+}
+
+test('#1977 rust-test 與 build 是兩個並行 job，各自步驟齊全、不重複', () => {
+  assert.deepEqual(splitJobProblems(linuxBuildWf()), [])
+})
+
+test('#1977 守門本身會紅：拿掉 rust-test、串起兩個 job、少一步、順序顛倒、build 又跑單元測試，都要被抓到', () => {
+  const src = linuxBuildWf()
+  const rust = jobText(src, 'rust-test')
+  assert.ok(rust)
+  assert.ok(splitJobProblems(src.replace(`  rust-test:\n${rust}`, '')).some(p => /沒有 rust-test job/.test(p)))
+  assert.ok(splitJobProblems(src.replace('  build:\n    runs-on: ubuntu-24.04\n', '  build:\n    needs: rust-test\n    runs-on: ubuntu-24.04\n')).some(p => /needs/.test(p)))
+  assert.ok(splitJobProblems(src.replace('run: npm run test:rust', 'run: echo skip')).some(p => /少了/.test(p)))
+  assert.ok(splitJobProblems(src.replace('keystore::linux -- --ignored', 'keystore::linux --')).some(p => /少了/.test(p)))
+  const swapped = src.replace('        run: npm test\n', '        run: npm run test:rust\n').replace('        run: npm run test:rust\n\n      # 系統金鑰庫', '        run: npm test\n\n      # 系統金鑰庫')
+  assert.ok(splitJobProblems(swapped).some(p => /順序/.test(p)), '順序顛倒要被抓到')
+  const dup = src.replace('      - name: 建置 deb 與 AppImage', '      - name: 重複的 Rust 測試\n        run: npm run test:rust\n\n      - name: 建置 deb 與 AppImage')
+  assert.ok(splitJobProblems(dup).some(p => /build 不該再跑單元測試/.test(p)))
+  assert.ok(splitJobProblems(src.replace('        run: npm run build\n', '        run: echo\n').replace(/npm run build/g, 'echo')).some(p => /build 沒有打包/.test(p)))
 })

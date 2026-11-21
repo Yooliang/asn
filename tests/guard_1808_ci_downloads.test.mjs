@@ -92,3 +92,20 @@ test('#1796 apt 快取只在安裝成功時存：workflow 的 save 步驟不用 
     assert.ok(!before.slice(ifPos).includes('fi\n'), 'save_cache 不能在 if 結束之後')
   }
 })
+
+// #1977 build 拆成 build 與 rust-test 之後，rust-test 也有一份 apt 安裝與快取：同樣要走 apt-install.sh、整步有上限、失敗不存快取
+test('#1977 rust-test job 的 apt 安裝也走 apt-install.sh（有整步上限）、快取只在安裝成功時存', () => {
+  const list = steps(job('rust-test'))
+  const inst = stepIndex(list, /id: aptinstall/)
+  assert.ok(inst >= 0, 'rust-test 要有「安裝系統依賴」')
+  assert.match(list[inst], /timeout-minutes:\s*\d+/, '整步要有 timeout-minutes')
+  assert.match(list[inst], /apt-install\.sh/)
+  assert.match(list[inst], /APT_DEB_CACHE:/)
+  assert.ok(!/apt-get install/.test(job('rust-test')), 'rust-test 不能繞過腳本直接 apt-get install')
+  const save = stepIndex(list, /actions\/cache\/save@/)
+  assert.ok(save >= 0, 'rust-test 少了存快取步驟')
+  const cond = list[save].match(/^\s+if: (.*)$/m)?.[1] ?? ''
+  assert.match(cond, /steps\.aptinstall\.outcome == 'success'/)
+  assert.doesNotMatch(cond, /always\(\)/)
+  assert.ok(stepIndex(list, /actions\/cache\/restore@/) >= 0, 'rust-test 要有還原快取步驟')
+})

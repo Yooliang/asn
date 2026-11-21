@@ -494,8 +494,12 @@ jobs:
           fi
           exit $rc
 
-  build:
+  # Rust 與 Node 單元測試（#1977 / #1943-D）：從 build 拆出，與「建置＋端到端」並行。
+  # 步驟與順序和拆之前完全相同（npm test 的 pretest 先產 ui/vendor，之後才 cargo test）；沒有成品，所以需要成品的測試仍然略過，由 build job 的端到端補跑。
+  # 兩個 job 各用各的 target（rust-cache 的鍵含 job 名）；apt 快取鍵相同，誰先存誰贏。
+  rust-test:
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: relay/asn
@@ -560,6 +564,7 @@ jobs:
 
       - name: 單元測試（Rust）
         run: npm run test:rust
+
       # 系統金鑰庫（Secret Service）的整合測試：起一個只在這次工作裡的 dbus＋gnome-keyring，金鑰圈用固定測試密碼解鎖。
       # 平常是 ignored，只在這裡明確跑；不碰任何真的帳號或 secrets
       - name: 系統金鑰庫整合測試（Linux）
@@ -567,12 +572,75 @@ jobs:
         run: |
           dbus-run-session -- sh -ec 'printf asn-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null; cargo test --locked --lib keystore::linux -- --ignored --test-threads=1'
 
+  # 建置 deb／AppImage＋需要成品的端到端＋上傳成品（#1977）。Rust 與 Node 單元測試在 rust-test job，與這個 job 並行。
+  # job id 維持 build：rust-cache 的快取鍵含 job 名（改名會讓 release 那份快取第一次全冷）、PR 檢查名稱也沿用。
+  build:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: relay/asn
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # apt 下載偶爾很慢（#1796：要抓約 95 MB／203 個套件，鏡像慢時逾時 exit 124）：
+      # 1) .deb 快取：key＝runner OS＋套件清單與安裝腳本的雜湊＋年週（每週重建一次，讓安全更新進得來）。
+      #    用 actions/cache（repo 已有且釘在 SHA），不新增第三方 action。
+      # 2) apt-install.sh 最多 3 輪、第 2、3 輪換 Azure／官方鏡像，每輪有 timeout；3) 整步上限 20 分鐘，卡住就失敗、不佔住機器
+      - name: 算 apt 快取 key
+        id: aptkey
+        run: echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - name: 還原 apt 套件快取
+        id: aptcache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/apt-cache
+          key: apt-cache-${{ runner.os }}-${{ hashFiles('.github/apt-build-packages.txt', '.github/scripts/apt-install.sh') }}-${{ steps.aptkey.outputs.week }}
+
+      - name: 安裝系統依賴
+        id: aptinstall
+        timeout-minutes: 20
+        env:
+          APT_DEB_CACHE: ${{ runner.temp }}/apt-cache/debs
+          APT_LISTS_CACHE: ${{ runner.temp }}/apt-cache
+        run: |
+          mapfile -t pkgs < <(grep -vE '^\s*(#|$)' "$GITHUB_WORKSPACE/.github/apt-build-packages.txt")
+          bash "$GITHUB_WORKSPACE/.github/scripts/apt-install.sh" "${pkgs[@]}"
+
+      # 只在安裝成功時存（失敗的半套 .deb 不能佔住這週的 key，否則之後都命中殘缺快取）；已命中就不重存。
+      - name: 儲存 apt 套件快取
+        if: steps.aptinstall.outcome == 'success' && steps.aptcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/apt-cache
+          key: ${{ steps.aptcache.outputs.cache-primary-key }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: relay/asn/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # 2026-10-16 的 toolchain: stable commit（當時 stable 分支頂端，分支之後已前進）；版本由 toolchain: stable 指定
+        with:
+          toolchain: stable
+
+      # Rust 編譯快取（target 與 ~/.cargo）：CI 一次要 9～10 分鐘，大多花在重編相依套件。
+      # 以 Cargo.lock 與工具鏈為鍵，相依沒變就直接沿用；只有 main 的推送會更新快取，PR 只讀。
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: relay/asn/src-tauri -> target
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: 安裝前端依賴
+        run: npm ci
+
       # 打包 AppImage 時 tauri 會從 GitHub 抓 AppRun 等工具：外部服務 5xx／逾時才重試，最多 3 次，其他失敗照常紅。
       # 重試前清掉上一次留下的半套 AppImage 輸出與 tauri 的工具快取（下載到一半的檔會讓 linuxdeploy 壞掉）
       - name: 建置 deb 與 AppImage
         run: bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "建置 deb 與 AppImage" --before 'rm -rf "$GITHUB_WORKSPACE/relay/asn/src-tauri/target/release/bundle/appimage" "$HOME/.cache/tauri"' -- npm run build
 
-      # 上面的 npm test 還沒有成品，這幾支會略過；#652 改欄位後過期就是這樣沒人發現（#719）
+      # rust-test 的 npm test 沒有成品，需要成品的幾支會略過；#652 改欄位後過期就是這樣沒人發現（#719），所以要在這裡建置後補跑
       - name: 需要成品的測試（端到端）
         timeout-minutes: 15
         run: xvfb-run -a node --test --test-timeout=600000 test/e2e.test.mjs test/launch-cwd.test.mjs test/login.test.mjs test/login-e2e-screen.test.mjs test/login-e2e-bind.test.mjs test/partner-launch-notice-shot.test.mjs
