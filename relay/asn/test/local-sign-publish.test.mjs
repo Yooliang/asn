@@ -85,6 +85,7 @@ function world(mod = () => {}) {
     }
     const blobM = /^rev-parse (\S+):(site\/public\/\S+)$/.exec(j)
     if (blobM) return `${blobM[1] === TAG ? 'tagblob' : (w.mainBlobs[blobM[2]] ?? 'tagblob')}\n`
+    if (args[0] === 'tag' && args[1] === '--list') { ev('git tag --list', args); return w.linuxTag ? args[2] : '' }
     if (args[0] === 'push') { w.pushCount++; ev('git push', args); if (w.pushFailTimes >= w.pushCount) throw new Error('rejected'); return '' }
     if (j === 'rev-parse --is-shallow-repository') return w.shallow ? 'true\n' : 'false\n'
     if (j.startsWith('log -n1')) { if (!w.hist) throw new Error('fatal'); return `${w.hist}\n` }
@@ -151,7 +152,7 @@ function world(mod = () => {}) {
     },
     fetchFn: async url => {
       const u = new URL(url)
-      if (!w.deployed && u.pathname === '/update/latest.json') return { ok: true, status: 200, text: async () => JSON.stringify({ version: w.onlineVersion }) }
+      if (!w.deployed && u.pathname === '/update/latest.json') return { ok: true, status: 200, text: async () => JSON.stringify(w.onlineLinux ? { version: w.onlineVersion, platforms: { 'windows-x86_64': {}, 'linux-x86_64': {} } } : { version: w.onlineVersion }) }
       const body = onlineFiles()[u.pathname]
       if (body === undefined) return { ok: false, status: 404 }
       const buf = Buffer.isBuffer(body) ? body : Buffer.from(body)
@@ -473,4 +474,25 @@ test('#1999 部署之後才中止（推送回 main 用盡）：群組中止訊�
   assert.ok(c.w.events.filter(e => e.k === 'asn-cli send').some(e => /線上已是/.test(e.a[4])))
   const a = await run(w => { w.firebaseDeployFails = true }) // 第 8 步部署本身失敗
   assert.ok(!a.w.events.filter(e => e.k === 'asn-cli send').some(e => /線上已是/.test(e.a[4])), '部署沒成功不能說線上已更新')
+})
+
+// ---- #1964 Linux 項暫時移除：不靜默
+test('#1964 有發 Linux（有 linux-v 標籤）：只寫 log，不貼群組', async () => {
+  const x = await run(w => { w.onlineLinux = true; w.linuxTag = true })
+  assert.equal(x.r.ok, true, x.r.error)
+  assert.ok(x.w.logs.some(l => /Linux 項已暫時移除.*等 Linux 發佈補回/.test(l)), x.w.logs.join(' | '))
+  const posts = x.w.events.filter(e => e.k === 'asn-cli send').map(e => e.a[4])
+  assert.ok(!posts.some(p => /Linux 更新資訊暫停/.test(p)), posts.join(' | '))
+})
+test('#1964 這版不發 Linux（沒有 linux-v 標籤）：log＋群組通知都有，寫明停在上一版', async () => {
+  const x = await run(w => { w.onlineLinux = true; w.linuxTag = false })
+  assert.equal(x.r.ok, true, x.r.error)
+  assert.ok(x.w.logs.some(l => /Linux 項已暫時移除.*Linux 使用者停在上一版/.test(l)))
+  const posts = x.w.events.filter(e => e.k === 'asn-cli send').map(e => e.a[4])
+  assert.ok(posts.some(p => /這版不發 Linux，Linux 使用者停在上一版，直到下一個有 Linux 的版本/.test(p)), posts.join(' | '))
+})
+test('#1964 線上本來就沒有 Linux 項：不寫、不貼', async () => {
+  const x = await run(w => { w.onlineLinux = false })
+  assert.ok(!x.w.logs.some(l => /Linux 項已暫時移除/.test(l)))
+  assert.ok(!x.w.events.some(e => e.k === 'asn-cli send' && /Linux 更新資訊暫停/.test(e.a[4])))
 })
