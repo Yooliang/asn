@@ -6,6 +6,8 @@ name: ASN 發版（標籤觸發）
 # 全過之前不推 main、不發 Release、不部署（那些都在本機腳本，CI 沒有）。改 workflow 本身要驗證時用演練 workflow。
 # 簽章（#2022）：只有 desktop-sign 這一個 job 掛 environment: release，更新簽章的私鑰與密碼（TAURI_SIGNING_*）只從它簽章那一步的 env: 進來；
 # 其餘 job 沒有 secrets、沒有 environment（只用 github.token）。desktop-sign 只產 artifact，不建 Release、不動官網。
+# 發佈（#2022 ②-2）：desktop-publish 用 CI 建 GitHub Release、產 latest.json／index.html（artifact asn-site-files）；權限只有 contents: write，仍沒有 secrets、沒有 environment。
+#   它是休眠的：只有 repo variable ASN_CI_PUBLISH 恰為 true 才跑（現在沒有這個變數＝略過，現行發版流程不變）；④ 退役本機常駐程式時才設。不推 main、不部署官網。
 # 開關：repo variable ASN_RELEASE_AUTO，只有值恰為 true 才開；未設定一律視為 false，下游全略過。
 on:
   push:
@@ -311,6 +313,80 @@ jobs:
             installer-in/ASN_*_x64-setup.exe
             installer-in/ASN_*_x64-setup.exe.sig
             installer-in/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+  # ---- 2c. 電腦版發佈（#2022 ②-2）：用 CI 建 GitHub Release，並產 latest.json／index.html 放進 artifact；不推 main、不部署官網（②-3 的事） ----
+  # 休眠開關：整個 job 只在 repo variable ASN_CI_PUBLISH 恰為 true 時才跑。這個變數現在不存在，所以合進來後本 job 一律略過，現行發版流程完全不變。
+  #   原因：在 #2022 ④ 之前，工作機的常駐程式（tools/release/auto_publish.mjs → local_sign_publish.mjs）仍會建同一個 Release v<版本>，兩邊同時建會撞。
+  #   ④ 切換時才設這個變數，同時退役本機那條。
+  # 權限只有 contents: write（建 Release 要）；不掛 environment、不用任何 secrets，gh 用 github.token（只在需要的那一步的 env:）。
+  # 建 Release 重用 tools/release/github_release.mjs 的 publishRelease：草稿 → 上傳（不覆蓋）→ 下載比對 sha256 → 轉正式並設 Latest → 匿名下載再比一次，不一致退回草稿。
+  # notify 不接這個 job（跟 desktop-sign 一樣，等 ④ 切換時一起處理）；本 job 被略過時不影響 notify。
+  desktop-publish:
+    needs:
+      - desktop-sign
+    if: vars.ASN_CI_PUBLISH == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: asn-installer-signed
+          path: signed-in
+
+      - name: 核對 SHA256SUMS.txt 並確認安裝檔與簽章檔名
+        id: files
+        env:
+          TAG: ${{ github.ref_name }}
+        working-directory: signed-in
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "標籤格式不對：$TAG" >&2; exit 1; fi
+          sha256sum -c SHA256SUMS.txt
+          test -s "ASN_${version}_x64-setup.exe"
+          test -s "ASN_${version}_x64-setup.exe.sig"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # 先產檔（含「版本不得低於線上」）再建 Release：版本退步時不留下 Release
+      - name: 產 latest.json、index.html 與更新說明
+        env:
+          VERSION: ${{ steps.files.outputs.version }}
+        run: |
+          set -euo pipefail
+          node tools/release/ci_site_files.mjs --version "$VERSION" --sig "signed-in/ASN_${VERSION}_x64-setup.exe.sig" --changelog relay/asn/CHANGELOG.md --index site/public/index.html --out "$RUNNER_TEMP/site-files" --notes-out "$RUNNER_TEMP/notes.md"
+
+      - name: 建 GitHub Release（草稿 → 上傳 → 比對 → 轉正式 → 匿名下載再比對）
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.files.outputs.version }}
+          TARGET: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          node tools/release/github_release.mjs --version "$VERSION" --exe "signed-in/ASN_${VERSION}_x64-setup.exe" --sig "signed-in/ASN_${VERSION}_x64-setup.exe.sig" --notes-file "$RUNNER_TEMP/notes.md" --target "$TARGET"
+
+      - name: 上傳官網檔（latest.json、index.html）
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-site-files
+          path: |
+            ${{ runner.temp }}/site-files/latest.json
+            ${{ runner.temp }}/site-files/index.html
           if-no-files-found: error
           retention-days: 14
           overwrite: true

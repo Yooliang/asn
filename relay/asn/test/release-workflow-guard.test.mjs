@@ -77,15 +77,18 @@ const secretsOf = text => [...new Set([...text.matchAll(/secrets\.(?!GITHUB_TOKE
 const sorted = o => Object.entries(o).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}: ${v}`).join(', ')
 
 // ---- 規格 3.2 的白名單表 ----
-const ALL_JOBS = ['guard', 'desktop', 'attest', 'desktop-sign', 'site-draft', 'notify']
-const NOTIFY_JOBS = ['guard', 'desktop', 'attest', 'site-draft'] // #2022 ②-1 不動 notify：desktop-sign 還沒接進通知
+const ALL_JOBS = ['guard', 'desktop', 'attest', 'desktop-sign', 'desktop-publish', 'site-draft', 'notify']
+const NOTIFY_JOBS = ['guard', 'desktop', 'attest', 'site-draft'] // #2022 ②-1／②-2 不動 notify：desktop-sign、desktop-publish 還沒接進通知（④ 切換時一起處理）
 const SIGN_JOB = 'desktop-sign'
+const PUBLISH_JOB = 'desktop-publish' // #2022 ②-2：休眠的發佈 job，全檔唯一可以 contents: write
+const PUBLISH_IF = "if: vars.ASN_CI_PUBLISH == 'true'"
 const SIGN_SECRETS = ['TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD']
 const TABLE = {
   guard: { perms: { contents: 'read', actions: 'read' } },
   desktop: { perms: { contents: 'read' } },
   attest: { perms: { contents: 'read', 'id-token': 'write', attestations: 'write' } },
   'desktop-sign': { perms: { contents: 'read' } },
+  'desktop-publish': { perms: { contents: 'write' } },
   'site-draft': { perms: { contents: 'read' } },
   notify: { perms: { contents: 'read', issues: 'write' } },
 }
@@ -154,6 +157,29 @@ const checkSign = (src, jobs) => {
   return bad
 }
 
+/** #2022 ②-2 desktop-publish 的專屬規則（休眠開關、權限、needs、不推 main、不觸發部署、步驟順序）；回違規訊息陣列 */
+const checkPublish = jobs => {
+  const bad = []
+  const pj = jobs[PUBLISH_JOB]
+  if (pj === undefined) return bad
+  if (needsOf(pj).join() !== 'desktop-sign') bad.push('desktop-publish 的 needs 要剛好是 desktop-sign，現在是 [' + needsOf(pj).join(', ') + ']')
+  const ifs = [...pj.matchAll(/^ {4}if:.*$/gm)].map(m => m[0].trim())
+  if (ifs.join('|') !== PUBLISH_IF) bad.push('desktop-publish 要有 ' + PUBLISH_IF + '（休眠開關），現在是 [' + ifs.join(' | ') + ']')
+  if (sorted(permsOf(pj) ?? {}) !== 'contents: write') bad.push('desktop-publish 的權限只能是 contents: write')
+  if (/^\s*environment\s*:/m.test(pj)) bad.push('desktop-publish 不准掛 environment')
+  if (secretsOf(pj).length || /secrets\s*:/.test(pj)) bad.push('desktop-publish 不准用 secrets（只用 github.token）')
+  if (/^ {4}env:/m.test(pj)) bad.push('desktop-publish 不准在 job 層放 env（token 只放在需要的那一步）')
+  if (!/persist-credentials:\s*false/.test(pj)) bad.push('desktop-publish 的 checkout 要 persist-credentials: false')
+  if (/\bgit\s+push\b/.test(pj)) bad.push('desktop-publish 不准 git push（推 main 是 ②-3 的事）')
+  if (/\bworkflow\s+run\b|gh\s+workflow\b|site-deploy|firebase|workflow_dispatch/.test(pj)) bad.push('desktop-publish 不准觸發 workflow／部署官網（workflow run、site-deploy、firebase）')
+  const tokenSteps = stepsOf(pj).filter(st => /github\.token/.test(st))
+  if (tokenSteps.length < 1 || tokenSteps.some(st => !/^ {8}env:\s*$/m.test(st) || !/^ {10}GH_TOKEN:\s*\$\{\{\s*github\.token\s*\}\}\s*$/m.test(st))) bad.push('github.token 只能以 GH_TOKEN 放在步驟的 env: 底下，且至少用一次')
+  const order = ['actions/checkout@', 'name: asn-installer-signed', 'sha256sum -c SHA256SUMS.txt', 'tools/release/ci_site_files.mjs', 'tools/release/github_release.mjs', 'name: asn-site-files']
+  order.forEach((k, i) => { const at = pj.indexOf(k); if (at < 0) bad.push('desktop-publish 缺 ' + k); else if (i > 0 && pj.indexOf(order[i - 1]) >= 0 && at < pj.indexOf(order[i - 1])) bad.push('desktop-publish 的順序不對：' + k + ' 要在 ' + order[i - 1] + ' 之後') })
+  if (!/--target\s+"\$TARGET"/.test(pj) || !/^ {10}TARGET:\s*\$\{\{\s*github\.sha\s*\}\}\s*$/m.test(pj)) bad.push('建 Release 的 target 要用觸發的 commit（TARGET: github.sha、--target "$TARGET"）')
+  return bad
+}
+
 /** 檢查一份發版 workflow；回違規訊息陣列，空陣列＝通過 */
 export const checkRelease = raw => {
   const src = stripComments(raw)
@@ -177,7 +203,10 @@ export const checkRelease = raw => {
   if (/\bset\s+-[A-Za-z]*x/.test(src) || /\bbash\s+-[A-Za-z]*x/.test(src)) bad.push('不准 set -x')
   if (/secrets\s*:\s*inherit/.test(src)) bad.push('不准 secrets: inherit')
   if (/write-all/.test(src)) bad.push('不准 write-all')
-  for (const m of src.matchAll(/^\s*contents:\s*write\b/gm)) bad.push(`不准 ${m[0].trim()}`)
+  // contents: write 只准 desktop-publish（逐 job 檢查，頂層與其他 job 一律不准）
+  const jobsForWrite = jobsOf(src)
+  const writeOutside = src.split('\n').filter(l => /^\s*contents:\s*write\b/.test(l)).length - Object.entries(jobsForWrite).filter(([n]) => n === PUBLISH_JOB).reduce((a, [, t]) => a + t.split('\n').filter(l => /^\s*contents:\s*write\b/.test(l)).length, 0)
+  for (let i = 0; i < writeOutside; i++) bad.push('不准 contents: write（只有 desktop-publish 可以）')
   // 頂層權限、concurrency
   const perms = topBlock(src, 'permissions')
   if (!perms) bad.push('頂層缺 permissions: 區塊')
@@ -189,6 +218,7 @@ export const checkRelease = raw => {
   if (Object.keys(jobs).sort().join() !== [...ALL_JOBS].sort().join()) bad.push(`job 清單不對：[${Object.keys(jobs).join(', ')}]`)
   // 2、3. secrets.（GITHUB_TOKEN 例外）與 environment: 只准 desktop-sign（細則在 checkSign）；逐 job 比對權限與 timeout
   bad.push(...checkSign(src, jobs))
+  bad.push(...checkPublish(jobs))
   for (const name of ALL_JOBS) {
     const t = jobs[name]
     if (t === undefined) continue
@@ -326,6 +356,73 @@ test('#2024 壞例子：改回 npm ci、改 npm install、多一行 npx／yarn�
   for (const [i, b] of bads.entries()) assert.notDeepEqual(checkSignInstall(b), [], '壞例子 ' + i + ' 沒有紅')
 })
 
+test('#2022 ②-2 desktop-publish：休眠開關、needs desktop-sign、權限只有 contents: write、無 secrets／environment、不推 main、不觸發部署、順序與 target', () => {
+  const jobs = jobsOf(stripComments(release))
+  const p = jobs[PUBLISH_JOB]
+  assert.deepEqual(needsOf(p), ['desktop-sign'])
+  assert.equal(sorted(permsOf(p)), 'contents: write')
+  assert.match(p, /^ {4}if: vars\.ASN_CI_PUBLISH == 'true'$/m)
+  assert.deepEqual(secretsOf(p), [])
+  assert.equal(envOf(p), null)
+  assert.doesNotMatch(p, /\bgit\s+push\b|\bworkflow\s+run\b/)
+  assert.match(p, /name:\s*asn-installer-signed/)
+  assert.match(p, /name:\s*asn-site-files/)
+  assert.deepEqual(checkPublish(jobs), [])
+  // run 區塊的全檔規則（不內插 ${{ }}、不 || true、不 set +e、不 continue-on-error）確實涵蓋這個 job：它至少有 3 個 run 區塊
+  assert.ok(runBodies(p).length >= 3, 'desktop-publish 的 run 區塊命中數太少')
+  // 其他 job 不准有休眠開關以外的 contents: write；下游 notify 沒有接 desktop-publish，所以它被略過時 notify 不受影響
+  assert.ok(!needsOf(jobs.notify).includes(PUBLISH_JOB))
+})
+
+test('#2022 ②-2 壞例子：desktop-publish 的每條規則都會紅（休眠開關、needs、權限、secrets、environment、push、workflow run、順序、target、persist-credentials、token 位置、contents: write 別處）', () => {
+  const IF = "    if: vars.ASN_CI_PUBLISH == 'true'\n"
+  const anchor = '          set -euo pipefail\n          version="${TAG#v}"\n'
+  assert.deepEqual(allProblems(release), [])
+  // 休眠開關：拿掉、改成別的條件、改成 != false 都紅
+  assert.ok(hit(mutate(IF, ''), /休眠開關/))
+  assert.ok(hit(mutate(IF, "    if: vars.ASN_CI_PUBLISH != 'false'\n"), /休眠開關/))
+  assert.ok(hit(mutate(IF, "    if: needs.guard.outputs.auto == 'true'\n"), /休眠開關/))
+  assert.ok(hit(mutate(IF, IF + IF), /休眠開關/))
+  // needs
+  assert.ok(hit(mutate('  desktop-publish:\n    needs:\n      - desktop-sign\n', '  desktop-publish:\n    needs:\n      - desktop-sign\n      - attest\n'), /desktop-publish 的 needs/))
+  assert.ok(hit(mutate('  desktop-publish:\n    needs:\n      - desktop-sign\n', '  desktop-publish:\n    needs:\n      - desktop\n'), /desktop-publish 的 needs/))
+  // 權限
+  assert.ok(hit(mutate('    permissions:\n      contents: write\n', '    permissions:\n      contents: read\n'), /desktop-publish 的權限|job desktop-publish 的 permissions/))
+  assert.ok(hit(mutate('    permissions:\n      contents: write\n', '    permissions:\n      contents: write\n      id-token: write\n'), /desktop-publish 的權限|id-token 只能在 attest/))
+  assert.ok(hit(mutate('    permissions:\n      contents: write\n', '    permissions:\n      contents: write\n      issues: write\n'), /desktop-publish 的權限|issues 只能在 notify/))
+  // 只有 desktop-publish 能 contents: write
+  assert.ok(hit(mutate('    timeout-minutes: 90\n    permissions:\n      contents: read', '    timeout-minutes: 90\n    permissions:\n      contents: write'), /只有 desktop-publish 可以/))
+  assert.ok(hit(mutate('permissions:\n  contents: read\n\n# 每個標籤', 'permissions:\n  contents: write\n\n# 每個標籤'), /只有 desktop-publish 可以/))
+  // secrets、environment
+  assert.ok(hit(mutate('          TARGET: ${{ github.sha }}\n', '          TARGET: ${{ github.sha }}\n          K: ${{ secrets.ASN_X }}\n'), /desktop-publish 不准用 secrets|不准出現 secrets/))
+  assert.ok(hit(mutate('          TARGET: ${{ github.sha }}\n', '          TARGET: ${{ github.sha }}\n          K: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}\n'), /desktop-publish 不准用 secrets|不准出現 secrets/))
+  assert.ok(hit(mutate(IF, IF + '    environment: release\n'), /desktop-publish 不准掛 environment|只有 desktop-sign 可以掛 environment/))
+  // job 層 env
+  assert.ok(hit(mutate(IF, IF + '    env:\n      GH_TOKEN: ${{ github.token }}\n'), /job 層放 env/))
+  // checkout 憑證
+  assert.ok(hit(mutate('  desktop-publish:\n    needs:\n      - desktop-sign\n    if: vars.ASN_CI_PUBLISH == \'true\'\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    permissions:\n      contents: write\n    defaults:\n      run:\n        shell: bash\n    steps:\n      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0\n        with:\n          persist-credentials: false', '  desktop-publish:\n    needs:\n      - desktop-sign\n    if: vars.ASN_CI_PUBLISH == \'true\'\n    runs-on: ubuntu-24.04\n    timeout-minutes: 20\n    permissions:\n      contents: write\n    defaults:\n      run:\n        shell: bash\n    steps:\n      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0\n        with:\n          persist-credentials: true'), /persist-credentials/))
+  // 不推 main、不觸發部署
+  assert.ok(hit(mutate(anchor, anchor + '          git push origin HEAD:main\n'), /git push/))
+  assert.ok(hit(mutate(anchor, anchor + '          gh workflow run site-deploy.yml\n'), /不准觸發 workflow/))
+  assert.ok(hit(mutate(anchor, anchor + '          echo workflow run\n'), /不准觸發 workflow/))
+  assert.ok(hit(mutate(anchor, anchor + '          npx firebase deploy\n'), /不准觸發 workflow/))
+  // run 區塊全檔規則涵蓋新 job
+  assert.ok(hit(mutate(anchor, anchor + '          echo "${{ github.ref_name }}"\n'), /run 內不准/))
+  assert.ok(hit(mutate(anchor, anchor + '          node x.mjs || true\n'), /\|\| true/))
+  assert.ok(hit(mutate(anchor, anchor + '          set +e\n'), /set \+e/))
+  assert.ok(hit(mutate(IF, IF + '    continue-on-error: true\n'), /continue-on-error/))
+  // token 位置：放到 run 裡、放到別的 job 層、移除
+  assert.ok(hit(mutate('          GH_TOKEN: ${{ github.token }}\n          VERSION: ${{ steps.files.outputs.version }}\n          TARGET', '          VERSION: ${{ steps.files.outputs.version }}\n          TARGET'), /github\.token 只能以 GH_TOKEN/))
+  // 順序與 target
+  assert.ok(hit(mutate('--target "$TARGET"', ''), /target 要用觸發的 commit/))
+  assert.ok(hit(mutate('TARGET: ${{ github.sha }}', 'TARGET: main'), /target 要用觸發的 commit/))
+  assert.ok(hit(mutate('name: asn-site-files', 'name: asn-site-filez'), /desktop-publish 缺 name: asn-site-files/))
+  assert.ok(hit(mutate('name: asn-installer-signed\n          path: signed-in', 'name: asn-installer-unsigned\n          path: signed-in'), /desktop-publish 缺 name: asn-installer-signed/))
+  assert.ok(hit(mutate('tools/release/ci_site_files.mjs', 'tools/release/other.mjs'), /缺 tools\/release\/ci_site_files\.mjs/))
+  // 註解裡提到不算
+  assert.deepEqual(allProblems(`${release}\n# git push; workflow run; contents: write; secrets.ASN_X\n`), [])
+})
+
 test('#2022 不准 pull_request 類觸發：全檔（去註解後）沒有 pull_request（含 _target）', () => {
   assert.doesNotMatch(stripComments(release), /pull_request/)
 })
@@ -350,13 +447,15 @@ test('2 secrets：除 asn-release-android.yml 外，其他 workflow 與 .github/
   }
 })
 
-test('3 權限白名單：逐 job 比對 3.2 表；頂層只有 contents: read；全檔無 contents: write（6 個 job 各一份 permissions）', () => {
+test('3 權限白名單：逐 job 比對 3.2 表；頂層只有 contents: read；全檔 contents: write 只有 desktop-publish 一處（7 個 job 各一份 permissions）', () => {
   const src = stripComments(release)
-  assert.equal([...src.matchAll(/^ {4}permissions:\s*$/gm)].length, 6)
+  assert.equal([...src.matchAll(/^ {4}permissions:\s*$/gm)].length, 7)
   const jobs = jobsOf(src)
   for (const j of ALL_JOBS) assert.equal(sorted(permsOf(jobs[j])), sorted(TABLE[j].perms), j)
   assert.equal(topBlock(src, 'permissions').map(l => l.trim()).join('|'), 'contents: read')
-  assert.doesNotMatch(src, /contents:\s*write|write-all/)
+  assert.equal([...src.matchAll(/contents:\s*write/g)].length, 1)
+  assert.deepEqual(Object.entries(jobs).filter(([, t]) => /contents:\s*write/.test(t)).map(([n]) => n), [PUBLISH_JOB])
+  assert.doesNotMatch(src, /write-all/)
   // id-token／attestations 只在 attest；issues 只在 notify；actions 只在 guard（各至少命中 1 次）
   for (const [k, only] of [['id-token', 'attest'], ['attestations', 'attest'], ['issues', 'notify'], ['actions', 'guard']]) {
     const have = Object.entries(jobs).filter(([, t]) => new RegExp(`^ {6}${k}:`, 'm').test(t)).map(([n]) => n)
@@ -364,7 +463,7 @@ test('3 權限白名單：逐 job 比對 3.2 表；頂層只有 contents: read�
   }
 })
 
-test('3 timeout：desktop 90 分鐘，其餘 5 個 job 各 20 分鐘', () => {
+test('3 timeout：desktop 90 分鐘，其餘 6 個 job 各 20 分鐘', () => {
   const jobs = jobsOf(stripComments(release))
   for (const j of ALL_JOBS) assert.equal(Number(/^ {4}timeout-minutes:\s*(\d+)\s*$/m.exec(jobs[j])?.[1]), j === 'desktop' ? 90 : 20, j)
 })
