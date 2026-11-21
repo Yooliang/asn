@@ -4,7 +4,7 @@
 import type { SigState } from "./owner_sign.ts";
 
 export type ObserveRpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
-export type ObserveVia = "signed" | "role";
+export type ObserveVia = "signed" | "role" | "blocked";
 export type ObserveSig = "absent" | "invalid" | "valid_not_owner" | "valid_owner";
 
 async function sha16(s: string): Promise<string> {
@@ -47,4 +47,13 @@ export async function recordAcct(
   } catch (x) {
     console.warn("auth observe (acct) threw", e.action, x instanceof Error ? x.message : String(x));
   }
+}
+
+/** 旗標 ASN_REQUIRE_SIGNED_ACCT 開啟而被擋下（403）時記一筆：通過方式 blocked＋實際簽章狀態。永不丟錯（#500 拆項 3b）。 */
+export function recordBlocked(
+  rpc: ObserveRpc,
+  e: { action: string; node: string; state: SigState; validNotOwner: boolean },
+): Promise<void> {
+  const sig: ObserveSig = e.validNotOwner ? "valid_not_owner" : e.state === "invalid" ? "invalid" : "absent";
+  return recordAuth(rpc, { action: e.action, via: "blocked", sig, node: e.node });
 }

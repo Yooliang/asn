@@ -6,7 +6,7 @@
 // deno-lint-ignore no-explicit-any
 type Json = any;
 
-import { recordAcct } from "./auth_observe.ts";
+import { recordAcct, recordBlocked } from "./auth_observe.ts";
 import type { SigState } from "./owner_sign.ts";
 
 export const NODE_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
@@ -215,7 +215,10 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
       console.error("asn_user_owns_node", owns.error);
       return fail("internal");
     }
-    if (!owns || owns.data !== true) return { status: 403, body: { ...fail("forbidden").body, detail: SIGNED_ONLY_DETAIL } };
+    if (!owns || owns.data !== true) {
+      await recordBlocked(deps.rpc, { action, node: me.id, state: sigState, validNotOwner: !!owns }); // 只記次數，失敗不影響 403（#500 3b）
+      return { status: 403, body: { ...fail("forbidden").body, detail: SIGNED_ONLY_DETAIL } };
+    }
   }
   if (action === "acct_report") {
     const accounts = parseReport(params);
