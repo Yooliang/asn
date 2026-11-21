@@ -735,6 +735,7 @@ function focusSearch() { searchInput.value?.focus?.() }
 const launchPicker = ref(false)
 const launchPickerPos = reactive({ x: 0, y: 0 })
 const launchPickerEl = ref(null)
+const termOpSlotEl = ref(null)   // 終端分頁最下面放夥伴操作狀態列的一格（#1907）
 async function openLaunchPicker(e) {
   closeBuddyMenu()
   const r = e?.currentTarget?.getBoundingClientRect?.()
@@ -2175,6 +2176,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
+      termOpSlotEl,
       version: info.version, skin, lookNow, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText, progressPct,
       reloginBar, dismissReloginBar, goLogin, roomsNote, refreshRooms,
