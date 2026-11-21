@@ -203,3 +203,4 @@
 :root[data-skin="modern"] .pv-btn .lic,:root[data-skin="line"] .pv-btn .lic,:root[data-skin="modern"] .pv-nav .lic,:root[data-skin="line"] .pv-nav .lic{display:inline-block}
 :root[data-skin="modern"] .photo-viewer .pv-btn .lic,:root[data-skin="line"] .photo-viewer .pv-btn .lic{width:20px;height:20px}
 :root[data-skin="modern"] .photo-viewer .pv-count,:root[data-skin="line"] .photo-viewer .pv-count{background:rgba(255,255,255,.16)}
+:root[data-skin="modern"] .actionbar .op-strip,:root[data-skin="line"] .actionbar .op-strip{left:50%;top:58px;margin:0;transform:translateX(-50%);width:max-content}

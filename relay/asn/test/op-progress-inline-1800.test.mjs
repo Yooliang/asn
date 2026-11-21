@@ -426,7 +426,12 @@ test('#1907 位置守門：電腦版 teleport 到 chatpane 最下面的 .op-slot
   assert.ok(chat.indexOf('<div class="typing"') < chat.indexOf('<div class="op-slot" ref="opSlotEl">'), '.op-slot 在最下面那條狀態列（.typing）之後')
   assert.match(chat, /<action-bar [^>]*:op-slot="opSlotEl"/)
   assert.match(bar, /<teleport :to="opSlot" :disabled="!opSlot"><partner-op-strip /)
-  assert.doesNotMatch(css, /\.actionbar \.op-strip\s*[{,]/, '不再用 absolute 蓋在功能列下面')
+  // 每個 action-bar 要嘛有 :op-slot，要嘛有停用 teleport 時的定位規則（終端分頁沒有 .op-slot）：否則狀態列會變成功能列 flex 的一個項目、擠開按鈕
+  const bars = [...(read('ui/list.html') + read('ui/chat.html') + chat).matchAll(/<action-bar [^>]*>/g)].map(m => m[0])
+  assert.ok(bars.length >= 2, '找得到 action-bar')
+  const fallback = /\.actionbar \.op-strip\{position:absolute/.test(css)
+  for (const x of bars) assert.ok(/:op-slot=/.test(x) || fallback, '沒有 :op-slot 的功能列要有定位規則：' + x.slice(0, 60))
+  assert.ok(fallback, '停用 teleport 時浮在功能列下面')
   const ci = html.indexOf('<chat-pane v-if="chatFriend"'), bi = html.indexOf('class="m-ops-run"')
   assert.ok(ci > 0 && bi > ci, '手機橫幅在 chat-pane 之後')
   assert.ok(bi < html.indexOf('</section>', bi), '仍在對話頁的 section 裡（導覽列之上）')

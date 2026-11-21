@@ -191,6 +191,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .op-strip-bar{flex:0 0 36px;height:4px;border-radius:2px;background:linear-gradient(90deg,var(--muted) 0 40%,transparent 40%);background-size:200% 100%;animation:op-strip-run 1.2s linear infinite}
 @keyframes op-strip-run{from{background-position:100% 0}to{background-position:-100% 0}}
 /* 夥伴操作的進度與結果（#1907）：放在對話窗最下面（.op-slot），跟最下面那條狀態列一樣的寬度與字級，不蓋住對話或輸入區 */
+/* 沒有 .op-slot 的功能列（終端分頁，list.html）：提示留在功能列裡，浮在功能列下面，不擠開按鈕 */
+.actionbar .op-strip{position:absolute;z-index:20;left:8px;top:100%;margin:2px 0 0;max-width:min(520px,calc(100% - 16px))}
 .op-slot{flex:none}
 .op-slot:empty{display:none}
 .op-slot .op-strip{margin:0;gap:0}
