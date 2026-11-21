@@ -3,6 +3,7 @@
 // 帳號以 email 識別；介面只會拿到 email／方案／是否使用中，權杖不經過前端。
 import { fetchRoster, normalizeQuotaState } from './account-roster.mjs'
 import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
+import { acctErrorText, isForbidden } from './acct-error.mjs'
 
 export const CURRENT_UNREADABLE = '讀不到目前登入的帳號'   // 跟 Rust claude_login::UNREADABLE_TEXT 同一句
 export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。'
@@ -62,7 +63,13 @@ export const isFinalStatus = s => s === 'ok' || s === 'failed' || s === 'denied'
 
 const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
-export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80, now = () => Date.now(), retryMs = REPORT_RETRY_MS }) {
+export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80, now = () => Date.now(), retryMs = REPORT_RETRY_MS, log = (...a) => console.info(...a) }) {
+  // 別台帳號的錯誤：後台回 403（沒有權限）顯示白話，原文只進 log；其他維持原樣
+  const remoteErr = e => {
+    if (!isForbidden(e)) return errText(e)
+    log('[帳號切換] 後台拒絕：', errText(e))
+    return acctErrorText(e)
+  }
   const s = reactive({
     list: [], loginFailed: false, grok: [], current: null, currentErr: '', codex: null, codexErr: '', msg: '', busy: false, confirmDel: '',
     allowSwitch: true,   // 「允許切換帳號」（#371）：讓手機或別台設備替這台切換
@@ -117,7 +124,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
       r.reportedAt = v?.reported_at ?? ''
       if (!r.asnOnline) r.msg = '對方電腦的 ASN 目前沒有在線，無法切換。'
       else if (!r.list.length) r.msg = '對方電腦還沒有帳號（請對方電腦開著 ASN，一分鐘內會自動加入目前登入的帳號）。'
-    } catch (e) { r.list = []; r.msg = errText(e) }
+    } catch (e) { r.list = []; r.msg = remoteErr(e) }
     r.loading = false
   }
   // 設備分類：一次讀好幾台的帳號回報（讀不到就記錯誤與失敗時間 failedAt，介面顯示「未回報」；之後由 retryReports 過了時間再讀）
@@ -128,7 +135,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
       try {
         const v = await invoke('acct_remote_list', { node })
         s.reports[node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
-      } catch (e) { s.reports[node] = { error: errText(e), failedAt: now(), asnOnline: false, reportedAt: '', accounts: [] } }
+      } catch (e) { s.reports[node] = { error: remoteErr(e), failedAt: now(), asnOnline: false, reportedAt: '', accounts: [] } }
       finally { reading.delete(node) }
     }))
   }
@@ -161,7 +168,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
         if (isFinalStatus(st.status)) break
         if (i === pollMax - 1) r.msg = '等太久了，對方電腦沒有回應；稍後再看對方的帳號清單。'
       }
-    } catch (e) { r.msg = errText(e) }
+    } catch (e) { r.msg = remoteErr(e) }
     r.busy = false
     const finalMsg = r.msg
     await remoteLoad().catch(() => {})   // 重抓對方的清單（使用中的帳號可能變了）；結果訊息不要被洗掉

@@ -497,15 +497,28 @@ impl ReportLog {
         }
     }
 }
-/// 有登入就帶本人簽章（#380：成員角色的電腦不帶會被後台擋 403）；沒登入照舊不帶
-pub async fn remote_list(relay: &Relay, node: &str, token: Option<&str>) -> Result<Value, String> {
+/// 沒有本人簽章時給畫面的白話（#500）：沒登入與其他取不到（過期、換憑證失敗…）分開講
+pub fn signin_prompt(f: crate::auth_notice::SigningFail) -> &'static str {
+    match f {
+        crate::auth_notice::SigningFail::NotSignedIn => "請先登入",
+        _ => "登入已過期，請重新登入",
+    }
+}
+/// 帳號切換一定要本人簽章：沒有就在打後台之前回白話，不送請求（#500，與手機一致）
+fn require_token(token: Result<String, crate::auth_notice::SigningFail>) -> Result<String, String> {
+    token.map_err(|f| signin_prompt(f).to_string())
+}
+/// 列出別台電腦的帳號：要本人簽章；沒登入或登入過期就回白話、不打後台（#500）
+pub async fn remote_list(relay: &Relay, node: &str, token: Result<String, crate::auth_notice::SigningFail>) -> Result<Value, String> {
+    let token = require_token(token)?;
     if !valid_node(node) {
         return Err("設備代號不對".into());
     }
-    relay.api_signed("acct_list", Some(json!({ "node": node })), token).await
+    relay.api_signed("acct_list", Some(json!({ "node": node })), Some(&token)).await
 }
-/// 與 `remote_list` 同一條規則：有登入就帶本人簽章（成員角色的電腦不帶會被後台擋 403），沒登入照舊不帶
-pub async fn remote_request(relay: &Relay, node: &str, email: &str, vendor: &str, token: Option<&str>) -> Result<Value, String> {
+/// 與 `remote_list` 同一條規則：沒登入或登入過期就回白話、不打後台
+pub async fn remote_request(relay: &Relay, node: &str, email: &str, vendor: &str, token: Result<String, crate::auth_notice::SigningFail>) -> Result<Value, String> {
+    let token = require_token(token)?;
     if !valid_node(node) {
         return Err("設備代號不對".into());
     }
@@ -513,7 +526,7 @@ pub async fn remote_request(relay: &Relay, node: &str, email: &str, vendor: &str
         return Err("目前只支援切換 Claude、Grok 帳號".into());
     }
     let email = claude_accounts::normalize_email(email).ok_or("email 格式不對")?;
-    relay.api_signed("acct_switch", Some(json!({ "node": node, "vendor": vendor, "email": email })), token).await
+    relay.api_signed("acct_switch", Some(json!({ "node": node, "vendor": vendor, "email": email })), Some(&token)).await
 }
 pub async fn remote_status(relay: &Relay, ids: Vec<String>) -> Result<Value, String> {
     if ids.is_empty() || ids.len() > 20 || !ids.iter().all(|i| is_uuid(i)) {
@@ -1649,5 +1662,45 @@ mod tests {
         assert_eq!(left.iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["network", "just-in-time"], "只有暫時失敗的留著");
         let called = called.lock().unwrap();
         assert!(!called.contains(&"too-old".to_string()) && !called.contains(&"no-time".to_string()), "太舊與沒有時間的連試都不試：{called:?}");
+    }
+
+    // ---------- #500：帳號切換沒有本人簽章時，在打後台之前就地提示 ----------
+    use crate::auth_notice::SigningFail;
+
+    fn seen_count(seen: &std::sync::Arc<Mutex<Vec<String>>>) -> usize {
+        seen.lock().unwrap().len()
+    }
+
+    #[tokio::test]
+    async fn 列出別台帳號_沒登入或過期_不打後台並回白話() {
+        let (url, seen) = fake_server(vec![]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        let e = remote_list(&relay, "H", Err(SigningFail::NotSignedIn)).await.unwrap_err();
+        assert_eq!(e, "請先登入");
+        for f in [SigningFail::LoginExpired, SigningFail::RefreshFailed, SigningFail::ReadFailed, SigningFail::NoConfig] {
+            assert_eq!(remote_list(&relay, "H", Err(f)).await.unwrap_err(), "登入已過期，請重新登入", "{f:?}");
+        }
+        assert_eq!(seen_count(&seen), 0, "沒簽章不能送出任何請求");
+    }
+
+    #[tokio::test]
+    async fn 送切換_沒登入或過期_不打後台並回白話() {
+        let (url, seen) = fake_server(vec![]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        assert_eq!(remote_request(&relay, "H", "b@x.test", "claude", Err(SigningFail::NotSignedIn)).await.unwrap_err(), "請先登入");
+        assert_eq!(remote_request(&relay, "H", "b@x.test", "claude", Err(SigningFail::LoginExpired)).await.unwrap_err(), "登入已過期，請重新登入");
+        assert_eq!(seen_count(&seen), 0, "沒簽章不能送出任何請求");
+    }
+
+    #[tokio::test]
+    async fn 已登入_照常帶簽章送出() {
+        let (url, seen) = fake_server(vec![]);
+        let relay = Relay::new(url, "k".into(), "W".into(), "W-ASN".into());
+        remote_list(&relay, "H", Ok("TOK-1".into())).await.unwrap();
+        remote_request(&relay, "H", "b@x.test", "claude", Ok("TOK-1".into())).await.unwrap();
+        let reqs = seen.lock().unwrap();
+        assert_eq!(reqs.len(), 2, "兩個動作各送一次");
+        assert!(reqs[0].starts_with("POST /relay?action=acct_list") && reqs[1].starts_with("POST /relay?action=acct_switch"), "{reqs:?}");
+        assert!(reqs.iter().all(|r| r.contains("TOK-1")), "帶本人簽章");
     }
 }

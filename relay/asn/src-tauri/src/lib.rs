@@ -534,15 +534,21 @@ async fn acct_roster(app: State<'_, App>, auth: State<'_, auth::AuthState>) -> R
 #[tauri::command]
 async fn acct_remote_list(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String) -> Result<Value, String> {
     let r = relay_of(&app)?;
-    let token = account::signing_token(&auth).await;
-    acct_remote::remote_list(r.as_ref(), &node, token.as_deref()).await
+    let token = account::signing_token_checked(&auth).await;
+    if let Err(f) = &token {
+        auth_notice::report_fail(*f);
+    }
+    acct_remote::remote_list(r.as_ref(), &node, token).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
 async fn acct_remote_request(app: State<'_, App>, auth: State<'_, auth::AuthState>, node: String, email: String, vendor: Option<String>) -> Result<Value, String> {
-    let token = account::signing_token(&auth).await;
-    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email, vendor.as_deref().unwrap_or("claude"), token.as_deref()).await
+    let token = account::signing_token_checked(&auth).await;
+    if let Err(f) = &token {
+        auth_notice::report_fail(*f);
+    }
+    acct_remote::remote_request(relay_of(&app)?.as_ref(), &node, &email, vendor.as_deref().unwrap_or("claude"), token).await
 }
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
