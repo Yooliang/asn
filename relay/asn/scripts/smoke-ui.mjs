@@ -11,7 +11,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { readDevToolsPort } from './devtools-port.mjs'
-import { mpaneWidenProbeSource, motionMedia, findBrowser, injectSource, mountCheckSource, pagerSettleSource, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
+import { mpaneWidenProbeSource, motionMedia, findBrowser, injectSource, mountCheckSource, makeStableTracker, pagerSettleSource, SETTLE_QUIET_MS, settleSnapshotSource, waitUntil, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
@@ -221,10 +221,15 @@ async function runScenario(cdp, sc, base) {
   await S('Page.navigate', { url: `${base}/${sc.page}` })
   const expr = mountCheckSource(sc.ready, pathOf(sc.page))
   const evalCheck = async () => { try { return (await S('Runtime.evaluate', { expression: expr, returnByValue: true })).result.value ?? { ok: false, why: '頁面還沒就緒' } } catch { return { ok: false, why: '頁面還沒就緒' } } }
+  const pollSnapshot = async () => { try { return (await S('Runtime.evaluate', { expression: settleSnapshotSource(), returnByValue: true })).result.value } catch { return null } }
   const deadline = Date.now() + opts.timeoutMs
   let check = await evalCheck()
   while (!check.ok && Date.now() < deadline) { await sleep(200); check = await evalCheck() }
-  if (check.ok) { await sleep(1000); check = await evalCheck() }   // 掛上後再等一下，讓首次渲染與啟動後的非同步例外跑完
+  // 掛上後等版面穩定再留一小段靜默窗，讓首次渲染與啟動後的非同步例外跑完（#1974：取代每情境固定睡一秒）
+  const settle = what => waitUntil({ scenario: sc.name, what, poll: pollSnapshot, isDone: makeStableTracker() })
+  if (check.ok) {
+    try { await settle('版面穩定（載入完成、字型就緒、連續三次量到相同）'); await sleep(SETTLE_QUIET_MS); check = await evalCheck() } catch (e) { check = { ok: false, why: e.message } }
+  }
   let probeWhy = ''
   if (check.ok && sc.probe) {
     try { const v = (await S('Runtime.evaluate', { expression: probeSource(sc.probe), awaitPromise: true, returnByValue: true })).result.value; if (!v?.ok) probeWhy = v?.why || '沒有回結果'; else if (v.why) console.log(`    量測 ${sc.name}：${v.why}`) } catch (e) { probeWhy = `執行失敗：${e.message}` }
@@ -237,7 +242,8 @@ async function runScenario(cdp, sc, base) {
       if (!v?.ok) probeWhy = v?.why || '放寬後沒有回結果'
     } catch (e) { probeWhy = `放寬後執行失敗：${e.message}` }
     await S('Emulation.setDeviceMetricsOverride', { width: sc.width, height: sc.height ?? 800, deviceScaleFactor: 1, mobile: false })
-    await sleep(300)
+    // 放寬後等版面穩定（#1974：取代固定睡 0.3 秒）；等不到就算這個情境失敗
+    if (!probeWhy) { try { await settle('放寬視窗後版面穩定') } catch (e) { probeWhy = e.message } }
   }
   // 情境帶 shot（#374）：探測完存一張截圖（ASN_SMOKE_SHOTS 指定的資料夾，沒指定放暫存資料夾）；存不了只記一筆，不算失敗
   let shot = '', settleWhy = ''

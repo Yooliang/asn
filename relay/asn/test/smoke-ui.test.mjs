@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { motionMedia, BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeEntry, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
+import { makeStableTracker, waitUntil, settleSnapshotSource, SETTLE_QUIET_MS, motionMedia, BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeEntry, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
 import { SKIP_WARNING, smokeGate, splitSkipFlag } from '../scripts/smoke-gate.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -461,4 +461,43 @@ test('motionMedia：沒帶 reducedMotion 明確設 no-preference，帶了才設 
   assert.equal(motionMedia({}).features.length, 1)
   // smoke-ui.mjs 對每個情境都要送出這個設定（不能再包在 if (sc.reducedMotion) 裡）
   assert.match(read('scripts/smoke-ui.mjs').replace(/\r\n/g, '\n'), /^ *await S\('Emulation\.setEmulatedMedia', motionMedia\(sc\)\)$/m)
+})
+
+test('#1974 等待：條件成立就往下，不多睡', async () => {
+  let t = 0, polls = 0
+  const slept = []
+  const r = await waitUntil({ scenario: 'x', what: '甲', poll: async () => ++polls, isDone: v => v >= 3, now: () => t, sleep: async ms => { slept.push(ms); t += ms } })
+  assert.equal(r, 3)
+  assert.deepEqual(slept, [50, 50])   // 第 3 次量到就回，只睡了兩個 50ms
+})
+
+test('#1974 等待：永遠不成立就逾時，訊息指出情境名與等待條件', async () => {
+  let t = 0
+  await assert.rejects(
+    waitUntil({ scenario: 'm-signed-in', what: '版面穩定', poll: async () => ({ h: t }), isDone: () => false, timeoutMs: 500, now: () => t, sleep: async ms => { t += ms } }),
+    e => /情境 m-signed-in/.test(e.message) && /版面穩定/.test(e.message) && /500 毫秒/.test(e.message))
+})
+
+test('#1974 版面穩定：載入未完成、字型載入中、數值還在變都不算，連續三次相同才算', () => {
+  const ok = { rs: 'complete', fonts: 'loaded', h: 800, w: 412, n: 90, t: 300 }
+  const st = makeStableTracker()
+  assert.equal(st({ ...ok, rs: 'loading' }), false)
+  assert.equal(st({ ...ok, fonts: 'loading' }), false)
+  assert.equal(st(ok), false)
+  assert.equal(st(ok), false)
+  assert.equal(st({ ...ok, n: 91 }), false)   // 元素數又變了：重算
+  assert.equal(st({ ...ok, n: 91 }), false)
+  assert.equal(st({ ...ok, n: 91 }), true)
+  assert.equal(makeStableTracker()(null), false)
+  assert.match(settleSnapshotSource(), /readyState/)
+  assert.match(settleSnapshotSource(), /fonts/)
+})
+
+test('#1974 冒煙腳本不再有固定 sleep(1000)／sleep(300)，改用等條件，且保留靜默窗收啟動後的例外', () => {
+  const src = read('scripts/smoke-ui.mjs').replace(/\r\n/g, '\n')
+  assert.doesNotMatch(src, /sleep\(1000\)/)
+  assert.doesNotMatch(src, /sleep\(300\)/)
+  assert.match(src, /waitUntil\(\{ scenario: sc\.name/)
+  assert.match(src, /await sleep\(SETTLE_QUIET_MS\)/)
+  assert.ok(SETTLE_QUIET_MS >= 200 && SETTLE_QUIET_MS < 1000)
 })
