@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { releaseTag, parseArgs, FILES, COMMIT_PATHS, nextPatch, readVersions, taipeiDate } from '../../../tools/release/release-tag.mjs'
+import { releaseTag, parseArgs, FILES, COMMIT_PATHS, nextPatch, readVersions, taipeiDate , PINS_PATH, WEZTERM_WORKFLOW, pinsWorkflowProblem } from '../../../tools/release/release-tag.mjs'
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..', '..')
 const RULES = [
@@ -19,13 +19,17 @@ const esc = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 function mkTmp() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'release-tag-'))
-  for (const rel of COMMIT_PATHS) {
+  for (const rel of [...COMMIT_PATHS, PINS_PATH, WEZTERM_WORKFLOW]) {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
     let t = fs.readFileSync(path.join(REPO, rel), 'utf8')
     t = t.replace(/\r\n/g, '\n') // 固定成 LF（工作樹可能因 autocrlf 是 CRLF），來測「LF 維持 LF」
     fs.writeFileSync(path.join(dir, rel), t)
   }
   fs.writeFileSync(path.join(dir, 'items.json'), JSON.stringify(['改善：測試條目。（#1979）']))
+  // #2001：預設讓 pins 等於 workflow 的 RELEASE_TAG，測試不受 repo 過渡期（pins 落後一號）影響；要測落後的另外改
+  const pinsFile = path.join(dir, PINS_PATH), pins = JSON.parse(fs.readFileSync(pinsFile, 'utf8'))
+  pins.windows_bundle.tag = /^\s*RELEASE_TAG: '([^']+)'/m.exec(fs.readFileSync(path.join(dir, WEZTERM_WORKFLOW), 'utf8'))[1]
+  fs.writeFileSync(pinsFile, JSON.stringify(pins, null, 2))
   return dir
 }
 
@@ -346,4 +350,39 @@ test('--dry-run：不寫檔、不跑子程序、無任何 git 寫入；印出完
 test('taipeiDate：UTC 16:00 之後就是台北隔天', () => {
   assert.equal(taipeiDate(new Date('2026-11-21T15:59:00Z')), '2026-11-21')
   assert.equal(taipeiDate(new Date('2026-11-21T16:00:00Z')), '2026-11-22')
+})
+
+// ---- #2001 pins 必須等於 wezterm-build.yml 的 RELEASE_TAG
+const setPinsTag = (dir, tag) => {
+  const p = path.join(dir, PINS_PATH); const j = JSON.parse(fs.readFileSync(p, 'utf8')); j.windows_bundle.tag = tag; fs.writeFileSync(p, JSON.stringify(j, null, 2))
+}
+const wfTag = dir => /^\s*RELEASE_TAG: '([^']+)'/m.exec(fs.readFileSync(path.join(dir, WEZTERM_WORKFLOW), 'utf8'))[1]
+const prevSuffix = t => t.replace(/asn\.(\d+)$/, (_, n) => `asn.${Number(n) - 1}`)
+
+test('#2001 pinsWorkflowProblem：相等放行；落後一號、讀不懂都擋', () => {
+  const wf = "  RELEASE_TAG: 'wezterm-x-asn.2'\n"
+  assert.equal(pinsWorkflowProblem(JSON.stringify({ windows_bundle: { tag: 'wezterm-x-asn.2' } }), wf), '')
+  assert.match(pinsWorkflowProblem(JSON.stringify({ windows_bundle: { tag: 'wezterm-x-asn.1' } }), wf), /WezTerm 新版已建（wezterm-x-asn\.2）但 pins 還指著 wezterm-x-asn\.1/)
+  assert.match(pinsWorkflowProblem('{壞', wf), /讀不懂/)
+  assert.match(pinsWorkflowProblem('{}', wf), /讀不到 WezTerm 版本/)
+})
+
+test('#2001 打電腦版標籤時 pins 落後 workflow 一號 → 停，不寫檔不推送；相等照常', async () => {
+  const s = setup()
+  setPinsTag(s.dir, prevSuffix(wfTag(s.dir)))
+  const r = await releaseTag(opts(), s.deps)
+  assert.equal(r.ok, false)
+  assert.match(s.logs.join(' / '), /WezTerm 新版已建.*但 pins 還指著/)
+  assert.equal(s.calls.filter(c => c.kind === 'write' || (c.kind === 'git' && ['commit', 'push', 'tag'].includes(c.args[0]) && c.args[1] !== '--list')).length, 0)
+  const ok = setup()
+  setPinsTag(ok.dir, wfTag(ok.dir))
+  assert.equal((await releaseTag(opts(), ok.deps)).ok, true)
+})
+
+test('#2001 只打手機（不打電腦版）時不檢查 pins', async () => {
+  const s = setup({ changed: ['relay/asn/src-tauri/gen/android/a.kt'] })
+  setPinsTag(s.dir, prevSuffix(wfTag(s.dir)))
+  fs.writeFileSync(path.join(s.dir, 'items.json'), JSON.stringify(['修正（只有手機版）：測試條目。（#2001）']))
+  const r = await releaseTag(opts(), s.deps)
+  assert.equal(r.ok, true, s.logs.join(' / '))
 })
