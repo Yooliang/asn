@@ -20,6 +20,8 @@ pub const STUCK_HELD_TEXT: &str = "終端服務卡住了，10 分鐘內已經接
 pub struct StuckGuard {
     cancelled: Option<((u32, u64), u64)>,
     notified: Option<(u32, u64)>,
+    /// 已經寫過「沒有服務紀錄，先不處置」的 mux（每個 mux 只寫一次）
+    unseen_logged: Option<(u32, u64)>,
 }
 
 impl StuckGuard {
@@ -65,6 +67,15 @@ pub fn run_round(w: &mut Watch, tracker: &mut Tracker, o: &Observed, exited: &[S
 pub fn run_round_stuck(w: &mut Watch, tracker: &mut Tracker, guard: &mut StuckGuard, o: &Observed, exited: &[String], now: u64, ctx: &Round, sink: &dyn Sink) -> Option<Incident> {
     let (Hb::Stale { secs }, Some(mux), Some((hb_key, seq))) = (o.hb, o.live, o.hb_at) else { return round(w, tracker, o, exited, now, ctx, sink, true) };
     if guard.cooling(mux, now) {
+        return round(w, tracker, o, exited, now, ctx, sink, false);
+    }
+    // 沒有這個服務的記錄（ASN 剛啟動）：結束了也沒有夥伴名單可以接回，夥伴會斷線，所以這一輪先不處置。
+    // 這一輪的 tick 會記下 seen，下一輪就照常判斷（判 Stale 本來就要 90 秒，實際上只會跳過一兩輪）
+    if !w.seen_mux_is(mux) {
+        if guard.unseen_logged != Some(mux) {
+            guard.unseen_logged = Some(mux);
+            sink.record(&format!("終端服務卡住（心跳停了超過 {secs} 秒），但沒有服務紀錄，這輪先不處置"));
+        }
         return round(w, tracker, o, exited, now, ctx, sink, false);
     }
     // 處置一定接著接回：額度未到就不結束，只通知本人一次
@@ -362,14 +373,17 @@ mod tests {
     }
 
     #[test]
-    fn t1897_沒有_seen_處置成功_不報事故_只寫_log() {
+    fn t1897_沒有_seen_不處置_只寫_log_一次_下一輪有_seen_才處置() {
         let (mut e, rig) = (Env::new(), Rig::new(Disposal::Done));
-        // ASN 剛啟動、沒有任何記錄就看到卡死的 mux
+        // ASN 剛啟動、沒有任何記錄就看到卡死的 mux：結束了也沒有名單可以接回，夥伴會斷線，所以先不處置
         assert_eq!(e.round(&obs(Some(M1), Hb::Stale { secs: 120 }), 0, &rig), None);
-        assert_eq!(rig.disposed.get(), 1, "照樣可以處置");
-        assert_eq!(rig.resumes.borrow().len(), 0);
-        assert_eq!(crate::launch::mux_watch::read_notice(e.dir.path()), None, "不報事故");
-        assert!(rig.log().contains("已結束") && rig.log().contains("不算事故"), "{}", rig.log());
+        assert_eq!(rig.disposed.get(), 0, "沒有 seen 不處置");
+        assert_eq!(rig.records.borrow().len(), 1, "{}", rig.log());
+        assert!(rig.log().contains("沒有服務紀錄，這輪先不處置"), "{}", rig.log());
+        // 這一輪已記下 seen：下一輪照常判斷，而且 log 不再寫
+        let inc = e.round(&obs(Some(M1), Hb::Stale { secs: 150 }), TICK_MS, &rig).expect("有 seen 了，處置後成事故");
+        assert_eq!((rig.disposed.get(), inc.resume), (1, true));
+        assert_eq!(rig.log().matches("沒有服務紀錄").count(), 1, "每個 mux 只寫一次");
     }
 
     #[test]
