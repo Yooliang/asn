@@ -535,7 +535,7 @@ pub async fn take_shot(app: AppHandle, state: State<'_, App>, tab: Option<String
     // 提示視窗只在這次截的是「完整一輪」（沒帶 tab）時才關：之後帶 tab 的逐頁截圖不拍提示視窗，也不需要它
     let close = tab.is_none();
     capture_then_cleanup(
-        capture_until_drawn(&dir, SHOT_MIN_BYTES, SHOT_RETRY_MAX, Duration::from_millis(SHOT_RETRY_MS), |only| {
+        capture_until_drawn(&dir, SHOT_MIN_BYTES, shot_retry_max(shot_toast_lenient()), Duration::from_millis(SHOT_RETRY_MS), |only| {
             let (app, dir, tab) = (app.clone(), dir.clone(), tab.clone());
             async move { take_shot_capture(&app, &dir, tab, only).await }
         }),
@@ -559,6 +559,18 @@ where
 const SHOT_MIN_BYTES: u64 = 3000;
 const SHOT_RETRY_MAX: u32 = 40;
 const SHOT_RETRY_MS: u64 = 150;
+/// 發版機放寬模式（#2033）的重截上限：提示視窗截圖疑似空白只警告，不值得把 e2e 的時間花在重截上
+/// （Windows 每次重截約 1.2 秒，40 次約 48 秒，會把 e2e 拖到逾時）
+const SHOT_RETRY_MAX_LENIENT: u32 = 8;
+
+/// 發版 workflow 設 `ASN_SHOT_TOAST_LENIENT=1` 時，提示視窗截圖疑似空白只警告（判斷在 test/shot-png.mjs 的 checkShot）
+fn shot_toast_lenient() -> bool {
+    std::env::var("ASN_SHOT_TOAST_LENIENT").is_ok_and(|v| v == "1")
+}
+
+fn shot_retry_max(lenient: bool) -> u32 {
+    if lenient { SHOT_RETRY_MAX_LENIENT } else { SHOT_RETRY_MAX }
+}
 
 /// 截完檢查每張圖，太小的（還沒畫完）隔一小段時間只重截那幾扇，最多重試 `max_retry` 次；仍太小就照現狀交出，由測試判定
 async fn capture_until_drawn<F, Fut>(dir: &Path, min_bytes: u64, max_retry: u32, gap: Duration, mut capture: F) -> Result<(), String>
@@ -685,6 +697,14 @@ fn which_scrot() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2033：發版機放寬模式少重截，e2e 不會被重截拖到逾時；平常仍照原上限重截
+    #[test]
+    fn t2033_放寬模式重截上限較短() {
+        assert_eq!(shot_retry_max(false), SHOT_RETRY_MAX);
+        assert_eq!(shot_retry_max(true), SHOT_RETRY_MAX_LENIENT);
+        assert!(SHOT_RETRY_MAX_LENIENT * 1200 < 15_000, "放寬模式重截（Windows 每次約 1.2 秒）要在 15 秒內結束");
+    }
 
     /// #1953 一審：重截時擷取失敗，不能把已截到的結果變成失敗
     #[tokio::test]
