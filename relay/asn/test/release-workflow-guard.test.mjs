@@ -285,6 +285,47 @@ test('#2022 desktop-sign：needs desktop＋attest；權限只有 contents: read�
   assert.ok(lock.packages['node_modules/@tauri-apps/cli-linux-x64-gnu'], 'package-lock 沒有 linux x64 的 tauri cli 原生套件，Linux runner 會裝不到')
 })
 
+/** #2024 一審必修：desktop-sign 安裝相依套件一定要 `npm ci --ignore-scripts`。
+ *  拿掉旗標時，任何相依套件的安裝腳本都能改掉 node_modules 裡的 tauri cli，下一步簽章時就能拿走私鑰。
+ *  規則：去註解後，安裝指令只能有一行，而且整行就是 `npm ci --ignore-scripts`；不能有其他任何 npm／npx／yarn／pnpm／corepack／bun 指令（npm rebuild、npm run 也會跑安裝腳本）；
+ *  不能用 ignore-scripts=false 或 npm_config_ignore_scripts 把旗標關掉；這一行要排在簽章那一步之前。回傳違規清單。 */
+export const checkSignInstall = job => {
+  const bad = []
+  const lines = job.split('\n')
+  // setup-node 的 `cache: npm` 是參數不是指令，排除
+  const installs = lines.map((l, i) => [l.trim(), i]).filter(([l]) => !/^cache:\s*npm$/.test(l)).filter(([l]) => /(^|[\s;&|(\x60])(npm|npx|yarn|pnpm|corepack|bun)\b/.test(l))
+  if (installs.length !== 1) bad.push('套件管理指令（npm／npx／yarn…）要剛好一行，現在有 ' + installs.length + ' 行：' + installs.map(x => x[0]).join(' | '))
+  for (const [l] of installs) if (l !== 'npm ci --ignore-scripts') bad.push('安裝指令要整行是 npm ci --ignore-scripts，現在是：' + l)
+  if (/ignore[-_]scripts\s*[=:]\s*["']?false|npm_config_ignore_scripts/i.test(job)) bad.push('不准用 ignore-scripts=false／npm_config_ignore_scripts 把旗標關掉')
+  const signAt = lines.findIndex(l => /tauri\.js\s+signer\s+sign\b/.test(l))
+  if (signAt < 0) bad.push('找不到簽章指令（tauri.js signer sign），規則可能失效')
+  else if (installs.length && installs[0][1] > signAt) bad.push('安裝要在簽章之前')
+  return bad
+}
+
+test('#2024 desktop-sign 安裝相依套件一定要 npm ci --ignore-scripts（擋安裝腳本改掉 tauri cli 拿私鑰）', () => {
+  assert.deepEqual(checkSignInstall(jobsOf(stripComments(release))[SIGN_JOB]), [])
+})
+
+test('#2024 壞例子：改回 npm ci、改 npm install、多一行 npx／yarn／npm rebuild／npm run、ignore-scripts=false、npm_config_ignore_scripts、安裝挪到簽章之後，都會紅', () => {
+  const job = jobsOf(stripComments(release))[SIGN_JOB]
+  const ok = '          npm ci --ignore-scripts'
+  assert.ok(job.includes(ok + '\n'), '找不到安裝那一行，壞例子無從替換')
+  const bads = [
+    job.replace(ok, '          npm ci'),
+    job.replace(ok, '          npm install --ignore-scripts'),
+    job.replace(ok, ok + '\n          npx @tauri-apps/cli --version'),
+    job.replace(ok, ok + '\n          yarn install'),
+    job.replace(ok, ok + '\n          npm rebuild'),
+    job.replace(ok, ok + '\n          cd x && npm run build'),
+    job.replace(ok, '          npm ci --ignore-scripts=false'),
+    job.replace(ok, '          npm_config_ignore_scripts=false npm ci --ignore-scripts'),
+    job.replace(ok, ok + ' --foreground-scripts'),
+    job.replace(ok, '          true').replace(/(tauri\.js signer sign[^\n]*\n)/, '$1' + ok + '\n'),
+  ]
+  for (const [i, b] of bads.entries()) assert.notDeepEqual(checkSignInstall(b), [], '壞例子 ' + i + ' 沒有紅')
+})
+
 test('#2022 不准 pull_request 類觸發：全檔（去註解後）沒有 pull_request（含 _target）', () => {
   assert.doesNotMatch(stripComments(release), /pull_request/)
 })
