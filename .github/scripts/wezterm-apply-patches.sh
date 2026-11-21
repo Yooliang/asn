@@ -22,6 +22,7 @@ while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in *$'\t'*) ;; *) fail "清單格式錯誤（要有 Tab 分隔）：$line" ;; esac
   name="${line%%$'\t'*}"; files="${line#*$'\t'}"
   [ -n "$name" ] && [ -n "$files" ] || fail "清單格式錯誤（檔名或檔案為空）：$line"
+  case "$name" in *.patch) ;; *) fail "清單列的補丁檔名要以 .patch 結尾：$name" ;; esac
   [ -z "${DECL[$name]+x}" ] || fail "清單重複列了 $name"
   DECL[$name]="$(printf '%s' "$files" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | sed '/^$/d' | LC_ALL=C sort -u)"
 done < "$MANIFEST"

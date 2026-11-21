@@ -137,8 +137,13 @@ echo "紅燈對照如預期：沒套修補的版本因堆疊溢位而失敗（�
 # ---- 長鏈（2000 層、不成環）：只做 windows（Linux 的遞迴不會在 2000 層溢位，紅燈對照做不出來）----
 if [ "$PLATFORM" = "windows" ]; then
   echo "::group::長鏈綠燈：已套 #7706 與 ASN 修補"
-  # 修補之後的 HEAD 要是 ASN 修補那個 commit，HEAD~1 才是「只套 #7706」的狀態
-  git log -1 --format=%s | grep -q '^asn patch: ' || { echo "::error::HEAD 不是 ASN 修補的 commit，無法取得只套 #7706 的對照版本" >&2; exit 1; }
+  # 紅燈對照要「只套 #7706」的版本：用明確的 commit，不靠 HEAD~1（之後多一份 ASN 修補，HEAD~1 就不是它了）。
+  # 取「最近一個不是 ASN 修補的 commit」＝cherry-pick 的 #7706，並核對它的標題與上游 PATCH_SHA 相同
+  : "${PATCH_SHA:?}"
+  ONLY_7706="$(git rev-list --max-count=1 --invert-grep --grep='^asn patch: ' HEAD)"
+  [ -n "$ONLY_7706" ] && [ "$ONLY_7706" != "$(git rev-parse HEAD)" ] || { echo "::error::找不到 ASN 修補之前的 commit（HEAD 不是 ASN 修補？）" >&2; exit 1; }
+  [ "$(git log -1 --format=%s "$ONLY_7706")" = "$(git log -1 --format=%s "$PATCH_SHA")" ] || { echo "::error::ASN 修補之前的 commit（$ONLY_7706）不是 #7706 的 cherry-pick" >&2; exit 1; }
+  [ -z "$(git diff "$ONLY_7706" "$PATCH_SHA" -- "$FILE")" ] || { echo "::error::$ONLY_7706 的 $FILE 和上游 #7706（$PATCH_SHA）不同" >&2; exit 1; }
   inject
   if ! run_chain_test 2>&1 | tee "$LOGDIR/chain-green.log"; then
     echo "::error::長鏈綠燈失敗：已套 ASN 修補的版本沒有通過" >&2; exit 1
@@ -147,8 +152,8 @@ if [ "$PLATFORM" = "windows" ]; then
   echo "::endgroup::"
   git checkout -- "$FILE" procinfo/Cargo.toml
 
-  echo "::group::長鏈紅燈對照：只套 #7706、不套 ASN 修補（HEAD~1），預期堆疊溢位"
-  git checkout "HEAD~1" -- "$FILE"
+  echo "::group::長鏈紅燈對照：只套 #7706、不套 ASN 修補（$ONLY_7706），預期堆疊溢位"
+  git checkout "$ONLY_7706" -- "$FILE"
   inject
   set +e
   run_chain_test > "$LOGDIR/chain-red.log" 2>&1

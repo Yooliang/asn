@@ -45,7 +45,7 @@ function makePatch(repo, touched) {
   assert.ok(r.stdout.length > 0)
   return r.stdout
 }
-function run({ touched, declared, listed = true, writePatch = true, extraPatch = false, noPatches = false }) {
+function run({ touched, declared, listed = true, writePatch = true, extraPatch = false, noPatches = false, extraLines = [] }) {
   const repo = makeRepo()
   const pdir = fs.mkdtempSync(path.join(os.tmpdir(), 'wz-patch-'))
   const name = '0001-test.patch'
@@ -54,6 +54,7 @@ function run({ touched, declared, listed = true, writePatch = true, extraPatch =
   if (extraPatch) fs.writeFileSync(path.join(pdir, '0002-unlisted.patch'), text)
   const lines = ['# 註解', '']
   if (listed) lines.push(`${name}\t${declared.join(',')}`)
+  lines.push(...extraLines)
   fs.writeFileSync(path.join(pdir, 'manifest.txt'), lines.join('\n') + '\n')
   const r = spawnSync(BASH, [toPosix(SCRIPT), toPosix(repo), toPosix(pdir)], { encoding: 'utf8' })
   return { r, repo }
@@ -87,10 +88,16 @@ test('有補丁沒列在清單 → 失敗', { skip: SKIP }, () => {
 })
 
 test('清單列了但檔案不存在 → 失敗', { skip: SKIP }, () => {
-  // 資料夾裡放另一份補丁（讓「至少一份」成立），清單多列一份不存在的
-  const { r } = run({ touched: [FILES.windows], declared: [FILES.windows], extraPatch: true, writePatch: false })
+  // 0001 照常存在且有列（其他核對都會過），清單另外多列一份資料夾裡沒有的 0009（#1992：要真的走到「列了但沒有檔」那一支）
+  const { r } = run({ touched: [FILES.windows], declared: [FILES.windows], extraLines: [`0009-missing.patch\t${FILES.windows}`] })
   assert.notEqual(r.status, 0)
-  assert.match(r.stderr, /::error::/)
+  assert.match(r.stderr, /::error::manifest\.txt 列了 0009-missing\.patch，但資料夾裡沒有這個檔/)
+})
+
+test('#1992 清單列的補丁檔名不是 .patch 結尾 → 失敗', { skip: SKIP }, () => {
+  const { r } = run({ touched: [FILES.windows], declared: [FILES.windows], extraLines: [`README.txt\t${FILES.windows}`] })
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, /::error::清單列的補丁檔名要以 \.patch 結尾：README\.txt/)
 })
 
 test('補丁資料夾沒有任何補丁 → 失敗', { skip: SKIP }, () => {
@@ -118,4 +125,12 @@ test('真的 patches/wezterm：清單和 .patch 一一對應，numstat 解析的
     const got = r.stdout.split('\n').filter(Boolean).map((l) => l.split('\t')[2]).sort()
     assert.deepEqual(got, decl.get(p), p)
   }
+})
+
+test('#1992 長鏈紅燈對照用明確的 #7706 commit，不靠 HEAD~1（多一份修補時語意才不會變）', () => {
+  const s = fs.readFileSync(new URL('../../../.github/scripts/wezterm-procinfo-cycle-test.sh', import.meta.url), 'utf8')
+  assert.ok(!/HEAD~1/.test(s.replace(/^\s*#.*$/gm, '')), '程式行不能再用 HEAD~1')
+  assert.match(s, /ONLY_7706="\$\(git rev-list --max-count=1 --invert-grep --grep='\^asn patch: ' HEAD\)"/)
+  assert.match(s, /git log -1 --format=%s "\$PATCH_SHA"/, '要核對它就是 #7706 的 cherry-pick')
+  assert.match(s, /git checkout "\$ONLY_7706" -- "\$FILE"/)
 })
