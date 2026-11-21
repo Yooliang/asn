@@ -7,7 +7,9 @@
 //   4. 轉正式、設成 Latest
 //   5. 不登入、匿名從公開網址下載比對 sha256；不一致就退回草稿並報錯
 // 用法（repo 根目錄，發版腳本產完檔、提交並推上去之後）：
-//   node tools/release/github_release.mjs --version 0.2.26 --exe <安裝檔> --sig <.sig> [--notes-file <更新說明>]
+//   node tools/release/github_release.mjs --version 0.2.26 --exe <安裝檔> --sig <.sig> [--notes-file <更新說明>] [--target <40 位 commit>]
+// --target（#2022 ②-2，CI 用）：直接指定 tag 要掛的 commit（CI 上是觸發的 github.sha，標籤本身就在 GitHub 上），
+//   不再用本機的 git 判斷「目前的 commit 有沒有推上去」（CI 的淺層 checkout 沒有遠端分支可查）。沒給就照舊：取 HEAD，並要求已推上 GitHub。
 // 不讀也不印任何權杖：gh 用這台電腦現有的登入。
 import fs from 'node:fs'
 import os from 'node:os'
@@ -141,15 +143,19 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     else if (a[i] === '--exe') opt.exe = a[++i]
     else if (a[i] === '--sig') opt.sig = a[++i]
     else if (a[i] === '--notes-file') opt.notes = fs.readFileSync(a[++i], 'utf8')
+    else if (a[i] === '--target') opt.target = a[++i]
     else { console.error(`不認得的參數：${a[i]}`); process.exit(2) }
   }
   try {
     if (!opt.version || !opt.exe || !opt.sig) throw new Error('要給 --version、--exe、--sig')
     const [exeName, sigName] = installerFiles(opt.version)
     if (path.basename(opt.exe) !== exeName || path.basename(opt.sig) !== sigName) throw new Error(`檔名要是 ${exeName} 與 ${sigName}`)
-    const target = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
-    // tag 要掛在 GitHub 上找得到的 commit：目前的 commit 一定要已經推上去
-    if (!execFileSync('git', ['branch', '-r', '--contains', target], { encoding: 'utf8' }).trim()) throw new Error(`目前的 commit ${target.slice(0, 8)} 還沒推上 GitHub：先提交並推上去再發`)
+    let target = opt.target
+    if (target === undefined) {
+      target = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+      // tag 要掛在 GitHub 上找得到的 commit：目前的 commit 一定要已經推上去
+      if (!execFileSync('git', ['branch', '-r', '--contains', target], { encoding: 'utf8' }).trim()) throw new Error(`目前的 commit ${target.slice(0, 8)} 還沒推上 GitHub：先提交並推上去再發`)
+    } else if (!/^[0-9a-f]{40}$/.test(target)) throw new Error('--target 要是完整的 40 位 commit')
     await publishRelease({ version: opt.version, files: [{ name: exeName, file: opt.exe }, { name: sigName, file: opt.sig }], notes: opt.notes, target, gh: realGh, ghDownload: realGhDownload, log: m => console.log(m) })
     console.log(`完成：${githubUrl(opt.version, exeName)}。接著才部署官網（latest.json 與首頁）。`)
   } catch (e) { console.error(`發到 GitHub 中止：${e.message}`); process.exit(1) }

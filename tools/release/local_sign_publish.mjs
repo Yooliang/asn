@@ -16,8 +16,9 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { PLATFORM, buildLatestJson, installerName, installerUrl, patchDownloadLink, resolveNotes, INSTALLER_HREF_RE } from '../../relay/asn/scripts/release-lib.mjs'
-import { verifyAll, sigMatchesLatest } from './verify_sig.mjs'
+import { PLATFORM, installerName } from '../../relay/asn/scripts/release-lib.mjs'
+import { verifyAll } from './verify_sig.mjs'
+import { SiteFilesError, SITE_BASE as SHARED_SITE_BASE, buildSiteFiles, compareVersions as sharedCompareVersions, fetchOnlineLatest, versionNotBackProblem } from './site_files.mjs'
 import { verifyOnline } from './verify_online.mjs'
 import { checkRecord } from './site_record_check.mjs'
 import { listZip } from './zip_lite.mjs'
@@ -30,7 +31,7 @@ export const REPO = 'Yooliang/asn'
 export const WORKFLOW = '.github/workflows/asn-release.yml'
 export const ARTIFACT_WHITELIST = ['asn-installer-unsigned', 'asn-site-draft', 'asn-aab', 'asn-debug']
 export const SITE_FILES = ['site/public/update/latest.json', 'site/public/index.html']
-export const SITE_BASE = 'https://asnmessenger.web.app'
+export const SITE_BASE = SHARED_SITE_BASE
 const FIREBASE_PROJECT = 'asnmessenger'
 
 const sha256 = buf => crypto.createHash('sha256').update(buf).digest('hex')
@@ -38,11 +39,7 @@ class StepError extends Error {}
 const bad = msg => { throw new StepError(msg) }
 const first = s => String(s ?? '').trim()
 
-export const compareVersions = (a, b) => {
-  const x = a.split('.').map(Number), y = b.split('.').map(Number)
-  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1
-  return 0
-}
+export const compareVersions = sharedCompareVersions // 與 CI 版共用（site_files.mjs）
 
 export function parseArgs(argv) {
   const o = { platform: 'windows', tag: null, version: null, runId: null, dryRun: false, withPlay: 'auto', sameVersion: false, itemsFile: null, room: null, error: null }
@@ -268,20 +265,15 @@ export async function localSignPublish(opts, deps) {
     await step(5, '產 latest.json 與 index.html', async () => {
       let changelog
       try { changelog = showAt(tag, 'relay/asn/CHANGELOG.md') } catch { bad('讀不到標籤上的 CHANGELOG.md') }
-      const { notes } = resolveNotes({ arg: '', changelog, version, date: S.record.date })
-      S.notes = notes
-      const latest = buildLatestJson({ version, notes, pubDate: new Date(now()), signature: S.sigText })
-      const m = sigMatchesLatest({ sigText: S.sigText, latest })
-      if (!m.ok) bad(m.problems.join('；'))
       let html
       try { html = showAt(tag, 'site/public/index.html') } catch { bad('讀不到標籤上的 site/public/index.html') }
-      html = html.replace(/\r\n/g, '\n')
-      if (!INSTALLER_HREF_RE.test(html)) bad('index.html 裡找不到安裝檔連結，不知道要改哪裡')
-      INSTALLER_HREF_RE.lastIndex = 0
-      const patched = patchDownloadLink(html, installerUrl(version))
-      S.latest = latest
-      S.latestText = `${JSON.stringify(latest, null, 2)}\n`
-      S.indexText = patched
+      // 產檔邏輯與 CI 版共用（site_files.mjs）；它丟的 SiteFilesError 是自己寫的訊息，照舊轉成 StepError
+      let built
+      try { built = buildSiteFiles({ version, sigText: S.sigText, changelog, indexHtml: html, pubDate: new Date(now()), date: S.record.date }) } catch (e) { if (e instanceof SiteFilesError) bad(e.message); throw e }
+      S.notes = built.notes
+      S.latest = built.latest
+      S.latestText = built.latestText
+      S.indexText = built.indexText
       const out = path.join(S.dir, 'site-out')
       fsx.mkdirSync(out, { recursive: true })
       fsx.writeFileSync(path.join(out, 'latest.json'), S.latestText)
@@ -292,17 +284,13 @@ export async function localSignPublish(opts, deps) {
     await step(6, '版本不退', async () => {
       let online
       try {
-        const res = await fetchFn(`${SITE_BASE}/update/latest.json?t=${now()}`, { headers: { 'cache-control': 'no-cache' } })
-        if (!res.ok) bad(`讀不到線上 latest.json（HTTP ${res.status}）`)
-        const onlineObj = JSON.parse(await res.text())
-        online = onlineObj.version
+        const got = await fetchOnlineLatest({ fetchFn, now, base: SITE_BASE })
+        online = got.version
         // #1964：記下線上目前有沒有 Linux 項（電腦版產的 latest.json 只有 windows-x86_64，部署後 Linux 項會暫時消失）
-        S.onlineHadLinux = !!onlineObj?.platforms?.['linux-x86_64']
-      } catch (e) { if (e instanceof StepError) throw e; bad('讀不到線上 latest.json，無法確認版本不退') }
-      if (!/^\d+\.\d+\.\d+$/.test(online ?? '')) bad('線上 latest.json 的 version 格式不對')
-      const c = compareVersions(version, online)
-      if (c < 0) bad(`版本會倒退：這次 ${version}，線上已是 ${online}`)
-      if (c === 0 && !opts.sameVersion) bad(`線上已經是 ${version}：要重發同一版請加 --same-version`)
+        S.onlineHadLinux = !!got.obj?.platforms?.['linux-x86_64']
+      } catch (e) { if (e instanceof SiteFilesError) bad(e.message); throw e }
+      const problem = versionNotBackProblem({ version, online, allowSame: opts.sameVersion })
+      if (problem) bad(problem)
     })
 
     if (dryRun) {
