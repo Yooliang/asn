@@ -4,6 +4,7 @@
 // 動作的名稱、參數、回應格式與 irori-relay 的 HTTP 動作一致（whoami、list、inbox、ack、sent_status、send、invite、reissue），
 // 所以 irori-api/relay.ts 的呼叫端不用關心走的是哪一條路。租戶一律由呼叫端（登入者的帳號）決定，不接受任何來自 body 的租戶或節點。
 
+import { recordRoleOnly } from "./auth_observe.ts";
 import { expectsReplyArgs } from "./expects_reply.ts";
 import { badSenderName } from "./reserved_sender.ts";
 
@@ -87,6 +88,7 @@ export async function nodeAction(deps: OpsDeps, who: Actor, action: string, body
       if (error) return internal(action, error);
       if (data?.error === "forbidden") return err(403, "forbidden");
       if (data?.error) return err(400, data.error);
+      await recordRoleOnly(deps.rpc, action, who.node); // 只記次數與通過方式（#500）
       return ok({ invite: code, expires_at: data.expires_at, prefix: data.prefix });
     }
     case "reissue": {
@@ -97,6 +99,7 @@ export async function nodeAction(deps: OpsDeps, who: Actor, action: string, body
       if (data?.error === "forbidden") return err(403, "forbidden");
       if (data?.error === "not_found") return err(404, "not_found");
       if (data?.error) return err(400, data.error);
+      await recordRoleOnly(deps.rpc, action, who.node); // 只記次數與通過方式（#500）
       return ok({ code, expires_at: data.expires_at });
     }
   }

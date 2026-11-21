@@ -47,8 +47,8 @@ Deno.test("relay/index.ts：只有 acct_list／acct_switch 讀本人簽章標頭
   const at = src.indexOf("ACCT_ACTIONS.has(action)");
   const block = src.slice(at, at + 1200);
   assert(block.includes('action === "acct_list" || action === "acct_switch"'), "只有這兩個動作讀簽章");
-  assert(block.includes("signedUserId("));
-  assert(/handleAcctAction\([^;]*, me, action, params, signedAcct\)/.test(block));
+  assert(block.includes("signedUserState("));
+  assert(/handleAcctAction\([^;]*, me, action, params, signedAcct, signedState\.state\)/.test(block));
 });
 
 Deno.test("migration 20261024130000：list／switch 多認本人簽章（asn_user_owns_node），預設值 null、只給 service_role", () => {

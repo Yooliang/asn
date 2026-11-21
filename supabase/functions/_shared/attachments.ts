@@ -2,6 +2,7 @@
 // 設計見 docs/ATTACHMENTS.md；資料與權限的最後一道關在 supabase/migrations/20261020000500_attachments.sql。
 // Edge Function 只負責接線：把 Supabase Storage 包成 StorageDeps 傳進來，這裡就能不連網路單元測試。
 
+import { recordRoleOnly } from "./auth_observe.ts";
 import { rpcMissing } from "./account_me.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -234,6 +235,7 @@ export async function handleAttachAction(
     case "attach_sweep": {
       if (me.role !== "owner") return err(403, "forbidden");
       const n = await sweepExpired(deps, 200);
+      await recordRoleOnly(deps.rpc, action, me.id); // 只記次數與通過方式（#500）
       return { status: 200, body: { removed: n } };
     }
   }

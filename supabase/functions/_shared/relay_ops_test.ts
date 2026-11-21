@@ -62,7 +62,7 @@ Deno.test("invite／reissue：碼只以雜湊進資料庫；forbidden／not_foun
   assertEquals(inv.body.prefix, "t2-");
   assertEquals(f.calls[0].args.p_code_hash, await sha256Hex(inv.body.invite));
   const re = await nodeAction(f.deps, WHO, "reissue", { id: "H" });
-  assertEquals(f.calls[1].args.p_code_hash, await sha256Hex(re.body.code));
+  assertEquals(f.calls[2].args.p_code_hash, await sha256Hex(re.body.code)); // calls[1] 是 invite 的通過方式記錄（#500）
   assertEquals((await nodeAction(f.deps, WHO, "reissue", { id: "bad id!" })).status, 400);
   assertEquals((await nodeAction(f.deps, WHO, "update", { id: "H", machine: "書房" })).status, 404, "update 已移除");
   const nf = fake({ asn_relay_invite: () => ({ error: "forbidden" }) });

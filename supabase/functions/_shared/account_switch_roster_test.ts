@@ -153,7 +153,7 @@ Deno.test("acct_report：舊函式失敗就照舊回錯，不呼叫新的", asyn
 
 Deno.test("relay/index.ts：acct_roster 讀本人簽章（照 acct_list 的做法）", () => {
   const src = Deno.readTextFileSync(new URL("../relay/index.ts", import.meta.url));
-  assert(/const signedAcct = \([^)]*action === "acct_list"[^)]*action === "acct_roster"\) \? await signedUserId\(/.test(src));
+  assert(/const signedState = \([^)]*action === "acct_list"[^)]*action === "acct_roster"\) \? await signedUserState\(/.test(src));
 });
 
 Deno.test("acct_roster：沒簽章回 forbidden、不呼叫資料庫；有簽章帶 p_actor 與 p_signed_user", async () => {
