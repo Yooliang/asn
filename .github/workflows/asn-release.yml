@@ -4,7 +4,8 @@ name: ASN 發版（標籤觸發）
 # #1892 規格 2.1。只吃 v<主>.<次>.<修訂> 標籤；不加 workflow_dispatch（重跑用 Re-run failed jobs）。
 # 「只建一次」（11-20 決定）：這一輪 CI 就是正式建置，含冒煙與 npm test 都在這一份產物上做；
 # 全過之前不推 main、不發 Release、不部署（那些都在本機腳本，CI 沒有）。改 workflow 本身要驗證時用演練 workflow。
-# CI 不簽章：更新簽章金鑰只在發版機器上，不進 GitHub；這份 workflow 沒有 secrets、沒有 environment（只用 github.token）。
+# 簽章（#2022）：只有 desktop-sign 這一個 job 掛 environment: release，更新簽章的私鑰與密碼（TAURI_SIGNING_*）只從它簽章那一步的 env: 進來；
+# 其餘 job 沒有 secrets、沒有 environment（只用 github.token）。desktop-sign 只產 artifact，不建 Release、不動官網。
 # 開關：repo variable ASN_RELEASE_AUTO，只有值恰為 true 才開；未設定一律視為 false，下游全略過。
 on:
   push:
@@ -232,6 +233,87 @@ jobs:
       - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
         with:
           subject-path: installer-in/ASN_*_x64-setup.exe
+
+  # ---- 2b. 電腦版簽章（#2022 ②-1）：整份 workflow 唯一有 environment 與 secrets 的 job；只簽、驗、上傳 artifact，不建 Release、不動官網 ----
+  # 私鑰與密碼只從「簽章」那一步的 env: 進來（tauri 直接讀 TAURI_SIGNING_PRIVATE_KEY／TAURI_SIGNING_PRIVATE_KEY_PASSWORD 環境變數，不寫成檔案、不放參數）。
+  # tauri cli 用 relay/asn 的 package-lock 鎖定的版本（npm ci --ignore-scripts），不用 npx 臨時抓最新版。
+  desktop-sign:
+    needs:
+      - desktop
+      - attest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: relay/asn/package-lock.json
+
+      - name: 安裝 tauri cli（版本跟著 package-lock，不跑安裝腳本）
+        working-directory: relay/asn
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: asn-installer-unsigned
+          path: installer-in
+
+      - name: 再核對一次 SHA256SUMS.txt 並記下簽章前的雜湊
+        id: pre
+        working-directory: installer-in
+        run: |
+          set -euo pipefail
+          sha256sum -c SHA256SUMS.txt
+          shopt -s nullglob
+          files=(ASN_*_x64-setup.exe)
+          if [ "${#files[@]}" -ne 1 ]; then echo "安裝檔要剛好一個，實際 ${#files[@]} 個" >&2; exit 1; fi
+          echo "name=${files[0]}" >> "$GITHUB_OUTPUT"
+          echo "sha=$(sha256sum "${files[0]}" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: 簽章（私鑰只在這一步的 env）
+        working-directory: installer-in
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          INSTALLER: ${{ steps.pre.outputs.name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then echo "沒有拿到簽章私鑰（environment release 的 secret）" >&2; exit 1; fi
+          node ../relay/asn/node_modules/@tauri-apps/cli/tauri.js signer sign "$INSTALLER" > /dev/null
+          test -s "$INSTALLER.sig"
+
+      - name: 驗簽、反向驗證、簽章前後雜湊
+        env:
+          INSTALLER: ${{ steps.pre.outputs.name }}
+          BEFORE_SHA: ${{ steps.pre.outputs.sha }}
+        run: |
+          set -euo pipefail
+          node tools/release/ci_verify_sig.mjs --conf relay/asn/src-tauri/tauri.conf.json --exe "installer-in/$INSTALLER" --before-sha "$BEFORE_SHA"
+
+      - name: 上傳已簽章的安裝檔、.sig 與 SHA256SUMS.txt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asn-installer-signed
+          path: |
+            installer-in/ASN_*_x64-setup.exe
+            installer-in/ASN_*_x64-setup.exe.sig
+            installer-in/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
 
   # ---- 3. 官網紀錄草稿：只放 artifact，不寫入任何地方；不依賴電腦版 ----
   site-draft:
