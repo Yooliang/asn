@@ -417,6 +417,11 @@ impl Mux<'_> {
 }
 
 /// ASN 上一次自己停 mux 的記號：（程序編號, 毫秒）。沒有或看不懂就是 None
+/// pid 檔裡記的（程序編號, 建立時間），給只有資料夾、沒有 `Mux` 的呼叫端用（心跳讀取）
+pub fn recorded_at(paths: &MuxPaths) -> Option<(u32, u64)> {
+    read_pid(&paths.pid)
+}
+
 pub fn stopped_mark(dir: &Path) -> Option<(u32, u64)> {
     read_pid(&dir.join(STOPPED_FILE))
 }
