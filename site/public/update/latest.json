@@ -1,15 +1,11 @@
 {
-  "version": "0.2.54",
-  "notes": "- 改善：切換帳號、列出別台電腦的帳號時，沒登入或登入過期會直接提示「請先登入」或「登入已過期，請重新登入」，不再顯示看不懂的 403 錯誤。（#500、#2066）",
-  "pub_date": "2026-11-21T20:15:32.821Z",
+  "version": "0.2.55",
+  "notes": "- 改善：終端服務卡死時，ASN 會自動結束它並把夥伴接回來，不用再手動重開。（#1897、#2060、#2062、#2063、#2064、#2072）",
+  "pub_date": "2026-11-21T22:17:00.675Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybityR3NoejhqOGh3dmhHVHpBaFFnUXdPWnVQNHZMczJQRXFFUUcwOE9DMVE5Ky9uWUp3b0pHaWM0dTlLbGg0dFNxQUhyMjRuT1ZRREVJUE1IWFN1d1FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjkyMTMyCWZpbGU6QVNOXzAuMi41NF94NjQtc2V0dXAuZXhlCm16UGowOE1FT3FvSzRUdXFrNGdPT052cjJYL2o3RjRNdnQ2UnhyYXFUMEViSXJuWU1QVFE5QW82endvdUt2TmtaTldxMll0bHV6cEh3RmF6Qk1IbEJRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.54_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlnazU0VlBPWDVmR1c4MzFyTHVqY0FDZmRFTFkrT3l3b3FKTDZUQVdDbFVXUGJ1SlV6elJJSVJLSUk1akZvajYwTkJEVGxKYzJFRFMxQ1lrMUQvY3d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjkyNTg4CWZpbGU6QVNOXzAuMi41NF9hbWQ2NC5BcHBJbWFnZQp5M3gzcGFEVkdNelNJL3V2TFNQblJaTDlhNVFrdkxPb1lVYVZRNlkzanVwenpWL3pzZnVvOEdaS0tFUm9XMStlSUVPSkU4YWlhVjU1YjFXUnVSZkRDUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.54_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnlyd0F6bmFOV1d2TElNNUxzOExrV2U5aDRxak40b05WNXRRVDZKNE9UallJaVBZNWt6UlFrblVRQ0pmQWhzcUJ0Q0p2UjlmVkR1ZW50UmU4dG1jdGdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mjk5NDIwCWZpbGU6QVNOXzAuMi41NV94NjQtc2V0dXAuZXhlClhZWGlUN0ZoSFVFL0dwRnhyZTUzSTJFcHBicFNXMmptZE9XMi9Bc0VqVVh1Tm9MM2FWZEtnUVhIM3h3OTd1cTlpUXJrUXI2QVRSek9JWGZtYnY4UEF3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.55_x64-setup.exe"
     }
   }
 }
