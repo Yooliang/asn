@@ -1250,6 +1250,39 @@ mod stuck {
         assert_eq!(*r.killed.borrow(), vec![4000]);
     }
 
+    /// 只實作必要方法（外加讓前面幾步過關的 exe_path）、沒有覆寫 check_process_table 的 runner
+    struct Minimal;
+    impl Runner for Minimal {
+        fn run(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>, _t: Duration) -> Result<RunOutput, String> {
+            Ok(RunOutput { success: false, stdout: String::new(), stderr: String::new() })
+        }
+        fn spawn(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>) -> Result<u32, String> {
+            unreachable!()
+        }
+        fn kill_tree(&self, _pid: u32) {
+            panic!("沒有實作程序表檢查的 runner 不能被拿來結束程序");
+        }
+        fn started_ms(&self, pid: u32) -> Option<u64> {
+            (pid == 4000).then_some(777)
+        }
+        fn exe_path(&self, _pid: u32) -> Option<PathBuf> {
+            Some(PathBuf::from(SERVER))
+        }
+        fn sleep(&self, _d: Duration) {}
+    }
+
+    #[test]
+    fn t1897_runner_沒有覆寫程序表檢查_處置取消() {
+        let d = tempfile::tempdir().unwrap();
+        let r = Minimal;
+        let m = Mux { runner: &r, cli: PathBuf::from("W/wezterm.exe"), server: PathBuf::from(SERVER), paths: paths(d.path()).unwrap(), base_env: base() };
+        std::fs::create_dir_all(&m.paths.dir).unwrap();
+        std::fs::write(&m.paths.pid, "4000 777").unwrap();
+        let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("要取消") };
+        assert!(why.contains("沒有實作程序表檢查"), "{why}");
+        assert!(m.paths.pid.exists());
+    }
+
     #[test]
     fn t1897_cli_跑不起來_取消_不當成連不上() {
         let d = tempfile::tempdir().unwrap();

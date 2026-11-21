@@ -100,9 +100,9 @@ pub trait Runner {
     fn descendants_of(&self, _pid: u32) -> Vec<u32> {
         Vec::new()
     }
-    /// 結束程序樹之前先確認程序表可信（見 [`table_check`]）。預設可信（測試的假 runner 不用改）
+    /// 結束程序樹之前先確認程序表可信（見 [`table_check`]）。預設**不可信**：沒有明確實作的 runner 不能被拿來結束程序樹
     fn check_process_table(&self, _mux: u32) -> Result<(), String> {
-        Ok(())
+        Err("沒有實作程序表檢查".into())
     }
     /// ASN 自己和它的祖先（沿著父程序編號往上，含自己）。結束一棵程序樹之前，確認這些都不在樹裡。預設只有自己
     fn self_ancestors(&self) -> Vec<u32> {
