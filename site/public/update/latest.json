@@ -1,15 +1,11 @@
 {
-  "version": "0.2.46",
-  "notes": "- 修正（只有電腦版）：開著很多視窗、行程進出頻繁時，終端服務不會再把某個視窗誤認成別的程式底下，畫面與視窗清單更準（內建的 WezTerm 換成修過的版本）。（#1914、#2026）",
-  "pub_date": "2026-11-21T07:00:40.852Z",
+  "version": "0.2.47",
+  "notes": "- 改善：終端服務中斷後自動接回夥伴時，不再跳出擋住畫面的「已自動接回」框，接回結果改寄到通知頁。（#1895、#2029）",
+  "pub_date": "2026-11-21T08:33:07.683Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitIbFV5KzlJMTUydmEzdm5QaWJ6V25yMWpFendVR3JyQmd1VHZVOEFndUlHK1c1c2JUbWJKZWc0Vm9Hejczc0hVS0NrWGI0WVVZY08zN0tzM0tNOHdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjQ0NDQwCWZpbGU6QVNOXzAuMi40Nl94NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQ2CkU3SHMwTHBTU3hHeEwrWHZ5OTRkdFdpay9iZUc4c1FXQTR6S3U1UjhMRjhJci84WWV2eFZlMXJuSG9KNmZQK0dYOXRIaW1Eb2R0OW5JQmdDMnZxbEFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.46_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpadmpOZS9UcnRtYjA2b1dCUzBwN1FLQVg5a1QyTFBOUjliTkpFVWtwTVh2bGVHQ0ZzenYvb05RbjkyamcwUVNjSkJndGQ1TU1QUFc3ZWVkOWtycHd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjQ1MjQyCWZpbGU6QVNOXzAuMi40Nl9hbWQ2NC5BcHBJbWFnZQpnT1FPR3htMUM1d2xLSGZQaXlocDdVOUhUZlNla2E5YlErZFBENEk3MFZWTFpSei9pbkxpck8wMlVuYzFuc3lqT3FzV0s5c2VvL21vWU02YmNtY3lEZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.46_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVYT1FUVnFxZXBwbXpxQ0xPclFreEJVa053Q1lKeUNwcFFVNnNTSytvdm5FbXNZV3FMNjNaRFFIY2hWL0ZkM0t3SzVPdEdVM2V1bEZlNnc5RmNnbHcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjQ5OTg3CWZpbGU6QVNOXzAuMi40N194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4yLjQ3CjU1akppRzR3Q3lndEtLMWtPNHhFU3ZVWlMyUkl6aFVuUWowYnZqSEY0NWNkditiREpUeTI3TjUzWFh2ci82VVZaRFF2My92YTJqc1NyQmptTU9tN0FnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.47_x64-setup.exe"
     }
   }
 }
