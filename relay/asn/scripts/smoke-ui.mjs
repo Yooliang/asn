@@ -11,7 +11,7 @@ import path from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { readDevToolsPort } from './devtools-port.mjs'
-import { mpaneWidenProbeSource, motionMedia, findBrowser, injectSource, mountCheckSource, makeStableTracker, pagerSettleSource, SETTLE_QUIET_MS, settleSnapshotSource, waitUntil, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
+import { mpaneWidenProbeSource, motionMedia, findBrowser, injectSource, mountCheckSource, makeStableTracker, pagerSettleSource, quietMsFor, settleSnapshotSource, waitUntil, probeKind, probeSource, parseSmokeArgs, pathOf, selectScenarios, shotPath, tableFor } from './smoke-lib.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ui = path.join(root, 'ui')
@@ -228,7 +228,7 @@ async function runScenario(cdp, sc, base) {
   // 掛上後等版面穩定再留一小段靜默窗，讓首次渲染與啟動後的非同步例外跑完（#1974：取代每情境固定睡一秒）
   const settle = what => waitUntil({ scenario: sc.name, what, poll: pollSnapshot, isDone: makeStableTracker() })
   if (check.ok) {
-    try { await settle('版面穩定（載入完成、字型就緒、連續三次量到相同）'); await sleep(SETTLE_QUIET_MS); check = await evalCheck() } catch (e) { check = { ok: false, why: e.message } }
+    try { await settle('版面穩定（載入完成、字型就緒、連續三次量到相同）'); await sleep(quietMsFor(sc.name)); check = await evalCheck() } catch (e) { check = { ok: false, why: e.message } }
   }
   let probeWhy = ''
   if (check.ok && sc.probe) {

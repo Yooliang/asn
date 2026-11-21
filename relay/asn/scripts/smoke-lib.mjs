@@ -1072,6 +1072,11 @@ export const mountCheckSource = (ready, expectedPath) => `(() => {
 export const SETTLE_POLL_MS = 50
 export const SETTLE_STABLE_POLLS = 3
 export const SETTLE_QUIET_MS = 300
+// 取捨：多數情境靜默窗只留 300ms，晚於 300ms 才冒出的啟動例外由「代表情境」把關：
+// 每個 ui 頁面挑一個代表情境，穩定後多等 SETTLE_QUIET_LATE_MS（同舊版固定睡一秒的覆蓋）。
+export const SETTLE_QUIET_LATE_MS = 1000
+export const LATE_QUIET_SCENARIOS = Object.freeze(['m-signed-in', 'list', 'chat', 'onboard', 'login', 'panel', 'askpass', 'toast', 'setup-progress'])
+export const quietMsFor = name => (LATE_QUIET_SCENARIOS.includes(name) ? SETTLE_QUIET_LATE_MS : SETTLE_QUIET_MS)
 export const SETTLE_TIMEOUT_MS = 5000
 export const settleSnapshotSource = () => `(() => {
   const d = document, b = d.body, e = d.documentElement;

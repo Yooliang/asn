@@ -5,7 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
-import { makeStableTracker, waitUntil, settleSnapshotSource, SETTLE_QUIET_MS, motionMedia, BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeEntry, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
+import { makeStableTracker, waitUntil, settleSnapshotSource, SETTLE_QUIET_MS, SETTLE_QUIET_LATE_MS, LATE_QUIET_SCENARIOS, quietMsFor, motionMedia, BAR_PROBES, EXCLUDED_PAGES, GROUP_ITEMS, groupProbeSource, probeEntry, probeKind, MASK_PROBES, barProbeSource, probeSource, PARTNER_ME, SCENARIOS, browserCandidates, fakeTable, findBrowser, injectSource, maskProbeSource, mountCheckSource, parseSmokeArgs, pathOf, selectScenarios, tableFor } from '../scripts/smoke-lib.mjs'
 import { SKIP_WARNING, smokeGate, splitSkipFlag } from '../scripts/smoke-gate.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -498,6 +498,19 @@ test('#1974 冒煙腳本不再有固定 sleep(1000)／sleep(300)，改用等條�
   assert.doesNotMatch(src, /sleep\(1000\)/)
   assert.doesNotMatch(src, /sleep\(300\)/)
   assert.match(src, /waitUntil\(\{ scenario: sc\.name/)
-  assert.match(src, /await sleep\(SETTLE_QUIET_MS\)/)
-  assert.ok(SETTLE_QUIET_MS >= 200 && SETTLE_QUIET_MS < 1000)
+  assert.match(src, /await sleep\(quietMsFor\(sc\.name\)\)/)
+  assert.ok(SETTLE_QUIET_MS >= 300 && SETTLE_QUIET_MS < 1000)
+})
+
+test('#1974 每個冒煙頁面都有一個保留 1 秒靜默窗的代表情境，名單不得空或打錯', () => {
+  assert.equal(SETTLE_QUIET_LATE_MS, 1000)
+  assert.ok(LATE_QUIET_SCENARIOS.length > 0)
+  const byName = new Map(SCENARIOS.map(sc => [sc.name, sc]))
+  for (const name of LATE_QUIET_SCENARIOS) assert.ok(byName.has(name), `代表情境 ${name} 不在情境表裡`)
+  assert.equal(new Set(LATE_QUIET_SCENARIOS).size, LATE_QUIET_SCENARIOS.length, '代表情境名單有重複')
+  const pages = new Set(SCENARIOS.map(sc => pathOf(sc.page)))
+  const covered = new Set(LATE_QUIET_SCENARIOS.map(name => pathOf(byName.get(name).page)))
+  for (const page of pages) assert.ok(covered.has(page), `頁面 ${page} 沒有代表情境`)
+  assert.equal(quietMsFor(LATE_QUIET_SCENARIOS[0]), SETTLE_QUIET_LATE_MS)
+  assert.equal(quietMsFor('不存在的情境'), SETTLE_QUIET_MS)
 })
