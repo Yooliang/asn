@@ -1,7 +1,7 @@
 // 自動發佈常駐程式（#1980 第二小項）：輪詢發版 run，全綠就依序跑 local_sign_publish（先 dry-run 再正式）。
 // 判斷規則全在 auto_publish_core.mjs；這支只負責呼叫端：取鎖、讀 gh、準備工作樹、跑子程序、存 state、貼群組。
 // 用法：node tools/release/auto_publish.mjs [--once] [--interval 120] [--state <檔>] [--room <群組代號>] [--dry-run-only]
-//   首次：node tools/release/auto_publish.mjs --seed <版號>（或 --seed-desktop <版號> --seed-linux <版號>）播種後結束
+//   首次：node tools/release/auto_publish.mjs --seed <版號>（或 --seed-desktop <版號> --seed-linux <版號>）播種後結束（需加 --yes 才會執行；會先對照 gh 最新成功版號與線上 latest.json，起點低於線上版就拒絕）
 //   人工確認一筆失敗：node tools/release/auto_publish.mjs --ack <平台@版號>，存檔後結束
 //   ⚠ 運行手冊：電腦版自動那條紅了、改走備援手動發版之後，要對那一版下 --ack desktop@<版號>（Linux 若被標 blocked 也要 --ack linux@<版號>），
 //     否則有未清除的失敗，兩個平台的新版都會一直暫停（西川 #4561）
@@ -11,7 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
-import { decide, applyResult, seed, acknowledge, STALE_MS } from './auto_publish_core.mjs'
+import { decide, applyResult, seed, acknowledge, compareVersions, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail } from './asn_cli.mjs'
 
 export const WORKFLOWS = [
@@ -25,7 +25,7 @@ const DEFAULT_STATE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'asn-a
 export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
 
 export function parseArgs(argv) {
-  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, error: null }
+  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, yes: false, error: null }
   for (let i = 0; i < argv.length && !o.error; i++) {
     const a = argv[i]
     const val = () => { const v = argv[++i]; if (v === undefined || v.startsWith('--')) { o.error = `${a} 後面要有值`; return null } return v }
@@ -38,8 +38,10 @@ export function parseArgs(argv) {
     else if (a === '--seed-desktop') o.seedDesktop = val()
     else if (a === '--seed-linux') o.seedLinux = val()
     else if (a === '--ack') o.ack = val()
+    else if (a === '--yes') o.yes = true
     else o.error = `不認得的參數：${a}`
   }
+  if (!o.error && o.ack && (o.seedDesktop || o.seedLinux)) o.error = '--ack 和 --seed 不能同時給'
   return o
 }
 
@@ -126,11 +128,12 @@ export function parseLock(text) {
 // 且目的檔已存在就失敗（EEXIST）、不像 Windows 上的 rename 會直接覆蓋別人的鎖。
 // 接手殘留鎖只准用 rename 搶（先改名成 .stale-<自己的 pid>）：rename 失敗代表別人先搶走了，這一輪放棄。
 export function acquireLock(lockPath, deps) {
-  const content = () => `${deps.pid}\n${deps.now()}`
+  let written = null
   const tryCreate = () => {
-    try { deps.createLock(lockPath, content()); return true } catch (e) { if (e.code === 'EEXIST') return false; throw e }
+    const c = `${deps.pid}\n${deps.now()}`
+    try { deps.createLock(lockPath, c); written = c; return true } catch (e) { if (e.code === 'EEXIST') return false; throw e }
   }
-  if (tryCreate()) return { got: true }
+  if (tryCreate()) return { got: true, content: written }
   let text
   try { text = deps.readFile(lockPath) } catch { return { got: false, why: '鎖檔剛好消失或讀不到，這一輪放棄' } }
   const { pid, ts } = parseLock(text)
@@ -141,9 +144,25 @@ export function acquireLock(lockPath, deps) {
   if (!expired && deps.pidAlive(pid)) return { got: false, pid }
   const mine = `${lockPath}.stale-${deps.pid}`
   try { deps.rename(lockPath, mine) } catch { return { got: false, pid, why: '殘留鎖被別人先搶走了，這一輪放棄' } }
+  // rename 之後重讀：搬到的必須就是剛才判斷為殘留的那份（pid＋時間戳都一樣），否則搬到的是別人剛建的活鎖，要還回去並放棄
+  let again = null
+  try { again = parseLock(deps.readFile(mine)) } catch { /* 讀不到當作不一致 */ }
+  if (!again || again.pid !== pid || again.ts !== ts) {
+    try { deps.rename(mine, lockPath) } catch (e) { deps.log(`搬到的不是殘留鎖而是別人剛建的鎖，且還原失敗（${mine}）：${e.message}`) }
+    return { got: false, pid: null, why: '接手時發現鎖已被別人換成新的，已還回原名，這一輪放棄' }
+  }
   try { deps.unlink(mine) } catch { /* 刪不掉不影響 */ }
   if (!tryCreate()) return { got: false, pid: null, why: '接手後建鎖失敗，這一輪放棄' }
-  return { got: true, stale: pid, expired }
+  return { got: true, stale: pid, expired, content: written }
+}
+
+// 還鎖：鎖檔內的 pid 和時間戳都要是自己取鎖時寫的才刪，否則不動並記 log
+export function releaseLock(lockPath, deps, content) {
+  let cur
+  try { cur = parseLock(deps.readFile(lockPath)) } catch (e) { deps.log(`還鎖時讀不到鎖檔，不刪：${e.message}`); return }
+  const mine = parseLock(content)
+  if (cur.pid !== mine.pid || cur.ts !== mine.ts) { deps.log(`鎖已被換成別人的（pid ${cur.pid}），不刪`); return }
+  try { deps.unlink(lockPath) } catch (e) { deps.log(`還鎖失敗：${e.message}`) }
 }
 
 const logPathOf = (opts) => path.join(path.dirname(opts.state), 'auto-publish.log')
@@ -252,7 +271,7 @@ export async function runOnce(opts, deps) {
     log(`子程序結束碼 ${r.status}\n--- stdout ---\n${r.stdout ?? ''}\n--- stderr ---\n${r.stderr ?? ''}`)
     return finish(r.status === 0, `local_sign_publish 結束碼 ${r.status}，細節看 auto-publish.log`)
   } finally {
-    try { deps.unlink(lockPath) } catch (e) { deps.log(`還鎖失敗：${e.message}`) }
+    releaseLock(lockPath, deps, lock.content)
   }
 }
 
@@ -265,7 +284,9 @@ export function checkStartup(opts, deps) {
 }
 
 // --seed / --ack 子命令：取鎖（免得和常駐程式同時寫 state）、做完存檔、回 { code, msg }
-export function runCommand(opts, deps) {
+export const ONLINE_LATEST = 'https://asnmessenger.web.app/update/latest.json'
+
+export async function runCommand(opts, deps) {
   const lockPath = `${opts.state}.lock`
   const lock = acquireLock(lockPath, deps)
   if (!lock.got) return { code: 3, msg: lock.why ?? `鎖被 pid ${lock.pid ?? '未知'} 佔用（常駐程式正在跑？），稍後再試` }
@@ -275,17 +296,42 @@ export function runCommand(opts, deps) {
       let st
       try { st = JSON.parse(deps.readFile(opts.state)) } catch (e) { return { code: 1, msg: `state 檔讀不懂：${e.message}` } }
       let next
+      const before = st?.done?.[opts.ack]?.result
       try { next = acknowledge(st, opts.ack, deps.now()) } catch (e) { return { code: 1, msg: e.message } }
       atomicWrite(deps, opts.state, JSON.stringify(next, null, 2))
+      deps.log(`--ack：pid ${deps.pid} 清除 ${opts.ack}，原結果 ${before}，時間 ${new Date(deps.now()).toISOString()}`)
       return { code: 0, msg: `已確認 ${opts.ack}` }
     }
     if (deps.exists(opts.state)) return { code: 2, msg: 'state 檔已存在，不可播種（--seed 只能在 state 不存在時用）' }
+    // 起點合理性檢查：先顯示兩平台最新成功的版號，再對照線上 latest.json，低於線上版或讀不到都拒絕
+    const lines = []
+    for (const w of WORKFLOWS) {
+      const g = deps.gh(['run', 'list', '--workflow', w.file, '--status', 'success', '-L', '20', '--json', 'databaseId,headBranch,status,conclusion,createdAt,attempt'])
+      if (g.status !== 0) return { code: 2, msg: `gh run list ${w.file} 失敗，查不到最新成功的 run，拒絕播種` }
+      let latest = null
+      try { for (const x of toRuns(w.platform, w.re, JSON.parse(g.stdout))) if (latest === null || compareVersions(x.version, latest) > 0) latest = x.version } catch { return { code: 2, msg: `gh run list ${w.file} 輸出讀不懂，拒絕播種` } }
+      lines.push(`${w.platform} 最新成功的 run 版號：${latest ?? '（沒有）'}`)
+    }
+    let online
+    try {
+      const res = await deps.fetch(ONLINE_LATEST)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      online = (await res.json()).version
+      if (!/^\d+\.\d+\.\d+$/.test(online ?? '')) throw new Error('version 欄位不是版號')
+    } catch (e) { return { code: 2, msg: `讀不到線上 latest.json（${e.message}），無法確認起點，拒絕播種` } }
+    lines.push(`線上 latest.json 版號：${online}`)
+    for (const [p, v] of [['desktop', opts.seedDesktop], ['linux', opts.seedLinux]]) {
+      if (/^\d+\.\d+\.\d+$/.test(v ?? '') && compareVersions(v, online) < 0) return { code: 2, msg: `${p} 的起點 ${v} 低於線上版 ${online}，會重發舊版，拒絕播種` }
+    }
+    const plan = `${lines.join('\n')}\n播種計畫：desktop ${opts.seedDesktop}、linux ${opts.seedLinux}`
+    if (!opts.yes) return { code: 4, msg: `${plan}\n尚未播種：確認無誤後加 --yes 才會執行` }
+    deps.log(plan)
     const r = seed(undefined, { since: { desktop: opts.seedDesktop, linux: opts.seedLinux }, now: deps.now() })
     if (!r.ok) return { code: 2, msg: r.reason }
     atomicWrite(deps, opts.state, JSON.stringify(r.state, null, 2))
     return { code: 0, msg: `已播種：desktop ${opts.seedDesktop}、linux ${opts.seedLinux}` }
   } finally {
-    try { deps.unlink(lockPath) } catch { /* ignore */ }
+    releaseLock(lockPath, deps, lock.content)
   }
 }
 
@@ -298,6 +344,7 @@ export function realDeps(opts) {
   return {
     gh: cmd('gh'), git: cmd('git'), spawn: (bin, args) => cmd(bin)(args),
     asnCli: makeAsnCli(),
+    fetch: (u) => fetch(u, { signal: AbortSignal.timeout(15000) }),
     now: () => Date.now(), pid: process.pid,
     exists: (p) => fs.existsSync(p),
     readFile: (p) => fs.readFileSync(p, 'utf8'),
@@ -324,7 +371,7 @@ async function main() {
   if (opts.error) { console.error(opts.error); process.exit(2) }
   const deps = realDeps(opts)
   if (opts.ack || opts.seedDesktop || opts.seedLinux) {
-    const r = runCommand(opts, deps)
+    const r = await runCommand(opts, deps)
     ;(r.code === 0 ? console.log : console.error)(r.msg)
     process.exit(r.code)
   }

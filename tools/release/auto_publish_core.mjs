@@ -105,6 +105,7 @@ export function seed(state, { since, now } = {}) {
 export function acknowledge(state, key, now) {
   const st = clone(state)
   if (!st.done[key]) throw new Error(`找不到這筆紀錄：${key}`)
+  if (!FAILURES.has(st.done[key].result)) throw new Error(`${key} 的結果是 ${st.done[key].result}，不是失敗類，不可清除`)
   if (!st.done[key].ackedAt) st.done[key] = { ...st.done[key], ackedAt: iso(now) }
   if (!unackedFailureVersion(st)) st.pausedNoticed = false
   return st

@@ -13,15 +13,15 @@ const T0 = Date.parse('2026-11-21T10:00:00Z')
 const lk = (pid, ts = T0 - 60_000) => `${pid}
 ${ts}`
 // 核心現在要求先播種：預設的初始 state 是已播種（0.2.44 以下都算處理過）
-const seededState = (extra = {}) => ({ v: 1, done: { 'desktop@0.2.44': { result: 'seeded', at: 'x', runId: null }, 'linux@0.2.44': { result: 'seeded', at: 'x', runId: null } }, pending: {}, inflight: null, seeded: true, seedNoticed: false, pausedNoticed: false, ...extra })
+const seededState = (extra = {}) => ({ v: 1, done: { 'desktop@0.2.44': { result: 'seeded', at: 'x', runId: null }, 'linux@0.2.44': { result: 'seeded', at: 'x', runId: null } }, pending: {}, inflight: null, seeded: true, since: { desktop: '0.2.44', linux: '0.2.44' }, seedNoticed: false, pausedNoticed: false, ...extra })
 
 // 假環境：檔案、gh、git、子程序、asn-cli 全是假的
-function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver = {}, spawnStatus = 0, ghStatus = 0, noDeps = false, noState = false } = {}) {
+function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver = {}, spawnStatus = 0, ghStatus = 0, noDeps = false, noState = false, online = '0.2.43' } = {}) {
   const fsMap = new Map(Object.entries(files))
   if (!noState && !fsMap.has(STATE)) fsMap.set(STATE, JSON.stringify(seededState()))
   const clock = { t: T0 }
   if (!noDeps) for (const p of REQUIRED_DEPS) fsMap.set(p, 'x')
-  const calls = { gh: [], git: [], spawn: [], posts: [], logs: [], unlinks: [], ops: [] }
+  const calls = { gh: [], git: [], spawn: [], posts: [], fetch: [], logs: [], unlinks: [], ops: [] }
   const deps = {
     pid: 4242, now: () => clock.t,
     gh: (args) => {
@@ -46,6 +46,7 @@ function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver
     unlink: (p) => { calls.unlinks.push(p); fsMap.delete(p) },
     pidAlive: (pid) => alive.includes(pid),
     log: (m) => calls.logs.push(m),
+    fetch: async (u) => { calls.fetch.push(u); if (online === null) throw new Error('offline'); return { ok: true, status: 200, json: async () => ({ version: online }) } },
   }
   return { deps, calls, fsMap, clock }
 }
@@ -383,44 +384,45 @@ test('沒有 state 但有 log 或鎖檔：拒絕啟動，不自動播種', () =>
 })
 
 test('state 存在但沒播種：核心回報一次，log 有 --seed 提示', async () => {
-  const e = env({ desktopRows: [row('v0.2.45')], files: { [STATE]: JSON.stringify(seededState({ seeded: false, done: {} })) } })
+  const e = env({ desktopRows: [row('v0.2.45')], files: { [STATE]: JSON.stringify(seededState({ seeded: false, since: null, done: {} })) } })
   assert.equal((await runOnce(opts, e.deps)).outcome, 'report')
   assert.equal(e.calls.spawn.length, 0)
   assert.ok(e.calls.logs.some((l) => l.includes('--seed')))
 })
 
-test('--seed 子命令：parseArgs、播種存檔、已有 state 拒絕、格式錯非零', () => {
-  const o = parseArgs(['--seed', '0.2.44', '--state', STATE])
+test('--seed 子命令：parseArgs、播種存檔、已有 state 拒絕、格式錯非零', async () => {
+  const o = parseArgs(['--seed', '0.2.44', '--yes', '--state', STATE])
   assert.deepEqual([o.seedDesktop, o.seedLinux], ['0.2.44', '0.2.44'])
   const o2 = parseArgs(['--seed-desktop', '0.2.45', '--seed-linux', '0.2.40'])
   assert.deepEqual([o2.seedDesktop, o2.seedLinux], ['0.2.45', '0.2.40'])
   const e = env({ noState: true })
-  const r = runCommand(o, e.deps)
+  const r = await runCommand(o, e.deps)
   assert.equal(r.code, 0)
   const st = lastState(e.fsMap)
   assert.equal(st.seeded, true)
   assert.equal(st.done['desktop@0.2.44'].result, 'seeded')
   assert.equal(st.done['linux@0.2.44'].result, 'seeded')
   assert.equal(e.fsMap.has(LOCK), false, '還鎖')
-  assert.equal(runCommand(o, e.deps).code, 2, '已有 state 不可再播種')
+  assert.equal((await runCommand(o, e.deps)).code, 2, '已有 state 不可再播種')
   const bad = env({ noState: true })
-  const rb = runCommand(parseArgs(['--seed', 'abc', '--state', STATE]), bad.deps)
+  const rb = await runCommand(parseArgs(['--seed', 'abc', '--yes', '--state', STATE]), bad.deps)
   assert.notEqual(rb.code, 0)
   assert.equal(bad.fsMap.has(STATE), false)
   const only = env({ noState: true })
-  assert.notEqual(runCommand(parseArgs(['--seed-desktop', '0.2.1', '--state', STATE]), only.deps).code, 0)
+  assert.notEqual((await runCommand(parseArgs(['--seed-desktop', '0.2.44', '--yes', '--state', STATE]), only.deps)).code, 0)
 })
 
-test('--ack 子命令：標記已確認並存檔；找不到非零；鎖被佔用不動 state', () => {
+test('--ack 子命令：標記已確認並存檔；找不到非零；鎖被佔用不動 state', async () => {
   const failed = seededState({ done: { 'desktop@0.2.44': { result: 'seeded' }, 'linux@0.2.44': { result: 'seeded' }, 'desktop@0.2.45': { result: 'dryrun-failed', at: 'x', runId: '1' } } })
   const e = env({ files: { [STATE]: JSON.stringify(failed) } })
   const o = parseArgs(['--ack', 'desktop@0.2.45', '--state', STATE])
   assert.equal(o.ack, 'desktop@0.2.45')
-  assert.equal(runCommand(o, e.deps).code, 0)
+  assert.equal((await runCommand(o, e.deps)).code, 0)
+  assert.ok(e.calls.logs.some((l) => l.includes('--ack') && l.includes('4242') && l.includes('desktop@0.2.45') && l.includes('dryrun-failed')), 'ack 要寫 log：pid、key、原結果')
   assert.ok(lastState(e.fsMap).done['desktop@0.2.45'].ackedAt)
-  assert.notEqual(runCommand({ ...o, ack: 'desktop@9.9.9' }, e.deps).code, 0)
+  assert.notEqual((await runCommand({ ...o, ack: 'desktop@9.9.9' }, e.deps)).code, 0)
   const busy = env({ files: { [STATE]: JSON.stringify(failed), [LOCK]: lk(777) }, alive: [777] })
-  assert.equal(runCommand(o, busy.deps).code, 3)
+  assert.equal((await runCommand(o, busy.deps)).code, 3)
   assert.equal(busy.fsMap.get(STATE), JSON.stringify(failed))
 })
 
@@ -435,4 +437,83 @@ test('真實 createLock：鎖檔一出現就是完整內容、已存在就 EEXIS
     assert.equal(fs.readFileSync(lock, 'utf8'), '123\n456', '不覆蓋別人的鎖')
     assert.deepEqual(fs.readdirSync(dir), ['state.json.lock'])
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('--ack 只准清失敗類：published／seeded／不存在都報錯且不寫檔；--ack 與 --seed 同給報錯', async () => {
+  const st = seededState({ done: { 'desktop@0.2.44': { result: 'seeded' }, 'linux@0.2.44': { result: 'seeded' }, 'desktop@0.2.45': { result: 'published' }, 'linux@0.2.45': { result: 'blocked' } } })
+  const e = env({ files: { [STATE]: JSON.stringify(st) } })
+  const before = e.fsMap.get(STATE)
+  for (const k of ['desktop@0.2.45', 'desktop@0.2.44', 'desktop@9.9.9']) {
+    const r = await runCommand({ state: STATE, ack: k }, e.deps)
+    assert.equal(r.code, 1, k)
+    assert.equal(e.fsMap.get(STATE), before, '不寫檔')
+  }
+  assert.equal((await runCommand({ state: STATE, ack: 'linux@0.2.45' }, e.deps)).code, 0)
+  assert.ok(lastState(e.fsMap).done['linux@0.2.45'].ackedAt)
+  assert.equal(lastState(e.fsMap).done['linux@0.2.45'].result, 'blocked', '保留原結果')
+  assert.match(parseArgs(['--ack', 'desktop@0.2.45', '--seed', '0.2.44']).error, /不能同時/)
+})
+
+const seedOpts = (extra = []) => parseArgs(['--seed', '0.2.44', '--state', STATE, ...extra])
+
+test('--seed 沒帶 --yes：只印計畫（含 gh 最新成功版號與線上版號）、不寫檔、結束碼非零', async () => {
+  const e = env({ noState: true, desktopRows: [row('v0.2.44', 5)], linuxRows: [row('linux-v0.2.43', 6)] })
+  const r = await runCommand(seedOpts(), e.deps)
+  assert.notEqual(r.code, 0)
+  assert.equal(e.fsMap.has(STATE), false)
+  assert.match(r.msg, /desktop 最新成功的 run 版號：0.2.44/)
+  assert.match(r.msg, /linux 最新成功的 run 版號：0.2.43/)
+  assert.match(r.msg, /線上 latest.json 版號：0.2.43/)
+  assert.ok(e.calls.gh.every((a) => !['create', 'edit', 'delete', 'rerun', 'cancel'].includes(a[1])), 'gh 只讀')
+  assert.ok(e.calls.gh.some((a) => a.includes('--status') && a.includes('success')))
+})
+
+test('--seed 起點低於線上版：拒絕並說明會重發舊版，不寫檔', async () => {
+  const e = env({ noState: true, online: '0.2.50' })
+  const r = await runCommand(seedOpts(['--yes']), e.deps)
+  assert.notEqual(r.code, 0)
+  assert.match(r.msg, /低於線上版/)
+  assert.match(r.msg, /重發舊版/)
+  assert.equal(e.fsMap.has(STATE), false)
+  assert.deepEqual(e.calls.fetch, ['https://asnmessenger.web.app/update/latest.json'])
+})
+
+test('--seed 線上讀不到：拒絕並說明原因，不寫檔', async () => {
+  const e = env({ noState: true, online: null })
+  const r = await runCommand(seedOpts(['--yes']), e.deps)
+  assert.notEqual(r.code, 0)
+  assert.match(r.msg, /讀不到線上 latest.json（offline）/)
+  assert.equal(e.fsMap.has(STATE), false)
+})
+
+test('--seed 正常情況（--yes、起點不低於線上版）會寫檔', async () => {
+  const e = env({ noState: true, online: '0.2.43' })
+  const r = await runCommand(seedOpts(['--yes']), e.deps)
+  assert.equal(r.code, 0)
+  assert.equal(lastState(e.fsMap).seeded, true)
+})
+
+test('接手殘留鎖：rename 後重讀發現已被換成別人的新鎖 B：放棄、不刪 B、鎖檔還是 B', async () => {
+  const A = lk(999, T0 - 3 * 60 * 60 * 1000)
+  const B = lk(555, T0 - 1000)
+  const e = env({ files: { [LOCK]: A }, alive: [555] })
+  const realRename = e.deps.rename
+  e.deps.rename = (a, b) => { if (a === LOCK) e.fsMap.set(LOCK, B); return realRename(a, b) } // 讀完 A 之後、rename 之前，鎖被換成 B
+  const r = acquireLock(LOCK, e.deps)
+  assert.equal(r.got, false)
+  assert.equal(e.fsMap.get(LOCK), B, '鎖檔最後還是 B')
+  assert.equal(e.fsMap.has(`${LOCK}.stale-4242`), false)
+  assert.equal(e.calls.unlinks.length, 0, '沒刪任何東西')
+})
+
+test('finally 還鎖：取鎖後鎖被換成別人的，不能刪別人的鎖；自己的鎖照常刪', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  const other = lk(777, T0 + 5)
+  e.deps.spawn = (bin, args) => { e.fsMap.set(LOCK, other); return { status: 0, stdout: '', stderr: '' } } // 子程序執行期間鎖被換掉
+  await runOnce(opts, e.deps)
+  assert.equal(e.fsMap.get(LOCK), other, '別人的鎖還在')
+  assert.ok(e.calls.logs.some((l) => l.includes('不刪')))
+  const e2 = env({ desktopRows: [row('v0.2.45')] })
+  await runOnce(opts, e2.deps)
+  assert.equal(e2.fsMap.has(LOCK), false)
 })
