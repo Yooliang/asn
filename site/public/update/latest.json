@@ -1,15 +1,11 @@
 {
-  "version": "0.2.53",
-  "notes": "- 改善：Linux 上需要時才下載的終端機 WezTerm，改從 ASN 自己建置、發版前驗過雜湊與來源的版本下載，含上游的修正。（#1258、#2053）",
-  "pub_date": "2026-11-21T19:29:50.440Z",
+  "version": "0.2.54",
+  "notes": "- 改善：切換帳號、列出別台電腦的帳號時，沒登入或登入過期會直接提示「請先登入」或「登入已過期，請重新登入」，不再顯示看不懂的 403 錯誤。（#500、#2066）",
+  "pub_date": "2026-11-21T20:15:32.821Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndJZEp2a2JmVGZlMlVabnJ3RjhRUisyekN1TWlpMHkrblZsRTZNbEpoZ05QQ3FOajJoRjFrZE1LODU4YjBSdmxQS0gzK2IxKzFteDRIRHpLK1J5SkFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mjg5MzkwCWZpbGU6QVNOXzAuMi41M194NjQtc2V0dXAuZXhlClVEaFlPR0tnT1g0UWpFYTY2cFp3S21kMUU3TWJBelEyVmtORmQ4YzFpVmxyRVRVN2FCZzZFc01GK1VBTStiOTBZTGVkdC9PcHA5YVdDOWRtWkpTN0JBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.53_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybis4RnpyODNtem9zbi81RnBZenlBTWl2NUIwQnlUa3pyQjFhdC9FYS95NUZxSFhuUjJxYk8wUmpHTWlBMWpPRnNZUkE1c0xkT0lkWmVNeUx3VWM1NUFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mjg5ODk4CWZpbGU6QVNOXzAuMi41M19hbWQ2NC5BcHBJbWFnZQovTXhsYjA4bWtZa3owcXhWcjlzZUxXQ2FyRFNjdHBSeGtaam5odWhoYkhuRS9sMVFQckNUc3p0b0thNGJZSks2eHAzTC90cTFEc1MzM3RqeEFiMEpCZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.53_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybityR3NoejhqOGh3dmhHVHpBaFFnUXdPWnVQNHZMczJQRXFFUUcwOE9DMVE5Ky9uWUp3b0pHaWM0dTlLbGg0dFNxQUhyMjRuT1ZRREVJUE1IWFN1d1FVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MjkyMTMyCWZpbGU6QVNOXzAuMi41NF94NjQtc2V0dXAuZXhlCm16UGowOE1FT3FvSzRUdXFrNGdPT052cjJYL2o3RjRNdnQ2UnhyYXFUMEViSXJuWU1QVFE5QW82endvdUt2TmtaTldxMll0bHV6cEh3RmF6Qk1IbEJRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.54_x64-setup.exe"
     }
   }
 }
