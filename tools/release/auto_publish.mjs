@@ -27,6 +27,8 @@ export const SITE_FILES = ['site/public/index.html', 'site/public/update/latest.
 const DEFAULT_STATE = path.join(process.env.LOCALAPPDATA || os.homedir(), 'asn-auto-publish', 'state.json')
 // 連續被鎖住超過這段時間就貼一次群組（鎖超過 STALE_MS 會被當殘留接手，這裡是接手之前的告警）
 export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
+// gh 連續失敗（含 403 rate limit）超過這段時間就貼一次群組
+export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 
 export function parseArgs(argv) {
   const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, yes: false, error: null }
@@ -181,8 +183,11 @@ function makePost(opts, deps) {
   }
 }
 
+// 被鎖住時記「開始被擋的時間」的檔：每個 pid 一份，只有該程序自己讀寫，所以不需要鎖
+const blockedPathOf = (opts, deps) => `${opts.state}.blocked-since-${deps.pid}`
+
 // 去重用的小檔（核心的 state 只保留自己定義的欄位，多的欄位下一輪會被丟掉，所以另放旁邊）
-// { blockedSince, blockedNoticed, prep, badState }
+// { prep, badState, ghFailSince, ghFailNoticed }；只准持鎖時讀改寫（被鎖住的那條分支改用 blocked-since-<pid>）
 function makeNotices(opts, deps) {
   const p = `${opts.state}.notices.json`
   return {
@@ -199,11 +204,15 @@ export async function runOnce(opts, deps) {
   const lock = acquireLock(lockPath, deps)
   if (!lock.got) {
     log(lock.why ?? `鎖被 pid ${lock.pid ?? '未知'} 佔用，這一輪不做任何事`)
-    const n = notices.load()
+    // 沒持鎖：絕不碰 <state>.notices.json（那是持鎖者的檔，這裡讀改寫會蓋掉別人剛寫的去重標記）。
+    // 「開始被擋的時間」與「已貼過」只記在只歸自己（pid）用的檔，不會和任何實例競爭
+    const bp = blockedPathOf(opts, deps)
+    let b = {}
+    try { const x = JSON.parse(deps.readFile(bp)); if (x && typeof x === 'object') b = x } catch { /* 沒有或壞了就重新計時 */ }
     const now = deps.now()
-    if (!Number.isFinite(n.blockedSince)) notices.save({ ...n, blockedSince: now, blockedNoticed: false })
-    else if (!n.blockedNoticed && now - n.blockedSince > BLOCKED_NOTICE_MS) {
-      notices.save({ ...n, blockedNoticed: true })
+    if (!Number.isFinite(b.since)) atomicWrite(deps, bp, JSON.stringify({ since: now, noticed: false }))
+    else if (!b.noticed && now - b.since > BLOCKED_NOTICE_MS) {
+      atomicWrite(deps, bp, JSON.stringify({ ...b, noticed: true }))
       post('自動發佈被鎖住超過 30 分鐘，請檢查')
     }
     return { outcome: 'locked' }
@@ -213,6 +222,8 @@ export async function runOnce(opts, deps) {
     const save = (s) => atomicWrite(deps, opts.state, JSON.stringify(s, null, 2))
     let nt = notices.load()
     const setN = (patch) => { nt = { ...nt, ...patch }; for (const k of Object.keys(patch)) if (patch[k] === undefined) delete nt[k]; notices.save(nt) }
+    // 取到鎖了：清掉自己的「被擋計時」檔（舊版寫在 notices 的欄位也順便清掉）
+    try { if (deps.exists(blockedPathOf(opts, deps))) deps.unlink(blockedPathOf(opts, deps)) } catch (e) { log(`清除被擋計時檔失敗：${e.message}`) }
     if (nt.blockedSince !== undefined) setN({ blockedSince: undefined, blockedNoticed: undefined })
 
     // 不自動建 state：沒播種的 state 不存在時一律拒絕（要先 --seed）
@@ -231,14 +242,26 @@ export async function runOnce(opts, deps) {
     }
     if (nt.badState) setN({ badState: undefined })
 
+    // gh 連續失敗計時（持鎖才寫 notices）：從第一次失敗起算，超過 GH_FAIL_NOTICE_MS 貼一次固定句，不放 stderr；成功後清掉
+    const ghFailed = () => {
+      const now = deps.now()
+      if (!Number.isFinite(nt.ghFailSince)) setN({ ghFailSince: now, ghFailNoticed: false })
+      else if (!nt.ghFailNoticed && now - nt.ghFailSince > GH_FAIL_NOTICE_MS) {
+        setN({ ghFailNoticed: true })
+        post('自動發佈連續 30 分鐘查不到 GitHub 上的發版狀態，請檢查 gh 登入或網路')
+      }
+      return { outcome: 'gh-failed' }
+    }
     let runs = []
     for (const w of WORKFLOWS) {
       const r = gh(['run', 'list', '--workflow', w.file, '-L', '20', '--json', 'databaseId,headBranch,status,conclusion,createdAt,attempt'])
-      if (r.status !== 0) { log(`gh run list ${w.file} 失敗，這一輪略過：${String(r.stderr).trim().slice(0, 200)}`); return { outcome: 'gh-failed' } }
+      if (r.status !== 0) { log(`gh run list ${w.file} 失敗，這一輪略過：${String(r.stderr).trim().slice(0, 200)}`); return ghFailed() }
       let rows
-      try { rows = JSON.parse(r.stdout) } catch { log(`gh run list ${w.file} 輸出不是 JSON，這一輪略過`); return { outcome: 'gh-failed' } }
+      try { rows = JSON.parse(r.stdout) } catch { log(`gh run list ${w.file} 輸出不是 JSON，這一輪略過`); return ghFailed() }
       runs = runs.concat(toRuns(w.platform, w.re, rows))
     }
+
+    if (nt.ghFailSince !== undefined) { log('gh 已恢復，清掉連續失敗計時'); setN({ ghFailSince: undefined, ghFailNoticed: undefined }) }
 
     const d = decide({ runs, state, now: deps.now() })
     for (const n of d.notes || []) log(n)
