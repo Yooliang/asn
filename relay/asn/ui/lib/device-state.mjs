@@ -208,7 +208,7 @@ export function localReloginAction({ vendor, isSelf = false, phone = false, stat
 /** 主要幾家 AI：設備卡上就算這台沒用到也要列出「未安裝／不確定」 */
 export const CORE_VENDORS = Object.freeze(['claude', 'codex', 'grok'])
 
-const SHORT_TEXT = Object.freeze({
+export const SHORT_TEXT = Object.freeze({
   [STATE.LOGGED_IN]: '已登入',
   [STATE.LOGIN_FAILED]: '登入失效',
   [STATE.INSTALLED_LOGGED_OUT]: '已安裝未登入',

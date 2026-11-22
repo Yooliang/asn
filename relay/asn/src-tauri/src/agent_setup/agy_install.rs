@@ -72,6 +72,14 @@ fn parse_manifest(text: &str, platform: &str) -> Result<Release, String> {
     Ok(Release { version, platform: platform.to_string(), url, sum, size: None, max: MAX_BINARY_BYTES })
 }
 
+/// 官方 manifest 現在的版本號（只讀版本號；安裝流程與設定頁「最新版」共用，#1548）。
+/// 平台只決定讀哪一份 manifest，不支援的平台（例如 Linux）退回 Windows 那份：只為了知道版本號，不下載
+pub fn latest_version(fetch: &dyn super::net::Fetch) -> Result<String, String> {
+    let p = platform().unwrap_or("windows_amd64");
+    let text = fetch.get_text(&manifest_url(p)?, MAX_MANIFEST_BYTES)?;
+    parse_manifest(&text, p).map(|r| r.version)
+}
+
 fn resolve(d: &Deps, platform: &str) -> Result<Release, String> {
     let text = d.fetch.get_text(&manifest_url(platform)?, MAX_MANIFEST_BYTES)?;
     parse_manifest(&text, platform)

@@ -85,14 +85,27 @@ fn asset_sum(v: &serde_json::Value, name: &str, version: &str) -> Result<String,
     Ok(sum)
 }
 
-/// `channels/latest` → （版本號, 套件雜湊）。版本取自 `tag_name`（`rust-v<版本>`），只收 `數字.數字.數字`
-fn parse_latest(text: &str, target: &str) -> Result<(String, String), String> {
-    let v: serde_json::Value = serde_json::from_str(text).map_err(|_| "官方清單讀不懂".to_string())?;
+/// `channels/latest` 裡的版本號：取自 `tag_name`（`rust-v<版本>`），只收 `數字.數字.數字`
+fn parse_latest_version(v: &serde_json::Value) -> Result<String, String> {
     let tag = v.get("tag_name").and_then(|x| x.as_str()).unwrap_or("");
     let version = tag.strip_prefix("rust-v").unwrap_or("").to_string();
     if !vi::valid_version(&version) {
         return Err("官方回的版本號格式不對，已放棄安裝".to_string());
     }
+    Ok(version)
+}
+
+/// 官方 latest 頻道現在的版本號（只讀版本號、不看雜湊與下載；安裝流程與設定頁「最新版」共用，#1548）
+pub fn latest_version(fetch: &dyn super::net::Fetch) -> Result<String, String> {
+    let text = fetch.get_text(&url_latest(), MAX_METADATA_BYTES)?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|_| "官方清單讀不懂".to_string())?;
+    parse_latest_version(&v)
+}
+
+/// `channels/latest` → （版本號, 套件雜湊）
+fn parse_latest(text: &str, target: &str) -> Result<(String, String), String> {
+    let v: serde_json::Value = serde_json::from_str(text).map_err(|_| "官方清單讀不懂".to_string())?;
+    let version = parse_latest_version(&v)?;
     let sum = asset_sum(&v, &package_asset(target), &version)?;
     asset_sum(&v, SUMS_ASSET, &version)?; // SHA256SUMS 也要在清單上、網址也要是官方的
     Ok((version, sum))

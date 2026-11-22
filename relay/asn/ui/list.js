@@ -19,6 +19,7 @@ import { openUiLog } from './lib/view-log.mjs'
 import { isAboutUrl } from './lib/about-info.mjs'
 import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
+import { toolStatusView } from './lib/tool-status.mjs'
 import { SETTING_CATS, catSummary, normalizeCatKey } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { activityRound, withActivity } from './lib/activity.mjs'
@@ -582,6 +583,22 @@ async function removeLaunchCwd(p) {
     launchCwdMsg.value = `移除沒有成功：${cwdReason(e)}`
     await loadLaunchPrefs()
   }
+}
+// 設定頁「已安裝的工具」的版本與登入狀態（#1548 ④）：打開啟動設定時查一次，「重新檢查」略過快取
+const cliStatus = ref({})
+const cliStatusBusy = ref(false)
+let cliStatusAgain = false   // 查的途中又按了「重新檢查」：這一輪查完再用「略過快取」補查一次，不吞掉那一下
+const refreshCliStatus = async (force = false) => {
+  if (cliStatusBusy.value) { if (force) cliStatusAgain = true; return }
+  cliStatusBusy.value = true
+  try {
+    const r = await transport.cliStatus(force)
+    const map = {}
+    for (const t of r?.tools ?? []) map[t.id] = t
+    cliStatus.value = map
+  } catch (e) { console.info('[ASN] cli status failed', e?.message ?? e); cliStatus.value = {} }   // 查不到：畫面顯示「暫時查不到」，原因只進記錄
+  finally { cliStatusBusy.value = false }
+  if (cliStatusAgain) { cliStatusAgain = false; await refreshCliStatus(true) }
 }
 const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTools.value[m.toolId ?? m.id])))
 const partnerModels = computed(() => launchToolRows.value)
@@ -2066,7 +2083,7 @@ const app = createApp({
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
-      launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdList: launchPrefs.cwdAllow, cwdSuggest: suggestCwds(launchPrefs.cwdAllow, launchPrefs.recentCwd), cwdMsg: launchCwdMsg.value, msg: launchMsg.value },
+      launch: { tools: launchToolRows.value.map(t => ({ ...t, view: toolStatusView(cliStatus.value[t.toolId ?? t.id], cliStatusBusy.value) })), checking: cliStatusBusy.value, maxPerHour: launchPrefs.maxPerHour, cwdList: launchPrefs.cwdAllow, cwdSuggest: suggestCwds(launchPrefs.cwdAllow, launchPrefs.recentCwd), cwdMsg: launchCwdMsg.value, msg: launchMsg.value },
       piSetup: piSetupView(piSetup.raw, piSetup),
       version: info.version, deviceName: selfDeviceName.value, uiLogMsg: uiLogMsg.value,
       log: buildLogView({ entries: releases.entries, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
@@ -2138,6 +2155,7 @@ const app = createApp({
         case 'bridge-takeover': bridge.confirm = true; break
         case 'bridge-takeover-yes': await takeoverBridge(); break
         case 'bridge-takeover-no': bridge.confirm = false; break
+        case 'launch-recheck': await Promise.all([refreshCliTools(), refreshCliStatus(true)]); break   // 重新偵測並略過快取
         case 'askpass-copy': await copyAskpassPath(); break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break
@@ -2174,6 +2192,7 @@ const app = createApp({
     watch(() => ui.panel.setting, k => {
       if (normalizeCatKey(k) !== 'devices') taskMgr.close()   // 離開「設備」頁就不再更新工作管理員
       if (k === 'usage') void usage.refresh()
+      if (normalizeCatKey(k) === 'launch') void refreshCliStatus(false)   // 打開「啟動設定」時查一次版本與登入（最新版 6 小時內不重抓）
       if (k) void accounts.refreshQuota()   // 打開設定頁（或換頁籤）時重讀額度
       if (['devices', 'accounts'].includes(normalizeCatKey(k))) void accounts.refreshRoster()   // 打開「設備」或「帳號」時讀一次帳號列表（#374）
     }, { immediate: true })

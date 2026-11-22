@@ -828,11 +828,23 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .launch-set{display:flex;flex-direction:column;gap:10px;min-width:0}
 .launch-set .sec-h{margin:8px 0 0;padding-bottom:4px;border-bottom:1px solid var(--line);font-size:13px;font-weight:700;color:var(--title-fg)}
 .launch-set .sec-h:first-child{margin-top:0}
+.launch-set .sec-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 0;padding-bottom:4px;border-bottom:1px solid var(--line)}
+.launch-set .sec-head:first-child{margin-top:0}
+.launch-set .sec-head .sec-h{margin:0;padding:0;border:0}
 .launch-tools{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
 .launch-tools li{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .launch-tools li:last-child{border-bottom:0}
 .launch-tools .launch-name{flex:none;width:64px;font-weight:700}
-.launch-tools .launch-ver{flex:1;min-width:0;font-size:12.5px;color:var(--muted)}
+.launch-tools .launch-ver{flex:none;min-width:52px;font-size:12.5px;color:var(--muted)}
+.launch-tools .launch-latest{flex:1;min-width:0;font-size:12.5px;color:var(--fg)}
+.launch-tools .launch-latest.k-ok{color:color-mix(in srgb,var(--online) 70%,#000)}
+.launch-tools .launch-latest.k-unknown,.launch-tools .launch-login.k-unknown{display:inline-block;flex:none;padding:0 8px;border-radius:10px;font-size:11.5px;line-height:18px;background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--muted)}
+.launch-tools .launch-latest.k-wait,.launch-tools .launch-login.k-wait{color:var(--muted)}
+.launch-tools .launch-login{flex:none;margin-left:auto;padding:0 8px;border-radius:10px;font-size:11.5px;line-height:18px;color:var(--fg)}
+.launch-tools .launch-login.k-in{background:color-mix(in srgb,var(--online) 18%,transparent);color:color-mix(in srgb,var(--online) 70%,#000)}
+.launch-tools .launch-login.k-out{background:color-mix(in srgb,var(--away) 22%,transparent)}
+.launch-tools .launch-login.k-unknown{margin-left:auto}
+.launch-set .sec-head .aero-btn{flex:none;margin-left:auto}
 .launch-tools .launch-hint{flex:1;min-width:0;font-size:12.5px;color:var(--muted)}
 .launch-tools li.off .launch-name{color:var(--muted)}
 .launch-set label.launch-max{flex-direction:row;align-items:center;gap:8px;flex-wrap:wrap}

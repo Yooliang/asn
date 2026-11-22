@@ -79,12 +79,18 @@ fn hash_open_file(f: &File) -> Result<String, String> {
     vi::hash_open_file(f, SPEC.hash)
 }
 
-/// 從官方頻道與清單解析出這一次要裝的版本
-fn resolve(d: &Deps, platform: &str) -> Result<Release, String> {
-    let version = d.fetch.get_text(&url_channel(), MAX_VERSION_BYTES)?.trim().to_string();
+/// 官方 stable 頻道現在的版本號（只取這一個版本號、不碰清單與下載；安裝流程與設定頁「最新版」共用，#1548）
+pub fn latest_version(fetch: &dyn Fetch) -> Result<String, String> {
+    let version = fetch.get_text(&url_channel(), MAX_VERSION_BYTES)?.trim().to_string();
     if !valid_version(&version) {
         return Err("官方回的版本號格式不對，已放棄安裝".to_string());
     }
+    Ok(version)
+}
+
+/// 從官方頻道與清單解析出這一次要裝的版本
+fn resolve(d: &Deps, platform: &str) -> Result<Release, String> {
+    let version = latest_version(d.fetch)?;
     let manifest = d.fetch.get_text(&url_manifest(&version), MAX_MANIFEST_BYTES)?;
     let (sum, size) = parse_manifest(&manifest, &version, platform)?;
     Ok(Release { url: url_binary(&version, platform), version, platform: platform.to_string(), sum, size: Some(size), max: MAX_BINARY_BYTES })
