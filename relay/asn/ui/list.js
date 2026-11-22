@@ -54,7 +54,8 @@ import { HOLD_TIP, createPartnerNoticePoller, noticeStillFor, permissionView } f
 import { createHold } from './lib/hold-press.mjs'
 import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
-import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { plainMessage } from './lib/plain-errors.mjs'
+import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, ctl, emit, initFrame, invoke, listen, logViewApi, settingsApi, updateApi, voiceApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
@@ -208,22 +209,22 @@ const autostart = reactive({ supported: false, on: false, busy: false, blocked: 
 const guard = reactive({ supported: false, on: false, busy: false, paused: '', blocked: '' })
 const applyGuard = v => { if (v) Object.assign(guard, { supported: v.supported === true, on: v.on === true, paused: String(v.paused ?? ''), blocked: String(v.blocked ?? '') }) }
 try {
-  await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' })
-  trayOk.value = await invoke('tray_available')
-  autostart.supported = await invoke('autostart_supported')
-  if (autostart.supported) { autostart.on = await invoke('autostart_get'); autostart.blocked = (await invoke('autostart_blocked').catch(() => null)) || '' }
+  await settingsApi.setCloseToTray(closeTo.value === 'tray')
+  trayOk.value = await settingsApi.trayAvailable()
+  autostart.supported = await autostartApi.supported()
+  if (autostart.supported) { autostart.on = await autostartApi.get(); autostart.blocked = (await autostartApi.blocked().catch(() => null)) || '' }
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
-invoke('guard_get').then(applyGuard).catch(() => { /* 舊版後端沒有這個指令：不顯示 */ })
+settingsApi.guardGet().then(applyGuard).catch(() => { /* 舊版後端沒有這個指令：不顯示 */ })
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
 const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, compactHandoff: true, compactN: 3, screenWatch: true, permPhone: true, mobileView: true, remoteInput: true, termServer: true, termServerSupported: false, termServerMissing: false, termFetch: '', termFetchKind: '', termFetchDetail: '', keyProtection: '', termServerActive: true, termServerWhy: '', termServerLocked: false, termServerBackground: 0, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
 const applyBridgeStatus = s => {
   Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, compactHandoff: s.compact_handoff !== false, compactN: clampCompactN(s.compact_handoff_n, 3), screenWatch: s.screen_watch !== false, permPhone: s.perm_phone !== false, mobileView: s.mobile_view !== false, remoteInput: s.remote_input !== false, termServer: s.term_server !== false, termServerSupported: s.term_server_supported === true, termServerMissing: s.term_server_missing === true, termFetch: typeof s.term_fetch === 'string' ? s.term_fetch : '', termFetchKind: typeof s.term_fetch_kind === 'string' ? s.term_fetch_kind : '', termFetchDetail: typeof s.term_fetch_detail === 'string' ? s.term_fetch_detail : '', keyProtection: typeof s.key_protection === 'string' ? s.key_protection : '', termServerActive: s.term_server_active !== false, termServerWhy: typeof s.term_server_why === 'string' ? s.term_server_why : '', termServerLocked: s.term_server_locked === true, termServerBackground: Number.isInteger(s.term_server_background) ? s.term_server_background : 0, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
 }
-try { applyBridgeStatus(await invoke('bridge_status')) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
+try { applyBridgeStatus(await bridgeApi.status()) } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 // 密碼小幫手（asn-askpass）：git／ssh 要密碼時請 ASN 跳窗收。設定頁「啟動設定」的進階裡顯示設定指令，可複製路徑；ASN 不會自動改環境變數。程式在 askpass/
 const askpassInfo = reactive({ shown: false, path: '', example: '', copied: false })
 try {
-  const a = await invoke('askpass_helper_info')
+  const a = await settingsApi.askpassHelperInfo()
   if (a?.path) Object.assign(askpassInfo, { shown: true, path: String(a.path), example: String(a.example || '') })
 } catch { /* 舊版後端沒有這個指令就不顯示 */ }
 async function copyAskpassPath() {
@@ -246,19 +247,19 @@ const checkUpdate = async (manual = false) => {
   upd.checking = true
   if (manual) upd.manual = '檢查中…'
   try {
-    const found = await invoke('update_check')
+    const found = await updateApi.check()
     setUpd(withAvailable(upd, found))
     upd.lastCheck = Date.now(); upd.checkErr = ''
     if (manual) upd.manual = manualResultText(found, info.version)
   } catch (e) {
-    upd.checkErr = String(e?.message ?? e)
+    upd.checkErr = plainMessage(e)
     if (manual) upd.manual = upd.checkErr
   } finally { upd.checking = false }
 }
 const installUpdate = async () => {
   if (upd.phase === 'installing') return
   setUpd(withInstalling(upd))
-  try { await invoke('update_install') } catch (e) { setUpd(withFailure(upd, e?.message ?? e)) }
+  try { await updateApi.install() } catch (e) { setUpd(withFailure(upd, plainMessage(e))) }
 }
 if (!info.shot) {
   await listen('update-progress', p => setUpd(withProgress(upd, p)))
@@ -281,7 +282,7 @@ if (!info.shot) {
 // 對方 ASN 回報在線時取走並用內建更新器安裝，不經 AI）。remoteMine＝本人帳號下的設備與請求狀態；程式在 account.rs
 const remoteMine = ref({}), remoteErr = reactive({})
 const refreshRemoteUpd = async () => {
-  try { remoteMine.value = mineFromStatus(await invoke('update_remote_status')) } catch { /* 沒登入、後台還沒部署或連不上：保持上一次的狀態 */ }
+  try { remoteMine.value = mineFromStatus(await updateApi.remoteStatus()) } catch { /* 沒登入、後台還沒部署或連不上：保持上一次的狀態 */ }
 }
 // 看別台畫面（#597）：只有本人帳號底下的設備才有入口（兩台不是同一個本人時後台也會擋）
 const mineViewApi = {
@@ -296,9 +297,9 @@ const requestRemoteUpdate = async node => {
   if (remoteBtn(node)?.busy) return
   remoteErr[node] = ''
   remoteMine.value = { ...remoteMine.value, [node]: { state: 'pending', detail: '' } }   // 先顯示「已送出」，失敗再還原
-  try { await invoke('update_remote_request', { node }) } catch (e) {
+  try { await updateApi.remoteRequest(node) } catch (e) {
     remoteMine.value = { ...remoteMine.value, [node]: null }
-    remoteErr[node] = e?.message ?? String(e)
+    remoteErr[node] = plainMessage(e)
   }
   void refreshRemoteUpd()
 }
@@ -494,7 +495,7 @@ async function forgetKnown(node) {
   try { await invoke('device_known_forget', { node }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 忘記這台失敗', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
 }
 async function openLaunchLogFolder() {
-  try { await invoke('open_machine_log_dir') } catch (e) { console.info('[ASN] 開啟記錄資料夾', e.message) }
+  try { await logViewApi.openMachineLogDir() } catch (e) { console.info('[ASN] 開啟記錄資料夾', e.message) }
 }
 // 設定頁「檢視記錄」：開 ui.log，開不了就退回開記錄資料夾；說明顯示在設定頁（#339）
 const uiLogMsg = ref('')
@@ -1114,7 +1115,7 @@ const setPaneCall = (id, on) => { if (on) mergedCalls[id] = true; else delete me
 const callBeats = createCallBeats({ isLocalCall: isCallActive })   // 通話中（本視窗或對話視窗）不自動念，通話自己會念回信
 await listen('asn:call', p => { callBeats.onBeat(p); callTick.value++ })   // 分開模式：對話視窗的通話廣播
 startCallPoll({ anyCall: () => callBeats.anyCall(), pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
-const voiceCfg = reactive(normalizeCfg(await invoke('voice_cfg_get').catch(() => null)))
+const voiceCfg = reactive(normalizeCfg(await voiceApi.cfgGet().catch(() => null)))
 core.on('notify', n => {
   const plan = notifyPlan(n, notifyPrefs.value, me.status)
   if (plan.sound) SOUNDS[plan.sound]?.()
@@ -1738,42 +1739,42 @@ const app = createApp({
     // 設定頁改「視窗外框」：Rust 端立刻改所有視窗的外框並通知各視窗的頁面換樣式
     const setFrame = async v => {
       frame.value = normalizeFrame(v)
-      try { await invoke('set_frame', { native: frame.value === 'native' }) } catch (e) { say(e.message) }
+      try { await settingsApi.setFrame(frame.value === 'native') } catch (e) { say(plainMessage(e)) }
     }
     // 設定頁改「關閉視窗時」「登入時自動啟動」：立刻通知 Rust 端
     const setCloseTo = async v => {
       closeTo.value = normalizeClose(v)
-      try { await invoke('set_close_to_tray', { tray: closeTo.value === 'tray' }) } catch (e) { say(e.message) }
+      try { await settingsApi.setCloseToTray(closeTo.value === 'tray') } catch (e) { say(plainMessage(e)) }
     }
     const setGuard = async on => {
       guard.busy = true
-      try { applyGuard(await invoke('guard_set', { on })) } catch (e) { say(String(e?.message ?? e)); applyGuard(await invoke('guard_get').catch(() => null)) } finally { guard.busy = false }
+      try { applyGuard(await settingsApi.guardSet(on)) } catch (e) { say(plainMessage(e)); applyGuard(await settingsApi.guardGet().catch(() => null)) } finally { guard.busy = false }
     }
     const resumeGuard = async () => {
       guard.busy = true
-      try { await invoke('guard_resume'); applyGuard(await invoke('guard_get')) } catch (e) { say(String(e?.message ?? e)) } finally { guard.busy = false }
+      try { await settingsApi.guardResume(); applyGuard(await settingsApi.guardGet()) } catch (e) { say(plainMessage(e)) } finally { guard.busy = false }
     }
     const setAutostart = async on => {
       autostart.busy = true
-      try { await invoke('autostart_set', { on }); autostart.on = on } catch (e) { say(String(e?.message ?? e)); autostart.on = await invoke('autostart_get').catch(() => autostart.on) } finally { autostart.busy = false }
+      try { await autostartApi.set(on); autostart.on = on } catch (e) { say(plainMessage(e)); autostart.on = await autostartApi.get().catch(() => autostart.on) } finally { autostart.busy = false }
     }
     // 設定頁「讓 ASN 負責這台的收發室」與「改由 ASN 負責」（停舊版收發室橋，要再按一次確認）
     const runBridge = async fn => {
       bridge.busy = true
-      try { applyBridgeStatus(await fn()) } catch (e) { bridge.error = String(e?.message ?? e); say(bridge.error) } finally { bridge.busy = false; bridge.confirm = false }
+      try { applyBridgeStatus(await fn()) } catch (e) { bridge.error = plainMessage(e); say(bridge.error) } finally { bridge.busy = false; bridge.confirm = false }
     }
-    const setBridgeRemoteLaunch = on => runBridge(() => invoke('bridge_set_remote_launch', { on }))
-    const setBridgeAutoResume = on => runBridge(() => invoke('bridge_set_auto_resume', { on }))
+    const setBridgeRemoteLaunch = on => runBridge(() => bridgeApi.setRemoteLaunch(on))
+    const setBridgeAutoResume = on => runBridge(() => bridgeApi.setAutoResume(on))
     // 壓縮 N 次自動交接（#1852）：開關與次數存在一起；次數夾在 2～10（跟 Rust 認的範圍一樣），不是數字就維持原本的
-    const setBridgeCompact = (on, n) => runBridge(() => invoke('bridge_set_compact_handoff', { on, n: clampCompactN(n, bridge.compactN) }))
-    const setBridgeTermServer = on => runBridge(() => invoke('bridge_set_term_server', { on }))
-    const retryBridgeTermFetch = () => runBridge(() => invoke('bridge_retry_term_fetch'))
-    const setBridgePermPhone = on => runBridge(() => invoke('bridge_set_perm_phone', { on }))
-    const setBridgeMobileView = on => runBridge(() => invoke('bridge_set_mobile_view', { on }))
-    const setBridgeRemoteInput = on => runBridge(() => invoke('bridge_set_remote_input', { on }))
-    const setBridgeScreenWatch = on => runBridge(() => invoke('bridge_set_screen_watch', { on }))
-    const setBridgeUnaddressed = name => runBridge(() => invoke('bridge_set_unaddressed_to', { name: String(name ?? '') }))
-    const takeoverBridge = () => runBridge(() => invoke('bridge_takeover', { confirmed: true }))
+    const setBridgeCompact = (on, n) => runBridge(() => bridgeApi.setCompactHandoff(on, clampCompactN(n, bridge.compactN)))
+    const setBridgeTermServer = on => runBridge(() => bridgeApi.setTermServer(on))
+    const retryBridgeTermFetch = () => runBridge(() => bridgeApi.retryTermFetch())
+    const setBridgePermPhone = on => runBridge(() => bridgeApi.setPermPhone(on))
+    const setBridgeMobileView = on => runBridge(() => bridgeApi.setMobileView(on))
+    const setBridgeRemoteInput = on => runBridge(() => bridgeApi.setRemoteInput(on))
+    const setBridgeScreenWatch = on => runBridge(() => bridgeApi.setScreenWatch(on))
+    const setBridgeUnaddressed = name => runBridge(() => bridgeApi.setUnaddressedTo(String(name ?? '')))
+    const takeoverBridge = () => runBridge(() => bridgeApi.takeover())
     // 指引、設定的聊天窗（openPanel／closePanel 在上面）：列表只負責「點一項就開」，內容在右邊分頁或獨立視窗
     const panelGuide = computed(() => panelItem('guide', ui.panel.guide))
     const catSub = key => catSummary(key, {
@@ -1920,14 +1921,14 @@ const app = createApp({
     const ttsVoices = ref({ enabled: true, voices: [], default: '' }), sttSt = ref(null), voiceMsg = ref('')
     const sttText = computed(() => sttStatusText(sttSt.value))
     const refreshVoice = async () => {
-      try { ttsVoices.value = await invoke('tts_voices') } catch (e) { voiceMsg.value = e.message }
-      try { sttSt.value = await invoke('stt_status') } catch { /* 取不到就不顯示 */ }
+      try { ttsVoices.value = await voiceApi.ttsVoices() } catch (e) { voiceMsg.value = plainMessage(e) }
+      try { sttSt.value = await voiceApi.sttStatus() } catch { /* 取不到就不顯示 */ }
     }
     void refreshVoice()
     const saveVoice = async patch => {
       const next = normalizeCfg({ ...voiceCfg, ...patch })
-      try { await invoke('voice_cfg_set', { cfg: next }); Object.assign(voiceCfg, next); voiceMsg.value = ''; void refreshVoice() }
-      catch (e) { voiceMsg.value = e.message }
+      try { await voiceApi.cfgSet(next); Object.assign(voiceCfg, next); voiceMsg.value = ''; void refreshVoice() }
+      catch (e) { voiceMsg.value = plainMessage(e) }
     }
     // 設定頁「帳號」（檔案操作全在 Rust 端）：Claude 帳號庫、Codex 目前登入、遠端設備的 Claude 帳號切換
     const accounts = createAccountsUi({

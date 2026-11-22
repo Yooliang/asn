@@ -49,8 +49,11 @@ test('接線：「更新」鈕在「有新版」旁、點擊不展開分組、�
   assert.ok(i > 0 && html.indexOf('asn-upd', i) > i)
   assert.match(html, /class="asn-upd"[^>]*v-if="remoteBtn\(g\.node\)"[^>]*@click\.stop="requestRemoteUpdate\(g\.node\)"/)
   const js = read('ui/list.js')
-  assert.match(js, /invoke\('update_remote_request', \{ node \}\)/)
-  assert.match(js, /invoke\('update_remote_status'\)/)
+  assert.match(js, /updateApi\.remoteRequest\(node\)/)
+  assert.match(js, /updateApi\.remoteStatus\(\)/)
+  const ex = read('ui/lib/tauri.mjs')   // 指令名在出口
+  assert.match(ex, /invoke\('update_remote_request', \{ node \}\)/)
+  assert.match(ex, /invoke\('update_remote_status'\)/)
   assert.match(js, /if \(!info\.shot\) \{\s*void refreshRemoteUpd\(\)/, '--shot 模式不輪詢')
   assert.doesNotMatch(js + html, /access_token|Bearer|x-relay-key/i)
 })

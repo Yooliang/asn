@@ -19,7 +19,7 @@ export const PENDING = {
   'lib/account-roster.mjs': 2,
   'lib/claude-accounts.mjs': 24,
   'lib/quota-readers.mjs': 6,
-  'list.js': 97,
+  'list.js': 61,
   'm.js': 49,
 }
 
@@ -114,4 +114,40 @@ test('openLink：沒有 Tauri 時什麼都不做；有就走 open_link', async (
   const saved = globalThis.__TAURI__
   delete globalThis.__TAURI__
   try { const n = await import(`../ui/lib/tauri.mjs?t=${++seq}`); assert.equal(n.openLink('https://x.test'), undefined) } finally { globalThis.__TAURI__ = saved }
+})
+
+// ---- ⑦：list.js 第一批（設定頁各區塊）的出口：指令名與參數形狀與以前直接 invoke 時完全相同 ----
+test('設定頁出口：指令名與參數形狀不變', async () => {
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return null })
+  await m.settingsApi.setFrame(true); await m.settingsApi.setCloseToTray(false); await m.settingsApi.trayAvailable()
+  await m.settingsApi.guardGet(); await m.settingsApi.guardSet(true); await m.settingsApi.guardResume(); await m.settingsApi.askpassHelperInfo()
+  await m.autostartApi.supported(); await m.autostartApi.get(); await m.autostartApi.blocked(); await m.autostartApi.set(true)
+  await m.bridgeApi.status(); await m.bridgeApi.setRemoteLaunch(true); await m.bridgeApi.setAutoResume(false); await m.bridgeApi.setCompactHandoff(true, 4)
+  await m.bridgeApi.setTermServer(true); await m.bridgeApi.retryTermFetch(); await m.bridgeApi.setPermPhone(true); await m.bridgeApi.setMobileView(false)
+  await m.bridgeApi.setRemoteInput(true); await m.bridgeApi.setScreenWatch(true); await m.bridgeApi.setUnaddressedTo('x'); await m.bridgeApi.takeover()
+  await m.updateApi.check(); await m.updateApi.install(); await m.updateApi.remoteStatus(); await m.updateApi.remoteRequest('N1')
+  await m.logViewApi.openMachineLogDir()
+  await m.voiceApi.ttsVoices(); await m.voiceApi.sttStatus(); await m.voiceApi.cfgGet(); await m.voiceApi.cfgSet({ a: 1 })
+  assert.deepEqual(calls, [
+    ['set_frame', { native: true }], ['set_close_to_tray', { tray: false }], ['tray_available', undefined],
+    ['guard_get', undefined], ['guard_set', { on: true }], ['guard_resume', undefined], ['askpass_helper_info', undefined],
+    ['autostart_supported', undefined], ['autostart_get', undefined], ['autostart_blocked', undefined], ['autostart_set', { on: true }],
+    ['bridge_status', undefined], ['bridge_set_remote_launch', { on: true }], ['bridge_set_auto_resume', { on: false }], ['bridge_set_compact_handoff', { on: true, n: 4 }],
+    ['bridge_set_term_server', { on: true }], ['bridge_retry_term_fetch', undefined], ['bridge_set_perm_phone', { on: true }], ['bridge_set_mobile_view', { on: false }],
+    ['bridge_set_remote_input', { on: true }], ['bridge_set_screen_watch', { on: true }], ['bridge_set_unaddressed_to', { name: 'x' }], ['bridge_takeover', { confirmed: true }],
+    ['update_check', undefined], ['update_install', undefined], ['update_remote_status', undefined], ['update_remote_request', { node: 'N1' }],
+    ['open_machine_log_dir', undefined],
+    ['tts_voices', undefined], ['stt_status', undefined], ['voice_cfg_get', undefined], ['voice_cfg_set', { cfg: { a: 1 } }],
+  ])
+})
+
+test('list.js 第一批：已搬的設定頁指令不再直接 invoke、走具名出口', () => {
+  const s = src(path.join(UI, 'list.js'))
+  const moved = ['set_frame', 'tray_available', 'autostart_supported', 'autostart_get', 'autostart_blocked', 'autostart_set', 'guard_get', 'guard_set', 'guard_resume',
+    'askpass_helper_info', 'bridge_status', 'bridge_set_', 'bridge_retry_term_fetch', 'bridge_takeover', 'update_check', 'update_install', 'update_remote_', 'open_machine_log_dir',
+    'tts_voices', 'stt_status', 'voice_cfg_']
+  for (const c of moved) assert.ok(!s.includes(`'${c}`), `${c} 還在 list.js 直接呼叫`)
+  assert.ok(!/invoke\('set_close_to_tray'/.test(s), 'set_close_to_tray 還在 list.js 直接呼叫')
+  for (const api of ['settingsApi.setFrame(', 'settingsApi.setCloseToTray(', 'bridgeApi.takeover()', 'updateApi.check()', 'autostartApi.set(on)', 'voiceApi.cfgSet(next)']) assert.ok(s.includes(api), api)
 })
