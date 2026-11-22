@@ -2,6 +2,9 @@
 // MiniMax key 只經過這裡交給 Rust 存進憑證管理員，不留在狀態裡，也不進設定頁快照。
 // 查詢代碼只在開的當下回一次：放在狀態裡顯示，使用者關掉或換一筆就清掉，之後讀不回來。
 
+import { quotaShareErrorText } from './plain-errors.mjs'
+import { makeQuotaReadersApi } from './tauri.mjs'
+
 export const QUOTA_TEXT = {
   title: '這台讀額度',
   accountsTitle: '帳號',
@@ -106,6 +109,7 @@ export function vendorSections(my, readers) {
 }
 
 export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged = () => {}, clipboard = t => globalThis.navigator.clipboard.writeText(t), log = (...a) => console.info(...a) }) {
+  const api = makeQuotaReadersApi(invoke)   // 指令名與參數形狀都在 lib/tauri.mjs 的出口（#2106 ⑬）
   // msg＝讀額度設定（開關、MiniMax、自動換新）的訊息，只在「設備 → 這台 → 這台讀額度」顯示；
   // shareMsg＝查詢代碼（產生、撤銷、複製）的訊息 { key, text }，顯示在帳號頁那張帳號卡上。兩邊各寫各的，不共用一個欄位
   const s = reactive({ ...EMPTY, busy: false, msg: '', shareMsg: null, code: null, copied: false, confirm: '' })
@@ -118,14 +122,14 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     s.busy = true; s.msg = ''
     try { await work(); return true } catch (e) { fail(failText, e); return false } finally { s.busy = false }
   }
-  const load = async () => { try { apply(await invoke('quota_readers_get')) } catch (e) { log('[額度來源]', e) } }
-  const setSource = (source, on) => run(QUOTA_TEXT.failGeneric, async () => apply(await invoke('quota_readers_set', { source, on: on === true })))
+  const load = async () => { try { apply(await api.get()) } catch (e) { log('[額度來源]', e) } }
+  const setSource = (source, on) => run(QUOTA_TEXT.failGeneric, async () => apply(await api.set(source, on === true)))
   const addMinimax = async ({ email, key } = {}) => {
     const mail = String(email ?? '').trim()
     const k = String(key ?? '').trim()
     if (!mail || !k) { s.msg = QUOTA_TEXT.failInput; return false }
     if (s.minimax.length >= 2 && !s.minimax.some(m => m.email === mail.toLowerCase())) { s.msg = QUOTA_TEXT.failFull; return false }
-    const ok = await run(QUOTA_TEXT.failGeneric, async () => apply(await invoke('quota_minimax_add', { email: mail, key: k })))
+    const ok = await run(QUOTA_TEXT.failGeneric, async () => apply(await api.minimaxAdd(mail, k)))
     if (ok) s.msg = QUOTA_TEXT.added
     return ok
   }
@@ -133,7 +137,7 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
   const confirmed = id => { if (s.confirm === id) { s.confirm = ''; return true } s.confirm = id; s.msg = ''; s.shareMsg = null; return false }
   const removeMinimax = async email => {
     if (!confirmed(`minimax\n${email}`)) return false
-    const ok = await run(QUOTA_TEXT.failGeneric, async () => apply(await invoke('quota_minimax_remove', { email })))
+    const ok = await run(QUOTA_TEXT.failGeneric, async () => apply(await api.minimaxRemove(email)))
     if (ok) s.msg = QUOTA_TEXT.removed
     return ok
   }
@@ -143,7 +147,7 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     s.confirm = ''
     return setSource('extra_claude_refresh', on === true)
   }
-  const shareFail = e => (/尚未登入/.test(typeof e === 'string' ? e : e?.message ?? '') ? QUOTA_TEXT.failLogin : QUOTA_TEXT.failShare)
+  const shareFail = e => quotaShareErrorText(e, QUOTA_TEXT)
   const share = async ({ vendor, account, shared } = {}) => {
     if (shared && !confirmed(`again\n${shareKey(vendor, account)}`)) return false
     s.code = null; s.copied = false
@@ -151,7 +155,7 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     const key = shareKey(vendor, account)
     s.busy = true; s.msg = ''; s.shareMsg = null
     try {
-      const r = await invoke('quota_share_create', { vendor, account })
+      const r = await api.shareCreate(vendor, account)
       if (typeof r?.code !== 'string' || !r.code) throw new Error('沒有回傳代碼')
       s.code = { key: shareKey(vendor, account), value: r.code }
       onShareChanged()
@@ -164,7 +168,7 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     const key = shareKey(vendor, account)
     s.busy = true; s.msg = ''; s.shareMsg = null
     try {
-      await invoke('quota_share_revoke', { vendor, account })
+      await api.shareRevoke(vendor, account)
       if (s.code?.key === key) s.code = null
       s.shareMsg = { key, text: QUOTA_TEXT.revoked }
       onShareChanged()

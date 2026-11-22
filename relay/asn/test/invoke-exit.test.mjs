@@ -17,8 +17,6 @@ const src = f => fs.readFileSync(f, 'utf8')
 // 待搬清單：各檔直接呼叫 invoke( 的次數（含註解裡的字樣）。後續分組搬遷時，搬完一個檔就刪一行或改小數字。
 export const PENDING = {
   'lib/account-roster.mjs': 2,
-  'lib/quota-readers.mjs': 6,
-  'm.js': 4,
 }
 
 test('除 tauri.mjs 外，不准直接呼叫 __TAURI__.core.invoke', () => {
@@ -278,7 +276,7 @@ test('手機第二批出口：指令名與參數形狀不變', async () => {
   ])
 })
 
-test('m.js 第二批：已搬的指令不再直接 invoke、走具名出口；m.js 只剩帳號那 4 處', () => {
+test('m.js 第二批：已搬的指令不再直接 invoke、走具名出口；⑬ 起 m.js 已無直接 invoke', () => {
   const s = src(path.join(UI, 'm.js'))
   const moved = ['setup_remote_status', 'setup_remote_request', 'setup_device_request', 'setup_device_fetch', 'setup_device_cancel', 'startup_info', 'set_presence', 'set_foreground',
     'invite_pending', 'open_link', 'site_releases', 'android_launchers', 'android_launch', 'android_push_register', 'android_push_unregister', 'android_update_check', 'android_update_download']
@@ -291,7 +289,7 @@ test('m.js 第二批：已搬的指令不再直接 invoke、走具名出口；m.
   assert.equal((s.match(/openLink\(/g) ?? []).length, 3)   // 三處開連結（Play 商店、關於頁、官網）都走 openLink
   // 只剩帳號那 4 處（另一張處理）
   const left = [...s.matchAll(/(?<![\w.$])invoke\('(\w+)'/g)].map(x => x[1])
-  assert.deepEqual(left, ['android_acct_list', 'android_acct_switch', 'android_acct_status', 'android_acct_roster'])
+  assert.deepEqual(left, [])   // ⑬ 起帳號那 4 處也搬走了
   // 常呼叫的在線與前景回報：失敗已由出口記一行並去重，這裡的空 catch 要有註解交代、不再多記
   assert.equal((s.match(/出口的 invoke 已記一行並去重，這裡不再多記/g) ?? []).length, 2)
   assert.doesNotMatch(s, /mobileStateApi\.(presence|foreground)\([^\n]*console\./)
@@ -327,4 +325,31 @@ test('⑫：claude-accounts 與 list.js 不再直接 invoke、走具名出口', 
     'api.grokSwitch(email)', 'api.remoteReport()', 'api.remoteList(r.node)', 'api.remoteList(node)', 'api.remoteRequest(node, email, vendor)', 'api.remoteStatus([sent.id])', 'api.remotePending()',
     'api.remoteApply(row.id, false)', 'api.remoteApply(id, true)', 'api.remoteDecline(id)', 'api.allowGet()', 'api.allowSet(on)']) assert.ok(a.includes(call), call)
   assert.ok(l.includes('cliLoginApi.login(v.tool)') && l.includes("cliLoginApi.login('pi')"))
+})
+
+// ---- ⑬：手機帳號（android_acct_*）與讀額度（quota-readers）：指令名與參數形狀與以前直接 invoke 時完全相同 ----
+test('手機帳號與讀額度出口：指令名與參數形狀不變', async () => {
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return null })
+  const a = m.makeMobileAccountApi()
+  await a.list('N1'); await a.switchTo('N1', 'a@x.test'); await a.status(['i1']); await a.roster()
+  const q = m.makeQuotaReadersApi()
+  await q.get(); await q.set('extra_claude_refresh', true); await q.minimaxAdd('a@x.test', 'k'); await q.minimaxRemove('a@x.test'); await q.shareCreate('claude', 'a@x.test'); await q.shareRevoke('claude', 'a@x.test')
+  assert.deepEqual(calls, [
+    ['android_acct_list', { node: 'N1' }], ['android_acct_switch', { node: 'N1', email: 'a@x.test' }], ['android_acct_status', { ids: ['i1'] }], ['android_acct_roster', undefined],
+    ['quota_readers_get', undefined], ['quota_readers_set', { source: 'extra_claude_refresh', on: true }], ['quota_minimax_add', { email: 'a@x.test', key: 'k' }], ['quota_minimax_remove', { email: 'a@x.test' }],
+    ['quota_share_create', { vendor: 'claude', account: 'a@x.test' }], ['quota_share_revoke', { vendor: 'claude', account: 'a@x.test' }],
+  ])
+})
+
+test('⑬：m.js 與 quota-readers 不再直接 invoke、走具名出口', () => {
+  const mj = src(path.join(UI, 'm.js')), qr = src(path.join(UI, 'lib', 'quota-readers.mjs'))
+  assert.ok(!/(?<![\w.$])invoke\(/.test(mj), 'm.js 還有直接 invoke(')
+  assert.ok(!/(?<![\w.$])invoke\(/.test(qr), 'quota-readers.mjs 還有直接 invoke(')
+  assert.ok(!mj.includes("'android_acct_") && !qr.includes("'quota_"), '指令名還寫在呼叫端')
+  for (const call of ['mobileAccountApi.list(node)', 'mobileAccountApi.switchTo(node, email)', 'mobileAccountApi.status(ids)', 'mobileAccountApi.roster()']) assert.ok(mj.includes(call), call)
+  assert.ok(qr.includes('makeQuotaReadersApi(invoke)'))
+  for (const call of ['api.get()', 'api.set(source, on === true)', 'api.minimaxAdd(mail, k)', 'api.minimaxRemove(email)', 'api.shareCreate(vendor, account)', 'api.shareRevoke(vendor, account)']) assert.ok(qr.includes(call), call)
+  const ex = src(path.join(UI, 'lib/tauri.mjs'))
+  for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status', 'android_acct_roster', 'quota_readers_get', 'quota_readers_set', 'quota_minimax_add', 'quota_minimax_remove', 'quota_share_create', 'quota_share_revoke']) assert.ok(ex.includes(`'${c}'`), c)
 })
