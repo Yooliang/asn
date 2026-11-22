@@ -64,7 +64,7 @@ export const isFinalStatus = s => s === 'ok' || s === 'failed' || s === 'denied'
 
 const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
-export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80, now = () => Date.now(), retryMs = REPORT_RETRY_MS, log = (...a) => console.info(...a) }) {
+export function createAccountsUi({ invoke, transport = null, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80, now = () => Date.now(), retryMs = REPORT_RETRY_MS, log = (...a) => console.info(...a) }) {
   // 別台帳號的錯誤：後台回 403（沒有權限）顯示白話，原文只進 log；其他維持原樣
   const remoteErr = e => {
     if (!isForbidden(e)) return errText(e)
@@ -221,7 +221,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     if (vendor === 'claude' && (s.list ?? []).some(a => a.email === email && loginIncomplete(a))) return { ok: false, fail: { error: INCOMPLETE_REASON } }
     s.busy = true
     try {
-      await invoke(vendor === 'grok' ? 'grok_account_switch' : 'claude_account_switch', { email })
+      await transport.accountSwitch(vendor, email)   // 走 lib/tauri.mjs 的出口（#2106）；呼叫端（list.js）要傳 transport
       return { ok: true }
     } catch (e) { return { ok: false, fail: { error: e } } } finally { s.busy = false }
   }

@@ -116,7 +116,9 @@ function mkAccounts(handlers, extra = {}) {
   const calls = [], logs = []
   const invoke = async (cmd, args) => { calls.push([cmd, args]); const h = handlers[cmd]; if (h instanceof Error) throw h; return typeof h === 'function' ? h(args, calls) : h }
   const c = clock()
-  const ui = createAccountsUi({ invoke, reactive: o => o, sleep: c.sleep, now: c.now, pollMs: 3000, log: (...a) => logs.push(a.join(' ')), ...extra })
+  // 本機切換走 tauri.mjs 的 transport.accountSwitch（#2106）；這裡照它的指令對應轉給假 invoke，handlers 照舊用指令名
+  const transport = { accountSwitch: (vendor, email) => invoke(vendor === 'grok' ? 'grok_account_switch' : 'claude_account_switch', { email }) }
+  const ui = createAccountsUi({ invoke, transport, reactive: o => o, sleep: c.sleep, now: c.now, pollMs: 3000, log: (...a) => logs.push(a.join(' ')), ...extra })
   return { ui, calls, logs, c }
 }
 const names = calls => calls.map(x => x[0])
