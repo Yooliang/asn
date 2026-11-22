@@ -428,10 +428,10 @@ pub fn claude_mod_report() -> Option<serde_json::Value> {
     current_report()
 }
 
-/// 馬上在背景跑一次安裝檢查（跟啟動時同一條路；引導頁「連接你的 AI 工具」用），結果用 claude-mod-status 事件送回畫面
+/// 馬上在背景跑一次安裝檢查（跟啟動時同一條路；引導頁「連接你的 AI 工具」用），結果用 claude-mod-status 事件送回畫面，也直接回傳（引導頁照實顯示）
 #[cfg(feature = "gui")]
 #[tauri::command]
-pub async fn claude_mod_check(app: tauri::State<'_, crate::App>, handle: tauri::AppHandle) -> Result<(), String> {
+pub async fn claude_mod_check(app: tauri::State<'_, crate::App>, handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
     use tauri::Emitter;
     let dir = app.data_dir.clone();
     let out = tauri::async_runtime::spawn_blocking(move || run_real(&dir)).await.unwrap_or_else(|_| Outcome::Failed("背景工作中斷".into()));
