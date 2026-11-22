@@ -5,6 +5,7 @@
   --fs-1:11px; --fs-2:12px; --fs-3:14px; --fs-4:16px;
   --btn-h:28px; --btn-px:var(--sp-3);
   --kit-ok:#2e7d32; --kit-fail:#b3261e; --kit-current:#4b5058;
+  --kit-warn:#a86f00; --kit-warn-line:#d9b25a;   /* 警告色（登入已失效的提示與標籤）；黃色鈕另用 --kit-relogin-* */
   --kit-relogin-bg:#ffd84d; --kit-relogin-fg:#3b2c00; --kit-relogin-line:#c79a00;
 }
 /* 手機：字級各加大一檔、鈕高 40（最小觸控目標） */
@@ -13,7 +14,7 @@
   --btn-h:40px; --btn-px:14px;
 }
 @media (prefers-color-scheme:dark){
-  :root{--kit-ok:#7ad07e; --kit-fail:#ff9a90; --kit-current:#6b727c}
+  :root{--kit-ok:#7ad07e; --kit-fail:#ff9a90; --kit-current:#6b727c; --kit-warn:#e0b04a; --kit-warn-line:#8a6a1f}
 }
 
 /* ---- 按鈕：三級（primary／secondary／text），尺寸固定，不依所在位置覆寫 ---- */

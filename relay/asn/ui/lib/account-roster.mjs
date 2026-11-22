@@ -266,6 +266,17 @@ export const DEVICE_BUTTON_TEXT = { group: '用在哪幾台' }
 /** 帳號卡設備列：按鈕上的字（電腦、手機同一份，#2111） */
 export const DEVICE_ROW_TEXT = Object.freeze({ current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', self: '這台' })
 
+/** 登入失效（#1960，電腦、手機同一份）：設備列、卡片頂端標籤、額度區、名單上方提示的字都在這裡 */
+export const LOGIN_LOST_TEXT = Object.freeze({
+  button: '重新登入',
+  row: '登入已失效',
+  rowElsewhere: '登入已失效，到那台重新登入',   // 現在沒辦法從這裡替那台重新登入（離線、ASN 沒開）：不放鈕，講清楚去哪做
+  tag: '登入已失效',
+  quota: '額度暫時看不到',
+  notice: (who, vendor, email) => `${who}的 ${vendor} 帳號 ${email} 需要重新登入，登入前不能切換到這個帳號。`,
+  who: (label, self) => (self ? `這台（${label}）` : label),
+})
+
 /** 設備列切不過去時，寫在設備名下方的原因：每種都說清楚、說怎麼辦（#2110；電腦、手機同一份） */
 export const DEVICE_BLOCK_REASON = Object.freeze({
   vendor: '這個服務不能切換',
@@ -320,9 +331,37 @@ export function accountDeviceRows(devices, vendor, email, usedOn, opts = {}) {
     const current = d.self && has ? has.current === true : (u?.current === true || has?.current === true)
     const st = rowStateOf(d, v ?? { accounts: [] }, has, vendor, current, Array.isArray(opts.vendors) ? opts.vendors : ['claude', 'grok'])
     const busy = st.state !== 'current' && opts.switchingNode === d.key
-    rows.push({ node: d.key, label: d.label || u?.label || unnamedLabelOf(d.key), self: d.self === true, current, state: busy ? 'busy' : st.state, reason: busy ? '' : st.reason })
+    const label = d.label || u?.label || unnamedLabelOf(d.key)
+    // 登入失效（#1960）：沿用各台帳號回報裡的旗標（device-tree 的 loginFailed）；能不能從這裡替它重新登入看設備樹算好的 relogin 入口（本機／別台）
+    if (vendor === 'claude' && has?.loginFailed === true) {
+      const kind = v?.relogin?.kind === 'local' || v?.relogin?.kind === 'remote' ? v.relogin.kind : ''
+      rows.push({ node: d.key, label, self: d.self === true, current, loginFailed: true, relogin: kind, state: kind ? 'relogin' : 'expired', reason: kind ? LOGIN_LOST_TEXT.row : LOGIN_LOST_TEXT.rowElsewhere })
+      continue
+    }
+    rows.push({ node: d.key, label, self: d.self === true, current, state: busy ? 'busy' : st.state, reason: busy ? '' : st.reason })
   }
   return rows.map((r, i) => ({ r, i })).sort((x, y) => Number(!x.r.current) - Number(!y.r.current) || x.i - y.i).map(x => x.r)
+}
+
+/** 這個帳號有沒有哪一台登入失效（卡片頂端標籤、額度區改寫「額度暫時看不到」都看這一個） */
+export const accountLoginLost = rows => Array.isArray(rows) && rows.some(r => r?.loginFailed === true)
+
+/**
+ * 帳號名單上方的提示（#1960）：每個失效的「設備＋帳號」一行，寫明是哪台、哪家的帳號。提示本身不放鈕，鈕在那一列。
+ * sections＝[{ key, label, accounts:[{ account }] }]（廠牌分組）；rowsOf(vendorKey, account)＝該帳號的設備列（accountDeviceRows 的結果）。
+ * 回 [{ key, text }]
+ */
+export function loginLostNotices(sections, rowsOf) {
+  const out = []
+  for (const sec of Array.isArray(sections) ? sections : []) {
+    for (const a of sec?.accounts ?? []) {
+      for (const r of rowsOf(sec.key, a) ?? []) {
+        if (r?.loginFailed !== true) continue
+        out.push({ key: `${sec.key}|${a.account}|${r.node}`, text: LOGIN_LOST_TEXT.notice(LOGIN_LOST_TEXT.who(r.label, r.self), sec.label, a.account) })
+      }
+    }
+  }
+  return out
 }
 
 /** 卡片頂端的「使用中」：以設備列為準（列表裡沒有任何設備時才退回後台說的），兩邊不會互相矛盾（#2110） */
