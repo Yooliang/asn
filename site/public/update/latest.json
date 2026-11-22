@@ -1,15 +1,11 @@
 {
-  "version": "0.2.68",
-  "notes": "- 改善：帳號頁按切換後，結果直接顯示在原來的位置。（#2111、#2117）\n- 改善：記錄檔裡的 email 一律遮掉；操作失敗時，原始錯誤也會寫進記錄，方便查原因。（#2104、#2106、#2118、#2119、#2122）",
-  "pub_date": "2026-11-22T14:36:19.016Z",
+  "version": "0.2.69",
+  "notes": "- 改善：語音、房間、登入、安裝、遠端畫面等處出錯時，改成顯示看得懂的話，原始錯誤寫進記錄。（#2106、#2120、#2123、#2126）\n- 改善：開始統一按鈕樣式與確認方式（設定頁的安裝鈕先換上），之後各頁陸續跟進。（#2105、#2121）",
+  "pub_date": "2026-11-22T15:46:51.200Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpISzc0aFNvenc4NkNlWDc5RkppbElVSnRhN1F0TEVUcEFFZzhJMnZzdGZOcjdPMnVmSUdpT1o1eTd5TmRkVG5BS3lTbjZQbHlkQ3ZabWs5aUJJSGdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzU4MTc4CWZpbGU6QVNOXzAuMi42OF94NjQtc2V0dXAuZXhlCjRTVHFDYnp4elBHUDd4RVVZa0djMTlpbHRObWhyc0tTZU5uT2ZYckc5MFYrTWVVWkwwb3d1VktieGR6VkNRQjJiUEY2QjZ0WlRQSGdGZVgveW9QaEJnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.68_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpaYjV5dXhmWDRjOHBseDdlcm5zTzZpcm01dmlLYTJGNnJRbGJtdVZ2TnJKUW52eG1vNm1kN21xQUxOdW8ydjZOSlF3M1lFc0ZweDRncGo0Slh5aEFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzU4Nzc4CWZpbGU6QVNOXzAuMi42OF9hbWQ2NC5BcHBJbWFnZQpuZENjeWJGaHZKdEx3aGhZWElJWUQ0aTBHTnAxOTlkdUc3Y0RXUGFacGhLTTQrUGhRMEd4MEw1SGM2NzNMUS9nOWxFY1BmT0w0VW04WE0rbnRPcTBCZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.68_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlGb3p0aGtjaUFZcURob3pBQ3VMc2xlODhqdzAxTi9FQWtsS2N4MjlCVVRBOVNFN0xWL3RRVFZpVXRHeHR1WTZHMmVCOGdRYVV5Vit0Si9rdHBsT3dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzYyNDEwCWZpbGU6QVNOXzAuMi42OV94NjQtc2V0dXAuZXhlCk1ZVzNqSXVmMWpOaEJodDRWeWlEOXRwV240dFpOU05wME1aWHRITzR4ZzZpckFYc285K0VBL2xpZlRrMjltbTNVR3k1eGhuVmtXUGFFWllzUjR6WUFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.69_x64-setup.exe"
     }
   }
 }
