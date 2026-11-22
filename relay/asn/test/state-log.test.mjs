@@ -82,3 +82,26 @@ test('list.js 真的接上：每個來源都呼叫對應的記錄', () => {
   }
   assert.equal((src.match(/stateLog\.cwdRejected\(/g) ?? []).length, 4, '加入×3（瀏覽、建議、夥伴對話框）＋移除×1 都要記拒絕原因')
 })
+
+test('ai-cli：收到非陣列直接 return，不當成「沒有任何工具」記初始、也不動比較基準（#2104 C）', () => {
+  const { lines, log } = mk()
+  for (const bad of [null, undefined, {}, 'oops', 42]) log.aiCliStatus(bad)
+  assert.deepEqual(lines, [], '非陣列不記任何行')
+  log.aiCliStatus([row()])
+  assert.match(lines[0], /^ai-cli 初始：claude /, '之後第一次真的資料才記初始（不是變動）')
+  log.aiCliStatus(null)
+  log.aiCliStatus([row()])
+  assert.equal(lines.length, 1, '中間夾一次非陣列，比較基準沒被清掉，沒變不記')
+})
+
+test('ai-cli-detect：收到非陣列直接 return，不記初始、也不動比較基準（#2104 C）', () => {
+  const { lines, log } = mk()
+  const d = [{ id: 'claude', binary_found: true, version: '1.0' }]
+  for (const bad of [null, undefined, {}, 'oops', 42]) log.aiCliDetect(bad)
+  assert.deepEqual(lines, [], '非陣列不記任何行')
+  log.aiCliDetect(d)
+  assert.match(lines[0], /^ai-cli-detect 初始：claude 已安裝 1\.0/)
+  log.aiCliDetect(null)
+  log.aiCliDetect(d)
+  assert.equal(lines.length, 1, '中間夾一次非陣列，比較基準沒被清掉，沒變不記')
+})
