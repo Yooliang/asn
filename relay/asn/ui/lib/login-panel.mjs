@@ -20,7 +20,7 @@ export const LoginPanel = {
       try {
         status.value = await authApi.status()
         info.value = null
-        if (status.value?.signed_in) { info.value = await authApi.accountInfo(); void authApi.getAiWakeLimit().then(n => { wakeText.value = String(n) }).catch(() => { /* 取不到上限就留著輸入框原樣；出口已把失敗寫進 log */ }); nameText.value = accountDisplayName(info.value?.owner_name, '') === '我' ? '' : accountDisplayName(info.value?.owner_name, '') }
+        if (status.value?.signed_in) { info.value = await authApi.accountInfo(); void authApi.getAiWakeLimit().then(n => { wakeText.value = String(n) }).catch(() => { /* 取不到上限就留著輸入框原樣；出口已 console.warn */ }); nameText.value = accountDisplayName(info.value?.owner_name, '') === '我' ? '' : accountDisplayName(info.value?.owner_name, '') }
       } catch (e) { msg.value = errorText(e) }
     }
     const run = async (fn, ok = '') => {

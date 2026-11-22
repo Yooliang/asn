@@ -10,13 +10,13 @@ createApp({
     const state = reactive({ v: initialView() })
     const apply = e => { state.v = applyEvent(state.v, e) }
     // 小窗開得比事件慢：先向 Rust 要最後一個事件，再接著聽
-    void setupProgressApi.snapshot().then(list => { for (const e of list ?? []) apply(e) }).catch(() => { /* 拿不到最後一個事件，就等下一個事件；出口已把失敗寫進 log */ })
+    void setupProgressApi.snapshot().then(list => { for (const e of list ?? []) apply(e) }).catch(() => { /* 拿不到最後一個事件，就等下一個事件；出口已 console.warn */ })
     void listen('agent-setup', apply)
     void listen('agent-setup-remote', apply)
     const cancel = () => {
       if (!canCancel(state.v)) return
       state.v = requestCancel(state.v)
-      void setupProgressApi.cancel().catch(() => { /* 取消請求沒送到：畫面已顯示取消中，安裝照舊跑完；出口已把失敗寫進 log */ })
+      void setupProgressApi.cancel().catch(() => { /* 取消請求沒送到：畫面已顯示取消中，安裝照舊跑完；出口已 console.warn */ })
     }
     return { v: computed(() => state.v), lines: computed(() => statusLines(state.v)), can: computed(() => canCancel(state.v)), cancel, close: () => ctl('close'), CANCEL_LABEL, CLOSE_LABEL }
   },
