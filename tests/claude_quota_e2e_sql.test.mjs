@@ -76,7 +76,7 @@ test('端到端（後台段）：同一份回報再送一次、另一台較舊�
 // 畫面段：同一條路接著走到「帳號頁」用的 rosterView（設備頁用的 rosterQuota 是同一個函式）
 import { rosterView, QUOTA_LINES_FOR_TEST } from './_claude_quota_ui.mjs'
 
-test('端到端（整條）：黃金回報 → 後台 → roster → 帳號頁文字；沒有任何設備在用時加灰字', { skip }, async () => {
+test('端到端（整條）：黃金回報 → 後台 → roster → 帳號頁文字；沒有任何設備在用時照樣顯示最後讀數（#2111 不再加灰字）', { skip }, async () => {
   const db = await setup()
   const NOW = Date.parse('2026-10-24T12:05:00Z')
   await sendLikeEdge(db, 'W', golden)
@@ -87,15 +87,15 @@ test('端到端（整條）：黃金回報 → 後台 → roster → 帳號頁�
   assert.equal(row.quota.known, true)
   assert.equal(row.quota.text, '5 小時剩 62%、每週剩 80%')
   assert.match(row.quota.meta, /工作機/)
-  assert.equal(row.quota.idleText, '', '有設備在用，不加灰字')
-  // 那台改回報別的帳號：這個帳號沒有任何設備在用，照樣顯示最後讀數與時間，加「目前沒有設備在用」
+  assert.ok(!('idleText' in row.quota), '#2111 不再有「沒有設備在用」灰字')
+  // 那台改回報別的帳號：這個帳號沒有任何設備在用，照樣顯示最後讀數與時間，不再加灰字（#2111）
   const other = structuredClone(golden)
   other.accounts[0].current = false
   await sendLikeEdge(db, 'W', other)
   const roster2 = await one(db, 'select public.asn_relay_acct_roster($1, $2::uuid) r', ['H', U1])
   const idle = rosterView(roster2, { nodeLabel: n => n, now: NOW }).vendors.find(v => v.key === 'claude').accounts[0]
   assert.equal(idle.quota.text, '5 小時剩 62%、每週剩 80%')
-  assert.equal(idle.quota.idleText, QUOTA_LINES_FOR_TEST.idle)
+  assert.ok(!('idleText' in idle.quota))
 })
 
 // ---------- 舊版用戶端相容（四欄轉 windows，只保留一版）與新版整份取代 ----------

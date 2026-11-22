@@ -6,7 +6,7 @@
 // 後台沒部署、沒登入、回錯（404／forbidden）時一律當「沒有列表」（null），畫面退回各設備自己回報的數字。
 import { deviceNameOf } from './device-known.mjs'
 import { agoText } from './cloud-invite.mjs'
-import { OLD_TEXT, QUOTA_LINES, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
+import { QUOTA_LINES, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
 import { unnamedLabelOf } from './device-known.mjs'
 
@@ -21,9 +21,6 @@ export const ROSTER_TEXT = {
   usedOn: '用在',
   resetPending: '已重置，待更新',   // 那一窗的重置時間已經過了：記著的百分比不代表現在（#527 審查）
 }
-const STALE_NOTE = '較舊'   // 「我的帳號」卡片上帳號後面的括號：「（11 小時前，較舊）」
-// Claude 的額度只有「用這個帳號登入的視窗」會送來（換帳號前開的舊視窗不收，#1688）：讀數舊了，告訴人怎麼讓它更新
-const STALE_HINT = '用這個帳號開新視窗就會更新'
 const FIVE_HOUR_STALE_MS = 30 * 60_000   // 5 小時那條 30 分鐘沒更新就算舊（#1688）；其他窗沿用 STALE_MS（6 小時）
 export const FIVE_ONLY_WEEKLY_TEXT = '這個帳號最近只回報每週額度'
 const FIVE_GONE_MS = 60 * 60_000   // 同一台後來讀到每週、5 小時卻停了這麼久：當作這個帳號已經沒有 5 小時窗（#1736）
@@ -72,7 +69,7 @@ export function nodeLabelOf(friends = [], { nodeNames = null } = {}) {
 }
 
 // 沒有 5 小時窗的帳號（Ultra 等，#1736）：Claude 狀態列只送每週，後台還留著改方案前最後一筆 5 小時。
-// 判斷：方案是 Ultra，或同一台電腦後來又讀到每週、但那條 5 小時比每週舊了超過 1 小時（有 5 小時窗的帳號兩條會一起更新；1 小時內仍照舊標舊，#1688）→ 那條 5 小時已經沒有在送，不列、也不拿它算「資料較舊」。
+// 判斷：方案是 Ultra，或同一台電腦後來又讀到每週、但那條 5 小時比每週舊了超過 1 小時（有 5 小時窗的帳號兩條會一起更新；1 小時內仍照舊標舊，#1688）→ 那條 5 小時已經沒有在送，不列、也不拿它算過期。
 // 不同電腦讀的不算（那是換帳號前的舊視窗，#1688，照舊標舊）；只動 Claude
 const fiveGone = (entry, w, all) => entry?.vendor === 'claude' && (w.name === 'five_hour') && (
   /ultra/i.test(String(entry?.plan ?? '')) ||
@@ -97,7 +94,7 @@ function cleanWindows(entry, keepGone = false) {
  *     兩窗讀取時間不同時，meta 標**較舊**的那個（「2 天前・工作機」），stale 也看較舊的——舊數字不能看起來像新的（#527 審查）
  *   listMeta：「我的帳號」區那一行後面的括號：有窗時只寫哪台讀的（時間各窗自己標了，最多兩台）；沒有任何窗時同 meta（最後一次回報）
  *   目前沒有任何一台還在回報的，時間寫成「3 天前讀的」
- *   bars（#374）：一行版那幾窗的額度條，每條自己寫重置時間（重置時間已過的那一窗不列）；oldText：舊資料寫「資料較舊」
+ *   bars（#374）：一行版那幾窗的額度條，每條自己寫重置時間（重置時間已過的那一窗不列）；過期（stale）時畫面把額度區改淡色，不另寫「舊資料」字樣（#2111）
  */
 export function rosterQuota(entry, opts = {}) {
   const q = rosterQuotaInner(entry, opts)
@@ -111,8 +108,6 @@ function rosterQuotaInner(entry, { nodeLabel = node => unnamedLabelOf(node), now
   // gemini 的 nodes 後台一律回空陣列（20261029130000_acct_roster_gemini：nodes 來自舊表、舊表不收 gemini），
   // 看不出有沒有設備還在回報，所以不當成「沒有設備在回報」
   const gone = entry?.vendor !== 'gemini' && entry?.vendor !== 'minimax' && (!Array.isArray(entry?.nodes) || entry.nodes.length === 0)
-  // Claude 帳號現在沒有任何一台在用（#1883）：照樣顯示最後一次讀數與時間，旁邊加一句灰字
-  const idleText = entry?.vendor === 'claude' && Array.isArray(entry?.nodes) && !entry.nodes.some(n => n?.current === true) ? QUOTA_LINES.idle : ''
   const readNodesOf = list => [...new Set(list.map(w => w.node).filter(Boolean))]   // 這幾窗是哪幾台讀的（設備按鈕上標藍線用）
   const agoOf = at => (at != null ? agoText(new Date(at).toISOString(), now) : '')   // 「3 天前」（「我的帳號」卡片帳號後面的括號用，不加「讀的」）
   const stamp = (at, node) => {
@@ -124,7 +119,7 @@ function rosterQuotaInner(entry, { nodeLabel = node => unnamedLabelOf(node), now
     const text = ROSTER_TEXT[NO_WINDOW_TEXT[entry?.vendor] ?? 'noQuota']
     const seenNode = typeof entry?.seen_node === 'string' ? entry.seen_node : ''
     const meta = stamp(time(entry?.seen_at), seenNode)
-    return { known: false, text, parts: [text], meta, listMeta: meta, ageLabel: agoOf(time(entry?.seen_at)), readNodes: seenNode ? [seenNode] : [], resetText: '', bars: [], oldText: '', idleText, stale: true, exhausted: false, gone }
+    return { known: false, text, parts: [text], meta, listMeta: meta, ageLabel: agoOf(time(entry?.seen_at)), readNodes: seenNode ? [seenNode] : [], resetText: '', bars: [], stale: true, exhausted: false, gone }
   }
   const expired = w => w.reset != null && w.reset <= now
   const parts = wins.map(w => (expired(w)
@@ -145,20 +140,19 @@ function rosterQuotaInner(entry, { nodeLabel = node => unnamedLabelOf(node), now
   if (!live.length) {
     // 這一行該放的窗都已經重置過了：數字不代表現在，不列，寫「已重置，待更新」
     const o = oldestOf(inLine)
-    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, ageLabel: agoOf(o.read), readNodes: readNodesOf(inLine), resetText, bars, oldText: '', idleText, stale: true, exhausted: Boolean(out), gone }
+    return { known: false, text: ROSTER_TEXT.resetPending, parts, meta: stamp(o.read, o.node), listMeta, ageLabel: agoOf(o.read), readNodes: readNodesOf(inLine), resetText, bars, stale: true, exhausted: Boolean(out), gone }
   }
   const oldest = oldestOf(live)
   const staleWins = live.filter(w => now - w.read > staleMsOf(w.name))
   const stale = staleWins.length > 0
   const shown = stale ? oldestOf(staleWins) : oldest   // 括號裡的時間寫「舊的那一窗」的，免得新的那窗把舊的蓋掉
-  const staleNote = stale ? `，${STALE_NOTE}${entry?.vendor === 'claude' ? `，${STALE_HINT}` : ''}` : ''
   return {
     known: true, text: live.map(w => `${windowLabel(w.name)}剩 ${w.pct}%`).join('、'), parts,
     meta: stamp(oldest.read, oldest.node), listMeta,   // 手機與設備卡的時間照舊標「兩窗裡最舊的」（#527 審查）；只有電腦「我的帳號」括號的 ageLabel 寫過期那一窗的
-    // 「我的帳號」卡片的新排法：時間放在帳號後面的括號（舊資料在括號裡加「較舊」），讀這筆額度的那台只標在它的設備按鈕上；meta／oldText 留給手機與設備卡
-    ageLabel: agoOf(shown.read) + staleNote, readNodes: readNodesOf(live),
-    resetText, bars, oldText: stale ? (entry?.vendor === 'claude' ? `${OLD_TEXT}，${STALE_HINT}` : OLD_TEXT) : '',
-    idleText, stale, exhausted: Boolean(out), gone,
+    // 「我的帳號」卡片的新排法：時間放在帳號後面的括號，讀這筆額度的那台只標在它的設備按鈕上；meta 留給手機與設備卡
+    ageLabel: agoOf(shown.read), readNodes: readNodesOf(live),
+    resetText, bars,
+    stale, exhausted: Boolean(out), gone,
   }
 }
 
@@ -173,7 +167,7 @@ export function normalizeQuotaState(raw) {
   return { email, status: status === 'ok' && !windows.length ? 'none' : status, readAt: typeof raw?.read_at === 'string' ? raw.read_at : '', windows }
 }
 
-const stubQuota = text => ({ known: false, text, parts: [text], meta: '', listMeta: '', ageLabel: '', readNodes: [], resetText: '', bars: [], oldText: '', idleText: '', stale: true, exhausted: false, gone: false })
+const stubQuota = text => ({ known: false, text, parts: [text], meta: '', listMeta: '', ageLabel: '', readNodes: [], resetText: '', bars: [], stale: true, exhausted: false, gone: false })
 
 /**
  * 這台電腦上一個 Claude 帳號的額度顯示：

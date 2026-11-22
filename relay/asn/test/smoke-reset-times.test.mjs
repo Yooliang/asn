@@ -31,7 +31,7 @@ test('情境：電腦「我的帳號」兩條各自重置時間；已過的那�
   }
 })
 
-test('情境：手機「設備與帳號」三行卡片、Max 方案、資料較舊、只有一個返回、說明在最下面，並存截圖', () => {
+test('情境：手機「設備與帳號」三行卡片、Max 方案、舊資料淡色、只有一個返回、說明在最下面，並存截圖', () => {
   const sc = SCENARIOS.find(s => s.name === 'm-acct-cards')
   assert.ok(sc)
   assert.equal(sc.page, 'm.html')

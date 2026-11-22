@@ -249,7 +249,6 @@ export const SettingsPanel = {
           <section class="dv-my" v-if="st.myAccounts || st.quotaReaders" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.title">
               <h3 class="dv-my-h" v-if="st.myAccounts">{{ st.myAccounts.title }}</h3>
               <small v-if="st.myAccounts && st.myAccounts.empty">{{ st.myAccounts.empty }}</small>
-              <small v-if="st.quotaReaders">{{ QUOTA_TEXT.note }}</small>
               <div class="dv-my-v" v-for="v in vendorSections(st.myAccounts, st.quotaReaders)" :key="v.key" :data-vendor="v.key">
                 <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.key)"></span><b>{{ v.label }}</b>
                   <!-- 額度開關（原本在「額度來源」大段與啟動設定的「額度回報」，行為不變、只換位置）：只管這台電腦 -->
@@ -329,7 +328,6 @@ export const SettingsPanel = {
                       </span>
                       <span v-else>{{ a.quota.text }}</span>
                       <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
-                      <span class="dv-old" v-if="a.quota.idleText">{{ a.quota.idleText }}</span>
                     </span>
                     <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色底、aria-pressed，按鈕上只寫設備名，按了不做事；其他的按了改用那台（原本的切換流程）。
                          讀這筆額度的那台，按鈕上方有一條藍色粗線（.read；每顆按鈕的上框一樣高，沒有線的是透明的） -->
@@ -535,8 +533,6 @@ export const SettingsPanel = {
                               </span>
                             </span>
                             <span v-else>{{ a.quota.text }}</span>
-                            <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
-                            <span class="dv-old" v-if="a.quota.idleText">{{ a.quota.idleText }}</span>
                             <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                           </span>
                         </li>
@@ -600,9 +596,7 @@ export const SettingsPanel = {
                               </span>
                             </span>
                             <span v-else>{{ a.quota.text }}</span>
-                            <span class="dv-old" v-if="a.quota.oldText">{{ a.quota.oldText }}</span>
                             <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
-                            <span class="dv-old" v-if="a.quota.idleText">{{ a.quota.idleText }}</span>
                             <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
                           </span>
                           <span class="dv-quota stale" v-else-if="v.key === 'codex' || v.key === 'grok'">{{ NO_QUOTA_TEXT }}</span>

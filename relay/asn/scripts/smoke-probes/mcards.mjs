@@ -30,7 +30,10 @@ export const mcardsProbeSource = ({ open }) => `(async () => {
   const bars = [...claude.querySelectorAll('.m-dv-bar')];
   if (bars.length !== 2) return { ok: false, why: 'Claude 額度條是 ' + bars.length + ' 條' };
   if (bars.some(b => !(b.querySelector('.m-dv-br')?.textContent.trim() ?? '').endsWith('重置'))) return { ok: false, why: 'Claude 額度條沒有各自的重置時間' };
-  if (!cards.some(c => c.textContent.includes('資料較舊'))) return { ok: false, why: '舊資料那張沒寫「資料較舊」' };
+  const tw = [...document.querySelectorAll('.m-dv-my .m-dv-track')].filter(e => e.offsetParent !== null).map(e => Math.round(e.getBoundingClientRect().width));
+  if (tw.length < 2 || tw.some(x => x !== 130)) return { ok: false, why: '額度條寬度不是固定的 130px：' + tw.join(',') };
+  if (cards.some(c => c.textContent.includes('較舊'))) return { ok: false, why: '舊資料不該寫「較舊」標籤（#2111）' };
+  if (!cards.some(c => c.querySelector('.m-dv-quota.stale'))) return { ok: false, why: '舊資料那張額度區沒有淡色 class' };
   if (document.querySelector('.m-fourth .m-dv-back')) return { ok: false, why: '頁內還有第二個返回' };
   const foot = document.querySelector('.m-fourth .m-dv-foot');
   if (!foot) return { ok: false, why: '最下面沒有說明' };

@@ -281,7 +281,7 @@ export const QUOTA_PROBES = {
   mobile: { quota: '.m-dv-my', open: '帳號', want: { claude: CLAUDE_BARS, gemini: ['Gemini', '5 小時', '剩', '每週', '剩'] } },
 }
 // 手機「設備與帳號」帳號卡（#374）：每張固定三行（帳號＋右邊固定位置的「使用中」／「切換」、方案、額度）；
-// 方案寫 Max 這類、沒有底線；額度兩條各有重置時間；舊資料寫「資料較舊」且不是斜體；頁內沒有第二個返回；說明在最下面
+// 方案寫 Max 這類、沒有底線；額度兩條各有重置時間；舊資料額度區改淡色（不寫標籤）且不是斜體；頁內沒有第二個返回；說明在最下面
 export const MCARDS_PROBE = { mcards: true, open: '帳號' }
 // 手機「設備與帳號」返回（修返回鍵退不回設備列表）：從夥伴列表某台設備旁「選項」進來（直接開那台細部）或從設定進來（先看列表），
 // 按系統返回鍵一層一層退：細部 → 設備列表 → 收起整頁；兩種進法、一台或多台設備都要。列表＝有 .m-dv-list，細部＝內頁開著但沒有列表
@@ -371,7 +371,7 @@ export function resetRoster(now = SMOKE_NOW, { passed = false } = {}) {
 }
 const RESET_WEEK_TEXT = resetWhen(resetRoster().accounts[0].windows[1].resets_at, SMOKE_NOW)
 export const RESET_PROBES = {
-  resets: { quota: '.dv-my', want: { claude: ['Claude', '5 小時', '剩 40%', '約 3 小時後重置', '每週', '剩 72%', RESET_WEEK_TEXT] } },
+  resets: { quota: '.dv-my', trackPx: 200, want: { claude: ['Claude', '5 小時', '剩 40%', '約 3 小時後重置', '每週', '剩 72%', RESET_WEEK_TEXT] } },
   passed: { quota: '.dv-my', want: { claude: ['Claude', '每週', '剩 72%'] }, absent: { claude: ['剩 40%'] } },
 }
 // 手機三行卡片：Claude（claude_max、兩條各有重置時間、使用中）＋ Gemini 一張舊資料（9 小時前讀的）＋ Codex 沒有額度

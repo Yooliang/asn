@@ -19,7 +19,6 @@ test('#1739 守門：Ultra 沒有 5 小時窗時，舊 5 小時不列、不標�
   const r = q([win('five_hour', 91, 4 * H, { resets_at: iso(NOW + H) }), win('weekly', 72, 5 * MIN)])
   assert.deepEqual(r.bars.map(b => b.label), ['每週'])
   assert.equal(r.stale, false)
-  assert.equal(r.oldText, '')
   assert.equal(r.fiveNote, FIVE_ONLY_WEEKLY_TEXT)
   // 方案寫 Ultra 時，連看起來不太舊的 5 小時也不列
   const u = q([win('five_hour', 91, 40 * MIN), win('weekly', 72, 5 * MIN)], { plan: 'claude_ultra' })
@@ -40,25 +39,22 @@ test('#1736 守門：有兩窗的帳號、不同電腦讀的舊 5 小時、每�
 })
 
 test('#1688 守門：換帳號前開的舊視窗讀數不收，5 小時超過 30 分、每週超過 6 小時就標較舊並提示開新視窗', () => {
-  const HINT = '用這個帳號開新視窗就會更新'
   assert.equal(q([win('five_hour', 40, 30 * MIN), win('weekly', 72, 30 * MIN)]).stale, false, '30 分鐘整還算新')
   const a = q([win('five_hour', 40, 31 * MIN), win('weekly', 72, 31 * MIN)])
   assert.equal(a.stale, true)
-  assert.equal(a.ageLabel, `31 分鐘前，較舊，${HINT}`)
+  assert.equal(a.ageLabel, '31 分鐘前')
   const w = q([win('five_hour', 40, MIN), win('weekly', 72, 6 * H + MIN)])
   assert.equal(w.stale, true)
-  assert.equal(w.ageLabel, `6 小時前，較舊，${HINT}`, '寫舊的那一窗的時間，不被新的蓋掉')
+  assert.equal(w.ageLabel, '6 小時前', '寫舊的那一窗的時間，不被新的蓋掉')
   assert.equal(q([win('five_hour', 40, MIN), win('weekly', 72, 6 * H)]).stale, false)
-  // 提示句只對 Claude（只有 Claude 視窗送額度）
   const cx = rosterQuota(entry([win('w300', 40, 2 * H)], { vendor: 'codex' }), { nodeLabel, now: NOW })
-  assert.equal(cx.ageLabel, '2 小時前，較舊')
+  assert.equal(cx.ageLabel, '2 小時前')
 })
 
-test('#1689 守門：手機與設備卡的口徑——meta 標兩窗最舊的，oldText 只有 Claude 帶提示句', () => {
+test('#1689 守門：手機與設備卡的口徑——meta 標兩窗最舊的（#2111 不再有舊資料標籤）', () => {
   const r = q([win('five_hour', 40, 40 * MIN), win('weekly', 72, 5 * H)])
   assert.equal(r.meta, '5 小時前・工作機')
-  assert.equal(r.oldText, '資料較舊，用這個帳號開新視窗就會更新')
-  assert.equal(q([win('five_hour', 40, 5 * MIN), win('weekly', 72, 5 * MIN)]).oldText, '')
+  assert.ok(!('oldText' in r))
 })
 
 test('#1321 守門：重置時間已過的窗不當現值，寫「已重置，待更新」、不進額度條', () => {

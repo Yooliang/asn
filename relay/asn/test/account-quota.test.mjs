@@ -36,13 +36,13 @@ test('#1883 狀態判定：登入過期、查詢太頻繁、暫時查不到各�
   assert.ok(QUOTA_LINES.loginExpired.startsWith('登入過期'))
   assert.equal(QUOTA_LINES.rateLimited, '查詢太頻繁，稍後再試')
   assert.equal(QUOTA_LINES.unavailable, '暫時查不到')
-  assert.equal(QUOTA_LINES.idle, '目前沒有設備在用')
+  assert.ok(!('idle' in QUOTA_LINES), '#2111 不再有「目前沒有設備在用」')
 })
 
 test('#1883 這台目前登入的帳號：查詢成功用本機剛讀到的窗；還沒讀到：有列表就用列表、沒有寫「讀取中」', () => {
   const ok = selfClaudeQuota(okState, 'a@x.test', { current: true, roster: roster([entry()]), now: NOW })
   assert.equal(ok.text, '5 小時剩 62%、每週剩 80%', '本機剛讀到的，不是列表裡的 40%')
-  assert.equal(ok.idleText, '', '這台正在用它，不寫沒有設備在用')
+  assert.ok(!('idleText' in ok), '#2111 不再有「沒有設備在用」欄位')
   const none = normalizeQuotaState(null)
   assert.equal(none.status, 'none')
   assert.equal(selfClaudeQuota(none, 'a@x.test', { current: true, roster: roster([entry()]), now: NOW }).text, '5 小時剩 40%、每週剩 72%')
@@ -62,20 +62,13 @@ test('#1883 normalizeQuotaState：形狀不對、沒有窗的 ok、壞掉的窗�
   assert.equal(normalizeQuotaState({ status: 'login_expired', windows: [{ name: 'weekly', left_pct: 30, read_at: iso(NOW) }] }).windows.length, 0, '只有 ok 才帶窗')
 })
 
-test('#1883 帳號沒有任何一台在用：照樣顯示最後一次讀數與時間，旁邊寫「目前沒有設備在用」；有設備在用就不寫', () => {
+test('#1883 帳號沒有任何一台在用：照樣顯示最後一次讀數與時間；#2111 不再寫「目前沒有設備在用」', () => {
   const idle = entry({ nodes: [{ node: 'W', current: false, reported_at: iso(NOW - H) }] })
   const v = rosterView(roster([idle, entry({ account: 'b@x.test' })]), { now: NOW })
   const [a, b] = v.vendors[0].accounts
   assert.equal(a.quota.text, '5 小時剩 40%、每週剩 72%', '最後一次讀數照樣在')
   assert.match(a.quota.meta, /前/, '時間照樣在')
-  assert.equal(a.quota.idleText, '目前沒有設備在用')
-  assert.equal(b.quota.idleText, '')
-  // 完全沒有節點（後台已很久沒收到）也算沒有設備在用；舊後台沒回 nodes 欄位就不下結論
-  assert.equal(rosterView(roster([entry({ nodes: [] })]), { now: NOW }).vendors[0].accounts[0].quota.idleText, '目前沒有設備在用')
-  const noNodes = entry(); delete noNodes.nodes
-  assert.equal(rosterView(roster([noNodes]), { now: NOW }).vendors[0].accounts[0].quota.idleText, '')
-  // 其他廠牌不寫這句
-  assert.equal(rosterView(roster([entry({ vendor: 'codex', nodes: [] })]), { now: NOW }).vendors[0].accounts[0].quota.idleText, '')
+  assert.ok(!('idleText' in a.quota) && !('idleText' in b.quota))
 })
 
 test('#1883 「額度讀不到」只有一個說法：列表沒有數字、別台沒有紀錄、本機沒有指令都是同一個常數', () => {
@@ -119,8 +112,8 @@ test('#1883 手機與電腦同一份文字：額度的說法都從 QUOTA_LINES �
   for (const t of Object.values(QUOTA_LINES).filter(x => x.length > 4)) {   // 「讀取中」這類通用短詞別處也會用，不算
     assert.ok(!m.includes(t) && !panel.includes(t), `頁面不能自己寫「${t}」`)
   }
-  assert.match(m, /a\.quota\.idleText/, '手機畫出「沒有設備在用」')
-  assert.match(panel, /a\.quota\.idleText/, '電腦畫出「沒有設備在用」')
+  assert.doesNotMatch(m, /idleText/, '手機不畫「沒有設備在用」')
+  assert.doesNotMatch(panel, /idleText/, '電腦不畫「沒有設備在用」')
   assert.match(read('ui/lib/account-roster.mjs'), /QUOTA_LINES/)
 })
 

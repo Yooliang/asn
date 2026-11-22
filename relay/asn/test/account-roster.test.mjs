@@ -299,20 +299,21 @@ const render = async st => {
   return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'accounts', meAv: '' }) }))
 }
 
-test('「我的帳號」卡片的資料：時間放帳號後面（舊資料加「較舊」），讀這筆額度的那台另外給（readNodes）；舊欄位照留給手機', () => {
+test('「我的帳號」卡片的資料：時間放帳號後面（只寫時間），讀這筆額度的那台另外給（readNodes）；舊欄位照留給手機', () => {
   const fresh = rosterQuota(entry(), { nodeLabel, now: NOW })
   assert.equal(fresh.ageLabel, '3 小時前')
   assert.deepEqual(fresh.readNodes, [W])
   assert.equal(fresh.meta, '3 小時前・工作機', '手機與設備卡還在用 meta')
   const old = rosterQuota(entry({ windows: [win('five_hour', 40, 11 * H), win('weekly', 72, 11 * H)] }), { nodeLabel, now: NOW })
-  assert.equal(old.ageLabel, '11 小時前，較舊，用這個帳號開新視窗就會更新')
-  assert.equal(old.oldText, '資料較舊，用這個帳號開新視窗就會更新', '手機與設備卡也看得到同一句（#1690）')
+  assert.equal(old.ageLabel, '11 小時前', '#2111 只寫時間')
+  assert.equal(old.stale, true)
+  assert.ok(!('oldText' in old))
   // 兩窗是不同台讀的：兩台都標；同一台只列一次
   const two = rosterQuota(entry({ windows: [win('five_hour', 40, H, { read_node: S }), win('weekly', 72, 2 * H)] }), { nodeLabel, now: NOW })
   assert.deepEqual([...two.readNodes].sort(), [S, W].sort())
   // 不再回報的帳號：跟其他帳號寫法一致「3 天前」（不加「讀的」），資料超過 6 小時一樣加「較舊」；舊欄位 meta 還是「3 天前讀的」給手機用
   const gone = rosterQuota(entry({ nodes: [], windows: [win('weekly', 72, 3 * D)] }), { nodeLabel, now: NOW })
-  assert.equal(gone.ageLabel, '3 天前，較舊，用這個帳號開新視窗就會更新')
+  assert.equal(gone.ageLabel, '3 天前')
   assert.match(gone.meta, /^3 天前讀的/)
   // 沒有額度窗（Codex 還沒開）：時間用最後一次回報，哪台用 seen_node；說明文字照留
   const codex = rosterQuota(entry({ vendor: 'codex', windows: [] }), { nodeLabel, now: NOW })
@@ -334,7 +335,8 @@ test('「我的帳號」卡片：帳號後面寫（時間）、沒有（時間�
   ]), { nodeLabel, now: NOW })
   const html = await render({ devices: [], accounts: ACCT, myAccounts: my })
   assert.ok(/<span class="dv-mail">a@x\.test<\/span><span class="dv-age">（3 小時前）<\/span>/.test(html), '時間在帳號後面')
-  assert.ok(html.includes('（11 小時前，較舊，用這個帳號開新視窗就會更新）'), '舊資料在括號裡加「較舊」')
+  assert.ok(html.includes('（11 小時前）'), '#2111 舊資料只寫時間')
+  assert.ok(!html.includes('較舊') && !html.includes('開新視窗就會更新'))
   assert.ok(html.includes('c@x.test') && html.includes('（1 小時前）') && html.includes('開 Codex 後才讀得到'), '說明文字照留，時間在帳號後面')
   assert.ok(!/（\d+ (小時|分鐘|天)前・/.test(html) && !html.includes('資料較舊'), '舊的「（時間・哪台）」與「資料較舊」標籤都不見了')
   // 讀的那台（W）的按鈕外框有 read；另一台（S，old@ 的卡片上）沒有
@@ -453,8 +455,7 @@ test('冒煙情境：有列表時「我的帳號」出現；後台沒部署（�
 })
 
 // #1688：換帳號前開的舊視窗讀數不收，數字會停在舊值；畫面要標出來，不能像現值
-test('讀數過期（#1688）：5 小時那條 30 分、每週 6 小時；Claude 寫「用這個帳號開新視窗就會更新」，時間寫舊的那一窗', () => {
-  const HINT = '用這個帳號開新視窗就會更新'
+test('讀數過期（#1688）：5 小時那條 30 分、每週 6 小時；時間寫舊的那一窗（#2111 只寫時間）', () => {
   const MIN = 60_000
   const q = (five, week, o = {}) => rosterQuota(entry({ windows: [win('five_hour', 40, five), win('weekly', 72, week)], ...o }), { nodeLabel, now: NOW })
   // 邊界：5 小時那條 30 分鐘整還算新，31 分鐘舊
@@ -462,42 +463,40 @@ test('讀數過期（#1688）：5 小時那條 30 分、每週 6 小時；Claude
   assert.equal(q(30 * MIN, 30 * MIN).ageLabel, '30 分鐘前')
   const a = q(31 * MIN, 31 * MIN)
   assert.equal(a.stale, true)
-  assert.equal(a.ageLabel, `31 分鐘前，較舊，${HINT}`)
+  assert.equal(a.ageLabel, '31 分鐘前')
   // 每週那條 6 小時整還算新，6 小時又 1 分鐘舊；5 小時那條新的時候只有每週舊
   assert.equal(q(1 * MIN, 6 * H).stale, false)
   const w = q(1 * MIN, 6 * H + MIN)
   assert.equal(w.stale, true)
-  assert.equal(w.ageLabel, `6 小時前，較舊，${HINT}`, '寫舊的那一窗的時間，不被新的那窗蓋掉')
+  assert.equal(w.ageLabel, '6 小時前', '寫舊的那一窗的時間，不被新的那窗蓋掉')
   // 只有 5 小時那條舊、每週新：標舊，時間寫 5 小時那條的
   const f = q(40 * MIN, 5 * MIN)
   assert.equal(f.stale, true)
-  assert.equal(f.ageLabel, `40 分鐘前，較舊，${HINT}`)
+  assert.equal(f.ageLabel, '40 分鐘前')
   // 兩條都新：不標
   assert.equal(q(5 * MIN, 5 * MIN).ageLabel, '5 分鐘前')
   assert.ok(!q(5 * MIN, 5 * MIN).ageLabel.includes('較舊'))
-  // 這句只有 Claude 有意義（只有 Claude 視窗送額度）：其他廠牌照舊只寫「較舊」
+  // 其他廠牌一樣只寫時間
   const cx = rosterQuota(entry({ vendor: 'codex', windows: [win('w300', 40, 2 * H)] }), { nodeLabel, now: NOW })
   assert.equal(cx.stale, true)
-  assert.equal(cx.ageLabel, '2 小時前，較舊')
+  assert.equal(cx.ageLabel, '2 小時前')
 })
 
 // #1690：手機與設備卡的口徑（meta 標兩窗裡最舊的、oldText 帶提示句），Codex 5 小時窗不另訂門檻
-test('手機與設備卡（#1690）：meta 仍標兩窗最舊的；oldText 只有 Claude 帶「用這個帳號開新視窗就會更新」', () => {
+test('手機與設備卡（#1690）：meta 仍標兩窗最舊的（#2111 不再有 oldText 標籤）', () => {
   const MIN = 60_000
   // 5 小時那條 40 分鐘前（過期）、每週 5 小時前（未過 6 小時）：meta 寫最舊的 5 小時前，不能讓每週那條看起來比實際新；ageLabel 仍寫過期那窗的 40 分鐘
   const q = rosterQuota(entry({ windows: [win('five_hour', 40, 40 * MIN), win('weekly', 72, 5 * H)] }), { nodeLabel, now: NOW })
   assert.equal(q.stale, true)
   assert.equal(q.meta, '5 小時前・工作機')
-  assert.match(q.ageLabel, /^40 分鐘前，較舊/)
-  assert.equal(q.oldText, '資料較舊，用這個帳號開新視窗就會更新')
+  assert.equal(q.ageLabel, '40 分鐘前')
+  assert.ok(!('oldText' in q))
   const fresh = rosterQuota(entry({ windows: [win('five_hour', 40, 5 * MIN), win('weekly', 72, 5 * MIN)] }), { nodeLabel, now: NOW })
-  assert.equal(fresh.oldText, '')
   const cx = rosterQuota(entry({ vendor: 'codex', windows: [win('w300', 40, 2 * H)] }), { nodeLabel, now: NOW })
-  assert.equal(cx.oldText, '資料較舊', '其他廠牌不帶這句')
 })
 
 // #1736：Ultra 沒有 5 小時窗，狀態列只送每週；後台還留著改方案前最後一筆 5 小時
-test('沒有 5 小時窗的帳號（#1736）：舊 5 小時不列、不拖累「資料較舊」；有兩窗的照舊；真的舊還是舊', () => {
+test('沒有 5 小時窗的帳號（#1736）：舊 5 小時不列、不拖累標舊；有兩窗的照舊；真的舊還是舊', () => {
   const MIN = 60_000
   const q = (windows, o = {}) => rosterQuota(entry({ windows, ...o }), { nodeLabel, now: NOW })
   const labels = r => r.bars.map(b => b.label)
@@ -509,7 +508,6 @@ test('沒有 5 小時窗的帳號（#1736）：舊 5 小時不列、不拖累「
   const old = q([win('five_hour', 91, 4 * H, { resets_at: iso(NOW + H) }), win('weekly', 72, 5 * MIN)])
   assert.deepEqual(labels(old), ['每週'])
   assert.equal(old.stale, false)
-  assert.equal(old.oldText, '')
   assert.equal(old.text, '每週剩 72%')
   assert.equal(old.parts.length, 1)
   assert.equal(old.fiveNote, FIVE_ONLY_WEEKLY_TEXT, '5 小時停了：原位寫一行說明，不默默不見')
