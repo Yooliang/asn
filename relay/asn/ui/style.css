@@ -1015,7 +1015,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 /* 窄的時候額度條這一行可以換行：條可以縮（保留最小寬度），重置時間放不下就換到下一行，卡片不會被撐出窗格 */
 .dv-bar{display:flex;align-items:center;flex-wrap:wrap;gap:2px 6px;min-width:0}
 .dv-bl{flex:none;width:3.6em;color:var(--muted)}
-.dv-track{flex:1 1 40px;min-width:40px;max-width:220px;height:8px;border-radius:4px;background:var(--panel-soft);border:1px solid var(--line);overflow:hidden}
+.dv-track{flex:none;width:200px;max-width:100%;height:8px;border-radius:4px;background:var(--panel-soft);border:1px solid var(--line);overflow:hidden}
 .dv-fill{display:block;height:100%;background:var(--online)}
 .dv-fill.low{background:var(--busy)}
 .dv-bp{flex:none;min-width:4.5em;font-variant-numeric:tabular-nums}

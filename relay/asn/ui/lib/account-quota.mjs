@@ -6,7 +6,6 @@ export const STALE_MS = 6 * 3600_000
 export const QUOTA_NOTE = '額度是各台電腦上次讀到的數字。'   // 手機「設備與帳號」最下面的一句（#374 縮短）
 
 // ---- 一條額度自己的重置時間（#374）----
-export const OLD_TEXT = '資料較舊'
 export const PLAN_UNKNOWN = '方案未知'   // 帳號卡第二行：沒有回報方案時
 const WEEKDAYS = ['週日', '週一', '週二', '週三', '週四', '週五', '週六']
 const two = n => String(n).padStart(2, '0')
@@ -57,5 +56,4 @@ export const QUOTA_LINES = Object.freeze({
   loginExpired: '登入過期，用這個帳號開一次 Claude 就會恢復',
   rateLimited: '查詢太頻繁，稍後再試',
   unavailable: '暫時查不到',
-  idle: '目前沒有設備在用',   // 這個 Claude 帳號現在沒有任何一台在登入使用：照樣顯示最後一次讀數與時間
 })

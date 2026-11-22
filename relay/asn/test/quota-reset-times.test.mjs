@@ -28,14 +28,12 @@ test('重置時間的寫法：分鐘、小時、超過一天寫星期幾與時�
 const entry = (windows, extra = {}) => ({ vendor: 'claude', account: 'a@x.test', plan: 'claude_max', windows, seen_at: at, seen_node: 'W', nodes: [{ node: 'W', current: true }], ...extra })
 const w = (name, left_pct, resets_at, read_at = at) => ({ name, left_pct, resets_at, read_at, read_node: 'W' })
 
-test('帳號列表：每條自己寫重置時間；已過的那條不列；舊資料標「資料較舊」', () => {
+test('帳號列表：每條自己寫重置時間；已過的那條不列；舊資料標 stale（畫面改淡色，#2111）', () => {
   const q = rosterQuota(entry([w('five_hour', 40, iso(NOW + 20 * MIN)), w('weekly', 72, iso(new Date(2026, 9, 31, 14, 0).getTime()))]), { now: NOW })
   assert.deepEqual(q.bars.map(b => [b.label, b.pct, b.reset, b.expired]), [['5 小時', 40, '約 20 分鐘後重置', false], ['每週', 72, '週六 14:00 重置', false]])
-  assert.equal(q.oldText, '')
   const old = rosterQuota(entry([w('five_hour', 3, iso(NOW - H), iso(NOW - 9 * H)), w('weekly', 72, iso(NOW + 2 * D), iso(NOW - 9 * H))]), { now: NOW })
   assert.deepEqual(old.bars.map(b => [b.label, b.reset, b.expired]), [['每週', '週五 10:00 重置', false]])
   assert.equal(old.stale, true)
-  assert.equal(old.oldText, '資料較舊，用這個帳號開新視窗就會更新')
   assert.deepEqual(rosterQuota(entry([]), { now: NOW }).bars, [])
 })
 
@@ -65,11 +63,11 @@ test('Gemini：後台有 nodes 時只列在使用中那台、標使用中；沒�
   assert.doesNotMatch(rosterQuota(gem('g1@x.test', []), { now: NOW }).meta, /讀的/)
 })
 
-test('接線：電腦設定頁與手機的帳號卡都畫兩條額度、各自的重置時間、「資料較舊」；不再整段斜體', () => {
+test('接線：電腦設定頁與手機的帳號卡都畫兩條額度、各自的重置時間；不再整段斜體', () => {
   const panel = read('ui/lib/settings-panel.mjs'), m = read('ui/m.html')
   for (const src of [panel, m]) {
     assert.match(src, /b\.reset/)
-    assert.match(src, /oldText/)
+    assert.doesNotMatch(src, /oldText/)
     assert.match(src, /role="progressbar"/)
   }
   const css = read('ui/style.css') + read('ui/mobile.css')

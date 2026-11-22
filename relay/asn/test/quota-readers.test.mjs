@@ -134,7 +134,7 @@ test('畫面文字：agy 帳號判斷、key 不再顯示、代碼只顯示一次
   assert.match(QUOTA_TEXT.minimaxNote, /不會再顯示/)
   assert.match(QUOTA_TEXT.codeOnce, /只顯示這一次/)
   assert.match(QUOTA_TEXT.codeOnce, /只能重新產生/)
-  assert.match(QUOTA_TEXT.note, /都是關的/)
+  assert.ok(!('note' in QUOTA_TEXT), '#2111 拿掉標題下「都是關的…」那句')
   const all = Object.values(QUOTA_TEXT).filter(v => typeof v === 'string').join('\n')
   assert.doesNotMatch(all, /relay|supabase|rpc|hash|雜湊|憑證管理員|HTTP|API/i)
   // agy 是使用者看得到的程式名稱，只允許出現在 Gemini 那兩句（「要開著 agy 視窗」）

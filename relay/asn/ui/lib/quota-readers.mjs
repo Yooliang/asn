@@ -4,7 +4,6 @@
 
 export const QUOTA_TEXT = {
   title: '額度來源',
-  note: '都是關的。打開後，這台電腦每 10 分鐘讀一次額度，只把數字送出去。',
   grok: '讀 Grok 額度',
   grokNote: '用這台電腦的 Grok 登入讀取。',
   agy: '讀 Gemini 額度',
