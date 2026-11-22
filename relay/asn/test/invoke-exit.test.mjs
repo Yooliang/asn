@@ -19,7 +19,7 @@ export const PENDING = {
   'askpass.js': 2,
   'lib/account-roster.mjs': 2,
   'lib/agent-install.mjs': 6,
-  'lib/claude-accounts.mjs': 25,
+  'lib/claude-accounts.mjs': 24,
   'lib/device-rename.mjs': 2,
   'lib/groups.mjs': 1,
   'lib/login-panel.mjs': 1,
