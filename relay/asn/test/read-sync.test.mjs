@@ -193,7 +193,8 @@ test('相容：舊後台（404）靜默退回本機行為且這次不再問；�
 
 test('守門：兩端 transport、Rust 指令（電腦與手機清單都有）、本人簽章、後台只對 read_sync 讀簽章', () => {
   assert.match(read('ui', 'lib', 'tauri.mjs'), /readSync: body => invoke\('relay_read_sync', \{ body \}\)/)
-  assert.match(read('ui', 'm.js'), /readSync: body => invoke\('relay_read_sync', \{ body \}\)/)
+  assert.match(read('ui', 'lib', 'tauri.mjs'), /readSync: body => call\('relay_read_sync', \{ body \}\)/)   // 手機的在 mobileRelayApi（#2106 ⑩）
+  assert.match(read('ui', 'm.js'), /const transport = mobileRelayApi/)
   const lib = read('src-tauri', 'src', 'lib.rs')
   assert.match(lib, /#\[tauri::command\]\nasync fn relay_read_sync\([^)]*\) -> Result<Value, String> \{\n    let r = relay_of\(&app\)\?;\n    let token = account::signing_token\(&auth\)\.await;\n    r\.read_sync_signed\(&body, token\.as_deref\(\)\)\.await/)
   const d = /#\[cfg\(desktop\)\]\n\s*let builder = builder\s*\.invoke_handler\(tauri::generate_handler!\[([\s\S]*?)\]\);/.exec(lib)

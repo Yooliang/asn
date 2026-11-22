@@ -20,7 +20,7 @@ export const PENDING = {
   'lib/claude-accounts.mjs': 24,
   'lib/quota-readers.mjs': 6,
   'list.js': 2,
-  'm.js': 49,
+  'm.js': 4,
 }
 
 test('除 tauri.mjs 外，不准直接呼叫 __TAURI__.core.invoke', () => {
@@ -209,4 +209,92 @@ test('list.js 第三批：已搬的指令不再直接 invoke、走具名出口�
   assert.deepEqual([...s.matchAll(/(?<![\w.$])invoke\('([a-z_]+)'/g)].map(x => x[1]), ['ai_cli_login', 'ai_cli_login'])
   const ex = src(path.join(UI, 'lib/tauri.mjs'))
   for (const c of moved) assert.ok(ex.includes(`'${c}'`), `${c} 不在 tauri.mjs 出口`)
+})
+
+// ---- ⑩：m.js 第一批（收寄信、管理夥伴、照片、三種請求確認）的出口：指令名與參數形狀與以前直接 invoke 時完全相同 ----
+test('手機出口：指令名與參數形狀不變', async () => {
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return cmd === 'relay_sent_status' ? { status: [1] } : null })
+  const r = m.makeMobileRelayApi(m.invoke)
+  assert.deepEqual(await r.sentStatus(['a']), [1])
+  await r.list(); await r.inbox(); await r.ack(['a']); await r.send({ p: 1 }); await r.history('N', 'ag', 'pid', 5, 20); await r.history('N')
+  await r.readSync({ b: 1 }); await r.avatar('N'); await r.partnerAvatar('P'); await r.setAvatar(null); await r.sendAttachment({ f: 1 })
+  const o = m.makeMobileOpsApi(m.invoke); await o.partnerOp({ b: 1 }); await o.partnerOps(['i']); await o.partnerArchive({ b: 2 })
+  const p = m.makeMobilePhotoApi(m.invoke); await p.fetch('id1'); await p.fetch('id2', 99); await p.save('id3', 'n.png')
+  const a = m.makeMobileAskApi(m.invoke)
+  await a.secretPending(); await a.secretReply('s1', 'pw'); await a.secretReply('s2', null)
+  await a.permReqList(); await a.permReqDecide({ id: 'q1', choiceN: 2, hash: 'h', extra: 'x' })
+  await a.termReqList(); await a.termReqDecide({ id: 't1', decision: 'allow', choiceN: 1, hash: 'h2', extra: 'x' })
+  assert.deepEqual(calls, [
+    ['relay_sent_status', { ids: ['a'] }],
+    ['relay_list', undefined], ['relay_inbox', undefined], ['relay_ack', { ids: ['a'] }], ['relay_send', { payload: { p: 1 } }],
+    ['relay_chat_history', { node: 'N', agent: 'ag', partnerId: 'pid', before: 5, limit: 20 }],
+    ['relay_chat_history', { node: 'N', agent: null, partnerId: null, before: null, limit: null }],
+    ['relay_read_sync', { body: { b: 1 } }], ['relay_avatar', { node: 'N' }], ['relay_partner_avatar', { partner: 'P' }], ['relay_set_avatar', { avatar: null }],
+    ['relay_send_attachment', { payload: { f: 1 } }],
+    ['android_partner_op', { body: { b: 1 } }], ['android_partner_ops', { ids: ['i'] }], ['android_partner_archive', { body: { b: 2 } }],
+    ['relay_attachment_fetch', { id: 'id1', expiresAt: null }], ['relay_attachment_fetch', { id: 'id2', expiresAt: 99 }], ['relay_attachment_save', { id: 'id3', name: 'n.png' }],
+    ['android_secret_pending', undefined], ['android_secret_reply', { id: 's1', secret: 'pw' }], ['android_secret_reply', { id: 's2', secret: null }],
+    ['android_perm_req_list', undefined], ['android_perm_req_decide', { id: 'q1', choiceN: 2, hash: 'h' }],
+    ['android_term_req_list', undefined], ['android_term_req_decide', { id: 't1', decision: 'allow', choiceN: 1, hash: 'h2' }],
+  ])
+})
+
+test('m.js 第一批：已搬的指令不再直接 invoke、走具名出口', () => {
+  const s = src(path.join(UI, 'm.js'))
+  const moved = ['relay_list', 'relay_inbox', 'relay_ack', 'relay_send', 'relay_chat_history', 'relay_sent_status', 'relay_read_sync', 'relay_avatar', 'relay_partner_avatar',
+    'relay_set_avatar', 'relay_send_attachment', 'android_partner_op', 'android_partner_ops', 'android_partner_archive', 'relay_attachment_fetch', 'relay_attachment_save',
+    'android_secret_pending', 'android_secret_reply', 'android_perm_req_list', 'android_perm_req_decide', 'android_term_req_list', 'android_term_req_decide']
+  for (const c of moved) assert.ok(!s.includes(`'${c}'`), `${c} 還在 m.js 直接呼叫`)
+  for (const api of ['const transport = mobileRelayApi', 'const opsTransport = mobileOpsApi', 'mobilePhotoApi.fetch(id, expiresAt)', 'mobilePhotoApi.save(id, name)',
+    'mobileAskApi.secretPending()', 'mobileAskApi.secretReply(cur.id, value)', 'mobileAskApi.permReqDecide(args)', 'mobileAskApi.termReqDecide(args)']) assert.ok(s.includes(api), api)
+  assert.equal((s.match(/mobileAskApi\.permReqList\(\)/g) ?? []).length, 3)
+  assert.equal((s.match(/mobileAskApi\.termReqList\(\)/g) ?? []).length, 1)
+  // 手機沒有 ui.log：出口的失敗原文只留在 console.warn；這幾處「下一輪再查」的靜默 catch 要有註解交代
+  assert.equal((s.match(/出口已留警告記錄，下一輪再查/g) ?? []).length, 5)
+})
+
+// ---- ⑪：m.js 第二批（安裝並登入、啟動與前景狀態、連結、啟動器、推播、手機更新）的出口：指令名與參數形狀與以前直接 invoke 時完全相同 ----
+test('手機第二批出口：指令名與參數形狀不變', async () => {
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return null })
+  const s = m.makeMobileSetupApi(m.invoke)
+  await s.remoteStatus(); await s.remoteRequest('N'); await s.remoteRequest('N', true); await s.remoteRequest('N', false)
+  await s.deviceRequest('N', 'codex'); await s.deviceFetch('r1'); await s.deviceCancel('r2')
+  const t = m.makeMobileStateApi(m.invoke)
+  await t.presence('online', 'hi'); await t.presence('away', ''); await t.foreground(true); await t.foreground(false); await t.foreground('x'); await t.invitePending()
+  const l = m.makeMobileLaunchApi(m.invoke)
+  await l.launchers(); await l.launchers(['i1']); await l.launch({ b: 1 })
+  const p = m.makeMobilePushApi(m.invoke); await p.register('tok'); await p.unregister()
+  const u = m.makeMobileUpdateApi(m.invoke); await u.check({ a: 1 }); await u.download({ a: 2 })
+  await m.shellApi.startupInfo(); const w = m.makeMobileSiteApi(m.invoke); await w.releases(true); await w.releases(); await m.openLink('https://x.test/')
+  assert.deepEqual(calls, [
+    ['setup_remote_status', undefined], ['setup_remote_request', { node: 'N' }], ['setup_remote_request', { node: 'N', mode: 'relogin' }], ['setup_remote_request', { node: 'N' }],
+    ['setup_device_request', { node: 'N', vendor: 'codex' }], ['setup_device_fetch', { rid: 'r1' }], ['setup_device_cancel', { rid: 'r2' }],
+    ['set_presence', { status: 'online', psm: 'hi' }], ['set_presence', { status: 'away', psm: '' }],
+    ['set_foreground', { foreground: true }], ['set_foreground', { foreground: false }], ['set_foreground', { foreground: false }], ['invite_pending', undefined],
+    ['android_launchers', {}], ['android_launchers', { ids: ['i1'] }], ['android_launch', { body: { b: 1 } }],
+    ['android_push_register', { token: 'tok' }], ['android_push_unregister', undefined],
+    ['android_update_check', { a: 1 }], ['android_update_download', { a: 2 }],
+    ['startup_info', undefined], ['site_releases', { force: true }], ['site_releases', { force: false }], ['open_link', { url: 'https://x.test/' }],
+  ])
+})
+
+test('m.js 第二批：已搬的指令不再直接 invoke、走具名出口；m.js 只剩帳號那 4 處', () => {
+  const s = src(path.join(UI, 'm.js'))
+  const moved = ['setup_remote_status', 'setup_remote_request', 'setup_device_request', 'setup_device_fetch', 'setup_device_cancel', 'startup_info', 'set_presence', 'set_foreground',
+    'invite_pending', 'open_link', 'site_releases', 'android_launchers', 'android_launch', 'android_push_register', 'android_push_unregister', 'android_update_check', 'android_update_download']
+  for (const c of moved) assert.ok(!s.includes(`'${c}'`), `${c} 還在 m.js 直接呼叫`)
+  for (const api of ["mobileSetupApi.remoteRequest(node, setupSt.mode === 'relogin')", 'mobileSetupApi.deviceRequest(node, vendor)', 'mobileSetupApi.deviceFetch(rid)', 'mobileSetupApi.deviceCancel(loginSt.rid)',
+    "mobileStateApi.presence(me.status, me.psm ?? '')", 'mobileStateApi.foreground(fg)', 'mobileStateApi.invitePending()', 'shellApi.startupInfo()', 'mobileSiteApi.releases(f)',
+    'mobileLaunchApi.launchers()', 'mobileLaunchApi.launchers([t.id])', 'mobileLaunchApi.launch(body)', 'mobilePushApi.register(token)', 'mobilePushApi.unregister()',
+    'mobileUpdateApi.check(updArgs())', 'mobileUpdateApi.download(updArgs())']) assert.ok(s.includes(api), api)
+  assert.equal((s.match(/mobileSetupApi\.remoteStatus\(\)/g) ?? []).length, 2)
+  assert.equal((s.match(/openLink\(/g) ?? []).length, 3)   // 三處開連結（Play 商店、關於頁、官網）都走 openLink
+  // 只剩帳號那 4 處（另一張處理）
+  const left = [...s.matchAll(/(?<![\w.$])invoke\('(\w+)'/g)].map(x => x[1])
+  assert.deepEqual(left, ['android_acct_list', 'android_acct_switch', 'android_acct_status', 'android_acct_roster'])
+  // 常呼叫的在線與前景回報：失敗已由出口記一行並去重，這裡的空 catch 要有註解交代、不再多記
+  assert.equal((s.match(/出口的 invoke 已記一行並去重，這裡不再多記/g) ?? []).length, 2)
+  assert.doesNotMatch(s, /mobileStateApi\.(presence|foreground)\([^\n]*console\./)
 })

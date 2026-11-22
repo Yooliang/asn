@@ -149,7 +149,9 @@ test('接線：對話分頁直接就是最後那一則（#1438，回到 0.2.17�
 
 test('接線：送出走手機的 Rust 指令、先過 opFormError、輪詢用 runPartnerOp；不能按的不送', () => {
   const js = read('ui', 'm.js'), html = read('ui', 'm.html')
-  assert.match(js, /invoke\('android_partner_op', \{ body \}\)/); assert.match(js, /invoke\('android_partner_ops', \{ ids \}\)/)
+  const ex = read('ui', 'lib', 'tauri.mjs')   // 指令名在出口（#2106 ⑩）；m.js 走 mobileOpsApi
+  assert.match(ex, /partnerOp: body => call\('android_partner_op', \{ body \}\)/); assert.match(ex, /partnerOps: ids => call\('android_partner_ops', \{ ids \}\)/)
+  assert.match(js, /const opsTransport = mobileOpsApi/)
   const fn = /async function submitOp\(op\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
   assert.ok(fn.indexOf('opFormError(') >= 0 && fn.indexOf('opFormError(') < fn.indexOf('execOp('), '先檢查再送出')
   assert.ok(/async function execOp\(/.test(js) && js.indexOf('runPartnerOp(', js.indexOf('async function execOp(')) > 0, '送出走 runPartnerOp')

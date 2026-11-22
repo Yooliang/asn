@@ -415,3 +415,84 @@ export async function initFrame() {
 export const RESIZE_DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 const RESIZE_NAME = { n: 'North', s: 'South', e: 'East', w: 'West', ne: 'NorthEast', nw: 'NorthWest', se: 'SouthEast', sw: 'SouthWest' }
 export const resizeFrom = dir => { try { return T.window.getCurrentWindow().startResizeDragging(RESIZE_NAME[dir]) } catch { return undefined } }
+
+// ---- #2106 ⑩：手機（m.js）第一批。方法名＝指令的駝峰寫法，參數形狀與以前直接 invoke 時完全相同 ----
+// 手機只用得到這幾個 Rust 指令（金鑰與權杖都在 Rust 端，這裡拿不到）：給 AsnCore 的 transport
+export const makeMobileRelayApi = (call = invoke) => ({
+  list: () => call('relay_list'),
+  inbox: () => call('relay_inbox'),
+  ack: ids => call('relay_ack', { ids }),
+  send: payload => call('relay_send', { payload }),
+  history: (node, agent, partnerId, before, limit) => call('relay_chat_history', { node, agent: agent || null, partnerId: partnerId || null, before: before || null, limit: limit || null }),   // 後台的往來記錄（90 天；要登入，本機只當快取）
+  sentStatus: ids => call('relay_sent_status', { ids }).then(r => r?.status ?? []),
+  readSync: body => call('relay_read_sync', { body }),   // 已讀多端同步（要本人簽章；沒登入或舊後台就回錯，前端靜默）
+  avatar: node => call('relay_avatar', { node }),
+  partnerAvatar: partner => call('relay_partner_avatar', { partner }),
+  setAvatar: avatar => call('relay_set_avatar', { avatar }),
+  sendAttachment: payload => call('relay_send_attachment', { payload }),
+})
+export const mobileRelayApi = makeMobileRelayApi()
+// 管理夥伴視窗（⋯ 選單）：手機只下指令，視窗在那台電腦上；要本人簽章（Rust 端沒憑證就不送）
+export const makeMobileOpsApi = (call = invoke) => ({
+  partnerOp: body => call('android_partner_op', { body }),
+  partnerOps: ids => call('android_partner_ops', { ids }),
+  partnerArchive: body => call('android_partner_archive', { body }),
+})
+export const mobileOpsApi = makeMobileOpsApi()
+// 手機的照片放大與收到的檔案：取回、存進 App 私有資料夾（再由外殼複製到「下載/ASN」）
+export const makeMobilePhotoApi = (call = invoke) => ({
+  fetch: (id, expiresAt = null) => call('relay_attachment_fetch', { id, expiresAt }),
+  save: (id, name) => call('relay_attachment_save', { id, name }),
+})
+export const mobilePhotoApi = makeMobilePhotoApi()
+// 手機端的三種「電腦在等本人」請求：密碼詢問、權限詢問、終端請求。清單與回覆都由 Rust 簽章與加密
+export const makeMobileAskApi = (call = invoke) => ({
+  secretPending: () => call('android_secret_pending'),
+  secretReply: (id, secret) => call('android_secret_reply', { id, secret }),
+  permReqList: () => call('android_perm_req_list'),
+  permReqDecide: args => call('android_perm_req_decide', { id: args.id, choiceN: args.choiceN, hash: args.hash }),
+  termReqList: () => call('android_term_req_list'),
+  termReqDecide: args => call('android_term_req_decide', { id: args.id, decision: args.decision, choiceN: args.choiceN, hash: args.hash }),
+})
+export const mobileAskApi = makeMobileAskApi()
+
+// ---- #2106 ⑪：手機（m.js）第二批。方法名＝指令的駝峰寫法，參數形狀與以前直接 invoke 時完全相同 ----
+// 「在別台電腦安裝並登入 Claude Code」：手機只送請求與查結果，安裝與驗證都在那台電腦；登入走裝置碼（網址與代碼只留在畫面，不進記錄）
+export const makeMobileSetupApi = (call = invoke) => ({
+  remoteStatus: () => call('setup_remote_status'),   // → { nodes: [...] }
+  remoteRequest: (node, relogin) => call('setup_remote_request', relogin === true ? { node, mode: 'relogin' } : { node }),
+  deviceRequest: (node, vendor) => call('setup_device_request', { node, vendor }),
+  deviceFetch: rid => call('setup_device_fetch', { rid }),
+  deviceCancel: rid => call('setup_device_cancel', { rid }),   // 連 Rust 端記著的一次性私鑰一起丟掉
+})
+export const mobileSetupApi = makeMobileSetupApi()
+// 在線狀態與前景狀態：每次切換與定時續報都會呼叫，失敗時出口的 invoke 已記一行並去重，呼叫端不再多記
+export const makeMobileStateApi = (call = invoke) => ({
+  presence: (status, psm) => call('set_presence', { status, psm }),
+  foreground: fg => call('set_foreground', { foreground: fg === true }),
+  invitePending: () => call('invite_pending'),   // → 開 App 時帶進來的邀請碼（沒有就空）
+})
+export const mobileStateApi = makeMobileStateApi()
+// 在手機上替電腦開新夥伴（啟動器）：查可開的電腦與送出請求，都由 Rust 簽章
+export const makeMobileLaunchApi = (call = invoke) => ({
+  launchers: ids => call('android_launchers', Array.isArray(ids) ? { ids } : {}),
+  launch: body => call('android_launch', { body }),
+})
+export const mobileLaunchApi = makeMobileLaunchApi()
+// 官網的版本紀錄（關於頁）：→ [{ version, date, lines }]；讀不到丟「暫時讀不到版本紀錄」
+export const makeMobileSiteApi = (call = invoke) => ({
+  releases: force => call('site_releases', { force: force === true }),
+})
+export const mobileSiteApi = makeMobileSiteApi()
+// 推播權杖：註冊與取消（權杖只在 Rust 與後台之間流動）
+export const makeMobilePushApi = (call = invoke) => ({
+  register: token => call('android_push_register', { token }),
+  unregister: () => call('android_push_unregister'),
+})
+export const mobilePushApi = makeMobilePushApi()
+// 手機自己更新：查新版與下載（Rust 端下載並驗 sha256，不符就拒絕）
+export const makeMobileUpdateApi = (call = invoke) => ({
+  check: args => call('android_update_check', args),
+  download: args => call('android_update_download', args),
+})
+export const mobileUpdateApi = makeMobileUpdateApi()
