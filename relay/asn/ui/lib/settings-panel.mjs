@@ -16,6 +16,7 @@ import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from '.
 import { DIMS, groupOptions } from './dims.mjs'
 import { LoginPanel, LogoutPanel } from './login-panel.mjs'
 import { CloudInvitePanel } from './cloud-invite.mjs'
+import { modStatusLine } from './mod-line.mjs'
 import { accountLine, INCOMPLETE_LABEL, INCOMPLETE_REASON, loginIncomplete, usableAtText } from './claude-accounts.mjs'
 import { catByKey, lookShows, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
@@ -181,7 +182,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
       QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
-      fileEl, act, about, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
+      fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, lookShows, GH_REFS_LABEL, GH_REFS_NOTE,
@@ -546,7 +547,7 @@ export const SettingsPanel = {
                       <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
                       <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
                       <small role="status">{{ st.accounts.msg }}</small>
-                      <small v-if="st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
+                      <small v-if="modLine(st.accounts.mod)" role="status">{{ modLine(st.accounts.mod) }}</small>
                       <label class="chk"><input type="checkbox" :checked="st.accounts.allowSwitch" @change="act('acct-allow-switch', $event.target.checked)" /><span>允許切換帳號</span></label>
                       <small>讓手機或別台設備替這台切換帳號。</small>
                       <div class="dv-install" v-if="AGENT_INSTALL_UI && st.install && ((v.action && v.action.kind === 'local') || st.install.stage === 'running' || st.install.stage === 'done')">
@@ -759,11 +760,9 @@ export const SettingsPanel = {
             </li>
           </ul>
           <h3 class="sec-h">外掛與互通</h3>
-          <section class="set-card" aria-label="Claude 外掛" v-if="st.claudeModAuto !== null && st.claudeModAuto !== undefined">
+          <section class="set-card" aria-label="Claude 外掛" v-if="modLine(st.accounts && st.accounts.mod)">
             <b>Claude 外掛</b>
-            <label class="chk"><input type="checkbox" checked disabled /><span>自動安裝或更新 Claude 外掛</span></label>
-            <small>ASN 必要元件，會自動安裝和更新。</small>
-            <small v-if="st.accounts && st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
+            <small role="status">{{ modLine(st.accounts && st.accounts.mod) }}</small>
           </section>
           <section class="set-card" aria-label="pi 與 ASN 互通" v-if="st.piSetup">
             <b>{{ st.piSetup.title }}</b>

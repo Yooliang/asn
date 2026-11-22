@@ -537,15 +537,6 @@ async function runPiSetup(call, doneText) {
   try { piSetup.raw = await call(); piSetup.msg = doneText } catch (e) { piSetup.msg = piSetupError(e) } finally { piSetup.busy = false }
 }
 if (!info.shot) void reloadReleases()   // 啟動時先讀一次（讀成功的 Rust 端留 10 分鐘，之後開設定頁不重抓）
-// Claude 外掛「自動安裝或更新」開關（#343）：null＝還沒查到（舊版 Rust 沒有這個指令就不顯示）
-const claudeModAuto = ref(null)
-async function loadClaudeModAuto() {
-  try {
-    claudeModAuto.value = await invoke('claude_mod_auto_get')
-    // 必要元件、不能取消：0.1.100～0.1.104 版期間在設定裡關過的，這裡改回打開（擁有者的決定，#343）
-    if (claudeModAuto.value === false) claudeModAuto.value = await invoke('claude_mod_auto_set', { on: true })
-  } catch { claudeModAuto.value = null }
-}
 async function loadLaunchPrefs() {
   try {
     const p = normalizeLaunchPrefs(await transport.launchPrefsGet())
@@ -1054,7 +1045,7 @@ async function pollLaunchResults() {
 void refreshCliTools()
 void launchersLoop()
 void loadLaunchPrefs()
-void loadPiSetup(); void loadClaudeModAuto()
+void loadPiSetup()
 setInterval(() => void pollLaunchResults(), LAUNCHERS_POLL_MS)   // 只在有剛開的夥伴要追進度時才查
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
@@ -1954,7 +1945,7 @@ const app = createApp({
     // 帳號列表（#374）也跟著這個節奏，但只在「設備與帳號」開著時讀（打開那一刻另讀一次，見下面監看設定頁那段）
     const devicesOpen = () => ['devices', 'accounts'].includes(normalizeCatKey(ui.panel.setting))
     setInterval(() => { void accounts.refreshQuota(); if (devicesOpen()) void accounts.refreshRoster() }, 5 * 60_000)
-    void listen('claude-mod-status', p => { accounts.state.mod = String(p ?? '') })   // Rust 背景安裝 Claude 外掛完成
+    void listen('claude-mod-status', p => { accounts.state.mod = p ?? null })   // Rust 背景安裝 Claude 外掛完成
     void listen('claude-account-auto', p => void accounts.onAuto(p))
     void listen('grok-account-auto', p => void accounts.onAuto(p))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
     if (!info.shot) {
@@ -2053,7 +2044,6 @@ const app = createApp({
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
       launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value, msg: launchMsg.value },
       piSetup: piSetupView(piSetup.raw, piSetup),
-      claudeModAuto: claudeModAuto.value,
       version: info.version, deviceName: selfDeviceName.value, uiLogMsg: uiLogMsg.value,
       log: buildLogView({ entries: releases.entries, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
       logNote: releasesNote(releases), logRetry: releases.phase === 'error',

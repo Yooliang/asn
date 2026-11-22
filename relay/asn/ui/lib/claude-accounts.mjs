@@ -79,7 +79,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     reports: {},    // 節點 → 那台電腦的帳號回報（設備分類用）：{ error, asnOnline, reportedAt, accounts }
     savedSeq: 0,
     autoNote: '',   // 背景自動加入成功時的一行小字
-    mod: '',        // Claude 外掛自動安裝的狀態文字（Rust 背景工作寫好；空字串＝不顯示）
+    mod: null,      // Claude 外掛狀態 {state, version?, reason?}（Rust 背景工作寫好；null＝不顯示，白話由 mod-line.mjs 組）
     quotaState: normalizeQuotaState(null),   // 這台目前登入帳號的額度查詢狀態（claude_quota_state，#1883）
     roster: null,   // 後台的帳號列表（#374，acct_roster）；讀不到是 null，畫面退回各設備自己回報的數字
   })
@@ -91,7 +91,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     try { s.current = (await invoke('claude_account_current')) ?? null; s.currentErr = '' } catch (e) { s.current = null; s.currentErr = errText(e) || CURRENT_UNREADABLE }   // 讀不到不等於沒登入：畫面寫「讀不到目前登入的帳號」，不沿用舊值（#1880）
     try { s.grok = (await invoke('grok_accounts_list')) ?? [] } catch { s.grok = [] }   // 舊版 Rust 沒有這個指令就當沒有
     try { s.codex = (await invoke('codex_account_current')) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
-    try { s.mod = (await invoke('claude_mod_status')) ?? '' } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
+    try { s.mod = (await invoke('claude_mod_report')) ?? null } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
     try { s.loginFailed = (await invoke('claude_login_failed')) === true } catch { s.loginFailed = false }   // 本機的登入失效判定（#1645，只讀）；舊版 Rust 沒有這個指令就當沒失效
     await refreshQuota()
   }
