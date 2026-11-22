@@ -25,7 +25,7 @@ import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { switchRowKey, switchResultOf } from './switch-result.mjs'
-import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, ROSTER_TEXT, accountDeviceRows, accountInUse, usedOnText } from './account-roster.mjs'
+import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, ROSTER_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
 import { QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections } from './quota-readers.mjs'
@@ -149,8 +149,13 @@ export const SettingsPanel = {
     }
     const rowResult = (vendor, a, node) => switchResultOf(rowState.value, switchRowKey(vendor, a?.account, node))
     const accountInUseOf = (vendor, a) => accountInUse(devRows(vendor, a), a?.current)
+    // 登入失效（#1960）：卡片頂端標籤、額度區、名單上方提示都從設備列算，手機用同一組函式
+    const loginLostOf = (vendor, a) => accountLoginLost(devRows(vendor, a))
+    const loginNotices = computed(() => loginLostNotices(vendorSections(props.st.myAccounts, props.st.quotaReaders), devRows))
+    const reloginHere = node => Boolean(props.st.relogin) && props.st.relogin.target === node && props.st.relogin.stage !== 'idle'
     const busyNow = computed(() => Boolean(props.st.accounts && (props.st.accounts.busy || (props.st.accounts.remote && props.st.accounts.remote.busy))))
     const pressDev = (vendor, a, b) => {
+      if (b.state === 'relogin') { act('relogin-ask', { node: b.node, kind: b.relogin }); return }
       if (b.state !== 'switch' || busyNow.value) return
       if (!switchTargets(vendor, a).some(x => x.node === b.node)) return
       act('row-switch', { vendor, email: a.account, node: b.node, label: b.label, self: b.self })
@@ -191,7 +196,7 @@ export const SettingsPanel = {
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
-      QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, accountInUseOf, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
+      QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, accountInUseOf, loginLostOf, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -259,6 +264,7 @@ export const SettingsPanel = {
           <section class="dv-my" v-if="st.myAccounts || st.quotaReaders" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.accountsTitle">
               <h3 class="dv-my-h" v-if="st.myAccounts">{{ st.myAccounts.title }}</h3>
               <small v-if="st.myAccounts && st.myAccounts.empty">{{ st.myAccounts.empty }}</small>
+              <ul class="dv-lostnotes" role="status" v-if="loginNotices.length"><li v-for="n in loginNotices" :key="n.key">{{ n.text }}</li></ul>
               <div class="dv-my-v" v-for="v in vendorSections(st.myAccounts, st.quotaReaders)" :key="v.key" :data-vendor="v.key">
                 <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.key)"></span><b>{{ v.label }}</b></header>
                 <!-- 沒開額度上報：指到「設備 → 這台」的開關（讀額度的開關不放在帳號頁） -->
@@ -268,11 +274,13 @@ export const SettingsPanel = {
                     <span class="dv-who"><span class="dv-mail">{{ a.account }}</span><span class="dv-age" v-if="a.quota.ageLabel">（{{ a.quota.ageLabel }}）</span></span>
                     <span class="dv-side">
                       <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
+                      <span class="dv-lost" v-if="loginLostOf(v.key, a)">{{ LOGIN_LOST_TEXT.tag }}</span>
                       <span class="dv-cur" v-if="accountInUseOf(v.key, a)">使用中</span>
                       <span class="dv-plan dv-shared" v-if="a.shared">{{ QUOTA_TEXT.shareOn }}</span>
                     </span>
                     <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }">
-                      <span class="dv-bars" v-if="a.quota.bars && a.quota.bars.length">
+                      <span v-if="loginLostOf(v.key, a)">{{ LOGIN_LOST_TEXT.quota }}</span>
+                      <span class="dv-bars" v-else-if="a.quota.bars && a.quota.bars.length">
                         <span class="dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
                           <span class="dv-bl">{{ b.label }}</span>
                           <span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
@@ -289,8 +297,24 @@ export const SettingsPanel = {
                       <template v-for="b in devRows(v.key, a)" :key="b.node">
                       <span :class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]">
                         <span class="dv-devname"><span class="dv-devn">{{ b.label }}<small class="dv-devself" v-if="b.self">{{ DEVICE_ROW_TEXT.self }}</small></span><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
-                        <asn-button fixed class="dv-devbtn" :state="b.state === 'switch' ? '' : b.state" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</asn-button>
+                        <asn-button fixed class="dv-devbtn" v-if="b.state !== 'expired' && b.state !== 'relogin'" :state="b.state === 'switch' ? '' : b.state" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</asn-button>
+                        <asn-button fixed class="dv-devbtn dv-relogin-btn" :state="b.state" v-else-if="b.state === 'relogin'" :disabled="busyNow || reloginHere(b.node)" @click="pressDev(v.key, a, b)">{{ LOGIN_LOST_TEXT.button }}</asn-button>
                       </span>
+                      <div class="dv-confirm dv-devconfirm" role="alertdialog" v-if="b.state === 'relogin' && reloginHere(b.node) && st.relogin.stage === 'confirm'">
+                        <b>{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localTitle : DESK_RELOGIN_TEXT.remoteTitle(b.label) }}</b>
+                        <p>{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localBody : DESK_RELOGIN_TEXT.remoteBody }}</p>
+                        <small v-if="st.relogin.kind !== 'local'">{{ DESK_RELOGIN_TEXT.remoteNeed }}</small>
+                        <asn-actions class="dv-ibtns">
+                          <asn-button @click="act('relogin-no')">{{ DESK_RELOGIN_TEXT.no }}</asn-button>
+                          <asn-button level="primary" @click="act('relogin-yes')">{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localYes : DESK_RELOGIN_TEXT.remoteYes }}</asn-button>
+                        </asn-actions>
+                      </div>
+                      <div class="dv-prog dv-devconfirm" :role="st.relogin.stage === 'done' && !st.relogin.ok ? 'alert' : 'status'" aria-live="polite" v-else-if="b.state === 'relogin' && reloginHere(b.node)">
+                        <p v-if="st.relogin.lead">{{ st.relogin.lead }}</p>
+                        <p>{{ st.relogin.text }}</p>
+                        <p class="note" v-if="st.relogin.note">{{ st.relogin.note }}</p>
+                        <span class="dv-ibtns" v-if="st.relogin.stage === 'done'"><asn-button @click="act('relogin-close')">{{ DESK_RELOGIN_TEXT.close }}</asn-button></span>
+                      </div>
                       <span :class="['dv-devres', rowResult(v.key, a, b.node).phase]" role="status" v-if="rowResult(v.key, a, b.node)">{{ rowResult(v.key, a, b.node).text }}</span>
                       </template>
                     </span>

@@ -40,13 +40,13 @@ const fresh = () => ({ node: '', kind: 'remote', stage: 'idle', since: 0, saw: f
  * stage：idle（只有按鈕）→ confirm → sending → waiting → done。kind：'remote'（別台）｜'local'（本機）。
  * checkLoggedIn：本機用，回 true＝這台 Claude 已經登入且沒有失效旗標。
  */
-export function createReloginFlow({ invoke, reactive, checkLoggedIn = async () => false, now = () => Date.now(), setIntervalFn = setInterval, clearIntervalFn = clearInterval }) {
+export function createReloginFlow({ invoke, reactive, checkLoggedIn = async () => false, onDone = () => {}, now = () => Date.now(), setIntervalFn = setInterval, clearIntervalFn = clearInterval }) {
   const api = makeReloginApi(invoke)   // 指令名與參數在 tauri.mjs；invoke 仍由呼叫端注入（測試換假的）
   const s = reactive(fresh())
   let timer = null
   const stopTimer = () => { if (timer !== null) { clearIntervalFn(timer); timer = null } }
   const reset = () => { stopTimer(); Object.assign(s, fresh()) }
-  const finish = (text, ok, note = '') => { stopTimer(); Object.assign(s, { stage: 'done', ok, text, note }) }
+  const finish = (text, ok, note = '') => { stopTimer(); Object.assign(s, { stage: 'done', ok, text, note }); try { onDone(ok, s.node) } catch (e) { console.info('[重新登入] 完成後重讀列表失敗', String(e)) } }
 
   const ask = (node, kind = 'remote') => {
     if (s.stage === 'sending' || s.stage === 'waiting') return   // 進行中不重來

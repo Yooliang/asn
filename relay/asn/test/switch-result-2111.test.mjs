@@ -271,7 +271,7 @@ test('#2111 手機接線與樣板：結果句在被按那列之後、用共用�
   assert.ok(js.includes("from './lib/switch-result.mjs'") && js.includes('createSwitchTracker({ state: acctRowSwitch'))
   assert.match(js, /reload: async \(\) => \{ await loadRoster\(\); await loadAcct\(b\.node, true\) \}/, '成功後重讀帳號列表與那台的回報')
   assert.ok(js.includes('switchBusyNode(acctRowSwitch'), '切換中的列由共用狀態決定')
-  assert.match(html, /<span class="m-dv-devrow">[\s\S]*?<\/span><span :class="\['m-dv-devres', acctRowResult\(v\.key, a, b\.node\)\.phase\]" role="status" v-if="acctRowResult\(v\.key, a, b\.node\)">\{\{ acctRowResult\(v\.key, a, b\.node\)\.text \}\}<\/span><\/template>/, '結果句接在那一列之後')
+  assert.match(html, /<span class="m-dv-devrow">[\s\S]*?<\/span><span :class="\['m-dv-devres', acctRowResult\(v\.key, a, b\.node\)\.phase\]" role="status" v-if="acctRowResult\(v\.key, a, b\.node\)">\{\{ acctRowResult\(v\.key, a, b\.node\)\.text \}\}<\/span>(?:<div class="m-dv-(?:confirm|prog) m-dv-devconfirm"[\s\S]*?)?<\/template>/, '結果句接在那一列之後（#1960：失效那列的重新登入確認／進度接在結果句之後、同一個迴圈裡）')
   assert.ok(css.includes('.m-dv-devres.ok') && css.includes('.m-dv-devres.fail') && desk.includes('.dv-devres.ok') && desk.includes('.dv-devres.fail'))
   for (const f of ['ui/m.html', 'ui/m.js', 'ui/lib/settings-panel.mjs', 'ui/list.js']) {
     const t = read(f)

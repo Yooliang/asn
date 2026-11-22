@@ -212,6 +212,12 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-dev{flex:0 0 100px;box-sizing:border-box;width:100px;min-width:100px;max-width:100px;height:40px;min-height:40px;margin-left:auto;display:inline-flex;align-items:center;justify-content:center;white-space:nowrap;padding:0;border:1px solid #7a9ec4;border-radius:8px;background:linear-gradient(#fdfeff 0 45%,#dfeaf6 50%,#eaf2fb);color:var(--fg);font-size:14px}
 .m-dv-dev.current,.m-dv-dev.current:disabled{background:#4b5058;border-color:#4b5058;color:#fff;opacity:1;font-weight:600}
 .m-dv-dev.busy,.m-dv-dev.busy:disabled{opacity:.55}
+.m-dv-dev.relogin{background:var(--kit-relogin-bg);border-color:var(--kit-relogin-line);color:var(--kit-relogin-fg);font-weight:600}
+.m-dv-dev.relogin:disabled{opacity:.55}
+/* 登入失效（#1960）：名單上方的提示、卡片頂端的標籤、設備列下方展開的確認與進度（和電腦版同一份文字） */
+.m-dv-lostnotes{list-style:none;margin:0 0 var(--sp-2);padding:var(--sp-2) var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-1);border:1px solid var(--kit-warn-line);border-radius:8px;background:var(--panel-soft);color:var(--kit-warn);font-size:var(--fs-2)}
+.m-dv-lost{padding:2px 9px;border:1px solid var(--kit-warn-line);border-radius:4px;font-size:var(--fs-1);font-weight:600;color:var(--kit-warn)}
+.m-dv-devconfirm{margin:0 0 var(--sp-2)}
 .m-dv-dev.blocked,.m-dv-dev.blocked:disabled{background:transparent;border:1px dashed var(--muted);color:var(--muted);opacity:.8}
 @media (prefers-color-scheme:dark){.m-dv-dev.current,.m-dv-dev.current:disabled{background:#6b727c;border-color:#6b727c;color:#fff}}
 .m-dv-acct.cur{background:var(--panel-soft)}
