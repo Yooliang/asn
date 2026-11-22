@@ -4,6 +4,7 @@
 -- 三支函式各改一處，其餘本體與線上現行版逐字相同（回報＝20261115100000_acct_usable_at.sql 版；名單寫入＝20261120120000_acct_quota_latest_per_window.sql 版；名單讀出＝20261110100000_acct_quota_share.sql 版）：
 --  1. asn_relay_acct_report（寫 relay.asn_accounts，每台電腦一列）：選填；有帶就要是上述三個字串之一，否則整份退回 bad_request（跟其他欄位同一條規則）；只存 claude 的帳號。
 --     「沒帶」不動：這支每次整列重寫，所以沒帶時改沿用同一台、同一帳號（email 不分大小寫）上次存的值，沒有就不存。
+--     帶 'unknown' 也一樣沿用上次確定的 active／lapsed（二審：讀不到不代表恢復了，不然帳號卡和通知會來回跳）；只有 active、lapsed 會覆寫。
 --     這點與 login_failed 不同：login_failed 只存 true、沒帶＝清掉（恢復後旗標自然消失）；訂閱狀態則是明說 'active' 才清、沒帶不清。
 --  2. asn_relay_acct_roster_report（寫 relay.asn_user_accounts）：只檢查型別（讓兩條寫入的拒收規則一致），不存。
 --     這張表是「每個帳號一列、跨電腦合併」，沒有每台電腦的欄位；claude 的每台狀態讀自上一條那張表。gemini／minimax 不是訂閱制偵測的對象，不存。
@@ -55,12 +56,14 @@ begin
        or (v_row ? 'sub_state' and (jsonb_typeof(v_row->'sub_state') <> 'string' or (v_row->>'sub_state') not in ('active', 'lapsed', 'unknown'))) then
       return jsonb_build_object('error', 'bad_request');
     end if;
-    -- 訂閱狀態（只有 claude）：有帶就用這次的；沒帶（舊版用戶端）就沿用這台上次存的，沒有就不存
+    -- 訂閱狀態（只有 claude）：只有確定的 active／lapsed 會覆寫；帶 unknown（電腦端這輪判不出來）或沒帶（舊版用戶端）
+    -- 都沿用這台上次存的確定值（二審：讀不到不代表恢復了，不然帳號卡和通知會來回跳），沒有就不存
     v_sub := null;
     if v_row->>'vendor' = 'claude' then
-      v_sub := case when v_row ? 'sub_state' then v_row->>'sub_state' else (
+      v_sub := case when v_row->>'sub_state' in ('active', 'lapsed') then v_row->>'sub_state' else (
         select e->>'sub_state' from jsonb_array_elements(v_old) e
-          where e->>'vendor' = 'claude' and lower(e->>'email') = lower(v_row->>'email') limit 1) end;
+          where e->>'vendor' = 'claude' and lower(e->>'email') = lower(v_row->>'email')
+            and e->>'sub_state' in ('active', 'lapsed') limit 1) end;
     end if;
     v_out := v_out || jsonb_build_array(jsonb_build_object(
       'vendor', v_row->>'vendor', 'email', v_row->>'email', 'plan', coalesce(v_row->>'plan', ''), 'current', coalesce((v_row->>'current')::boolean, false))

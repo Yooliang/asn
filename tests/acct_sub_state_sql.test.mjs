@@ -38,7 +38,7 @@ const body = (sql, name) => { const s = sql.toLowerCase().indexOf(`create or rep
 const CHECK_TAIL = "\n       or (v_row ? 'sub_state' and (jsonb_typeof(v_row->'sub_state') <> 'string' or (v_row->>'sub_state') not in ('active', 'lapsed', 'unknown')))"
 const DECL = "\n  v_old jsonb;\n  v_sub text;"
 const OLD_READ = "\n  -- 這台上一次回報存的清單：訂閱狀態「沒帶」時沿用它（見上方說明）\n  select accounts into v_old from relay.asn_accounts where node = p_node for update;\n  v_old := coalesce(v_old, '[]'::jsonb);"
-const SUB_BLOCK = "\n    -- 訂閱狀態（只有 claude）：有帶就用這次的；沒帶（舊版用戶端）就沿用這台上次存的，沒有就不存\n    v_sub := null;\n    if v_row->>'vendor' = 'claude' then\n      v_sub := case when v_row ? 'sub_state' then v_row->>'sub_state' else (\n        select e->>'sub_state' from jsonb_array_elements(v_old) e\n          where e->>'vendor' = 'claude' and lower(e->>'email') = lower(v_row->>'email') limit 1) end;\n    end if;"
+const SUB_BLOCK = "\n    -- 訂閱狀態（只有 claude）：只有確定的 active／lapsed 會覆寫；帶 unknown（電腦端這輪判不出來）或沒帶（舊版用戶端）\n    -- 都沿用這台上次存的確定值（二審：讀不到不代表恢復了，不然帳號卡和通知會來回跳），沒有就不存\n    v_sub := null;\n    if v_row->>'vendor' = 'claude' then\n      v_sub := case when v_row->>'sub_state' in ('active', 'lapsed') then v_row->>'sub_state' else (\n        select e->>'sub_state' from jsonb_array_elements(v_old) e\n          where e->>'vendor' = 'claude' and lower(e->>'email') = lower(v_row->>'email')\n            and e->>'sub_state' in ('active', 'lapsed') limit 1) end;\n    end if;"
 const STORE = "\n      || case when v_sub is not null then jsonb_build_object('sub_state', v_sub) else '{}'::jsonb end"
 const READ_ADD = /,\n *'sub_state', coalesce\(e->>'sub_state', 'unknown'\)\)/g
 // 把新版的新增片段逐段拿掉
@@ -141,13 +141,19 @@ test('實跑（pglite）：帶 lapsed 存得下讀得出；沒帶沿用；明說
     assert.deepEqual(await report(db, 'W', [{ ...a, sub_state: bad }]), { error: 'bad_request' }, JSON.stringify(bad))
   }
   assert.equal((await list(db))[0].sub_state, 'lapsed', '退回的回報沒有寫入')
-  // unknown 照存（不當成沒問題）；明說 active 才清成 active
+  // 二審：unknown（這輪判不出來）不蓋掉先前確定的 lapsed——讀不到不代表恢復了；明說 active 才清成 active
   await oldReport(db, 'W', [{ ...a, sub_state: 'unknown' }])
-  assert.equal((await list(db))[0].sub_state, 'unknown')
+  assert.equal((await list(db))[0].sub_state, 'lapsed', 'unknown 保留上一次確定的 lapsed')
+  assert.deepEqual((await subs(db))['claude/a@x.test'].find(([n]) => n === 'W'), ['W', 'lapsed'], '讀出也是 lapsed')
   await oldReport(db, 'W', [{ ...a, sub_state: 'active' }])
   assert.equal((await list(db))[0].sub_state, 'active')
   await oldReport(db, 'W', [a])
   assert.equal((await list(db))[0].sub_state, 'active', '之後沒帶仍沿用 active')
+  await oldReport(db, 'W', [{ ...a, sub_state: 'unknown' }])
+  assert.equal((await list(db))[0].sub_state, 'active', 'unknown 也不蓋掉先前確定的 active')
+  // 從來沒有確定值時帶 unknown：不存，讀出仍是 unknown
+  await oldReport(db, 'Q', [{ ...a, sub_state: 'unknown' }])
+  assert.equal('sub_state' in (await list(db, 'Q'))[0], false)
   // 帳號不再回報就不留
   await oldReport(db, 'W', [{ vendor: 'claude', email: 'z@x.test' }])
   await oldReport(db, 'W', [a])
