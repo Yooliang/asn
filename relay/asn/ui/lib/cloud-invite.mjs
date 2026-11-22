@@ -5,6 +5,7 @@
 // 金鑰規矩：新金鑰只存在這個元件的記憶體（created.key），只顯示一次——按「完成」、換到別的設定分類、關掉視窗都會丟掉；
 // 不寫 localStorage、不寫檔、不送進任何記錄。給代理的說明（created.invite）不含金鑰，可以放心貼給代理。
 import { authApi, cloudApi } from './tauri.mjs'
+import { UI_KIT } from './ui-kit.mjs'
 
 export const DEFAULT_NAME = '雲端代理'
 export const POLL_MS = 20000
@@ -49,6 +50,7 @@ export const COPY_NOTE = '金鑰只會顯示這一次，關掉就再也看不到
 export const INVITE_NOTE = '這段說明沒有金鑰，只有公開資訊，可以直接貼給代理。'
 
 export const CloudInvitePanel = {
+  components: { ...UI_KIT },
   setup() {
     const { ref, computed, onMounted, onUnmounted } = globalThis.Vue
     const signedIn = ref(null)          // null＝還沒問到
@@ -138,28 +140,28 @@ export const CloudInvitePanel = {
           <p class="cloud-step">第一步：把金鑰設到代理的平台</p>
           <div class="cloud-key">
             <input class="set-code" readonly :type="reveal ? 'text' : 'password'" :value="created.key" aria-label="金鑰" autocomplete="off" spellcheck="false">
-            <button class="aero-btn" type="button" @click="reveal = !reveal">{{ reveal ? '隱藏' : '顯示' }}</button>
-            <button class="aero-btn" type="button" @click="copyKey">{{ copiedKey ? '已複製金鑰' : '複製金鑰' }}</button>
+            <asn-button @click="reveal = !reveal">{{ reveal ? '隱藏' : '顯示' }}</asn-button>
+            <asn-button @click="copyKey">{{ copiedKey ? '已複製金鑰' : '複製金鑰' }}</asn-button>
           </div>
           <small>{{ COPY_NOTE }}</small>
           <p class="cloud-step">第二步：把說明貼給代理</p>
-          <div class="av-btns"><button class="aero-btn" type="button" @click="copyInvite">{{ copiedInvite ? '已複製說明' : '複製給代理的說明' }}</button></div>
+          <div class="av-btns"><asn-button @click="copyInvite">{{ copiedInvite ? '已複製說明' : '複製給代理的說明' }}</asn-button></div>
           <small>{{ INVITE_NOTE }}</small>
           <p class="cloud-step">第三步：等代理上線</p>
           <small role="status">{{ justJoined ? '「' + created.name + '」已加入。' : '等待中…代理照說明做完、連上來後，這裡會顯示已加入。' }}</small>
-          <div class="av-btns"><button class="aero-btn" type="button" @click="done">完成（關掉後看不到金鑰）</button></div>
+          <div class="av-btns"><asn-button level="primary" @click="done">完成（關掉後看不到金鑰）</asn-button></div>
         </div>
         <div v-else-if="form" class="cloud-form">
           <label>代理的名字
             <input class="set-sel" type="text" v-model="name" maxlength="40" aria-label="代理的名字" @keydown.enter.prevent="create">
           </label>
           <small>這會顯示在好友名單上，例如 小真。</small>
-          <div class="av-btns">
-            <button class="aero-btn" type="button" :disabled="busy" @click="create">建立</button>
-            <button class="aero-btn" type="button" :disabled="busy" @click="form = false">取消</button>
-          </div>
+          <asn-actions>
+            <asn-button :disabled="busy" @click="form = false">取消</asn-button>
+            <asn-button level="primary" :disabled="busy" @click="create">建立</asn-button>
+          </asn-actions>
         </div>
-        <div v-else class="av-btns"><button class="aero-btn" type="button" :disabled="busy" @click="form = true">邀請雲端代理</button></div>
+        <div v-else class="av-btns"><asn-button :disabled="busy" @click="form = true">邀請雲端代理</asn-button></div>
         <div v-if="approveForm" class="cloud-form">
           <label>主機上顯示的短碼
             <input class="set-sel" type="text" v-model="code" maxlength="12" placeholder="ABCD-2345" aria-label="短碼" autocomplete="off" spellcheck="false" @keydown.enter.prevent="approve">
@@ -170,18 +172,18 @@ export const CloudInvitePanel = {
           <label>節點代號（可留空，系統自動取）
             <input class="set-sel" type="text" v-model="hostId" maxlength="32" aria-label="節點代號" autocomplete="off" spellcheck="false" @keydown.enter.prevent="approve">
           </label>
-          <div class="av-btns">
-            <button class="aero-btn" type="button" :disabled="busy" @click="approve">核准</button>
-            <button class="aero-btn" type="button" :disabled="busy" @click="approveForm = false">取消</button>
-          </div>
+          <asn-actions>
+            <asn-button :disabled="busy" @click="approveForm = false">取消</asn-button>
+            <asn-button level="primary" :disabled="busy" @click="approve">核准</asn-button>
+          </asn-actions>
         </div>
-        <div v-else class="av-btns"><button class="aero-btn" type="button" :disabled="busy" @click="approveForm = true; approved = ''">輸入短碼核准主機</button></div>
+        <div v-else class="av-btns"><asn-button :disabled="busy" @click="approveForm = true; approved = ''">輸入短碼核准主機</asn-button></div>
         <small v-if="approved" role="status">{{ approved }}</small>
         <ul class="acct-list" v-if="rows.length" aria-label="已加入的雲端代理">
           <li v-for="r in rows" :key="r.id">
             <span class="acct-txt"><span class="acct-name">{{ r.name }}<em v-if="r.state === 'online'">在線</em></span><small :title="r.title">{{ r.status }}</small></span>
-            <button class="aero-btn" type="button" :disabled="busy" @click="openRename(r)">改名</button>
-            <button class="aero-btn" type="button" :disabled="busy" @click="revoke(r.id)">{{ confirmId === r.id ? '確認撤銷' : '撤銷' }}</button>
+            <asn-button :disabled="busy" @click="openRename(r)">改名</asn-button>
+            <asn-button state="danger" :disabled="busy" @click="revoke(r.id)">{{ confirmId === r.id ? '確認撤銷' : '撤銷' }}</asn-button>
           </li>
         </ul>
         <small v-else-if="signedIn">還沒有邀請過雲端代理。</small>
@@ -190,10 +192,10 @@ export const CloudInvitePanel = {
             <input class="set-sel" type="text" v-model="renameName" maxlength="40" aria-label="設備名" @keydown.enter.prevent="rename">
           </label>
           <small>只改設備名，代理底下 bot 的名字不會變。</small>
-          <div class="av-btns">
-            <button class="aero-btn" type="button" :disabled="busy" @click="rename">儲存</button>
-            <button class="aero-btn" type="button" :disabled="busy" @click="cancelRename">取消</button>
-          </div>
+          <asn-actions>
+            <asn-button :disabled="busy" @click="cancelRename">取消</asn-button>
+            <asn-button level="primary" :disabled="busy" @click="rename">儲存</asn-button>
+          </asn-actions>
         </div>
         <small v-if="confirmId">撤銷後，這個代理的金鑰立刻失效，好友名單上也會消失。</small>
         <small role="status">{{ msg }}</small>

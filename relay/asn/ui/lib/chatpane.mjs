@@ -7,6 +7,7 @@ import { SEND_LABEL, SEND_LABEL_TERM, composeHintTitle, composePlaceholder, comp
 import { foldBarArrow, SIDE_FOLD_LOCK_TIP, hasSideCol, isCollapsed, msgLayout, paneClasses, sideOf } from './merge.mjs'
 import { autoAvatarDataUrl } from './avatar.mjs'
 import { AsnAvatar } from './avatar-badge.mjs'
+import { UI_KIT } from './ui-kit.mjs'
 import { QUOTE_PREFIX, composeReply, findQuoted, replyTarget, splitQuote } from './reply-quote.mjs'
 import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQuery } from './mention.mjs'
 import { FILE_ACCEPT, expiryMs, formatBytes, photoExpired, photoTitle, queueStepText, queueSummary, sendInOrder, shownPhotos } from './photo.mjs'
@@ -51,7 +52,7 @@ const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯�
 
 export const ChatPane = {
   name: 'ChatPane',
-  components: { Annotator, ActionBar, CallView, ConfirmCards, AsnAvatar, TermView, RemoteView, RemoteInput },
+  components: { ...UI_KIT, Annotator, ActionBar, CallView, ConfirmCards, AsnAvatar, TermView, RemoteView, RemoteInput },
   props: {
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
@@ -890,8 +891,10 @@ export const ChatPane = {
       <div class="voice-install" v-if="voice && voice.state.install.needed" role="alert">
         <span v-if="!voice.state.install.busy">語音輸入在這台電腦上辨識，聲音不會上傳。第一次使用要先下載辨識引擎與語音模型（約 200 MB，只下載一次）。</span>
         <span v-else>{{ voice.state.install.text }}</span>
-        <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.installStt()">下載</button>
-        <button class="aero-btn" type="button" :disabled="voice.state.install.busy" @click="voice.dismissInstall()">取消</button>
+        <asn-actions>
+          <asn-button :disabled="voice.state.install.busy" @click="voice.dismissInstall()">取消</asn-button>
+          <asn-button level="primary" :disabled="voice.state.install.busy" @click="voice.installStt()">下載</asn-button>
+        </asn-actions>
       </div>
       <div class="reply-bar" v-if="replying"><span class="reply-bar-text"><b>回覆 {{ plain(replying.author) }}</b>：{{ plain(replying.excerpt) }}</span><button class="reply-bar-x" type="button" @click="cancelReply" aria-label="取消回覆" title="取消回覆">✕</button></div>
       <form class="composer" @submit.prevent="send">

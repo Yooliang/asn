@@ -214,7 +214,7 @@ test('守門：電腦設定第一頁——登入帳號資訊與我的名字同�
   assert.ok(accts.includes('允許切換帳號'), '帳號管理留在原位（現在在這台的頁籤裡）')
   assert.ok(!accts.includes('<cloud-invite-panel>'), '雲端代理搬到自己一類，設備頁不再放')
   const lp = fs.readFileSync(new URL('../ui/lib/login-panel.mjs', import.meta.url), 'utf8')
-  assert.ok(lp.includes('LogoutPanel') && /logout-btn/.test(lp))
+  assert.ok(lp.includes('LogoutPanel') && /<asn-button state="danger" :disabled="busy" @click="ask">登出<\/asn-button>/.test(lp))
   assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.logout-set\{margin-top:3\d+px/)
 })
 
