@@ -1,15 +1,11 @@
 {
-  "version": "0.2.56",
-  "notes": "- 改善：設定頁的「分頁與分組」併進「外觀」，目前外觀用不到的選項會自動藏起來。（#1547、#2076）",
-  "pub_date": "2026-11-21T23:11:26.398Z",
+  "version": "0.2.57",
+  "notes": "- 修正：遠端一次性密碼請求的確認視窗打不開、顯示「這個視窗的網址不正確」的問題。（#2075、#2078）",
+  "pub_date": "2026-11-22T00:08:03.082Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdlZjJqR3NDSzhSMlpxRXZoZlExZVFvSlU2Qm1qNWxYUndQcnUyTGJZWnR3S3ZLbk9zWnpnMnErdGtEeEhEOTFDY0hQb0pzaGdvSnBuYmJLM2JSRWdrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzAyNjg1CWZpbGU6QVNOXzAuMi41Nl94NjQtc2V0dXAuZXhlCmgxZlh4L2M2dWQ5ZjExMFFVWE1kMnk3OFhmWnkyYzJaOFMxUzVWcDRaVTJUYlZYOXZ0bjh6VXhyZVN2dEl6R3dIV1NBL0NnN1RQY1MzeUZvTEpweURRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.56_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZ1QmU4b0lqRFdBb1pObVducFZBc0VlRWtGTmtjUEtHVWVyWDJVMGY5Wi83N3ZyWVNwSk9zcVZ4SFZmTWIwakpGSkxLNTNxMk5tRlhMdkN5SFdrMUFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzAzMDYxCWZpbGU6QVNOXzAuMi41Nl9hbWQ2NC5BcHBJbWFnZQpHUmw2NzBKdVFucnNTT3RMWXVDbTZnZlN0YzNMOUx0Q0pWUitVSlBKT1h3ZHFtSEhyc3FHS3JPNjBwNUZFSlFBL2tRd3NFeVpMRmU2ZEFyU1QxM3RCQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.56_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndNVjN6Qjg5VEZ2VG5iazR2THpGaVBVK1RVL09XVHZRN295NnJUQ1Fkb0tWU3Z5U1FPMnZiVk9FVExXVjF4SFZpV3pHN3FiM2tLakt2T0JwUUh1cFEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzA2MDgyCWZpbGU6QVNOXzAuMi41N194NjQtc2V0dXAuZXhlCmdBOXJRUHo1NTMxMURUZ1pJTkpvNUYvZlA4T1RxejF4d0ZObDJiaXhsZDVFdWt5UTZuTW9IN2s4TEZzNzBsYWRSdUtLaExpRDBEenZiZHdWanMvakJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.57_x64-setup.exe"
     }
   }
 }
