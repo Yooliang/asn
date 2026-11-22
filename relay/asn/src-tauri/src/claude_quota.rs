@@ -228,21 +228,43 @@ fn shown_key(k: &str) -> String {
     }
 }
 
+/// 白名單欄位（`asn-cli claude-usage --profile-shape` 用）：值是固定代碼、不是個資，所以印出實際值；名單外的欄位一律只印型別。
+pub const PROFILE_VALUE_KEYS: [&str; 7] = ["organization_type", "subscription_type", "subscription_status", "billing_type", "rate_limit_tier", "has_claude_pro", "has_claude_max"];
+
+/// 白名單欄位的值要真的像「代碼」才印：只含英數、底線、減號、點，長度 1～40，不是 uuid、不含 `@`。
+/// 就算鍵名在白名單裡，email、uuid、名字這類值也不會印出來。
+fn code_like(s: &str) -> bool {
+    let uuid = s.len() == 36 && s.char_indices().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() });
+    !uuid && (1..=40).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
+
 /// 回應 → 欄位結構：鍵名照印（識別資料樣式的見 `shown_key`），值一律換成型別名（string／number／boolean／null），物件與陣列照結構展開（陣列最多展開 5 項）。
 /// 任何值（含長得像 token、email、uuid 的字串、數字）都不會出現在結果裡。
 pub fn shape_of(v: &Value) -> Value {
+    shape_with(v, &[], None, false)
+}
+
+/// `shape_of` 的共用實作。`allow`＝允許印值的鍵名（白名單，值是字串或布林，字串還要通過 `code_like`）；
+/// `key`＝這個值所屬的鍵名；`labeled`＝字串寫成 `<字串>`／`<空字串>`（profile 用），否則寫 `string`（usage 的既有輸出）。
+fn shape_with(v: &Value, allow: &[&str], key: Option<&str>, labeled: bool) -> Value {
+    let allowed = key.is_some_and(|k| allow.contains(&k));
     match v {
         Value::Object(m) => {
             let mut out = serde_json::Map::new();
             for (k, x) in m {
-                // 同樣被遮成 `<key>` 的鍵只留第一個
-                out.entry(shown_key(k)).or_insert_with(|| shape_of(x));
+                // 同樣被遮成 `<key>` 的鍵只留第一個；被遮的鍵不算白名單
+                let shown = shown_key(k);
+                let k_allow = (shown == *k).then_some(k.as_str());
+                out.entry(shown).or_insert_with(|| shape_with(x, allow, k_allow, labeled));
             }
             Value::Object(out)
         }
-        Value::Array(a) => Value::Array(a.iter().take(5).map(shape_of).collect()),
+        Value::Array(a) => Value::Array(a.iter().take(5).map(|x| shape_with(x, allow, key, labeled)).collect()),
+        Value::String(s) if allowed && code_like(s) => json!(s),
+        Value::String(s) if labeled => json!(if s.is_empty() { "<空字串>" } else { "<字串>" }),
         Value::String(_) => json!("string"),
         Value::Number(_) => json!("number"),
+        Value::Bool(b) if allowed => json!(b),
         Value::Bool(_) => json!("boolean"),
         Value::Null => json!("null"),
     }
@@ -259,18 +281,40 @@ fn fail_code_text(f: HttpFail) -> String {
     }
 }
 
+/// 讀這台目前登入的憑證；沒有或本機判斷已過期就回說明文字（不連網）
+fn shape_cred(home: &Path, now_ms: i64) -> Result<Vec<u8>, String> {
+    let cred = std::fs::read(claude_accounts::cred_path(home)).unwrap_or_default();
+    if token_of(&cred).is_none() {
+        return Err("沒有可用的登入（找不到 access token），沒有查詢".into());
+    }
+    if expires_at_ms(&cred).is_some_and(|e| e <= now_ms) {
+        return Err("登入已過期（憑證上的到期時間已過），沒有查詢".into());
+    }
+    Ok(cred)
+}
+
 /// `asn-cli claude-usage --shape`：讀這台目前登入的憑證，向額度端點查一次（跟正式查額度同一個 `HttpNet::usage`），只回欄位結構。
 /// 不印值、不印標頭；失敗只印狀態碼。本機判斷登入過期時不連網。
 pub fn shape_report(home: &Path, now_ms: i64, net: &dyn Net) -> String {
-    let cred = std::fs::read(claude_accounts::cred_path(home)).unwrap_or_default();
-    if token_of(&cred).is_none() {
-        return "沒有可用的登入（找不到 access token），沒有查詢".into();
-    }
-    if expires_at_ms(&cred).is_some_and(|e| e <= now_ms) {
-        return "登入已過期（憑證上的到期時間已過），沒有查詢".into();
-    }
+    let cred = match shape_cred(home, now_ms) {
+        Ok(c) => c,
+        Err(msg) => return msg,
+    };
     match net.usage(&cred) {
         Ok(v) => serde_json::to_string_pretty(&shape_of(&v)).unwrap_or_default(),
+        Err(f) => format!("查詢失敗：{}", fail_code_text(f)),
+    }
+}
+
+/// `asn-cli claude-usage --profile-shape`：同上，但查帳號資料端點（`Net::profile`），印欄位結構。
+/// 字串寫成 `<字串>`；只有 `PROFILE_VALUE_KEYS` 白名單的固定代碼欄位會印實際值（用來比對免費或停訂帳號的回應）。
+pub fn profile_shape_report(home: &Path, now_ms: i64, net: &dyn Net) -> String {
+    let cred = match shape_cred(home, now_ms) {
+        Ok(c) => c,
+        Err(msg) => return msg,
+    };
+    match net.profile(&cred) {
+        Ok(v) => serde_json::to_string_pretty(&shape_with(&v, &PROFILE_VALUE_KEYS, None, true)).unwrap_or_default(),
         Err(f) => format!("查詢失敗：{}", fail_code_text(f)),
     }
 }
