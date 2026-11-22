@@ -824,6 +824,22 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .logout-set .logout-btn{color:#b3261e;border-color:#d79a95}
 
 .set-adv{margin-top:4px}.set-adv>summary{cursor:pointer;color:var(--muted,inherit);font-size:12px;margin-bottom:8px}
+/* 啟動設定（#1548 ①）：四區標題、CLI 清單一列一家（名稱／版本分欄）、窄版按鈕靠右。三種外觀共用，只用變數 */
+.launch-set{display:flex;flex-direction:column;gap:10px;min-width:0}
+.launch-set .sec-h{margin:8px 0 0;padding-bottom:4px;border-bottom:1px solid var(--line);font-size:13px;font-weight:700;color:var(--title-fg)}
+.launch-set .sec-h:first-child{margin-top:0}
+.launch-tools{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+.launch-tools li{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.launch-tools li:last-child{border-bottom:0}
+.launch-tools .launch-name{flex:none;width:64px;font-weight:700}
+.launch-tools .launch-ver{flex:1;min-width:0;font-size:12.5px;color:var(--muted)}
+.launch-tools .launch-hint{flex:1;min-width:0;font-size:12.5px;color:var(--muted)}
+.launch-tools li.off .launch-name{color:var(--muted)}
+.launch-set label.launch-max{flex-direction:row;align-items:center;gap:8px;flex-wrap:wrap}
+.launch-set label.launch-max .set-input{flex:none;width:72px}
+.launch-set .upd-row{justify-content:flex-end}
+.launch-set .set-card>.aero-btn{align-self:flex-end}
+.launch-set .set-adv>summary{font-size:13px;font-weight:700;color:var(--title-fg);margin:8px 0}
 /* 設定「設備與帳號」：設備頁籤 → 廠商卡片 → 帳號列（只用上面的 CSS 變數，深色時跟著變） */
 .dv-set{display:flex;flex-direction:column;gap:12px;min-width:0}
 .dv-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}

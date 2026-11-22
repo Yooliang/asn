@@ -750,8 +750,7 @@ export const SettingsPanel = {
       </template>
       <template v-if="catKey === 'launch'">
         <div class="launch-set">
-          <b>啟動設定</b>
-          <p class="launch-note">偵測本機 CLI 自動產生啟動方式；指令只在這台電腦決定，不上傳雲端。</p>
+          <h3 class="sec-h">已安裝的工具</h3>
           <ul class="launch-tools">
             <li v-for="t in st.launch.tools" :key="t.id" :class="{ off: !t.installed }">
               <span class="launch-name">{{ t.label }}</span>
@@ -759,6 +758,13 @@ export const SettingsPanel = {
               <span class="launch-hint" v-else>{{ t.installHint }}</span>
             </li>
           </ul>
+          <h3 class="sec-h">外掛與互通</h3>
+          <section class="set-card" aria-label="Claude 外掛" v-if="st.claudeModAuto !== null && st.claudeModAuto !== undefined">
+            <b>Claude 外掛</b>
+            <label class="chk"><input type="checkbox" checked disabled /><span>自動安裝或更新 Claude 外掛</span></label>
+            <small>ASN 必要元件，會自動安裝和更新。</small>
+            <small v-if="st.accounts && st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
+          </section>
           <section class="set-card" aria-label="pi 與 ASN 互通" v-if="st.piSetup">
             <b>{{ st.piSetup.title }}</b>
             <small v-for="(l, i) in st.piSetup.lines" :key="i">{{ l }}</small>
@@ -774,29 +780,24 @@ export const SettingsPanel = {
             </div>
             <small v-if="st.piSetup.msg" role="status">{{ st.piSetup.msg }}</small>
           </section>
-          <section class="set-card" aria-label="Claude 外掛" v-if="st.claudeModAuto !== null && st.claudeModAuto !== undefined">
-            <b>Claude 外掛</b>
-            <label class="chk"><input type="checkbox" checked disabled /><span>自動安裝或更新 Claude 外掛</span></label>
-            <small>ASN 必要元件，會自動安裝和更新。</small>
-            <small v-if="st.accounts && st.accounts.mod" role="status">{{ st.accounts.mod }}</small>
-          </section>
-          <label>每小時開新夥伴上限
-            <input class="set-input" type="number" min="1" max="20" :value="st.launch.maxPerHour" @change="act('launch-max', Number($event.target.value))">
-          </label>
-          <small class="set-note" id="set-note-launch-max">{{ LAUNCH_MAX_NOTE }}</small>
+          <h3 class="sec-h">安全限制</h3>
           <label>工作資料夾白名單（一行一個）
             <textarea class="set-area" rows="4" :value="st.launch.cwdText" @change="act('launch-cwd', $event.target.value)"></textarea>
           </label>
-          <small>新裝時預設放「文件」資料夾。</small>
           <small class="acct-warn" v-if="st.launch.msg" role="alert">{{ st.launch.msg }}</small>
-        <details class="set-adv" v-if="st.askpass">
-          <summary>進階</summary>
-          <section class="set-card" aria-label="密碼小幫手">
-            <small>git 或 ssh 要密碼時由 ASN 跳窗請你輸入，密碼不會經過 AI。想用的話，在終端機執行下面這行（只對之後開的視窗生效；ASN 不會自動改你的設定）：</small>
-            <code class="set-code">{{ st.askpass.example }}</code>
-            <button class="aero-btn" type="button" @click="act('askpass-copy')">{{ st.askpass.copied ? '已複製' : '複製路徑' }}</button>
-          </section>
-        </details>
+          <label class="launch-max">別的設備一小時最多替這台開
+            <input class="set-input" type="number" min="1" max="20" :value="st.launch.maxPerHour" @change="act('launch-max', Number($event.target.value))">
+            個新夥伴
+          </label>
+          <small class="set-note" id="set-note-launch-max">{{ LAUNCH_MAX_NOTE }}</small>
+          <details class="set-adv" v-if="st.askpass">
+            <summary>進階</summary>
+            <section class="set-card" aria-label="密碼小幫手">
+              <small>git 或 ssh 要密碼時由 ASN 跳窗請你輸入，密碼不會經過 AI。想用的話，在終端機執行下面這行（只對之後開的視窗生效；ASN 不會自動改你的設定）：</small>
+              <code class="set-code">{{ st.askpass.example }}</code>
+              <button class="aero-btn" type="button" @click="act('askpass-copy')">{{ st.askpass.copied ? '已複製' : '複製路徑' }}</button>
+            </section>
+          </details>
         </div>
       </template>
       <template v-if="catKey === 'usage'">

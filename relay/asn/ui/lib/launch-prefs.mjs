@@ -1,8 +1,8 @@
 // 啟動設定（本機存檔）：最近用過的工作資料夾、進階覆寫。
 export const LAUNCH_PREFS_KEY = 'launch'
 
-// 每小時上限的說明（#1548）：只擋「別的設備（手機、別台電腦）替這台開」，自己在這台開不受影響；值跟 launcher.json 同一個來源（Rust 的 effective_max_per_hour）
-export const LAUNCH_MAX_NOTE = '只限制從別的設備（手機或別台電腦）替這台開的新夥伴，一小時內最多幾個；超過時對方會看到「這個小時已經開了 N 個視窗，超過上限」，下一個小時就能再開。自己在這台電腦上開不受影響。'
+// 每小時上限的說明（#1548）：只留使用者能據以行動的一句；上限只擋「別的設備替這台開」，自己在這台開不受影響；值跟 launcher.json 同一個來源（Rust 的 effective_max_per_hour）
+export const LAUNCH_MAX_NOTE = '自己在這台電腦上開不受限制；超過時對方會看到提示，下一個小時就能再開。'
 
 // 每小時上限（#1548）：存檔只有使用者在設定頁真的改過才寫 maxPerHourSet（1～20 的整數）。
 // 舊版的 maxPerHour 一律不算：舊程式開過一次新夥伴就會把預設的 6 寫進存檔，拿它來算會悄悄蓋掉 launcher.json 手寫的值。
