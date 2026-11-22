@@ -9,7 +9,7 @@ fn usage() -> &'static str {
     "用法：asn-cli claude-usage --shape | --profile-shape
 --shape          讀這台目前登入的憑證，向 Claude 的額度端點查一次，只印回應的欄位結構（每個鍵與它的型別；任何值都不印）。
 --profile-shape  向 Claude 的帳號資料端點查一次，只印欄位結構；字串印成 <字串>，只有固定代碼欄位
-                 （organization_type、subscription_type、billing_type、rate_limit_tier、has_claude_pro、has_claude_max）印實際值，
+                 （organization_type、subscription_type、subscription_status、billing_type、rate_limit_tier、has_claude_pro、has_claude_max）印實際值，
                  email、uuid、名字等一律不印。用來比對免費或停訂帳號的回應長什麼樣。
 失敗只印狀態碼。供除錯用，結束碼一律 0。"
 }
@@ -35,4 +35,17 @@ pub async fn main(args: &[String], _env: &Env, io: &mut Io<'_>) -> R<i32> {
     .unwrap_or_else(|_| "查詢沒有完成".into());
     io.outln(&out);
     Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    /// --help 列出的「會印實際值的欄位」要跟程式的白名單一字不差（#2080 一審：白名單加了 subscription_status，說明卻沒跟上）
+    #[test]
+    fn 說明列出的欄位等於白名單() {
+        let text = super::usage();
+        let start = text.find("（organization_type").expect("說明裡找不到欄位清單") + "（".len();
+        let end = start + text[start..].find('）').expect("欄位清單沒有結尾括號");
+        let listed: Vec<&str> = text[start..end].split('、').collect();
+        assert_eq!(listed, crate::claude_quota::PROFILE_VALUE_KEYS.to_vec());
+    }
 }
