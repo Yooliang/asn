@@ -1,9 +1,14 @@
 //! 主視窗的記錄寫進檔案（#339 收尾）：畫面上 `[ASN]` 開頭的 console 記錄（收信失敗、ack 失敗、連線原因…）以前只進 devtools，
 //! 事後查不到。前端（ui/lib/ui-log.mjs）每隔幾秒整批送來，這裡附加到機器資料夾的 ui.log（跟 bridge.log 放一起）。
-//! 每行限長、拿掉控制字元；檔案超過 1 MB 就只留後半。寫不進去不影響畫面。
+//! 每行限長、拿掉控制字元；檔案超過 1 MB 就輪替：現有的 ui.log 改名成 ui.log.1（舊的 .1 直接覆蓋，只留一份），再開新的 ui.log。
+//! 改名失敗才退回舊做法（只留 ui.log 的後半），不讓寫入失敗也不清空記錄。寫不進去不影響畫面。
+//! 後端的 `elog!`（stderr 輸出）也寫進同一個檔（#2104）：啟動時用 `set_elog_dir` 設好機器資料夾，之前的呼叫只寫 stderr；
+//! 每行前綴 `[elog]`，跟前端的 `[ASN]` 分得出來。elog 與前端整批寫入都走 `append`，共用同一把鎖。
 use std::path::{Path, PathBuf};
 
 pub const UI_LOG_FILE: &str = "ui.log";
+/// 輪替後的舊記錄（只留一份）
+pub const UI_LOG_OLD_FILE: &str = "ui.log.1";
 const MAX_BYTES: u64 = 1024 * 1024;
 /// 一行最多幾個字（前端也會截，這裡再擋一次）
 pub const LINE_MAX: usize = 500;
@@ -32,6 +37,17 @@ pub fn clean_line(s: &str) -> Option<String> {
     (!t.is_empty()).then(|| t.to_string())
 }
 
+/// 改名失敗時的後備：只留檔案後半（從中間往後第一個換行之後）
+fn trim_to_second_half(p: &Path) {
+    if let Ok(t) = std::fs::read_to_string(p) {
+        // 用位元組找換行（換行一定在字元邊界上）。
+        // 以前用 t.get(t.len() / 2..)，中文一個字 3 個位元組，切在字中間會回 None，整個記錄就被清空
+        let mid = t.len() / 2;
+        let keep = t.as_bytes()[mid..].iter().position(|&b| b == b'\n').map(|i| &t[mid + i + 1..]).unwrap_or("");
+        let _ = std::fs::write(p, keep);
+    }
+}
+
 /// 附加一批記錄。回實際寫進去的行數
 pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
     use std::io::Write;
@@ -48,12 +64,9 @@ pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
     }
     let p = path(dir);
     if std::fs::metadata(&p).map(|m| m.len() > MAX_BYTES).unwrap_or(false) {
-        if let Ok(t) = std::fs::read_to_string(&p) {
-            // 從中間往後找第一個換行再切：用位元組找（換行一定在字元邊界上）。
-            // 以前用 t.get(t.len() / 2..)，中文一個字 3 個位元組，切在字中間會回 None，整個記錄就被清空
-            let mid = t.len() / 2;
-            let keep = t.as_bytes()[mid..].iter().position(|&b| b == b'\n').map(|i| &t[mid + i + 1..]).unwrap_or("");
-            let _ = std::fs::write(&p, keep);
+        // 輪替：ui.log → ui.log.1（已存在就覆蓋），下面再開新的 ui.log。改名失敗才退回只留後半
+        if std::fs::rename(&p, dir.join(UI_LOG_OLD_FILE)).is_err() {
+            trim_to_second_half(&p);
         }
     }
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&p).map_err(|e| e.to_string())?;
@@ -61,6 +74,73 @@ pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
     text.push('\n');
     f.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
     Ok(rows.len())
+}
+
+// ---------- elog! 也寫進 ui.log（#2104） ----------
+
+/// elog! 寫檔用的機器資料夾；啟動時設定一次，之前的 elog! 只寫 stderr
+static ELOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// 啟動時設定 elog! 寫檔的資料夾；空路徑（還沒有節點金鑰、截圖模式）不設定。只有第一次設定有效
+pub fn set_elog_dir(dir: PathBuf) {
+    if !dir.as_os_str().is_empty() {
+        let _ = ELOG_DIR.set(dir);
+    }
+}
+
+/// elog 那一行：時間、等級、`[elog]` 前綴、內容（格式同前端 formatUiLogLine，內容的控制字元與限長由 append 的 clean_line 處理）
+pub fn elog_line(now_ms: i64, msg: &str) -> String {
+    format!("{} info [elog] {msg}", crate::quota_core::iso_secs(now_ms))
+}
+
+/// 把訊息裡的 email 換成 `<email>`（elog 會持久寫進 ui.log，帳號 email 不留檔；stderr 輸出不變）。
+/// 規則：`@` 前後各有一串帳號／網域字元，`@` 後面那串含點且不以點開頭或結尾；單獨的 `@`（例如 "x @ y"）不動
+pub fn mask_emails(s: &str) -> String {
+    let c: Vec<char> = s.chars().collect();
+    let local = |ch: char| ch.is_alphanumeric() || "._%+-".contains(ch);
+    let dom = |ch: char| ch.is_alphanumeric() || ".-".contains(ch);
+    let mut out = String::new();
+    let (mut i, mut done) = (0usize, 0usize);
+    while i < c.len() {
+        if c[i] == '@' {
+            let mut l = i;
+            while l > done && local(c[l - 1]) {
+                l -= 1;
+            }
+            let mut r = i + 1;
+            while r < c.len() && dom(c[r]) {
+                r += 1;
+            }
+            // 網域尾端的點是句點，不算網域
+            let mut e = r;
+            while e > i + 1 && c[e - 1] == '.' {
+                e -= 1;
+            }
+            let d = &c[i + 1..e];
+            if l < i && !d.is_empty() && d[0] != '.' && d.contains(&'.') {
+                out.extend(&c[done..l]);
+                out.push_str("<email>");
+                done = e;
+                i = e;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.extend(&c[done..]);
+    out
+}
+
+/// 寫一行到 `dir` 的 ui.log；`dir` 是 None（還沒設定）就什麼都不做。任何錯誤都吞掉、絕不 panic。email 先遮掉
+pub fn elog_to(dir: Option<&Path>, msg: &str) {
+    if let Some(d) = dir {
+        let _ = append(d, &[elog_line(crate::heartbeat::now_ms() as i64, &mask_emails(msg))]);
+    }
+}
+
+/// elog! 呼叫：寫到啟動時設好的資料夾
+pub fn elog_to_file(msg: &str) {
+    elog_to(ELOG_DIR.get().map(|p| p.as_path()), msg);
 }
 
 // ---------- 程式結束的原因（#1749：10-30 家用機閃退 4 次，panic 訊息沒進任何記錄，查不出是哪一行） ----------
@@ -343,9 +423,11 @@ mod tests {
     }
 
     #[test]
-    fn 超過上限修剪時_中文不會把整個記錄清空_開頭是一整行() {
+    fn 改名失敗退回修剪時_中文不會把整個記錄清空_開頭是一整行() {
         // asn真 審 #432：用位元組位置切，切在中文字中間 get 會回 None，整個檔案就被清空
         let d = tempfile::tempdir().unwrap();
+        // 讓輪替的改名一定失敗：ui.log.1 是個資料夾
+        std::fs::create_dir(d.path().join(UI_LOG_OLD_FILE)).unwrap();
         let line = "中".repeat(100);
         let mut text = String::new();
         while (text.len() as u64) <= MAX_BYTES {
@@ -377,14 +459,75 @@ mod tests {
     }
 
     #[test]
-    fn 附加到_ui_log_一次最多收_lines_max_行_超過一_mb_只留後半() {
+    fn 超過上限就輪替_舊的進_ui_log_1_新的_ui_log_從新的一行開始() {
+        let d = tempfile::tempdir().unwrap();
+        let big = "x".repeat(LINE_MAX);
+        while std::fs::metadata(path(d.path())).map(|m| m.len()).unwrap_or(0) <= MAX_BYTES {
+            append(d.path(), &vec![big.clone(); 100]).unwrap();
+        }
+        let old_text = std::fs::read_to_string(path(d.path())).unwrap();
+        // 已有舊的 .1 要被覆蓋
+        append(d.path(), &["新的第一行".into()]).unwrap();
+        let rotated = std::fs::read_to_string(d.path().join(UI_LOG_OLD_FILE)).unwrap();
+        assert_eq!(rotated, old_text, "ui.log.1 是輪替前的整份舊記錄");
+        assert_eq!(std::fs::read_to_string(path(d.path())).unwrap(), "新的第一行\n", "ui.log 從新的一行開始");
+        // 再灌到超過：.1 被換成較新的，總量不超過約 2 MB
+        while std::fs::metadata(path(d.path())).unwrap().len() <= MAX_BYTES {
+            append(d.path(), &vec![big.clone(); 100]).unwrap();
+        }
+        append(d.path(), &["第二輪".into()]).unwrap();
+        let r2 = std::fs::read_to_string(d.path().join(UI_LOG_OLD_FILE)).unwrap();
+        assert!(r2.starts_with("新的第一行\n"), "舊的 .1 被覆蓋成上一份 ui.log");
+        let total = std::fs::metadata(path(d.path())).unwrap().len() + std::fs::metadata(d.path().join(UI_LOG_OLD_FILE)).unwrap().len();
+        assert!(total < 2 * MAX_BYTES + 100_000, "{total}");
+        let n = std::fs::read_dir(d.path()).unwrap().count();
+        assert_eq!(n, 2, "只有 ui.log 與 ui.log.1 兩份");
+    }
+
+    #[test]
+    fn elog_設定資料夾後寫進_ui_log_有前綴_沒設定不會_panic() {
+        // 沒設定（None）：什麼都不做、不 panic
+        elog_to(None, "沒有資料夾");
+        elog_to(Some(Path::new("")), "空路徑也不寫");
+        let d = tempfile::tempdir().unwrap();
+        elog_to(Some(d.path()), "[claude-mod] 外掛\n壞掉了");
+        let t = std::fs::read_to_string(path(d.path())).unwrap();
+        assert!(t.contains(" info [elog] [claude-mod] 外掛 壞掉了\n"), "{t}");
+        assert!(t.starts_with("20"), "開頭是時間：{t}");
+    }
+
+    #[test]
+    fn elog_寫檔前遮掉_email_普通的_at_不誤遮() {
+        let d = tempfile::tempdir().unwrap();
+        elog_to(Some(d.path()), "登入 a.b@example.com 失敗；(x_y+z@mail.example.co.jp), 再試 user=q@r.tw. 另外 x @ y 與 a@b 與 @abc 不動");
+        let t = std::fs::read_to_string(path(d.path())).unwrap();
+        assert!(!t.contains("example.com") && !t.contains("mail.example") && !t.contains("q@r.tw"), "{t}");
+        assert!(t.contains("登入 <email> 失敗；(<email>), 再試 user=<email>. 另外 x @ y 與 a@b 與 @abc 不動"), "{t}");
+        assert_eq!(mask_emails("沒有 email 的一行"), "沒有 email 的一行");
+    }
+
+    #[test]
+    fn elog_巨集真的寫進設好的資料夾() {
+        // 全域只能設一次：資料夾刻意不刪（其他測試的 elog! 也會寫進來，所以只查 contains）
+        let dir = std::env::temp_dir().join(format!("asn-elog-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_elog_dir(PathBuf::new()); // 空路徑不算設定
+        set_elog_dir(dir.clone());
+        elog!("測試行 {}", 2104);
+        let t = std::fs::read_to_string(path(&dir)).unwrap();
+        assert!(t.contains(" info [elog] 測試行 2104"), "{t}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn 附加到_ui_log_一次最多收_lines_max_行_超過一_mb_輪替() {
         let d = tempfile::tempdir().unwrap();
         assert_eq!(append(d.path(), &["a".into(), " ".into(), "b".into()]).unwrap(), 2);
         assert_eq!(append(d.path(), &[]).unwrap(), 0);
         assert_eq!(std::fs::read_to_string(path(d.path())).unwrap(), "a\nb\n");
         let many: Vec<String> = (0..LINES_MAX + 30).map(|i| format!("line{i}")).collect();
         assert_eq!(append(d.path(), &many).unwrap(), LINES_MAX);
-        // 灌到超過上限：下一次寫入前先砍成後半，檔案不會一直長大
+        // 灌到超過上限：下一次寫入前先輪替，ui.log 不會一直長大
         let big = "x".repeat(LINE_MAX);
         while std::fs::metadata(path(d.path())).unwrap().len() <= MAX_BYTES {
             append(d.path(), &vec![big.clone(); 100]).unwrap();

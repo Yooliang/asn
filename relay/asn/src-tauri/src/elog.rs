@@ -25,6 +25,15 @@ pub(crate) fn write_line(w: &mut impl Write, args: std::fmt::Arguments<'_>) {
 }
 
 pub(crate) fn stderr_line(args: std::fmt::Arguments<'_>) {
+    // 電腦版視窗：同一行也寫進 ui.log（#2104；stderr 常是斷掉的管線或沒人看，事後查不到）。
+    // 機器資料夾還沒設定時只寫 stderr
+    #[cfg(all(desktop, feature = "gui"))]
+    {
+        let msg = std::fmt::format(args);
+        write_line(&mut std::io::stderr().lock(), format_args!("{msg}"));
+        crate::ui_log::elog_to_file(&msg);
+    }
+    #[cfg(not(all(desktop, feature = "gui")))]
     write_line(&mut std::io::stderr().lock(), args);
 }
 
