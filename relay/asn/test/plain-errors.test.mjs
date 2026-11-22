@@ -13,7 +13,7 @@ const UI = fileURLToPath(new URL('../ui/', import.meta.url))
 const read = f => fs.readFileSync(UI + f, 'utf8').replace(/\r\n/g, '\n')
 
 // 已清理檔案：搬完一張就加進來
-export const CLEANED = ['lib/voice-ui.mjs', 'lib/room-hub.mjs', 'lib/mobile-known-peers.mjs', 'lib/agent-install.mjs', 'lib/mobile-remote-view.mjs', 'shot.js', 'onboard.js', 'login.js', 'lib/relogin-flow.mjs', 'askpass.js', 'setup-progress.js', 'toast.js', 'lib/device-rename.mjs', 'lib/term-chat.mjs', 'lib/view-log.mjs', 'lib/groups.mjs', 'lib/login-panel.mjs', 'lib/mobile-login-seal.mjs', 'lib/usage.mjs', 'lib/ui-log.mjs']
+export const CLEANED = ['lib/voice-ui.mjs', 'lib/room-hub.mjs', 'lib/mobile-known-peers.mjs', 'lib/agent-install.mjs', 'lib/mobile-remote-view.mjs', 'shot.js', 'onboard.js', 'login.js', 'lib/relogin-flow.mjs', 'askpass.js', 'setup-progress.js', 'toast.js', 'lib/device-rename.mjs', 'lib/term-chat.mjs', 'lib/view-log.mjs', 'lib/groups.mjs', 'lib/login-panel.mjs', 'lib/mobile-login-seal.mjs', 'lib/usage.mjs', 'lib/ui-log.mjs', 'lib/claude-accounts.mjs']
 
 // 沒有任何內容（連註解都沒有）的空 catch：catch { }、catch (e) { }、.catch(() => { })、.catch(e => { })
 export const EMPTY_CATCH = /\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}|\.catch\(\s*(?:\([^)]*\)|\w+)\s*=>\s*\{\s*\}\s*\)/g

@@ -403,6 +403,37 @@ export const updateApi = {
   remoteRequest: node => invoke('update_remote_request', { node }),   // 請別台設備自己更新
 }
 
+// 帳號卡（claude-accounts.mjs，#2106 ⑫）：Claude／Grok／Codex 帳號與遠端設備切換。檔案操作全在 Rust，帳號以 email 識別，權杖不經過前端。
+// 失敗記錄只記指令名不記參數，所以 email 不會進 ui.log
+export const makeAccountsApi = (call = invoke) => ({
+  roster: () => call('acct_roster'),                                          // 後台的帳號列表
+  list: () => call('claude_accounts_list'),
+  current: () => call('claude_account_current'),
+  grokList: () => call('grok_accounts_list'),                                 // 舊版 Rust 沒有這個指令
+  codexCurrent: () => call('codex_account_current'),
+  modReport: () => call('claude_mod_report'),                                 // 舊版 Rust 沒有這個指令
+  loginFailed: () => call('claude_login_failed'),
+  quotaState: () => call('claude_quota_state'),
+  save: () => call('claude_account_save'),                                    // 加入目前登入的帳號 → { email }
+  switchTo: email => call('claude_account_switch', { email }),                // → { email }
+  remove: email => call('claude_account_delete', { email }),
+  undo: () => call('claude_account_undo'),                                    // 還原到切換前
+  grokSwitch: email => call('grok_account_switch', { email }),                // → { notice }
+  remoteReport: () => call('acct_remote_report'),
+  remoteList: node => call('acct_remote_list', { node }),
+  remoteRequest: (node, email, vendor) => call('acct_remote_request', { node, email, vendor }),   // → { id }
+  remoteStatus: ids => call('acct_remote_status', { ids }),
+  remotePending: () => call('acct_remote_pending'),
+  remoteApply: (id, confirmed) => call('acct_remote_apply', { id, confirmed }),
+  remoteDecline: id => call('acct_remote_decline', { id }),
+  allowGet: () => call('acct_remote_allow_get'),
+  allowSet: on => call('acct_remote_allow_set', { on }),
+})
+// 啟動指引與設定頁的「登入」按鈕：開官方登入終端（list.js）
+export const cliLoginApi = {
+  login: toolId => invoke('ai_cli_login', { toolId }),
+}
+
 // ---------- 視窗外框（自訂／Windows 原生） ----------
 // 原生外框：html 加 frame-native，樣式把自畫的標題列、邊框與拖邊緣的把手藏起來
 export const applyFrame = native => document.documentElement.classList.toggle('frame-native', native === true)

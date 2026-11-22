@@ -17,9 +17,7 @@ const src = f => fs.readFileSync(f, 'utf8')
 // 待搬清單：各檔直接呼叫 invoke( 的次數（含註解裡的字樣）。後續分組搬遷時，搬完一個檔就刪一行或改小數字。
 export const PENDING = {
   'lib/account-roster.mjs': 2,
-  'lib/claude-accounts.mjs': 24,
   'lib/quota-readers.mjs': 6,
-  'list.js': 2,
   'm.js': 4,
 }
 
@@ -206,7 +204,7 @@ test('list.js 第三批：已搬的指令不再直接 invoke、走具名出口�
   for (const c of moved) assert.ok(!s.includes("invoke('" + c + "'"), `${c} 還在 list.js 直接呼叫`)
   for (const api of ['logViewApi.relayLogPaths(', 'knownDeviceApi.list()', 'knownDeviceApi.setLoginOk(', 'knownDeviceApi.forget(', 'knownDeviceApi.ownFingerprintQr()', 'termRemoteApi.offerSend(', 'termRemoteApi.withdraw(', 'termRemoteApi.pending()',
     'termRemoteApi.viewActive(', 'linkApi.openLink(', 'linkApi.openUrl(', 'linkApi.invitePending()', 'trayApi.setUnread(', 'trayApi.setPresence(', 'trayApi.setNowPlaying(', 'trayApi.adsFetch()', 'termRemoteErrorText(']) assert.ok(s.includes(api), api)
-  assert.deepEqual([...s.matchAll(/(?<![\w.$])invoke\('([a-z_]+)'/g)].map(x => x[1]), ['ai_cli_login', 'ai_cli_login'])
+  assert.deepEqual([...s.matchAll(/(?<![\w.$])invoke\('([a-z_]+)'/g)].map(x => x[1]), [])   // ⑫ 起 ai_cli_login 也搬走了，list.js 不再有直接 invoke
   const ex = src(path.join(UI, 'lib/tauri.mjs'))
   for (const c of moved) assert.ok(ex.includes(`'${c}'`), `${c} 不在 tauri.mjs 出口`)
 })
@@ -297,4 +295,36 @@ test('m.js 第二批：已搬的指令不再直接 invoke、走具名出口；m.
   // 常呼叫的在線與前景回報：失敗已由出口記一行並去重，這裡的空 catch 要有註解交代、不再多記
   assert.equal((s.match(/出口的 invoke 已記一行並去重，這裡不再多記/g) ?? []).length, 2)
   assert.doesNotMatch(s, /mobileStateApi\.(presence|foreground)\([^\n]*console\./)
+})
+
+// ---- ⑫：帳號卡（claude-accounts）與 ai_cli_login：指令名與參數形狀與以前直接 invoke 時完全相同 ----
+test('帳號卡出口：指令名與參數形狀不變', async () => {
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return null })
+  const api = m.makeAccountsApi()
+  await api.roster(); await api.list(); await api.current(); await api.grokList(); await api.codexCurrent(); await api.modReport(); await api.loginFailed(); await api.quotaState()
+  await api.save(); await api.switchTo('a@x.test'); await api.remove('a@x.test'); await api.undo(); await api.grokSwitch('a@x.test')
+  await api.remoteReport(); await api.remoteList('N1'); await api.remoteRequest('N1', 'a@x.test', 'claude'); await api.remoteStatus(['i1'])
+  await api.remotePending(); await api.remoteApply('i1', false); await api.remoteApply('i2', true); await api.remoteDecline('i1'); await api.allowGet(); await api.allowSet(true)
+  await m.cliLoginApi.login('pi')
+  assert.deepEqual(calls, [
+    ['acct_roster', undefined], ['claude_accounts_list', undefined], ['claude_account_current', undefined], ['grok_accounts_list', undefined],
+    ['codex_account_current', undefined], ['claude_mod_report', undefined], ['claude_login_failed', undefined], ['claude_quota_state', undefined],
+    ['claude_account_save', undefined], ['claude_account_switch', { email: 'a@x.test' }], ['claude_account_delete', { email: 'a@x.test' }], ['claude_account_undo', undefined], ['grok_account_switch', { email: 'a@x.test' }],
+    ['acct_remote_report', undefined], ['acct_remote_list', { node: 'N1' }], ['acct_remote_request', { node: 'N1', email: 'a@x.test', vendor: 'claude' }], ['acct_remote_status', { ids: ['i1'] }],
+    ['acct_remote_pending', undefined], ['acct_remote_apply', { id: 'i1', confirmed: false }], ['acct_remote_apply', { id: 'i2', confirmed: true }], ['acct_remote_decline', { id: 'i1' }],
+    ['acct_remote_allow_get', undefined], ['acct_remote_allow_set', { on: true }],
+    ['ai_cli_login', { toolId: 'pi' }],
+  ])
+})
+
+test('⑫：claude-accounts 與 list.js 不再直接 invoke、走具名出口', () => {
+  const a = src(path.join(UI, 'lib', 'claude-accounts.mjs')), l = src(path.join(UI, 'list.js'))
+  assert.ok(!/(?<![\w.$])invoke\(/.test(a), 'claude-accounts.mjs 還有直接 invoke(')
+  assert.ok(!l.includes("'ai_cli_login'"), 'list.js 還在直接呼叫 ai_cli_login')
+  assert.ok(a.includes('makeAccountsApi(invoke)'))
+  for (const call of ['api.roster()', 'api.list()', 'api.current()', 'api.grokList()', 'api.codexCurrent()', 'api.modReport()', 'api.loginFailed()', 'api.quotaState()', 'api.save()', 'api.switchTo(email)', 'api.remove(email)', 'api.undo()',
+    'api.grokSwitch(email)', 'api.remoteReport()', 'api.remoteList(r.node)', 'api.remoteList(node)', 'api.remoteRequest(node, email, vendor)', 'api.remoteStatus([sent.id])', 'api.remotePending()',
+    'api.remoteApply(row.id, false)', 'api.remoteApply(id, true)', 'api.remoteDecline(id)', 'api.allowGet()', 'api.allowSet(on)']) assert.ok(a.includes(call), call)
+  assert.ok(l.includes('cliLoginApi.login(v.tool)') && l.includes("cliLoginApi.login('pi')"))
 })
