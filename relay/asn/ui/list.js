@@ -55,7 +55,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { plainMessage } from './lib/plain-errors.mjs'
-import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, ctl, emit, initFrame, invoke, listen, logViewApi, settingsApi, updateApi, voiceApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, ctl, emit, initFrame, invoke, listen, logViewApi, settingsApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
@@ -142,10 +142,10 @@ const SOUNDS = {
   nudge: () => { for (let i = 0; i < 7; i++) tone(95 + (i % 2) * 35, i * 0.07, 0.09, 'square', 0.05) },
 }
 
-const info = reactive(await invoke('startup_info'))   // 響應式：改設備名後就地更新，不重載頁面
+const info = reactive(await shellApi.startupInfo())   // 響應式：改設備名後就地更新，不重載頁面
 document.title = `Agent Sync Network Messenger (${info.version})`
 if (info.shot) {
-  const logFe = (level, msg) => invoke('shot_frontend_log', { level, message: String(msg) }).catch(() => {})
+  const logFe = (level, msg) => shellApi.shotFrontendLog(level, msg).catch(() => {})
   window.onerror = (msg, src, line, col, err) => { logFe('error', `${msg} @ ${src}:${line}:${col} ${err?.stack ?? ''}`) }
   window.onunhandledrejection = e => logFe('error', e.reason?.stack ?? e.reason ?? 'unhandled rejection')
 }
@@ -327,7 +327,7 @@ const currentSession = () => snapshotSession({ tabs: withoutNoticeTabs(ui.tabs),
 async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，由 Rust 端的視窗清單為準
   if (!sess.ready || ui.mode !== 'split') { if (sess.wins.length || sess.panelWins.length) { sess.wins = []; sess.panelWins = [] } ; return }
   try {
-    const [chats, panels] = await invoke('open_windows')
+    const [chats, panels] = await windowApi.openWindows()
     if (JSON.stringify(chats) !== JSON.stringify(sess.wins)) sess.wins = chats
     if (JSON.stringify(panels) !== JSON.stringify(sess.panelWins)) sess.panelWins = panels
   } catch { /* 取不到就維持上次 */ }
@@ -338,7 +338,7 @@ async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，�
 // 不算未讀、不跳提示（跟以前通知開成對話分頁時一樣，西川二審）；分離模式照舊看通知對話視窗
 let railTabNow = () => ''   // 名單頁籤的 ref 在下面才建立，建立後換成真的
 const noticeOnScreen = () => railTabNow() === 'notice' || (ui.mode === 'merged' && ui.active === NOTICE_TAB)
-const chatShownId = async id => (id === NOTICE_ID && noticeOnScreen() ? Boolean(await invoke('main_visible')) : chatShown(ui, id, { mainVisible: () => invoke('main_visible'), chatVisible: cid => invoke('chat_visible', { id: cid }) }))
+const chatShownId = async id => (id === NOTICE_ID && noticeOnScreen() ? Boolean(await windowApi.mainVisible()) : chatShown(ui, id, { mainVisible: () => windowApi.mainVisible(), chatVisible: cid => windowApi.chatVisible(cid) }))
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
   isChatVisible: chatShownId,
@@ -1120,8 +1120,8 @@ core.on('notify', n => {
   const plan = notifyPlan(n, notifyPrefs.value, me.status)
   if (plan.sound) SOUNDS[plan.sound]?.()
   if (shouldAutoSpeak(n, voiceCfg, me.status) && !callBeats.anyCall()) voice.speakAuto(`auto:${n.friend.id}:${Date.now()}`, n.line)   // 預設關
-  if (n.shake) void invoke('shake', { id: n.friend.id, main: ui.mode === 'merged' })   // 整合模式抖整個主視窗
-  if (plan.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) } })
+  if (n.shake) void windowApi.shake(n.friend.id, ui.mode === 'merged')   // 整合模式抖整個主視窗
+  if (plan.toast) void windowApi.showToast({ cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) })
 })
 
 // 打開一個群組的對話（整合模式開分頁、分開模式開視窗），並讀它的新訊息與確認卡片
@@ -1134,10 +1134,10 @@ async function openRoomChat(id) {
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
     pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     pushLog(id)
-    await invoke('show_main')
+    await shellApi.showMain()
     sync()
   } else {
-    await invoke('open_chat', { id, title: `${plain(f.nick)} - 對話` })
+    await windowApi.openChat(id, `${plain(f.nick)} - 對話`)
     sync(); pushLog(id)
   }
   await hub.open(rid)
@@ -1145,7 +1145,7 @@ async function openRoomChat(id) {
 }
 // 對話上方「群組」與「管理」的選單動作：邀請別人加入、加我的另一個 AI、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
 async function openGroupMenu(chatId, what) {
-  await invoke('show_main').catch(() => {})
+  await shellApi.showMain().catch(() => {})
   if (isRoomChat(chatId)) {
     const rid = roomIdOf(chatId), r = hub.raw(rid)
     if (what === 'manage') groupFlow.openManage(rid)
@@ -1169,7 +1169,7 @@ const groupFlow = createGroupFlow({
   logOf: f => core.viewOf(f.id),
 })
 // 邀請連結一鍵開啟（asn://invite/<碼>）：Rust 端收到後通知；啟動前就收到的用 invite_pending 補取
-const onInviteCode = code => { if (typeof code === 'string' && code) { void invoke('show_main').catch(() => {}); groupFlow.openJoin(code) } }
+const onInviteCode = code => { if (typeof code === 'string' && code) { void shellApi.showMain().catch(() => {}); groupFlow.openJoin(code) } }
 await listen('asn:invite', onInviteCode)
 void invoke('invite_pending').then(onInviteCode).catch(() => {})
 
@@ -1200,12 +1200,12 @@ async function openNoticeRow(key) {
     if (key) markNoticeOne(key)
     Object.assign(ui, openChatTab(ui, NOTICE_TAB, ui.pinnedChat))
     pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（返回鈕寫「通知」）
-    await invoke('show_main')
+    await shellApi.showMain()
     sync()
     return
   }
   // 分離模式：打開（或叫出）原本的「通知」對話視窗；視窗一打開就整段標已讀
-  await invoke('open_chat', { id: NOTICE_ID, title: '通知 - 對話' })
+  await windowApi.openChat(NOTICE_ID, '通知 - 對話')
   noticeView.opened = []
   sync(); pushLog(NOTICE_ID)
 }
@@ -1233,11 +1233,11 @@ async function openChat(id) {
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
     pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     pushLog(id)
-    await invoke('show_main')
+    await shellApi.showMain()
     sync()
     return
   }
-  await invoke('open_chat', { id, title: `${plain(f.nick)} - 對話` })
+  await windowApi.openChat(id, `${plain(f.nick)} - 對話`)
   sync(); pushLog(id)
 }
 
@@ -1249,17 +1249,17 @@ async function openPanel(kind, key) {
   if (ui.mode === 'merged') {
     Object.assign(ui, openChatTab(ui, panelTabId(kind), ui.pinnedChat))
     pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
-    await invoke('show_main')
+    await shellApi.showMain()
     sync()
     return
   }
   const { w, h } = sizes[kind]
-  await invoke('open_panel', { kind, title: panelTitle(kind, key), w, h })
+  await windowApi.openPanel(kind, panelTitle(kind, key), w, h)
   emit('asn:panel', { kind, key })
 }
 async function closePanel(kind) {
   if (ui.mode === 'merged') { Object.assign(ui, closeChatTab(ui, panelTabId(kind))); sync() }
-  else await invoke('close_panels', { kind })
+  else await windowApi.closePanels(kind)
 }
 
 // 對話視窗的指令
@@ -1308,15 +1308,15 @@ async function setMode(to) {
   switching = true
   try {
     sizes[from] = normalizeSize(winSize(), from)
-    const closed = from === 'split' ? await invoke('close_chats') : []
-    const closedPanels = from === 'split' ? (await invoke('close_panels')).filter(k => PANEL_KINDS.includes(k)) : []   // 開著的指引、設定視窗
+    const closed = from === 'split' ? await windowApi.closeChats() : []
+    const closedPanels = from === 'split' ? (await windowApi.closeAllPanels()).filter(k => PANEL_KINDS.includes(k)) : []   // 開著的指引、設定視窗
     // 指引、設定也跟著轉：分離→整合＝視窗變分頁；整合→分開＝分頁開成視窗。好友的對話照舊交給 switchMode
     // 「通知」不跟著轉成分頁或視窗（它只從「通知」分頁打開）
     const { chats: chatTabs, panels: panelTabs } = splitTabs(withoutNoticeTabs(ui.tabs))
     const plan = switchMode(from, to, { tabs: chatTabs, active: isPanelTab(ui.active) || ui.active === NOTICE_TAB ? '' : ui.active, windowIds: withoutNoticeTabs(closed) })
     ui.mode = to
     ui.tabs = orderTabs([...plan.tabs, ...closedPanels.map(panelTabId)], ui.pinnedChat); ui.active = plan.active || ui.tabs.at(-1) || ''
-    await invoke('main_layout', { merged: to === 'merged', w: sizes[to].w, h: sizes[to].h, recenter: false })
+    await windowApi.mainLayout(to === 'merged', sizes[to].w, sizes[to].h, false)
     if (ui.active) core.markRead(ui.active)
     for (const id of plan.openWindows) await openChat(id)
     if (to === 'split') for (const kind of panelTabs) await openPanel(kind, ui.panel[kind])
@@ -1330,7 +1330,7 @@ window.addEventListener('resize', () => {
   clearTimeout(sizeTimer)
   sizeTimer = setTimeout(() => { if (!switching) sizes[ui.mode] = normalizeSize(winSize(), ui.mode) }, 400)
 })
-if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.merged.w, h: sizes.merged.h, recenter: true })
+if (ui.mode === 'merged') await windowApi.mainLayout(true, sizes.merged.w, sizes.merged.h, true)
 
 await listen('term-being-viewed', list => { beingViewed.value = Array.isArray(list) ? list : [] })
 await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
@@ -1505,7 +1505,7 @@ async function openTermTab(id) {
   if (ui.mode !== 'merged') { terms.open = true; return }   // 分離模式沒有分頁區：先用舊的終端面板
   Object.assign(ui, openChatTab(ui, termFriendId(id), ui.pinnedChat))
   pane.showList = false   // 窄視窗只顯示一個窗格時：點終端（含「N 個終端等你回答」）就切到右邊
-  await invoke('show_main')
+  await shellApi.showMain()
   sync()
 }
 // 「＋」上的紅點與選單裡的「N 個終端等你回答」（#349）：點了直接打開第一個在等的終端分頁
@@ -2014,9 +2014,9 @@ const app = createApp({
       void listen('relay-bell', () => void accounts.pollIncoming())
     }
     // 有人要求切換這台的帳號：把視窗叫到前面，讓使用者看得到確認框
-    watch(() => accounts.state.incoming.length, n => { if (n) void invoke('show_main').catch(() => {}) })
+    watch(() => accounts.state.incoming.length, n => { if (n) void shellApi.showMain().catch(() => {}) })
     // 免確認切好之後也叫到前面，讓使用者看得到「已切換／還原」
-    watch(() => accounts.state.done.length, n => { if (n) void invoke('show_main').catch(() => {}) })
+    watch(() => accounts.state.done.length, n => { if (n) void shellApi.showMain().catch(() => {}) })
     // 名單設備標題右鍵：切換那台設備的 Claude 帳號
     const deviceMenu = ref('')
     const deviceMenuPos = reactive({ x: 0, y: 0 })
@@ -2032,7 +2032,7 @@ const app = createApp({
     const openDeviceAcct = async (node, email = '', vendor = 'claude') => {
       if (!node) return
       deviceAcct.node = node; deviceAcct.label = deviceTree.value.find(d => d.key === node)?.label ?? accounts.remoteNodes().find(d => d.key === node)?.label ?? ''; deviceAcct.selected = email   // 設備頁籤上點某個帳號的「切換」＝預先選好那個帳號，仍要在對話框按送出
-      void invoke('show_main').catch(() => {})
+      void shellApi.showMain().catch(() => {})
       if (!accounts.state.roster) void accounts.refreshRoster()   // 從名單右鍵直接開、還沒讀過帳號列表：讀一次讓各帳號帶額度
       await accounts.remoteSelect(node, vendor)
     }
@@ -2351,22 +2351,22 @@ if (info.shot) {
     await refreshCwdCandidates()
     if (!partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
     await waitPaint()
-    await invoke('show_main').catch(() => {})
+    await shellApi.showMain().catch(() => {})
     await waitPaint()
     await sleep(900)
-    await invoke('capture_ui_ready', { tag: 'partner-dlg-ready' })
-    await invoke('take_shot', { tab: 'partner-dlg' })   // 第 1 頁：設備
+    await shellApi.captureUiReady('partner-dlg-ready')
+    await shellApi.takeShot('partner-dlg')   // 第 1 頁：設備
     // 沒有能開的設備就不硬切到第 2、3 頁（會拍出空白的設備與灰掉的按鈕），只在記錄寫原因
-    if (partnerDlg.node) for (const n of [2, 3]) { partnerDlg.step = n; await waitPaint(); await invoke('take_shot', { tab: `partner-dlg-${n}` }) }
+    if (partnerDlg.node) for (const n of [2, 3]) { partnerDlg.step = n; await waitPaint(); await shellApi.takeShot(`partner-dlg-${n}`) }
     else console.info('[ASN] 截圖：沒有能開新夥伴的設備，只拍第 1 頁', launchDeviceRowsList.value.map(d => [d.key, launchDisableReasonFor(d.key)]))
     closePartnerDlg()
   } else if (savedMe.shotLaunchNotice) {
     showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
     await waitPaint()
-    await invoke('show_main').catch(() => {})
+    await shellApi.showMain().catch(() => {})
     await waitPaint()
-    await invoke('capture_ui_ready', { tag: 'launch-notice-ready' })
-    await invoke('take_shot', { tab: 'launch-notice' })
+    await shellApi.captureUiReady('launch-notice-ready')
+    await shellApi.takeShot('launch-notice')
     closeLaunchNotice()
   } else {
   const all = core.snapshot().friends
@@ -2381,10 +2381,10 @@ if (info.shot) {
     core.emit('notify', { kind: 'login', friend: core.friends.get(target.id), line: '已經登入', toast: true })
   }
   await sleep(1500)
-  await invoke('take_shot')
+  await shellApi.takeShot()
   // 沒開對話的整合模式：再各拍一張別則大幅廣告（正見、招租＝按鈕不可點）
   if (savedMe.shotNoChat && ui.mode === 'merged') {
-    for (const [name, i] of [['ad-policy', Math.max(0, ads.value.findIndex(a => a.key === 'policy'))], ['ad-rent', ads.value.length - 1]]) { adI.value = i; await sleep(700); await invoke('take_shot', { tab: name }) }
+    for (const [name, i] of [['ad-policy', Math.max(0, ads.value.findIndex(a => a.key === 'policy'))], ['ad-rent', ads.value.length - 1]]) { adI.value = i; await sleep(700); await shellApi.takeShot(name) }
     adI.value = Number.isInteger(savedMe.shotAd) ? savedMe.shotAd : 0
   }
   // 逐頁籤截圖：本機、第二台設備、對話（含群組）、使用指引（清單與一篇內容）、設定
@@ -2400,12 +2400,12 @@ if (info.shot) {
       if (Array.isArray(savedMe.shotSettingSet)) for (const c of savedMe.shotSettingSet) { emit('asn:set', c); await sleep(400) }
     }
     await sleep(name.endsWith('-doc') ? 900 : 500)
-    await invoke('take_shot', { tab: name })
+    await shellApi.takeShot(name)
     if (name === 'guide-doc') await root.closePanel('guide')
     if (name === 'settings-doc') await root.closePanel('setting')
   }
   }
   await core.stop()
-  await invoke('quit_app')
+  await shellApi.quitApp()
 }
 blockContextMenu(document)

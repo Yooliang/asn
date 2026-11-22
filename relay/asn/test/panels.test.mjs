@@ -93,7 +93,7 @@ test('分離模式視窗大小：預設 480×560；壞值、太小、不是數�
 test('守門（樞紐）：openPanel 兩種模式都有、大小記在 asn-me.json、跨視窗走事件', () => {
   const hub = read('ui/list.js')
   assert.ok(/async function openPanel\(kind, key\)/.test(hub) && hub.includes('openChatTab(ui, panelTabId(kind), ui.pinnedChat)'), '整合＝開分頁')
-  assert.ok(hub.includes("invoke('open_panel', { kind, title: panelTitle(kind, key), w, h })") && hub.includes("emit('asn:panel', { kind, key })"), '分離＝開視窗並換內容')
+  assert.ok(hub.includes('windowApi.openPanel(kind, panelTitle(kind, key), w, h)') && hub.includes("emit('asn:panel', { kind, key })"), '分離＝開視窗並換內容')
   assert.ok(hub.includes('guideSize: sizes.guide, settingSize: sizes.setting') && hub.includes('normalizePanelSize(savedMe.guideSize)'), '視窗大小存檔與讀回')
   assert.ok(hub.includes("c.op === 'panel-size'") && hub.includes("c.op !== 'panel-hello'"), '收視窗大小與 hello')
   // 設定一變就把快照推給設定視窗（只在分離模式）

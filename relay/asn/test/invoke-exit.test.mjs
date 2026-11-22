@@ -19,7 +19,7 @@ export const PENDING = {
   'lib/account-roster.mjs': 2,
   'lib/claude-accounts.mjs': 24,
   'lib/quota-readers.mjs': 6,
-  'list.js': 61,
+  'list.js': 23,
   'm.js': 49,
 }
 
@@ -150,4 +150,32 @@ test('list.js 第一批：已搬的設定頁指令不再直接 invoke、走具�
   for (const c of moved) assert.ok(!s.includes(`'${c}`), `${c} 還在 list.js 直接呼叫`)
   assert.ok(!/invoke\('set_close_to_tray'/.test(s), 'set_close_to_tray 還在 list.js 直接呼叫')
   for (const api of ['settingsApi.setFrame(', 'settingsApi.setCloseToTray(', 'bridgeApi.takeover()', 'updateApi.check()', 'autostartApi.set(on)', 'voiceApi.cfgSet(next)']) assert.ok(s.includes(api), api)
+})
+
+// ---- ⑧：list.js 第二批（視窗開關、版面、啟動／--shot 截圖）的出口：指令名與參數形狀不變 ----
+test('視窗與啟動截圖出口：指令名與參數形狀不變', async () => {
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return null })
+  await m.windowApi.openChat('c1', 'T'); await m.windowApi.openPanel('guide', 'G', 1, 2); await m.windowApi.closePanels('guide'); await m.windowApi.closeAllPanels()
+  await m.windowApi.closeChats(); await m.windowApi.mainLayout(true, 3, 4, false); await m.windowApi.shake('c1', true); await m.windowApi.showToast({ cid: 'c1' })
+  await m.windowApi.openWindows(); await m.windowApi.mainVisible(); await m.windowApi.chatVisible('c1')
+  await m.shellApi.startupInfo(); await m.shellApi.showMain(); await m.shellApi.captureUiReady('t'); await m.shellApi.takeShot('x'); await m.shellApi.takeShot()
+  await m.shellApi.shotFrontendLog('error', 5); await m.shellApi.quitApp()
+  assert.deepEqual(calls, [
+    ['open_chat', { id: 'c1', title: 'T' }], ['open_panel', { kind: 'guide', title: 'G', w: 1, h: 2 }], ['close_panels', { kind: 'guide' }], ['close_panels', undefined],
+    ['close_chats', undefined], ['main_layout', { merged: true, w: 3, h: 4, recenter: false }], ['shake', { id: 'c1', main: true }], ['show_toast', { toast: { cid: 'c1' } }],
+    ['open_windows', undefined], ['main_visible', undefined], ['chat_visible', { id: 'c1' }],
+    ['startup_info', undefined], ['show_main', undefined], ['capture_ui_ready', { tag: 't' }], ['take_shot', { tab: 'x' }], ['take_shot', undefined],
+    ['shot_frontend_log', { level: 'error', message: '5' }], ['quit_app', undefined],
+  ])
+})
+
+test('list.js 第二批：已搬的視窗與啟動截圖指令不再直接 invoke、走具名出口', () => {
+  const s = src(path.join(UI, 'list.js'))
+  const moved = ['startup_info', 'shot_frontend_log', 'open_windows', 'main_visible', 'chat_visible', 'shake', 'show_toast', 'show_main', 'open_chat', 'open_panel', 'close_panels',
+    'close_chats', 'main_layout', 'capture_ui_ready', 'take_shot', 'quit_app']
+  for (const c of moved) assert.ok(!s.includes("invoke('" + c + "'"), `${c} 還在 list.js 直接呼叫`)
+  for (const api of ['windowApi.openChat(', 'windowApi.openPanel(', 'windowApi.mainLayout(', 'windowApi.closeChats()', 'shellApi.showMain()', 'shellApi.takeShot(', 'shellApi.quitApp()', 'shellApi.startupInfo()']) assert.ok(s.includes(api), api)
+  const ex = src(path.join(UI, 'lib/tauri.mjs'))
+  for (const c of moved) assert.ok(ex.includes(`'${c}'`), `${c} 不在 tauri.mjs 出口`)
 })

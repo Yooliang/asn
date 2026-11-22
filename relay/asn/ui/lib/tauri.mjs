@@ -255,7 +255,22 @@ export const shellApi = {
   quitApp: () => invoke('quit_app'),
   showMain: () => invoke('show_main'),                              // --shot 截圖時才用：把主視窗顯示出來
   captureUiReady: tag => invoke('capture_ui_ready', { tag }),       // --shot：畫面畫好的標記
-  takeShot: tab => invoke('take_shot', { tab }),                    // --shot：截圖存檔
+  takeShot: tab => (tab === undefined ? invoke('take_shot') : invoke('take_shot', { tab })),   // --shot：截圖存檔（不給 tab 就不帶參數）
+  shotFrontendLog: (level, msg) => invoke('shot_frontend_log', { level, message: String(msg) }),   // --shot：前端錯誤寫進截圖記錄
+}
+// 電腦主視窗的視窗開關與版面（#2106 ⑧）：對話／面板視窗、主視窗顯示與版面、抖動、提示小窗
+export const windowApi = {
+  openChat: (id, title) => invoke('open_chat', { id, title }),
+  openPanel: (kind, title, w, h) => invoke('open_panel', { kind, title, w, h }),
+  closePanels: kind => invoke('close_panels', { kind }),
+  closeAllPanels: () => invoke('close_panels'),
+  closeChats: () => invoke('close_chats'),
+  mainLayout: (merged, w, h, recenter) => invoke('main_layout', { merged, w, h, recenter }),
+  shake: (id, main) => invoke('shake', { id, main }),
+  showToast: toast => invoke('show_toast', { toast }),
+  openWindows: () => invoke('open_windows'),
+  mainVisible: () => invoke('main_visible'),
+  chatVisible: id => invoke('chat_visible', { id }),
 }
 // 引導第 3 步「連接你的 AI 工具」：檢查／安裝 Claude 的擴充
 export const claudeModApi = {

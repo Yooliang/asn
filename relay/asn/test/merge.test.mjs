@@ -66,7 +66,7 @@ test('切模式：指引、設定的分頁不是好友——先拆開，好友�
   const back = switchMode('split', 'merged', { windowIds: ['W/a'] })
   assert.deepEqual(back.tabs, ['W/a'])
   const hub = fs.readFileSync(path.join(UI, 'list.js'), 'utf8')
-  assert.ok(hub.includes("await invoke('close_panels')") && hub.includes('closedPanels.map(panelTabId)') && hub.includes('await openPanel(kind, ui.panel[kind])'), '樞紐切模式時也轉指引、設定')
+  assert.ok(hub.includes('await windowApi.closeAllPanels()') && hub.includes('closedPanels.map(panelTabId)') && hub.includes('await openPanel(kind, ui.panel[kind])'), '樞紐切模式時也轉指引、設定')
 })
 
 test('視窗大小：整合視窗預設 900×640；存檔壞掉／太小／不是數字都退回預設；合理值照用並取整', () => {
