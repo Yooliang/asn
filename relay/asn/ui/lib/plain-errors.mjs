@@ -38,3 +38,6 @@ export function knownPeerErrorText(e) {
   if (s.includes('螢幕鎖')) return s
   return KNOWN_PEER_FAILED_TEXT
 }
+
+/** 查詢代碼操作失敗：後台說「尚未登入」就請使用者先登入，其他一律說白話；原文由出口寫進 ui.log。文字表由呼叫端傳入（避免跟 quota-readers 互相引用） */
+export const quotaShareErrorText = (e, text) => (/尚未登入/.test(typeof e === 'string' ? e : e?.message ?? '') ? text.failLogin : text.failShare)

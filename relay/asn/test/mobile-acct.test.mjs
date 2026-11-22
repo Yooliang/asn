@@ -94,7 +94,9 @@ test('送出並等結果：成功、對方拒絕、失敗原因、逾時都有�
 
 test('頁面接線：m.js 走 android_acct_* 指令且不碰電腦端指令；m.html 有按鈕與浮層、先確認再送', () => {
   const js = read('ui', 'm.js'), html = read('ui', 'm.html')
-  for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status']) assert.match(js, new RegExp(c))
+  const ex = read('ui', 'lib', 'tauri.mjs')   // 指令名在出口（#2106 ⑬），m.js 走 mobileAccountApi
+  for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status']) assert.ok(ex.includes(`'${c}'`), c)
+  for (const c of ['mobileAccountApi.list(node)', 'mobileAccountApi.switchTo(node, email)', 'mobileAccountApi.status(ids)']) assert.ok(js.includes(c), c)
   assert.doesNotMatch(js, /acct_remote_/, '手機不叫電腦端的 acct_remote_* 指令')
   assert.match(html, /fourthPage\.kind === 'acct'/)
   assert.match(html, /切換 Claude 帳號/)

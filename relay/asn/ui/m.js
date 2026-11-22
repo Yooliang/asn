@@ -68,7 +68,7 @@ import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './lib/msg-ref.mjs'
 import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
-import { authApi, cloudApi, invoke, listen, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
+import { authApi, cloudApi, invoke, listen, mobileAccountApi, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, deviceNameError, deviceNameOf, unnamedLabelOf } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
@@ -118,11 +118,11 @@ const transport = mobileRelayApi   // 指令名與參數形狀在 lib/tauri.mjs�
 // 管理夥伴視窗（⋯ 選單）：手機只下指令，視窗在那台電腦上；要本人簽章（Rust 端沒憑證就不送）
 const opsTransport = mobileOpsApi   // android_partner_*（lib/tauri.mjs）
 // 替電腦切換 Claude 帳號（設備卡的按鈕）：手機只下指令；要本人簽章（Rust 端沒憑證就不送）。清單只有 email、方案、是否使用中
-const acctTransport = {
-  acctList: node => invoke('android_acct_list', { node }),
-  acctSwitch: (node, email) => invoke('android_acct_switch', { node, email }),
-  acctStatus: ids => invoke('android_acct_status', { ids }),
-  acctRoster: () => invoke('android_acct_roster'),   // 帳號列表（#374）：跟電腦版同一個後台動作
+const acctTransport = {   // 指令名與參數形狀在 lib/tauri.mjs（mobileAccountApi，#2106 ⑬）
+  acctList: node => mobileAccountApi.list(node),
+  acctSwitch: (node, email) => mobileAccountApi.switchTo(node, email),
+  acctStatus: ids => mobileAccountApi.status(ids),
+  acctRoster: () => mobileAccountApi.roster(),   // 帳號列表（#374）：跟電腦版同一個後台動作
 }
 // 照片放大與收到的檔案：另存＝存進 App 私有資料夾，再請外殼複製到「下載/ASN」
 const photoApi = {

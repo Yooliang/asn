@@ -527,3 +527,21 @@ export const makeMobileUpdateApi = (call = invoke) => ({
   download: args => call('android_update_download', args),
 })
 export const mobileUpdateApi = makeMobileUpdateApi()
+
+// 手機替電腦切換帳號（設備卡的按鈕，m.js；#2106 ⑬）：只下指令，要本人簽章由 Rust 處理。失敗記錄只記指令名不記參數，所以 email 不會進 ui.log
+export const makeMobileAccountApi = (call = invoke) => ({
+  list: node => call('android_acct_list', { node }),
+  switchTo: (node, email) => call('android_acct_switch', { node, email }),
+  status: ids => call('android_acct_status', { ids }),   // 輪詢切換結果：失敗時出口已記一行，呼叫端不再多記
+  roster: () => call('android_acct_roster'),             // 帳號列表（#374），輪詢用
+})
+export const mobileAccountApi = makeMobileAccountApi()
+// 讀額度設定與查詢代碼（quota-readers.mjs，#2106 ⑬）：金鑰與代碼都在 Rust，記錄只記指令名不記參數
+export const makeQuotaReadersApi = (call = invoke) => ({
+  get: () => call('quota_readers_get'),
+  set: (source, on) => call('quota_readers_set', { source, on }),
+  minimaxAdd: (email, key) => call('quota_minimax_add', { email, key }),
+  minimaxRemove: email => call('quota_minimax_remove', { email }),
+  shareCreate: (vendor, account) => call('quota_share_create', { vendor, account }),
+  shareRevoke: (vendor, account) => call('quota_share_revoke', { vendor, account }),
+})
