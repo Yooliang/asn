@@ -1,15 +1,11 @@
 {
-  "version": "0.2.57",
-  "notes": "- 修正：遠端一次性密碼請求的確認視窗打不開、顯示「這個視窗的網址不正確」的問題。（#2075、#2078）",
-  "pub_date": "2026-11-22T00:08:03.082Z",
+  "version": "0.2.58",
+  "notes": "- 改善：啟動設定頁分成「已安裝的工具」「外掛與互通」「安全限制」「進階」四區，說明文字只留能動手的話。（#1548、#2084）",
+  "pub_date": "2026-11-22T01:24:21.648Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndNVjN6Qjg5VEZ2VG5iazR2THpGaVBVK1RVL09XVHZRN295NnJUQ1Fkb0tWU3Z5U1FPMnZiVk9FVExXVjF4SFZpV3pHN3FiM2tLakt2T0JwUUh1cFEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzA2MDgyCWZpbGU6QVNOXzAuMi41N194NjQtc2V0dXAuZXhlCmdBOXJRUHo1NTMxMURUZ1pJTkpvNUYvZlA4T1RxejF4d0ZObDJiaXhsZDVFdWt5UTZuTW9IN2s4TEZzNzBsYWRSdUtLaExpRDBEenZiZHdWanMvakJ3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.57_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJJUXpmdTQyM3ZNZjRlZW95Slp4UGdtd1oyQ09wd2ExUmxzS1VDYy9FOWZUdk0zVVpmdFlabWwybzc5eEVNcVMvQ1NjNG1RTkZpaVlYczZ2d3JtdGdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzA2NjYxCWZpbGU6QVNOXzAuMi41N19hbWQ2NC5BcHBJbWFnZQpQcTNzYVRrL0J5K1k5M1d0WWRIdHhhYllmTWRtdnpNQ2ZEZ3MweUVkWmcwSUl6NVlUR0cxNjRpRjhYV2g0ZHg5ZGE0YktIaDZuSW9qU2g5Wks3NWhDdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.57_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBNLzBpUWprNEZBRUJ6dm5CWjNSbGovQWlYQ0liK2h3ZmJjTkEyZXJVNGFKLzlvcEJGMU1jREJMQXAzTjRpaXFjN0RYL0lZSEU1N3hNaWlONThqWlEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzEwNjYxCWZpbGU6QVNOXzAuMi41OF94NjQtc2V0dXAuZXhlCm9nZEc3MmRyYzlhZWZLOGVuTkhUTlJOdDI0eEFOQVV3b3JiTEEyVk1Bc0pyQk9CWVBudEw5OFZkOElsTU1vNEV1OW5UdVNKbUg1Mi9oamZGVW91Z0FBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.58_x64-setup.exe"
     }
   }
 }
