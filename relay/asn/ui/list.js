@@ -55,7 +55,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { plainMessage, termRemoteErrorText } from './lib/plain-errors.mjs'
-import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, cliLoginApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
@@ -1991,7 +1991,7 @@ const app = createApp({
       if (row.action === 'login') {
         // 登入：跟設定裡同一條路（ai_cli_login 開登入）
         if (v.key === 'claude') { await agentInstall.openTerminal(); guideMsg.value = agentInstall.state.msg; return }
-        try { await invoke('ai_cli_login', { toolId: v.tool }) } catch (e) { guideMsg.value = String(e?.message ?? e) }
+        try { await cliLoginApi.login(v.tool) } catch (e) { guideMsg.value = String(e?.message ?? e) }
         return
       }
       if (row.action === 'install') { await agentInstall.ask(); await openPanel('setting', 'devices') }   // 安裝並登入：跟設備頁同一個確認窗與進度
@@ -2205,7 +2205,7 @@ const app = createApp({
         case 'pi-setup-cancel': piSetup.confirm = false; break
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
-        case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
+        case 'pi-login': try { await cliLoginApi.login('pi'); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
         case 'open-link': if (isAboutUrl(value)) { try { await linkApi.openLink(value) } catch (e) { console.info('[ASN] 開啟連結失敗', String(e?.message ?? e)) } } break   // 只放行「關於」頁那幾個網址
         case 'open-update': await openPanel('setting', 'update'); break   // 版本紀錄在 App 內設定的「更新」
         case 'open-guide': await openPanel('guide', ui.panel.guide || GUIDES[0]?.key); break

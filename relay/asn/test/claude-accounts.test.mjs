@@ -159,17 +159,18 @@ test('免確認切好之後：留一筆讓使用者看一眼，可按還原（�
 })
 
 test('接線守門：設定頁有這一塊、Rust 指令有註冊、前端不碰權杖', () => {
-  const panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), lib = read('ui/lib/claude-accounts.mjs'), rs = read('src-tauri/src/lib.rs')
+  const panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), lib = read('ui/lib/claude-accounts.mjs'), ex = read('ui/lib/tauri.mjs'), rs = read('src-tauri/src/lib.rs')   // 指令名在出口 tauri.mjs（#2106 ⑫），claude-accounts 走 makeAccountsApi
   assert.match(panel, /dv-set/)   // 帳號管理併進「設備與帳號」頁（這台的頁籤）
   assert.match(js, /createAccountsUi/)
   for (const c of ['claude_accounts_list', 'claude_account_current', 'claude_account_save', 'claude_account_switch', 'claude_account_delete']) {
     assert.ok(rs.includes(`claude_accounts::${c}`), c)
-    assert.ok(lib.includes(c), c)
+    assert.ok(ex.includes(`'${c}'`), c)
   }
-  assert.ok(rs.includes('codex_accounts::codex_account_current') && lib.includes('codex_account_current'))
+  assert.ok(lib.includes('makeAccountsApi(invoke)'))
+  assert.ok(rs.includes('codex_accounts::codex_account_current') && ex.includes("'codex_account_current'"))
   for (const c of ['acct_remote_report', 'acct_remote_list', 'acct_remote_request', 'acct_remote_status', 'acct_remote_pending', 'acct_remote_apply', 'acct_remote_decline', 'acct_remote_allow_get', 'acct_remote_allow_set', 'claude_account_undo']) {
     assert.ok(rs.includes(c), `lib.rs 沒註冊 ${c}`)
-    assert.ok(lib.includes(c), `前端沒用到 ${c}`)
+    assert.ok(ex.includes(`'${c}'`), `前端沒用到 ${c}`)
   }
   assert.doesNotMatch(lib, /accessToken|refreshToken|credentials|\bfetch\(|localStorage/)
   const acctPart = panel.slice(panel.indexOf('dv-set'), panel.indexOf("catKey === 'look'"))

@@ -4,6 +4,8 @@
 import { fetchRoster, normalizeQuotaState } from './account-roster.mjs'
 import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
 import { acctErrorText, isForbidden } from './acct-error.mjs'
+import { accountsErrorText as errText } from './plain-errors.mjs'
+import { makeAccountsApi } from './tauri.mjs'
 import { createSwitchTracker, switchRowKey } from './switch-result.mjs'
 
 export const CURRENT_UNREADABLE = '讀不到目前登入的帳號'   // 跟 Rust claude_login::UNREADABLE_TEXT 同一句
@@ -62,9 +64,8 @@ export function remoteStatusText(st, email = '') {
 }
 export const isFinalStatus = s => s === 'ok' || s === 'failed' || s === 'denied'
 
-const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
-
 export function createAccountsUi({ invoke, transport = null, reactive, devices = () => [], nodeLabel = n => n, sleep = ms => new Promise(r => setTimeout(r, ms)), pollMs = 3000, pollMax = 80, now = () => Date.now(), retryMs = REPORT_RETRY_MS, log = (...a) => console.info(...a) }) {
+  const api = makeAccountsApi(invoke)   // 指令名與參數形狀都在 lib/tauri.mjs 的出口（#2106 ⑫）
   // 別台帳號的錯誤：後台回 403（沒有權限）顯示白話，原文只進 log；其他維持原樣
   const remoteErr = e => {
     if (!isForbidden(e)) return errText(e)
@@ -87,23 +88,23 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
   })
   // 帳號列表：打開「設備與帳號」時讀一次，之後跟額度一樣每 5 分鐘（list.js 排程）。
   // 讀不到沿用上一次讀成功的；從沒成功過才是 null（退回各設備自己回報的）。只記 console，不吵使用者
-  const refreshRoster = async () => { s.roster = await fetchRoster(() => invoke('acct_roster'), undefined, s.roster) }
+  const refreshRoster = async () => { s.roster = await fetchRoster(() => api.roster(), undefined, s.roster) }
   const refresh = async () => {
-    try { s.list = await invoke('claude_accounts_list') } catch (e) { s.msg = errText(e) }
-    try { s.current = (await invoke('claude_account_current')) ?? null; s.currentErr = '' } catch (e) { s.current = null; s.currentErr = errText(e) || CURRENT_UNREADABLE }   // 讀不到不等於沒登入：畫面寫「讀不到目前登入的帳號」，不沿用舊值（#1880）
-    try { s.grok = (await invoke('grok_accounts_list')) ?? [] } catch { s.grok = [] }   // 舊版 Rust 沒有這個指令就當沒有
-    try { s.codex = (await invoke('codex_account_current')) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
-    try { s.mod = (await invoke('claude_mod_report')) ?? null } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
-    try { s.loginFailed = (await invoke('claude_login_failed')) === true } catch { s.loginFailed = false }   // 本機的登入失效判定（#1645，只讀）；舊版 Rust 沒有這個指令就當沒失效
+    try { s.list = await api.list() } catch (e) { s.msg = errText(e) }
+    try { s.current = (await api.current()) ?? null; s.currentErr = '' } catch (e) { s.current = null; s.currentErr = errText(e) || CURRENT_UNREADABLE }   // 讀不到不等於沒登入：畫面寫「讀不到目前登入的帳號」，不沿用舊值（#1880）
+    try { s.grok = (await api.grokList()) ?? [] } catch { s.grok = [] }   // 舊版 Rust 沒有這個指令就當沒有
+    try { s.codex = (await api.codexCurrent()) ?? null; s.codexErr = '' } catch (e) { s.codex = null; s.codexErr = errText(e) }
+    try { s.mod = (await api.modReport()) ?? null } catch { /* 舊版 Rust 沒有這個指令就不顯示 */ }
+    try { s.loginFailed = (await api.loginFailed()) === true } catch { s.loginFailed = false }   // 本機的登入失效判定（#1645，只讀）；舊版 Rust 沒有這個指令就當沒失效
     await refreshQuota()
   }
   // 只重讀這台目前登入帳號的額度查詢狀態（每 5 分鐘、打開設定頁時呼叫；不重抓帳號清單）。
   // 查詢由 Rust 每 10 分鐘做一次；讀不到（舊版 Rust 沒有這個指令）就維持原樣，畫面寫「讀取中」
   const refreshQuota = async () => {
-    try { s.quotaState = normalizeQuotaState(await invoke('claude_quota_state')) } catch { /* 舊版沒有這個指令：維持原樣 */ }
+    try { s.quotaState = normalizeQuotaState(await api.quotaState()) } catch { /* 舊版沒有這個指令：維持原樣 */ }
   }
   // 帳號庫變了，就把新清單回報給收發室（讓擁有者設備看得到）；後台沒部署或沒連線都不吵使用者
-  const report = async () => { try { await invoke('acct_remote_report') } catch { /* 略過 */ } }
+  const report = async () => { try { await api.remoteReport() } catch { /* 略過 */ } }
   const run = async fn => {
     if (s.busy) return
     s.busy = true
@@ -119,7 +120,7 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
     if (!r.node) { r.list = []; r.msg = ''; return }
     r.loading = true; r.msg = ''
     try {
-      const v = await invoke('acct_remote_list', { node: r.node })
+      const v = await api.remoteList(r.node)
       r.list = (v?.accounts ?? []).filter(a => a.vendor === r.vendor)
       s.reports[r.node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
       r.asnOnline = v?.asn_online === true
@@ -135,7 +136,7 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
     await Promise.all([...new Set(nodes)].filter(n => n && !reading.has(n)).map(async node => {
       reading.add(node)
       try {
-        const v = await invoke('acct_remote_list', { node })
+        const v = await api.remoteList(node)
         s.reports[node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
       } catch (e) { s.reports[node] = { error: remoteErr(e), failedAt: now(), asnOnline: false, reportedAt: '', accounts: [] } }
       finally { reading.delete(node) }
@@ -157,11 +158,11 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
   // 送出別台的切換並等結果（對話框與帳號卡的設備列共用）。onMsg 收每一步的白話；回 { ok } 或 { ok: false, fail }（fail 給 switchFailReason）
   const switchRemoteCore = async (node, email, vendor, onMsg = () => {}) => {
     try {
-      const sent = await invoke('acct_remote_request', { node, email, vendor })
+      const sent = await api.remoteRequest(node, email, vendor)
       onMsg(remoteStatusText({ status: 'pending' }))
       for (let i = 0; i < pollMax; i++) {
         await sleep(pollMs)
-        const v = await invoke('acct_remote_status', { ids: [sent.id] })
+        const v = await api.remoteStatus([sent.id])
         const st = (v?.switches ?? []).find(x => x.id === sent.id)
         if (!st) { onMsg('查不到這個指令的結果。'); return { ok: false, fail: { code: 'missing' } } }
         onMsg(remoteStatusText(st, email))
@@ -179,14 +180,14 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
     if (out.fail?.error) r.msg = remoteErr(out.fail.error)
     r.busy = false
     const finalMsg = r.msg
-    await remoteLoad().catch(() => {})   // 重抓對方的清單（使用中的帳號可能變了）；結果訊息不要被洗掉
+    await remoteLoad().catch(() => { /* remoteLoad 自己已把錯誤寫進 r.msg */ })   // 重抓對方的清單（使用中的帳號可能變了）；結果訊息不要被洗掉
     if (!r.msg) r.msg = finalMsg
   }
   // 本機這邊：定期取走別台送來的切換指令。預設要使用者按確認；設定「信任我自己的設備」就直接切
   const handleIncoming = async row => {
     if (!row.needs_confirm) {
       try {
-        await invoke('acct_remote_apply', { id: row.id, confirmed: false })
+        await api.remoteApply(row.id, false)
         s.msg = `${nodeLabel(row.requested_by)} 要求切換，已切到 ${row.email}。${SWITCH_NOTICE}`
         s.done.push({ id: row.id, email: row.email, from: row.requested_by, fromLabel: nodeLabel(row.requested_by), vendor: row.vendor === 'grok' ? 'grok' : 'claude' })
       } catch (e) { s.msg = errText(e) }
@@ -197,7 +198,7 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
   }
   const pollIncoming = async () => {
     let rows = []
-    try { rows = await invoke('acct_remote_pending') } catch { return 0 }
+    try { rows = await api.remotePending() } catch { return 0 }   // 輪詢：失敗只留出口那一行記錄，這裡不重複
     for (const row of rows ?? []) await handleIncoming(row)
     return (rows ?? []).length
   }
@@ -205,14 +206,14 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
     const it = s.incoming.find(x => x.id === id)
     s.incoming = s.incoming.filter(x => x.id !== id)
     if (!it) return
-    try { await invoke('acct_remote_apply', { id, confirmed: true }); s.msg = `已依 ${it.fromLabel} 的要求切換到 ${it.email}。${SWITCH_NOTICE}` } catch (e) { s.msg = errText(e) }
+    try { await api.remoteApply(id, true); s.msg = `已依 ${it.fromLabel} 的要求切換到 ${it.email}。${SWITCH_NOTICE}` } catch (e) { s.msg = errText(e) }
     await refresh(); void report()
   }
   // 本機 Grok：切到帳號庫裡的另一個帳號（整份登入檔換掉；開著的 Grok 要重開才生效）
   const grokSwitch = async email => {
     if (s.busy) return
     s.busy = true
-    try { const o = await invoke('grok_account_switch', { email }); s.msg = String(o?.notice ?? '已切換') } catch (e) { s.msg = errText(e) }
+    try { const o = await api.grokSwitch(email); s.msg = String(o?.notice ?? '已切換') } catch (e) { s.msg = errText(e) }
     s.busy = false
     await refresh(); void report()
   }
@@ -241,12 +242,12 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
   // 還原到切換前（本機備份；只有這個按鈕能用，遠端指令碰不到）
   const undo = async id => {
     dismissDone(id)
-    try { s.msg = String((await invoke('claude_account_undo')) ?? '') } catch (e) { s.msg = errText(e) }
+    try { s.msg = String((await api.undo()) ?? '') } catch (e) { s.msg = errText(e) }
     await refresh(); void report()
   }
   const decline = async id => {
     s.incoming = s.incoming.filter(x => x.id !== id)
-    try { await invoke('acct_remote_decline', { id }) } catch { /* 略過 */ }
+    try { await api.remoteDecline(id) } catch { /* 略過 */ }
   }
   // Rust 背景工作（每分鐘）自動加入／回存後的通知：只有 kind 與 email，沒有權杖
   const onAuto = async ev => {
@@ -257,24 +258,24 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
   }
   // 讀不到就當預設（開）：不會因為讀取失敗而悄悄變成關（真正擋不擋由 Rust 端照存檔判斷）
   const loadTrust = async () => {
-    try { s.allowSwitch = (await invoke('acct_remote_allow_get')) !== false } catch { s.allowSwitch = true }
+    try { s.allowSwitch = (await api.allowGet()) !== false } catch { s.allowSwitch = true }
   }
   const setAllowSwitch = async on => {
-    try { await invoke('acct_remote_allow_set', { on }); s.allowSwitch = on === true } catch (e) { s.msg = errText(e) }
+    try { await api.allowSet(on); s.allowSwitch = on === true } catch (e) { s.msg = errText(e) }
   }
   return {
     state: s,
     refresh, refreshQuota, refreshRoster, report, onAuto, loadReports, retryReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, switchRow, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
-    addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
+    addCurrent: () => run(async () => { const a = await api.save(); s.savedSeq++; return `已加入 ${a.email}。` }),
     // 登入不完整的帳號畫面上已經反灰；這裡再擋一次（Rust 端 switch_impl 也會拒絕）
     switchTo: async email => {
       if ((s.list ?? []).some(a => a.email === email && loginIncomplete(a))) { s.msg = INCOMPLETE_REASON; return }
-      return run(async () => { const r = await invoke('claude_account_switch', { email }); return `已切換到 ${r.email}。${SWITCH_NOTICE}` })
+      return run(async () => { const r = await api.switchTo(email); return `已切換到 ${r.email}。${SWITCH_NOTICE}` })
     },
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸
     remove: email => {
       if (s.confirmDel !== email) { s.confirmDel = email; s.msg = ''; return }
-      return run(async () => { await invoke('claude_account_delete', { email }); return `已刪除 ${email}。` })
+      return run(async () => { await api.remove(email); return `已刪除 ${email}。` })
     },
   }
 }
