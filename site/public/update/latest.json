@@ -1,15 +1,11 @@
 {
-  "version": "0.2.61",
-  "notes": "- 改善：工作資料夾改成清單，用「加入」「移除」管理；加入時就檢查資料夾存不存在、有沒有重複。（#1548、#2091）",
-  "pub_date": "2026-11-22T05:26:04.249Z",
+  "version": "0.2.62",
+  "notes": "- 改善：啟動設定裡的工具會顯示是不是最新版、有沒有登入。（#1548、#2092）",
+  "pub_date": "2026-11-22T06:42:09.007Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlEZkhKV2lXZWVZL1dkKzBHampVT1l2UXdZTEJibytmY0FYMEI3eHhtNjQwdS9HcDNydGhHK3dsemNLck1hQUpaVGRsR294UFlXeG9pNDh0UDMvbGdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzI1MTYzCWZpbGU6QVNOXzAuMi42MV94NjQtc2V0dXAuZXhlCnRZN2k5VFFuYytiNGVXWjhlSUdzdEQzNFNaemR5ZDVHREk2S0hmWkdhNXQwaXZ6cXRqR1dZR3BEcDNEdWZaK2kwLzRzRE94OGRmY1RERFZKYXVabUJBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.61_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlEcWl3NWJiZjlzSVgveXZBSDZ4QzV5SFJYQytLUnJHNS8ycVdVNjlYNjRvT1RiY1FFcG9nSkdkcWJ1dVQza0NUZ0xLblF1TTF3SzBuSTdLUkg4YWdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzI2Mjk3CWZpbGU6QVNOXzAuMi42MV9hbWQ2NC5BcHBJbWFnZQpaUHJVQ0wwWnZVOXlhbjl6Q2NQdWJGdHdVREtLYnZXRWxnNytGdWk5LzBQdFlZWGtDNlhya0dJZmhQWU55aStMdFFBbS9SeDZSTmo0WkE1RVVzUlBBQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.61_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitjMjNrS3lGWXpoTjJsZ0ljK1o0QjF5MGlxT2xHdXdsbVJhb0RZR3VwNitsSldyd3g4aVd5RGttWVY1bytaTXlUTGg3dnVJTE9HYUx6S3UwUEQxcEE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzI5NzI4CWZpbGU6QVNOXzAuMi42Ml94NjQtc2V0dXAuZXhlCjN5ZXZDcEJGby9Gc0RTc29GRmpDRGFHSlQwRnBjUVEzQm5oWFpTRlVrdjdNVW5EbENXd080ZDJiWTNWT2ZsemhIZGtjZExLRVNaZ0ZaaiswQ1VDeEFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.62_x64-setup.exe"
     }
   }
 }
