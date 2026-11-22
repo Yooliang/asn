@@ -1,15 +1,11 @@
 {
-  "version": "0.2.62",
-  "notes": "- 改善：啟動設定裡的工具會顯示是不是最新版、有沒有登入。（#1548、#2092）",
-  "pub_date": "2026-11-22T06:42:09.007Z",
+  "version": "0.2.63",
+  "notes": "- 新功能：使用中的 Claude 帳號訂閱失效時，ASN 會偵測並回報，擁有者會收到通知。（#1646、#2096、#2102）",
+  "pub_date": "2026-11-22T08:26:48.021Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybitjMjNrS3lGWXpoTjJsZ0ljK1o0QjF5MGlxT2xHdXdsbVJhb0RZR3VwNitsSldyd3g4aVd5RGttWVY1bytaTXlUTGg3dnVJTE9HYUx6S3UwUEQxcEE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzI5NzI4CWZpbGU6QVNOXzAuMi42Ml94NjQtc2V0dXAuZXhlCjN5ZXZDcEJGby9Gc0RTc29GRmpDRGFHSlQwRnBjUVEzQm5oWFpTRlVrdjdNVW5EbENXd080ZDJiWTNWT2ZsemhIZGtjZExLRVNaZ0ZaaiswQ1VDeEFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.62_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjV1NDhQcmQ5N2hCam85dEdteWJ1NGhZZGVlKzYvaXlNZDVWbTZ4bGxOaStHKy8zbG5CTEFTR1JtSzROd3UxRVJEb01rQStKVVVLRTFJaHNNaU0yaHd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzMwMzA0CWZpbGU6QVNOXzAuMi42Ml9hbWQ2NC5BcHBJbWFnZQpSRjR4enJEUWVMdlpJRVBqSTFONjJyTU5QZkFGQ204ckNVdFVqU2RnOUJCS1U4b3NlbXc3Y29XTDFQeWh6UXlta09rNldTNjBlNWM0NEsrOVZ3dnZCZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.62_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjQzbWcyeVhYZmtFRjRZV2hJNWxvZ09WemNVeFhDbEI2QXdHMmN4QThvS0VSRUtKcGl3UGk4QS9KVTdnT0loNDVMTkVOWjVkbEJBRlhzWHBZVnNkOXdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzM2MDA3CWZpbGU6QVNOXzAuMi42M194NjQtc2V0dXAuZXhlCk1sY1c1QXFaOEUzQXdKWGxqRVFnclJZV0xRUE83SjhxVHhVVStPRFdTNWZ6Um11bUdZVmwzcklFWnl0NXVxbW9sU1d5ckpTY25SSmZtTDF1WUlxd0RnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.63_x64-setup.exe"
     }
   }
 }
