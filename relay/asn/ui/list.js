@@ -1341,14 +1341,14 @@ watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddC
 const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...deviceFieldsToSave(devPrefs), chatPins: chatPins.value, me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, ghRefs: ghRefs.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
 addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
-watch(() => totalUnread(friends.value), n => { void trayApi.setUnread(n).catch(e => console.warn('[ASN] 托盤未讀沒送出', String(e?.message ?? e))) }, { immediate: true })
+watch(() => totalUnread(friends.value), n => { void trayApi.setUnread(n).catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ }) }, { immediate: true })
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
-watch(() => [me.status, me.psm], () => { void trayApi.setPresence(me.status, me.psm ?? '').catch(e => console.warn('[ASN] 在線狀態沒送出', String(e?.message ?? e))) }, { immediate: true })
+watch(() => [me.status, me.psm], () => { void trayApi.setPresence(me.status, me.psm ?? '').catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ }) }, { immediate: true })
 // 正在聽的歌：開關交給 Rust 端（關著不讀不送）；歌變了 Rust 端推 asn:now-playing，自己的名單頭顯示
 await listen('asn:now-playing', p => { nowPlaying.value = showNowPlaying.value ? String(p ?? '') : '' })   // listen 已經把 payload 拆好交過來
 watch(showNowPlaying, on => {
   if (!on) nowPlaying.value = ''
-  void trayApi.setNowPlaying(on).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(e => console.warn('[ASN] 正在播放開關沒送出', String(e?.message ?? e)))
+  void trayApi.setNowPlaying(on).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ })
 }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
