@@ -275,17 +275,22 @@ test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「�
 
 test('守門：android_known_confirm／forget 前一定先 gate（要憑證、過本人確認）；先回答、再本人確認、最後才記住；只有 mobile-known-peers.mjs 叫這些命令', () => {
   const src = read('../ui/lib/mobile-known-peers.mjs')
-  for (const cmd of ['android_known_confirm', 'android_known_forget']) {
-    const i = src.indexOf(`'${cmd}'`)
+  // 指令名在出口（lib/tauri.mjs 的 makeKnownPeerApi，#2106 ②）；這裡看呼叫順序與是否帶憑證
+  const exit = read('../ui/lib/tauri.mjs')
+  assert.match(exit, /confirm: \(id, challenge\) => call\('android_known_confirm', \{ id, challenge \}\)/, 'confirm 要帶憑證')
+  assert.match(exit, /forget: \(node, challenge\) => call\('android_known_forget', \{ node, challenge \}\)/, 'forget 要帶憑證')
+  assert.match(exit, /token: \(action, node\) => call\('android_known_token', \{ action, node \}\)/)
+  for (const m of ['confirm', 'forget']) {
+    const i = src.indexOf(`api.${m}(`)
     assert.ok(i > 0)
     const start = Math.max(src.lastIndexOf('pick:', i), src.lastIndexOf('forget:', i))
-    assert.ok(src.slice(start, i).includes('await gate('), `${cmd} 前要先過本人確認`)
-    assert.ok(src.slice(i, i + 80).includes('challenge'), `${cmd} 要帶憑證`)
+    assert.ok(src.slice(start, i).includes('await gate('), `${m} 前要先過本人確認`)
+    assert.ok(src.slice(i, i + 40).includes('challenge'), `${m} 要帶憑證`)
   }
   const pick = src.slice(src.indexOf('pick: async'))
-  assert.ok(pick.indexOf("'android_known_answer'") < pick.indexOf('await gate(') && pick.indexOf('await gate(') < pick.indexOf("'android_known_confirm'"), '順序')
+  assert.ok(pick.indexOf('api.answer(') < pick.indexOf('await gate(') && pick.indexOf('await gate(') < pick.indexOf('api.confirm('), '順序')
   const gate = src.slice(src.indexOf('const gate = async'), src.indexOf('return {\n    list:'))
-  assert.ok(gate.indexOf("'android_known_token'") < gate.indexOf('await confirm('), '先要憑證才開本人確認')
+  assert.ok(gate.indexOf('api.token(') < gate.indexOf('await confirm('), '先要憑證才開本人確認')
   assert.match(src, /import \{ confirmWithToken, scanFingerprint \} from '\.\/mobile-confirm\.mjs'/)
   assert.doesNotMatch(src, /confirmViewer/, '不用沒有憑證的那種')
   assert.doesNotMatch(src, /remember|{ node: peer.node, fp/, '不再有「記住這台」、不送指紋')
@@ -437,8 +442,11 @@ test('守門：掃到的字不經過網頁——橋只回狀態字、Rust 命令
   assert.match(mc, /const SCAN_RESULTS = \[\.\.\.RESULTS, 'denied', 'no_camera', 'bad_qr'\]/)
   assert.match(mc, /resolve\(allowed\.includes\(r\) \? r : 'cancel'\)/, '外殼回什麼字都先過白名單，不在名單內一律 cancel')
   const kp = read('../ui/lib/mobile-known-peers.mjs')
-  assert.match(kp, /invoke\('android_known_scan_confirm', \{ node, challenge \}\)/, '只帶節點與憑證')
-  assert.equal((kp.match(/invoke\('android_known_scan_confirm'/g) ?? []).length, 1, '只有 scan 那一處叫')
+  const exit = read('../ui/lib/tauri.mjs')
+  assert.match(exit, /call\('android_known_scan_confirm', \{ node, challenge \}\)/, '只帶節點與憑證')
+  assert.equal((exit.match(/android_known_scan_confirm/g) ?? []).length, 1, '出口只有一處叫')
+  assert.match(kp, /api\.scanConfirm\(node, challenge\)/)
+  assert.equal((kp.match(/api\.scanConfirm\(/g) ?? []).length, 1, '只有 scan 那一處叫')
   const scanFn = kp.slice(kp.indexOf('scan: async node'), kp.indexOf('/** 替這台改名'))
   assert.doesNotMatch(scanFn, /scanText|\.text\b|decoded|JSON\.parse/, '沒有任何讀掃描內容的寫法')
   // 外殼的橋收（回呼編號、憑證），不回傳字串
