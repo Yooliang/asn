@@ -60,7 +60,7 @@ test('設定：顯示一行說明與設定指令，按鈕「複製路徑」送�
 test('守門：askpass-copy 在指令清單裡、樞紐接得住且複製的是路徑；前端呼叫的命令在 Rust 端都有註冊', () => {
   assert.ok(SETTING_OPS.includes('askpass-copy'))
   const list = read('../ui/list.js')
-  assert.ok(list.includes("case 'askpass-copy'") && list.includes("invoke('askpass_helper_info')"))
+  assert.ok(list.includes("case 'askpass-copy'") && list.includes('settingsApi.askpassHelperInfo()') && read('../ui/lib/tauri.mjs').includes("invoke('askpass_helper_info')"))
   assert.ok(list.includes('writeText(askpassInfo.path)'), '複製的是路徑，不是整行指令')
   const lib = read('../src-tauri/src/lib.rs')
   const js = read('../ui/askpass.js')

@@ -12,7 +12,8 @@ test('設定頁有開關，改了會送到後端；後端沒回報時當作開',
   assert.match(panel, /:checked="st\.bridge\.screenWatch"/)
   assert.match(panel, /act\('bridge-screen-watch', \$event\.target\.checked\)/)
   assert.match(list, /case 'bridge-screen-watch': await setBridgeScreenWatch\(value === true\)/)
-  assert.match(list, /invoke\('bridge_set_screen_watch', \{ on \}\)/)
+  assert.match(list, /bridgeApi\.setScreenWatch\(on\)/)
+  assert.match(fs.readFileSync(new URL('../ui/lib/tauri.mjs', import.meta.url), 'utf8'), /setScreenWatch: on => invoke\('bridge_set_screen_watch', \{ on \}\)/)
   assert.match(list, /screenWatch: s\.screen_watch !== false/, '預設開：舊後端沒有這個欄位也顯示開著')
 })
 

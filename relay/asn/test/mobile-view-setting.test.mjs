@@ -17,7 +17,8 @@ test('接線：預設開（舊後端沒有欄位也顯示開著）、開關呼�
   assert.match(list, /mobileView: true/)
   assert.match(list, /mobileView: s\.mobile_view !== false/)
   assert.match(list, /case 'bridge-mobile-view': await setBridgeMobileView\(value === true\)/)
-  assert.match(list, /invoke\('bridge_set_mobile_view', \{ on \}\)/)
+  assert.match(list, /bridgeApi\.setMobileView\(on\)/)
+  assert.match(fs.readFileSync(new URL('../ui/lib/tauri.mjs', import.meta.url), 'utf8'), /setMobileView: on => invoke\('bridge_set_mobile_view', \{ on \}\)/)
   assert.match(list, /mobileView: bridge\.mobileView/, '傳給設定面板')
 })
 

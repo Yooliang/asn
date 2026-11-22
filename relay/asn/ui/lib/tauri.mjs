@@ -200,6 +200,9 @@ export const makeVoiceApi = (call = invoke) => ({
   sttTranscribe: (wav, names) => call('stt_transcribe', names?.length ? { wav, names } : { wav }),   // → 辨識出的文字；沒有名字就不帶 names
   sttCancel: () => call('stt_cancel'),             // 請 Rust 端結束正在跑的辨識程式
   sttInstall: () => call('stt_install'),           // 下載辨識引擎與目前選的模型
+  ttsVoices: () => call('tts_voices'),             // 設定頁「語音」：→ { enabled, voices, default }
+  cfgGet: () => call('voice_cfg_get'),             // 設定頁「語音」：目前存的設定
+  cfgSet: cfg => call('voice_cfg_set', { cfg }),   // 存回 Rust 端（驗證在那裡）
 })
 export const voiceApi = makeVoiceApi()
 // 群組（房間）：讀、發言、附件。電腦版與手機版用同一組方法，只差指令名（手機是 android_room_*），由 cmds 帶進來
@@ -291,8 +294,9 @@ export const makeDeviceNameApi = (call = invoke) => ({
 // 開記錄檔／記錄資料夾（view-log.mjs）
 export const makeLogViewApi = (call = invoke) => ({
   openUiLog: () => call('open_ui_log'),
-  openMachineLogDir: () => call('open_machine_log_dir'),
+  openMachineLogDir: () => call('open_machine_log_dir'),   // 前端不能帶路徑參數
 })
+export const logViewApi = makeLogViewApi()
 // 群組動作（groups.mjs）：後台的群組操作都走 relay_group，以 action 區分
 export const makeGroupActApi = (call = invoke) => ({
   act: (action, body) => call('relay_group', { action, body }),
@@ -300,6 +304,9 @@ export const makeGroupActApi = (call = invoke) => ({
 // 登入頁的開機自啟動開關（login-panel.mjs）
 export const autostartApi = {
   get: () => invoke('autostart_get'),
+  supported: () => invoke('autostart_supported'),
+  blocked: () => invoke('autostart_blocked'),   // → 被擋住的原因文字，沒有就空
+  set: on => invoke('autostart_set', { on }),
 }
 // 手機登入憑證有沒有封存（mobile-login-seal.mjs）
 export const makeLoginSealApi = (call = invoke) => ({
@@ -313,6 +320,40 @@ export const makeUsageApi = (call = invoke) => ({
 export const makeUiLogApi = (call = invoke) => ({
   send: lines => call('ui_log', { lines }),
 })
+
+// ---------- 設定頁的出口（#2106 ⑦）：參數形狀與以前直接 invoke 時完全相同 ----------
+// 外框、關閉視窗時、托盤、意外關閉自動重開（guard）、密碼小幫手資訊
+export const settingsApi = {
+  setFrame: native => invoke('set_frame', { native }),
+  setCloseToTray: tray => invoke('set_close_to_tray', { tray }),
+  trayAvailable: () => invoke('tray_available'),
+  guardGet: () => invoke('guard_get'),
+  guardSet: on => invoke('guard_set', { on }),
+  guardResume: () => invoke('guard_resume'),
+  askpassHelperInfo: () => invoke('askpass_helper_info'),
+}
+// 內建收發室橋的設定（狀態以 Rust 端為準）：每個設定都回新的狀態
+export const bridgeApi = {
+  status: () => invoke('bridge_status'),
+  setRemoteLaunch: on => invoke('bridge_set_remote_launch', { on }),
+  setAutoResume: on => invoke('bridge_set_auto_resume', { on }),
+  setCompactHandoff: (on, n) => invoke('bridge_set_compact_handoff', { on, n }),
+  setTermServer: on => invoke('bridge_set_term_server', { on }),
+  retryTermFetch: () => invoke('bridge_retry_term_fetch'),
+  setPermPhone: on => invoke('bridge_set_perm_phone', { on }),
+  setMobileView: on => invoke('bridge_set_mobile_view', { on }),
+  setRemoteInput: on => invoke('bridge_set_remote_input', { on }),
+  setScreenWatch: on => invoke('bridge_set_screen_watch', { on }),
+  setUnaddressedTo: name => invoke('bridge_set_unaddressed_to', { name }),
+  takeover: () => invoke('bridge_takeover', { confirmed: true }),
+}
+// 自動更新與遠端更新（updater.rs／account.rs）
+export const updateApi = {
+  check: () => invoke('update_check'),
+  install: () => invoke('update_install'),
+  remoteStatus: () => invoke('update_remote_status'),
+  remoteRequest: node => invoke('update_remote_request', { node }),   // 請別台設備自己更新
+}
 
 // ---------- 視窗外框（自訂／Windows 原生） ----------
 // 原生外框：html 加 frame-native，樣式把自畫的標題列、邊框與拖邊緣的把手藏起來

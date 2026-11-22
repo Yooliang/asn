@@ -29,7 +29,7 @@ test('接線：設定頁有兩個控制項，存檔欄位 closeTo，Rust 端註�
   assert.match(html, /v-if="st\.autostart\.supported"/, '不支援的系統隱藏自動啟動開關')
   assert.match(js, /closeTo: closeTo\.value/, '關閉行為存進 asn-me.json')
   for (const cmd of ['set_close_to_tray', 'set_tray_unread', 'autostart_get', 'autostart_set', 'autostart_supported', 'tray_available']) {
-    assert.ok(js.includes(`'${cmd}'`), `前端呼叫 ${cmd}`)
+    assert.ok((js + read('ui/lib/tauri.mjs')).includes(`'${cmd}'`), `前端呼叫 ${cmd}`)
     assert.ok(lib.includes(`tray::${cmd}`), `Rust 註冊 ${cmd}`)
     assert.ok(tray.includes(`pub fn ${cmd}`), `Rust 實作 ${cmd}`)
   }
@@ -42,7 +42,7 @@ test('守門：開發版（target 資料夾底下的執行檔）不能寫開機�
   assert.ok(fn.includes('autostart_check(on, &exe)?;') && fn.indexOf('autostart_check') < fn.indexOf('sys::set'), '寫入前先檢查')
   assert.ok(tray.includes('開發版不能設定開機自動啟動，請用正式安裝的 ASN'))
   assert.ok(lib.includes('tray::autostart_blocked'))
-  assert.ok(js.includes("invoke('autostart_blocked')") && js.includes('blocked: autostart.blocked'))
+  assert.ok(read('ui/lib/tauri.mjs').includes("invoke('autostart_blocked')") && js.includes('autostartApi.blocked()') && js.includes('blocked: autostart.blocked'))
   assert.match(panel, /st\.autostart\.blocked/)
   assert.match(panel, /:disabled="st\.autostart\.busy \|\| \(!!st\.autostart\.blocked && !st\.autostart\.on\)"/, '開發版反灰（但已誤寫的項目仍能關掉）')
 })

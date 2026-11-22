@@ -256,7 +256,9 @@ test('視窗與系統匣：「ASN 意外關閉時自動重新開啟」預設關�
   // 接線：預設關（以系統上的排程為準，不另存）；讀狀態、開關、恢復都走後端指令
   const js = read('list.js')
   assert.match(js, /const guard = reactive\(\{ supported: false, on: false, busy: false, paused: '', blocked: '' \}\)/)
-  for (const c of ["invoke('guard_get')", "invoke('guard_set', { on })", "invoke('guard_resume')"]) assert.ok(js.includes(c), c)
+  const ex = fs.readFileSync(new URL('../ui/lib/tauri.mjs', import.meta.url), 'utf8')   // 指令名在出口
+  for (const c of ["invoke('guard_get')", "invoke('guard_set', { on })", "invoke('guard_resume')"]) assert.ok(ex.includes(c), c)
+  for (const c of ['settingsApi.guardGet()', 'settingsApi.guardSet(on)', 'settingsApi.guardResume()']) assert.ok(js.includes(c), c)
   const lib = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
   assert.ok(lib.includes('guard::guard_get, guard::guard_set, guard::guard_resume'))
 })

@@ -8,8 +8,11 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 test('open_machine_log_dir：前端不能帶路徑參數', () => {
   const list = fs.readFileSync(path.join(root, 'ui/list.js'), 'utf8')
-  assert.match(list, /invoke\('open_machine_log_dir'\)/)
-  assert.doesNotMatch(list, /invoke\(\s*['"]open_machine_log_dir['"]\s*,/)
+  const ex = fs.readFileSync(path.join(root, 'ui/lib/tauri.mjs'), 'utf8')   // 指令名在出口
+  assert.match(list, /logViewApi\.openMachineLogDir\(\)/)
+  assert.doesNotMatch(list, /openMachineLogDir\([^)]/)
+  assert.match(ex, /call\('open_machine_log_dir'\)/)
+  assert.doesNotMatch(ex, /call\(\s*['"]open_machine_log_dir['"]\s*,/)
 })
 
 test('open_machine_log_dir：Tauri 指令簽名沒有路徑參數', () => {

@@ -25,6 +25,24 @@ test('已清理的檔案：沒有沒註解的空 catch（要嘛 console.warn，�
   }
 })
 
+// list.js 還沒整檔清完，不在 CLEANED：先守住「第一批」搬過的區段（#2106 ⑦）
+const LIST_PART1 = [
+  ['const autostart = reactive', '// 自動更新：啟動與每'],   // 托盤、開機自啟、guard、bridge、密碼小幫手資訊
+  ['const checkUpdate =', '// 看別台畫面（#597）'],        // 更新檢查、安裝、遠端更新
+  ['const setFrame = async', '// 指引、設定的聊天窗'],      // 外框、關閉行為、guard、開機自啟、bridge 設定
+  ['const ttsVoices = ref', '// 設定頁「帳號」'],           // 語音設定
+]
+test('list.js 第一批搬過的區段：沒有沒註解的空 catch、畫面不直接放 e.message', () => {
+  const s = read('list.js')
+  for (const [a, b] of LIST_PART1) {
+    const i = s.indexOf(a), j = s.indexOf(b, i)
+    assert.ok(i >= 0 && j > i, `找不到區段 ${a}`)
+    const seg = s.slice(i, j)
+    assert.deepEqual(seg.match(EMPTY_CATCH) ?? [], [], `${a} 區段有沒註解的空 catch`)
+    assert.doesNotMatch(seg, /(?:=\s*|say\()(?:String\()?e\??\.message/, `${a} 區段直接放 e.message（改走 plainMessage）`)
+  }
+})
+
 test('空 catch 偵測本身有效：會抓到四種寫法、放行有註解的', () => {
   for (const bad of ['try { a() } catch {}', 'try { a() } catch (e) { }', 'p.catch(() => {})', 'p.catch(e => { })']) assert.equal((bad.match(EMPTY_CATCH) ?? []).length, 1, bad)
   for (const ok of ['try { a() } catch { /* 理由 */ }', 'p.catch(() => { /* 理由 */ })', "try { a() } catch (e) { console.warn('[ASN]', 'x') }"]) assert.equal((ok.match(EMPTY_CATCH) ?? []).length, 0, ok)

@@ -60,8 +60,9 @@ test('守門：新增的指令都在清單裡，樞紐接得住，Rust 端有註
   for (const op of ['bridge-launch', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no']) assert.ok(SETTING_OPS.includes(op), op)
   const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   // bridge_set_enabled 還在 Rust 端註冊，但收發室已固定開啟，前端不再呼叫
-  for (const cmd of ['bridge_status', 'bridge_set_remote_launch', 'bridge_takeover']) {
-    assert.ok(list.includes(`invoke('${cmd}'`), `前端呼叫 ${cmd}`)
+  const ex = fs.readFileSync(new URL('../ui/lib/tauri.mjs', import.meta.url), 'utf8')   // 指令名在出口；list.js 走 bridgeApi
+  for (const [cmd, call] of [['bridge_status', 'bridgeApi.status()'], ['bridge_set_remote_launch', 'bridgeApi.setRemoteLaunch(on)'], ['bridge_takeover', 'bridgeApi.takeover()']]) {
+    assert.ok(ex.includes(`invoke('${cmd}'`) && list.includes(call), `前端呼叫 ${cmd}`)
     assert.ok(fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8').includes(`${cmd},`), `lib.rs 註冊 ${cmd}`)
   }
   // 畫面任何地方都不顯示節點代號：新區塊不引用 node
