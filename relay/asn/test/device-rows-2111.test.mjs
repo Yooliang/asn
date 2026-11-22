@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { renderToString as ssrRender } from 'vue/server-renderer'
+// 共用元件的插槽會在輸出裡留下片段標記（<!--[-->、<!--]-->），比對畫面文字前先拿掉
+const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { DEVICE_BLOCK_REASON, DEVICE_ROW_TEXT, accountDeviceRows, accountInUse, rosterView } from '../ui/lib/account-roster.mjs'
 import { ACCT_SWITCH_REASON } from '../ui/lib/mobile-acct.mjs'
@@ -88,7 +90,7 @@ test('#2110 卡片頂端的「使用中」以設備列為準，兩邊不互相�
   const st = { devices, accounts: { list: [], current: null, busy: false, msg: '', allowSwitch: true }, myAccounts: my }
   const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'accounts', meAv: '' }) }))
   assert.ok(html.includes('<span class="dv-cur">使用中</span>'), '頂端標籤跟著本機')
-  assert.ok(/class="aero-btn dv-devbtn current" disabled>使用中</.test(html), '本機那列是使用中')
+  assert.ok(/class="asn-btn lv-secondary st-current fixed dv-devbtn"[^>]*disabled/.test(html) && html.includes('>使用中<'), '本機那列是使用中')
   assert.equal(accountInUse(rows([devices[1]]), true), false, '設備列沒有任何一列在用，頂端就不寫使用中')
   assert.equal(accountInUse([], true), true, '設備列表是空的才退回後台的說法')
   assert.equal(accountInUse([], false), false)
@@ -107,7 +109,7 @@ test('#2111 電腦與手機用同一個判斷函式、同一份文字：同一�
   globalThis.Vue = Vue
   const st = { devices, accounts: { list: [], current: null, busy: false, msg: '', allowSwitch: true }, myAccounts: my }
   const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'accounts', meAv: '' }) }))
-  const shown = [...html.matchAll(/dv-devbtn (current|switch|busy|blocked)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2]])
+  const shown = [...html.matchAll(/<button[^>]*class="asn-btn lv-secondary(?: st-(current|busy|blocked))? fixed dv-devbtn"[^>]*>([^<]*)</g)].map(m => [m[1] ?? 'switch', m[2]])
   assert.deepEqual(shown, expected.map(r => [r.state, DEVICE_ROW_TEXT[r.state]]))
   for (const r of expected.filter(x => x.reason)) assert.ok(html.includes(r.reason), `電腦畫面有原因：${r.reason}`)
   assert.deepEqual(expected.map(r => r.reason), ['', 'ASN 尚未開啟', ''])
@@ -124,10 +126,14 @@ test('#2111 電腦與手機用同一個判斷函式、同一份文字：同一�
 
 test('#2111 鈕的樣式：電腦 92×28、手機 100×40 固定尺寸靠右；使用中深灰、不能切換虛線；黃色不在這裡出現', () => {
   const css = read('ui/style.css'), m = read('ui/mobile.css')
-  assert.match(css, /\.dv-devs \.dv-devrow \.dv-devbtn\{[^}]*width:92px;min-width:92px;max-width:92px;height:28px/)
+  // 尺寸與狀態色由共用按鈕（kit.css）負責：設備列的鈕是 fixed（92 寬）＋ st-current／st-busy／st-blocked，頁面樣式不再自己覆寫
+  const kit = read('ui/kit.css')
+  assert.match(kit, /\.asn-btn\.fixed\{width:92px\}/)
+  assert.match(kit, /--btn-h:28px/)
+  assert.doesNotMatch(css, /\.dv-devbtn\{|\.dv-devbtn\./, '頁面樣式不再覆寫設備鈕的尺寸與狀態色')
   assert.match(m, /\.m-dv-dev\{[^}]*width:100px;min-width:100px;max-width:100px;height:40px/)
-  assert.match(css, /\.dv-devbtn\.current[^{]*\{[^}]*background:#4b5058[^}]*color:#fff/)
-  assert.match(css, /\.dv-devbtn\.blocked[^{]*\{[^}]*dashed/)
+  assert.match(kit, /\.asn-btn\.st-current[^{]*\{[^}]*background:var\(--kit-current\)[^}]*color:#fff/)
+  assert.match(kit, /\.asn-btn\.st-blocked[^{]*\{[^}]*dashed/)
   assert.match(m, /\.m-dv-dev\.current[^{]*\{[^}]*background:#4b5058[^}]*color:#fff/)
   assert.match(m, /\.m-dv-dev\.blocked[^{]*\{[^}]*dashed/)
   const dvBlock = css.slice(css.indexOf('.dv-devs{'), css.indexOf('.dv-code{'))

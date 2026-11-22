@@ -12,8 +12,8 @@ export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
   }
   const sel = mobile ? '.m-dv-my .m-dv-devrow .m-dv-dev' : '.dv-my .dv-devrow .dv-devbtn';
   let btns = [];
-  for (let i = 0; i < 60; i++) { btns = [...document.querySelectorAll(sel)].filter(vis); if (btns.some(b => b.classList.contains('current'))) break; await sleep(100) }
-  const on = btns.filter(b => b.classList.contains('current'));
+  for (let i = 0; i < 60; i++) { btns = [...document.querySelectorAll(sel)].filter(vis); if (btns.some(b => (b.classList.contains('current') || b.classList.contains('st-current')))) break; await sleep(100) }
+  const on = btns.filter(b => (b.classList.contains('current') || b.classList.contains('st-current')));
   const WORDS = ['使用中', '切換', '切換中…', '不能切換'];
   for (const b of btns) { const t = b.textContent.trim(); if (!WORDS.includes(t)) return { ok: false, why: '設備鈕上的字「' + t + '」不在固定的四種裡' } }
   // #2111 ②：同一張卡裡所有鈕同尺寸（電腦 92×28、手機 100×40）、同一欄靠右（右緣一致、貼近卡片右邊）

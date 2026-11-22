@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { renderToString as ssrRender } from 'vue/server-renderer'
+// 共用元件的插槽會在輸出裡留下片段標記（<!--[-->、<!--]-->），比對畫面文字前先拿掉
+const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { createAccountsUi } from '../ui/lib/claude-accounts.mjs'
 import { accountDeviceRows, accountInUse, rosterView } from '../ui/lib/account-roster.mjs'
@@ -225,8 +227,8 @@ test('#2111 電腦畫面：結果句出現在被按的那一列正下方，別�
   assert.match(fail, /<span class="dv-devres fail" role="status">沒有切換成功：那台的 ASN 尚未開啟。<\/span>/)
   assert.match(fail, />切換<\/button>/, '失敗後鈕是「切換」，可以再按')
   const busy = await renderPanel({ [kW]: { phase: 'busy', text: '', seq: 1 } }, twoDevs())
-  assert.match(busy, /dv-devbtn busy" disabled[^>]*>切換中…</, '切換中那列的鈕寫「切換中…」')
-  assert.equal((busy.match(/dv-devbtn busy/g) ?? []).length, 1, '只有被按的那一列')
+  assert.match(busy, /class="asn-btn lv-secondary st-busy fixed dv-devbtn"[^>]*disabled[^>]*>切換中…</, '切換中那列的鈕寫「切換中…」')
+  assert.equal((busy.match(/st-busy fixed dv-devbtn/g) ?? []).length, 1, '只有被按的那一列')
   assert.ok(!busy.includes('dv-devres'), '切換中不寫句子（鈕上已經寫了）')
 })
 

@@ -96,6 +96,6 @@ test('Rust 接線：加入與整份存檔都經過驗證函式；使用時的三
 
 test('樣式：清單列、按鈕靠右（列內 margin-left:auto）、窄版加入鈕靠右', () => {
   const css = rd('ui/style.css')
-  assert.match(css, /\.launch-cwd-list \.aero-btn\{[^}]*margin-left:auto/)
+  assert.match(css, /\.launch-cwd-list \.asn-btn\{[^}]*margin-left:auto/)
   assert.match(css, /@media \(max-width:560px\)\{\.launch-cwd-add\{justify-content:flex-end\}\}/)
 })
