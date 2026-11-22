@@ -222,6 +222,29 @@ export const makeKnownPeerApi = (call = invoke) => ({
   forget: (node, challenge) => call('android_known_forget', { node, challenge }),
   scanConfirm: (node, challenge) => call('android_known_scan_confirm', { node, challenge }),   // → ok｜mismatch｜bad_qr｜blocked｜locked｜not_verified
 })
+// 設備細部頁「安裝並登入 Claude Code」：確認、取消、開關。安裝與驗證全在 Rust（agent_setup）
+export const makeAgentSetupApi = (call = invoke) => ({
+  remoteAllowGet: () => call('agent_setup_remote_allow_get'),                // → true｜false
+  remoteAllowSet: on => call('agent_setup_remote_allow_set', { on }),
+  plan: () => call('agent_setup_plan'),                                      // → 要做什麼的說明句
+  start: () => call('agent_setup_start', { confirmed: true }),               // 本人在確認窗按過才會呼叫
+  cancel: () => call('agent_setup_cancel'),                                  // 請它在這一步做完後停下
+  cliLogin: toolId => call('ai_cli_login', { toolId }),                      // 開登入用的終端機
+})
+// 手機看／打字那台電腦的終端：發起前的本人確認在 mobile-remote-view.mjs，這裡只管送指令
+export const makeRemoteStartApi = (call = invoke) => ({
+  available: node => call('term_view_remote_available', { node }),           // → true｜false
+  start: (toNode, partner, machine) => call('term_view_remote_start', { toNode, partner, machine: machine || null }),   // → { id, expires_s }
+  startInput: (toNode, partner, machine, challenge) => call('term_view_remote_start', { toNode, partner, machine: machine || null, scope: 'input', challenge }),   // 帶本人驗證的一次性憑證
+})
+// 截圖覆蓋視窗（ui/shot.js）：每個螢幕一扇，各自取凍結畫面、回報選取範圍
+export const shotOverlayApi = {
+  image: index => invoke('shot_image', { index }),
+  ready: () => invoke('shot_ready'),
+  focus: () => invoke('shot_focus'),
+  cancel: () => invoke('shot_cancel'),
+  pick: (index, x, y, w, h) => invoke('shot_pick', { index, x, y, w, h }),
+}
 
 // ---------- 視窗外框（自訂／Windows 原生） ----------
 // 原生外框：html 加 frame-native，樣式把自畫的標題列、邊框與拖邊緣的把手藏起來

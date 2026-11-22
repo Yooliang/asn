@@ -18,13 +18,11 @@ const src = f => fs.readFileSync(f, 'utf8')
 export const PENDING = {
   'askpass.js': 2,
   'lib/account-roster.mjs': 2,
-  'lib/agent-install.mjs': 6,
   'lib/claude-accounts.mjs': 24,
   'lib/device-rename.mjs': 2,
   'lib/groups.mjs': 1,
   'lib/login-panel.mjs': 1,
   'lib/mobile-login-seal.mjs': 1,
-  'lib/mobile-remote-view.mjs': 5,
   'lib/quota-readers.mjs': 6,
   'lib/relogin-flow.mjs': 3,
   'lib/term-chat.mjs': 2,
@@ -36,7 +34,6 @@ export const PENDING = {
   'm.js': 49,
   'onboard.js': 6,
   'setup-progress.js': 2,
-  'shot.js': 5,
   'toast.js': 2,
 }
 

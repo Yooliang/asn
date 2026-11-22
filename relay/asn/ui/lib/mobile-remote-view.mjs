@@ -5,7 +5,7 @@
 // 守門測試鎖住 m.js、m.html、其他 mobile*.mjs 不准引用 remoteViewApi、remoteInputApi。
 // 指令和電腦版同名同參數（term_view_remote_available／start／input／set／stop），事件也一樣；差別只在 start 之前的確認。
 // 打字的那台看有沒有開「允許遠端在這台打字」（0.2.33 起不再跳確認框），送字只送到 Rust 端登記過（那台接受過）的工作階段。
-import { invoke as tauriInvoke, listen, remoteInputApi, remoteViewApi } from './tauri.mjs'
+import { invoke as tauriInvoke, listen, makeKnownPeerApi, makeRemoteStartApi, remoteInputApi, remoteViewApi } from './tauri.mjs'
 import { NO_LOCK_TEXT, confirmViewer, confirmWithToken } from './mobile-confirm.mjs'
 import { normalizeList } from './mobile-known-peers.mjs'
 
@@ -20,12 +20,13 @@ export const CANCELLED = 'cancel'
  * 這時就算確認回 ok 也不送 start（不然被看的那台會跳允許框、閃紅條、寄通知信）。
  */
 export function makeMobileRemoteViewApi({ confirm = () => confirmViewer(), invoke = tauriInvoke } = {}) {
+  const api = makeRemoteStartApi(invoke)   // 後端呼叫一律走 tauri.mjs 的具名出口；invoke 仍可注入（測試用）
   return {
-    available: node => invoke('term_view_remote_available', { node }),
+    available: node => api.available(node),
     start: async (toNode, partner, machine, opts = {}) => {
       const r = await confirm()
       if (typeof opts?.wanted === 'function' && !opts.wanted()) throw Object.assign(new Error(''), { code: CANCELLED })
-      if (r === 'ok') return invoke('term_view_remote_start', { toNode, partner, machine: machine || null })
+      if (r === 'ok') return api.start(toNode, partner, machine)
       if (r === 'no_lock') throw Object.assign(new Error(NO_LOCK_TEXT), { code: 'no_lock' })
       throw Object.assign(new Error(''), { code: CANCELLED })
     },
@@ -49,19 +50,20 @@ export const INPUT_NEEDS_CONFIRM_TEXT = '先在「設定 → 設備」打開這�
  * opts.wanted() 回 false（那一次已作廢）就不再往下。send／pause／stop 和電腦版的 remoteInputApi 相同（命令同名）。
  */
 export function makeMobileRemoteInputApi({ confirm = challenge => confirmWithToken(challenge), invoke = tauriInvoke, send = remoteInputApi.send } = {}) {
+  const api = makeRemoteStartApi(invoke), peersApi = makeKnownPeerApi(invoke)   // 同上：走出口、invoke 可注入
   const cancelled = () => Object.assign(new Error(''), { code: CANCELLED })
   return {
     start: async (toNode, partner, machine, opts = {}) => {
       const wanted = () => typeof opts?.wanted !== 'function' || opts.wanted()
       let peers = null
-      try { peers = normalizeList(await invoke('android_known_list')) } catch (e) { console.info('[ASN] 認得的電腦讀不到', String(e?.message ?? e)) }
+      try { peers = normalizeList(await peersApi.list()) } catch (e) { console.info('[ASN] 認得的電腦讀不到', String(e?.message ?? e)) }
       if (peers && !peers.some(p => p.node === toNode && p.confirmed)) throw Object.assign(new Error(INPUT_NEEDS_CONFIRM_TEXT), { code: 'need_confirm' })
       if (!wanted()) throw cancelled()
-      const challenge = await invoke('android_known_token', { action: 'input', node: toNode })
+      const challenge = await peersApi.token('input', toNode)
       if (typeof challenge !== 'string' || !challenge) throw cancelled()
       const r = await confirm(challenge)
       if (!wanted()) throw cancelled()
-      if (r === 'ok') return invoke('term_view_remote_start', { toNode, partner, machine: machine || null, scope: 'input', challenge })
+      if (r === 'ok') return api.startInput(toNode, partner, machine, challenge)
       if (r === 'no_lock') throw Object.assign(new Error(NO_LOCK_TEXT), { code: 'no_lock' })
       throw cancelled()
     },
