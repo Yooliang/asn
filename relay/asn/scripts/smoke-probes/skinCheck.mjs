@@ -13,7 +13,7 @@ export const skinProbeSource = (probe = {}) => probe.line ? lineProbeSource(prob
   // 危險動作（忘記這台、移除帳號、登出、退出群組…）的紅色在現代底下還要在：放幾顆同樣 class 的按鈕量顏色
   const host = document.createElement('div'); host.className = 'logout-set'; document.body.appendChild(host);
   const reds = [];
-  for (const cls of ['aero-btn danger', 'aero-btn dv-danger', 'gs-btn danger', 'aero-btn logout-btn', 'm-btn m-danger', 'm-btn m-dv-danger']) { const b = document.createElement('button'); b.className = cls; b.textContent = '移除'; host.appendChild(b); reds.push([cls, b]) }
+  for (const cls of ['aero-btn danger', 'aero-btn dv-danger', 'gs-btn danger', 'm-btn m-danger', 'm-btn m-dv-danger']) { const b = document.createElement('button'); b.className = cls; b.textContent = '移除'; host.appendChild(b); reds.push([cls, b]) }
   const redOf = b => { const c = getComputedStyle(b); return cls => (cls === 'm-btn m-dv-danger' ? c.backgroundColor : c.color) };
   const bad = reds.filter(([cls, b]) => redOf(b)(cls) !== 'rgb(179, 38, 30)').map(([cls, b]) => cls + '＝' + redOf(b)(cls));
   host.remove();

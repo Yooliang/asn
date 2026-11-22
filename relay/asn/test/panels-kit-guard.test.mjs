@@ -70,3 +70,11 @@ test('#2105 登出、撤銷、結束是危險鈕；取消與一般動作不是',
   assert.equal(find(CLOUD, 'revoke(r.id)').text, "{{ confirmId === r.id ? '確認撤銷' : '撤銷' }}")
   assert.equal(find(LOGIN, 'ask').text, '登出')
 })
+
+// 設定頁與內嵌面板都搬完了：這幾條舊按鈕的規則不得回來（#2105 清理）
+test('#2105 舊按鈕規則已清：.settings／.av-btns 底下的 aero-btn 與 logout-btn 不得再出現在三套樣式', () => {
+  for (const f of ['style.css', 'line.css', 'modern.css']) {
+    const css = fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8')
+    assert.doesNotMatch(css, /\.settings \.aero-btn|\.av-btns \.aero-btn|\.logout-btn/, `${f} 還有已沒人用的舊按鈕規則`)
+  }
+})

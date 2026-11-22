@@ -51,12 +51,11 @@ test('勾選框不被 `.settings input` 的 flex:1／外框撐開：有專屬的
   assert.ok(cmp(specificity(sel), specificity('.settings input')) > 0, '勾選框規則比通用的 input 規則重')
 })
 
-test('表單元件統一：下拉、文字輸入、多行輸入同一套外框；按鈕有統一高度', () => {
+test('表單元件統一：下拉、文字輸入、多行輸入同一套外框', () => {
   const all = rules.find(x => x.sels.some(s => /^\.settings select/.test(s)))
   assert.ok(all, '有統一的 .settings select／textarea／input 規則')
   assert.ok(/border:\s*1px solid var\(--line\)/.test(all.body) && /border-radius:\s*4px/.test(all.body))
   assert.ok(all.sels.some(s => /textarea/.test(s)) && all.sels.some(s => /input:not/.test(s)))
-  assert.ok(rules.some(x => x.sels.some(s => /^\.settings \.aero-btn/.test(s)) && /min-height/.test(x.body)))
 })
 
 // ---------- 更新頁的版面 ----------
