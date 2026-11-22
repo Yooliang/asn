@@ -1,15 +1,11 @@
 {
-  "version": "0.2.63",
-  "notes": "- 新功能：使用中的 Claude 帳號訂閱失效時，ASN 會偵測並回報，擁有者會收到通知。（#1646、#2096、#2102）",
-  "pub_date": "2026-11-22T08:26:48.021Z",
+  "version": "0.2.64",
+  "notes": "- 改善：帳號頁拿掉看不懂的說明；舊的額度只寫時間，額度條改成淡色。（#2111、#2112）\n- 改善：工具狀態、資料夾、外掛的變動都會寫進記錄，記錄檔改成保留舊檔。（#2104、#2108、#2109）\n- 新功能：先內建「進行安裝／進行更新」，入口暫不開放。（#1548、#2099）",
+  "pub_date": "2026-11-22T11:07:10.207Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjQzbWcyeVhYZmtFRjRZV2hJNWxvZ09WemNVeFhDbEI2QXdHMmN4QThvS0VSRUtKcGl3UGk4QS9KVTdnT0loNDVMTkVOWjVkbEJBRlhzWHBZVnNkOXdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzM2MDA3CWZpbGU6QVNOXzAuMi42M194NjQtc2V0dXAuZXhlCk1sY1c1QXFaOEUzQXdKWGxqRVFnclJZV0xRUE83SjhxVHhVVStPRFdTNWZ6Um11bUdZVmwzcklFWnl0NXVxbW9sU1d5ckpTY25SSmZtTDF1WUlxd0RnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.63_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNPMFU1MjRqN1oxc1dTWlZPYm9DeDlZT1krM0xOS2JKY3c3eS9XRCszS08yTDZ5VUc4Z0YzQjNuUkVUWTFHQ3l0MGh2YkNtTEdWbnJPVTRYNnNuT3dvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzM2NTg3CWZpbGU6QVNOXzAuMi42M19hbWQ2NC5BcHBJbWFnZQpjZnpMR1BxWUtHRG1LaWxLN0xXZC9yS3lHcEViTDNKQVZPN0U4VWJuYmNQcDVCNGR3dEJSRHFlOVlqSjV5aUdmRmpNYjlvaWRSMkM0SS9idS9BS3pCQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.63_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRIV1k1OG5xQzk3Ym1Tb3h3YlRCT1hMWmRDM21MK0oya2gySmFWbGEwZGduYWVIOG1qbkZuTXJmRW42K0EvOFlkWTdsVVlKbDJxUHJ6K2xBbTY4QWcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzQ1NjI5CWZpbGU6QVNOXzAuMi42NF94NjQtc2V0dXAuZXhlCkVZckpWcytoakRjUzcyT1VKUU4veGVTVTE4ayswNmt2OXY1bmFnc2hSWm1kNzlxb2NaeWtVdy9HbUlRTHdLWUJQdTROM0dNbE9ZaGFscmk3cE41dkFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.64_x64-setup.exe"
     }
   }
 }
