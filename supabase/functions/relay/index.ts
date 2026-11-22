@@ -834,7 +834,7 @@ async function handle(req: Request): Promise<Response> {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     // 手機（member 節點）靠本人簽章才准看別台清單、送切換；帳號列表（acct_roster，#374）只認簽章；其他動作不讀簽章
     const signedAcct = (action === "acct_list" || action === "acct_switch" || action === "acct_roster") ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
-    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedAcct, sigStateOf(signedAcct, req.headers.get(SIGN_HEADER)), requireSignedFlag(Deno.env.get("ASN_REQUIRE_SIGNED_ACCT")));
+    const r = await handleAcctAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring, onSubLapsed: (id) => signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "owner_mail", me.id, id)) }, me, action, params, signedAcct, sigStateOf(signedAcct, req.headers.get(SIGN_HEADER)), requireSignedFlag(Deno.env.get("ASN_REQUIRE_SIGNED_ACCT")));
     return json(r.status, r.body);
   }
   // 手機確認終端送字／代答（見 _shared/term_request.ts）：桌面用節點金鑰建立、領取、回報；手機用本人簽章列出與決定（沒簽章一律 403）

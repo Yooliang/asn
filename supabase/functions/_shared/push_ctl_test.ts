@@ -170,7 +170,7 @@ Deno.test("沒有要推的（不在線、60 秒內、沒權杖）：不送", asy
 Deno.test("守門：relay/index.ts 只在『寄給本人』『等待通知寄出』『建立確認請求成功』之後推，且不把用戶端參數傳進去", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   const calls = [...src.matchAll(/notifyPush\(\{.*?, fcm \}, "(\w+)", ([^)]*)\)/g)].map((m) => [m[1], m[2].trim()]);
-  assertEquals(calls.sort(), [["confirm", "me.id, id"], ["confirm", "me.id, id"], ["owner_mail", "me.id, sent.id"], ["waiting", "me.id, null"]]);   // confirm：建立請求成功後（onCreated）才推，編號來自資料庫回應
+  assertEquals(calls.sort(), [["confirm", "me.id, id"], ["confirm", "me.id, id"], ["owner_mail", "me.id, id"], ["owner_mail", "me.id, sent.id"], ["waiting", "me.id, null"]]);   // owner_mail me.id, id：訂閱失效通知（#1646），onSubLapsed 的 id 只來自資料庫回的 mail_ids   // confirm：建立請求成功後（onCreated）才推，編號來自資料庫回應
   assert(src.includes('typeof (sent as { fanout?: unknown }).fanout === "number"'), "寄給本人才有 fanout");
   assert(src.includes('data?.notify === "sent"'));
   assertEquals(src.includes("p_user"), false, "index.ts 不自己組收件人");

@@ -216,3 +216,26 @@ Deno.test("acct_roster：後台回的 sub_state 原樣傳給用戶端", async ()
   const r = await handleAcctAction(deps, { id: "W" }, "acct_roster", {}, "11111111-1111-1111-1111-111111111111");
   assertEquals(r, { status: 200, body: data });
 });
+
+Deno.test("acct_report 訂閱失效通知：資料庫回 mail_ids 才推播、敲門鈴；沒有（舊函式）不推；推播丟例外不影響回報結果", async () => {
+  const MAIL = "22222222-2222-2222-2222-222222222222";
+  const body = { accounts: [{ vendor: "claude", email: "a@x.test", plan: "max", current: true, sub_state: "lapsed" }] };
+  const run = async (answer: unknown, onSubLapsed?: (id: string) => void) => {
+    const f = fakeDeps((c) => (c.fn === "asn_relay_acct_report" ? answer : { ok: true }));
+    const r = await handleAcctAction({ ...f.deps, onSubLapsed }, { id: "W" }, "acct_report", body);
+    return { r, ...f };
+  };
+  const pushed: string[] = [];
+  const a = await run({ ok: true, count: 1, mail_ids: [MAIL, "不是編號", 5], bell_topics: ["bell-W", "bell-W"] }, (id) => pushed.push(id));
+  assertEquals(a.r, { status: 200, body: { ok: true, count: 1 } });
+  assertEquals(pushed, [MAIL], "只推合格的信件編號");
+  assertEquals(a.rings, ["bell-W"], "門鈴去重");
+  const pushed2: string[] = [];
+  const b = await run({ ok: true, count: 1 }, (id) => pushed2.push(id));
+  assertEquals(b.r.status, 200);
+  assertEquals(pushed2, [], "舊資料庫函式沒有 mail_ids：不推");
+  const c = await run({ ok: true, count: 1, mail_ids: [MAIL] }, () => { throw new Error("push down"); });
+  assertEquals(c.r, { status: 200, body: { ok: true, count: 1 } }, "推播出錯不影響回報");
+  const d = await run({ ok: true, count: 1, mail_ids: [MAIL] });
+  assertEquals(d.r.status, 200, "沒給 onSubLapsed 也不壞");
+});
