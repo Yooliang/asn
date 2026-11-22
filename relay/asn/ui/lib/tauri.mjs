@@ -246,6 +246,25 @@ export const shotOverlayApi = {
   pick: (index, x, y, w, h) => invoke('shot_pick', { index, x, y, w, h }),
 }
 
+// 引導／登入視窗的啟動資訊與收尾（#2106 ④）：startup_info 是這個視窗要知道的版本、節點、能不能略過登入等
+export const shellApi = {
+  startupInfo: () => invoke('startup_info'),
+  quitApp: () => invoke('quit_app'),
+  showMain: () => invoke('show_main'),                              // --shot 截圖時才用：把主視窗顯示出來
+  captureUiReady: tag => invoke('capture_ui_ready', { tag }),       // --shot：畫面畫好的標記
+  takeShot: tab => invoke('take_shot', { tab }),                    // --shot：截圖存檔
+}
+// 引導第 3 步「連接你的 AI 工具」：檢查／安裝 Claude 的擴充
+export const claudeModApi = {
+  check: () => invoke('claude_mod_check'),
+}
+// 設備細部頁「重新登入 Claude」：別台走手機同一套請求（mode 'relogin'），本機開官方登入終端（#1645）
+export const makeReloginApi = (call = invoke) => ({
+  remoteStatus: () => call('setup_remote_status'),                           // → { nodes: [...] }
+  remoteRequest: node => call('setup_remote_request', { node, mode: 'relogin' }),
+  cliLogin: toolId => call('ai_cli_login', { toolId }),                      // 開登入用的終端機
+})
+
 // ---------- 視窗外框（自訂／Windows 原生） ----------
 // 原生外框：html 加 frame-native，樣式把自畫的標題列、邊框與拖邊緣的把手藏起來
 export const applyFrame = native => document.documentElement.classList.toggle('frame-native', native === true)

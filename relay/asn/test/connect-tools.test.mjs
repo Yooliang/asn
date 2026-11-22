@@ -47,8 +47,8 @@ test('接線：只有電腦版的引導頁有這一步（名字填好之後）�
   assert.match(html, /@done="connect = true"/)
   assert.doesNotMatch(fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8'), /connect-step/, '手機版不需要')
   const js = fs.readFileSync(new URL('../ui/onboard.js', import.meta.url), 'utf8')
-  assert.match(js, /modInstall: \(\) => invoke\('claude_mod_check'\)/)
-  assert.match(js, /piLogin: \(\) => invoke\('ai_cli_login', \{ toolId: 'pi' \}\)/)
+  assert.match(js, /modInstall: \(\) => claudeModApi\.check\(\)/)
+  assert.match(js, /piLogin: \(\) => makeAgentSetupApi\(\)\.cliLogin\('pi'\)/)   // 指令名在 tauri.mjs（#2106 ④）
   const sp = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   assert.doesNotMatch(sp, /act\('claude-mod-auto'/, '設定裡不能再有關掉 Claude 外掛自動安裝的開關')
   assert.doesNotMatch(sp, /aria-label="Claude 外掛"[\s\S]{0,400}type="checkbox"/, 'Claude 外掛不再是打勾框，只是一行狀態')
