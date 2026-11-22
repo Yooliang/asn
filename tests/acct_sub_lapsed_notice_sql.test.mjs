@@ -167,3 +167,17 @@ test('實跑：回復檔跑回去後不再寄、回傳沒有 mail_ids', { skip }
 })
 
 closeAtEnd()
+
+// 二審：寄信丟例外時，整份回報不能回滾（否則下一輪又判成轉換、又丟，這台的帳號回報永遠寫不進去）
+test('實跑：send_notice 丟例外時回報仍寫入、仍回 ok，下一輪不再判成轉換', { skip }, async () => {
+  const db = await setup()
+  await db.exec(`create or replace function public.asn_relay_send_notice(p_node text, p_topic text, p_body text, p_limit integer default 3, p_window interval default interval '1 hour') returns jsonb language plpgsql as $$
+    begin raise exception 'boom'; end $$;`)
+  await rep(db, 'W', [{ ...A, sub_state: 'active' }])
+  const r = await rep(db, 'W', [{ ...A, sub_state: 'lapsed' }])
+  assert.equal(r.ok, true, '回報照樣成功'); assert.equal(r.count, 1)
+  assert.deepEqual(r.mail_ids, []); assert.deepEqual(r.bell_topics, [])
+  const stored = (await db.query(`select accounts from relay.asn_accounts where node = 'W'`)).rows[0].accounts
+  assert.equal(stored[0].sub_state, 'lapsed', '狀態有寫進去')
+  assert.deepEqual((await rep(db, 'W', [{ ...A, sub_state: 'lapsed' }])).mail_ids, [], '已存成 lapsed，下一輪不再判成轉換')
+})

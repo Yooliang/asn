@@ -96,13 +96,19 @@ begin
     foreach v_email in array v_alerts loop
       v_body := v_computer || '：Claude 訂閱已失效' || E'\n'
         || '帳號 ' || v_email || ' 的訂閱已失效，這台的 Claude 夥伴會停擺。請到「設備與帳號」切換帳號或續訂。';
-      v_res := public.asn_relay_send_notice(p_node, 'subscription', v_body, 3, interval '1 hour');
-      if v_res is not null and not (v_res ? 'error') and v_res ->> 'notify' = 'sent' then
-        if v_res -> 'send' ->> 'id' is not null then
-          v_ids := v_ids || to_jsonb(v_res -> 'send' ->> 'id');
+      -- 二審：寄信丟例外（例如 asn_relay_send_notice 裡的 raise）不能讓整份回報回滾——回滾後下一輪又判成轉換、又丟，
+      -- 這台的帳號回報就永遠寫不進去。所以寄信包在自己的子交易裡：失敗只記警告（原文進資料庫 log），回報照樣寫入、回 ok
+      begin
+        v_res := public.asn_relay_send_notice(p_node, 'subscription', v_body, 3, interval '1 hour');
+        if v_res is not null and not (v_res ? 'error') and v_res ->> 'notify' = 'sent' then
+          if v_res -> 'send' ->> 'id' is not null then
+            v_ids := v_ids || to_jsonb(v_res -> 'send' ->> 'id');
+          end if;
+          v_topics := v_topics || case when jsonb_typeof(v_res -> 'bell_topics') = 'array' then v_res -> 'bell_topics' else '[]'::jsonb end;
         end if;
-        v_topics := v_topics || case when jsonb_typeof(v_res -> 'bell_topics') = 'array' then v_res -> 'bell_topics' else '[]'::jsonb end;
-      end if;
+      exception when others then
+        raise warning 'asn_relay_acct_report: 訂閱失效通知寄送失敗（node=%）：%', p_node, sqlerrm;
+      end;
     end loop;
   end if;
   return jsonb_build_object('ok', true, 'count', jsonb_array_length(v_out), 'mail_ids', v_ids, 'bell_topics', v_topics);
