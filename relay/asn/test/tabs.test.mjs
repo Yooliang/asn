@@ -88,7 +88,7 @@ test('守門：通知頁籤與通知紀錄的程式與畫面都拿掉了（右�
   const dir = new URL('../ui/', import.meta.url)
   const html = fs.readFileSync(new URL('list.html', dir), 'utf8'), js = fs.readFileSync(new URL('list.js', dir), 'utf8'), tabs = fs.readFileSync(new URL('lib/tabs.mjs', dir), 'utf8')
   for (const [name, t] of [['list.html', html], ['list.js', js], ['tabs.mjs', tabs]]) assert.ok(!/notices|addNotice|fmtTime|NOTICE_MAX|'notices'/.test(t), `${name} 還有通知紀錄的東西`)
-  assert.ok(js.includes("'show_toast'") && js.includes('n.toast'), '右下角提示照舊')
+  assert.ok(js.includes('windowApi.showToast(') && js.includes('n.toast'), '右下角提示照舊')
   assert.ok(html.includes('class="unread"') && html.includes('class="red"'), '未讀數與紅點照舊')
 })
 

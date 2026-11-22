@@ -11,7 +11,7 @@ const read = f => fs.readFileSync(path.join(root, f), 'utf8')
 
 test('前端用到的截圖指令都在 Rust 的 invoke_handler 裡', () => {
   const used = new Set()
-  for (const f of ['ui/shot.js', 'ui/lib/tauri.mjs']) for (const m of read(f).matchAll(/invoke\('(shot_[a-z_]+)'/g)) used.add(m[1])
+  for (const f of ['ui/shot.js', 'ui/lib/tauri.mjs']) for (const m of read(f).matchAll(/invoke\('(shot_[a-z_]+)'/g)) if (m[1] !== 'shot_frontend_log') used.add(m[1])   // shot_frontend_log 不在 shot 模組，由別的守門管
   assert.deepEqual([...used].sort(), ['shot_begin', 'shot_cancel', 'shot_focus', 'shot_image', 'shot_pick', 'shot_ready', 'shot_supported'])
   const lib = read('src-tauri/src/lib.rs')
   for (const c of used) assert.ok(lib.includes(`shot::${c}`), `${c} 沒註冊`)
