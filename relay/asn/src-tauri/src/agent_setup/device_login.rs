@@ -281,6 +281,11 @@ pub(crate) fn codex_status(r: Result<(i32, String), String>) -> Check {
     }
 }
 
+/// 設定頁「已安裝的工具」查 Codex 登入：同一個 `codex login status`，逾時縮短（只看狀態，不讀任何憑證檔）
+pub fn codex_login_check(exe: &std::path::Path, timeout: std::time::Duration) -> Check {
+    codex_status(run_capture(exe, &["login", "status"], timeout))
+}
+
 /// Grok：`grok login --device-auth`；沒有可靠的確認方式，只回「無法確認」
 pub struct Grok {
     pub exe: PathBuf,

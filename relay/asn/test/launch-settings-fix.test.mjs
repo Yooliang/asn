@@ -26,7 +26,7 @@ test('白名單：存的是使用者改過的 launchPrefs.cwdAllow，不是顯�
   assert.deepEqual(launchPrefsToSave(normalizeLaunchPrefs({ cwdAllow: [], recentCwd: ['D:\demo'] })).cwdAllow, [], '白名單空的就存空的，不把建議資料夾放進去')
   assert.doesNotMatch(js, /launchCwdText/, '文字框已經拿掉（#1548 ③）')
   assert.match(fn, /launchMsg\.value = `啟動設定沒有存成功：/)
-  assert.match(js, /launch: \{ tools: launchToolRows\.value, maxPerHour: launchPrefs\.maxPerHour, cwdList: launchPrefs\.cwdAllow, cwdSuggest: suggestCwds\(launchPrefs\.cwdAllow, launchPrefs\.recentCwd\), cwdMsg: launchCwdMsg\.value, msg: launchMsg\.value \}/)
+  assert.match(js, /launch: { tools: launchToolRows\.value\.map\(t => \(\{ \.\.\.t, view: toolStatusView\(cliStatus\.value\[t\.toolId \?\? t\.id\], cliStatusBusy\.value\) \}\)\), checking: cliStatusBusy\.value, maxPerHour: launchPrefs\.maxPerHour, cwdList: launchPrefs\.cwdAllow, cwdSuggest: suggestCwds\(launchPrefs\.cwdAllow, launchPrefs\.recentCwd\), cwdMsg: launchCwdMsg\.value, msg: launchMsg\.value \}/)
   assert.match(rd('ui/lib/settings-panel.mjs'), /<small class="acct-warn" v-if="st\.launch\.msg" role="alert">\{\{ st\.launch\.msg \}\}<\/small>/)
 })
 

@@ -7,8 +7,10 @@ mod detect;
 
 pub use detect::resolve_binary;
 mod install;
+mod status;
 mod types;
 
+pub use status::{status_here, ToolsStatusSnapshot};
 pub use types::{InstallResult, ToolDetectRow, ToolsDetectSnapshot};
 
 use catalog::{tool, InstallKind, tools};
@@ -71,25 +73,20 @@ fn installed_version(binary: &str) -> String {
     }
 }
 
+/// 一家的偵測結果（找得到執行檔就連版本一起問）
+pub(crate) fn detect_row(d: &catalog::ToolDef) -> ToolDetectRow {
+    let mut r = row(d);
+    if r.binary_found {
+        r.version = installed_version(&d.binary);
+    }
+    r
+}
+
 /// 五家同時問版本（各自最多 5 秒），整份偵測不會被某一家拖太久
 pub fn detect_snapshot() -> ToolsDetectSnapshot {
     let defs = tools();
     let rows = std::thread::scope(|s| {
-        let jobs: Vec<_> = defs
-            .iter()
-            .map(|d| {
-                (
-                    d,
-                    s.spawn(move || {
-                        let mut r = row(d);
-                        if r.binary_found {
-                            r.version = installed_version(&d.binary);
-                        }
-                        r
-                    }),
-                )
-            })
-            .collect();
+        let jobs: Vec<_> = defs.iter().map(|d| (d, s.spawn(move || detect_row(d)))).collect();
         jobs.into_iter().map(|(d, h)| h.join().unwrap_or_else(|_| row(d))).collect()
     });
     ToolsDetectSnapshot { checked_at: checked_at(), tools: rows }
@@ -103,6 +100,12 @@ pub async fn ai_cli_detect() -> ToolsDetectSnapshot {
             checked_at: checked_at(),
             tools: vec![],
         })
+}
+
+/// 設定頁「已安裝的工具」：每家的版本、是不是最新版、登入狀態（只看不裝）。`force`＝按了「重新檢查」，略過快取
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn ai_cli_status(force: Option<bool>) -> Result<ToolsStatusSnapshot, String> {
+    tokio::task::spawn_blocking(move || status_here(force == Some(true))).await.map_err(|e| e.to_string())
 }
 
 #[cfg_attr(feature = "gui", tauri::command)]

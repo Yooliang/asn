@@ -129,16 +129,18 @@ pub fn login_state(exe: &Path, runner: &dyn CaptureRunner) -> LoginState {
     }
 }
 
-/// 真的環境的登入狀態（沒有 claude.exe 當作還沒登入）
-pub fn login_state_here() -> LoginState {
-    let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")).map(PathBuf::from) else {
-        return LoginState::Unknown("找不到使用者資料夾".to_string());
-    };
-    let exe = home.join(".local").join("bin").join("claude.exe");
-    if !exe.exists() {
-        return LoginState::Out;
+/// 偵測到的那支 claude（`resolve_binary`：PATH、官方安裝位置）的登入狀態；找不到執行檔當作還沒登入。
+/// 以前只認 `~/.local/bin/claude.exe`，用別的方式裝在 PATH 上的 claude 會被當成沒登入（#1548）
+pub fn login_state_of(found: Option<PathBuf>, runner: &dyn CaptureRunner) -> LoginState {
+    match found {
+        Some(exe) => login_state(&exe, runner),
+        None => LoginState::Out,
     }
-    login_state(&exe, &RealCapture)
+}
+
+/// 真的環境的登入狀態（沒有 claude 當作還沒登入）
+pub fn login_state_here() -> LoginState {
+    login_state_of(crate::agent_tools::resolve_binary("claude"), &RealCapture)
 }
 
 /// 開始登入前先確認要交出授權碼的那支程式是官方的（簽章有效、簽署者完全等於 Anthropic, PBC）

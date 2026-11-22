@@ -13,13 +13,34 @@ pub trait Fetch {
 
 pub struct RealFetch;
 
-fn client() -> Result<reqwest::Client, String> {
+fn client_with(connect: Duration, total: Duration) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(Duration::from_secs(20))
-        .timeout(Duration::from_secs(600))
+        .connect_timeout(connect)
+        .timeout(total)
         .build()
         .map_err(|e| format!("無法建立下載連線：{e}"))
+}
+
+fn client() -> Result<reqwest::Client, String> {
+    client_with(Duration::from_secs(20), Duration::from_secs(600))
+}
+
+/// 只查版本號用的短逾時連線（設定頁「已安裝的工具」查最新版，#1548）：整個請求最多 `LATEST_TIMEOUT`，卡住就當查不到，不拖住畫面。
+/// 其餘行為與 `RealFetch` 完全相同（不跟轉址、限制大小、只做 GET）
+pub struct TimedFetch;
+pub const LATEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+impl Fetch for TimedFetch {
+    fn get_text(&self, url: &str, max: u64) -> Result<String, String> {
+        let mut buf: Vec<u8> = Vec::new();
+        self.download(url, &mut buf, max)?;
+        String::from_utf8(buf).map_err(|_| "官方回的內容不是文字".to_string())
+    }
+
+    fn download(&self, url: &str, out: &mut dyn Write, max: u64) -> Result<u64, String> {
+        download_with(client_with(Duration::from_secs(5), LATEST_TIMEOUT), url, out, max)
+    }
 }
 
 impl Fetch for RealFetch {
@@ -30,21 +51,25 @@ impl Fetch for RealFetch {
     }
 
     fn download(&self, url: &str, out: &mut dyn Write, max: u64) -> Result<u64, String> {
-        crate::rt::block_on(async {
-            let c = client()?;
-            let mut resp = c.get(url).send().await.map_err(|e| format!("連不上官方下載網站：{e}"))?;
-            if !resp.status().is_success() {
-                return Err(format!("官方下載網站回 {}（網址不在預期內或服務暫時不可用）", resp.status().as_u16()));
-            }
-            let mut total: u64 = 0;
-            while let Some(chunk) = resp.chunk().await.map_err(|e| format!("下載中斷：{e}"))? {
-                total += chunk.len() as u64;
-                if total > max {
-                    return Err("下載的內容比預期的大，已中止".to_string());
-                }
-                out.write_all(&chunk).map_err(|e| format!("寫入下載檔失敗：{e}"))?;
-            }
-            Ok(total)
-        })
+        download_with(client(), url, out, max)
     }
+}
+
+fn download_with(c: Result<reqwest::Client, String>, url: &str, out: &mut dyn Write, max: u64) -> Result<u64, String> {
+    crate::rt::block_on(async {
+        let c = c?;
+        let mut resp = c.get(url).send().await.map_err(|e| format!("連不上官方下載網站：{e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("官方下載網站回 {}（網址不在預期內或服務暫時不可用）", resp.status().as_u16()));
+        }
+        let mut total: u64 = 0;
+        while let Some(chunk) = resp.chunk().await.map_err(|e| format!("下載中斷：{e}"))? {
+            total += chunk.len() as u64;
+            if total > max {
+                return Err("下載的內容比預期的大，已中止".to_string());
+            }
+            out.write_all(&chunk).map_err(|e| format!("寫入下載檔失敗：{e}"))?;
+        }
+        Ok(total)
+    })
 }

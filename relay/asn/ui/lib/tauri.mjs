@@ -36,6 +36,7 @@ export const transport = {
   launch: body => invoke('relay_launch', { body }),
   launchers: ids => invoke('relay_launchers', { ids: ids ?? null }),
   cliDetect: () => invoke('ai_cli_detect'),
+  cliStatus: force => invoke('ai_cli_status', { force: force === true }),   // 設定頁「已安裝的工具」：[{ id, installed, version, version_state, latest, login, login_count }]；force＝重新檢查（略過快取）
   partnerLaunchLocal: req => invoke('partner_launch_local', { req }),
   partnerConsoleQuery: req => invoke('partner_console_query', { req }),
   partnerConsoleSet: req => invoke('partner_console_set', { req }),

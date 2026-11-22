@@ -71,7 +71,7 @@ const fullState = () => ({
   },
   closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
   autoCheck: true, upd: { checking: false, installing: false, manual: '', status: { tone: 'ok', head: '已是最新版', lines: ['目前版本 9.9.9', '最後檢查：今天 14:03'] } },
-  launch: { tools: [{ id: 'claude', label: 'Claude Code', installed: true, version: '2.0', installHint: '' }, { id: 'gemini', label: 'Gemini', installed: false, version: '', installHint: '先安裝 Gemini CLI' }], maxPerHour: 6, cwdList: ['D:/a', 'D:/b'], cwdSuggest: ['D:/c'], cwdMsg: '' },
+  launch: { tools: [{ id: 'claude', label: 'Claude Code', installed: true, version: '2.0', installHint: '', view: { latest: { kind: 'ok', text: '已是最新版' }, login: { kind: 'in', text: '已登入' } } }, { id: 'gemini', label: 'Gemini', installed: false, version: '', installHint: '先安裝 Gemini CLI' }], maxPerHour: 6, cwdList: ['D:/a', 'D:/b'], cwdSuggest: ['D:/c'], cwdMsg: '' },
   usage: { loading: false, error: '', updated: '14:05', data: { empty: '', unpriced: '', priceLine: '價目依 Anthropic 官方公開定價（2026-10-22 抄錄）', periods: [{ key: 'today', label: '今天', cost: '$1.20', tokens: '3,000', messages: 2, detail: '輸入 1', models: [{ model: 'claude-opus-4-5', cost: '$1.20', tokens: '3,000', messages: 2, priced: true }] }] } },
   version: '9.9.9',
   askpass: { path: 'C:/x/asn-askpass.exe', example: 'setx SSH_ASKPASS "C:/x/asn-askpass.exe"', copied: false },
