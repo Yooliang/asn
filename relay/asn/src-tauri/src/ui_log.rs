@@ -91,7 +91,7 @@ pub fn set_elog_dir(dir: PathBuf) {
 
 /// elog 那一行：時間、等級、`[elog]` 前綴、內容（格式同前端 formatUiLogLine，內容的控制字元與限長由 append 的 clean_line 處理）
 pub fn elog_line(now_ms: i64, msg: &str) -> String {
-    format!("{} info [elog] {msg}", crate::quota_core::iso_secs(now_ms))
+    format!("{} info [elog] {msg}", crate::auth_notice::iso_secs(now_ms))
 }
 
 /// 把訊息裡的 email 換成 `<email>`（elog 會持久寫進 ui.log，帳號 email 不留檔；stderr 輸出不變）。
@@ -177,7 +177,7 @@ pub fn panic_line(now_ms: i64, thread: Option<&str>, location: Option<(&str, u32
     let at = location.map(|(f, l, c)| format!("{f}:{l}:{c}")).unwrap_or_else(|| "不明".into());
     format!(
         "{} error [ASN] 程式錯誤結束（panic）：執行緒={} 位置={} 訊息={}",
-        crate::quota_core::iso_secs(now_ms),
+        crate::auth_notice::iso_secs(now_ms),
         thread.unwrap_or("未命名"),
         at,
         redact(msg)
@@ -186,7 +186,7 @@ pub fn panic_line(now_ms: i64, thread: Option<&str>, location: Option<(&str, u32
 
 /// 程式自己結束時寫一行原因；沒有這行就表示是被結束（工作管理員、關機、閃退）
 pub fn exit_line(now_ms: i64, reason: &str) -> String {
-    format!("{} info [ASN] 程式結束：{}", crate::quota_core::iso_secs(now_ms), reason)
+    format!("{} info [ASN] 程式結束：{}", crate::auth_notice::iso_secs(now_ms), reason)
 }
 
 pub fn log_exit(dir: &Path, reason: &str) {
@@ -200,7 +200,7 @@ pub fn log_exit(dir: &Path, reason: &str) {
 pub fn signout_logger(dir: PathBuf) -> Box<dyn Fn(&str) + Send + Sync> {
     Box::new(move |detail| {
         if !dir.as_os_str().is_empty() {
-            let line = format!("{} info [ASN] 登入服務拒絕更新憑證，已清掉登入：{}", crate::quota_core::iso_secs(crate::heartbeat::now_ms() as i64), detail);
+            let line = format!("{} info [ASN] 登入服務拒絕更新憑證，已清掉登入：{}", crate::auth_notice::iso_secs(crate::heartbeat::now_ms() as i64), detail);
             let _ = append(&dir, &[line]);
         }
     })
@@ -289,6 +289,25 @@ pub fn relaunch_self() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 手機路徑也走同一個_append_輪替與遮_email() {
+        // 手機的 ui_log 指令與 auth_notice 的記錄器都落到 append，工作資料夾＝App 自己的資料夾（#2129 ①）
+        let d = std::env::temp_dir().join(format!("asn-uilog-mobile-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let log = crate::auth_notice::file_signout_logger(d.clone());
+        log("a@b.com 狀態 401");
+        let t = std::fs::read_to_string(path(&d)).unwrap();
+        assert!(t.contains("<email>") && !t.contains("a@b.com"), "{t}");
+        assert!(t.contains("Z info [ASN]"), "{t}");
+        std::fs::write(path(&d), vec![b'x'; (MAX_BYTES + 1) as usize]).unwrap();
+        assert_eq!(append(&d, &["新的一行".to_string()]), Ok(1));
+        assert_eq!(std::fs::metadata(d.join(UI_LOG_OLD_FILE)).unwrap().len(), MAX_BYTES + 1);
+        assert_eq!(std::fs::read_to_string(path(&d)).unwrap(), "新的一行
+");
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     #[test]
     fn 沒有工作資料夾_不寫_也不在目前目錄留檔() {

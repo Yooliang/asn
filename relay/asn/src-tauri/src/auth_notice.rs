@@ -150,18 +150,18 @@ pub fn report_fail(f: SigningFail) {
     }
 }
 
-#[cfg(all(desktop, feature = "gui"))]
+#[cfg(feature = "gui")]
 fn append_line(dir: &Path, line: &str) {
     let _ = crate::ui_log::append(dir, &[line.to_string()]);
 }
 
-/// 手機（和沒有視窗的版本）沒有 ui_log：直接附加到同一個 ui.log（寫不進去就算了；超過 1 MB 只留後半，和電腦版同一個規矩）
-#[cfg(not(all(desktop, feature = "gui")))]
+/// 沒有視窗的版本（無 gui）沒有 ui_log：直接附加到同一個 ui.log（寫不進去就算了；超過 1 MB 只留後半）。手機有視窗，走上面的 ui_log::append（#2129 ①）
+#[cfg(not(feature = "gui"))]
 fn append_line(dir: &Path, line: &str) {
     append_plain(dir, line);
 }
 
-#[cfg_attr(all(desktop, feature = "gui"), allow(dead_code))]
+#[cfg_attr(feature = "gui", allow(dead_code))]
 fn append_plain(dir: &Path, line: &str) {
     use std::io::Write;
     static LOCK: Mutex<()> = Mutex::new(());
@@ -186,7 +186,7 @@ fn append_plain(dir: &Path, line: &str) {
 /// 手機用的「清掉登入」記錄器（電腦版用 ui_log::signout_logger，同一句話）
 #[cfg_attr(desktop, allow(dead_code))]
 pub fn file_signout_logger(dir: PathBuf) -> Box<dyn Fn(&str) + Send + Sync> {
-    Box::new(move |detail| append_plain(&dir, &signout_line(crate::heartbeat::now_ms() as i64, detail)))
+    Box::new(move |detail| append_line(&dir, &signout_line(crate::heartbeat::now_ms() as i64, detail)))
 }
 
 /// 清掉登入時要做的事：先記錄，再發事件（電腦與手機共用同一個組合，不各寫一份）
@@ -197,8 +197,8 @@ pub fn signout_hook(log: Box<dyn Fn(&str) + Send + Sync>, emit: Box<dyn Fn() + S
     })
 }
 
-/// 毫秒 → `2026-10-24T12:00:00Z`（手機沒有 quota_core，自己算）
-fn iso_secs(ms: i64) -> String {
+/// 毫秒 → `2026-10-24T12:00:00Z`（手機沒有 quota_core，自己算；ui_log 也用這個，電腦與手機同一個寫法）
+pub(crate) fn iso_secs(ms: i64) -> String {
     let s = ms.div_euclid(1000);
     let (y, m, d) = crate::timeutil::civil_from_days(s.div_euclid(86400));
     let r = s.rem_euclid(86400);

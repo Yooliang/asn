@@ -98,6 +98,9 @@ const { createApp, reactive, ref, computed, watch } = Vue
 let fgListener = null   // 版本紀錄的重讀（#1501）掛在這裡：外殼的前景事件與 visibilitychange 都會走到 tellFg，不另掛一套監聽
 const FG_RENEW_MS = 30_000   // 前景續命間隔（#1281）；Rust 端前景告知 90 秒過期（FG_TTL_MS）
 import { AWAITING_LABEL } from './lib/awaiting.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 手機的 [ASN] 記錄也寫進 App 自己資料夾的 ui.log（#2129 ①，規則同電腦版）；越早裝越好，啟動過程的失敗也記得到
+installUiLog({ source: 'mobile' })
 const friendStatusText = f => (f?.awaiting === true ? AWAITING_LABEL : STATUS[f?.status])
 const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線' }
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
