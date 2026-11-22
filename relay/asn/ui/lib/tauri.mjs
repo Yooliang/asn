@@ -415,3 +415,43 @@ export async function initFrame() {
 export const RESIZE_DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 const RESIZE_NAME = { n: 'North', s: 'South', e: 'East', w: 'West', ne: 'NorthEast', nw: 'NorthWest', se: 'SouthEast', sw: 'SouthWest' }
 export const resizeFrom = dir => { try { return T.window.getCurrentWindow().startResizeDragging(RESIZE_NAME[dir]) } catch { return undefined } }
+
+// ---- #2106 ⑩：手機（m.js）第一批。方法名＝指令的駝峰寫法，參數形狀與以前直接 invoke 時完全相同 ----
+// 手機只用得到這幾個 Rust 指令（金鑰與權杖都在 Rust 端，這裡拿不到）：給 AsnCore 的 transport
+export const makeMobileRelayApi = (call = invoke) => ({
+  list: () => call('relay_list'),
+  inbox: () => call('relay_inbox'),
+  ack: ids => call('relay_ack', { ids }),
+  send: payload => call('relay_send', { payload }),
+  history: (node, agent, partnerId, before, limit) => call('relay_chat_history', { node, agent: agent || null, partnerId: partnerId || null, before: before || null, limit: limit || null }),   // 後台的往來記錄（90 天；要登入，本機只當快取）
+  sentStatus: ids => call('relay_sent_status', { ids }).then(r => r?.status ?? []),
+  readSync: body => call('relay_read_sync', { body }),   // 已讀多端同步（要本人簽章；沒登入或舊後台就回錯，前端靜默）
+  avatar: node => call('relay_avatar', { node }),
+  partnerAvatar: partner => call('relay_partner_avatar', { partner }),
+  setAvatar: avatar => call('relay_set_avatar', { avatar }),
+  sendAttachment: payload => call('relay_send_attachment', { payload }),
+})
+export const mobileRelayApi = makeMobileRelayApi()
+// 管理夥伴視窗（⋯ 選單）：手機只下指令，視窗在那台電腦上；要本人簽章（Rust 端沒憑證就不送）
+export const makeMobileOpsApi = (call = invoke) => ({
+  partnerOp: body => call('android_partner_op', { body }),
+  partnerOps: ids => call('android_partner_ops', { ids }),
+  partnerArchive: body => call('android_partner_archive', { body }),
+})
+export const mobileOpsApi = makeMobileOpsApi()
+// 手機的照片放大與收到的檔案：取回、存進 App 私有資料夾（再由外殼複製到「下載/ASN」）
+export const makeMobilePhotoApi = (call = invoke) => ({
+  fetch: (id, expiresAt = null) => call('relay_attachment_fetch', { id, expiresAt }),
+  save: (id, name) => call('relay_attachment_save', { id, name }),
+})
+export const mobilePhotoApi = makeMobilePhotoApi()
+// 手機端的三種「電腦在等本人」請求：密碼詢問、權限詢問、終端請求。清單與回覆都由 Rust 簽章與加密
+export const makeMobileAskApi = (call = invoke) => ({
+  secretPending: () => call('android_secret_pending'),
+  secretReply: (id, secret) => call('android_secret_reply', { id, secret }),
+  permReqList: () => call('android_perm_req_list'),
+  permReqDecide: args => call('android_perm_req_decide', { id: args.id, choiceN: args.choiceN, hash: args.hash }),
+  termReqList: () => call('android_term_req_list'),
+  termReqDecide: args => call('android_term_req_decide', { id: args.id, decision: args.decision, choiceN: args.choiceN, hash: args.hash }),
+})
+export const mobileAskApi = makeMobileAskApi()

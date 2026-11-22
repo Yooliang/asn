@@ -78,8 +78,11 @@ test('導覽：termreq 是合法的底部浮層，重整後還原', () => {
 
 test('守門：只呼叫兩個指令、只在本人按鈕時決定；預覽與雜湊不進儲存／網址／console；沒登入不打；Rust 端有註冊且是手機專用', () => {
   const js = read('../ui/m.js'), html = read('../ui/m.html'), lib = read('../ui/lib/term-ask.mjs'), rs = read('../src-tauri/src/lib.rs'), and = read('../src-tauri/src/android.rs')
-  assert.match(js, /invoke\('android_term_req_list'\)/)
-  assert.equal((js.match(/invoke\('android_term_req_decide'/g) ?? []).length, 1, 'decide 只有一處呼叫')
+  const ex = read('../ui/lib/tauri.mjs')   // 指令名在出口（#2106 ⑩）
+  assert.match(ex, /call\('android_term_req_list'\)/)
+  assert.match(js, /mobileAskApi\.termReqList\(\)/)
+  assert.equal((js.match(/mobileAskApi\.termReqDecide\(/g) ?? []).length, 1, 'decide 只有一處呼叫')
+  assert.equal((ex.match(/call\('android_term_req_decide', \{ id: args\.id, decision: args\.decision, choiceN: args\.choiceN, hash: args\.hash \}\)/g) ?? []).length, 1)
   const from = js.indexOf('電腦要往終端送字／代答提問'), block = js.slice(from, js.indexOf('名單第三行', from))
   assert.ok(block.length > 800)
   for (const banned of ['localStorage', 'sessionStorage', 'clipboard', 'console.', 'indexedDB', 'cookie', 'location.']) assert.ok(!block.includes(banned) && !lib.includes(banned), `待確認面板不能用「${banned}」`)

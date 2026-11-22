@@ -62,7 +62,9 @@ test('電腦確認窗：遠端請求顯示設備與核對碼；本機小幫手�
 
 test('守門：手機面板接線——只呼叫兩個指令，密碼只進輸入欄與 invoke，不進儲存／網址／console', () => {
   const js = read('../ui/m.js'), html = read('../ui/m.html'), lib = read('../ui/lib/secret-ask.mjs')
-  assert.match(js, /invoke\('android_secret_pending'\)/); assert.match(js, /invoke\('android_secret_reply', \{ id: cur\.id, secret: value \}\)/)
+  const ex = read('../ui/lib/tauri.mjs')   // 指令名在出口（#2106 ⑩）
+  assert.match(ex, /call\('android_secret_pending'\)/); assert.match(ex, /secretReply: \(id, secret\) => call\('android_secret_reply', \{ id, secret \}\)/)
+  assert.match(js, /mobileAskApi\.secretPending\(\)/); assert.match(js, /mobileAskApi\.secretReply\(cur\.id, value\)/)
   const from = js.indexOf('別台電腦／雲端代理要密碼'); const block = js.slice(from, js.indexOf('名單第三行', from))
   assert.ok(block.length > 500)
   for (const banned of ['localStorage', 'sessionStorage', 'clipboard', 'console.', 'indexedDB', 'cookie', 'location.']) {

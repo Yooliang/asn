@@ -68,7 +68,7 @@ import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './lib/msg-ref.mjs'
 import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
-import { authApi, cloudApi, invoke, listen, store } from './lib/tauri.mjs'
+import { authApi, cloudApi, invoke, listen, mobileAskApi, mobileOpsApi, mobilePhotoApi, mobileRelayApi, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, deviceNameError, deviceNameOf, unnamedLabelOf } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
@@ -111,25 +111,9 @@ const callOn = ref(false)   // 現在有沒有通話（通話中每 2 秒多收�
 let liveCall = null
 
 // 手機只用得到這幾個 Rust 指令（金鑰與權杖都在 Rust 端，這裡拿不到）
-const transport = {
-  list: () => invoke('relay_list'),
-  inbox: () => invoke('relay_inbox'),
-  ack: ids => invoke('relay_ack', { ids }),
-  send: payload => invoke('relay_send', { payload }),
-  history: (node, agent, partnerId, before, limit) => invoke('relay_chat_history', { node, agent: agent || null, partnerId: partnerId || null, before: before || null, limit: limit || null }),   // 後台的往來記錄（90 天；要登入，本機只當快取）
-  sentStatus: ids => invoke('relay_sent_status', { ids }).then(r => r?.status ?? []),
-  readSync: body => invoke('relay_read_sync', { body }),   // 已讀多端同步（要本人簽章；沒登入或舊後台就回錯，前端靜默）
-  avatar: node => invoke('relay_avatar', { node }),
-  partnerAvatar: partner => invoke('relay_partner_avatar', { partner }),
-  setAvatar: avatar => invoke('relay_set_avatar', { avatar }),
-  sendAttachment: payload => invoke('relay_send_attachment', { payload }),
-}
+const transport = mobileRelayApi   // 指令名與參數形狀在 lib/tauri.mjs（mobileRelayApi）
 // 管理夥伴視窗（⋯ 選單）：手機只下指令，視窗在那台電腦上；要本人簽章（Rust 端沒憑證就不送）
-const opsTransport = {
-  partnerOp: body => invoke('android_partner_op', { body }),
-  partnerOps: ids => invoke('android_partner_ops', { ids }),
-  partnerArchive: body => invoke('android_partner_archive', { body }),
-}
+const opsTransport = mobileOpsApi   // android_partner_*（lib/tauri.mjs）
 // 替電腦切換 Claude 帳號（設備卡的按鈕）：手機只下指令；要本人簽章（Rust 端沒憑證就不送）。清單只有 email、方案、是否使用中
 const acctTransport = {
   acctList: node => invoke('android_acct_list', { node }),
@@ -139,8 +123,8 @@ const acctTransport = {
 }
 // 照片放大與收到的檔案：另存＝存進 App 私有資料夾，再請外殼複製到「下載/ASN」
 const photoApi = {
-  fetch: (id, expiresAt = null) => invoke('relay_attachment_fetch', { id, expiresAt }),
-  save: async (id, name) => savePhotoOnPhone(await invoke('relay_attachment_save', { id, name }), bridge),
+  fetch: (id, expiresAt = null) => mobilePhotoApi.fetch(id, expiresAt),
+  save: async (id, name) => savePhotoOnPhone(await mobilePhotoApi.save(id, name), bridge),
   reveal: async () => bridge?.openDownloads(),
 }
 
@@ -1356,7 +1340,7 @@ const app = createApp({
     async function checkSecrets() {
       if (sec.busy || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
       let list
-      try { list = secretList(await invoke('android_secret_pending')) } catch { return }
+      try { list = secretList(await mobileAskApi.secretPending()) } catch { return /* 出口已留警告記錄，下一輪再查 */ }
       const next = secretNext(list, secDismissed)
       if (!next || nav.sheet) return
       Object.assign(sec, { cur: next, secret: '', error: '', busy: false, left: next.secondsLeft })
@@ -1371,7 +1355,7 @@ const app = createApp({
       sec.busy = true; sec.error = ''
       const value = deny ? null : sec.secret
       sec.secret = ''
-      try { await invoke('android_secret_reply', { id: cur.id, secret: value }); history.back() }
+      try { await mobileAskApi.secretReply(cur.id, value); history.back() }
       catch (e) { sec.error = secretError(e); sec.busy = false }
     }
     const laterSecret = () => { if (sec.cur) secDismissed.add(sec.cur.id); history.back() }
@@ -1394,7 +1378,7 @@ const app = createApp({
     async function checkPermReqs() {
       if (pq.busy || pq.cur || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
       let list
-      try { list = pqList(await invoke('android_perm_req_list'), pqDeviceName) } catch { return }
+      try { list = pqList(await mobileAskApi.permReqList(), pqDeviceName) } catch { return /* 出口已留警告記錄，下一輪再查 */ }
       const next = pqNext(list, pqDismissed)
       if (!next || nav.sheet) return
       Object.assign(pq, { cur: next, armed: false, busy: false, error: '', waiting: false, result: null })
@@ -1409,7 +1393,7 @@ const app = createApp({
       const cur = pq.cur
       if (!cur || pq.busy || pq.waiting || pq.result || document.visibilityState !== 'visible') return
       let alive = null
-      try { alive = pqStill(await invoke('android_perm_req_list'), cur.id) } catch { return }
+      try { alive = pqStill(await mobileAskApi.permReqList(), cur.id) } catch { return /* 出口已留警告記錄，下一輪再查 */ }
       const out = pqWatchOutcome(alive)
       if (out && pq.cur === cur && !pq.busy && !pq.waiting && !pq.result) { pqWatchStop(); pq.result = out; pqAutoArm() }
     }
@@ -1432,7 +1416,7 @@ const app = createApp({
       pqResultTimer = setInterval(async () => {
         tries += 1
         let r = null
-        try { r = pqResult(await invoke('android_perm_req_list'), id) } catch { /* 下一輪再查 */ }
+        try { r = pqResult(await mobileAskApi.permReqList(), id) } catch { /* 出口已留警告記錄，下一輪再查 */ }
         if (!r && tries < PQ_RESULT_TRIES) return
         clearInterval(pqResultTimer)
         Object.assign(pq, { waiting: false, result: r ?? { ok: false, text: PERMREQ_TEXT.unknown } })
@@ -1444,7 +1428,7 @@ const app = createApp({
       const args = pqDecideArgs(cur, n)
       if (!args) return
       pq.busy = true; pq.error = ''
-      try { await invoke('android_perm_req_decide', { id: args.id, choiceN: args.choiceN, hash: args.hash }); pqDismissed.add(cur.id); pqWaitResult(cur.id) }
+      try { await mobileAskApi.permReqDecide(args); pqDismissed.add(cur.id); pqWaitResult(cur.id) }
       catch (e) { pq.error = pqError(e); pq.busy = false }
     }
     const laterPermReq = () => { if (pq.cur) pqDismissed.add(pq.cur.id); history.back() }
@@ -1475,7 +1459,7 @@ const app = createApp({
     async function checkTermReqs() {
       if (tq.busy || tq.cur || sec.cur || nav.sheet || !acct.value.signed_in || document.visibilityState !== 'visible') return
       let list
-      try { list = tqList(await invoke('android_term_req_list'), tqDeviceName) } catch { return }
+      try { list = tqList(await mobileAskApi.termReqList(), tqDeviceName) } catch { return /* 出口已留警告記錄，下一輪再查 */ }
       const next = tqNext(list, tqDismissed)
       if (!next || nav.sheet) return
       Object.assign(tq, { cur: next, choice: null, error: '', busy: false, left: next.secondsLeft })
@@ -1489,7 +1473,7 @@ const app = createApp({
       const args = tqDecideArgs(cur, decision, tq.choice)
       if (!args) { tq.error = TERMREQ_TEXT.pickFirst; return }
       tq.busy = true; tq.error = ''
-      try { await invoke('android_term_req_decide', { id: args.id, decision: args.decision, choiceN: args.choiceN, hash: args.hash }); history.back() }
+      try { await mobileAskApi.termReqDecide(args); history.back() }
       catch (e) { tq.error = tqError(e); tq.busy = false }
     }
     const laterTermReq = () => { if (tq.cur) tqDismissed.add(tq.cur.id); history.back() }
