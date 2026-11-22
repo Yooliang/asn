@@ -70,7 +70,7 @@ test('設定頁與樞紐：顯示 QR code 的按鈕在指紋旁、只用 canvas�
   assert.match(read('../ui/lib/fp-qr.mjs'), /<canvas /)
   const list = read('../ui/list.js')
   assert.match(list, /case 'known-qr': await toggleOwnQr\(value === true\); break/)
-  assert.match(list, /invoke\('device_own_fingerprint_qr'\)/)
+  assert.match(list, /knownDeviceApi\.ownFingerprintQr\(\)/)
   assert.match(list, /ownFp: known\.ownFp, qr: known\.qr \}/)
   const lib = read('../src-tauri/src/lib.rs')
   const own = lib.slice(lib.indexOf('async fn device_own_fingerprint_qr('), lib.indexOf('async fn device_own_fingerprint_qr(') + 500).split('\n}\n')[0]

@@ -35,7 +35,7 @@ test('設定頁：個人分類有「顯示正在聽的歌」開關，預設未�
 test('介面接線：存檔值進 me 存檔、開關交給 set_now_playing、歌由 asn:now-playing 事件推來', () => {
   const js = read('ui/list.js')
   assert.match(js, /showNowPlaying = ref\(normalizeNowPlaying\(savedMe\.showNowPlaying\)\)/)
-  assert.match(js, /invoke\('set_now_playing', \{ on \}\)/)
+  assert.match(js, /trayApi\.setNowPlaying\(on\)/)
   assert.match(js, /listen\('asn:now-playing'/)
   assert.match(js, /case 'now-playing': showNowPlaying\.value = value === true/)
   assert.match(js, /showNowPlaying: showNowPlaying\.value/)

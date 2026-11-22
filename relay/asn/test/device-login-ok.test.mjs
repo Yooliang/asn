@@ -11,7 +11,8 @@ const uiFiles = () => walk(new URL('../ui', import.meta.url).pathname.replace(/^
 
 test('守門：「允許替這台登入」只有設定頁那條路能改', () => {
   const hits = uiFiles().filter(f => fs.readFileSync(f, 'utf8').includes('device_known_login_ok'))
-  assert.deepEqual(hits.map(f => f.split(/[\/]/).pop()), ['list.js'])
+  assert.deepEqual(hits.map(f => f.split(/[\/]/).pop()), ['tauri.mjs'], '指令名只寫在出口')
+  assert.ok(read('../ui/list.js').includes('knownDeviceApi.setLoginOk('), '設定頁那條路走出口')
   assert.ok(SETTING_OPS.includes('known-login-ok'))
   const lib = read('../src-tauri/src/lib.rs')
   assert.equal(lib.split('device_id::live::set_login_ok(').length - 1, 2, 'Rust 只有一個命令能改（打開、關掉各一處）')
