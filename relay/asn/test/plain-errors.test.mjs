@@ -114,12 +114,9 @@ test('onboardErrorText 收到 Error 物件要回 e.message，不能變成 "Error
   assert.notEqual(onboardErrorText(new Error('壞了')), 'Error: 壞了')
 })
 
-test('用量讀取失敗的畫面文字與搬之前一字不差', async () => {
+test('用量讀取失敗：畫面只給白話，不含 Rust 原文', async () => {
   const { usageErrorText } = await import('../ui/lib/plain-errors.mjs')
-  assert.equal(usageErrorText(new Error('壞了')), '壞了')
-  assert.equal(usageErrorText('字串'), '字串')
-  assert.equal(usageErrorText(null), 'null')
-  assert.equal(usageErrorText({ message: '' }), '')
+  for (const e of [new Error('壞了'), '字串', null, { message: '' }]) assert.equal(usageErrorText(e), '暫時讀不到用量，稍後再試一次。')
 })
 
 test('小檔的出口：指令名與參數形狀不變', async () => {

@@ -2,6 +2,9 @@
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { autoAvatarDataUrl, isAvatarDataUrl } from './lib/avatar.mjs'
 import { toastApi } from './lib/tauri.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
+installUiLog({ source: 'toast' })
 
 const { createApp } = Vue
 const q = new URLSearchParams(location.search)

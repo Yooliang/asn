@@ -7,6 +7,9 @@ import { ONBOARD_STORE, TEXT, markOnboarded, planOnboarding } from './lib/onboar
 import { RESIZE_DIRS, authApi, claudeModApi, ctl, initFrame, invoke, makeAgentSetupApi, resizeFrom, shellApi, store, transport } from './lib/tauri.mjs'
 import { onboardErrorText } from './lib/plain-errors.mjs'
 import { setDeviceNameOnboard } from './lib/device-rename.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
+installUiLog({ source: 'onboard' })
 
 const { createApp, ref } = Vue
 await initFrame()

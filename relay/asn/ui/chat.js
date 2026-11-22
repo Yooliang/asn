@@ -12,6 +12,9 @@ import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { CALL_BEAT_MS } from './lib/call-beats.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, termViewApi, transport } from './lib/tauri.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
+installUiLog({ source: 'chat' })
 
 const { createApp, ref, computed, onMounted, reactive } = Vue
 await initFrame()

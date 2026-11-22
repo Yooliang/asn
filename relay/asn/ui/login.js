@@ -5,6 +5,9 @@
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { LAST_USED_LABEL, PROVIDERS, SKIP_LABEL, STILL_RUNNING_NOTE, canStart, errorText, phaseText, showSkip } from './lib/login.mjs'
 import { RESIZE_DIRS, authApi, ctl, initFrame, resizeFrom, shellApi } from './lib/tauri.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
+installUiLog({ source: 'login' })
 
 const { createApp, ref, computed } = Vue
 await initFrame()

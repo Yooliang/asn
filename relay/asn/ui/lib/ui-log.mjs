@@ -3,7 +3,7 @@
 // 附加到機器資料夾的 ui.log。寫檔失敗就丟掉這批，不重試、不再印記錄（免得自己繞圈）。
 // node 也要能載入（測試），所以不碰 window；計時器與 console 都由呼叫端帶進來。
 
-import { makeUiLogApi } from './tauri.mjs'
+import { invoke as exitInvoke, makeUiLogApi } from './tauri.mjs'
 
 export const UI_LOG_FLUSH_MS = 3000
 export const UI_LOG_BUFFER_MAX = 200   // 佇列最多留幾行（寫檔一直失敗時只留最新的）
@@ -18,15 +18,17 @@ const part = a => {
 }
 
 // 一行記錄：時間、等級、內容（換行、tab 換成空白，限長）
-export function formatUiLogLine(level, args, now = new Date()) {
-  const text = args.map(part).join(' ').replace(/[\r\n\t]+/g, ' ').trim()
+// source：哪個視窗寫的（小窗用；主視窗不帶）。[ASN] 後面插一個 [視窗名]，同一份 ui.log 裡分得出來
+export function formatUiLogLine(level, args, now = new Date(), source = '') {
+  let text = args.map(part).join(' ').replace(/[\r\n\t]+/g, ' ').trim()
+  if (source && text.startsWith(TAG)) text = `${TAG} [${source}]${text.slice(TAG.length)}`
   return `${now.toISOString()} ${level} ${text}`.slice(0, UI_LOG_LINE_MAX)
 }
 
 export const isAsnLog = args => typeof args?.[0] === 'string' && args[0].startsWith(TAG)
 
 // 包住 target（console）的 info／warn／error：照常印出，[ASN] 開頭的另外排進佇列。回 { flush, pending }
-export function installUiLog({ invoke, target = console, flushMs = UI_LOG_FLUSH_MS, setTimer = setTimeout, now = () => new Date() }) {
+export function installUiLog({ invoke = exitInvoke, source = '', target = console, flushMs = UI_LOG_FLUSH_MS, setTimer = setTimeout, now = () => new Date() }) {
   const api = makeUiLogApi(invoke)
   const queue = []
   let timer = null
@@ -43,7 +45,7 @@ export function installUiLog({ invoke, target = console, flushMs = UI_LOG_FLUSH_
     target[level] = (...args) => {
       orig(...args)
       if (!isAsnLog(args)) return
-      queue.push(formatUiLogLine(level, args, now()))
+      queue.push(formatUiLogLine(level, args, now(), source))
       if (queue.length > UI_LOG_BUFFER_MAX) queue.splice(0, queue.length - UI_LOG_BUFFER_MAX)
       if (!timer) timer = setTimer(() => void flush(), flushMs)
     }

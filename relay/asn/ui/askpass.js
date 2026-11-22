@@ -3,6 +3,9 @@
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { askpassApi } from './lib/tauri.mjs'
 import { viewModel, countdownText, parseId } from './lib/askpass-dialog.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
+installUiLog({ source: 'askpass' })
 
 const { createApp, ref, computed, onMounted, onBeforeUnmount, nextTick } = Vue
 const id = parseId(location.search)
