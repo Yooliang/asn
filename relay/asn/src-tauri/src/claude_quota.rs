@@ -18,7 +18,7 @@
 //!   等使用者用那個帳號開 Claude、Claude 自己換新之後（憑證檔變了）自然恢復。本檔與 `claude_accounts::fetch_json` 沒有任何換新的呼叫（有靜態測試鎖住）。
 //!   （範圍只到「目前登入的帳號」：Claude 額外帳號 `claude_extra.rs` 是使用者另外開的功能、預設關閉，有它自己的換新流程，不在這裡。）
 //! - 紅線：函式一律吃家目錄路徑參數；只有 Tauri 指令與背景迴圈會決定真實家目錄，測試不得呼叫它們。
-use crate::claude_accounts::{self, HttpFail};
+use crate::claude_accounts::{self, HttpFail, OrgInfo, Sub, SubLog};
 use crate::quota_core::iso_secs;
 use crate::quota_readers::{Failure, Gate};
 use serde::Serialize;
@@ -60,14 +60,21 @@ pub struct State {
     pub status: Status,
     pub read_at: Option<String>,
     pub windows: Vec<Value>,
+    /// 這一輪帳號資料查詢有回應時，回應裡的訂閱欄位（#1646 拆項 C）；查詢沒回應（逾時、401、沒登入）就是 None＝不明。
+    /// 只留在記憶體給拆項 E 用，不進 `view()`（畫面）也不進回報
+    pub org: Option<OrgInfo>,
 }
 
 impl State {
     fn none(email: Option<String>) -> State {
-        State { email, status: Status::None, read_at: None, windows: vec![] }
+        State { email, status: Status::None, read_at: None, windows: vec![], org: None }
     }
     fn failed(email: &str, status: Status) -> State {
-        State { email: Some(email.to_string()), status, read_at: None, windows: vec![] }
+        State { email: Some(email.to_string()), status, read_at: None, windows: vec![], org: None }
+    }
+    /// 這一輪的訂閱狀態；沒有回應過就是不明
+    pub fn sub(&self) -> Sub {
+        self.org.as_ref().map_or(Sub::Unknown, |o| claude_accounts::subscription_state(o.organization_type.as_deref(), o.subscription_status.as_deref()))
     }
     pub fn view(&self) -> Value {
         json!({ "email": self.email, "status": self.status, "read_at": self.read_at, "windows": self.windows })
@@ -166,11 +173,25 @@ fn clamp_usage(usage: &Value) -> Value {
 /// `expect`＝預期的帳號（`.claude.json` 寫的）；給了而且不同，就不查用量、回 `Mismatch`。
 /// 正式的 Claude 額度、Claude 額外帳號、除錯命令（`--shape`）都走這一支，沒有第二份查詢程式。
 pub fn query(net: &dyn Net, cred: &[u8], now_ms: i64, expect: Option<&str>) -> Result<(String, Vec<Value>), QueryFail> {
-    let v = net.profile(cred).map_err(QueryFail::Http)?;
-    let (email, _) = claude_accounts::account_of_profile(&v).ok_or(QueryFail::NoAccount)?;
+    query_ex(net, cred, now_ms, expect).1
+}
+
+/// 同 `query`，另外回「這次帳號資料回應裡的訂閱欄位」（沿用同一次 profile 查詢，不另打 API）。
+/// 第一項：profile 沒回應（失敗）或帳號跟預期不同（不能記到別的帳號）是 None；回應沒有 email（格式不對）算有回應但欄位全空＝不明
+pub fn query_ex(net: &dyn Net, cred: &[u8], now_ms: i64, expect: Option<&str>) -> (Option<OrgInfo>, Result<(String, Vec<Value>), QueryFail>) {
+    let v = match net.profile(cred) {
+        Ok(v) => v,
+        Err(f) => return (None, Err(QueryFail::Http(f))),
+    };
+    let Some((email, _)) = claude_accounts::account_of_profile(&v) else { return (Some(OrgInfo::default()), Err(QueryFail::NoAccount)) };
     if expect.is_some_and(|e| e != email) {
-        return Err(QueryFail::Mismatch);
+        return (None, Err(QueryFail::Mismatch));
     }
+    let org = Some(claude_accounts::org_of_profile(&v));
+    (org, query_usage(net, cred, now_ms, email))
+}
+
+fn query_usage(net: &dyn Net, cred: &[u8], now_ms: i64, email: String) -> Result<(String, Vec<Value>), QueryFail> {
     let usage = net.usage(cred).map_err(QueryFail::Http)?;
     let usage = clamp_usage(&usage);
     let windows = crate::claude_extra::parse_usage(&usage, now_ms);
@@ -198,11 +219,13 @@ pub fn read_round(home: &Path, now_ms: i64, net: &dyn Net, busy: &dyn Fn() -> bo
         return Ok((State::failed(&email, Status::LoginExpired), Some(HttpFail::Unauthorized)));
     }
     // 查帳號與用量（跟 .claude.json 對不上就這一輪不查，下一輪再查，不記到錯的帳號）
-    let (_, windows) = match query(net, &cred, now_ms, Some(&email)) {
+    let (org, got) = query_ex(net, &cred, now_ms, Some(&email));
+    let failed = |status, f| Ok((State { org: org.clone(), ..State::failed(&email, status) }, Some(f)));
+    let (_, windows) = match got {
         Ok(r) => r,
         Err(QueryFail::Mismatch) => return Err(Skip::Mismatch),
-        Err(QueryFail::Http(f)) => return Ok((State::failed(&email, status_of(f)), Some(f))),
-        Err(QueryFail::NoAccount | QueryFail::Unreadable) => return Ok((State::failed(&email, Status::Unavailable), Some(HttpFail::Other))),
+        Err(QueryFail::Http(f)) => return failed(status_of(f), f),
+        Err(QueryFail::NoAccount | QueryFail::Unreadable) => return failed(Status::Unavailable, HttpFail::Other),
     };
     // 查的當中登入變了（切換，或 Claude 自己換新權杖也算變）：這輪不記，下一輪再查
     let now_cred = std::fs::read(claude_accounts::cred_path(home)).unwrap_or_default();
@@ -211,9 +234,9 @@ pub fn read_round(home: &Path, now_ms: i64, net: &dyn Net, busy: &dyn Fn() -> bo
     }
     if windows.is_empty() {
         // 介面變了或回應不齊：照實顯示讀不到，不補 0
-        return Ok((State::failed(&email, Status::Unavailable), Some(HttpFail::Other)));
+        return failed(Status::Unavailable, HttpFail::Other);
     }
-    Ok((State { email: Some(email), status: Status::Ok, read_at: Some(iso_secs(now_ms)), windows }, None))
+    Ok((State { email: Some(email), status: Status::Ok, read_at: Some(iso_secs(now_ms)), windows, org }, None))
 }
 
 // ---------- 除錯用：只印回應的欄位結構 ----------
@@ -298,6 +321,21 @@ pub fn state_view(home: &Path) -> Value {
     }
 }
 
+/// 這台目前登入帳號最近一次的訂閱狀態（給拆項 E 帶進回報用；這一張還沒送到任何地方）。
+/// 記著的那一筆要屬於現在登入的帳號才算數；還沒讀過、換了帳號、沒登入都回 `Unknown`（不明，不是失效）。
+/// 回 (狀態, 方案類型, 訂閱狀態)，後兩項是回應原值
+pub fn claude_subscription(home: &Path) -> (Sub, Option<String>, Option<String>) {
+    let email = claude_accounts::current_email(home);
+    let st = STATE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    match st {
+        Some(s) if email.is_some() && s.email == email => {
+            let o = s.org.clone().unwrap_or_default();
+            (s.sub(), o.organization_type, o.subscription_status)
+        }
+        _ => (Sub::Unknown, None, None),
+    }
+}
+
 /// 隨帳號回報送出的額度窗（email → 窗）：只有剛讀到（Ok）、還在 `KEEP_MS` 內、而且屬於現在登入帳號的才送
 pub fn report_windows(home: &Path, now_ms: i64) -> HashMap<String, Vec<Value>> {
     let email = claude_accounts::current_email(home);
@@ -340,6 +378,10 @@ pub struct Loop {
     logged_skip: Option<Skip>,
     /// 上一輪是「沒有登入」時，當時憑證檔的修改時間：每分鐘只在本機看一眼，登入了或憑證檔變了就立刻查
     no_login_mark: Option<Option<i64>>,
+    /// 訂閱狀態變動的 log（只有帳號資料查詢真的有回應的那一輪才觀察；逾時、401 這類暫時失敗不當成「不明」，免得來回洗版）
+    sub_log: SubLog,
+    /// 上一輪觀察的是哪個帳號：換帳號就重新開始，不拿 A 的狀態跟 B 比
+    sub_email: Option<String>,
 }
 
 impl Loop {
@@ -347,6 +389,18 @@ impl Loop {
     fn mark(home: &Path) -> Option<i64> {
         let t = std::fs::metadata(claude_accounts::cred_path(home)).ok()?.modified().ok()?;
         t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_millis() as i64)
+    }
+
+    /// 訂閱狀態改變才記一行（#1646 拆項 C）。這一輪沒有帳號資料回應（org 是 None）就不動
+    fn watch_sub(&mut self, state: &State, log: &(impl Fn(String) + Sync)) {
+        let Some(org) = &state.org else { return };
+        if self.sub_email != state.email {
+            self.sub_email = state.email.clone();
+            self.sub_log = SubLog::default();
+        }
+        if let Some(line) = self.sub_log.observe(org) {
+            log(line);
+        }
     }
 
     /// 每分鐘看一次：切換叫過、或到時間了才查。回這一輪有沒有真的查過（給測試看）
@@ -387,6 +441,7 @@ impl Loop {
                 self.logged = None;
                 self.logged_skip = None;
                 self.no_login_mark = (state.email.is_none()).then_some(mark);
+                self.watch_sub(&state, log);
                 set_state(state);
                 true
             }
@@ -400,6 +455,7 @@ impl Loop {
                     self.logged = Some(text);
                     log(format!("額度讀取 Claude：{text}"));
                 }
+                self.watch_sub(&state, log);
                 set_state(state);
                 true
             }

@@ -515,3 +515,108 @@ fn 沒登入時每分鐘只在本機看一眼_登入了就立刻查_不用等十
     assert!(lp.tick_at(0, h.path(), NOW + 2 * 60_000, &f.net, &idle, &log), "登入了（第 2 分鐘）就查，不等十分鐘");
     assert_eq!(state_view(h.path())["status"], "ok");
 }
+
+// ---------- #1646 拆項 C：訂閱失效偵測（只偵測與記 log） ----------
+/// 真實形狀的 profile 回應：帶 organization 的兩個訂閱欄位（值是照第三方程式碼寫的假樣本）
+fn profile_org(email: &str, org: Value) -> String {
+    http("200 OK", &json!({ "account": { "uuid": "u-1", "email": email, "full_name": "FAKE-NAME-1646" }, "organization": org }).to_string())
+}
+
+fn sub_round(profile: String) -> State {
+    let h = home("a@x.test", NOW + 86_400_000);
+    let f = serve(profile, usage_ok());
+    round(h.path(), &f).unwrap().0
+}
+
+#[test]
+fn 訂閱_走完整條解析_正常_失效_不明() {
+    use claude_accounts::Sub;
+    let ok = sub_round(profile_org("a@x.test", json!({ "uuid": "o", "organization_type": "claude_max", "subscription_status": "active" })));
+    assert_eq!(ok.status, Status::Ok);
+    assert_eq!((ok.sub(), ok.org.clone().unwrap().organization_type.as_deref().map(String::from)), (Sub::Active, Some("claude_max".into())));
+    let free = sub_round(profile_org("a@x.test", json!({ "organization_type": "claude_free" })));
+    assert_eq!(free.sub(), Sub::Lapsed);
+    assert_eq!(free.status, Status::Ok, "訂閱失效不影響額度讀取的狀態");
+    let canceled = sub_round(profile_org("a@x.test", json!({ "organization_type": "claude_max", "subscription_status": "Canceled" })));
+    assert_eq!(canceled.sub(), Sub::Lapsed);
+    // 現有的 profile_ok 沒有這兩個欄位：不明，不是失效
+    assert_eq!(sub_round(profile_ok("a@x.test")).sub(), Sub::Unknown);
+    // 欄位型別不對：不明
+    assert_eq!(sub_round(profile_org("a@x.test", json!({ "organization_type": 7, "subscription_status": ["canceled"] }))).sub(), Sub::Unknown);
+    // 整份 organization 不是物件：不明
+    assert_eq!(sub_round(profile_org("a@x.test", json!("free"))).sub(), Sub::Unknown);
+}
+
+#[test]
+fn 訂閱_查詢失敗或回應格式不對_一律不明_不判失效() {
+    use claude_accounts::Sub;
+    let h = home("a@x.test", NOW + 86_400_000);
+    for bad in [http("500 Internal Server Error", "{}"), http("401 Unauthorized", "{}"), http("200 OK", "not json")] {
+        let f = serve(bad, usage_ok());
+        let (st, fail) = round(h.path(), &f).unwrap();
+        assert!(fail.is_some());
+        assert_eq!((st.sub(), st.org.is_none()), (Sub::Unknown, true));
+    }
+    // 沒有 email 的回應（格式不對）：就算帶著 free 也不判失效
+    let f = serve(http("200 OK", &json!({ "organization": { "organization_type": "free" } }).to_string()), usage_ok());
+    assert_eq!(round(h.path(), &f).unwrap().0.sub(), Sub::Unknown);
+    // 用量查詢失敗但帳號資料有回應：訂閱欄位仍留著
+    let f = serve(profile_org("a@x.test", json!({ "organization_type": "claude_free" })), http("500 Internal Server Error", "{}"));
+    let (st, fail) = round(h.path(), &f).unwrap();
+    assert!(fail.is_some());
+    assert_eq!(st.sub(), Sub::Lapsed);
+}
+
+#[test]
+fn 訂閱_介面只認現在登入的帳號_不進畫面狀態與回報() {
+    use claude_accounts::Sub;
+    let _g = GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let h = home("a@x.test", NOW + 86_400_000);
+    let f = serve(profile_org("a@x.test", json!({ "organization_type": "claude_free", "subscription_status": "canceled" })), usage_ok());
+    let (_, log) = lines();
+    let mut lp = Loop::default();
+    assert!(lp.tick_at(0, h.path(), NOW, &f.net, &idle, &log));
+    assert_eq!(claude_subscription(h.path()), (Sub::Lapsed, Some("claude_free".into()), Some("canceled".into())));
+    let view = state_view(h.path()).to_string();
+    assert!(!view.contains("claude_free") && !view.contains("canceled"), "這張不帶進畫面：{view}");
+    assert!(!report_windows(h.path(), NOW).values().any(|w| w.iter().any(|x| x.to_string().contains("free"))));
+    login(h.path(), "b@x.test");
+    assert_eq!(claude_subscription(h.path()), (Sub::Unknown, None, None), "換了帳號：不拿舊帳號的結果");
+}
+
+#[test]
+fn 訂閱_log_只在狀態改變時寫_暫時失敗不洗版_恢復也寫_不含帳號() {
+    let _g = GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let h = home("a@x.test", NOW + 30 * 86_400_000);
+    let active = serve(profile_org("a@x.test", json!({ "organization_type": "claude_max", "subscription_status": "active" })), usage_ok());
+    let lapsed = serve(profile_org("a@x.test", json!({ "organization_type": "claude_free", "subscription_status": "canceled" })), usage_ok());
+    let down = serve(http("500 Internal Server Error", "{}"), usage_ok());
+    let (l, log) = lines();
+    let mut lp = Loop::default();
+    let step = 7 * 3_600_000; // 超過退避上限，每一步都會真的查
+    let mut t = NOW;
+    let mut go = |net: &HttpNet, lp: &mut Loop| {
+        t += step;
+        assert!(lp.tick_at(0, h.path(), t, net, &idle, &log));
+        l.lock().unwrap().iter().filter(|x| x.contains("訂閱")).cloned().collect::<Vec<_>>()
+    };
+    assert!(go(&active.net, &mut lp).is_empty(), "第一次就正常：不記");
+    assert!(go(&active.net, &mut lp).is_empty());
+    assert_eq!(go(&lapsed.net, &mut lp), ["使用中的 Claude 帳號訂閱失效（方案類型 claude_free、訂閱狀態 canceled）"]);
+    assert_eq!(go(&lapsed.net, &mut lp).len(), 1, "還是失效：不再記");
+    assert_eq!(go(&down.net, &mut lp).len(), 1, "查詢暫時失敗：不記成不明");
+    assert_eq!(go(&lapsed.net, &mut lp).len(), 1, "失敗後同樣的失效：不重記");
+    let all = go(&active.net, &mut lp);
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[1], "使用中的 Claude 帳號訂閱恢復正常（方案類型 claude_max、訂閱狀態 active）");
+    assert!(go(&active.net, &mut lp).len() == 2, "恢復後不再記");
+    let text = l.lock().unwrap().join("
+");
+    assert!(!text.contains("a@x.test") && !text.contains("FAKE-"), "log 不含 email 與權杖：{text}");
+    // 之前是正常、現在查不到欄位：記一次不明，再來不重複
+    let none = serve(profile_ok("a@x.test"), usage_ok());
+    let more = go(&none.net, &mut lp);
+    assert_eq!(more.last().unwrap(), "帳號訂閱狀態不明（查不到方案欄位）");
+    assert_eq!(more.len(), 3);
+    assert_eq!(go(&none.net, &mut lp).len(), 3);
+}
