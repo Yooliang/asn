@@ -61,6 +61,6 @@ test('守門：改名流程不得 location.reload()，且走 applyRename、info 
     const i = lines.findIndex(l => l.includes('followSelfRename({ info, core, me }'))
     assert.ok(i >= 0, `${f} 找不到改名後的就地更新`)
     assert.ok(!/reload/.test(lines.slice(Math.max(0, i - 1), i + 3).join('\n')), `${f} 改名後不得重載頁面`)
-    assert.match(src, /const info = reactive\(await invoke\('startup_info'\)\)/, `${f} 的 info 要是響應式`)
+    assert.match(src, /const info = reactive\(await shellApi\.startupInfo\(\)\)/, `${f} 的 info 要是響應式`)
   }
 })

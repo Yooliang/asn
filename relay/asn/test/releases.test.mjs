@@ -57,7 +57,7 @@ test('接線：電腦版與手機版都走 site_releases 指令；介面不 fetc
   const list = read('ui/list.js'), m = read('ui/m.js')
   assert.doesNotMatch(list, /vendor\/changelog/)
   assert.match(list, /loadReleases\(/)
-  assert.match(m, /loadReleases\(f => invoke\('site_releases', \{ force: f === true \}\)/)
+  assert.match(m, /loadReleases\(f => mobileSiteApi\.releases\(f\)/)   // 指令名在出口 mobileSiteApi（#2106 ⑪）；電腦版的 siteReleases 在 transport
   for (const f of ['ui/list.js', 'ui/m.js', 'ui/lib/releases.mjs']) assert.doesNotMatch(read(f), /fetch\([^)]*supabase/, f)
   assert.doesNotMatch(read('scripts/prep.mjs'), /changelog\.(json|mjs)/)
 })

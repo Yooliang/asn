@@ -162,7 +162,7 @@ test('失敗要醒目：結果用 role="alert"，失敗時把設備卡捲到看�
   const fin = js.slice(js.indexOf('const setupShowFailure'), js.indexOf('const setupNo'))
   assert.ok(fin.includes('scrollIntoView') && fin.includes('if (!ok) setupShowFailure()'), '失敗才捲動')
   const yes = js.slice(js.indexOf('const setupYes'), js.indexOf('const setupClose'))
-  assert.ok(yes.includes("setupSt.mode === 'relogin' ? { node, mode: 'relogin' } : { node }"), '安裝的呼叫維持原樣，只有重新登入多帶 mode')
+  assert.ok(yes.includes("mobileSetupApi.remoteRequest(node, setupSt.mode === 'relogin')") && read('ui/lib/tauri.mjs').includes("call('setup_remote_request', relogin === true ? { node, mode: 'relogin' } : { node })"), '安裝的呼叫維持原樣，只有重新登入多帶 mode（指令名與形狀在出口，#2106 ⑪）')
   assert.ok(yes.includes('return setupFinish(setupErrorText(e), false)'), '送不出去也是醒目的失敗')
   const poll = js.slice(js.indexOf('const setupPoll'), js.indexOf('const setupYes'))
   assert.ok(!poll.includes('catch { return }'), '輪詢出錯不再靜默吞掉')
@@ -172,10 +172,10 @@ test('失敗要醒目：結果用 role="alert"，失敗時把設備卡捲到看�
 test('接線守門：先確認才送出、送出只在「確認安裝」、離開頁面就停止輪詢、手機註冊了兩個指令、文字是人話', () => {
   const js = read('ui/m.js'), html = read('ui/m.html'), lib = read('src-tauri/src/lib.rs'), acct = read('src-tauri/src/account.rs')
   assert.match(js, /const setupAsk = \(node, mode = 'install'\) => \{ setupReset\(\); Object\.assign\(setupSt, \{ node, mode: mode === 'relogin' \? 'relogin' : 'install', stage: 'confirm' \}\) \}/, '按鈕只進確認，不送出')
-  const calls = js.match(/invoke\('setup_remote_request'/g) ?? []
+  const calls = js.match(/mobileSetupApi\.remoteRequest\(/g) ?? []
   assert.equal(calls.length, 1, '只有一處送出')
   const yes = js.slice(js.indexOf('const setupYes'), js.indexOf('const setupClose'))
-  assert.ok(yes.includes("if (setupSt.stage !== 'confirm') return") && yes.includes("invoke('setup_remote_request'"), '送出只在確認階段')
+  assert.ok(yes.includes("if (setupSt.stage !== 'confirm') return") && yes.includes("mobileSetupApi.remoteRequest(node, setupSt.mode === 'relogin')"), '送出只在確認階段')
   assert.match(js, /setInterval\(\(\) => void setupPoll\(\), SETUP_POLL_MS\)/)
   assert.match(js, /acctToken\+\+; acctEpoch\+\+; setupReset\(\)/, '離開設備頁就停止輪詢')
   assert.match(html, /role="alertdialog"/)
