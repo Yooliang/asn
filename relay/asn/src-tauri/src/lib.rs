@@ -170,8 +170,7 @@ pub mod guard;   // ASN 意外關閉時自動重開（工作排程每 5 分鐘�
 #[cfg(desktop)]
 mod tts;
 #[cfg(feature = "gui")]
-#[cfg(desktop)]
-mod ui_log;
+mod ui_log;   // 電腦與手機共用（#2129 ①）：手機的 ui_log 指令與其他記錄都走同一個 append
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 mod updater;
@@ -2432,7 +2431,6 @@ struct RelayLogPaths {
 
 /// 主視窗的 [ASN] 記錄整批附加到機器資料夾的 ui.log（#339）。寫不進去回錯誤，畫面不必理會
 #[cfg(feature = "gui")]
-#[cfg(desktop)]
 #[tauri::command(async)]   // 寫檔：在背景執行緒跑（todo-next-191）；同時寫由 ui_log::append 自己的鎖排隊
 fn ui_log(app: State<'_, App>, lines: Vec<String>) -> Result<usize, String> {
     ui_log::append(&app.work_dir, &lines)
@@ -3384,7 +3382,7 @@ pub fn run() {
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_partner_avatar, relay_set_avatar,
-        set_presence, set_foreground, device_name_align, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, open_link,
+        set_presence, set_foreground, device_name_align, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, ui_log, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_chat_pins_get, account::auth_chat_pins_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
