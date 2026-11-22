@@ -5,7 +5,8 @@
 // 另一條路是掃電腦設定頁上的 QR code（scan）：外殼開相機掃、本人確認後把掃到的字存進 App 私有資料夾，**畫面只拿得到狀態字，拿不到掃到的字**；
 // 格式、節點與指紋由 Rust 判斷（android_known_scan_confirm 只收節點與憑證）。
 import { confirmWithToken, scanFingerprint } from './mobile-confirm.mjs'
-import { invoke as tauriInvoke, store as tauriStore } from './tauri.mjs'
+import { invoke as tauriInvoke, makeKnownPeerApi, store as tauriStore } from './tauri.mjs'
+import { KNOWN_PEER_FAILED_TEXT, knownPeerErrorText, renameErrorText } from './plain-errors.mjs'
 import { ONBOARD_STORE } from './onboard.mjs'
 import { displayDeviceName, unnamedLabelOf } from './device-known.mjs'
 import { renameDeviceFromPage } from './device-rename.mjs'
@@ -58,7 +59,7 @@ export const TEXT = {
   forget: '忘記',
   forgetNote: '只有你確定是那台重灌、換了電腦，或不想再看它時才按。忘記之後，下次連上去會當成第一次。',
   notReady: '還沒記住這台電腦，請等畫面出來再按一次。',
-  failed: '操作沒有成功，請稍後再試。',
+  failed: KNOWN_PEER_FAILED_TEXT,
 }
 
 /** 和電腦版同一種寫法：名字後面接「（指紋 xxxxxxxx）」（辨認用的前 8 碼） */
@@ -102,26 +103,19 @@ export function normalizeList(raw) {
     })
 }
 
-/** 改名失敗：後台（Rust）回的是中文說明就原樣顯示，其他一律說白話 */
-export function renameErrorText(e) {
-  const s = String(e?.message ?? e ?? '').trim()
-  return /[\u4e00-\u9fff]/.test(s) && s.length <= 120 ? s : TEXT.failed
-}
-
-export function errorText(e) {
-  const s = String(e?.message ?? e ?? '')
-  if (s.includes('螢幕鎖')) return s
-  return TEXT.failed
-}
+// 轉白話集中在 plain-errors.mjs；這裡照舊匯出原名字
+export { renameErrorText }
+export const errorText = knownPeerErrorText
 
 /**
  * 確認、忘記要做的事。confirm、invoke 可以注入（測試用）。
  * 每次都先過本人確認（'ok' 才繼續；'cancel' 什麼都不送；'no_lock' 丟沒設螢幕鎖的說明），不記住上一次的結果。
  */
 export function makeKnownPeers({ confirm = challenge => confirmWithToken(challenge), scan = challenge => scanFingerprint(challenge), invoke = tauriInvoke, pendingStore = null } = {}) {
+  const api = makeKnownPeerApi(invoke)   // 後端呼叫一律走 tauri.mjs 的具名出口；invoke 仍可注入（測試用）
   // 回憑證字串（本人驗證過）或 null（取消）；沒設螢幕鎖丟說明。憑證每次都重要，不記住上一次的
   const gate = async (action, node) => {
-    const challenge = await invoke('android_known_token', { action, node })
+    const challenge = await api.token(action, node)
     if (typeof challenge !== 'string' || !challenge) throw new Error('no_token')
     const r = await confirm(challenge)
     if (r === 'ok') return challenge
@@ -129,7 +123,7 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
     return null
   }
   return {
-    list: async () => normalizeList(await invoke('android_known_list')),
+    list: async () => normalizeList(await api.list()),
     /**
      * 出四選一的題目：回 { state:'ok', id, options:[4 組分組指紋] }｜{ state:'locked', minutes }（答錯過一次，鎖住中）｜{ state:'blocked' }（答錯兩次，要忘記那台才能重來）；
      * 那台還沒記住或格式不對回 null。四個選項對同一台電腦每次都一樣，由 Rust 固定
@@ -137,7 +131,7 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
     challenge: async peer => {
       if (!peer?.node) return null
       let r
-      try { r = await invoke('android_known_challenge', { node: peer.node }) } catch (e) {
+      try { r = await api.challenge(peer.node) } catch (e) {
         if (String(e?.message ?? e) === 'not_ready') return null
         throw e
       }
@@ -156,20 +150,20 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
      */
     pick: async (id, index, node) => {
       if (!id || !Number.isInteger(index) || index < -1 || index > 3) return 'expired'
-      const r = await invoke('android_known_answer', { id, pick: index })
+      const r = await api.answer(id, index)
       if (r === 'wrong' || r === 'none' || r === 'expired' || r === 'locked' || r === 'blocked') return r
       if (r !== 'right') throw new Error('unexpected')
       if (!node) return 'not_ready'
       const challenge = await gate('confirm', node)
       if (!challenge) return 'cancel'
-      return (await invoke('android_known_confirm', { id, challenge })) === true ? 'done' : 'not_ready'
+      return (await api.confirm(id, challenge)) === true ? 'done' : 'not_ready'
     },
     /** 回 'done'｜'cancel' */
     forget: async node => {
       if (!node) return 'cancel'
       const challenge = await gate('forget', node)
       if (!challenge) return 'cancel'
-      await invoke('android_known_forget', { node, challenge })
+      await api.forget(node, challenge)
       return 'done'
     },
     /**
@@ -180,7 +174,7 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
     scan: async node => {
       if (!node) return 'cancel'
       let challenge
-      try { challenge = await invoke('android_known_token', { action: 'scan', node }) } catch (e) {
+      try { challenge = await api.token('scan', node) } catch (e) {
         const m = String(e?.message ?? e)
         if (m === 'blocked' || m === 'locked' || m === 'not_ready') return m
         throw e
@@ -191,7 +185,7 @@ export function makeKnownPeers({ confirm = challenge => confirmWithToken(challen
       if (st === 'denied' || st === 'no_camera') return 'no_camera'
       if (st === 'bad_qr') return 'bad_qr'
       if (st !== 'ok') return 'cancel'
-      const out = await invoke('android_known_scan_confirm', { node, challenge })
+      const out = await api.scanConfirm(node, challenge)
       if (out === 'ok') return 'done'
       if (out === 'mismatch' || out === 'bad_qr' || out === 'blocked' || out === 'locked') return out
       if (out === 'not_verified') return 'not_ready'

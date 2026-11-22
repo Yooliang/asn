@@ -191,6 +191,38 @@ export const store = name => ({
   },
 })
 
+// ---------- 具名出口（#2106 ②）：電腦版與手機版都經這裡呼叫後端 ----------
+// 參數 call 預設就是上面的 invoke；測試可以換成假的。方法名＝指令的駝峰寫法，參數形狀與以前直接 invoke 時完全相同。
+// 語音（念出訊息＋語音輸入）。辨識與金鑰都在 Rust 端
+export const makeVoiceApi = (call = invoke) => ({
+  ttsSpeak: text => call('tts_speak', { text }),   // → base64 音檔
+  sttStatus: () => call('stt_status'),             // → { ready }；辨識引擎與模型下載了沒
+  sttTranscribe: (wav, names) => call('stt_transcribe', names?.length ? { wav, names } : { wav }),   // → 辨識出的文字；沒有名字就不帶 names
+  sttCancel: () => call('stt_cancel'),             // 請 Rust 端結束正在跑的辨識程式
+  sttInstall: () => call('stt_install'),           // 下載辨識引擎與目前選的模型
+})
+export const voiceApi = makeVoiceApi()
+// 群組（房間）：讀、發言、附件。電腦版與手機版用同一組方法，只差指令名（手機是 android_room_*），由 cmds 帶進來
+export const makeRoomApi = (call = invoke, cmds = {}) => {
+  const { readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment' } = cmds
+  return {
+    rooms: () => call('relay_rooms'),                    // → { rooms, signed, reason? }
+    read: args => call(readCmd, args),                   // { room, agent, since, limit, mark } → { messages, reads, wakes }
+    post: body => call(postCmd, { body }),               // body＝{ room, body, from_agent?, reply_to? } → { seq, ... }
+    attach: payload => call(attachCmd, { payload }),     // 在群組傳照片或檔案；Rust 端上傳後以本人簽章發言
+  }
+}
+// 手機的「認得的電腦」：確認指紋、忘記。憑證與判斷都在 Rust（android.rs）
+export const makeKnownPeerApi = (call = invoke) => ({
+  token: (action, node) => call('android_known_token', { action, node }),   // → 一次性憑證字串（action: confirm｜forget｜scan）
+  list: () => call('android_known_list'),                                    // → { peers: [...] }
+  challenge: node => call('android_known_challenge', { node }),              // → { state: ok｜locked｜blocked, ... }；那台還沒記住丟 not_ready
+  answer: (id, pick) => call('android_known_answer', { id, pick }),          // → right｜wrong｜none｜expired｜locked｜blocked
+  confirm: (id, challenge) => call('android_known_confirm', { id, challenge }),   // → true｜false
+  forget: (node, challenge) => call('android_known_forget', { node, challenge }),
+  scanConfirm: (node, challenge) => call('android_known_scan_confirm', { node, challenge }),   // → ok｜mismatch｜bad_qr｜blocked｜locked｜not_verified
+})
+
 // ---------- 視窗外框（自訂／Windows 原生） ----------
 // 原生外框：html 加 frame-native，樣式把自畫的標題列、邊框與拖邊緣的把手藏起來
 export const applyFrame = native => document.documentElement.classList.toggle('frame-native', native === true)

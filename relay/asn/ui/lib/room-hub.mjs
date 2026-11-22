@@ -5,6 +5,7 @@ import { confirmCards } from './groups.mjs'
 import { ROOM_BACK_MAX, ROOM_FIRST_LOAD, ROOM_KEEP_MAX, ROOM_LOAD_FAIL_TEXT, applyReads, applyWakes, hasPendingReads, hasPendingWakes, mergeRoomLog, memberIdentity, needsRead, postError, readSince, roomErrorText, roomItems, roomLog } from './mobile-rooms.mjs'
 import { groupErrorText } from './groups.mjs'
 import { offlineNames } from './group-offline.mjs'
+import { makeRoomApi } from './tauri.mjs'
 
 // 後台回的 unmatched：內文裡 @ 了但對不到任何群組成員的名字；舊後台沒有這個欄位＝空。回要顯示的一句話（沒有就空字串）
 export function unmatchedText(r) {
@@ -15,6 +16,7 @@ export function unmatchedText(r) {
 
 // visible(群組代號)：使用者現在正在看這個群組嗎（可回 Promise）；沒指定 mark 的讀取只有看著的那個才標已讀
 export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x, onRooms = () => {}, onFail = () => {} }) {
+  const api = makeRoomApi(invoke, { readCmd, postCmd, attachCmd })   // 後端呼叫一律走 tauri.mjs 的具名出口；invoke 仍可注入（測試用）
   const st = reactive({ rooms: [], loaded: false, err: false, signed: true, logs: {}, cards: {}, note: '', deciding: false, notices: {} })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
   // 目前離線的成員鍵（叫醒順序標籤把離線的畫灰色加「離線」，#1656）；讀不到成員就是空集合
@@ -25,12 +27,12 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
 
   async function refresh() {
     try {
-      const r = await invoke('relay_rooms')
+      const r = await api.rooms()
       st.rooms = Array.isArray(r?.rooms) ? r.rooms : []
       st.err = false; st.loaded = true
       st.signed = r?.signed !== false   // 沒帶本人簽章（登入失效）：後台只回得出這台的群組，畫面要在原位說一句（#1764）
-      try { onRooms(r) } catch { /* 提醒條出錯不影響群組 */ }
-    } catch (e) { st.err = true; try { onFail(e) } catch { /* 同上 */ } }
+      try { onRooms(r) } catch { console.warn('[ASN]', '群組提醒條（onRooms）出錯，不影響群組本身') }
+    } catch (e) { st.err = true; try { onFail(e) } catch { console.warn('[ASN]', '群組失敗回呼（onFail）出錯，群組維持失敗狀態') } }
     return st.rooms
   }
 
@@ -52,7 +54,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
       const seen = typeof mark === 'boolean' ? mark : (await Promise.resolve().then(() => visible(id)).catch(() => false)) === true
       // 後台只在讀到新訊息時才標已讀：未讀還在就多讀最後一則
       const since = unread && !first ? Math.max(0, readSince(log, row.lastSeq) - 1) : readSince(log, row.lastSeq)
-      const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: seen })
+      const r = await api.read({ room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: seen })
       const mine = (room.mine ?? []).map(m => m?.member)
       st.logs[id] = applyWakes(applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members, { photos })), r?.reads), r?.wakes, offlineKeysOf(room))
       if (seen) for (const m of room.mine ?? []) if (m.member === ident.key) m.unread = 0
@@ -78,7 +80,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     let since = seq - 1
     try {
       while (since < oldest - 1) {
-        const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since, limit: Math.min(200, oldest - 1 - since), mark: false })
+        const r = await api.read({ room: id, agent: ident.agent || null, since, limit: Math.min(200, oldest - 1 - since), mark: false })
         const got = roomLog(r?.messages, mine, room.members, { photos })
         if (!got.length) break
         st.logs[id] = mergeRoomLog(st.logs[id] ?? [], got, ROOM_KEEP_MAX)
@@ -96,18 +98,18 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     const wakeWait = !noWakes && hasPendingWakes(log, now())
     if (!hasPendingReads(log) && !wakeWait) return false
     try {
-      const r = await invoke(readCmd, { room: id, agent: ident.agent || null, since: log[log.length - 1].seq, limit: 1, mark: false })
+      const r = await api.read({ room: id, agent: ident.agent || null, since: log[log.length - 1].seq, limit: 1, mark: false })
       if (wakeWait && !Array.isArray(r?.wakes)) noWakes = true   // 舊後台沒有這個欄位：不再為順序而問
       const cur = st.logs[id] ?? log
       const next = applyWakes(applyReads(cur, r?.reads), r?.wakes, offlineKeysOf(raw(id)))
       if (next !== cur) { st.logs[id] = next; return true }
-    } catch { /* 舊後台或暫時連不上：維持原樣 */ }
+    } catch { /* 舊後台或暫時連不上：維持原樣；背景補查已讀，出口已把失敗寫進 log，不必再提醒使用者 */ }
     return false
   }
 
   async function loadCards(id) {
     if (!raw(id)) return
-    try { const r = await groupApi.confirmList(id); st.cards[id] = confirmCards(r?.confirms) } catch { /* 舊後台沒有這個動作：不顯示卡片 */ }
+    try { const r = await groupApi.confirmList(id); st.cards[id] = confirmCards(r?.confirms) } catch { /* 舊後台沒有這個動作：不顯示卡片；出口已把失敗寫進 log */ }
   }
 
   // 打開一個群組：讀訊息與確認卡片
@@ -119,7 +121,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     if (err) { st.note = err; return false }
     try {
       const reply = Number.isInteger(opts?.replySeq) && opts.replySeq > 0 ? { reply_to: opts.replySeq } : {}   // 回覆某則訊息：後台記下引用並自動 @ 原作者
-      const r = await invoke(postCmd, { body: { room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}), ...reply } })
+      const r = await api.post({ room: id, body: text, ...(ident.agent ? { from_agent: ident.agent } : {}), ...reply })
       st.note = ''
       const warn = unmatchedText(r)
       if (warn) st.notices[id] = [...(st.notices[id] ?? []), { seq: Number.isInteger(r?.seq) ? r.seq : null, text: warn, t: now() }].slice(-20)   // 只留在本機畫面，不寄出去
@@ -145,7 +147,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     if (err) { st.note = err; return false }
     if (!item?.data) { st.note = '沒有內容'; return false }
     try {
-      await invoke(attachCmd, { payload: { room: id, ...(ident.agent ? { from_agent: ident.agent } : {}), kind: item.kind === 'file' ? 'file' : 'image', caption: String(caption ?? '').trim(), name: item.name, data: item.data, width: item.width, height: item.height, thumb: item.thumb || undefined } })
+      await api.attach({ room: id, ...(ident.agent ? { from_agent: ident.agent } : {}), kind: item.kind === 'file' ? 'file' : 'image', caption: String(caption ?? '').trim(), name: item.name, data: item.data, width: item.width, height: item.height, thumb: item.thumb || undefined })
       st.note = ''
       await refresh(); await read(id, { force: true })
       return true
