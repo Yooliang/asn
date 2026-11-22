@@ -1,15 +1,11 @@
 {
-  "version": "0.2.66",
-  "notes": "- 改善：帳號頁每台設備一列、按鈕統一，不能切換時會說明原因。（#2111、#2113、#2116）",
-  "pub_date": "2026-11-22T13:11:08.403Z",
+  "version": "0.2.68",
+  "notes": "- 改善：帳號頁按切換後，結果直接顯示在原來的位置。（#2111、#2117）\n- 改善：記錄檔裡的 email 一律遮掉；操作失敗時，原始錯誤也會寫進記錄，方便查原因。（#2104、#2106、#2118、#2119、#2122）",
+  "pub_date": "2026-11-22T14:36:19.016Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNJZXFLWVpNUjFEeGpweWRHS243djllNlVTcllERzM5SlNhRW5uUnJaTDkrMEdnY3VUbXZWZkoxZjdZOTlaQThpQ0hIYnFqSmNxbGl4VmtPZDJNeEFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzUzMDY4CWZpbGU6QVNOXzAuMi42Nl94NjQtc2V0dXAuZXhlCnV6MzRIWTNRWnduNE5FcXhyYWpEaFVIMVRqUTJOb0Z1bXhYZlZsbUszb3BEdC84UFdsWWFKRllOVHlxYUVmcm8rVGplV3hLVzZ1d1E1cWVva1NNL0NnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.66_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJ3alhmVUZkS0swYW5QVlhYSzR2SlR3S1ZjWkptRmxLbTNBZUc5K2JOaGNpdUhjUjVqekl5UjE5ZzlZYngweEtxS243S2hWbzFaSUtFZXVvZVNSRWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzUzNjg0CWZpbGU6QVNOXzAuMi42Nl9hbWQ2NC5BcHBJbWFnZQpxdEtRVHBZcHNLWi9RcU9KbEluL0RQWDdHV3EyazRGVHFKWlIyUVREYkhtZ1U5N3k3allZeEZPTUZvK2Y1dGxDek9KS3dCUm5ENnVsQTBYSFRLVjVEUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.66_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpISzc0aFNvenc4NkNlWDc5RkppbElVSnRhN1F0TEVUcEFFZzhJMnZzdGZOcjdPMnVmSUdpT1o1eTd5TmRkVG5BS3lTbjZQbHlkQ3ZabWs5aUJJSGdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzU4MTc4CWZpbGU6QVNOXzAuMi42OF94NjQtc2V0dXAuZXhlCjRTVHFDYnp4elBHUDd4RVVZa0djMTlpbHRObWhyc0tTZU5uT2ZYckc5MFYrTWVVWkwwb3d1VktieGR6VkNRQjJiUEY2QjZ0WlRQSGdGZVgveW9QaEJnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.68_x64-setup.exe"
     }
   }
 }
