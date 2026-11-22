@@ -116,20 +116,20 @@ export async function runAcctSwitch(transport, node, email, { onUpdate = () => {
   const emit = v => { onUpdate(v); return v }
   emit({ phase: 'sending', text: '送出中…', done: false })
   let sent
-  try { sent = await transport.acctSwitch(node, email) } catch (e) { return emit({ phase: 'failed', text: acctErrorText(e), done: true }) }
-  if (!sent?.id) return emit({ phase: 'failed', text: '後台沒有回指令編號，請稍後再試。', done: true })
+  try { sent = await transport.acctSwitch(node, email) } catch (e) { return emit({ phase: 'failed', text: acctErrorText(e), done: true, fail: { error: e } }) }
+  if (!sent?.id) return emit({ phase: 'failed', text: '後台沒有回指令編號，請稍後再試。', done: true, fail: { code: 'no_id' } })
   emit({ phase: 'waiting', text: remoteStatusText({ status: 'pending' }), done: false })
   for (let i = 0; i < pollMax; i++) {
     await sleep(pollMs)
     if (cancelled()) return { phase: 'waiting', text: '', done: false }
     let st
-    try { st = ((await transport.acctStatus([sent.id]))?.switches ?? []).find(x => x.id === sent.id) } catch (e) { return emit({ phase: 'failed', text: acctErrorText(e), done: true }) }
-    if (!st) return emit({ phase: 'failed', text: '查不到這個指令的結果。', done: true })
+    try { st = ((await transport.acctStatus([sent.id]))?.switches ?? []).find(x => x.id === sent.id) } catch (e) { return emit({ phase: 'failed', text: acctErrorText(e), done: true, fail: { error: e } }) }
+    if (!st) return emit({ phase: 'failed', text: '查不到這個指令的結果。', done: true, fail: { code: 'missing' } })
     const text = remoteStatusText(st, email)
-    if (isFinalStatus(st.status)) return emit({ phase: st.status === 'ok' ? 'done' : 'failed', text, done: true })
+    if (isFinalStatus(st.status)) return emit({ phase: st.status === 'ok' ? 'done' : 'failed', text, done: true, ...(st.status === 'ok' ? {} : { fail: { status: st.status, detail: st.detail } }) })
     emit({ phase: 'waiting', text, done: false })
   }
-  return emit({ phase: 'failed', text: '等太久了，那台電腦沒有回應；稍後再看它的帳號清單。', done: true })
+  return emit({ phase: 'failed', text: '等太久了，那台電腦沒有回應；稍後再看它的帳號清單。', done: true, fail: { code: 'timeout' } })
 }
 
 // 「設備與帳號」內頁上方的兩個分頁（#650）；預設「設備」

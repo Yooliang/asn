@@ -52,6 +52,7 @@ import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib
 import { GUIDE_TEXT, GUIDE_VENDORS, guideRows, guideVisible, guideReshowVisible, loadGuideHidden, saveGuideHidden } from './lib/new-computer-guide.mjs'
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { STATE } from './lib/device-state.mjs'
+import { createSwitchTracker, switchRowKey, switchResultOf, switchBusyNode } from './lib/switch-result.mjs'
 import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, canShowBackRow, DEVICE_TEXT } from './lib/device-order.mjs'
@@ -947,9 +948,27 @@ const app = createApp({
     const acctCanSwitchTo = node => isSwitchTarget(acctDevs.value.find(d => d.key === node), info.node)
     const acctSwitchOn = async (node, email) => { if (!acctCanSwitchTo(node)) return; await openAcctDevice(node); startAcctSwitch(email) }
     // 帳號卡片的設備列（#2111 ②）：一台一列，列的狀態由共用的 accountDeviceRows 決定（電腦同一個函式；手機只有 Claude 能切換）；切換進行中的那台顯示「切換中…」
-    const acctDevRows = (vendor, a) => accountDeviceRows(acctDevs.value, vendor, a?.account, a?.usedOn, { vendors: ['claude'], switchingNode: acctSw.phase === 'run' ? acctSw.node : '' })
+    const acctDevRows = (vendor, a) => accountDeviceRows(acctDevs.value, vendor, a?.account, a?.usedOn, { vendors: ['claude'], switchingNode: acctSw.phase === 'run' ? acctSw.node : switchBusyNode(acctRowSwitch, vendor, a?.account, acctDevs.value.map(d => d.key)) })
     const acctInUseOf = (vendor, a) => accountInUse(acctDevRows(vendor, a), a?.current)
-    const acctDevPress = (b, a) => { if (b.state !== 'switch') return; void acctSwitchOn(b.node, a.account) }
+    // 按帳號卡設備列的「切換」（#2111 ③）：不跳框、不進確認頁，那一列顯示「切換中…」，結果在那一列下方原位顯示；成功後重讀帳號列表，卡片頂端與設備列一起變。
+    // 流程與文字和電腦同一份（switch-result.mjs）；對方電腦預設仍會要使用者按「同意」才換
+    const acctRowSwitch = reactive({})
+    const acctRowTracker = createSwitchTracker({ state: acctRowSwitch, log: (...a) => console.info(...a) })
+    const acctRowCurrent = (vendor, email, node) => {
+      const acc = (acctMy.value?.vendors ?? []).find(x => x.key === vendor)?.accounts.find(x => String(x.account).trim().toLowerCase() === String(email).trim().toLowerCase())
+      return accountDeviceRows(acctDevs.value, vendor, email, acc?.usedOn, { vendors: ['claude'] }).find(r => r.node === node)?.current === true
+    }
+    const acctDevPress = (b, a, vendor = 'claude') => {
+      if (b.state !== 'switch' || !acctCanSwitchTo(b.node)) return
+      const email = a.account
+      void acctRowTracker.press({
+        key: switchRowKey(vendor, email, b.node), label: b.label,
+        run: async () => { const v = await runAcctSwitch(acctTransport, b.node, email); return v.phase === 'done' ? { ok: true } : { ok: false, fail: v.fail } },
+        reload: async () => { await loadRoster(); await loadAcct(b.node, true) },
+        synced: () => acctRowCurrent(vendor, email, b.node),
+      })
+    }
+    const acctRowResult = (vendor, a, node) => switchResultOf(acctRowSwitch, switchRowKey(vendor, a?.account, node))
     // 從手機替電腦安裝並登入 Claude Code（#650 F）：按鈕 → 確認 → 送出 → 每 5 秒查狀態 → 結果。真正的安裝在電腦上做，這裡只下指令與看狀態
     // mode：'install'＝安裝並登入、'relogin'＝重新登入（#1512 C；送的是同一個要求，只差按鈕與確認字）
     const setupSt = reactive({ node: '', mode: 'install', stage: 'idle', since: 0, saw: false, reached: false, fails: 0, lead: '', text: '', note: '', ok: false, msg: '' })
@@ -1654,7 +1673,7 @@ const app = createApp({
       KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
-      devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctInUseOf, acctDevPress, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
+      devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctInUseOf, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,

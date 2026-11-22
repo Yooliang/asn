@@ -100,7 +100,7 @@ import { buildDeviceTree } from './lib/device-tree.mjs'
 import { GUIDE_TEXT, GUIDE_VENDORS, guideReshowVisible, guideRows, guideVisible, loadGuideHidden, localVendorStates, saveGuideHidden, singleFlight } from './lib/new-computer-guide.mjs'
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { splitMachines } from './lib/remote-machines.mjs'
-import { nodeLabelOf, rosterQuotaFor, rosterView, selfClaudeQuota } from './lib/account-roster.mjs'
+import { accountDeviceRows, nodeLabelOf, rosterQuotaFor, rosterView, selfClaudeQuota } from './lib/account-roster.mjs'
 import { setNodePlatforms } from './lib/node-platform.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
@@ -2070,6 +2070,17 @@ const app = createApp({
     const myAccounts = computed(() => rosterView(accounts.state.roster, { nodeLabel: rosterNodeLabel.value }))
     const quotaReaders = createQuotaReaders({ invoke, onShareChanged: () => { void accounts.refreshRoster() }, reactive })
     void quotaReaders.load()
+    // 帳號卡設備列的「切換」：不跳框，結果在那一列下方原位顯示；成功後重讀列表，卡片頂端與設備列一起變（#2111 ③）
+    const switchAccountRow = v => {
+      const vendor = v?.vendor === 'grok' ? 'grok' : 'claude'
+      const email = String(v?.email ?? ''), node = String(v?.node ?? '')
+      if (!email || !node) return
+      const nowCurrent = () => {
+        const acc = (myAccounts.value?.vendors ?? []).find(x => x.key === vendor)?.accounts.find(a => String(a.account).trim().toLowerCase() === email.trim().toLowerCase())
+        return accountDeviceRows(deviceTree.value, vendor, email, acc?.usedOn).find(r => r.node === node)?.current === true
+      }
+      return accounts.switchRow({ vendor, email, node, label: String(v?.label ?? ''), self: node === info.node, synced: nowCurrent })
+    }
     const deviceAcctTitleText = computed(() => deviceAcctTitle(deviceAcct.label))
     const deviceAcctSubmit = () => { const v = deviceAcctView.value; if (v.canSwitch) void accounts.remoteSwitch(v.switchEmail) }
     const installFromSettings = async () => {
@@ -2093,6 +2104,7 @@ const app = createApp({
       relogin: reloginSnap(reloginFlow.state),
       accounts: {
         list: accounts.state.list.map(a => ({ ...a, quota: selfClaudeQuota(accounts.state.quotaState, a.email, { current: a.current === true, roster: accounts.state.roster, nodeLabel: rosterNodeLabel.value }) })), current: accounts.state.current, codexLine: codexLine(accounts.state.codex, accounts.state.codexErr),
+        rowSwitch: { ...accounts.state.rowSwitch },   // 帳號卡設備列的切換結果（#2111 ③）
         busy: accounts.state.busy, confirmDel: accounts.state.confirmDel, msg: accounts.state.msg, mod: accounts.state.mod, allowSwitch: accounts.state.allowSwitch, autoAdd: autoAddClaude.value, autoNote: accounts.state.autoNote,
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
@@ -2124,6 +2136,7 @@ const app = createApp({
         case 'voice-save': await saveVoice(value); break
         case 'voice-install': await installFromSettings(); break
         case 'acct-switch': await accounts.switchTo(value); break
+        case 'row-switch': await switchAccountRow(value); break
         case 'acct-remove': await accounts.remove(value); break
         case 'acct-allow-switch': await accounts.setAllowSwitch(value === true); break
         case 'quota-source': await quotaReaders.setSource(value?.source, value?.on); break
