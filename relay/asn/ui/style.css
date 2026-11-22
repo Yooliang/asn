@@ -996,6 +996,10 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-devres.waiting{color:var(--muted)}
 .dv-devrow.read .dv-devname{border-left:3px solid var(--accent);padding-left:6px}
 .dv-devwhy{font-size:11px;color:var(--muted)}
+/* 登入失效（#1960）：名單上方的提示、卡片頂端的標籤、設備列下方展開的重新登入確認與進度 */
+.dv-lostnotes{list-style:none;margin:0 0 var(--sp-2);padding:var(--sp-2) var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-1);border:1px solid var(--kit-warn-line);border-radius:4px;background:var(--panel-soft);color:var(--kit-warn);font-size:var(--fs-2)}
+.dv-lost{font-size:var(--fs-1);color:var(--kit-warn);border:1px solid var(--kit-warn-line);border-radius:4px;padding:0 var(--sp-1)}
+.dv-devconfirm{margin:0 0 var(--sp-2)}
 .dv-code{display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:6px}
 .dv-code code{word-break:break-all;user-select:all}
 .dv-mm{display:flex;flex-wrap:wrap;gap:6px}

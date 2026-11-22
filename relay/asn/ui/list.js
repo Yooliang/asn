@@ -1949,6 +1949,8 @@ const app = createApp({
     const reloginFlow = createReloginFlow({
       invoke, reactive,
       checkLoggedIn: async () => { await accounts.refresh(); const cur = accounts.state.list.find(a => a.current === true); return !!cur && accounts.state.loginFailed !== true },
+      // 登入成功後重讀列表與那台的帳號回報，帳號頁的「登入已失效」提示與標籤才會一起消失（#1960）
+      onDone: (ok, node) => { if (!ok) return; void accounts.refreshRoster(); if (node && node !== info.node) void accounts.loadReports([node]) },
     })
     onBeforeUnmount(() => reloginFlow.stop())
     void listen('agent-setup', e => agentInstall.onEvent(e))   // listen 已經把事件裡的內容（payload）直接交給函式
