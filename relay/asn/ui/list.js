@@ -2164,10 +2164,10 @@ const app = createApp({
         case 'bridge-takeover': bridge.confirm = true; break
         case 'bridge-takeover-yes': await takeoverBridge(); break
         case 'bridge-takeover-no': bridge.confirm = false; break
-        case 'launch-recheck': toolInstall.clear(); await Promise.all([refreshCliTools(), refreshCliStatus(true)]); break
+        case 'launch-recheck': toolInstall.clear(); await Promise.all([refreshCliTools(), refreshCliStatus(true)]); break   // 重新偵測並略過快取
         case 'launch-install-ask': toolInstall.ask(value); break
         case 'launch-install-yes': await toolInstall.confirm(); break
-        case 'launch-install-no': toolInstall.decline(); break   // 重新偵測並略過快取
+        case 'launch-install-no': toolInstall.decline(); break
         case 'askpass-copy': await copyAskpassPath(); break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break

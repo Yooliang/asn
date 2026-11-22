@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { LAUNCH_INSTALL_BTN, TOOL_INSTALL_TEXT, createToolInstall, installRowView } from '../ui/lib/tool-install.mjs'
+import { LAUNCH_INSTALL_BTN, TOOL_INSTALL_TEXT, createToolInstall, installBtnKind, installRowView } from '../ui/lib/tool-install.mjs'
 import { SETTING_OPS } from '../ui/lib/settings-panel.mjs'
 
 const rd = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -115,4 +115,27 @@ test('#1548 ⑤ 接線：命令名、動作登記、不動 AGENT_INSTALL_UI、�
   assert.match(css, /\.launch-tools \.launch-act\{flex:none;margin-left:auto\}/)
   assert.match(css, /\.launch-install-btns\{display:flex;gap:8px;justify-content:flex-end\}/)
   assert.doesNotMatch(rd('ui/lib/tool-install.mjs'), /怎麼安裝|怎麼更新/)
+})
+
+test('#1548 ⑤ 同意關卡：沒按過「進行安裝」就直接 confirm()（殘留事件、連點）不會呼叫後端；進行中、做完後再 confirm() 也不重複安裝', async () => {
+  const { t, calls } = make(() => ({ ok: true, message: '', opened_login: false }))
+  await t.confirm()   // idle
+  assert.deepEqual([t.state.stage, calls.install.length, calls.refresh], ['idle', 0, 0])
+  t.ask('install'); t.decline()
+  await t.confirm()   // 按了又取消之後
+  assert.deepEqual([t.state.stage, calls.install.length], ['idle', 0])
+  t.ask('install')
+  const first = t.confirm()
+  await t.confirm()   // running 中連點
+  await first
+  await t.confirm()   // done 之後
+  assert.deepEqual([calls.install.length, calls.refresh, t.state.stage], [1, 1, 'done'])
+})
+
+test('#1548 ⑤ 安裝狀態還不知道（偵測沒回來：installed 為 undefined／null）時不出「進行安裝」', () => {
+  for (const installed of [undefined, null]) {
+    assert.equal(installBtnKind({ enabled: true, toolId: 'claude', installAvail: true, installed, status: undefined }), null)
+    assert.equal(view({ installed, status: undefined }), null)
+    assert.equal(view({ installed, status: behind }), null, '也不出「進行更新」：沒確定裝了就不說有新版可更新')
+  }
 })
