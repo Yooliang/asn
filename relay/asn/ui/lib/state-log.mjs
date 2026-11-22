@@ -45,6 +45,7 @@ export function createStateLog(emit) {
   return {
     /** ai_cli_status 回來的 tools；查不到（丟錯）時不要呼叫，保留上一次的值 */
     aiCliStatus(tools) {
+      if (!Array.isArray(tools)) return   // 非陣列（回傳異常）不當成「沒有任何工具」，不記也不動比較基準
       const cur = toMap(tools, cliFields)
       if (cli === null) {
         out(LOG_HEAD.cliInit + (ids(cur).map(id => { const f = cur.get(id); return `${id} 版本=${f.版本} 最新=${f.最新} 登入=${f.登入}` }).join('；') || '（沒有任何工具）'))

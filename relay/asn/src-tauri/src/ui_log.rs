@@ -58,7 +58,8 @@ pub fn append(dir: &Path, lines: &[String]) -> Result<usize, String> {
     if dir.as_os_str().is_empty() {
         return Ok(0);
     }
-    let rows: Vec<String> = lines.iter().take(LINES_MAX).filter_map(|l| clean_line(l)).collect();
+    // 寫檔出口一律遮 email（前端整批寫入與 elog 都經這裡；帳號 email 不留檔），先遮再限長，才不會把 email 切在半截漏出來
+    let rows: Vec<String> = lines.iter().take(LINES_MAX).filter_map(|l| clean_line(&mask_emails(l))).collect();
     if rows.is_empty() {
         return Ok(0);
     }
@@ -131,10 +132,10 @@ pub fn mask_emails(s: &str) -> String {
     out
 }
 
-/// 寫一行到 `dir` 的 ui.log；`dir` 是 None（還沒設定）就什麼都不做。任何錯誤都吞掉、絕不 panic。email 先遮掉
+/// 寫一行到 `dir` 的 ui.log；`dir` 是 None（還沒設定）就什麼都不做。任何錯誤都吞掉、絕不 panic。email 由 append 統一遮
 pub fn elog_to(dir: Option<&Path>, msg: &str) {
     if let Some(d) = dir {
-        let _ = append(d, &[elog_line(crate::heartbeat::now_ms() as i64, &mask_emails(msg))]);
+        let _ = append(d, &[elog_line(crate::heartbeat::now_ms() as i64, msg)]);
     }
 }
 
@@ -504,6 +505,18 @@ mod tests {
         assert!(!t.contains("example.com") && !t.contains("mail.example") && !t.contains("q@r.tw"), "{t}");
         assert!(t.contains("登入 <email> 失敗；(<email>), 再試 user=<email>. 另外 x @ y 與 a@b 與 @abc 不動"), "{t}");
         assert_eq!(mask_emails("沒有 email 的一行"), "沒有 email 的一行");
+    }
+
+    #[test]
+    fn 前端整批寫入的_asn_行含_email_也遮成_email() {
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), &["2026-11-22T10:00:00Z warn [ASN] 帳號切換失敗：user.name+x@example.com 登入逾時；(a@b.co.jp)".into(), "沒有 email 的一行 x @ y".into()]).unwrap();
+        let t = std::fs::read_to_string(path(d.path())).unwrap();
+        assert!(!t.contains("example.com") && !t.contains("a@b.co.jp"), "{t}");
+        assert!(t.contains("[ASN] 帳號切換失敗：<email> 登入逾時；(<email>)
+"), "{t}");
+        assert!(t.contains("沒有 email 的一行 x @ y
+"), "{t}");
     }
 
     #[test]
