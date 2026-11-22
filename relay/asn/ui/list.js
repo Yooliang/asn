@@ -55,6 +55,7 @@ import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.m
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { RESIZE_DIRS, authApi, ctl, emit, initFrame, invoke, listen, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
+import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { MODEL_CATALOG, cliInstalled, defaultPartnerName, injectPendingGroups, modelUiRow, pendingFriend, resolvePending } from './lib/partner.mjs'
 import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
@@ -497,6 +498,8 @@ async function openLaunchLogFolder() {
 // 設定頁「檢視記錄」：開 ui.log，開不了就退回開記錄資料夾；說明顯示在設定頁（#339）
 const uiLogMsg = ref('')
 const launchPrefs = reactive(normalizeLaunchPrefs(null))
+// 狀態變動記錄（#2104 B）：第一次記初始、之後只在值變了才記，寫進 ui.log
+const stateLog = createStateLog(text => console.info('[ASN]', text))
 const launchCwdMsg = ref('')   // 加入／移除資料夾失敗的白話原因，顯示在清單下面（原文進 log）
 // 同一時間只偵測一份（連按「重新檢查」、開對話框同時要求，都共用正在跑的那一份）
 const refreshCliTools = singleFlight(async () => {
@@ -505,6 +508,7 @@ const refreshCliTools = singleFlight(async () => {
     const map = {}
     for (const t of r?.tools ?? []) map[t.id] = t
     cliTools.value = map
+    stateLog.aiCliDetect(r?.tools)
   } catch (e) { console.info('[ASN] cli detect failed', e.message) }
 })
 // #380：被後台擋（401／403）就拉長下次查詢的間隔（最長 5 分鐘），查到恢復 15 秒；記錄只在狀態改變時寫一次
@@ -564,22 +568,25 @@ async function addLaunchCwd() {
     if (!p) return
     await loadLaunchPrefs()
     if (hasCwd(before, p)) launchCwdMsg.value = '這個資料夾已經在清單裡'
-  } catch (e) { console.info('[ASN] 加入工作資料夾', cwdReason(e)); launchCwdMsg.value = `加入資料夾沒有成功：${cwdReason(e)}` }
+    else stateLog.cwdAdded(p)
+  } catch (e) { console.info('[ASN] 加入工作資料夾', cwdReason(e)); stateLog.cwdRejected('加入', cwdReason(e)); launchCwdMsg.value = `加入資料夾沒有成功：${cwdReason(e)}` }
 }
 async function addSuggestedCwd(p) {
   launchCwdMsg.value = ''
   const prev = [...launchPrefs.cwdAllow]
   launchPrefs.cwdAllow = [...prev, p]
-  try { await transport.launchPrefsSet(launchPrefsToSave(launchPrefs)) } catch (e) {
+  try { await transport.launchPrefsSet(launchPrefsToSave(launchPrefs)); stateLog.cwdAdded(p) } catch (e) {
     console.info('[ASN] 加入建議資料夾', cwdReason(e))
+    stateLog.cwdRejected('加入', cwdReason(e))
     launchPrefs.cwdAllow = prev
     launchCwdMsg.value = `加入資料夾沒有成功：${cwdReason(e)}`
   }
 }
 async function removeLaunchCwd(p) {
   launchCwdMsg.value = ''
-  try { launchPrefs.cwdAllow = await transport.launchCwdRemove(p) } catch (e) {
+  try { launchPrefs.cwdAllow = await transport.launchCwdRemove(p); stateLog.cwdRemoved(p) } catch (e) {
     console.info('[ASN] 移除工作資料夾', cwdReason(e))
+    stateLog.cwdRejected('移除', cwdReason(e))
     launchCwdMsg.value = `移除沒有成功：${cwdReason(e)}`
     await loadLaunchPrefs()
   }
@@ -596,6 +603,7 @@ const refreshCliStatus = async (force = false) => {
     const map = {}
     for (const t of r?.tools ?? []) map[t.id] = t
     cliStatus.value = map
+    stateLog.aiCliStatus(r?.tools)
   } catch (e) { console.info('[ASN] cli status failed', e?.message ?? e); cliStatus.value = {} }   // 查不到：畫面顯示「暫時查不到」，原因只進記錄
   finally { cliStatusBusy.value = false }
   if (cliStatusAgain) { cliStatusAgain = false; await refreshCliStatus(true) }
@@ -688,7 +696,8 @@ async function browsePartnerCwd() {
     localCwdList.value = withPickedCwd(localCwdList.value, p)
     partnerDlg.cwd = p
     await loadLaunchPrefs()
-  } catch (e) { partnerDlg.error = e.message }
+    stateLog.cwdAdded(p)
+  } catch (e) { partnerDlg.error = e.message; stateLog.cwdRejected('加入', cwdReason(e)) }
 }
 function pickPartnerModel(m) {
   if (!m.installed) return
@@ -1917,6 +1926,7 @@ const app = createApp({
       devices: () => launchDeviceRowsList.value.filter(d => d.key !== info.node && asnMap.value[d.key]),
       nodeLabel: n => launchDeviceRowsList.value.find(d => d.key === n)?.label ?? n,
     })
+    watch(() => accounts.state.mod, m => stateLog.claudeMod(m), { deep: true })   // Claude 外掛狀態（啟動後的安裝檢查、設定頁讀取、claude-mod-status 事件）都走這一個出口
     const acctReady = ref(false)   // 帳號讀過一輪了（新手引導卡判斷已登入／沒登入要等它）
     void accounts.refresh().finally(() => { acctReady.value = true })
     // 設定頁「用量」：打開那一頁才讀本機記錄（Rust 端有快取，不會每次重掃）
