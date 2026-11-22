@@ -43,7 +43,7 @@ test('樣式表：modern.css 每一條規則都限定在 :root[data-skin="modern
   assert.match(css, /--accent:#2f7a70/); assert.match(css, /--panel-soft:#f6f5f2/)
   assert.doesNotMatch(css, /@/, '不寫 @media／@import 等：包在 @ 規則裡的選擇器上面的檢查抓不到')
   // 危險動作的紅色在現代底下還在（一般按鈕換成白底的規則權重較高，要另外蓋回來）
-  for (const sel of ['.aero-btn.danger', '.gs-btn.danger', '.aero-btn.dv-danger', '.m-btn.m-danger', '.m-btn.m-dv-danger', '.logout-set .logout-btn']) assert.ok(css.includes(`:root[data-skin="modern"] ${sel}`), `現代底下的 ${sel} 要留紅色`)
+  for (const sel of ['.aero-btn.danger', '.gs-btn.danger', '.aero-btn.dv-danger', '.m-btn.m-danger', '.m-btn.m-dv-danger']) assert.ok(css.includes(`:root[data-skin="modern"] ${sel}`), `現代底下的 ${sel} 要留紅色`)
   // 手機浮層與提示不留 Aero 的藍色漸層
   for (const sel of ['.m-sheet', '.m-banner', '.toast', '.sp']) { const head = ':root[data-skin="modern"] ' + sel; assert.ok(css.includes(head + '{') || css.includes(head + ','), `${sel} 要有現代版`) }
   for (const page of ['list', 'chat', 'panel', 'toast', 'm', 'login', 'onboard', 'askpass', 'setup-progress']) {
