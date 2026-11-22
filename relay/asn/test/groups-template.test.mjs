@@ -85,7 +85,8 @@ test('簽章動作只走 relay_group／帶簽章的讀寫指令；Rust 端指令
   assert.ok(handler.every(h => /\brelay_group\b/.test(h) && /\binvite_pending\b/.test(h)), '電腦與手機的指令清單都要有')
   const ui = ['list.js', 'm.js'].map(f => read('ui', f)).join('\n') + read('ui', 'lib', 'room-hub.mjs') + read('ui', 'lib', 'group-flow.mjs')
   assert.doesNotMatch(ui, /invoke\('relay_group'/, 'relay_group 只在 groups.mjs 的包裝裡呼叫一次')
-  assert.equal((read('ui', 'lib', 'groups.mjs').match(/invoke\('relay_group'/g) ?? []).length, 1)
+  assert.equal((read('ui', 'lib', 'tauri.mjs').match(/call\('relay_group'/g) ?? []).length, 1)   // 指令名在出口
+  assert.match(read('ui', 'lib', 'groups.mjs'), /makeGroupActApi\(invoke\)/)
 })
 
 test('頁面腳本語法正確（list.js、m.js、chat.js 與群組模組）：語法錯誤在真機上的樣子是整頁沒掛載、露出 {{ }} 原文', () => {

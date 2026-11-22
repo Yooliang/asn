@@ -3,9 +3,8 @@
 // 這個檔案只放「怎麼叫 Rust」與改名後怎麼就地更新畫面，純函式／注入 invoke，node 與瀏覽器都能跑。
 import { applyRename } from './rename.mjs'
 import { displayDeviceName } from './device-known.mjs'
-
-/** 改名要叫的 Rust 命令：手機是 android_known_rename、電腦是 device_rename（兩個命令都送後台並替本機視窗名跟上） */
-export const renameCommandOf = phone => (phone === true ? 'android_known_rename' : 'device_rename')
+import { makeDeviceNameApi, renameCommandOf } from './tauri.mjs'
+export { renameCommandOf }   // 命令名的對照放在出口（tauri.mjs），這裡照舊匯出
 
 /** 啟動對齊後要對使用者說的話（本機名字被換成後台那一份時） */
 export const alignNote = name => `這台的名字已統一為設備頁設定的「${name}」，要改請到設備頁。`
@@ -37,7 +36,7 @@ export async function clearPendingDeviceName(store, log = console.info) {
 /** 替任一台設備改名；成功回 Rust 的結果（{ ok, name, changed, self_renamed?, window_name?, window_rename_failed? }），失敗丟 Error（訊息是給人看的中文） */
 export async function renameDevice(invoke, { node, name, phone = false }) {
   try {
-    return await invoke(renameCommandOf(phone), { node, name: String(name ?? '').trim() })
+    return await makeDeviceNameApi(invoke).rename(phone, node, String(name ?? '').trim())
   } catch (e) {
     throw new Error(String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試')
   }
@@ -72,7 +71,7 @@ export function followSelfRename(ctx, r, notify = () => {}, log = console.info) 
  */
 export async function alignDeviceName(invoke, ctx, notify = () => {}, log = console.info) {
   let r
-  try { r = await invoke('device_name_align') } catch (e) { log('[ASN] 對齊設備名沒成功', String(e?.message ?? e ?? '')); return null }
+  try { r = await makeDeviceNameApi(invoke).align() } catch (e) { log('[ASN] 對齊設備名沒成功', String(e?.message ?? e ?? '')); return null }
   if (r?.state === 'adopted' && typeof r.name === 'string' && r.name) { applyRename(ctx, r.name); notify(alignNote(r.name)) }
   else if (r?.state === 'failed') {
     log('[ASN] 對齊設備名：本機寄信名字沒換成', String(r.reason ?? ''))
@@ -113,12 +112,12 @@ export async function syncPendingDeviceName(invoke, store, ctx, { node, phone = 
   const backend = displayDeviceName(ctx?.core?.nodeNames?.[node])
   if (backend && base && backend !== base && backend !== name) {
     log('[ASN] 不補送首次引導的設備名：後台的名字已被改過', `後台「${backend}」、當初「${base}」、待送「${name}」`)
-    await store.save(rest).catch(() => {})
+    await store.save(rest).catch(() => { /* 待送名字清不掉：下次啟動會再比對一次（後台名字還是被改過就還是不送） */ })
     return null
   }
   try {
     const r = await renameDevice(invoke, { node, name, phone })
-    await store.save(rest).catch(() => {})
+    await store.save(rest).catch(() => { /* 名字已送出；清不掉待送的，下次補送時會因後台名字相同而略過 */ })
     followSelfRename(ctx, r, notify, log)
     return r
   } catch (e) {

@@ -3,6 +3,8 @@
 // 附加到機器資料夾的 ui.log。寫檔失敗就丟掉這批，不重試、不再印記錄（免得自己繞圈）。
 // node 也要能載入（測試），所以不碰 window；計時器與 console 都由呼叫端帶進來。
 
+import { makeUiLogApi } from './tauri.mjs'
+
 export const UI_LOG_FLUSH_MS = 3000
 export const UI_LOG_BUFFER_MAX = 200   // 佇列最多留幾行（寫檔一直失敗時只留最新的）
 export const UI_LOG_LINE_MAX = 500
@@ -25,6 +27,7 @@ export const isAsnLog = args => typeof args?.[0] === 'string' && args[0].startsW
 
 // 包住 target（console）的 info／warn／error：照常印出，[ASN] 開頭的另外排進佇列。回 { flush, pending }
 export function installUiLog({ invoke, target = console, flushMs = UI_LOG_FLUSH_MS, setTimer = setTimeout, now = () => new Date() }) {
+  const api = makeUiLogApi(invoke)
   const queue = []
   let timer = null
   let sending = false
@@ -33,7 +36,7 @@ export function installUiLog({ invoke, target = console, flushMs = UI_LOG_FLUSH_
     if (sending || !queue.length) return
     sending = true
     const lines = queue.splice(0, queue.length)
-    try { await invoke('ui_log', { lines }) } catch { /* 寫不進去就算了：不重試、不再印記錄 */ } finally { sending = false }
+    try { await api.send(lines) } catch { /* 寫不進去就算了：不重試、不再呼叫任何 console.*（會被排進佇列、再送、再失敗，繞圈）。出口對 ui_log 也不記失敗 */ } finally { sending = false }
   }
   for (const level of LEVELS) {
     const orig = typeof target[level] === 'function' ? target[level].bind(target) : () => {}

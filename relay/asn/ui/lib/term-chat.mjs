@@ -49,8 +49,8 @@ export function composerView(row) {
 // ---- 確認列狀態機 ----
 // phase：idle（沒有確認列）／confirm（確認列出現，等使用者在電腦按）／phone（已傳到手機，等手機或電腦先確認）／sending（已按確認送出，等結果）
 // 每個動作回 { state, effects }；effects 只會是下面幾種，接線照順序呼叫：
-//   { type: 'offer', req }    → invoke('term_remote_offer_send', { req })
-//   { type: 'withdraw', id }  → invoke('term_remote_withdraw', { id })
+//   { type: 'offer', req }    → 叫 term_remote_offer_send（參數 { req }）
+//   { type: 'withdraw', id }  → 叫 term_remote_withdraw（參數 { id }）
 //   { type: 'send', req }     → term_send（只有 confirm 動作會產生）
 export const IDLE = Object.freeze({ phase: 'idle', termId: '', text: '', enter: true, error: '' })
 

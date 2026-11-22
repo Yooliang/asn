@@ -49,7 +49,8 @@ test('守門：Rust 指令有註冊、前端呼叫的指令名與參數名對得
   assert.ok(src('src-tauri/src/lib.rs').includes('usage::usage_summary'), 'lib.rs 沒註冊 usage_summary')
   assert.ok(src('src-tauri/src/lib.rs').includes('mod usage;'))
   assert.ok(src('src-tauri/src/usage.rs').includes('pub async fn usage_summary(tz_offset_min: i32)'))
-  assert.ok(src('ui/lib/usage.mjs').includes("invoke('usage_summary', { tzOffsetMin:"))
+  assert.ok(src('ui/lib/tauri.mjs').includes("call('usage_summary', { tzOffsetMin"))   // 指令名與參數名在出口
+  assert.ok(src('ui/lib/usage.mjs').includes('api.summary(now().getTimezoneOffset())'))
 })
 
 test('守門：用量掃描不啟動外部程式、不連網、不碰登入檔與 ASN 資料', () => {

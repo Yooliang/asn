@@ -16,22 +16,11 @@ const src = f => fs.readFileSync(f, 'utf8')
 
 // 待搬清單：各檔直接呼叫 invoke( 的次數（含註解裡的字樣）。後續分組搬遷時，搬完一個檔就刪一行或改小數字。
 export const PENDING = {
-  'askpass.js': 2,
   'lib/account-roster.mjs': 2,
   'lib/claude-accounts.mjs': 24,
-  'lib/device-rename.mjs': 2,
-  'lib/groups.mjs': 1,
-  'lib/login-panel.mjs': 1,
-  'lib/mobile-login-seal.mjs': 1,
   'lib/quota-readers.mjs': 6,
-  'lib/term-chat.mjs': 2,
-  'lib/ui-log.mjs': 1,
-  'lib/usage.mjs': 1,
-  'lib/view-log.mjs': 2,
   'list.js': 97,
   'm.js': 49,
-  'setup-progress.js': 2,
-  'toast.js': 2,
 }
 
 test('除 tauri.mjs 外，不准直接呼叫 __TAURI__.core.invoke', () => {
