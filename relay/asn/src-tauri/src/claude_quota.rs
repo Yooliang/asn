@@ -229,7 +229,7 @@ fn shown_key(k: &str) -> String {
 }
 
 /// 白名單欄位（`asn-cli claude-usage --profile-shape` 用）：值是固定代碼、不是個資，所以印出實際值；名單外的欄位一律只印型別。
-pub const PROFILE_VALUE_KEYS: [&str; 6] = ["organization_type", "subscription_type", "billing_type", "rate_limit_tier", "has_claude_pro", "has_claude_max"];
+pub const PROFILE_VALUE_KEYS: [&str; 7] = ["organization_type", "subscription_type", "subscription_status", "billing_type", "rate_limit_tier", "has_claude_pro", "has_claude_max"];
 
 /// 白名單欄位的值要真的像「代碼」才印：只含英數、底線、減號、點，長度 1～40，不是 uuid、不含 `@`。
 /// 就算鍵名在白名單裡，email、uuid、名字這類值也不會印出來。

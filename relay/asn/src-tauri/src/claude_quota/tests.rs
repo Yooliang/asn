@@ -463,7 +463,7 @@ fn profile_body() -> Value {
         "account": { "uuid": P_UUID, "email": P_EMAIL, "full_name": P_NAME, "display_name": "SecretNick", "has_claude_pro": false, "has_claude_max": true, "created_at": "2025-01-01T00:00:00Z" },
         "organization": {
             "uuid": P_UUID, "name": P_NAME, "organization_type": "claude_max", "billing_type": "stripe_subscription",
-            "rate_limit_tier": "default_claude_max_5x", "subscription_type": "max", "seats": 3, "flags": [{ "organization_type": P_EMAIL }, "plainstring"],
+            "rate_limit_tier": "default_claude_max_5x", "subscription_type": "max", "subscription_status": "canceled", "seats": 3, "flags": [{ "organization_type": P_EMAIL }, "plainstring"],
             "nickname_code": "NotOnList"
         },
         "email_as_code": { "organization_type": P_EMAIL, "billing_type": P_UUID, "subscription_type": "has space", "rate_limit_tier": "" }
@@ -481,6 +481,8 @@ fn profile_shape_白名單欄位印值_名單外與個資只印型別() {
     assert_eq!(v["organization"]["billing_type"], "stripe_subscription");
     assert_eq!(v["organization"]["rate_limit_tier"], "default_claude_max_5x");
     assert_eq!(v["organization"]["subscription_type"], "max");
+    // 停訂的關鍵訊號（第三方專案 uwuclxdy/clauth 以 subscription_status == "canceled" 區分停訂與從未付費的免費帳號）
+    assert_eq!(v["organization"]["subscription_status"], "canceled");
     assert_eq!(v["account"]["has_claude_pro"], false);
     assert_eq!(v["account"]["has_claude_max"], true);
     // 名單外：字串 <字串>、數字只印型別；鍵名照印
