@@ -3154,6 +3154,7 @@ pub fn run() {
     #[cfg(desktop)]
     if !is_shot {
         ui_log::install_panic_hook(work_dir.clone());
+        ui_log::set_elog_dir(work_dir.clone());   // elog! 也寫進 ui.log（#2104）
     }
     // 自己結束時寫原因用的資料夾（截圖模式不寫）
     #[cfg(desktop)]
