@@ -471,7 +471,14 @@ async fn collect_and_report(relay: Arc<Relay>, work_dir: std::path::PathBuf, wri
     let login_failed = tauri::async_runtime::spawn_blocking(move || login_watch::tick_real(heartbeat::now_ms() as i64, &ctx, &notifier)).await.unwrap_or(false);
     // 讀畫面認出夥伴視窗要求重新登入（#1512 C）：也算登入失效，手機的設備頁才會出現「重新登入 Claude」（只是入口，放不放行仍由本機決定）
     let login_failed = login_failed || claude_screen_says_login();
-    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows, &gemini, login_failed, write).await
+    // 訂閱狀態（#1646 E）：只對應目前登入的帳號；Unknown 不會被帶出去（見 acct_remote::with_sub_state）
+    let sub = tauri::async_runtime::spawn_blocking(|| {
+        let home = claude_accounts::claude_home();
+        (claude_accounts::current_email(&home), claude_quota::claude_subscription(&home).0)
+    })
+    .await
+    .unwrap_or((None, claude_accounts::Sub::Unknown));
+    acct_remote::report(relay.as_ref(), &list, codex.as_ref(), &quotas, &grok, &codex_windows, &gemini, login_failed, sub, write).await
 }
 // ---------- 額度來源與查詢代碼（todo-next-193） ----------
 #[cfg(feature = "gui")]

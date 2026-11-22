@@ -10,7 +10,7 @@
 //!
 //! 指令只帶目標帳號的 email；本機只接受「自己剛從收發室取走、尚未處理」的指令編號，
 //! 所以介面端無法憑空要求切換，每個編號只能處理一次。
-use crate::claude_accounts::{self, AccountInfo};
+use crate::claude_accounts::{self, AccountInfo, Sub};
 use crate::codex_accounts::CodexLogin;
 use crate::relay::Relay;
 use serde::Serialize;
@@ -144,6 +144,35 @@ pub fn with_login_failed(attempts: Vec<Value>, failed: bool) -> Vec<Value> {
         a
     });
     flagged.chain(attempts.iter().cloned()).collect()
+}
+
+/// 訂閱狀態（#1646 拆項 E，後台讀法見 20261122200000_acct_sub_state.sql／account_switch.ts）：
+/// 只在「使用中那個 Claude 帳號」（email 與 `claude_subscription` 對應的登入帳號相同，不分大小寫）那列帶 `sub_state`，
+/// 與 `login_failed`、`usable_at` 同一層（accounts[] 的每個物件裡）。
+/// - 只有 `active`／`lapsed` 才帶。`Unknown`（還沒讀到、剛換帳號、查詢暫時失敗）不帶：後台「沒帶就沿用上次存的」，
+///   帶 `unknown` 會把已知的 `lapsed` 洗成 `unknown`，查詢一失敗警示就消失，所以不帶。
+/// - 其他帳號一律不帶，讓後台沿用上次的值。
+/// - 舊後台會把這個鍵丟掉、不退回整份，所以每一份（含退路）都帶，不必多送一輪。
+pub fn with_sub_state(mut attempts: Vec<Value>, login_email: Option<&str>, sub: Sub) -> Vec<Value> {
+    let (Some(email), Some(state)) = (login_email, sub_state_str(sub)) else {
+        return attempts;
+    };
+    for a in attempts.iter_mut() {
+        for r in a["accounts"].as_array_mut().into_iter().flatten() {
+            if r["vendor"] == "claude" && r["email"].as_str().is_some_and(|e| e.eq_ignore_ascii_case(email)) {
+                r["sub_state"] = json!(state);
+            }
+        }
+    }
+    attempts
+}
+
+fn sub_state_str(sub: Sub) -> Option<&'static str> {
+    match sub {
+        Sub::Active => Some("active"),
+        Sub::Lapsed => Some("lapsed"),
+        Sub::Unknown => None,
+    }
 }
 
 /// 額度讀取器（quota_readers.rs，預設關閉）讀到的：Grok 的窗掛到對應帳號那列；MiniMax 另外加列。
@@ -438,9 +467,9 @@ pub fn decide(taken: &mut HashMap<String, (String, Instant)>, id: &str, allowed:
 // ---------- 送給收發室的動作 ----------
 /// 被退回（HTTP 400）時的退路見 [`report_attempts`]：拿掉 gemini 再送，再不行只送 Claude；其他錯誤不退步
 #[allow(clippy::too_many_arguments)]
-pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, claude_windows: &HashMap<String, Vec<Value>>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value], login_failed: bool, log: &impl Fn(String)) -> Result<Value, String> {
+pub async fn report(relay: &Relay, list: &[AccountInfo], codex: Option<&CodexLogin>, claude_windows: &HashMap<String, Vec<Value>>, grok: &[crate::grok_accounts::GrokAccount], codex_windows: &[Value], gemini: &[Value], login_failed: bool, sub: (Option<String>, Sub), log: &impl Fn(String)) -> Result<Value, String> {
     let extras = crate::quota_readers::report_extras(crate::heartbeat::now_ms() as i64);
-    let attempts = with_reader_rows(with_login_failed(report_attempts(list, codex, claude_windows, grok, codex_windows, gemini), login_failed), &extras);
+    let attempts = with_reader_rows(with_sub_state(with_login_failed(report_attempts(list, codex, claude_windows, grok, codex_windows, gemini), login_failed), sub.0.as_deref(), sub.1), &extras);
     send_attempts(attempts, |body| relay.api("acct_report", Some(body)), log).await
 }
 
@@ -1161,6 +1190,41 @@ mod tests {
         assert!(v[0]["accounts"][1].get("login_failed").is_none(), "非使用中的不標");
         assert_eq!(v[0]["accounts"][1]["login_incomplete"], json!(true), "登入不完整照樣一起帶");
         assert!(v[1]["accounts"][0].get("login_failed").is_none(), "退路是原版");
+    }
+
+    #[test]
+    fn 訂閱狀態只帶給登入的那個帳號_unknown_不帶_大小寫不分() {
+        let list = [acct("a@x.test", true), acct("b@x.test", false)];
+        let base = report_attempts(&list, None, &HashMap::new(), &[], &[], &[]);
+        let lapsed = with_sub_state(base.clone(), Some("A@X.TEST"), Sub::Lapsed);
+        assert_eq!(lapsed[0]["accounts"][0]["sub_state"], json!("lapsed"), "email 大小寫不同也對得上");
+        assert!(lapsed[0]["accounts"][1].get("sub_state").is_none(), "非使用中的不帶");
+        let active = with_sub_state(base.clone(), Some("a@x.test"), Sub::Active);
+        assert_eq!(active[0]["accounts"][0]["sub_state"], json!("active"));
+        assert!(active[0]["accounts"][1].get("sub_state").is_none());
+        assert_eq!(with_sub_state(base.clone(), Some("a@x.test"), Sub::Unknown), base, "Unknown 不帶，後台沿用上次的值");
+        assert_eq!(with_sub_state(base.clone(), None, Sub::Lapsed), base, "沒有登入帳號不帶");
+        assert_eq!(with_sub_state(base.clone(), Some("zzz@x.test"), Sub::Lapsed), base, "對不上任何帳號不帶");
+    }
+
+    #[test]
+    fn 訂閱狀態鍵的位置與後台讀的一致_同一層_只在_claude_列() {
+        // 後台（feat/1646-d-flag：account_switch.ts 的 a.sub_state、asn_relay_acct_report 的 v_row->'sub_state'）
+        // 從 accounts[] 每個物件的頂層讀，與 login_failed、usable_at 同層，值為 active／lapsed／unknown 字串
+        let mut a = acct("a@x.test", true);
+        a.usable_at_ms = Some(1_700_000_000_000);
+        let codex_login = codex("a@x.test", "plus", "chatgpt");
+        let full = build_report_all(&[a], Some(&codex_login), &HashMap::new(), &[], &[], &[]);
+        let v = with_sub_state(with_login_failed(vec![full], true), Some("a@x.test"), Sub::Lapsed);
+        let rows = v[0]["accounts"].as_array().unwrap();
+        let claude = rows.iter().find(|r| r["vendor"] == "claude").unwrap();
+        assert_eq!(claude["sub_state"], json!("lapsed"));
+        assert_eq!(claude["login_failed"], json!(true));
+        assert!(claude.get("usable_at").is_some(), "同層還有 usable_at");
+        assert!(["active", "lapsed", "unknown"].contains(&claude["sub_state"].as_str().unwrap()));
+        assert!(v[0].get("sub_state").is_none(), "不在最外層");
+        let other = rows.iter().find(|r| r["vendor"] == "codex").unwrap();
+        assert!(other.get("sub_state").is_none(), "只有 claude 那列（同 email 的 codex 不帶）");
     }
 
     #[tokio::test]
