@@ -54,8 +54,8 @@ import { HOLD_TIP, createPartnerNoticePoller, noticeStillFor, permissionView } f
 import { createHold } from './lib/hold-press.mjs'
 import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
-import { plainMessage } from './lib/plain-errors.mjs'
-import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, ctl, emit, initFrame, invoke, listen, logViewApi, settingsApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { plainMessage, termRemoteErrorText } from './lib/plain-errors.mjs'
+import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
@@ -438,25 +438,25 @@ const launchPending = ref([])     // 啟動中列
 const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
 const launchNotice = reactive({ open: false, title: '', body: '', logPath: '' })
 const launchLogPaths = reactive({ bridgeLog: '', machineDir: '' })
-void invoke('relay_log_paths').then(p => { if (p) Object.assign(launchLogPaths, p) }).catch(() => {})
+void logViewApi.relayLogPaths().then(p => { if (p) Object.assign(launchLogPaths, p) }).catch(e => console.warn('[ASN] 讀不到記錄路徑', String(e?.message ?? e)))
 function showLaunchNotice(notice) {
   Object.assign(launchNotice, { open: true, logPath: launchNoticeLogPath(notice, launchLogPaths.bridgeLog), title: notice.title, body: notice.body })
 }
 function closeLaunchNotice() { launchNotice.open = false }
 // 別台正在看這台（#597）：一定顯示，不能關，只能按結束。Rust 在傳第一幅之前就會通知這裡
 const beingViewed = ref([])
-const stopBeingViewed = id => invoke('term_viewed_stop', { id }).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
+const stopBeingViewed = id => termRemoteApi.viewedStop(id).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
 // 設定頁「認得的電腦」（#597）：判斷都在 Rust，這裡只讀本機紀錄。第一次記住和金鑰換了的通知由 Rust 寄信，不在這裡
 const known = reactive({ peers: [], busy: false, error: '', renameError: '', shown: false, ownFp: '', qr: null })
 // 這台自己的指紋（唯讀）：本人拿去和手機上顯示的比對
 async function loadOwnFp() {
-  try { known.ownFp = String(await invoke('device_own_fingerprint') ?? '').slice(0, 16) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
+  try { known.ownFp = String(await knownDeviceApi.ownFingerprint() ?? '').slice(0, 16) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
 }
 // 把這台的指紋畫成 QR code 給手機掃（唯讀）：格子由 Rust 排，這裡只驗資料、交給設定頁畫在 canvas 上；on=false 就收起來
 async function toggleOwnQr(on) {
   if (!on) { known.qr = null; return }
   try {
-    const qr = normalizeQr(await invoke('device_own_fingerprint_qr'))
+    const qr = normalizeQr(await knownDeviceApi.ownFingerprintQr())
     if (!qr) throw new Error('bad_qr_rows')
     known.qr = qr
     known.error = ''
@@ -464,12 +464,12 @@ async function toggleOwnQr(on) {
 }
 async function refreshKnown() {
   void loadOwnFp()
-  try { Object.assign(known, knownView(await invoke('device_known_list')), { shown: true }) } catch (e) { console.info('[ASN] 認得的電腦讀不到', String(e?.message ?? e)); known.error = knownError(e); known.shown = true }
+  try { Object.assign(known, knownView(await knownDeviceApi.list()), { shown: true }) } catch (e) { console.info('[ASN] 認得的電腦讀不到', String(e?.message ?? e)); known.error = knownError(e); known.shown = true }
 }
 // 允許這支手機替這台登入（#933）：只有這台的設定頁能改，存在這台
 async function setKnownLoginOk(node, on) {
   known.busy = true
-  try { await invoke('device_known_login_ok', { node, on: !!on }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 允許替這台登入沒改成', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
+  try { await knownDeviceApi.setLoginOk(node, on); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 允許替這台登入沒改成', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
 }
 // 替某台設備改名（名字只有一個、存在後台）：規則與送出都在 Rust，成功後重讀設備列表與認得的電腦
 async function renameDevice(node, name) {
@@ -492,7 +492,7 @@ async function renameDevice(node, name) {
 }
 async function forgetKnown(node) {
   known.busy = true
-  try { await invoke('device_known_forget', { node }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 忘記這台失敗', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
+  try { await knownDeviceApi.forget(node); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 忘記這台失敗', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
 }
 async function openLaunchLogFolder() {
   try { await logViewApi.openMachineLogDir() } catch (e) { console.info('[ASN] 開啟記錄資料夾', e.message) }
@@ -1171,7 +1171,7 @@ const groupFlow = createGroupFlow({
 // 邀請連結一鍵開啟（asn://invite/<碼>）：Rust 端收到後通知；啟動前就收到的用 invite_pending 補取
 const onInviteCode = code => { if (typeof code === 'string' && code) { void shellApi.showMain().catch(() => {}); groupFlow.openJoin(code) } }
 await listen('asn:invite', onInviteCode)
-void invoke('invite_pending').then(onInviteCode).catch(() => {})
+void linkApi.invitePending().then(onInviteCode).catch(e => console.warn('[ASN] 讀不到啟動前的邀請', String(e?.message ?? e)))
 
 // ---------- 「通知」大分頁（方案 A）：系統通知不進名單、也不開成一般對話分頁 ----------
 // 整合模式：點一則＝右邊固定的「通知」內容分頁（NOTICE_TAB，沒有輸入列），窄視窗切到右邊並附「‹ 通知」返回鈕；
@@ -1341,14 +1341,14 @@ watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddC
 const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...deviceFieldsToSave(devPrefs), chatPins: chatPins.value, me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, ghRefs: ghRefs.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
 addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
-watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
+watch(() => totalUnread(friends.value), n => { void trayApi.setUnread(n).catch(e => console.warn('[ASN] 托盤未讀沒送出', String(e?.message ?? e))) }, { immediate: true })
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
-watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
+watch(() => [me.status, me.psm], () => { void trayApi.setPresence(me.status, me.psm ?? '').catch(e => console.warn('[ASN] 在線狀態沒送出', String(e?.message ?? e))) }, { immediate: true })
 // 正在聽的歌：開關交給 Rust 端（關著不讀不送）；歌變了 Rust 端推 asn:now-playing，自己的名單頭顯示
 await listen('asn:now-playing', p => { nowPlaying.value = showNowPlaying.value ? String(p ?? '') : '' })   // listen 已經把 payload 拆好交過來
 watch(showNowPlaying, on => {
   if (!on) nowPlaying.value = ''
-  void invoke('set_now_playing', { on }).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(() => {})
+  void trayApi.setNowPlaying(on).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(e => console.warn('[ASN] 正在播放開關沒送出', String(e?.message ?? e)))
 }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
@@ -1368,7 +1368,7 @@ const pageFail = reactive({})   // key → true：這則的網頁載入失敗或
 const refreshAds = async () => {
   if (info.shot) return
   try {
-    const next = pickAds(await invoke('ads_fetch'), null)
+    const next = pickAds(await trayApi.adsFetch(), null)
     if (next) { ads.value = next; for (const k of Object.keys(pageFail)) delete pageFail[k]; if (adI.value >= next.length) adI.value = 0 }
   } catch { /* 抓不到就沿用目前的 */ }
 }
@@ -1392,7 +1392,7 @@ watch(() => termPrompt.value, p => {
   if (!p?.row?.id || !p.pv) return
   const req = answerRequest(p.row.id, p.pv, p.pv.options[0]?.n ?? 1)
   if (!req) return
-  void invoke('term_remote_offer_answer', { req }).catch(() => {})
+  void termRemoteApi.offerAnswer(req).catch(e => console.warn('[ASN] 代答沒送出', String(e?.message ?? e)))
 }, { immediate: true })
 function termPick(n) { terms.selected = n; terms.error = '' }
 function termDismiss() { const p = termPrompt.value; if (p) terms.dismissed[p.key] = true }   // 「我自己在視窗裡處理」：只關框，不送任何鍵
@@ -1405,7 +1405,7 @@ async function termConfirm(given) {
     const r = await transport.termAnswer(req)
     terms.note = sentText(r?.keys); terms.selected = 0
     void termPoller?.tickNow()
-  } catch (e) { terms.error = String(e?.message ?? e) } finally { terms.busy = false }
+  } catch (e) { terms.error = termRemoteErrorText(e) } finally { terms.busy = false }
 }
 // ASN 替使用者往終端送字（#296）：寫文字 → 按「送出」→ 確認框 → 按「確認送出」才呼叫 term_send（termSendConfirm 是唯一呼叫處）。
 const termSend = reactive({ id: '', text: '', enter: true, confirming: false, busy: false, phone: false, entryKey: '', error: '', note: '' })
@@ -1419,7 +1419,7 @@ const termSendDraft = computed(() => sendDraftView(termSendRow.value, termSend.t
 const termSendConfirmView = computed(() => (termSend.confirming ? sendConfirmView(termSendRow.value, termSend.text, termSend.enter) : null))
 function termSendWithdraw() {   // 本機取消：手機上那筆一起撤回
   if (!termSend.id) return
-  void invoke('term_remote_withdraw', { id: termSend.id }).catch(() => {})
+  void termRemoteApi.withdraw(termSend.id).catch(e => console.warn('[ASN] 撤回手機確認沒成功', String(e?.message ?? e)))
   if (termSend.phone) { termEntrySet(termSend.id, termSend.entryKey, 'withdrawn'); termSend.phone = false; termSend.entryKey = '' }
 }
 function termsClose() { termSendWithdraw(); terms.open = false }   // 關整個終端面板（點外面或按「關閉」）：手機上等確認的送字一起撤回
@@ -1430,15 +1430,15 @@ function termSendPhone() {
   const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
   if (!req || termSend.phone || termSend.busy) return
   termSend.phone = true; termSend.error = ''
-  invoke('term_remote_offer_send', { req }).then(() => {
-    if (!termSend.phone || termSend.id !== req.id) { void invoke('term_remote_withdraw', { id: req.id }).catch(() => {}); return }   // 傳的途中已取消或換了終端：後台剛登記的那筆馬上撤掉，不留孤兒
+  termRemoteApi.offerSend(req).then(() => {
+    if (!termSend.phone || termSend.id !== req.id) { void termRemoteApi.withdraw(req.id).catch(e => console.warn('[ASN] 撤回手機確認沒成功', String(e?.message ?? e))); return }   // 傳的途中已取消或換了終端：後台剛登記的那筆馬上撤掉，不留孤兒
     termSend.entryKey = termEntryAdd(req.id, req.text, 'phone')
     termPhoneWatch()
-  }).catch(e => { termSend.phone = false; termSend.error = String(e?.message ?? e) })
+  }).catch(e => { termSend.phone = false; termSend.error = termRemoteErrorText(e) })
 }
 // 手機上那筆還在不在：term_remote_pending 是電腦端記著的進行中請求（手機執行完、拒絕、過期都會移除）
 async function termPhonePending(id) {
-  const list = await invoke('term_remote_pending')
+  const list = await termRemoteApi.pending()
   return Array.isArray(list) && list.some(p => p?.kind === 'send' && p?.termId === id)
 }
 // 手機已處理（確認、拒絕或過期）：收掉確認列，時間軸那筆改成「手機已處理」；字有沒有進去看終端畫面
@@ -1474,7 +1474,7 @@ async function termSendConfirm() {
     termSend.phone = false; termSend.entryKey = ''
     termSend.note = '已送出'; termSend.text = ''; termSend.confirming = false
     void termPoller?.tickNow()
-  } catch (e) { termEntryAdd(req.id, req.text, 'failed'); termSend.error = String(e?.message ?? e); termSend.confirming = false } finally { termSend.busy = false }
+  } catch (e) { termEntryAdd(req.id, req.text, 'failed'); termSend.error = termRemoteErrorText(e); termSend.confirming = false } finally { termSend.busy = false }
 }
 // ---------- 終端放進名單與分頁（#331）：名單上每個終端一列，點開是右邊的分頁，下方輸入框送字 ----------
 // 送字、代答仍然只走 termSendConfirm／termConfirm（唯一呼叫處）；分頁只是換了擺放位置。畫面文字用 term_read 只讀，純文字顯示。
@@ -1605,7 +1605,7 @@ function permHoldKey(o, e) { if (permHoldOk(o) && permHold.keyDown(o.n, e)) e.pr
 async function openPermissionDlg(item) {
   if (permissionDlg.open) return
   // 本人正開著它的終端畫面：不跳框搶按鍵，畫面上會有一行提示。下一輪再問，畫面關了就照常跳
-  if (await invoke('term_view_active', { name: item.name }).catch(() => false)) return false
+  if (await termRemoteApi.viewActive(item.name).catch(() => false)) return false   // 查不到就當沒開著，照常跳框
   try {
     const prompt = await transport.partnerPermissionPrompt(item.name)
     Object.assign(permissionDlg, { open: true, name: item.name, prompt, busy: false, error: '' })
@@ -1718,7 +1718,7 @@ const app = createApp({
       return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => flat || !tab.value || p.node === tab.value)), archived)
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : conn.value !== 'on' ? ROSTER_CONNECTING_TEXT : '這一頁目前沒有視窗。'))
-    const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
+    const openAd = a => openAdWith(a, url => void linkApi.openUrl(url))
     // 左上角的名字＝這台設備的後台名字，只顯示不能改（#1803：設備名稱只在「設定 → 設備」改，全程式只有一個改名入口）
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
@@ -1999,7 +1999,7 @@ const app = createApp({
     // 官網：用系統瀏覽器開（open_link 只放行 http／https）；只開引導卡列出的那四個網址
     function guideSite(site) {
       if (!GUIDE_VENDORS.some(v => v.url === site?.url)) return
-      invoke('open_link', { url: site.url }).catch(e => console.info('[ASN] 開啟官網失敗', String(e?.message ?? e)))
+      linkApi.openLink(site.url).catch(e => console.info('[ASN] 開啟官網失敗', String(e?.message ?? e)))
     }
     // 本機帳號庫清單定期回報給收發室在 Rust 背景工作（report_loop），停在登入畫面也照跑；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     // 每 5 分鐘回報時順便重讀這台的額度紀錄，設備卡的額度條才不會停在開機那時的數字
@@ -2206,7 +2206,7 @@ const app = createApp({
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
         case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
-        case 'open-link': if (isAboutUrl(value)) { try { await invoke('open_link', { url: value }) } catch (e) { console.info('[ASN] 開啟連結失敗', String(e?.message ?? e)) } } break   // 只放行「關於」頁那幾個網址
+        case 'open-link': if (isAboutUrl(value)) { try { await linkApi.openLink(value) } catch (e) { console.info('[ASN] 開啟連結失敗', String(e?.message ?? e)) } } break   // 只放行「關於」頁那幾個網址
         case 'open-update': await openPanel('setting', 'update'); break   // 版本紀錄在 App 內設定的「更新」
         case 'open-guide': await openPanel('guide', ui.panel.guide || GUIDES[0]?.key); break
         case 'open-ui-log': uiLogMsg.value = ''; uiLogMsg.value = await openUiLog(invoke); break

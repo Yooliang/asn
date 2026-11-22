@@ -129,7 +129,7 @@ test('畫面上的提示：只對這位夥伴、只有要回答的代號；沒�
 test('守門：同意框跳之前先問畫面有沒有開著；畫面元件會顯示提示', () => {
   const list = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const fn = list.slice(list.indexOf('async function openPermissionDlg'), list.indexOf('async function answerPermission'))
-  assert.match(fn, /invoke\('term_view_active', \{ name: item\.name \}\)\.catch\(\(\) => false\)\) return false/)
+  assert.match(fn, /termRemoteApi\.viewActive\(item\.name\)\.catch\(\(\) => false\)\) return false/)
   const view = fs.readFileSync(new URL('../ui/lib/term-view.mjs', import.meta.url), 'utf8')
   assert.ok(view.includes('term-view-ask') && view.includes('viewHint('))
 })

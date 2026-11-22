@@ -19,7 +19,7 @@ export const PENDING = {
   'lib/account-roster.mjs': 2,
   'lib/claude-accounts.mjs': 24,
   'lib/quota-readers.mjs': 6,
-  'list.js': 23,
+  'list.js': 2,
   'm.js': 49,
 }
 
@@ -176,6 +176,37 @@ test('list.js 第二批：已搬的視窗與啟動截圖指令不再直接 invok
     'close_chats', 'main_layout', 'capture_ui_ready', 'take_shot', 'quit_app']
   for (const c of moved) assert.ok(!s.includes("invoke('" + c + "'"), `${c} 還在 list.js 直接呼叫`)
   for (const api of ['windowApi.openChat(', 'windowApi.openPanel(', 'windowApi.mainLayout(', 'windowApi.closeChats()', 'shellApi.showMain()', 'shellApi.takeShot(', 'shellApi.quitApp()', 'shellApi.startupInfo()']) assert.ok(s.includes(api), api)
+  const ex = src(path.join(UI, 'lib/tauri.mjs'))
+  for (const c of moved) assert.ok(ex.includes(`'${c}'`), `${c} 不在 tauri.mjs 出口`)
+})
+
+// ---- ⑨：list.js 第三批（終端遠端、已知電腦、連結、邀請、記錄路徑、托盤未讀、正在播放、廣告）的出口：指令名與參數形狀不變 ----
+test('終端遠端、已知電腦、連結、托盤出口：指令名與參數形狀不變', async () => {
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return null })
+  const k = m.makeKnownDeviceApi(m.invoke), t = m.makeTermRemoteApi(m.invoke), l = m.makeLogViewApi(m.invoke)
+  await k.ownFingerprint(); await k.ownFingerprintQr(); await k.list(); await k.setLoginOk('n1', 1); await k.setLoginOk('n1', false); await k.forget('n1')
+  await t.viewedStop('v1'); await t.viewActive('p'); await t.offerAnswer({ id: 1 }); await t.offerSend({ id: 2 }); await t.withdraw('t1'); await t.pending()
+  await l.relayLogPaths()
+  await m.linkApi.openLink('https://a'); await m.linkApi.openUrl('https://b'); await m.linkApi.invitePending()
+  await m.trayApi.setUnread(3); await m.trayApi.setPresence('on', ''); await m.trayApi.setNowPlaying(true); await m.trayApi.adsFetch()
+  assert.deepEqual(calls, [
+    ['device_own_fingerprint', undefined], ['device_own_fingerprint_qr', undefined], ['device_known_list', undefined], ['device_known_login_ok', { node: 'n1', on: true }], ['device_known_login_ok', { node: 'n1', on: false }], ['device_known_forget', { node: 'n1' }],
+    ['term_viewed_stop', { id: 'v1' }], ['term_view_active', { name: 'p' }], ['term_remote_offer_answer', { req: { id: 1 } }], ['term_remote_offer_send', { req: { id: 2 } }], ['term_remote_withdraw', { id: 't1' }], ['term_remote_pending', undefined],
+    ['relay_log_paths', undefined],
+    ['open_link', { url: 'https://a' }], ['open_url', { url: 'https://b' }], ['invite_pending', undefined],
+    ['set_tray_unread', { n: 3 }], ['set_presence', { status: 'on', psm: '' }], ['set_now_playing', { on: true }], ['ads_fetch', undefined],
+  ])
+})
+
+test('list.js 第三批：已搬的指令不再直接 invoke、走具名出口；只剩帳號那邊的 ai_cli_login', () => {
+  const s = src(path.join(UI, 'list.js'))
+  const moved = ['relay_log_paths', 'term_viewed_stop', 'device_own_fingerprint', 'device_own_fingerprint_qr', 'device_known_list', 'device_known_login_ok', 'device_known_forget', 'invite_pending',
+    'set_tray_unread', 'set_presence', 'set_now_playing', 'ads_fetch', 'term_remote_offer_answer', 'term_remote_offer_send', 'term_remote_withdraw', 'term_remote_pending', 'term_view_active', 'open_url', 'open_link']
+  for (const c of moved) assert.ok(!s.includes("invoke('" + c + "'"), `${c} 還在 list.js 直接呼叫`)
+  for (const api of ['logViewApi.relayLogPaths(', 'knownDeviceApi.list()', 'knownDeviceApi.setLoginOk(', 'knownDeviceApi.forget(', 'knownDeviceApi.ownFingerprintQr()', 'termRemoteApi.offerSend(', 'termRemoteApi.withdraw(', 'termRemoteApi.pending()',
+    'termRemoteApi.viewActive(', 'linkApi.openLink(', 'linkApi.openUrl(', 'linkApi.invitePending()', 'trayApi.setUnread(', 'trayApi.setPresence(', 'trayApi.setNowPlaying(', 'trayApi.adsFetch()', 'termRemoteErrorText(']) assert.ok(s.includes(api), api)
+  assert.deepEqual([...s.matchAll(/(?<![\w.$])invoke\('([a-z_]+)'/g)].map(x => x[1]), ['ai_cli_login', 'ai_cli_login'])
   const ex = src(path.join(UI, 'lib/tauri.mjs'))
   for (const c of moved) assert.ok(ex.includes(`'${c}'`), `${c} 不在 tauri.mjs 出口`)
 })

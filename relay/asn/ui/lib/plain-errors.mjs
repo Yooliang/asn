@@ -26,6 +26,9 @@ export function renameErrorText(e) {
   return /[一-鿿]/.test(s) && s.length <= 120 ? s : KNOWN_PEER_FAILED_TEXT
 }
 
+/** 終端遠端（代答、代送手機確認）失敗：字串或 Error 都原文顯示（以前 list.js 自己寫的 String(e?.message ?? e)） */
+export const termRemoteErrorText = e => String(e?.message ?? e)
+
 /** 確認、忘記失敗：只有「沒設螢幕鎖」的說明原樣顯示，其他一律說白話 */
 export function knownPeerErrorText(e) {
   const s = String(e?.message ?? e ?? '')

@@ -310,8 +310,41 @@ export const makeDeviceNameApi = (call = invoke) => ({
 export const makeLogViewApi = (call = invoke) => ({
   openUiLog: () => call('open_ui_log'),
   openMachineLogDir: () => call('open_machine_log_dir'),   // 前端不能帶路徑參數
+  relayLogPaths: () => call('relay_log_paths'),            // → { bridgeLog, machineDir }（只回路徑，通知上「看記錄」用）
 })
 export const logViewApi = makeLogViewApi()
+// 電腦版設定頁「認得的電腦」（#2106 ⑨）：這台自己的指紋、認得的別台、允許手機替這台登入、忘記。判斷都在 Rust（device_id.rs）
+export const makeKnownDeviceApi = (call = invoke) => ({
+  ownFingerprint: () => call('device_own_fingerprint'),
+  ownFingerprintQr: () => call('device_own_fingerprint_qr'),
+  list: () => call('device_known_list'),
+  setLoginOk: (node, on) => call('device_known_login_ok', { node, on: !!on }),
+  forget: node => call('device_known_forget', { node }),
+})
+export const knownDeviceApi = makeKnownDeviceApi()
+// 電腦版終端遠端（#2106 ⑨）：別台正在看這台、本機替手機代答／代送、手機確認狀態。字與按鍵都在 Rust 編號加密
+export const makeTermRemoteApi = (call = invoke) => ({
+  viewedStop: id => call('term_viewed_stop', { id }),
+  viewActive: name => call('term_view_active', { name }),
+  offerAnswer: req => call('term_remote_offer_answer', { req }),
+  offerSend: req => call('term_remote_offer_send', { req }),
+  withdraw: id => call('term_remote_withdraw', { id }),
+  pending: () => call('term_remote_pending'),
+})
+export const termRemoteApi = makeTermRemoteApi()
+// 開外部網址與邀請（#2106 ⑨）：open_link 只放行 http／https；open_url 開廣告網址；invite_pending 補取啟動前就收到的邀請碼
+export const linkApi = {
+  openLink: url => invoke('open_link', { url }),
+  openUrl: url => invoke('open_url', { url }),
+  invitePending: () => invoke('invite_pending'),
+}
+// 系統匣與狀態回報（#2106 ⑨）：未讀總數、在線狀態、正在聽的歌、官網廣告。開關與讀取都在 Rust
+export const trayApi = {
+  setUnread: n => invoke('set_tray_unread', { n }),
+  setPresence: (status, psm) => invoke('set_presence', { status, psm }),
+  setNowPlaying: on => invoke('set_now_playing', { on }),
+  adsFetch: () => invoke('ads_fetch'),
+}
 // 群組動作（groups.mjs）：後台的群組操作都走 relay_group，以 action 區分
 export const makeGroupActApi = (call = invoke) => ({
   act: (action, body) => call('relay_group', { action, body }),

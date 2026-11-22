@@ -247,7 +247,7 @@ test('守門：大頁載入失敗或逾時、--shot 模式、沒有圖片時都�
   assert.match(html, /<template v-else>\s*<span class="ad-new"/, '小輪播沒圖就退回樣板')
   assert.ok(html.includes('<div class="hero-tx" v-if="!pageSrc(a)">'), '大幅輪播沒網頁就退回樣板')
   assert.ok(!/v-html="[^"]*\b(?:a\.(?:title|sub|cta|badge|url|page|smallImage)|ads|adImageSrc|pageSrc)\b/.test(html), '廣告的內容不進 v-html')
-  assert.match(js, /if \(info\.shot\) return\s*\r?\n\s*try \{\s*\r?\n\s*const next = pickAds\(await invoke\('ads_fetch'\)/, '--shot 不抓線上廣告')
+  assert.match(js, /if \(info\.shot\) return\s*\r?\n\s*try \{\s*\r?\n\s*const next = pickAds\(await trayApi\.adsFetch\(\)/, '--shot 不抓線上廣告')
 })
 
 test('守門：官網 /ads/** 的標頭只放行 ASN 的 WebView 來源；其他路徑仍禁止被嵌入；範例大頁不引用外部資源', () => {
@@ -299,8 +299,8 @@ test('守門：廣告不用任何 AdSense／外部廣告程式碼；點廣告一
     assert.ok(!/adsbygoogle|googlesyndication|pagead|doubleclick|adservice/i.test(t), `${f} 不該有外部廣告程式碼`)
   }
   const js = fs.readFileSync(new URL('list.js', dir), 'utf8')
-  assert.ok(js.includes("openAdWith(a, url => void invoke('open_url', { url }))"))
-  assert.ok(!js.includes("if (a.url) void invoke('open_url'"))
+  assert.ok(js.includes("openAdWith(a, url => void linkApi.openUrl(url))"))
+  assert.ok(!js.includes("if (a.url) void linkApi.openUrl("))
   const html = fs.readFileSync(new URL('list.html', dir), 'utf8')
   assert.equal(html.split(':disabled="!a.url"').length - 1, 3, '底部小廣告、「開始」頁大幅廣告（樣板與網頁版各一顆）的按鈕，沒網址時都要停用')
   assert.equal(html.split('@click="openAd(a)"').length - 1, 3, '各處點廣告都走 openAd')
