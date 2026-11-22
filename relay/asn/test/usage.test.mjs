@@ -33,7 +33,8 @@ test('畫面資料：沒資料夾、沒記錄、沒價目的模型各有說明�
 test('createUsageUi：把本機時差傳給 Rust、載入中不重複呼叫、失敗顯示中文訊息', async () => {
   const calls = []
   let fail = false
-  const invoke = async (cmd, args) => { calls.push([cmd, args]); if (fail) throw new Error('壞了'); return { rootsFound: true, periods: [] } }
+  let invokeMsg = '壞了'
+  const invoke = async (cmd, args) => { calls.push([cmd, args]); if (fail) throw new Error(invokeMsg); return { rootsFound: true, periods: [] } }
   const ui = createUsageUi({ invoke, reactive: o => o, now: () => ({ getTimezoneOffset: () => -480, getHours: () => 9, getMinutes: () => 5 }) })
   const a = ui.refresh(); const b = ui.refresh()
   await Promise.all([a, b])
@@ -42,7 +43,14 @@ test('createUsageUi：把本機時差傳給 Rust、載入中不重複呼叫、�
   assert.equal(ui.state.loading, false)
   fail = true
   await ui.refresh()
-  assert.equal(ui.state.error, '讀取用量失敗：壞了')
+  assert.equal(ui.state.error, '暫時讀不到用量，稍後再試一次。')
+  // Rust 原文（含路徑、系統錯誤）一律不進畫面
+  for (const raw of ['壞了', '讀取 C:/Users/x/.claude/projects 失敗：拒絕存取。 (os error 5)', 'tokio task panicked: JoinError::Panic']) {
+    invokeMsg = raw
+    await ui.refresh()
+    assert.equal(ui.state.error, '暫時讀不到用量，稍後再試一次。')
+    assert.ok(!ui.state.error.includes(raw), '畫面不顯示 Rust 原文')
+  }
 })
 
 test('守門：Rust 指令有註冊、前端呼叫的指令名與參數名對得上', () => {

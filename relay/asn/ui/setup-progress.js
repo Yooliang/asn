@@ -2,6 +2,9 @@
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { setupProgressApi, listen, ctl } from './lib/tauri.mjs'
 import { CANCEL_LABEL, CLOSE_LABEL, applyEvent, canCancel, initialView, requestCancel, statusLines } from './lib/setup-progress.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
+installUiLog({ source: 'setup-progress' })
 
 const { createApp, reactive, computed } = Vue
 

@@ -1,6 +1,9 @@
 // 截圖覆蓋視窗（每個螢幕一扇）：顯示 Rust 端凍結的那一塊畫面，拖曳框選；換算在 lib/shot.mjs。
 import { dragRect, physicalToCss, selectionToPhysical, sizeLabelPos, validSelection } from './lib/shot.mjs'
 import { shotOverlayApi as api } from './lib/tauri.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
+installUiLog({ source: 'shot' })
 
 const index = Number(new URLSearchParams(location.search).get('m') ?? 0)
 const cv = document.getElementById('cv'), hint = document.getElementById('hint')

@@ -10,6 +10,9 @@ import { PANEL_KINDS, panelItem, panelTitle } from './lib/panels.mjs'
 import { selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, listen, resizeFrom } from './lib/tauri.mjs'
+import { installUiLog } from './lib/ui-log.mjs'
+// 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
+installUiLog({ source: 'panel' })
 
 const { createApp, ref, computed, onMounted } = Vue
 await initFrame()

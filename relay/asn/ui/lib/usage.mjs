@@ -62,7 +62,7 @@ export function createUsageUi({ invoke, reactive, now = () => new Date() }) {
       const d = now()
       state.updated = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     } catch (e) {
-      state.error = `讀取用量失敗：${usageErrorText(e)}`
+      state.error = usageErrorText(e)   // 原文由出口寫進 ui.log，畫面只給白話
     } finally {
       state.loading = false
     }
