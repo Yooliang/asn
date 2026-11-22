@@ -24,6 +24,7 @@ import { USAGE_NOTE } from './usage.mjs'
 import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
+import { switchRowKey, switchResultOf } from './switch-result.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, ROSTER_TEXT, accountDeviceRows, accountInUse, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
@@ -38,7 +39,7 @@ import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFet
 export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
+  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
@@ -138,24 +139,20 @@ export const SettingsPanel = {
     const act = (op, value) => emit('act', op, value)
     const about = computed(() => aboutView({ deviceName: props.st.deviceName }))
     // 帳號卡片的設備列（#2111 ②）：一台一列，列的狀態由共用的 accountDeviceRows 決定（手機同一個函式）。
-    // 按下「切換」後那一列顯示「切換中…」，直到切換結束（後台忙碌旗標由開到關）；沒進入忙碌的話 5 秒後自己恢復
-    const pendingDev = ref('')
-    let pendingTimer = null
-    const clearPending = () => { pendingDev.value = ''; clearTimeout(pendingTimer); pendingTimer = null }
-    watch(() => Boolean(props.st.accounts && (props.st.accounts.busy || (props.st.accounts.remote && props.st.accounts.remote.busy))), (on, was) => { if (was && !on) clearPending() })
-    onBeforeUnmount(() => clearTimeout(pendingTimer))
-    const devKey = (vendor, a, node) => vendor + '|' + (a?.account ?? '') + '|' + node
-    const devRows = (vendor, a) => accountDeviceRows(allDevs.value, vendor, a?.account, a?.usedOn, { switchingNode: pendingDev.value.startsWith(devKey(vendor, a, '')) ? pendingDev.value.slice(devKey(vendor, a, '').length) : '' })
+    // 按下「切換」＝交給樞紐（row-switch）：該列顯示「切換中…」，結果在那一列下方原位顯示（#2111 ③；狀態在 st.accounts.rowSwitch，手機用同一份流程與文字）
+    const rowState = computed(() => (props.st.accounts && props.st.accounts.rowSwitch) || {})
+    const devRows = (vendor, a) => {
+      const prefix = switchRowKey(vendor, a?.account, '')
+      const busy = Object.keys(rowState.value).find(k => k.startsWith(prefix) && rowState.value[k].phase === 'busy')
+      return accountDeviceRows(allDevs.value, vendor, a?.account, a?.usedOn, { switchingNode: busy ? busy.slice(prefix.length) : '' })
+    }
+    const rowResult = (vendor, a, node) => switchResultOf(rowState.value, switchRowKey(vendor, a?.account, node))
     const accountInUseOf = (vendor, a) => accountInUse(devRows(vendor, a), a?.current)
     const busyNow = computed(() => Boolean(props.st.accounts && (props.st.accounts.busy || (props.st.accounts.remote && props.st.accounts.remote.busy))))
     const pressDev = (vendor, a, b) => {
       if (b.state !== 'switch' || busyNow.value) return
-      const t = switchTargets(vendor, a).find(x => x.node === b.node)
-      if (!t) return
-      pendingDev.value = devKey(vendor, a, b.node)
-      clearTimeout(pendingTimer)
-      pendingTimer = setTimeout(() => { if (!busyNow.value) clearPending() }, 5000)
-      act(t.op, t.value)
+      if (!switchTargets(vendor, a).some(x => x.node === b.node)) return
+      act('row-switch', { vendor, email: a.account, node: b.node, label: b.label, self: b.self })
     }
     // MiniMax 的輸入欄只留在元件裡：送出就清空，不進設定頁快照
     // 設備改名：名字只有一個（存在後台）；輸入只在這個元件裡，存的時候才交給樞紐
@@ -191,7 +188,7 @@ export const SettingsPanel = {
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
-      QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devRows, accountInUseOf, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
+      QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devRows, rowResult, accountInUseOf, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -342,10 +339,13 @@ export const SettingsPanel = {
                     <!-- 設備列：一台一列。左邊設備名（本機加「這台」），原因寫在設備名下方；右邊的鈕固定靠右、同一欄、同尺寸。
                          使用中＝深灰不能按；可切換＝「切換」；切換中＝淡色不能按；不能切換＝虛線淡色不能按＋原因。讀這筆額度的那台，設備名左邊有一條藍色粗線 -->
                     <span class="dv-devs" v-if="devRows(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account">
-                      <span :class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]" v-for="b in devRows(v.key, a)" :key="b.node">
+                      <template v-for="b in devRows(v.key, a)" :key="b.node">
+                      <span :class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]">
                         <span class="dv-devname"><span class="dv-devn">{{ b.label }}<small class="dv-devself" v-if="b.self">{{ DEVICE_ROW_TEXT.self }}</small></span><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
                         <button type="button" :class="['aero-btn', 'dv-devbtn', b.state]" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</button>
                       </span>
+                      <span :class="['dv-devres', rowResult(v.key, a, b.node).phase]" role="status" v-if="rowResult(v.key, a, b.node)">{{ rowResult(v.key, a, b.node).text }}</span>
+                      </template>
                     </span>
                     <span class="dv-share" v-if="st.quotaReaders">
                       <button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-share', { vendor: v.key, account: a.account, shared: a.shared })">{{ !a.shared ? QUOTA_TEXT.share : st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmAgain : QUOTA_TEXT.shareAgain }}</button>

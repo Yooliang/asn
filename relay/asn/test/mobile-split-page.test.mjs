@@ -90,7 +90,8 @@ test('接線與樣板守門：openSetting 兩列都進同一頁並帶分頁、�
   assert.ok(!html.includes('m-dv-devck') && !html.includes('✓') && !html.includes('DEVICE_BUTTON_TEXT.current'), '設備按鈕沒有勾勾與「使用中」小字')
   assert.match(html, /\{\{ DEVICE_ROW_TEXT\[b\.state\] \}\}/, '鈕上的字和電腦同一份常數')
   assert.ok(!html.includes('ROSTER_TEXT.usedOn') && !html.includes('切換到{{'), '拿掉「用在：」與「切換到…」')
-  assert.match(js, /const acctDevPress = \(b, a\) => \{ if \(b\.state !== 'switch'\) return; void acctSwitchOn\(b\.node, a\.account\) \}/, '不是「切換」的按了不做事，其他走原本的切換')
+  // #2111 ③：帳號卡設備列的「切換」改成原位顯示結果、不進確認頁（和電腦同一份流程 switch-result.mjs）；acctSwitchOn（細部頁走確認畫面）照舊留著
+  assert.match(js, /const acctDevPress = \(b, a, vendor = 'claude'\) => \{\s*if \(b\.state !== 'switch' \|\| !acctCanSwitchTo\(b\.node\)\) return/,'不是「切換」的、不能切到的按了不做事；其餘走共用的原位結果流程')
   for (const cls of ['m-dv-seg', 'm-dv-segbtn', 'm-dv-devs', 'm-dv-dev'])assert.ok(css.includes(`.${cls}`), `mobile.css 要有 .${cls}`)
   // 畫面上沒有「設備與帳號」當作設定列的名稱（頁標題仍是這個內頁的名字）
   assert.ok(!read('ui/lib/settings-cats.mjs').replace(/\/\/.*$/gm, '').includes('設備與帳號'))

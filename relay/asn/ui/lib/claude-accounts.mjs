@@ -4,6 +4,7 @@
 import { fetchRoster, normalizeQuotaState } from './account-roster.mjs'
 import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
 import { acctErrorText, isForbidden } from './acct-error.mjs'
+import { createSwitchTracker, switchRowKey } from './switch-result.mjs'
 
 export const CURRENT_UNREADABLE = '讀不到目前登入的帳號'   // 跟 Rust claude_login::UNREADABLE_TEXT 同一句
 export const SWITCH_NOTICE = '已切換，開著的 Claude 視窗不用重開。'
@@ -81,6 +82,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     autoNote: '',   // 背景自動加入成功時的一行小字
     mod: null,      // Claude 外掛狀態 {state, version?, reason?}（Rust 背景工作寫好；null＝不顯示，白話由 mod-line.mjs 組）
     quotaState: normalizeQuotaState(null),   // 這台目前登入帳號的額度查詢狀態（claude_quota_state，#1883）
+    rowSwitch: {},  // 帳號卡設備列的切換結果（#2111 ③）：key（廠商｜帳號｜設備）→ { phase: busy｜ok｜fail｜waiting, text }
     roster: null,   // 後台的帳號列表（#374，acct_roster）；讀不到是 null，畫面退回各設備自己回報的數字
   })
   // 帳號列表：打開「設備與帳號」時讀一次，之後跟額度一樣每 5 分鐘（list.js 排程）。
@@ -152,23 +154,29 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     return due.length
   }
   const remoteSelect = async (node, vendor = 'claude') => { s.remote.node = node || ''; s.remote.vendor = vendor === 'grok' ? 'grok' : 'claude'; await remoteLoad() }
-  const remoteSwitch = async email => {
-    const r = s.remote
-    if (r.busy || !r.node) return
-    r.busy = true; r.msg = '送出中…'
+  // 送出別台的切換並等結果（對話框與帳號卡的設備列共用）。onMsg 收每一步的白話；回 { ok } 或 { ok: false, fail }（fail 給 switchFailReason）
+  const switchRemoteCore = async (node, email, vendor, onMsg = () => {}) => {
     try {
-      const sent = await invoke('acct_remote_request', { node: r.node, email, vendor: r.vendor })
-      r.msg = remoteStatusText({ status: 'pending' })
+      const sent = await invoke('acct_remote_request', { node, email, vendor })
+      onMsg(remoteStatusText({ status: 'pending' }))
       for (let i = 0; i < pollMax; i++) {
         await sleep(pollMs)
         const v = await invoke('acct_remote_status', { ids: [sent.id] })
         const st = (v?.switches ?? []).find(x => x.id === sent.id)
-        if (!st) { r.msg = '查不到這個指令的結果。'; break }
-        r.msg = remoteStatusText(st, email)
-        if (isFinalStatus(st.status)) break
-        if (i === pollMax - 1) r.msg = '等太久了，對方電腦沒有回應；稍後再看對方的帳號清單。'
+        if (!st) { onMsg('查不到這個指令的結果。'); return { ok: false, fail: { code: 'missing' } } }
+        onMsg(remoteStatusText(st, email))
+        if (isFinalStatus(st.status)) return st.status === 'ok' ? { ok: true } : { ok: false, fail: { status: st.status, detail: st.detail } }
+        if (i === pollMax - 1) { onMsg('等太久了，對方電腦沒有回應；稍後再看對方的帳號清單。'); return { ok: false, fail: { code: 'timeout' } } }
       }
-    } catch (e) { r.msg = remoteErr(e) }
+      return { ok: false, fail: { code: 'timeout' } }
+    } catch (e) { return { ok: false, fail: { error: e } } }
+  }
+  const remoteSwitch = async email => {
+    const r = s.remote
+    if (r.busy || !r.node) return
+    r.busy = true; r.msg = '送出中…'
+    const out = await switchRemoteCore(r.node, email, r.vendor, m => { r.msg = m })
+    if (out.fail?.error) r.msg = remoteErr(out.fail.error)
     r.busy = false
     const finalMsg = r.msg
     await remoteLoad().catch(() => {})   // 重抓對方的清單（使用中的帳號可能變了）；結果訊息不要被洗掉
@@ -208,6 +216,27 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
     s.busy = false
     await refresh(); void report()
   }
+  // 本機切換（Claude／Grok）：不寫 s.msg，結果交給設備列原位顯示
+  const switchLocalCore = async (vendor, email) => {
+    if (vendor === 'claude' && (s.list ?? []).some(a => a.email === email && loginIncomplete(a))) return { ok: false, fail: { error: INCOMPLETE_REASON } }
+    s.busy = true
+    try {
+      await invoke(vendor === 'grok' ? 'grok_account_switch' : 'claude_account_switch', { email })
+      return { ok: true }
+    } catch (e) { return { ok: false, fail: { error: e } } } finally { s.busy = false }
+  }
+  // 帳號卡設備列的「切換」（電腦）：該列顯示「切換中…」→ 結果在那一列下方原位顯示 → 重讀列表直到那一列變成「使用中」（#2111 ③、#2110）。
+  // synced＝呼叫端用目前畫面的資料判斷那一列是不是已經是「使用中」
+  const tracker = createSwitchTracker({ state: s.rowSwitch, log, sleep, now, pollMs })
+  const switchRow = ({ vendor, email, node, label, self = false, synced }) => tracker.press({
+    key: switchRowKey(vendor, email, node), label,
+    run: () => (self ? switchLocalCore(vendor, email) : switchRemoteCore(node, email, vendor)),
+    reload: async () => {
+      if (self) { await refresh(); void report() } else await loadReports([node])
+      await refreshRoster()
+    },
+    synced,
+  })
   const dismissDone = id => { s.done = s.done.filter(x => x.id !== id) }
   // 還原到切換前（本機備份；只有這個按鈕能用，遠端指令碰不到）
   const undo = async id => {
@@ -235,7 +264,7 @@ export function createAccountsUi({ invoke, reactive, devices = () => [], nodeLab
   }
   return {
     state: s,
-    refresh, refreshQuota, refreshRoster, report, onAuto, loadReports, retryReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
+    refresh, refreshQuota, refreshRoster, report, onAuto, loadReports, retryReports, remoteNodes, remoteSelect, remoteLoad, remoteSwitch, switchRow, grokSwitch, pollIncoming, approve, decline, dismissDone, undo, loadTrust, setAllowSwitch,
     addCurrent: () => run(async () => { const a = await invoke('claude_account_save'); s.savedSeq++; return `已加入 ${a.email}。` }),
     // 登入不完整的帳號畫面上已經反灰；這裡再擋一次（Rust 端 switch_impl 也會拒絕）
     switchTo: async email => {
