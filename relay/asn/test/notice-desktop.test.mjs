@@ -126,8 +126,8 @@ test('守門：通知不會變成一般對話分頁；存檔與還原都拿掉�
   // 通知相關的程式不做遠端動作：openNoticeRow／markAllNotices 只開本機視窗、標已讀
   const block = js.slice(js.indexOf('const noticeView = reactive('), js.indexOf('async function openChat(id)'))
   assert.ok(block.length > 200)
-  const invokes = [...block.matchAll(/invoke\('([a-z_]+)'/g)].map(m => m[1])
-  assert.deepEqual([...new Set(invokes)].sort(), ['open_chat', 'show_main'])
+  const invokes = [...block.matchAll(/(?:shellApi|windowApi)\.([A-Za-z]+)\(/g)].map(m => m[1])
+  assert.deepEqual([...new Set(invokes)].sort(), ['openChat', 'showMain'])
   assert.ok(!/transport\./.test(block), '不呼叫後台')
 })
 
@@ -142,7 +142,7 @@ test('「通知」分頁不能固定：右鍵選單不給「固定分頁」，�
 test('正在看通知（左邊選著通知頁籤，或右邊開著通知內容）時，新通知不算未讀、不跳提示', () => {
   const js = read('../ui/list.js')
   assert.match(js, /const noticeOnScreen = \(\) => railTabNow\(\) === 'notice' \|\| \(ui\.mode === 'merged' && ui\.active === NOTICE_TAB\)/)
-  assert.match(js, /const chatShownId = async id => \(id === NOTICE_ID && noticeOnScreen\(\) \? Boolean\(await invoke\('main_visible'\)\) : chatShown\(/)
+  assert.match(js, /const chatShownId = async id => \(id === NOTICE_ID && noticeOnScreen\(\) \? Boolean\(await windowApi\.mainVisible\(\)\) : chatShown\(/)
   assert.match(js, /railTabNow = \(\) => shotTab\.value/)
 })
 

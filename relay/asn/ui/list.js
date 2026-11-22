@@ -54,8 +54,8 @@ import { HOLD_TIP, createPartnerNoticePoller, noticeStillFor, permissionView } f
 import { createHold } from './lib/hold-press.mjs'
 import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
-import { plainMessage } from './lib/plain-errors.mjs'
-import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, ctl, emit, initFrame, invoke, listen, logViewApi, settingsApi, updateApi, voiceApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { plainMessage, termRemoteErrorText } from './lib/plain-errors.mjs'
+import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
@@ -142,10 +142,10 @@ const SOUNDS = {
   nudge: () => { for (let i = 0; i < 7; i++) tone(95 + (i % 2) * 35, i * 0.07, 0.09, 'square', 0.05) },
 }
 
-const info = reactive(await invoke('startup_info'))   // 響應式：改設備名後就地更新，不重載頁面
+const info = reactive(await shellApi.startupInfo())   // 響應式：改設備名後就地更新，不重載頁面
 document.title = `Agent Sync Network Messenger (${info.version})`
 if (info.shot) {
-  const logFe = (level, msg) => invoke('shot_frontend_log', { level, message: String(msg) }).catch(() => {})
+  const logFe = (level, msg) => shellApi.shotFrontendLog(level, msg).catch(() => {})
   window.onerror = (msg, src, line, col, err) => { logFe('error', `${msg} @ ${src}:${line}:${col} ${err?.stack ?? ''}`) }
   window.onunhandledrejection = e => logFe('error', e.reason?.stack ?? e.reason ?? 'unhandled rejection')
 }
@@ -327,7 +327,7 @@ const currentSession = () => snapshotSession({ tabs: withoutNoticeTabs(ui.tabs),
 async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，由 Rust 端的視窗清單為準
   if (!sess.ready || ui.mode !== 'split') { if (sess.wins.length || sess.panelWins.length) { sess.wins = []; sess.panelWins = [] } ; return }
   try {
-    const [chats, panels] = await invoke('open_windows')
+    const [chats, panels] = await windowApi.openWindows()
     if (JSON.stringify(chats) !== JSON.stringify(sess.wins)) sess.wins = chats
     if (JSON.stringify(panels) !== JSON.stringify(sess.panelWins)) sess.panelWins = panels
   } catch { /* 取不到就維持上次 */ }
@@ -338,7 +338,7 @@ async function pollOpenWindows() {   // 分開模式開著哪些對話視窗，�
 // 不算未讀、不跳提示（跟以前通知開成對話分頁時一樣，西川二審）；分離模式照舊看通知對話視窗
 let railTabNow = () => ''   // 名單頁籤的 ref 在下面才建立，建立後換成真的
 const noticeOnScreen = () => railTabNow() === 'notice' || (ui.mode === 'merged' && ui.active === NOTICE_TAB)
-const chatShownId = async id => (id === NOTICE_ID && noticeOnScreen() ? Boolean(await invoke('main_visible')) : chatShown(ui, id, { mainVisible: () => invoke('main_visible'), chatVisible: cid => invoke('chat_visible', { id: cid }) }))
+const chatShownId = async id => (id === NOTICE_ID && noticeOnScreen() ? Boolean(await windowApi.mainVisible()) : chatShown(ui, id, { mainVisible: () => windowApi.mainVisible(), chatVisible: cid => windowApi.chatVisible(cid) }))
 const core = new AsnCore({
   transport, store: store('chats'), selfNode: info.node, windowName: info.window_name,
   isChatVisible: chatShownId,
@@ -438,25 +438,25 @@ const launchPending = ref([])     // 啟動中列
 const launchTrack = ref([])       // { id, node, name, profile } 遠端 launch uuid
 const launchNotice = reactive({ open: false, title: '', body: '', logPath: '' })
 const launchLogPaths = reactive({ bridgeLog: '', machineDir: '' })
-void invoke('relay_log_paths').then(p => { if (p) Object.assign(launchLogPaths, p) }).catch(() => {})
+void logViewApi.relayLogPaths().then(p => { if (p) Object.assign(launchLogPaths, p) }).catch(e => console.warn('[ASN] 讀不到記錄路徑', String(e?.message ?? e)))
 function showLaunchNotice(notice) {
   Object.assign(launchNotice, { open: true, logPath: launchNoticeLogPath(notice, launchLogPaths.bridgeLog), title: notice.title, body: notice.body })
 }
 function closeLaunchNotice() { launchNotice.open = false }
 // 別台正在看這台（#597）：一定顯示，不能關，只能按結束。Rust 在傳第一幅之前就會通知這裡
 const beingViewed = ref([])
-const stopBeingViewed = id => invoke('term_viewed_stop', { id }).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
+const stopBeingViewed = id => termRemoteApi.viewedStop(id).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
 // 設定頁「認得的電腦」（#597）：判斷都在 Rust，這裡只讀本機紀錄。第一次記住和金鑰換了的通知由 Rust 寄信，不在這裡
 const known = reactive({ peers: [], busy: false, error: '', renameError: '', shown: false, ownFp: '', qr: null })
 // 這台自己的指紋（唯讀）：本人拿去和手機上顯示的比對
 async function loadOwnFp() {
-  try { known.ownFp = String(await invoke('device_own_fingerprint') ?? '').slice(0, 16) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
+  try { known.ownFp = String(await knownDeviceApi.ownFingerprint() ?? '').slice(0, 16) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
 }
 // 把這台的指紋畫成 QR code 給手機掃（唯讀）：格子由 Rust 排，這裡只驗資料、交給設定頁畫在 canvas 上；on=false 就收起來
 async function toggleOwnQr(on) {
   if (!on) { known.qr = null; return }
   try {
-    const qr = normalizeQr(await invoke('device_own_fingerprint_qr'))
+    const qr = normalizeQr(await knownDeviceApi.ownFingerprintQr())
     if (!qr) throw new Error('bad_qr_rows')
     known.qr = qr
     known.error = ''
@@ -464,12 +464,12 @@ async function toggleOwnQr(on) {
 }
 async function refreshKnown() {
   void loadOwnFp()
-  try { Object.assign(known, knownView(await invoke('device_known_list')), { shown: true }) } catch (e) { console.info('[ASN] 認得的電腦讀不到', String(e?.message ?? e)); known.error = knownError(e); known.shown = true }
+  try { Object.assign(known, knownView(await knownDeviceApi.list()), { shown: true }) } catch (e) { console.info('[ASN] 認得的電腦讀不到', String(e?.message ?? e)); known.error = knownError(e); known.shown = true }
 }
 // 允許這支手機替這台登入（#933）：只有這台的設定頁能改，存在這台
 async function setKnownLoginOk(node, on) {
   known.busy = true
-  try { await invoke('device_known_login_ok', { node, on: !!on }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 允許替這台登入沒改成', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
+  try { await knownDeviceApi.setLoginOk(node, on); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 允許替這台登入沒改成', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
 }
 // 替某台設備改名（名字只有一個、存在後台）：規則與送出都在 Rust，成功後重讀設備列表與認得的電腦
 async function renameDevice(node, name) {
@@ -492,7 +492,7 @@ async function renameDevice(node, name) {
 }
 async function forgetKnown(node) {
   known.busy = true
-  try { await invoke('device_known_forget', { node }); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 忘記這台失敗', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
+  try { await knownDeviceApi.forget(node); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 忘記這台失敗', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
 }
 async function openLaunchLogFolder() {
   try { await logViewApi.openMachineLogDir() } catch (e) { console.info('[ASN] 開啟記錄資料夾', e.message) }
@@ -1120,8 +1120,8 @@ core.on('notify', n => {
   const plan = notifyPlan(n, notifyPrefs.value, me.status)
   if (plan.sound) SOUNDS[plan.sound]?.()
   if (shouldAutoSpeak(n, voiceCfg, me.status) && !callBeats.anyCall()) voice.speakAuto(`auto:${n.friend.id}:${Date.now()}`, n.line)   // 預設關
-  if (n.shake) void invoke('shake', { id: n.friend.id, main: ui.mode === 'merged' })   // 整合模式抖整個主視窗
-  if (plan.toast) void invoke('show_toast', { toast: { cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) } })
+  if (n.shake) void windowApi.shake(n.friend.id, ui.mode === 'merged')   // 整合模式抖整個主視窗
+  if (plan.toast) void windowApi.showToast({ cid: n.friend.id, title: plain(n.friend.nick), line: n.line, status: n.friend.status, hue: n.friend.hue, dp: n.friend.dp, av: (a => (a.kind === 'upload' ? a.src : null))(avatarFor(n.friend, { avatars: avatars.value })) })
 })
 
 // 打開一個群組的對話（整合模式開分頁、分開模式開視窗），並讀它的新訊息與確認卡片
@@ -1134,10 +1134,10 @@ async function openRoomChat(id) {
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
     pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     pushLog(id)
-    await invoke('show_main')
+    await shellApi.showMain()
     sync()
   } else {
-    await invoke('open_chat', { id, title: `${plain(f.nick)} - 對話` })
+    await windowApi.openChat(id, `${plain(f.nick)} - 對話`)
     sync(); pushLog(id)
   }
   await hub.open(rid)
@@ -1145,7 +1145,7 @@ async function openRoomChat(id) {
 }
 // 對話上方「群組」與「管理」的選單動作：邀請別人加入、加我的另一個 AI、成員與設定（開在名單視窗；分開模式的對話視窗也是請名單視窗代開）
 async function openGroupMenu(chatId, what) {
-  await invoke('show_main').catch(() => {})
+  await shellApi.showMain().catch(() => {})
   if (isRoomChat(chatId)) {
     const rid = roomIdOf(chatId), r = hub.raw(rid)
     if (what === 'manage') groupFlow.openManage(rid)
@@ -1169,9 +1169,9 @@ const groupFlow = createGroupFlow({
   logOf: f => core.viewOf(f.id),
 })
 // 邀請連結一鍵開啟（asn://invite/<碼>）：Rust 端收到後通知；啟動前就收到的用 invite_pending 補取
-const onInviteCode = code => { if (typeof code === 'string' && code) { void invoke('show_main').catch(() => {}); groupFlow.openJoin(code) } }
+const onInviteCode = code => { if (typeof code === 'string' && code) { void shellApi.showMain().catch(() => {}); groupFlow.openJoin(code) } }
 await listen('asn:invite', onInviteCode)
-void invoke('invite_pending').then(onInviteCode).catch(() => {})
+void linkApi.invitePending().then(onInviteCode).catch(e => console.warn('[ASN] 讀不到啟動前的邀請', String(e?.message ?? e)))
 
 // ---------- 「通知」大分頁（方案 A）：系統通知不進名單、也不開成一般對話分頁 ----------
 // 整合模式：點一則＝右邊固定的「通知」內容分頁（NOTICE_TAB，沒有輸入列），窄視窗切到右邊並附「‹ 通知」返回鈕；
@@ -1200,12 +1200,12 @@ async function openNoticeRow(key) {
     if (key) markNoticeOne(key)
     Object.assign(ui, openChatTab(ui, NOTICE_TAB, ui.pinnedChat))
     pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（返回鈕寫「通知」）
-    await invoke('show_main')
+    await shellApi.showMain()
     sync()
     return
   }
   // 分離模式：打開（或叫出）原本的「通知」對話視窗；視窗一打開就整段標已讀
-  await invoke('open_chat', { id: NOTICE_ID, title: '通知 - 對話' })
+  await windowApi.openChat(NOTICE_ID, '通知 - 對話')
   noticeView.opened = []
   sync(); pushLog(NOTICE_ID)
 }
@@ -1233,11 +1233,11 @@ async function openChat(id) {
     Object.assign(ui, openChatTab(ui, id, ui.pinnedChat))
     pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
     pushLog(id)
-    await invoke('show_main')
+    await shellApi.showMain()
     sync()
     return
   }
-  await invoke('open_chat', { id, title: `${plain(f.nick)} - 對話` })
+  await windowApi.openChat(id, `${plain(f.nick)} - 對話`)
   sync(); pushLog(id)
 }
 
@@ -1249,17 +1249,17 @@ async function openPanel(kind, key) {
   if (ui.mode === 'merged') {
     Object.assign(ui, openChatTab(ui, panelTabId(kind), ui.pinnedChat))
     pane.showList = false   // 窄視窗只顯示一個窗格時：點了就切到右邊（即使那個分頁本來就開著、active 沒變）
-    await invoke('show_main')
+    await shellApi.showMain()
     sync()
     return
   }
   const { w, h } = sizes[kind]
-  await invoke('open_panel', { kind, title: panelTitle(kind, key), w, h })
+  await windowApi.openPanel(kind, panelTitle(kind, key), w, h)
   emit('asn:panel', { kind, key })
 }
 async function closePanel(kind) {
   if (ui.mode === 'merged') { Object.assign(ui, closeChatTab(ui, panelTabId(kind))); sync() }
-  else await invoke('close_panels', { kind })
+  else await windowApi.closePanels(kind)
 }
 
 // 對話視窗的指令
@@ -1308,15 +1308,15 @@ async function setMode(to) {
   switching = true
   try {
     sizes[from] = normalizeSize(winSize(), from)
-    const closed = from === 'split' ? await invoke('close_chats') : []
-    const closedPanels = from === 'split' ? (await invoke('close_panels')).filter(k => PANEL_KINDS.includes(k)) : []   // 開著的指引、設定視窗
+    const closed = from === 'split' ? await windowApi.closeChats() : []
+    const closedPanels = from === 'split' ? (await windowApi.closeAllPanels()).filter(k => PANEL_KINDS.includes(k)) : []   // 開著的指引、設定視窗
     // 指引、設定也跟著轉：分離→整合＝視窗變分頁；整合→分開＝分頁開成視窗。好友的對話照舊交給 switchMode
     // 「通知」不跟著轉成分頁或視窗（它只從「通知」分頁打開）
     const { chats: chatTabs, panels: panelTabs } = splitTabs(withoutNoticeTabs(ui.tabs))
     const plan = switchMode(from, to, { tabs: chatTabs, active: isPanelTab(ui.active) || ui.active === NOTICE_TAB ? '' : ui.active, windowIds: withoutNoticeTabs(closed) })
     ui.mode = to
     ui.tabs = orderTabs([...plan.tabs, ...closedPanels.map(panelTabId)], ui.pinnedChat); ui.active = plan.active || ui.tabs.at(-1) || ''
-    await invoke('main_layout', { merged: to === 'merged', w: sizes[to].w, h: sizes[to].h, recenter: false })
+    await windowApi.mainLayout(to === 'merged', sizes[to].w, sizes[to].h, false)
     if (ui.active) core.markRead(ui.active)
     for (const id of plan.openWindows) await openChat(id)
     if (to === 'split') for (const kind of panelTabs) await openPanel(kind, ui.panel[kind])
@@ -1330,7 +1330,7 @@ window.addEventListener('resize', () => {
   clearTimeout(sizeTimer)
   sizeTimer = setTimeout(() => { if (!switching) sizes[ui.mode] = normalizeSize(winSize(), ui.mode) }, 400)
 })
-if (ui.mode === 'merged') await invoke('main_layout', { merged: true, w: sizes.merged.w, h: sizes.merged.h, recenter: true })
+if (ui.mode === 'merged') await windowApi.mainLayout(true, sizes.merged.w, sizes.merged.h, true)
 
 await listen('term-being-viewed', list => { beingViewed.value = Array.isArray(list) ? list : [] })
 await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
@@ -1341,14 +1341,14 @@ watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddC
 const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...deviceFieldsToSave(devPrefs), chatPins: chatPins.value, me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, ghRefs: ghRefs.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
 addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
-watch(() => totalUnread(friends.value), n => { void invoke('set_tray_unread', { n }).catch(() => {}) }, { immediate: true })
+watch(() => totalUnread(friends.value), n => { void trayApi.setUnread(n).catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ }) }, { immediate: true })
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
-watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
+watch(() => [me.status, me.psm], () => { void trayApi.setPresence(me.status, me.psm ?? '').catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ }) }, { immediate: true })
 // 正在聽的歌：開關交給 Rust 端（關著不讀不送）；歌變了 Rust 端推 asn:now-playing，自己的名單頭顯示
 await listen('asn:now-playing', p => { nowPlaying.value = showNowPlaying.value ? String(p ?? '') : '' })   // listen 已經把 payload 拆好交過來
 watch(showNowPlaying, on => {
   if (!on) nowPlaying.value = ''
-  void invoke('set_now_playing', { on }).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(() => {})
+  void trayApi.setNowPlaying(on).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ })
 }, { immediate: true })
 // 設定頁改「分頁依」：分組若撞到自動換成剩下兩個裡的第一個
 const setTabDim = v => Object.assign(dims, withTabDim(dims, v))
@@ -1368,7 +1368,7 @@ const pageFail = reactive({})   // key → true：這則的網頁載入失敗或
 const refreshAds = async () => {
   if (info.shot) return
   try {
-    const next = pickAds(await invoke('ads_fetch'), null)
+    const next = pickAds(await trayApi.adsFetch(), null)
     if (next) { ads.value = next; for (const k of Object.keys(pageFail)) delete pageFail[k]; if (adI.value >= next.length) adI.value = 0 }
   } catch { /* 抓不到就沿用目前的 */ }
 }
@@ -1392,7 +1392,7 @@ watch(() => termPrompt.value, p => {
   if (!p?.row?.id || !p.pv) return
   const req = answerRequest(p.row.id, p.pv, p.pv.options[0]?.n ?? 1)
   if (!req) return
-  void invoke('term_remote_offer_answer', { req }).catch(() => {})
+  void termRemoteApi.offerAnswer(req).catch(e => console.warn('[ASN] 代答沒送出', String(e?.message ?? e)))
 }, { immediate: true })
 function termPick(n) { terms.selected = n; terms.error = '' }
 function termDismiss() { const p = termPrompt.value; if (p) terms.dismissed[p.key] = true }   // 「我自己在視窗裡處理」：只關框，不送任何鍵
@@ -1405,7 +1405,7 @@ async function termConfirm(given) {
     const r = await transport.termAnswer(req)
     terms.note = sentText(r?.keys); terms.selected = 0
     void termPoller?.tickNow()
-  } catch (e) { terms.error = String(e?.message ?? e) } finally { terms.busy = false }
+  } catch (e) { terms.error = termRemoteErrorText(e) } finally { terms.busy = false }
 }
 // ASN 替使用者往終端送字（#296）：寫文字 → 按「送出」→ 確認框 → 按「確認送出」才呼叫 term_send（termSendConfirm 是唯一呼叫處）。
 const termSend = reactive({ id: '', text: '', enter: true, confirming: false, busy: false, phone: false, entryKey: '', error: '', note: '' })
@@ -1419,7 +1419,7 @@ const termSendDraft = computed(() => sendDraftView(termSendRow.value, termSend.t
 const termSendConfirmView = computed(() => (termSend.confirming ? sendConfirmView(termSendRow.value, termSend.text, termSend.enter) : null))
 function termSendWithdraw() {   // 本機取消：手機上那筆一起撤回
   if (!termSend.id) return
-  void invoke('term_remote_withdraw', { id: termSend.id }).catch(() => {})
+  void termRemoteApi.withdraw(termSend.id).catch(e => console.warn('[ASN] 撤回手機確認沒成功', String(e?.message ?? e)))
   if (termSend.phone) { termEntrySet(termSend.id, termSend.entryKey, 'withdrawn'); termSend.phone = false; termSend.entryKey = '' }
 }
 function termsClose() { termSendWithdraw(); terms.open = false }   // 關整個終端面板（點外面或按「關閉」）：手機上等確認的送字一起撤回
@@ -1430,15 +1430,15 @@ function termSendPhone() {
   const req = sendRequest(termSendRow.value, termSend.text, termSend.enter)
   if (!req || termSend.phone || termSend.busy) return
   termSend.phone = true; termSend.error = ''
-  invoke('term_remote_offer_send', { req }).then(() => {
-    if (!termSend.phone || termSend.id !== req.id) { void invoke('term_remote_withdraw', { id: req.id }).catch(() => {}); return }   // 傳的途中已取消或換了終端：後台剛登記的那筆馬上撤掉，不留孤兒
+  termRemoteApi.offerSend(req).then(() => {
+    if (!termSend.phone || termSend.id !== req.id) { void termRemoteApi.withdraw(req.id).catch(e => console.warn('[ASN] 撤回手機確認沒成功', String(e?.message ?? e))); return }   // 傳的途中已取消或換了終端：後台剛登記的那筆馬上撤掉，不留孤兒
     termSend.entryKey = termEntryAdd(req.id, req.text, 'phone')
     termPhoneWatch()
-  }).catch(e => { termSend.phone = false; termSend.error = String(e?.message ?? e) })
+  }).catch(e => { termSend.phone = false; termSend.error = termRemoteErrorText(e) })
 }
 // 手機上那筆還在不在：term_remote_pending 是電腦端記著的進行中請求（手機執行完、拒絕、過期都會移除）
 async function termPhonePending(id) {
-  const list = await invoke('term_remote_pending')
+  const list = await termRemoteApi.pending()
   return Array.isArray(list) && list.some(p => p?.kind === 'send' && p?.termId === id)
 }
 // 手機已處理（確認、拒絕或過期）：收掉確認列，時間軸那筆改成「手機已處理」；字有沒有進去看終端畫面
@@ -1474,7 +1474,7 @@ async function termSendConfirm() {
     termSend.phone = false; termSend.entryKey = ''
     termSend.note = '已送出'; termSend.text = ''; termSend.confirming = false
     void termPoller?.tickNow()
-  } catch (e) { termEntryAdd(req.id, req.text, 'failed'); termSend.error = String(e?.message ?? e); termSend.confirming = false } finally { termSend.busy = false }
+  } catch (e) { termEntryAdd(req.id, req.text, 'failed'); termSend.error = termRemoteErrorText(e); termSend.confirming = false } finally { termSend.busy = false }
 }
 // ---------- 終端放進名單與分頁（#331）：名單上每個終端一列，點開是右邊的分頁，下方輸入框送字 ----------
 // 送字、代答仍然只走 termSendConfirm／termConfirm（唯一呼叫處）；分頁只是換了擺放位置。畫面文字用 term_read 只讀，純文字顯示。
@@ -1505,7 +1505,7 @@ async function openTermTab(id) {
   if (ui.mode !== 'merged') { terms.open = true; return }   // 分離模式沒有分頁區：先用舊的終端面板
   Object.assign(ui, openChatTab(ui, termFriendId(id), ui.pinnedChat))
   pane.showList = false   // 窄視窗只顯示一個窗格時：點終端（含「N 個終端等你回答」）就切到右邊
-  await invoke('show_main')
+  await shellApi.showMain()
   sync()
 }
 // 「＋」上的紅點與選單裡的「N 個終端等你回答」（#349）：點了直接打開第一個在等的終端分頁
@@ -1605,7 +1605,7 @@ function permHoldKey(o, e) { if (permHoldOk(o) && permHold.keyDown(o.n, e)) e.pr
 async function openPermissionDlg(item) {
   if (permissionDlg.open) return
   // 本人正開著它的終端畫面：不跳框搶按鍵，畫面上會有一行提示。下一輪再問，畫面關了就照常跳
-  if (await invoke('term_view_active', { name: item.name }).catch(() => false)) return false
+  if (await termRemoteApi.viewActive(item.name).catch(() => false)) return false   // 查不到就當沒開著，照常跳框
   try {
     const prompt = await transport.partnerPermissionPrompt(item.name)
     Object.assign(permissionDlg, { open: true, name: item.name, prompt, busy: false, error: '' })
@@ -1718,7 +1718,7 @@ const app = createApp({
       return withArchivedGroup(injectPendingGroups(base, launchPending.value.filter(p => flat || !tab.value || p.node === tab.value)), archived)
     })
     const emptyText = computed(() => (normalizeSearchQuery(query.value) ? '沒有符合的聯絡人。' : conn.value === 'off' ? ROSTER_LOAD_FAIL_TEXT : conn.value !== 'on' ? ROSTER_CONNECTING_TEXT : '這一頁目前沒有視窗。'))
-    const openAd = a => openAdWith(a, url => void invoke('open_url', { url }))
+    const openAd = a => openAdWith(a, url => void linkApi.openUrl(url))
     // 左上角的名字＝這台設備的後台名字，只顯示不能改（#1803：設備名稱只在「設定 → 設備」改，全程式只有一個改名入口）
     // 設定頁「大頭貼」：選圖 → 前端裁成正方形縮成 96×96（webp／png，≤ 32 KB）→ 上傳；也可以移除改回自動產生
     const avBusy = ref(false), avMsg = ref(''), avFile = ref(null)
@@ -1999,7 +1999,7 @@ const app = createApp({
     // 官網：用系統瀏覽器開（open_link 只放行 http／https）；只開引導卡列出的那四個網址
     function guideSite(site) {
       if (!GUIDE_VENDORS.some(v => v.url === site?.url)) return
-      invoke('open_link', { url: site.url }).catch(e => console.info('[ASN] 開啟官網失敗', String(e?.message ?? e)))
+      linkApi.openLink(site.url).catch(e => console.info('[ASN] 開啟官網失敗', String(e?.message ?? e)))
     }
     // 本機帳號庫清單定期回報給收發室在 Rust 背景工作（report_loop），停在登入畫面也照跑；別台送來的切換指令定期取走（預設要本機按確認才切）。--shot 不輪詢指令。
     // 每 5 分鐘回報時順便重讀這台的額度紀錄，設備卡的額度條才不會停在開機那時的數字
@@ -2014,9 +2014,9 @@ const app = createApp({
       void listen('relay-bell', () => void accounts.pollIncoming())
     }
     // 有人要求切換這台的帳號：把視窗叫到前面，讓使用者看得到確認框
-    watch(() => accounts.state.incoming.length, n => { if (n) void invoke('show_main').catch(() => {}) })
+    watch(() => accounts.state.incoming.length, n => { if (n) void shellApi.showMain().catch(() => {}) })
     // 免確認切好之後也叫到前面，讓使用者看得到「已切換／還原」
-    watch(() => accounts.state.done.length, n => { if (n) void invoke('show_main').catch(() => {}) })
+    watch(() => accounts.state.done.length, n => { if (n) void shellApi.showMain().catch(() => {}) })
     // 名單設備標題右鍵：切換那台設備的 Claude 帳號
     const deviceMenu = ref('')
     const deviceMenuPos = reactive({ x: 0, y: 0 })
@@ -2032,7 +2032,7 @@ const app = createApp({
     const openDeviceAcct = async (node, email = '', vendor = 'claude') => {
       if (!node) return
       deviceAcct.node = node; deviceAcct.label = deviceTree.value.find(d => d.key === node)?.label ?? accounts.remoteNodes().find(d => d.key === node)?.label ?? ''; deviceAcct.selected = email   // 設備頁籤上點某個帳號的「切換」＝預先選好那個帳號，仍要在對話框按送出
-      void invoke('show_main').catch(() => {})
+      void shellApi.showMain().catch(() => {})
       if (!accounts.state.roster) void accounts.refreshRoster()   // 從名單右鍵直接開、還沒讀過帳號列表：讀一次讓各帳號帶額度
       await accounts.remoteSelect(node, vendor)
     }
@@ -2206,7 +2206,7 @@ const app = createApp({
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
         case 'pi-setup-remove': await runPiSetup(() => transport.piSetupRemove(), PI_SETUP_TEXT.removed); break
         case 'pi-login': try { await invoke('ai_cli_login', { toolId: 'pi' }); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
-        case 'open-link': if (isAboutUrl(value)) { try { await invoke('open_link', { url: value }) } catch (e) { console.info('[ASN] 開啟連結失敗', String(e?.message ?? e)) } } break   // 只放行「關於」頁那幾個網址
+        case 'open-link': if (isAboutUrl(value)) { try { await linkApi.openLink(value) } catch (e) { console.info('[ASN] 開啟連結失敗', String(e?.message ?? e)) } } break   // 只放行「關於」頁那幾個網址
         case 'open-update': await openPanel('setting', 'update'); break   // 版本紀錄在 App 內設定的「更新」
         case 'open-guide': await openPanel('guide', ui.panel.guide || GUIDES[0]?.key); break
         case 'open-ui-log': uiLogMsg.value = ''; uiLogMsg.value = await openUiLog(invoke); break
@@ -2351,22 +2351,22 @@ if (info.shot) {
     await refreshCwdCandidates()
     if (!partnerDlg.cwd) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
     await waitPaint()
-    await invoke('show_main').catch(() => {})
+    await shellApi.showMain().catch(() => {})
     await waitPaint()
     await sleep(900)
-    await invoke('capture_ui_ready', { tag: 'partner-dlg-ready' })
-    await invoke('take_shot', { tab: 'partner-dlg' })   // 第 1 頁：設備
+    await shellApi.captureUiReady('partner-dlg-ready')
+    await shellApi.takeShot('partner-dlg')   // 第 1 頁：設備
     // 沒有能開的設備就不硬切到第 2、3 頁（會拍出空白的設備與灰掉的按鈕），只在記錄寫原因
-    if (partnerDlg.node) for (const n of [2, 3]) { partnerDlg.step = n; await waitPaint(); await invoke('take_shot', { tab: `partner-dlg-${n}` }) }
+    if (partnerDlg.node) for (const n of [2, 3]) { partnerDlg.step = n; await waitPaint(); await shellApi.takeShot(`partner-dlg-${n}`) }
     else console.info('[ASN] 截圖：沒有能開新夥伴的設備，只拍第 1 頁', launchDeviceRowsList.value.map(d => [d.key, launchDisableReasonFor(d.key)]))
     closePartnerDlg()
   } else if (savedMe.shotLaunchNotice) {
     showLaunchNotice(backgroundRestoreNoticeText('夥伴-7'))
     await waitPaint()
-    await invoke('show_main').catch(() => {})
+    await shellApi.showMain().catch(() => {})
     await waitPaint()
-    await invoke('capture_ui_ready', { tag: 'launch-notice-ready' })
-    await invoke('take_shot', { tab: 'launch-notice' })
+    await shellApi.captureUiReady('launch-notice-ready')
+    await shellApi.takeShot('launch-notice')
     closeLaunchNotice()
   } else {
   const all = core.snapshot().friends
@@ -2381,10 +2381,10 @@ if (info.shot) {
     core.emit('notify', { kind: 'login', friend: core.friends.get(target.id), line: '已經登入', toast: true })
   }
   await sleep(1500)
-  await invoke('take_shot')
+  await shellApi.takeShot()
   // 沒開對話的整合模式：再各拍一張別則大幅廣告（正見、招租＝按鈕不可點）
   if (savedMe.shotNoChat && ui.mode === 'merged') {
-    for (const [name, i] of [['ad-policy', Math.max(0, ads.value.findIndex(a => a.key === 'policy'))], ['ad-rent', ads.value.length - 1]]) { adI.value = i; await sleep(700); await invoke('take_shot', { tab: name }) }
+    for (const [name, i] of [['ad-policy', Math.max(0, ads.value.findIndex(a => a.key === 'policy'))], ['ad-rent', ads.value.length - 1]]) { adI.value = i; await sleep(700); await shellApi.takeShot(name) }
     adI.value = Number.isInteger(savedMe.shotAd) ? savedMe.shotAd : 0
   }
   // 逐頁籤截圖：本機、第二台設備、對話（含群組）、使用指引（清單與一篇內容）、設定
@@ -2400,12 +2400,12 @@ if (info.shot) {
       if (Array.isArray(savedMe.shotSettingSet)) for (const c of savedMe.shotSettingSet) { emit('asn:set', c); await sleep(400) }
     }
     await sleep(name.endsWith('-doc') ? 900 : 500)
-    await invoke('take_shot', { tab: name })
+    await shellApi.takeShot(name)
     if (name === 'guide-doc') await root.closePanel('guide')
     if (name === 'settings-doc') await root.closePanel('setting')
   }
   }
   await core.stop()
-  await invoke('quit_app')
+  await shellApi.quitApp()
 }
 blockContextMenu(document)

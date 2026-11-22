@@ -66,6 +66,6 @@ test('介面接線：設備分組標題旁有小綠點與有新版小字；狀�
   assert.match(html, /g\.kind === 'device' && asnBadge\(g\.node\)/)
   assert.match(html, /asnBadge\(g\.node\)\.tip/)
   assert.match(html, /有新版/)
-  assert.match(js, /invoke\('set_presence', \{ status: me\.status, psm: me\.psm/)
+  assert.match(js, /trayApi\.setPresence\(me\.status, me\.psm/)
   assert.match(css, /\.toolbar\{[^}]*flex-wrap:wrap/)
 })

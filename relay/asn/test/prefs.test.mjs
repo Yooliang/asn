@@ -78,7 +78,7 @@ test('守門：樞紐用 notifyPlan 決定聲音與右下角通知，存檔寫 n
   const js = read('ui/list.js')
   assert.match(js, /const plan = notifyPlan\(n, notifyPrefs\.value, me\.status\)/)
   assert.match(js, /if \(plan\.sound\) SOUNDS\[plan\.sound\]/)
-  assert.match(js, /if \(plan\.toast\) void invoke\('show_toast'/)
+  assert.match(js, /if \(plan\.toast\) void windowApi\.showToast\(/)
   assert.match(js, /notify: notifyPrefs\.value, skin: skin\.value, frame:/)
   assert.match(js, /notifyFromSaved\(savedMe\)/)
   assert.match(js, /\bfile: \(\) =>/, '收到檔案有自己的聲音')
