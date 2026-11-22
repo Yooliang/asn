@@ -87,6 +87,8 @@ export const launchSetProbeSource = ({ err = false, mod = 'installed', status = 
   }
   if (rows[2].querySelector('.launch-latest, .launch-login')) return { ok: false, why: '沒裝的 Gemini 不該有最新版與登入狀態' };
   if (/過期|undefined/.test(box.querySelector('.launch-tools').textContent)) return { ok: false, why: '工具清單不該出現「過期」或 undefined' };
+  // 1b'. 旗標關（正式版預設）：五家都沒有「進行安裝／進行更新」鈕——DOM 裡完全找不到（#1548 第 5 張）
+  if (box.querySelector('.launch-act, .launch-install-note') || /進行安裝|進行更新/.test(box.textContent)) return { ok: false, why: '旗標關著時不該有進行安裝／進行更新鈕：' + box.querySelector('.launch-tools').textContent.trim() };
   // 1c. 重新檢查：按下去用略過快取（force:true）再查一次；按鈕在標題列最右邊
   const rebtn = [...box.querySelectorAll('.sec-head button')].find(b => vis(b) && b.textContent.trim() === '重新檢查');
   if (!rebtn) return { ok: false, why: '找不到「重新檢查」鈕' };
