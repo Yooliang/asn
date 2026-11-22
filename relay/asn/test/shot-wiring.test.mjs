@@ -11,10 +11,12 @@ const read = f => fs.readFileSync(path.join(root, f), 'utf8')
 
 test('前端用到的截圖指令都在 Rust 的 invoke_handler 裡', () => {
   const used = new Set()
-  for (const f of ['ui/shot.js', 'ui/lib/tauri.mjs']) for (const m of read(f).matchAll(/invoke\('(shot_[a-z_]+)'/g)) if (m[1] !== 'shot_frontend_log') used.add(m[1])   // shot_frontend_log 不在 shot 模組，由別的守門管
+  for (const f of ['ui/shot.js', 'ui/lib/tauri.mjs']) for (const m of read(f).matchAll(/invoke\('(shot_[a-z_]+)'/g)) if (m[1] !== 'shot_frontend_log') used.add(m[1])   // shot_frontend_log 定義在 lib.rs 本身，不在 shot 模組，所以不用 shot:: 前綴比對；它有沒有註冊由本測試最後一條斷言管，指令名與參數形狀由 invoke-exit.test.mjs 的「⑧：list.js 第二批」管
   assert.deepEqual([...used].sort(), ['shot_begin', 'shot_cancel', 'shot_focus', 'shot_image', 'shot_pick', 'shot_ready', 'shot_supported'])
   const lib = read('src-tauri/src/lib.rs')
   for (const c of used) assert.ok(lib.includes(`shot::${c}`), `${c} 沒註冊`)
+  assert.ok(read('ui/lib/tauri.mjs').includes("invoke('shot_frontend_log'"), '前提：tauri.mjs 的出口還在呼叫 shot_frontend_log')
+  assert.match(lib, /generate_handler!\[[^\]]*\bshot_frontend_log\b/, 'shot_frontend_log 沒註冊在 invoke_handler')
 })
 
 test('工具列有截圖鈕：中文 aria-label，只在支援時顯示', () => {
