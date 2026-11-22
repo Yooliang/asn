@@ -122,7 +122,7 @@ test('流程行為：點「切換」＝選好帳號進確認畫面；從夥伴�
   assert.match(js, /acctView\.value\.canPick/, '進確認前仍檢查能不能切換')
   assert.match(js, /if \(acctSw\.phase !== 'confirm' \|\| !acctView\.value\.pickEmail \|\| !acctCanSwitchTo\(acctCur\.value\?\.key\)\) return/, '一定先看過確認畫面才送（也不能送到這支手機自己，#930）')
   assert.match(js, /acctSw\.phase = 'run'\n[\s\S]{0,200}const v = await runAcctSwitch\(acctTransport, node, email, \{ onUpdate: v => \{ if \(token === acctToken\) acctSw\.view = v \}, cancelled: \(\) => run !== acctRunSeq \}\)/, '送出後進進度畫面；離開畫面後照樣等結果（只有送出新的切換才停）')
-  assert.match(js, /android_acct_list/)
+  assert.match(js, /acctList: node => mobileAccountApi\.list\(node\)/)
   assert.match(js, /fourthNav\.openPage\(acctPage\(acctSw\.node\)\)/, '當內頁打開（#461；蓋在進來的那個分頁上）')
   assert.equal(pageTitle(acctPage()), '設備', '內頁標題（分頁列照樣標著底下那一格）')
   assert.equal(tabLabel('chats'), '對話')
