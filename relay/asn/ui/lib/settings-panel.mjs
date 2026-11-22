@@ -28,7 +28,7 @@ import { switchRowKey, switchResultOf } from './switch-result.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, ROSTER_TEXT, accountDeviceRows, accountInUse, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
-import { QUOTA_TEXT, shareKey, vendorSections } from './quota-readers.mjs'
+import { QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
 import { COLUMNS as TM_COLUMNS, TEXT as TM } from './task-manager.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './msg-ref.mjs'
@@ -182,14 +182,16 @@ export const SettingsPanel = {
     const forget = createForgetConfirm({ box: forgetBox, forget: id => act('known-forget', id) })
     const mmEmail = ref('')
     const mmKey = ref('')
+    const mmOpen = ref(false)   // 「加入帳號」按下去才展開輸入欄
     const addMinimax = () => {
       act('quota-mm-add', { email: mmEmail.value, key: mmKey.value })
       mmKey.value = ''
       mmEmail.value = ''
+      mmOpen.value = false
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
-      QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devRows, rowResult, accountInUseOf, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
+      QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, accountInUseOf, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -254,69 +256,13 @@ export const SettingsPanel = {
       </template>
       <template v-if="cat === 'accounts'">
         <div class="dv-set dv-acctpage">
-          <section class="dv-my" v-if="st.myAccounts || st.quotaReaders" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.title">
+          <section class="dv-my" v-if="st.myAccounts || st.quotaReaders" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.accountsTitle">
               <h3 class="dv-my-h" v-if="st.myAccounts">{{ st.myAccounts.title }}</h3>
               <small v-if="st.myAccounts && st.myAccounts.empty">{{ st.myAccounts.empty }}</small>
               <div class="dv-my-v" v-for="v in vendorSections(st.myAccounts, st.quotaReaders)" :key="v.key" :data-vendor="v.key">
-                <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.key)"></span><b>{{ v.label }}</b>
-                  <!-- 額度開關（原本在「額度來源」大段與啟動設定的「額度回報」，行為不變、只換位置）：只管這台電腦 -->
-                  <span class="dv-vtog" v-if="st.quotaReaders && v.key === 'grok'">
-                    <label class="chk"><input type="checkbox" :checked="st.quotaReaders.grok" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'grok', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.grok }}</span></label>
-                  </span>
-                  <span class="dv-vtog" v-if="v.key === 'claude' && st.quotaReaders && st.quotaReaders.extraDirs.length">
-                    <label class="chk" v-if="st.quotaReaders && st.quotaReaders.extraDirs.length"><input type="checkbox" :checked="st.quotaReaders.extra" :disabled="st.quotaReaders.busy" @change="act('quota-source', { source: 'extra_claude', on: $event.target.checked })" /><span>{{ QUOTA_TEXT.extra }}</span></label>
-                  </span>
-                </header>
-                <div class="dv-vq" v-if="st.quotaReaders && v.key === 'grok'">
-                  <small>{{ QUOTA_TEXT.grokNote }}{{ QUOTA_TEXT.thisPc }}</small>
-                  <small class="acct-warn" v-if="st.quotaReaders.grok && st.quotaReaders.status.grok">{{ st.quotaReaders.status.grok }}</small>
-                </div>
-                <div class="dv-vq" v-if="st.quotaReaders && v.key === 'gemini'">
-                  <small>{{ QUOTA_TEXT.agyShort }}{{ QUOTA_TEXT.thisPc }}</small>
-                  <small class="acct-warn" v-if="st.quotaReaders.agy && st.quotaReaders.status.agy">{{ st.quotaReaders.status.agy }}</small>
-                  <details><summary>{{ QUOTA_TEXT.more }}</summary><small>{{ QUOTA_TEXT.agyNote }}</small></details>
-                </div>
-                <div class="dv-vq" v-if="v.key === 'claude' && st.quotaReaders && st.quotaReaders.extraDirs.length">
-                  <small>{{ QUOTA_TEXT.extraShort }}{{ QUOTA_TEXT.extraDirs(st.quotaReaders.extraDirs.length) }}{{ QUOTA_TEXT.thisPc }}</small>
-                  <template v-if="st.quotaReaders.extra">
-                    <small class="acct-warn" v-for="d in st.quotaReaders.extraDirs.filter(x => x.status)" :key="d.name">{{ d.status }}</small>
-                    <small v-if="st.quotaReaders.extraRefresh">{{ QUOTA_TEXT.refreshActive }}</small>
-                    <!-- 要打開自動換新的確認當下，風險與服務條款要看得到；平常收在「說明」裡 -->
-                    <template v-if="st.quotaReaders.confirm === 'refresh'">
-                      <small class="acct-warn">{{ QUOTA_TEXT.refreshRisk }}</small>
-                      <small class="acct-warn">{{ QUOTA_TEXT.refreshWarn }}</small>
-                    </template>
-                    <span class="dv-ibtns">
-                      <asn-button :disabled="st.quotaReaders.busy" @click="act('quota-refresh', !st.quotaReaders.extraRefresh)">{{ st.quotaReaders.extraRefresh ? QUOTA_TEXT.refreshOff : st.quotaReaders.confirm === 'refresh' ? QUOTA_TEXT.refreshConfirm : QUOTA_TEXT.refreshOn }}</asn-button>
-                    </span>
-                    <details><summary>{{ QUOTA_TEXT.more }}</summary>
-                      <small>{{ QUOTA_TEXT.extraNote }}</small>
-                      <small>{{ QUOTA_TEXT.refreshNote }}</small>
-                      <small>{{ QUOTA_TEXT.refreshRisk }}</small>
-                      <small>{{ QUOTA_TEXT.refreshWarn }}</small>
-                      <small>{{ QUOTA_TEXT.refreshStopped }}</small>
-                    </details>
-                  </template>
-                </div>
-                <div class="dv-vq" v-if="st.quotaReaders && v.key === 'minimax'">
-                  <small v-if="!st.quotaReaders.minimaxSupported">{{ QUOTA_TEXT.minimaxUnsupported }}</small>
-                  <template v-else>
-                    <small>{{ QUOTA_TEXT.minimaxNote }}{{ QUOTA_TEXT.thisPc }}</small>
-                    <ul class="dv-accts" v-if="st.quotaReaders.minimax.length">
-                      <li class="dv-acct" v-for="m in st.quotaReaders.minimax" :key="m.email">
-                        <span class="dv-mail">{{ m.email }}</span>
-                        <span class="dv-side"><asn-button state="danger" :disabled="st.quotaReaders.busy" @click="act('quota-mm-remove', m.email)">{{ st.quotaReaders.confirm === 'minimax\\n' + m.email ? QUOTA_TEXT.minimaxConfirmRemove : QUOTA_TEXT.minimaxRemove }}</asn-button></span>
-                        <small class="dv-why acct-warn" v-if="!m.hasKey">{{ QUOTA_TEXT.minimaxNoKey }}</small>
-                        <small class="dv-why acct-warn" v-else-if="m.status">{{ m.status }}</small>
-                      </li>
-                    </ul>
-                    <form class="dv-mm" v-if="st.quotaReaders.minimax.length < 2" @submit.prevent="addMinimax">
-                      <input type="email" autocomplete="off" :placeholder="QUOTA_TEXT.minimaxEmail" :aria-label="QUOTA_TEXT.minimaxEmail" v-model="mmEmail" />
-                      <input type="password" autocomplete="off" :placeholder="QUOTA_TEXT.minimaxKey" :aria-label="QUOTA_TEXT.minimaxKey" v-model="mmKey" />
-                      <asn-button type="submit" :disabled="st.quotaReaders.busy">{{ QUOTA_TEXT.minimaxAdd }}</asn-button>
-                    </form>
-                  </template>
-                </div>
+                <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.key)"></span><b>{{ v.label }}</b></header>
+                <!-- 沒開額度上報：指到「設備 → 這台」的開關（讀額度的開關不放在帳號頁） -->
+                <div class="dv-vq" v-if="quotaGuideFor(v.key, st.quotaReaders)"><small class="dv-guide">{{ quotaGuideFor(v.key, st.quotaReaders) }}</small></div>
                 <ul class="dv-accts">
                   <li :class="['dv-acct', { cur: accountInUseOf(v.key, a) }]" v-for="a in v.accounts" :key="a.account">
                     <span class="dv-who"><span class="dv-mail">{{ a.account }}</span><span class="dv-age" v-if="a.quota.ageLabel">（{{ a.quota.ageLabel }}）</span></span>
@@ -366,7 +312,6 @@ export const SettingsPanel = {
                   </li>
                 </ul>
               </div>
-              <small role="status" v-if="st.quotaReaders && st.quotaReaders.msg">{{ st.quotaReaders.msg }}</small>
             </section>
           <small class="dv-none" v-else>{{ ROSTER_TEXT.noList }}</small>
         </div>
@@ -476,6 +421,67 @@ export const SettingsPanel = {
                 <h3 class="set-h">{{ IDENTITY_TEXT.title }}</h3>
                 <small class="pair-warn" v-if="st.known && st.known.renameError" role="alert">{{ st.known.renameError }}</small>
                 <device-identity :identity="curDev.identity" :note="curDev.noReport ? curDev.stateLine : ''"></device-identity>
+              </div>
+              <div class="set-card dv-qread" v-if="curDev.self && st.quotaReaders" :aria-label="QUOTA_TEXT.title">
+                <h3 class="set-h">{{ QUOTA_TEXT.title }}</h3>
+                <ul class="dv-qrows">
+                  <li class="dv-qrow" data-reader="grok">
+                    <span class="dv-qname"><b>{{ QUOTA_TEXT.grok }}</b><small>{{ QUOTA_TEXT.grokNote }}</small>
+                      <small class="acct-warn" v-if="st.quotaReaders.grok && st.quotaReaders.status.grok">{{ st.quotaReaders.status.grok }}</small></span>
+                    <input class="dv-qsw" type="checkbox" :checked="st.quotaReaders.grok" :disabled="st.quotaReaders.busy" :aria-label="QUOTA_TEXT.grok" @change="act('quota-source', { source: 'grok', on: $event.target.checked })" />
+                  </li>
+                  <li class="dv-qrow" data-reader="gemini">
+                    <span class="dv-qname"><b>{{ QUOTA_TEXT.agy }}</b><small>{{ QUOTA_TEXT.agyShort }}</small>
+                      <small class="acct-warn" v-if="st.quotaReaders.agy && st.quotaReaders.status.agy">{{ st.quotaReaders.status.agy }}</small></span>
+                  </li>
+                  <li class="dv-qrow" data-reader="claude" v-if="st.quotaReaders.extraDirs.length">
+                    <span class="dv-qname"><b>{{ QUOTA_TEXT.extra }}</b><small>{{ QUOTA_TEXT.extraShort }}{{ QUOTA_TEXT.extraDirs(st.quotaReaders.extraDirs.length) }}</small>
+                      <template v-if="st.quotaReaders.extra">
+                        <small class="acct-warn" v-for="d in st.quotaReaders.extraDirs.filter(x => x.status)" :key="d.name">{{ d.status }}</small>
+                        <small v-if="st.quotaReaders.extraRefresh">{{ QUOTA_TEXT.refreshActive }}</small>
+                        <!-- 要打開自動換新的確認當下，風險與服務條款要看得到；平常收在「說明」裡 -->
+                        <template v-if="st.quotaReaders.confirm === 'refresh'">
+                          <small class="acct-warn">{{ QUOTA_TEXT.refreshRisk }}</small>
+                          <small class="acct-warn">{{ QUOTA_TEXT.refreshWarn }}</small>
+                        </template>
+                        <span class="dv-ibtns">
+                          <asn-button :disabled="st.quotaReaders.busy" @click="act('quota-refresh', !st.quotaReaders.extraRefresh)">{{ st.quotaReaders.extraRefresh ? QUOTA_TEXT.refreshOff : st.quotaReaders.confirm === 'refresh' ? QUOTA_TEXT.refreshConfirm : QUOTA_TEXT.refreshOn }}</asn-button>
+                        </span>
+                        <details><summary>{{ QUOTA_TEXT.more }}</summary>
+                          <small>{{ QUOTA_TEXT.refreshNote }}</small>
+                          <small>{{ QUOTA_TEXT.refreshRisk }}</small>
+                          <small>{{ QUOTA_TEXT.refreshWarn }}</small>
+                          <small>{{ QUOTA_TEXT.refreshStopped }}</small>
+                        </details>
+                      </template></span>
+                    <input class="dv-qsw" type="checkbox" :checked="st.quotaReaders.extra" :disabled="st.quotaReaders.busy" :aria-label="QUOTA_TEXT.extra" @change="act('quota-source', { source: 'extra_claude', on: $event.target.checked })" />
+                  </li>
+                  <li class="dv-qrow" data-reader="minimax">
+                    <span class="dv-qname"><b>{{ QUOTA_TEXT.minimax }}</b>
+                      <small v-if="!st.quotaReaders.minimaxSupported">{{ QUOTA_TEXT.minimaxUnsupported }}</small>
+                      <template v-else>
+                        <small>{{ QUOTA_TEXT.minimaxNote }}</small>
+                        <small v-if="st.quotaReaders.minimax.length">{{ QUOTA_TEXT.minimaxCount(st.quotaReaders.minimax.length) }}</small>
+                      </template></span>
+                    <asn-button class="dv-qbtn" v-if="st.quotaReaders.minimaxSupported && st.quotaReaders.minimax.length < 2 && !mmOpen" :disabled="st.quotaReaders.busy" @click="mmOpen = true">{{ QUOTA_TEXT.minimaxOpen }}</asn-button>
+                  </li>
+                </ul>
+                <template v-if="st.quotaReaders.minimaxSupported">
+                  <ul class="dv-accts" v-if="st.quotaReaders.minimax.length">
+                    <li class="dv-acct" v-for="m in st.quotaReaders.minimax" :key="m.email">
+                      <span class="dv-mail">{{ m.email }}</span>
+                      <span class="dv-side"><asn-button state="danger" :disabled="st.quotaReaders.busy" @click="act('quota-mm-remove', m.email)">{{ st.quotaReaders.confirm === 'minimax\\n' + m.email ? QUOTA_TEXT.minimaxConfirmRemove : QUOTA_TEXT.minimaxRemove }}</asn-button></span>
+                      <small class="dv-why acct-warn" v-if="!m.hasKey">{{ QUOTA_TEXT.minimaxNoKey }}</small>
+                      <small class="dv-why acct-warn" v-else-if="m.status">{{ m.status }}</small>
+                    </li>
+                  </ul>
+                  <form class="dv-mm" v-if="mmOpen && st.quotaReaders.minimax.length < 2" @submit.prevent="addMinimax">
+                    <input type="email" autocomplete="off" :placeholder="QUOTA_TEXT.minimaxEmail" :aria-label="QUOTA_TEXT.minimaxEmail" v-model="mmEmail" />
+                    <input type="password" autocomplete="off" :placeholder="QUOTA_TEXT.minimaxKey" :aria-label="QUOTA_TEXT.minimaxKey" v-model="mmKey" />
+                    <asn-button type="submit" :disabled="st.quotaReaders.busy">{{ QUOTA_TEXT.minimaxAdd }}</asn-button>
+                  </form>
+                </template>
+                <small role="status" v-if="st.quotaReaders.msg">{{ st.quotaReaders.msg }}</small>
               </div>
               <div class="set-card" v-if="deviceFp">
                 <h3 class="set-h">連線安全</h3>

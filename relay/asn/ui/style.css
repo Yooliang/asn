@@ -1004,7 +1004,15 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-mm input{flex:1 1 140px;min-width:0}
 .dv-my-v{border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .dv-vh{flex-wrap:wrap}
-.dv-vtog{margin-left:auto;display:flex;flex-wrap:wrap;gap:4px 14px;font-weight:normal}
+/* 「設備 → 這台」的「這台讀額度」（#2111 ④）：一列一項，名字在左（說明在下一行），開關／動作鈕固定靠右 */
+.dv-qrows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--sp-3)}
+.dv-qrow{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-3);min-width:0}
+.dv-qname{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:var(--sp-1);overflow-wrap:anywhere}
+.dv-qname small{display:block}
+.dv-qname details summary{cursor:pointer;font-size:var(--fs-2);color:var(--muted, inherit)}
+.dv-qrow .dv-qsw{flex:none;margin:var(--sp-1) 0 0 auto}
+.dv-qrow .dv-qbtn{flex:none;margin-left:auto;white-space:nowrap}
+.dv-guide{color:var(--muted)}
 .dv-vq{display:flex;flex-direction:column;gap:2px;padding:6px 12px 0}
 .dv-vq details summary{cursor:pointer;font-size:12px;color:var(--muted, inherit)}
 .dv-vq details small{display:block}

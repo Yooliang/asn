@@ -1,16 +1,15 @@
-// 額度來源與查詢代碼（todo-next-193）。設定頁的狀態與動作；純邏輯，node 測試可直接載入。
+// 這台讀額度與查詢代碼（todo-next-193；#2111 ④ 起讀額度的開關在「設備 → 這台」）。設定頁的狀態與動作；純邏輯，node 測試可直接載入。
 // MiniMax key 只經過這裡交給 Rust 存進憑證管理員，不留在狀態裡，也不進設定頁快照。
 // 查詢代碼只在開的當下回一次：放在狀態裡顯示，使用者關掉或換一筆就清掉，之後讀不回來。
 
 export const QUOTA_TEXT = {
-  title: '額度來源',
+  title: '這台讀額度',
+  accountsTitle: '帳號',
   grok: '讀 Grok 額度',
   grokNote: '用這台電腦的 Grok 登入讀取。',
   agy: '讀 Gemini 額度',
-  agyNote: 'agy 的額度查詢不會告訴我們是哪個帳號，所以這個開關目前不會主動查額度；Gemini 的額度只在開著 agy 視窗時更新。',
-  agyShort: 'Gemini 額度要開著 agy 視窗才會更新。',
+  agyShort: '要開著 Gemini 視窗才會更新。',
   extra: '讀 Claude 額外帳號',
-  extraNote: '讀你另外登入在專用資料夾的帳號，平常使用的登入不會動到。',
   extraShort: '讀另外登入的帳號，平常的登入不動。',
   extraDirs: n => `找到 ${n} 個帳號。`,
   refreshOn: '打開自動換新',
@@ -18,20 +17,21 @@ export const QUOTA_TEXT = {
   refreshOff: '關閉自動換新',
   refreshActive: '自動換新已打開。',
   refreshNote: '額外帳號的登入約 8 小時到期。打開後，快到期時會自動換新。',
-  refreshWarn: '同一個帳號只能有一個程式在換新，否則會被登出。如果還有其他程式在換，請先停掉再打開。',
-  refreshRisk: '這項使用非公開的登入方式，可能隨時失效，也可能不符合服務條款；失效時會顯示要重新登入。',
+  refreshWarn: '同一個帳號只能有一個程式在換新，否則會被登出；其他程式在換的話，請先停掉再打開。',
+  refreshRisk: '這是非公開的登入方式，可能隨時失效，也可能不符合服務條款；失效時要重新登入。',
   refreshStopped: '換新失敗就不會再試，請重新登入該帳號，或關閉後再打開。',
   minimax: 'MiniMax',
   minimaxNote: 'key 只存在這台電腦，存好後不會再顯示。最多 2 個帳號。',
-  minimaxUnsupported: 'MiniMax 目前只有 Windows 電腦能設定。',
+  minimaxUnsupported: '只能在 Windows 電腦設定。',
+  minimaxOpen: '加入帳號',
+  minimaxCount: n => `已存 ${n} 個帳號。`,
   minimaxEmail: '帳號 email',
   minimaxKey: 'key',
   minimaxAdd: '加入',
   minimaxRemove: '移除',
   minimaxConfirmRemove: '確認移除',
   minimaxNoKey: '找不到 key，請移除後重新加入',
-  // 開關搬進各服務區段後（設定 → 帳號）：每個開關只管這台電腦；長說明收進可展開的「說明」
-  thisPc: '只影響這台電腦。',
+  // 長說明收進可展開的「說明」
   more: '說明',
   share: '產生查詢代碼',
   shareAgain: '重新產生',
@@ -80,20 +80,26 @@ export function normalizeReaders(v) {
 
 export const shareKey = (vendor, account) => `${vendor}\n${account}`
 
-/** 額度開關所在的服務（區段鍵與名稱）：還沒有帳號也要有區段，開關才有地方放 */
-const TOGGLE_VENDORS = [['claude', 'Claude'], ['gemini', 'Gemini'], ['grok', 'Grok'], ['minimax', 'MiniMax']]
+/**
+ * 帳號頁的引導句（#2111 ④）：這台沒開額度上報時，帳號卡改寫這一句，指到開關所在的「設備 → 這台」。
+ * 目前只有 Grok 有可開的讀取開關（Gemini 的開關先藏起來，所以不指路）；沒開才有句子，開了回空字串。
+ */
+export const QUOTA_GUIDE_VENDORS = { grok: 'Grok' }
+export const quotaGuide = name => `還沒開啟額度上報。到『設備 → 這台』打開『讀 ${name} 額度』，這裡就會顯示額度。`
+export function quotaGuideFor(vendor, readers) {
+  const name = QUOTA_GUIDE_VENDORS[vendor]
+  if (!name || !readers) return ''
+  return readers[vendor] === true ? '' : quotaGuide(name)
+}
 
 /**
- * 設定 → 帳號 要畫哪些服務區段。my＝帳號清單（可能還沒有）；readers＝額度來源。
- * 有帳號的服務照原本的順序；額度開關所在的服務就算還沒有帳號，也補一個空區段（只有標題列的開關與說明）。
+ * 設定 → 帳號 要畫哪些服務區段。my＝帳號清單（可能還沒有）；readers＝額度讀取器。
+ * 有帳號的服務照原本的順序；Grok 沒開額度上報時就算還沒有帳號，也補一個空區段，引導句才有地方寫。
  */
 export function vendorSections(my, readers) {
   const out = [...(my?.vendors ?? [])]
-  const need = new Set()
-  if (readers) for (const k of ['gemini', 'grok', 'minimax']) need.add(k)
-  if ((readers?.extraDirs ?? []).length) need.add('claude')
-  for (const [key, label] of TOGGLE_VENDORS) {
-    if (need.has(key) && !out.some(v => v.key === key)) out.push({ key, label, accounts: [] })
+  for (const key of Object.keys(QUOTA_GUIDE_VENDORS)) {
+    if (quotaGuideFor(key, readers) && !out.some(v => v.key === key)) out.push({ key, label: QUOTA_GUIDE_VENDORS[key], accounts: [] })
   }
   return out
 }
