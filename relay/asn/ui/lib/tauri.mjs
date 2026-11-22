@@ -37,6 +37,7 @@ export const transport = {
   launchers: ids => invoke('relay_launchers', { ids: ids ?? null }),
   cliDetect: () => invoke('ai_cli_detect'),
   cliStatus: force => invoke('ai_cli_status', { force: force === true }),   // 設定頁「已安裝的工具」：[{ id, installed, version, version_state, latest, login, login_count }]；force＝重新檢查（略過快取）
+  cliInstall: toolId => invoke('ai_cli_install', { toolId }),   // 設定頁 Claude 那一列「進行安裝／進行更新」（#1548 ⑤）：已驗數位簽章的流程 → { ok, message, opened_login }；使用者同意後才呼叫
   partnerLaunchLocal: req => invoke('partner_launch_local', { req }),
   partnerConsoleQuery: req => invoke('partner_console_query', { req }),
   partnerConsoleSet: req => invoke('partner_console_set', { req }),

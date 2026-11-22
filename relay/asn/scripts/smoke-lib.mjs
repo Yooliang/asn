@@ -1025,6 +1025,7 @@ export const injectSource = table => `(() => {
   const missing = (globalThis.__smokeMissing = []);
   // 手機看終端的本人確認（PR③ 的外殼）：表裡的 __confirmViewer＝'ok'／'cancel'／'no_lock'；每次確認都記在 __smokeConfirms
   // 語音輸入（#1536）：表裡的 __dict＝true 就給一個假的通話外殼（還沒允許麥克風：按下去先停在準備中，探測用 __asnCallEvent 送「允許」才開始聽；開始聽之後一直停在聆聽中、不回結果），手機輸入列才會有麥克風
+  if (T.__launchInstallBtn) globalThis.__smokeLaunchInstallBtn = true;   // 冒煙：打開 Claude 那一列的「進行安裝／進行更新」旗標（#1548 ⑤；正式版旗標預設關）
   if (T.__dict) globalThis.AsnAndroid = Object.assign(globalThis.AsnAndroid || {}, { vibrate() {}, callAvailable: () => true, callMicState: () => 'ask', callRequestMic() { (globalThis.__smokeDict ||= []).push('ask') }, callListen() { (globalThis.__smokeDict ||= []).push('listen') }, callStopListen() {}, callEnd() {}, callSpeak() {}, callStopSpeak() {} });
   if (T.__confirmViewer) globalThis.AsnAndroid = { confirmViewer(id) { (globalThis.__smokeConfirms ||= []).push(id); setTimeout(() => globalThis.__asnConfirmViewer && globalThis.__asnConfirmViewer(id, T.__confirmViewer), T.__confirmDelay || 30) } };
   const tv = T.__tvLive ? (globalThis.__smokeTv = { paused: false, timer: 0, seq: 0, sent: 0, id: 7 }) : null;

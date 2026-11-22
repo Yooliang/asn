@@ -20,6 +20,7 @@ import { isAboutUrl } from './lib/about-info.mjs'
 import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
 import { toolStatusView } from './lib/tool-status.mjs'
+import { LAUNCH_INSTALL_BTN, createToolInstall, installRowView } from './lib/tool-install.mjs'
 import { SETTING_CATS, catSummary, normalizeCatKey } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { activityRound, withActivity } from './lib/activity.mjs'
@@ -600,6 +601,14 @@ const refreshCliStatus = async (force = false) => {
   finally { cliStatusBusy.value = false }
   if (cliStatusAgain) { cliStatusAgain = false; await refreshCliStatus(true) }
 }
+// Claude 那一列的「進行安裝／進行更新」（#1548 ⑤）：旗標預設關；冒煙探測用 __smokeLaunchInstallBtn 注入開啟（只在假後台設，正式環境沒有）
+const launchInstallOn = () => LAUNCH_INSTALL_BTN === true || globalThis.__smokeLaunchInstallBtn === true
+const toolInstall = createToolInstall({
+  reactive,
+  install: id => transport.cliInstall(id),
+  refresh: () => Promise.all([refreshCliTools(), refreshCliStatus(true)]),   // 完成（成功或失敗）後自動重跑狀態檢查
+  log: (m, raw) => console.info('[ASN]', m, raw),   // 原文只進記錄，畫面只顯示白話
+})
 const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTools.value[m.toolId ?? m.id])))
 const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
@@ -2083,7 +2092,7 @@ const app = createApp({
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
-      launch: { tools: launchToolRows.value.map(t => ({ ...t, view: toolStatusView(cliStatus.value[t.toolId ?? t.id], cliStatusBusy.value) })), checking: cliStatusBusy.value, maxPerHour: launchPrefs.maxPerHour, cwdList: launchPrefs.cwdAllow, cwdSuggest: suggestCwds(launchPrefs.cwdAllow, launchPrefs.recentCwd), cwdMsg: launchCwdMsg.value, msg: launchMsg.value },
+      launch: { tools: launchToolRows.value.map(t => ({ ...t, view: toolStatusView(cliStatus.value[t.toolId ?? t.id], cliStatusBusy.value), install: installRowView({ enabled: launchInstallOn(), toolId: t.toolId ?? t.id, installAvail: cliTools.value[t.toolId ?? t.id]?.install_available, installed: t.installed, status: cliStatus.value[t.toolId ?? t.id], ui: toolInstall.state }) })), checking: cliStatusBusy.value, maxPerHour: launchPrefs.maxPerHour, cwdList: launchPrefs.cwdAllow, cwdSuggest: suggestCwds(launchPrefs.cwdAllow, launchPrefs.recentCwd), cwdMsg: launchCwdMsg.value, msg: launchMsg.value },
       piSetup: piSetupView(piSetup.raw, piSetup),
       version: info.version, deviceName: selfDeviceName.value, uiLogMsg: uiLogMsg.value,
       log: buildLogView({ entries: releases.entries, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
@@ -2155,7 +2164,10 @@ const app = createApp({
         case 'bridge-takeover': bridge.confirm = true; break
         case 'bridge-takeover-yes': await takeoverBridge(); break
         case 'bridge-takeover-no': bridge.confirm = false; break
-        case 'launch-recheck': await Promise.all([refreshCliTools(), refreshCliStatus(true)]); break   // 重新偵測並略過快取
+        case 'launch-recheck': toolInstall.clear(); await Promise.all([refreshCliTools(), refreshCliStatus(true)]); break
+        case 'launch-install-ask': toolInstall.ask(value); break
+        case 'launch-install-yes': await toolInstall.confirm(); break
+        case 'launch-install-no': toolInstall.decline(); break   // 重新偵測並略過快取
         case 'askpass-copy': await copyAskpassPath(); break
         case 'autoCheck': autoCheck.value = value === true; break
         case 'check-update': await checkUpdate(true); break
