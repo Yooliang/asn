@@ -93,10 +93,48 @@ pub fn elog_line(now_ms: i64, msg: &str) -> String {
     format!("{} info [elog] {msg}", crate::quota_core::iso_secs(now_ms))
 }
 
-/// 寫一行到 `dir` 的 ui.log；`dir` 是 None（還沒設定）就什麼都不做。任何錯誤都吞掉、絕不 panic
+/// 把訊息裡的 email 換成 `<email>`（elog 會持久寫進 ui.log，帳號 email 不留檔；stderr 輸出不變）。
+/// 規則：`@` 前後各有一串帳號／網域字元，`@` 後面那串含點且不以點開頭或結尾；單獨的 `@`（例如 "x @ y"）不動
+pub fn mask_emails(s: &str) -> String {
+    let c: Vec<char> = s.chars().collect();
+    let local = |ch: char| ch.is_alphanumeric() || "._%+-".contains(ch);
+    let dom = |ch: char| ch.is_alphanumeric() || ".-".contains(ch);
+    let mut out = String::new();
+    let (mut i, mut done) = (0usize, 0usize);
+    while i < c.len() {
+        if c[i] == '@' {
+            let mut l = i;
+            while l > done && local(c[l - 1]) {
+                l -= 1;
+            }
+            let mut r = i + 1;
+            while r < c.len() && dom(c[r]) {
+                r += 1;
+            }
+            // 網域尾端的點是句點，不算網域
+            let mut e = r;
+            while e > i + 1 && c[e - 1] == '.' {
+                e -= 1;
+            }
+            let d = &c[i + 1..e];
+            if l < i && !d.is_empty() && d[0] != '.' && d.contains(&'.') {
+                out.extend(&c[done..l]);
+                out.push_str("<email>");
+                done = e;
+                i = e;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out.extend(&c[done..]);
+    out
+}
+
+/// 寫一行到 `dir` 的 ui.log；`dir` 是 None（還沒設定）就什麼都不做。任何錯誤都吞掉、絕不 panic。email 先遮掉
 pub fn elog_to(dir: Option<&Path>, msg: &str) {
     if let Some(d) = dir {
-        let _ = append(d, &[elog_line(crate::heartbeat::now_ms() as i64, msg)]);
+        let _ = append(d, &[elog_line(crate::heartbeat::now_ms() as i64, &mask_emails(msg))]);
     }
 }
 
@@ -456,6 +494,16 @@ mod tests {
         let t = std::fs::read_to_string(path(d.path())).unwrap();
         assert!(t.contains(" info [elog] [claude-mod] 外掛 壞掉了\n"), "{t}");
         assert!(t.starts_with("20"), "開頭是時間：{t}");
+    }
+
+    #[test]
+    fn elog_寫檔前遮掉_email_普通的_at_不誤遮() {
+        let d = tempfile::tempdir().unwrap();
+        elog_to(Some(d.path()), "登入 a.b@example.com 失敗；(x_y+z@mail.example.co.jp), 再試 user=q@r.tw. 另外 x @ y 與 a@b 與 @abc 不動");
+        let t = std::fs::read_to_string(path(d.path())).unwrap();
+        assert!(!t.contains("example.com") && !t.contains("mail.example") && !t.contains("q@r.tw"), "{t}");
+        assert!(t.contains("登入 <email> 失敗；(<email>), 再試 user=<email>. 另外 x @ y 與 a@b 與 @abc 不動"), "{t}");
+        assert_eq!(mask_emails("沒有 email 的一行"), "沒有 email 的一行");
     }
 
     #[test]
