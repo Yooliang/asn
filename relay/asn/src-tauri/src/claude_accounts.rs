@@ -672,6 +672,79 @@ pub(crate) fn account_of_profile(v: &serde_json::Value) -> Option<(String, Strin
     }
 }
 
+/// 帳號資料回應裡跟訂閱有關的兩個欄位（#1646 拆項 C）。不是個資，可以存、可以寫 log。
+/// 值只來自第三方專案的程式碼，沒有真實樣本；所以只存原值（去頭尾空白，空字串算沒有），判斷交給 `subscription_state`。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OrgInfo {
+    /// `organization.organization_type`
+    pub organization_type: Option<String>,
+    /// `organization.subscription_status`
+    pub subscription_status: Option<String>,
+}
+
+/// 從「同一份」帳號資料回應取訂閱欄位（沿用現有那次查詢，不另打 API）。拿不到、型別不對、空字串都是 None
+pub(crate) fn org_of_profile(v: &serde_json::Value) -> OrgInfo {
+    let get = |k: &str| {
+        let t = v.pointer(&format!("/organization/{k}"))?.as_str()?.trim();
+        (!t.is_empty()).then(|| t.chars().filter(|c| !c.is_control()).take(40).collect::<String>())
+    };
+    OrgInfo { organization_type: get("organization_type"), subscription_status: get("subscription_status") }
+}
+
+/// 訂閱狀態
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Sub {
+    /// 正常
+    Active,
+    /// 失效（降成免費方案，或訂閱已取消）
+    Lapsed,
+    /// 不明（兩個欄位都拿不到）：絕不能當成失效
+    Unknown,
+}
+
+/// 判斷訂閱狀態（純函式，比對不分大小寫）：
+/// - 方案類型是 `claude_free` 或 `free`，或訂閱狀態是 `canceled` → 失效
+/// - 兩個欄位都拿不到（None 或空字串）→ 不明
+/// - 其他（至少拿到一個值、但不符合失效條件）→ 正常。
+///   連看不懂的方案類型（例如 `claude_foo`）也算正常：不認得的付費方案不能誤報失效，只認寫死的失效值。
+pub fn subscription_state(org_type: Option<&str>, sub_status: Option<&str>) -> Sub {
+    let norm = |x: Option<&str>| x.map(|t| t.trim().to_lowercase()).filter(|t| !t.is_empty());
+    let (t, st) = (norm(org_type), norm(sub_status));
+    if matches!(t.as_deref(), Some("claude_free" | "free")) || st.as_deref() == Some("canceled") {
+        Sub::Lapsed
+    } else if t.is_none() && st.is_none() {
+        Sub::Unknown
+    } else {
+        Sub::Active
+    }
+}
+
+/// 訂閱狀態變動的記錄狀態（比照 `PlanLog`）：只有狀態改變才產生一行。第一次若是正常或不明都不記（沒有變動可言），
+/// 第一次就失效、或之後從別的狀態變成不明／失效／恢復正常才記。
+/// 行內只有方案類型與訂閱狀態的值，不含 email、uuid、權杖
+#[derive(Default)]
+pub struct SubLog {
+    last: Option<Sub>,
+}
+
+impl SubLog {
+    pub fn observe(&mut self, org: &OrgInfo) -> Option<String> {
+        let (t, st) = (org.organization_type.as_deref(), org.subscription_status.as_deref());
+        let now = subscription_state(t, st);
+        let prev = self.last.replace(now);
+        if prev == Some(now) || (prev.is_none() && now != Sub::Lapsed) {
+            return None;
+        }
+        let shown = |x: Option<&str>| x.unwrap_or("（無）").to_string();
+        Some(match now {
+            Sub::Lapsed => format!("使用中的 Claude 帳號訂閱失效（方案類型 {}、訂閱狀態 {}）", shown(t), shown(st)),
+            Sub::Unknown => "帳號訂閱狀態不明（查不到方案欄位）".to_string(),
+            Sub::Active => format!("使用中的 Claude 帳號訂閱恢復正常（方案類型 {}、訂閱狀態 {}）", shown(t), shown(st)),
+        })
+    }
+}
+
 /// 查到的帳號是不是庫裡這一份（uuid 相同或 email 相同）；回 log 用的結果類別
 fn verdict(l: &Lookup, owner_uuid: &str, owner_email: &str) -> (bool, String) {
     match l {
@@ -2101,6 +2174,54 @@ mod tests {
         assert_eq!(plan_of(r#"{"emailAddress":"a@x.test"}"#, Some(&c)), ("max".into(), "credentials"));
         assert_eq!(plan_of(r#"{"emailAddress":"a@x.test"}"#, None), (String::new(), PLAN_FROM_NONE));
         assert_eq!(plan_of(r#"{}"#, Some(r#"{"claudeAiOauth":{"subscriptionType":""}}"#)), (String::new(), PLAN_FROM_NONE));
+    }
+
+    #[test]
+    fn 訂閱狀態判斷表() {
+        use Sub::*;
+        let t = |a: Option<&str>, b: Option<&str>| subscription_state(a, b);
+        assert_eq!(t(Some("claude_free"), None), Lapsed);
+        assert_eq!(t(Some("free"), Some("active")), Lapsed);
+        assert_eq!(t(Some("claude_max"), Some("canceled")), Lapsed, "canceled 配任何類型都失效");
+        assert_eq!(t(None, Some("canceled")), Lapsed);
+        for ty in ["claude_max", "claude_pro", "claude_team"] {
+            assert_eq!(t(Some(ty), Some("active")), Active);
+            assert_eq!(t(Some(ty), None), Active);
+        }
+        assert_eq!(t(None, None), Unknown);
+        assert_eq!(t(Some(""), Some("  ")), Unknown, "空字串算沒拿到");
+        assert_eq!(t(Some(" Claude_Free "), None), Lapsed, "不分大小寫、去空白");
+        assert_eq!(t(Some("CLAUDE_MAX"), Some("CANCELED")), Lapsed);
+        assert_eq!(t(Some("Claude_Max"), Some("Active")), Active);
+        assert_eq!(t(Some("claude_foo"), None), Active, "看不懂的類型且沒有 canceled：不誤報失效");
+        assert_eq!(t(None, Some("active")), Active);
+    }
+
+    #[test]
+    fn 訂閱欄位只取兩個字串欄位_型別不對或空的都是沒有() {
+        let g = |v: serde_json::Value| org_of_profile(&v);
+        assert_eq!(g(serde_json::json!({"organization":{"organization_type":"claude_max","subscription_status":"active"}})), OrgInfo { organization_type: Some("claude_max".into()), subscription_status: Some("active".into()) });
+        assert_eq!(g(serde_json::json!({"organization":{"organization_type":5,"subscription_status":""}})), OrgInfo::default());
+        assert_eq!(g(serde_json::json!({"account":{}})), OrgInfo::default());
+        assert_eq!(g(serde_json::json!([1])), OrgInfo::default());
+    }
+
+    #[test]
+    fn 訂閱記錄_只在狀態改變時記_恢復也記_不含帳號() {
+        let o = |t: Option<&str>, s: Option<&str>| OrgInfo { organization_type: t.map(String::from), subscription_status: s.map(String::from) };
+        let mut l = SubLog::default();
+        assert!(l.observe(&o(Some("claude_max"), Some("active"))).is_none(), "第一次就正常：不記");
+        assert!(l.observe(&o(Some("claude_pro"), None)).is_none(), "還是正常（只是值變了）：不記");
+        assert_eq!(l.observe(&o(Some("claude_free"), Some("canceled"))).unwrap(), "使用中的 Claude 帳號訂閱失效（方案類型 claude_free、訂閱狀態 canceled）");
+        assert!(l.observe(&o(Some("free"), None)).is_none(), "還是失效：不重複記");
+        assert_eq!(l.observe(&o(None, None)).unwrap(), "帳號訂閱狀態不明（查不到方案欄位）");
+        assert!(l.observe(&o(None, None)).is_none());
+        assert_eq!(l.observe(&o(Some("claude_max"), Some("active"))).unwrap(), "使用中的 Claude 帳號訂閱恢復正常（方案類型 claude_max、訂閱狀態 active）");
+        let mut l2 = SubLog::default();
+        assert!(l2.observe(&OrgInfo::default()).is_none(), "第一次就不明：起點本來就是不明，不記");
+        assert!(l2.observe(&OrgInfo::default()).is_none());
+        let mut l3 = SubLog::default();
+        assert!(l3.observe(&o(Some("claude_free"), None)).unwrap().starts_with("使用中的 Claude 帳號訂閱失效"), "第一次就失效：記");
     }
 
     #[test]
