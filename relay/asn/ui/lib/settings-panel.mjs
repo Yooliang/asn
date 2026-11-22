@@ -24,7 +24,7 @@ import { USAGE_NOTE } from './usage.mjs'
 import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
-import { DEVICE_BUTTON_TEXT, ROSTER_TEXT, deviceBlockReason, deviceButtons, usedOnText } from './account-roster.mjs'
+import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, ROSTER_TEXT, accountDeviceRows, accountInUse, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
 import { QUOTA_TEXT, shareKey, vendorSections } from './quota-readers.mjs'
@@ -137,15 +137,25 @@ export const SettingsPanel = {
     }
     const act = (op, value) => emit('act', op, value)
     const about = computed(() => aboutView({ deviceName: props.st.deviceName }))
-    // 帳號卡片的設備按鈕：使用中的按了不做事；其他的就是原本的「切換到那台」（同一個指令、確認框照舊）
-    const selfKey = computed(() => allDevs.value.find(d => d.self)?.key ?? '')
-    const devName = node => allDevs.value.find(d => d.key === node)?.label ?? ''
-    // 切不過去的（不是使用中、也沒有切換目標）帶上原因，寫在按鈕下方
-    const devButtons = (vendor, a) => deviceButtons(a?.usedOn, switchTargets(vendor, a), selfKey.value, devName)
-      .map(b => (b.current || b.target ? b : { ...b, reason: deviceBlockReason(allDevs.value, vendor, a?.account, b.node) }))
-    const pressDev = b => {
-      if (b.current || !b.target) return
-      act(b.target.op, b.target.value)
+    // 帳號卡片的設備列（#2111 ②）：一台一列，列的狀態由共用的 accountDeviceRows 決定（手機同一個函式）。
+    // 按下「切換」後那一列顯示「切換中…」，直到切換結束（後台忙碌旗標由開到關）；沒進入忙碌的話 5 秒後自己恢復
+    const pendingDev = ref('')
+    let pendingTimer = null
+    const clearPending = () => { pendingDev.value = ''; clearTimeout(pendingTimer); pendingTimer = null }
+    watch(() => Boolean(props.st.accounts && (props.st.accounts.busy || (props.st.accounts.remote && props.st.accounts.remote.busy))), (on, was) => { if (was && !on) clearPending() })
+    onBeforeUnmount(() => clearTimeout(pendingTimer))
+    const devKey = (vendor, a, node) => vendor + '|' + (a?.account ?? '') + '|' + node
+    const devRows = (vendor, a) => accountDeviceRows(allDevs.value, vendor, a?.account, a?.usedOn, { switchingNode: pendingDev.value.startsWith(devKey(vendor, a, '')) ? pendingDev.value.slice(devKey(vendor, a, '').length) : '' })
+    const accountInUseOf = (vendor, a) => accountInUse(devRows(vendor, a), a?.current)
+    const busyNow = computed(() => Boolean(props.st.accounts && (props.st.accounts.busy || (props.st.accounts.remote && props.st.accounts.remote.busy))))
+    const pressDev = (vendor, a, b) => {
+      if (b.state !== 'switch' || busyNow.value) return
+      const t = switchTargets(vendor, a).find(x => x.node === b.node)
+      if (!t) return
+      pendingDev.value = devKey(vendor, a, b.node)
+      clearTimeout(pendingTimer)
+      pendingTimer = setTimeout(() => { if (!busyNow.value) clearPending() }, 5000)
+      act(t.op, t.value)
     }
     // MiniMax 的輸入欄只留在元件裡：送出就清空，不進設定頁快照
     // 設備改名：名字只有一個（存在後台）；輸入只在這個元件裡，存的時候才交給樞紐
@@ -181,7 +191,7 @@ export const SettingsPanel = {
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
-      QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devButtons, pressDev, DEVICE_BUTTON_TEXT,
+      QUOTA_TEXT, shareKey, vendorSections, mmEmail, mmKey, addMinimax, devRows, accountInUseOf, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -310,11 +320,11 @@ export const SettingsPanel = {
                   </template>
                 </div>
                 <ul class="dv-accts">
-                  <li :class="['dv-acct', { cur: a.current }]" v-for="a in v.accounts" :key="a.account">
+                  <li :class="['dv-acct', { cur: accountInUseOf(v.key, a) }]" v-for="a in v.accounts" :key="a.account">
                     <span class="dv-who"><span class="dv-mail">{{ a.account }}</span><span class="dv-age" v-if="a.quota.ageLabel">（{{ a.quota.ageLabel }}）</span></span>
                     <span class="dv-side">
                       <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
-                      <span class="dv-cur" v-if="a.current">使用中</span>
+                      <span class="dv-cur" v-if="accountInUseOf(v.key, a)">使用中</span>
                       <span class="dv-plan dv-shared" v-if="a.shared">{{ QUOTA_TEXT.shareOn }}</span>
                     </span>
                     <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }">
@@ -329,10 +339,13 @@ export const SettingsPanel = {
                       <span v-else>{{ a.quota.text }}</span>
                       <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
                     </span>
-                    <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色底、aria-pressed，按鈕上只寫設備名，按了不做事；其他的按了改用那台（原本的切換流程）。
-                         讀這筆額度的那台，按鈕上方有一條藍色粗線（.read；每顆按鈕的上框一樣高，沒有線的是透明的） -->
-                    <span class="dv-devs" v-if="devButtons(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account">
-                      <span :class="['dv-devb', { read: (a.quota.readNodes || []).includes(b.node) }]" v-for="b in devButtons(v.key, a)" :key="b.node"><button type="button" :class="['aero-btn', 'dv-devbtn', { on: b.current }]" :aria-pressed="b.current ? 'true' : 'false'" :disabled="!b.current && (!b.target || (st.accounts && st.accounts.busy))" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(b)">{{ b.label }}</button><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
+                    <!-- 設備列：一台一列。左邊設備名（本機加「這台」），原因寫在設備名下方；右邊的鈕固定靠右、同一欄、同尺寸。
+                         使用中＝深灰不能按；可切換＝「切換」；切換中＝淡色不能按；不能切換＝虛線淡色不能按＋原因。讀這筆額度的那台，設備名左邊有一條藍色粗線 -->
+                    <span class="dv-devs" v-if="devRows(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account">
+                      <span :class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]" v-for="b in devRows(v.key, a)" :key="b.node">
+                        <span class="dv-devname"><span class="dv-devn">{{ b.label }}<small class="dv-devself" v-if="b.self">{{ DEVICE_ROW_TEXT.self }}</small></span><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
+                        <button type="button" :class="['aero-btn', 'dv-devbtn', b.state]" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</button>
+                      </span>
                     </span>
                     <span class="dv-share" v-if="st.quotaReaders">
                       <button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-share', { vendor: v.key, account: a.account, shared: a.shared })">{{ !a.shared ? QUOTA_TEXT.share : st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmAgain : QUOTA_TEXT.shareAgain }}</button>

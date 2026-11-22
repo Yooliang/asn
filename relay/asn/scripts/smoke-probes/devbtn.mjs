@@ -10,18 +10,31 @@ export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
     if (!row) return { ok: false, why: '找不到「' + open + '」' };
     row.click();
   }
-  const sel = mobile ? '.m-dv-my .m-dv-dev' : '.dv-my .dv-devbtn';
+  const sel = mobile ? '.m-dv-my .m-dv-devrow .m-dv-dev' : '.dv-my .dv-devrow .dv-devbtn';
   let btns = [];
-  for (let i = 0; i < 60; i++) { btns = [...document.querySelectorAll(sel)].filter(vis); if (btns.some(b => b.classList.contains('on'))) break; await sleep(100) }
-  const on = btns.filter(b => b.classList.contains('on'));
-  for (const b of btns) { const t = b.textContent.trim(); const bad = ['✓', '使用中', '（這台）'].find(w => t.includes(w)); if (bad) return { ok: false, why: '設備按鈕「' + t + '」不該有「' + bad + '」，只寫設備名' } }
+  for (let i = 0; i < 60; i++) { btns = [...document.querySelectorAll(sel)].filter(vis); if (btns.some(b => b.classList.contains('current'))) break; await sleep(100) }
+  const on = btns.filter(b => b.classList.contains('current'));
+  const WORDS = ['使用中', '切換', '切換中…', '不能切換'];
+  for (const b of btns) { const t = b.textContent.trim(); if (!WORDS.includes(t)) return { ok: false, why: '設備鈕上的字「' + t + '」不在固定的四種裡' } }
+  // #2111 ②：同一張卡裡所有鈕同尺寸（電腦 92×28、手機 100×40）、同一欄靠右（右緣一致、貼近卡片右邊）
+  const W = mobile ? 100 : 92, H = mobile ? 40 : 28;
+  for (const c of [...document.querySelectorAll(mobile ? '.m-dv-my .m-dv-acct' : '.dv-my .dv-acct')].filter(vis)) {
+    const cbtns = [...c.querySelectorAll(mobile ? '.m-dv-dev' : '.dv-devbtn')].filter(vis);
+    if (!cbtns.length) continue;
+    const k = c.getBoundingClientRect();
+    for (const b of cbtns) {
+      const r = b.getBoundingClientRect();
+      if (Math.abs(r.width - W) > 0.6 || Math.abs(r.height - H) > 0.6) return { ok: false, why: '「' + b.textContent.trim() + '」鈕尺寸 ' + Math.round(r.width) + '×' + Math.round(r.height) + '，應為 ' + W + '×' + H };
+      if (Math.abs(r.right - cbtns[0].getBoundingClientRect().right) > 0.6) return { ok: false, why: '設備鈕沒有在同一欄（右緣不一致）' };
+      if (k.right - r.right > 24) return { ok: false, why: '設備鈕沒有靠右（離卡片右緣 ' + Math.round(k.right - r.right) + 'px）' };
+    }
+  }
   if (!on.length) return { ok: false, why: '沒有使用中的設備按鈕（共 ' + btns.length + ' 顆）' };
   for (const b of on) {
     const t = b.textContent.trim();
-    if (b.getAttribute('aria-pressed') !== 'true') return { ok: false, why: '「' + t + '」不是選中的樣子（aria-pressed）' };
-    if (b.disabled) return { ok: false, why: '使用中的「' + t + '」被停用了' };
+    if (!b.disabled) return { ok: false, why: '使用中的「' + t + '」應該不能按' };
     const rgb = (getComputedStyle(b).backgroundColor.match(/[0-9]+/g) || []).map(Number);
-    if (!(rgb[0] > 200 && rgb[1] > 170 && rgb[2] < 140)) return { ok: false, why: '使用中的「' + t + '」不是黃色：' + getComputedStyle(b).backgroundColor };
+    if (!(rgb[0] < 140 && rgb[1] < 140 && rgb[2] < 150)) return { ok: false, why: '使用中的「' + t + '」不是深灰底：' + getComputedStyle(b).backgroundColor };
   }
   const box = document.querySelector(mobile ? '.m-dv-my' : '.dv-my');
   if (box.textContent.includes('用在：')) return { ok: false, why: '還有「用在：」那一行' };

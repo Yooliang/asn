@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
-import { DEVICE_BLOCK_REASON, deviceBlockReason, deviceButtons, rosterView, usedOnText } from '../ui/lib/account-roster.mjs'
+import { DEVICE_BLOCK_REASON, DEVICE_ROW_TEXT, accountDeviceRows, rosterView, usedOnText } from '../ui/lib/account-roster.mjs'
 import { deviceStateLine, STATE } from '../ui/lib/device-state.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 
@@ -48,82 +48,55 @@ const my = () => rosterView(roster([
   entry('claude', 'z@b.c', [{ node: 'H', current: false }, { node: 'W', current: false }]),
 ]), { nodeLabel: label, now: NOW })
 
-/** 帳號頁的設備按鈕：[{ text, on, pressed, disabled }]（依畫面順序） */
-const devBtns = html => [...html.matchAll(/<button([^>]*class="aero-btn dv-devbtn( on)?"[^>]*)>([\s\S]*?)<\/button>/g)].map(m => ({
-  text: m[3].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ''), on: Boolean(m[2]), pressed: /aria-pressed="true"/.test(m[1]), disabled: /\sdisabled/.test(m[1]),
+/** 帳號頁的設備列：[{ name, text, state, disabled, why }]（依畫面順序；#2111 ② 一台一列） */
+const devBtns = html => [...html.matchAll(/<span class="dv-devrow[^"]*"><span class="dv-devname"><span class="dv-devn">([^<]*)(?:<small[^>]*>[^<]*<\/small>|<!---->)?<\/span>(?:<small class="dv-devwhy"[^>]*>([^<]*)<\/small>|<!---->)?<\/span><button([^>]*)>([\s\S]*?)<\/button>/g)].map(m => ({
+  name: m[1], why: m[2] ?? '', text: m[4].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ''), state: /dv-devbtn (current|switch|busy|blocked)/.exec(m[3])?.[1] ?? '', disabled: /\sdisabled/.test(m[3]),
 }))
 
-test('帳號頁：每個帳號一排設備按鈕（用過的每台一顆）；使用中的是黃色底選中（aria-pressed）、按鈕上只寫設備名、不停用；沒在用的按了就是切換到那台', async () => {
+test('帳號頁：每個帳號一台一列；使用中＝深灰不能按；沒在用的寫「切換」可以按；按鈕上不再寫設備名', async () => {
   const devices = [
     dev('H', '家用機', true, [vend('claude', [acct('a@b.c', true), acct('z@b.c')])]),
     dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: true })]),
   ]
   const html = await render('accounts', state(devices, my()))
-  assert.deepEqual(devBtns(html), [
-    { text: '家用機', on: true, pressed: true, disabled: false },
-    { text: '家用機', on: false, pressed: false, disabled: false },
-    { text: '工作機', on: false, pressed: false, disabled: false },
+  assert.deepEqual(devBtns(html).map(({ name, text, state, disabled }) => ({ name, text, state, disabled })), [
+    { name: '家用機', text: '使用中', state: 'current', disabled: true },
+    { name: '家用機', text: '切換', state: 'switch', disabled: false },
+    { name: '工作機', text: '切換', state: 'switch', disabled: false },
   ])
-  assert.ok(!html.includes('用在：') && !html.includes('切換到'), '拿掉「用在：」一行與「切換到…」按鈕')
-  for (const b of devBtns(html)) for (const w of ['✓', '使用中', '（這台）']) assert.ok(!b.text.includes(w), `設備按鈕只寫設備名，不含「${w}」：${b.text}`)
-  assert.ok(!html.includes('dv-devck'), '勾勾的 span 不存在')
+  assert.ok(html.includes('這台'), '本機的那列加小標「這台」')
+  assert.ok(!html.includes('用在：') && !html.includes('切換到') && !html.includes('目前不能切換'))
   assert.ok(!html.includes('class="dv-list"') && !html.includes('雲端代理'))
 })
 
-test('設備按鈕的資料：使用中的沒有切換目標（按了不做事）；切換目標裡有、後台還沒回報的也補上；這台也只寫設備名（self 欄位留給邏輯）', () => {
-  const usedOn = [{ node: 'H', label: '家用機', current: true }, { node: 'W', label: '工作機', current: false }]
-  const targets = [{ node: 'W', name: '工作機', op: 'device-switch' }, { node: 'X', name: '新電腦', op: 'device-switch' }, { node: 'H', name: '家用機', op: 'acct-switch' }]
-  const b = deviceButtons(usedOn, targets, 'H')
-  assert.equal(b.find(x => x.node === 'H').self, true, 'self 欄位仍在')
-  assert.deepEqual(b.map(x => [x.node, x.label, x.current, x.target?.op ?? null]), [['H', '家用機', true, null], ['W', '工作機', false, 'device-switch'], ['X', '新電腦', false, 'device-switch']])
-  assert.equal(deviceButtons([{ node: 'W', label: '', current: false }], [], 'H', () => '工作機')[0].label, '工作機', '後台沒給名字時用設備名')
-  assert.deepEqual(deviceButtons(null, null, ''), [])
+test('#2111 切換進行中的那台：鈕寫「切換中…」、不能按、不寫原因（共用函式）', () => {
+  const devices = [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: true })])]
+  const rows = accountDeviceRows(devices, 'claude', 'z@b.c', [], { switchingNode: 'W' })
+  assert.deepEqual(rows.map(r => [r.node, r.state, r.reason]), [['W', 'busy', '']])
+  assert.equal(DEVICE_ROW_TEXT.busy, '切換中…')
 })
 
-test('帳號頁的切換：對方 ASN 沒在線／不可切換、帳號登入不完整、設備已隱藏或移除、Grok 只有一個帳號，那台的按鈕都停用', async () => {
+test('#2111 帳號頁的切換：對方 ASN 沒開、登入不完整、Grok 只有一個帳號是「不能切換」並寫原因；隱藏、已移除、沒登入這個帳號的設備整列不畫', async () => {
   const mk = over => [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: true })]), ...[]].map(d => ({ ...d, ...over }))
   const page = async devices => render('accounts', state(devices, my()))
-  const work = async devices => devBtns(await page(devices)).find(b => b.text === '工作機')
-  // 停用的按鈕下方寫原因（像手機），按鈕用 aria-describedby 指到那行字；能按的不寫
-  const whys = html => [...html.matchAll(/<small class="dv-devwhy" id="([^"]+)">([^<]*)<\/small>/g)].map(m => ({ id: m[1], text: m[2] }))
-  const why = async devices => whys(await page(devices)).filter(w => w.id.endsWith('-W')).map(w => w.text)   // 只看工作機那顆（家用機不在設備樹裡，本來就停用）
+  const work = async devices => devBtns(await page(devices)).find(b => b.name === '工作機')
   assert.equal((await work(mk({}))).disabled, false)
-  assert.deepEqual(await why(mk({})), [])
-  assert.equal((await work(mk({ hidden: true }))).disabled, true)
-  assert.equal((await work(mk({ removed: true }))).disabled, true)
-  const hiddenHtml = await page(mk({ hidden: true }))
-  const hw = whys(hiddenHtml).filter(w => w.id.endsWith('-W'))
-  assert.deepEqual(hw.map(w => w.text), [DEVICE_BLOCK_REASON.hidden])
-  assert.ok(hiddenHtml.includes(`aria-describedby="${hw[0].id}"`), '停用的按鈕指到原因那行字')
-  assert.deepEqual(await why(mk({ removed: true })), [DEVICE_BLOCK_REASON.removed])
+  assert.equal((await work(mk({}))).why, '')
+  assert.equal(await work(mk({ hidden: true })), undefined, '已隱藏不畫')
+  assert.equal(await work(mk({ removed: true })), undefined, '已永久移除不畫（#1858）')
   const off = [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: false, switchHint: '對方電腦的 ASN 沒有在線，無法切換' })])]
-  assert.equal((await work(off)).disabled, true)
-  assert.deepEqual(await why(off), [DEVICE_BLOCK_REASON.offline])
+  assert.deepEqual(pick(await work(off)), { text: '不能切換', state: 'blocked', disabled: true, why: DEVICE_BLOCK_REASON.offline })
+  assert.equal(DEVICE_BLOCK_REASON.offline, 'ASN 尚未開啟')
   const incomplete = [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c', false, { incomplete: true })], { switchable: true })])]
-  assert.equal((await work(incomplete)).disabled, true)
-  assert.deepEqual(await why(incomplete), [DEVICE_BLOCK_REASON.incomplete])
-  // Codex 沒有切換；Grok 本機只有一個帳號：按鈕在，但停用
+  assert.deepEqual(pick(await work(incomplete)), { text: '不能切換', state: 'blocked', disabled: true, why: DEVICE_BLOCK_REASON.incomplete })
+  const notLogged = [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true)], { switchable: true })])]
+  assert.equal(await work(notLogged), undefined, '沒登入這個帳號的設備不畫')
   const grok = [dev('H', '家用機', true, [vend('grok', [acct('z@b.c')])])]
   const gmy = rosterView(roster([entry('grok', 'z@b.c', [{ node: 'H', current: false }])]), { nodeLabel: label, now: NOW })
   const grokHtml = await render('accounts', state(grok, gmy))
-  assert.deepEqual(devBtns(grokHtml), [{ text: '家用機', on: false, pressed: false, disabled: true }])
-  assert.deepEqual(whys(grokHtml).map(w => w.text), [DEVICE_BLOCK_REASON.single])
+  assert.deepEqual(devBtns(grokHtml).map(pick), [{ text: '不能切換', state: 'blocked', disabled: true, why: DEVICE_BLOCK_REASON.single }])
 })
-
-test('設備按鈕切不過去的原因：服務不能切換、隱藏／移除、沒存這個帳號、登入不完整、Grok 只有一個帳號、對方不在線', () => {
-  const d = (key, self, vendors, over = {}) => ({ key, self, vendors, ...over })
-  const cl = (accounts, over = {}) => ({ key: 'claude', accounts, ...over })
-  const R = DEVICE_BLOCK_REASON
-  assert.equal(deviceBlockReason([], 'codex', 'a@b.c', 'W'), R.vendor)
-  assert.equal(deviceBlockReason([], 'claude', 'a@b.c', 'W'), R.unavailable, '找不到那台')
-  assert.equal(deviceBlockReason([d('W', false, [], { removed: true })], 'claude', 'a@b.c', 'W'), R.removed)
-  assert.equal(deviceBlockReason([d('W', false, [], { hidden: true })], 'claude', 'a@b.c', 'W'), R.hidden)
-  assert.equal(deviceBlockReason([d('W', false, [cl([{ email: 'x@b.c' }])])], 'claude', 'a@b.c', 'W'), R.missing)
-  assert.equal(deviceBlockReason([d('W', false, [cl([{ email: 'A@b.c', incomplete: true }], { switchable: true })])], 'claude', 'a@b.c', 'W'), R.incomplete, '比對帳號不分大小寫')
-  assert.equal(deviceBlockReason([d('H', true, [{ key: 'grok', accounts: [{ email: 'a@b.c' }] }])], 'grok', 'a@b.c', 'H'), R.single)
-  assert.equal(deviceBlockReason([d('W', false, [cl([{ email: 'a@b.c' }], { switchable: false, switchHint: '不在線' })])], 'claude', 'a@b.c', 'W'), R.offline)
-  assert.equal(deviceBlockReason([d('W', false, [cl([{ email: 'a@b.c' }], { switchable: false })])], 'claude', 'a@b.c', 'W'), R.unavailable)
-})
+const pick = ({ text, state, disabled, why }) => ({ text, state, disabled, why })
 
 test('帳號頁：後台讀不到列表就寫提示，不是整頁空白；設備頁沒有「我的帳號」', async () => {
   const none = await render('accounts', state([], null))

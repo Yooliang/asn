@@ -5,7 +5,7 @@
 import { agoText } from './cloud-invite.mjs'
 import { CLOSE_NOTE, incompleteRow, rowQuota } from './device-acct-dialog.mjs'
 import { loginIncomplete } from './claude-accounts.mjs'
-import { nodeLabelOf, rosterQuotaFor, rosterView } from './account-roster.mjs'
+import { DEVICE_BLOCK_REASON, nodeLabelOf, rosterQuotaFor, rosterView } from './account-roster.mjs'
 import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
 import { QUOTA_NOTE } from './account-quota.mjs'
 import { buildDeviceTree } from './device-tree.mjs'
@@ -138,9 +138,9 @@ export const acctTabOf = v => (v === 'accounts' ? 'accounts' : 'devices')
 
 /** 帳號分頁「切換到某台」不能按時，按鈕左邊的說明（按鈕已寫「切換到哪台」，這裡不再說「這台」：在手機上看會以為指手機，#930） */
 export const ACCT_SWITCH_REASON = Object.freeze({
-  incomplete: '登入不完整',
-  offline: '那台的 ASN 沒開著',
-  unavailable: '目前不能切換',
+  incomplete: DEVICE_BLOCK_REASON.incomplete,
+  offline: DEVICE_BLOCK_REASON.offline,
+  unavailable: DEVICE_BLOCK_REASON.unknown,
 })
 
 /**

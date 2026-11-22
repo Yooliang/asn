@@ -327,13 +327,14 @@ test('「我的帳號」卡片的資料：時間放帳號後面（只寫時間�
   for (const q of [fresh, old, two, codex]) assert.doesNotMatch(q.ageLabel, /read_node|seen_node|node|uuid|undefined/i)
 })
 
-test('「我的帳號」卡片：帳號後面寫（時間）、沒有（時間・哪台）；讀的那台設備按鈕上有藍線，所有按鈕上框一樣高', async () => {
+test('「我的帳號」卡片：帳號後面寫（時間）、沒有（時間・哪台）；讀的那台設備名左邊有藍線', async () => {
   const my = rosterView(roster([
     entry(),
     entry({ account: 'old@x.test', windows: [win('five_hour', 40, 11 * H), win('weekly', 72, 11 * H)], nodes: [{ node: W, current: false, reported_at: iso(NOW - H) }, { node: S, current: false, reported_at: iso(NOW - H) }] }),
     entry({ vendor: 'codex', account: 'c@x.test', windows: [] }),
   ]), { nodeLabel, now: NOW })
-  const html = await render({ devices: [], accounts: ACCT, myAccounts: my })
+  const cl = (self, key) => ({ key, label: labels[key], self, kind: '電腦', hidden: false, removed: false, vendors: [{ key: 'claude', accounts: [{ email: 'a@x.test', current: false }, { email: 'old@x.test', current: false }], switchable: !self, switchHint: '' }] })
+  const html = await render({ devices: [cl(false, W), cl(true, S)], accounts: ACCT, myAccounts: my })
   assert.ok(/<span class="dv-mail">a@x\.test<\/span><span class="dv-age">（3 小時前）<\/span>/.test(html), '時間在帳號後面')
   assert.ok(html.includes('（11 小時前）'), '#2111 舊資料只寫時間')
   assert.ok(!html.includes('較舊') && !html.includes('開新視窗就會更新'))
@@ -341,19 +342,17 @@ test('「我的帳號」卡片：帳號後面寫（時間）、沒有（時間�
   assert.ok(!/（\d+ (小時|分鐘|天)前・/.test(html) && !html.includes('資料較舊'), '舊的「（時間・哪台）」與「資料較舊」標籤都不見了')
   // 讀的那台（W）的按鈕外框有 read；另一台（S，old@ 的卡片上）沒有
   const oldCard = html.slice(html.indexOf('old@x.test'), html.indexOf('c@x.test'))
-  assert.match(oldCard, /<span class="dv-devb read">/)
-  assert.match(oldCard, /<span class="dv-devb">/, '沒讀的那台沒有線')
+  assert.match(oldCard, /<span class="dv-devrow read">/)
+  assert.match(oldCard, /<span class="dv-devrow">/, '沒讀的那台沒有線')
   // 按鈕本身的 class 不變（其他頁的測試與樣式靠它）
   assert.ok(!oldCard.includes('dv-devbtn read'))
 })
 
-test('設備按鈕的藍線：4px、用主題色、深色模式有對應；沒線的是透明上框（高度一致）；手機版是另一份樣板，不動', () => {
+test('設備列的藍線：設備名左邊 3px、用主題色；手機版是另一份樣板，不動', () => {
   const css = read('ui/style.css')
-  assert.match(css, /\.dv-devs \.dv-devb \.dv-devbtn,\.dv-devs \.dv-devb \.dv-devbtn:hover\{border-top:4px solid transparent\}/)
-  assert.match(css, /\.dv-devs \.dv-devb\.read \.dv-devbtn,\.dv-devs \.dv-devb\.read \.dv-devbtn:hover\{border-top-color:var\(--accent\)\}/)
-  assert.match(css, /prefers-color-scheme:dark\)\{[^}]*\}[^@]*\.dv-devs \.dv-devb\.read \.dv-devbtn[^}]*var\(--msg-st-read\)/s)
+  assert.match(css, /\.dv-devrow\.read \.dv-devname\{border-left:3px solid var\(--accent\)/)
   const panel = read('ui/lib/settings-panel.mjs')
-  assert.ok(panel.includes(`:class="['dv-devb', { read: (a.quota.readNodes || []).includes(b.node) }]"`))
+  assert.ok(panel.includes(`:class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]"`))
   assert.ok(!panel.includes('<span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>\n                    </span>\n                    <!-- 設備按鈕'), '「我的帳號」卡片的額度行後面不再接 meta')
   assert.ok(read('ui/m.html').includes('{{ a.quota.meta }}'), '手機版的樣板與樣式是分開的，沒有跟著改')
 })
