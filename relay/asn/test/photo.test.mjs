@@ -344,7 +344,8 @@ test('看大圖記住的圖：登入、登出、Rust 通知快取清空時都丟
   assert.match(t, /listen\('attach-cache-cleared', \(\) => shownPhotos\.clear\(\)\)/)
   assert.match(read('ui/lib/chatpane.mjs'), /const recentShown = shownPhotos/)
   assert.match(read('ui/lib/chatpane.mjs'), /photoApi\.fetch\(p\.id, expiryMs\(p\)\)/)
-  assert.match(read('ui/m.js'), /relay_attachment_fetch', \{ id, expiresAt \}/)
+  assert.match(read('ui/lib/tauri.mjs'), /call\('relay_attachment_fetch', \{ id, expiresAt \}\)/)   // 指令名在出口（#2106 ⑩）
+  assert.match(read('ui/m.js'), /mobilePhotoApi\.fetch\(id, expiresAt\)/)
   // Rust：登入、登出都清附件快取；看圖與另存都先對帳號
   const acct = read('src-tauri/src/account.rs')
   for (const f of ['pub async fn auth_login', 'pub async fn auth_logout']) {

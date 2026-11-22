@@ -102,7 +102,8 @@ test('接線：電腦版右鍵與手機「⋯」只用 manageItems；已封存�
   assert.match(m, /op === 'archive' \|\| op === 'unarchive'\) \{ history\.back\(\); void setArchived\(opsFriend\.value, op === 'archive'\)/)
   assert.match(mhtml, /v-if="g\.kind === 'archived'" :aria-label="'取消封存 ' \+ c\.nick" @click="setArchived\(c, false\)"/, '手機已封存群組每列有取消封存')
   assert.match(read('ui/lib/tauri.mjs'), /partnerArchive: body => invoke\('relay_partner_archive', \{ body \}\)/)
-  assert.match(m, /partnerArchive: body => invoke\('android_partner_archive', \{ body \}\)/)
+  assert.match(read('ui/lib/tauri.mjs'), /partnerArchive: body => call\('android_partner_archive', \{ body \}\)/)   // 指令名在出口（#2106 ⑩）
+  assert.match(m, /const opsTransport = mobileOpsApi/)
   for (const f of [lhtml, mhtml, read('ui/lib/archive.mjs')]) assert.doesNotMatch(f, /archive[^>]*\{\{\s*c\.(node|partnerId)/, '不顯示節點與夥伴 ID')
 })
 

@@ -192,7 +192,9 @@ test('接線（靜態）：三個宿主都不再 slice(-200)、都把 loadOlder 
   const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8')
   for (const f of ['m.js', 'list.js']) assert.doesNotMatch(read(f), /logOf\(id\)\.slice\(-200\)/, f)
   for (const f of ['m.html', 'list.html', 'chat.html']) assert.match(read(f), /:load-older="loadOlder"/, f)
-  for (const f of ['m.js', 'lib/tauri.mjs']) assert.match(read(f), /relay_chat_history', \{ node, agent: agent \|\| null, partnerId: partnerId \|\| null, before: before \|\| null, limit: limit \|\| null \}/, f)
+  const shape = /relay_chat_history', \{ node, agent: agent \|\| null, partnerId: partnerId \|\| null, before: before \|\| null, limit: limit \|\| null \}/g
+  assert.equal((read('lib/tauri.mjs').match(shape) ?? []).length, 2, '出口裡電腦與手機各一份')   // 手機的在 mobileRelayApi（#2106 ⑩）
+  assert.match(read('m.js'), /const transport = mobileRelayApi/)
   const pane = read('lib/chatpane.mjs')
   assert.match(pane, /@scroll\.passive="onScroll"/)
   assert.match(pane, /keepScroll\(keep\.top, keep\.h, el\.scrollHeight\)/)

@@ -20,7 +20,7 @@ export const PENDING = {
   'lib/claude-accounts.mjs': 24,
   'lib/quota-readers.mjs': 6,
   'list.js': 2,
-  'm.js': 49,
+  'm.js': 25,
 }
 
 test('除 tauri.mjs 外，不准直接呼叫 __TAURI__.core.invoke', () => {
@@ -209,4 +209,47 @@ test('list.js 第三批：已搬的指令不再直接 invoke、走具名出口�
   assert.deepEqual([...s.matchAll(/(?<![\w.$])invoke\('([a-z_]+)'/g)].map(x => x[1]), ['ai_cli_login', 'ai_cli_login'])
   const ex = src(path.join(UI, 'lib/tauri.mjs'))
   for (const c of moved) assert.ok(ex.includes(`'${c}'`), `${c} 不在 tauri.mjs 出口`)
+})
+
+// ---- ⑩：m.js 第一批（收寄信、管理夥伴、照片、三種請求確認）的出口：指令名與參數形狀與以前直接 invoke 時完全相同 ----
+test('手機出口：指令名與參數形狀不變', async () => {
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return cmd === 'relay_sent_status' ? { status: [1] } : null })
+  const r = m.makeMobileRelayApi(m.invoke)
+  assert.deepEqual(await r.sentStatus(['a']), [1])
+  await r.list(); await r.inbox(); await r.ack(['a']); await r.send({ p: 1 }); await r.history('N', 'ag', 'pid', 5, 20); await r.history('N')
+  await r.readSync({ b: 1 }); await r.avatar('N'); await r.partnerAvatar('P'); await r.setAvatar(null); await r.sendAttachment({ f: 1 })
+  const o = m.makeMobileOpsApi(m.invoke); await o.partnerOp({ b: 1 }); await o.partnerOps(['i']); await o.partnerArchive({ b: 2 })
+  const p = m.makeMobilePhotoApi(m.invoke); await p.fetch('id1'); await p.fetch('id2', 99); await p.save('id3', 'n.png')
+  const a = m.makeMobileAskApi(m.invoke)
+  await a.secretPending(); await a.secretReply('s1', 'pw'); await a.secretReply('s2', null)
+  await a.permReqList(); await a.permReqDecide({ id: 'q1', choiceN: 2, hash: 'h', extra: 'x' })
+  await a.termReqList(); await a.termReqDecide({ id: 't1', decision: 'allow', choiceN: 1, hash: 'h2', extra: 'x' })
+  assert.deepEqual(calls, [
+    ['relay_sent_status', { ids: ['a'] }],
+    ['relay_list', undefined], ['relay_inbox', undefined], ['relay_ack', { ids: ['a'] }], ['relay_send', { payload: { p: 1 } }],
+    ['relay_chat_history', { node: 'N', agent: 'ag', partnerId: 'pid', before: 5, limit: 20 }],
+    ['relay_chat_history', { node: 'N', agent: null, partnerId: null, before: null, limit: null }],
+    ['relay_read_sync', { body: { b: 1 } }], ['relay_avatar', { node: 'N' }], ['relay_partner_avatar', { partner: 'P' }], ['relay_set_avatar', { avatar: null }],
+    ['relay_send_attachment', { payload: { f: 1 } }],
+    ['android_partner_op', { body: { b: 1 } }], ['android_partner_ops', { ids: ['i'] }], ['android_partner_archive', { body: { b: 2 } }],
+    ['relay_attachment_fetch', { id: 'id1', expiresAt: null }], ['relay_attachment_fetch', { id: 'id2', expiresAt: 99 }], ['relay_attachment_save', { id: 'id3', name: 'n.png' }],
+    ['android_secret_pending', undefined], ['android_secret_reply', { id: 's1', secret: 'pw' }], ['android_secret_reply', { id: 's2', secret: null }],
+    ['android_perm_req_list', undefined], ['android_perm_req_decide', { id: 'q1', choiceN: 2, hash: 'h' }],
+    ['android_term_req_list', undefined], ['android_term_req_decide', { id: 't1', decision: 'allow', choiceN: 1, hash: 'h2' }],
+  ])
+})
+
+test('m.js 第一批：已搬的指令不再直接 invoke、走具名出口', () => {
+  const s = src(path.join(UI, 'm.js'))
+  const moved = ['relay_list', 'relay_inbox', 'relay_ack', 'relay_send', 'relay_chat_history', 'relay_sent_status', 'relay_read_sync', 'relay_avatar', 'relay_partner_avatar',
+    'relay_set_avatar', 'relay_send_attachment', 'android_partner_op', 'android_partner_ops', 'android_partner_archive', 'relay_attachment_fetch', 'relay_attachment_save',
+    'android_secret_pending', 'android_secret_reply', 'android_perm_req_list', 'android_perm_req_decide', 'android_term_req_list', 'android_term_req_decide']
+  for (const c of moved) assert.ok(!s.includes(`'${c}'`), `${c} 還在 m.js 直接呼叫`)
+  for (const api of ['const transport = mobileRelayApi', 'const opsTransport = mobileOpsApi', 'mobilePhotoApi.fetch(id, expiresAt)', 'mobilePhotoApi.save(id, name)',
+    'mobileAskApi.secretPending()', 'mobileAskApi.secretReply(cur.id, value)', 'mobileAskApi.permReqDecide(args)', 'mobileAskApi.termReqDecide(args)']) assert.ok(s.includes(api), api)
+  assert.equal((s.match(/mobileAskApi\.permReqList\(\)/g) ?? []).length, 3)
+  assert.equal((s.match(/mobileAskApi\.termReqList\(\)/g) ?? []).length, 1)
+  // 手機沒有 ui.log：出口的失敗原文只留在 console.warn；這幾處「下一輪再查」的靜默 catch 要有註解交代
+  assert.equal((s.match(/出口已留警告記錄，下一輪再查/g) ?? []).length, 5)
 })
