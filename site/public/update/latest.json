@@ -1,15 +1,11 @@
 {
-  "version": "0.2.58",
-  "notes": "- 改善：啟動設定頁分成「已安裝的工具」「外掛與互通」「安全限制」「進階」四區，說明文字只留能動手的話。（#1548、#2084）",
-  "pub_date": "2026-11-22T01:24:21.648Z",
+  "version": "0.2.59",
+  "notes": "- 改善：使用中的 Claude 帳號訂閱失效時，ASN 會偵測並寫進記錄，方便查原因；asn-cli 也多了查帳號回應欄位結構的選項。（#1646、#2080、#2085）",
+  "pub_date": "2026-11-22T02:59:14.013Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBNLzBpUWprNEZBRUJ6dm5CWjNSbGovQWlYQ0liK2h3ZmJjTkEyZXJVNGFKLzlvcEJGMU1jREJMQXAzTjRpaXFjN0RYL0lZSEU1N3hNaWlONThqWlEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzEwNjYxCWZpbGU6QVNOXzAuMi41OF94NjQtc2V0dXAuZXhlCm9nZEc3MmRyYzlhZWZLOGVuTkhUTlJOdDI0eEFOQVV3b3JiTEEyVk1Bc0pyQk9CWVBudEw5OFZkOElsTU1vNEV1OW5UdVNKbUg1Mi9oamZGVW91Z0FBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.58_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi8zUXRvbXJuOXRSRGJGRS93eUdQUm0vVWJrWUswdlhvRWJ2ZytaYjUzcnliNUhZa05oUG9yRHM4MXhHS21ieHdWLzFFTStVellIekVzL1N4dXM0T3dVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzEyNTUxCWZpbGU6QVNOXzAuMi41OF9hbWQ2NC5BcHBJbWFnZQpIQ0JCMVRiSTVHTTRNOEJMWXA0NzVXcHlWaHVaaUhHa3NZODlaQXFvYjk2Sk1qRzVKU1h4QklNKzRtNytmbldwMWc5NDM4a3Q3UlYxcEFjN0EveDhEUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.58_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBNWkZackpvZWhHYmV5VUxRVUZad04rRVFVTlRPQlA0eXhCaTlvYzQ0TlpZcVFhS0wwM1lxc3M4dEV4YThzS3ZkOUMvemFDU0htM0dKVFlmVUVxUkE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzE2MzUzCWZpbGU6QVNOXzAuMi41OV94NjQtc2V0dXAuZXhlCllIYlcwWXdmU2cycTJ0SHI4clV5dFpyaTBEMGdXQWU3aUV4eThRMXVVTDRYalFKMHZ3V3I0NlFRUytjejFwa1Z5Y1VGaDBMWnVnL1FRQUdtcDk3NERBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.59_x64-setup.exe"
     }
   }
 }
