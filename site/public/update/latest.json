@@ -1,15 +1,11 @@
 {
-  "version": "0.2.64",
-  "notes": "- 改善：帳號頁拿掉看不懂的說明；舊的額度只寫時間，額度條改成淡色。（#2111、#2112）\n- 改善：工具狀態、資料夾、外掛的變動都會寫進記錄，記錄檔改成保留舊檔。（#2104、#2108、#2109）\n- 新功能：先內建「進行安裝／進行更新」，入口暫不開放。（#1548、#2099）",
-  "pub_date": "2026-11-22T11:07:10.207Z",
+  "version": "0.2.66",
+  "notes": "- 改善：帳號頁每台設備一列、按鈕統一，不能切換時會說明原因。（#2111、#2113、#2116）",
+  "pub_date": "2026-11-22T13:11:08.403Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRIV1k1OG5xQzk3Ym1Tb3h3YlRCT1hMWmRDM21MK0oya2gySmFWbGEwZGduYWVIOG1qbkZuTXJmRW42K0EvOFlkWTdsVVlKbDJxUHJ6K2xBbTY4QWcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzQ1NjI5CWZpbGU6QVNOXzAuMi42NF94NjQtc2V0dXAuZXhlCkVZckpWcytoakRjUzcyT1VKUU4veGVTVTE4ayswNmt2OXY1bmFnc2hSWm1kNzlxb2NaeWtVdy9HbUlRTHdLWUJQdTROM0dNbE9ZaGFscmk3cE41dkFnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.64_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZCcXBoeHI4c2JnQTFWN0lCMjRLY3E5WnZHd1ExM3RjS3ErWnJsK2NUbFNoU25qMEd4K3krcTdCK1BybWxpaDFINjBjbE5weURDenNBTjZXcEZwcXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzQ2MjQyCWZpbGU6QVNOXzAuMi42NF9hbWQ2NC5BcHBJbWFnZQp0QkpKYmxkbVIwaUU4TWFaUkUrSjg0VjZ4SXFwM3VodXV6NGNXU2dvbWJkbkZzMTdVTndmN2QrcGozVkgxS1VnRmV3ZzhmN2czbnlnM0g4aEJtUWxDUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.64_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNJZXFLWVpNUjFEeGpweWRHS243djllNlVTcllERzM5SlNhRW5uUnJaTDkrMEdnY3VUbXZWZkoxZjdZOTlaQThpQ0hIYnFqSmNxbGl4VmtPZDJNeEFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzUzMDY4CWZpbGU6QVNOXzAuMi42Nl94NjQtc2V0dXAuZXhlCnV6MzRIWTNRWnduNE5FcXhyYWpEaFVIMVRqUTJOb0Z1bXhYZlZsbUszb3BEdC84UFdsWWFKRllOVHlxYUVmcm8rVGplV3hLVzZ1d1E1cWVva1NNL0NnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.66_x64-setup.exe"
     }
   }
 }
