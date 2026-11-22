@@ -985,6 +985,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-my{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}
 .dv-my-h{margin:0;font-size:13px}
 .dv-share{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;margin-left:auto}
+.dv-sharemsg{flex:1 1 100%;font-size:var(--fs-2);overflow-wrap:anywhere}
 /* 帳號卡片的設備列（#2111 ②）：一台一列，左邊設備名（原因在下方一行），右邊的鈕固定 92×28、同一欄靠右。
    使用中＝深灰底白字；切換中＝淡色；不能切換＝虛線淡色。黃色只留給「重新登入」，這裡不用 */
 .dv-devs{flex:1 1 100%;display:flex;flex-direction:column;gap:6px;margin-top:4px;min-width:0}

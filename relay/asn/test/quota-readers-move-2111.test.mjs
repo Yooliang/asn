@@ -104,3 +104,35 @@ test('#2111 ④ 讀額度的訊息只在「這台讀額度」卡片顯示，帳�
   assert.ok(text(devPage).includes('沒有成功，請稍後再試。'), '新卡片顯示')
   assert.equal(devPage.split('沒有成功，請稍後再試。').length - 1, 1, '只顯示一次')
 })
+
+const myClaude = { title: '帳號', empty: '', vendors: [{ key: 'claude', label: 'Claude', accounts: [{ account: 'a@x.test', plan: 'pro', shared: false, usedOn: [], quota: { text: '', bars: [], stale: false, exhausted: false } }] }] }
+
+test('#2111 ④ 查詢代碼失敗：白話訊息在帳號卡上（原位），「這台讀額度」卡不出現；讀額度開關失敗只在新卡片', async () => {
+  const shareFail = { shareMsg: { key: 'claude\na@x.test', text: QUOTA_TEXT.failShare } }
+  const acct = await render('accounts', st(readers(shareFail), myClaude))
+  assert.ok(text(acct).includes(QUOTA_TEXT.failShare), '帳號卡上看得到查詢代碼的失敗')
+  const dev1 = await render('devices', st(readers(shareFail)), { dev: 'H' })
+  assert.ok(!text(dev1).includes(QUOTA_TEXT.failShare), '「這台讀額度」卡不出現查詢代碼的訊息')
+  const other = await render('accounts', st(readers({ shareMsg: { key: 'claude\nb@x.test', text: QUOTA_TEXT.failShare } }), myClaude))
+  assert.ok(!text(other).includes(QUOTA_TEXT.failShare), '訊息只在被按的那個帳號卡上')
+  const setFail = { msg: QUOTA_TEXT.failGeneric }
+  assert.ok(!text(await render('accounts', st(readers(setFail), myClaude))).includes(QUOTA_TEXT.failGeneric), '讀額度訊息不在帳號頁')
+  assert.ok(text(await render('devices', st(readers(setFail)), { dev: 'H' })).includes(QUOTA_TEXT.failGeneric), '讀額度訊息在新卡片')
+})
+
+test('#2111 ④ 查詢代碼與讀額度設定的訊息是兩個欄位：分享失敗／撤銷成功寫 shareMsg，開關失敗寫 msg', async () => {
+  const logs = []
+  const mk = answers => createQuotaReaders({ invoke: async c => { const a = answers[c]; if (a instanceof Error) throw a; return a ?? {} }, log: (...x) => logs.push(x) })
+  const bad = mk({ quota_share_create: new Error('HTTP 500'), quota_readers_set: new Error('boom') })
+  await bad.share({ vendor: 'claude', account: 'a@x.test' })
+  assert.deepEqual(bad.state.shareMsg, { key: 'claude\na@x.test', text: QUOTA_TEXT.failShare })
+  assert.equal(bad.state.msg, '', '分享失敗不寫到讀額度的欄位')
+  await bad.setSource('grok', true)
+  assert.equal(bad.state.msg, QUOTA_TEXT.failGeneric)
+  assert.equal(bad.state.shareMsg.text, QUOTA_TEXT.failShare, '開關動作不去動分享的訊息')
+  const ok = mk({ quota_share_revoke: { ok: true } })
+  await ok.unshare({ vendor: 'claude', account: 'a@x.test' }); await ok.unshare({ vendor: 'claude', account: 'a@x.test' })
+  assert.deepEqual(ok.state.shareMsg, { key: 'claude\na@x.test', text: QUOTA_TEXT.revoked })
+  assert.equal(ok.state.msg, '')
+  assert.ok(logs.length >= 2, '原文進 log')
+})

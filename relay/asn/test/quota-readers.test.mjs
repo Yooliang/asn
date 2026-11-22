@@ -116,12 +116,12 @@ test('重新產生、撤銷都要按兩次；撤銷收掉畫面上的代碼', as
 test('代碼失敗：畫面是白話，細節進主控台；沒回代碼不算成功', async () => {
   const net = make({ quota_share_create: new Error('quota_share_create HTTP 404 not_found') })
   assert.equal(await net.ui.share({ vendor: 'claude', account: 'a@x.test' }), false)
-  assert.equal(net.ui.state.msg, QUOTA_TEXT.failShare)
-  assert.ok(!net.ui.state.msg.includes('HTTP'))
+  assert.equal(net.ui.state.shareMsg.text, QUOTA_TEXT.failShare)
+  assert.ok(!net.ui.state.shareMsg.text.includes('HTTP'))
   assert.equal(net.logs.length, 1)
   const login = make({ quota_share_create: new Error('尚未登入，無法變更查詢代碼') })
   await login.ui.share({ vendor: 'claude', account: 'a@x.test' })
-  assert.equal(login.ui.state.msg, QUOTA_TEXT.failLogin)
+  assert.equal(login.ui.state.shareMsg.text, QUOTA_TEXT.failLogin)
   const empty = make({ quota_share_create: { ok: true } })
   assert.equal(await empty.ui.share({ vendor: 'claude', account: 'a@x.test' }), false)
   assert.equal(empty.ui.state.code, null)
@@ -151,7 +151,7 @@ test('設定頁：指令都在清單；key 欄位是密碼欄且只綁元件內�
     assert.ok(list.includes(`case '${op}':`), `${op} 樞紐`)
   }
   assert.match(SettingsPanel.template, /type="password"[^>]*autocomplete="off"/)
-  assert.doesNotMatch(SettingsPanel.template.replaceAll('st.quotaReaders.code.key', ''), /st\.quotaReaders\.[a-zA-Z.]*key\b/i, '快照裡沒有 MiniMax key')
+  assert.doesNotMatch(SettingsPanel.template.replaceAll('st.quotaReaders.code.key', '').replaceAll('st.quotaReaders.shareMsg.key', ''), /st\.quotaReaders\.[a-zA-Z.]*key\b/i, '快照裡沒有 MiniMax key')
 })
 
 test('電腦版註冊了四個設定指令與兩個代碼指令', () => {

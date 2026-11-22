@@ -300,6 +300,7 @@ export const SettingsPanel = {
                       <small class="acct-warn" v-if="st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareAgainWarn }}</small>
                       <small class="acct-warn" v-if="st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareRevokeWarn }}</small>
                     </span>
+                    <small class="dv-sharemsg" role="status" v-if="st.quotaReaders && st.quotaReaders.shareMsg && st.quotaReaders.shareMsg.key === shareKey(v.key, a.account)">{{ st.quotaReaders.shareMsg.text }}</small>
                     <div class="dv-code" role="status" v-if="st.quotaReaders && st.quotaReaders.code && st.quotaReaders.code.key === shareKey(v.key, a.account)">
                       <b>{{ QUOTA_TEXT.codeTitle }}</b>
                       <code>{{ st.quotaReaders.code.value }}</code>

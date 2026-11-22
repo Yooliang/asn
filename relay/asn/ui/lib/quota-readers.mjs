@@ -54,6 +54,7 @@ export const QUOTA_TEXT = {
   failFull: '最多 2 個帳號，請先移除一個。',
   failShare: '現在無法變更查詢代碼，請稍後再試。',
   failLogin: '要先登入才能變更查詢代碼。',
+  revoked: '已撤銷，這組代碼不能再查了。',
 }
 
 const EMPTY = { grok: false, agy: false, minimax: [], minimaxSupported: false, status: { grok: '', agy: '' }, extra: false, extraRefresh: false, extraDirs: [] }
@@ -105,9 +106,13 @@ export function vendorSections(my, readers) {
 }
 
 export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged = () => {}, clipboard = t => globalThis.navigator.clipboard.writeText(t), log = (...a) => console.info(...a) }) {
-  const s = reactive({ ...EMPTY, busy: false, msg: '', code: null, copied: false, confirm: '' })
+  // msg＝讀額度設定（開關、MiniMax、自動換新）的訊息，只在「設備 → 這台 → 這台讀額度」顯示；
+  // shareMsg＝查詢代碼（產生、撤銷、複製）的訊息 { key, text }，顯示在帳號頁那張帳號卡上。兩邊各寫各的，不共用一個欄位
+  const s = reactive({ ...EMPTY, busy: false, msg: '', shareMsg: null, code: null, copied: false, confirm: '' })
   const apply = v => { Object.assign(s, normalizeReaders(v)) }
   const fail = (text, e) => { s.msg = text; log('[額度來源]', typeof e === 'string' ? e : e?.message ?? String(e)) }
+  // 查詢代碼的失敗：白話寫在那張帳號卡上（shareMsg），原文進 log
+  const shareFailed = (key, text, e) => { s.shareMsg = { key, text }; log('[額度來源]', typeof e === 'string' ? e : e?.message ?? String(e)) }
   const run = async (failText, work) => {
     if (s.busy) return false
     s.busy = true; s.msg = ''
@@ -125,7 +130,7 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     return ok
   }
   // 按兩次才生效的動作（移除、重新產生、撤銷）：第一次只把按鈕變成確認
-  const confirmed = id => { if (s.confirm === id) { s.confirm = ''; return true } s.confirm = id; s.msg = ''; return false }
+  const confirmed = id => { if (s.confirm === id) { s.confirm = ''; return true } s.confirm = id; s.msg = ''; s.shareMsg = null; return false }
   const removeMinimax = async email => {
     if (!confirmed(`minimax\n${email}`)) return false
     const ok = await run(QUOTA_TEXT.failGeneric, async () => apply(await invoke('quota_minimax_remove', { email })))
@@ -143,29 +148,32 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     if (shared && !confirmed(`again\n${shareKey(vendor, account)}`)) return false
     s.code = null; s.copied = false
     if (s.busy) return false
-    s.busy = true; s.msg = ''
+    const key = shareKey(vendor, account)
+    s.busy = true; s.msg = ''; s.shareMsg = null
     try {
       const r = await invoke('quota_share_create', { vendor, account })
       if (typeof r?.code !== 'string' || !r.code) throw new Error('沒有回傳代碼')
       s.code = { key: shareKey(vendor, account), value: r.code }
       onShareChanged()
       return true
-    } catch (e) { fail(shareFail(e), e); return false } finally { s.busy = false }
+    } catch (e) { shareFailed(key, shareFail(e), e); return false } finally { s.busy = false }
   }
   const unshare = async ({ vendor, account } = {}) => {
     if (!confirmed(`revoke\n${shareKey(vendor, account)}`)) return false
     if (s.busy) return false
-    s.busy = true; s.msg = ''
+    const key = shareKey(vendor, account)
+    s.busy = true; s.msg = ''; s.shareMsg = null
     try {
       await invoke('quota_share_revoke', { vendor, account })
-      if (s.code?.key === shareKey(vendor, account)) s.code = null
+      if (s.code?.key === key) s.code = null
+      s.shareMsg = { key, text: QUOTA_TEXT.revoked }
       onShareChanged()
       return true
-    } catch (e) { fail(shareFail(e), e); return false } finally { s.busy = false }
+    } catch (e) { shareFailed(key, shareFail(e), e); return false } finally { s.busy = false }
   }
   const copyCode = async () => {
     if (!s.code) return
-    try { await clipboard(s.code.value); s.copied = true } catch (e) { fail(QUOTA_TEXT.copyFail, e) }
+    try { await clipboard(s.code.value); s.copied = true } catch (e) { shareFailed(s.code.key, QUOTA_TEXT.copyFail, e) }
   }
   const closeCode = () => { s.code = null; s.copied = false }
   return { state: s, load, setSource, setRefresh, addMinimax, removeMinimax, share, unshare, copyCode, closeCode }
@@ -176,6 +184,6 @@ export function quotaReadersView(s) {
   return {
     grok: s.grok, agy: s.agy, minimax: s.minimax, minimaxSupported: s.minimaxSupported, status: s.status,
     extra: s.extra, extraRefresh: s.extraRefresh, extraDirs: s.extraDirs,
-    busy: s.busy, msg: s.msg, code: s.code, copied: s.copied, confirm: s.confirm,
+    busy: s.busy, msg: s.msg, shareMsg: s.shareMsg, code: s.code, copied: s.copied, confirm: s.confirm,
   }
 }
