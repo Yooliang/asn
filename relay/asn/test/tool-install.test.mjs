@@ -113,7 +113,7 @@ test('#1548 ⑤ 接線：命令名、動作登記、不動 AGENT_INSTALL_UI、�
   assert.match(rd('ui/lib/device-state.mjs'), /export const AGENT_INSTALL_UI = false/)
   const css = rd('ui/style.css')
   assert.match(css, /\.launch-tools \.launch-act\{flex:none;margin-left:auto\}/)
-  assert.match(css, /\.launch-install-btns\{display:flex;gap:8px;justify-content:flex-end\}/)
+  assert.doesNotMatch(css, /launch-install-btns/, '確認的兩顆鈕改用共用元件（取消在左、同意在右），舊的排版規則已刪')
   assert.doesNotMatch(rd('ui/lib/tool-install.mjs'), /怎麼安裝|怎麼更新/)
 })
 

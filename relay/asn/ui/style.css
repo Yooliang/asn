@@ -849,7 +849,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .launch-tools .launch-install-note{flex:1 1 100%;display:flex;flex-direction:column;align-items:flex-end;gap:6px;font-size:12.5px;color:var(--muted);text-align:left}
 .launch-tools .launch-install-note>small{align-self:stretch}
 .launch-tools small.launch-install-note{display:block}
-.launch-tools .launch-install-btns{display:flex;gap:8px;justify-content:flex-end}
 .launch-tools small.launch-install-note.ok{color:color-mix(in srgb,var(--online) 70%,#000)}
 .launch-tools small.launch-install-note.bad{color:var(--fg)}
 .launch-set .sec-head .aero-btn{flex:none;margin-left:auto}
