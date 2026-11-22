@@ -47,7 +47,9 @@ export function cleanEmail(v: unknown): string | null {
 
 // 額度窗（#374 帳號列表）：name＝five_hour／weekly／w<分鐘數>；left_pct＝剩餘 0～100 整數；resets_at＝重置時間（可空）；read_at＝那台電腦讀到的時間
 export type QuotaWindow = { name: string; left_pct: number; resets_at: string | null; read_at: string };
-export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini" | "minimax"; email: string; plan: string; current: boolean; extra?: true; login_failed?: true; login_incomplete?: true; usable_at?: string; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
+export type SubState = "active" | "lapsed" | "unknown";
+const SUB_STATES = new Set<string>(["active", "lapsed", "unknown"]);
+export type ReportedAccount = { vendor: "claude" | "codex" | "grok" | "gemini" | "minimax"; email: string; plan: string; current: boolean; extra?: true; login_failed?: true; login_incomplete?: true; sub_state?: SubState; usable_at?: string; five_hour_pct?: number; weekly_pct?: number; reset_at?: string; five_reset_at?: string; week_reset_at?: string; at?: string; windows?: QuotaWindow[] };
 
 // 剩餘額度（#228，全部選填）：five_hour_pct／weekly_pct 是 0～100 的剩餘百分比，reset_at 是重置時間，at 是那台電腦記下數字的時間。
 // five_reset_at／week_reset_at（#374，選填）：兩條各自的重置時間（reset_at 是舊的、兩條共用一個，照收）。
@@ -143,6 +145,8 @@ export function parseReport(b: Json): ReportedAccount[] | null {
     // 登入失效、登入不完整（0.1.113）：不帶就當 false（輸出時不帶欄位）；型別不合整份退回
     if (a.login_failed != null && typeof a.login_failed !== "boolean") return null;
     if (a.login_incomplete != null && typeof a.login_incomplete !== "boolean") return null;
+    // 訂閱狀態（#1646）：三值字串；不帶（或 null）就不輸出，資料庫沿用上次存的；值不合整份退回
+    if (a.sub_state != null && (typeof a.sub_state !== "string" || !SUB_STATES.has(a.sub_state))) return null;
     // 清完一窗都不剩就不帶 windows，讓資料庫退回舊四欄（#524 審查）
     const parsed = Array.isArray(a.windows) ? parseWindows(a.windows) : [];
     const allowed = VENDOR_WINDOWS[a.vendor];
@@ -150,7 +154,7 @@ export function parseReport(b: Json): ReportedAccount[] | null {
     const windows = cleaned.length ? { windows: cleaned } : {};
     const usable = a.vendor === "claude" ? parseUsableAt(a.usable_at) : null;
     // 額外帳號（只有 Claude）：不在這台的帳號庫，不能切換，所以不進舊表，只進帳號列表
-    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.extra === true && a.vendor === "claude" ? { extra: true as const } : {}), ...(a.login_failed === true ? { login_failed: true as const } : {}), ...(a.login_incomplete === true ? { login_incomplete: true as const } : {}), ...(usable ? { usable_at: usable } : {}), ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
+    out.push({ vendor: a.vendor, email, plan, current: a.current === true, ...(a.extra === true && a.vendor === "claude" ? { extra: true as const } : {}), ...(a.login_failed === true ? { login_failed: true as const } : {}), ...(a.login_incomplete === true ? { login_incomplete: true as const } : {}), ...(a.sub_state != null ? { sub_state: a.sub_state as SubState } : {}), ...(usable ? { usable_at: usable } : {}), ...(a.vendor === "claude" ? parseQuota(a) : {}), ...windows });
   }
   return out;
 }

@@ -182,3 +182,37 @@ Deno.test("上次確認可用（#1512 C2）：只收 claude、UTC 到秒的 ISO�
   ], "壞的只丟這一欄、整份照收；別家不帶");
 });
 
+
+Deno.test("parseReport：sub_state 只收 active／lapsed／unknown、不帶或 null 不輸出、其他整份退回（#1646）", () => {
+  const r = parseReport({ accounts: [
+    { vendor: "claude", email: "a@x.test", sub_state: "lapsed" }, { vendor: "claude", email: "b@x.test", sub_state: "active" },
+    { vendor: "claude", email: "c@x.test", sub_state: "unknown" }, { vendor: "claude", email: "d@x.test" }, { vendor: "claude", email: "e@x.test", sub_state: null }] });
+  assertEquals(r, [
+    { vendor: "claude", email: "a@x.test", plan: "", current: false, sub_state: "lapsed" },
+    { vendor: "claude", email: "b@x.test", plan: "", current: false, sub_state: "active" },
+    { vendor: "claude", email: "c@x.test", plan: "", current: false, sub_state: "unknown" },
+    { vendor: "claude", email: "d@x.test", plan: "", current: false },
+    { vendor: "claude", email: "e@x.test", plan: "", current: false },
+  ]);
+  for (const bad of [true, 1, "Lapsed", "expired", "", {}, ["lapsed"]]) {
+    assertEquals(parseReport({ accounts: [{ vendor: "claude", email: "a@x.test", sub_state: bad }] }), null, JSON.stringify(bad));
+  }
+});
+
+Deno.test("acct_report：sub_state 會原樣交給兩支寫入函式（白名單放行）；型別不對不碰資料庫", async () => {
+  const { deps, calls } = fakeDeps(() => ({ ok: true, count: 1 }));
+  const acc = [{ vendor: "claude", email: "a@x.test", plan: "", current: true, sub_state: "lapsed" }];
+  const r = await handleAcctAction(deps, { id: "W" }, "acct_report", { accounts: acc });
+  assertEquals(r.status, 200);
+  assertEquals(calls, [{ fn: "asn_relay_acct_report", args: { p_node: "W", p_accounts: acc } }, { fn: "asn_relay_acct_roster_report", args: { p_node: "W", p_accounts: acc } }]);
+  const bad = fakeDeps();
+  assertEquals((await handleAcctAction(bad.deps, { id: "W" }, "acct_report", { accounts: [{ vendor: "claude", email: "a@x.test", sub_state: "expired" }] })).status, 400);
+  assertEquals(bad.calls, []);
+});
+
+Deno.test("acct_roster：後台回的 sub_state 原樣傳給用戶端", async () => {
+  const data = { now: "2026-11-22T00:00:00Z", accounts: [{ vendor: "claude", account: "a@x.test", nodes: [{ node: "W", sub_state: "lapsed" }] }] };
+  const { deps } = fakeDeps(() => data);
+  const r = await handleAcctAction(deps, { id: "W" }, "acct_roster", {}, "11111111-1111-1111-1111-111111111111");
+  assertEquals(r, { status: 200, body: data });
+});
