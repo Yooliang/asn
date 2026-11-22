@@ -71,7 +71,7 @@ test('#1858 #2110 不列：已永久移除、已隱藏、設備代號在設備�
   ]
   const usedOn = [used('W', '工作機'), used('OLD', '舊代號', true), used('R', '已移除'), used('HID', '已隱藏'), used('N', '沒登入')]
   assert.deepEqual(rows(devices, usedOn).map(r => r.node), ['W'])
-  assert.deepEqual(rows([dev('H', '家用機', [claude([acc('other@example.test')])], { self: true })], [used('H', '家用機', false)]), [], '本機沒登入這個帳號、後台也沒說它在用：不畫')
+  assert.deepEqual(rows([dev('H', '家用機', [claude([acc('other@example.test')])], { self: true })], [used('H', '家用機', true)]), [], '本機有 Claude 帳號庫、庫裡沒這個帳號：就算後台（舊資料）說它在用也不畫（#2110 本機以帳號庫為準）')
   assert.deepEqual(rows([dev('W', '工作機', [claude([])])], [used('W', '工作機')]), [], '有回報、但沒有這個帳號＝沒登入')
 })
 
