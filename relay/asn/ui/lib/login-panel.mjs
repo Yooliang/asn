@@ -5,9 +5,11 @@ import { LOGOUT_CANCEL_LABEL, LOGOUT_DONE_TEXT, LOGOUT_NOTE, LOGOUT_ONLY_LABEL, 
 import { authApi, autostartApi } from './tauri.mjs'
 import { checkName } from './onboard.mjs'
 import { accountDisplayName } from './mobile.mjs'
+import { UI_KIT } from './ui-kit.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './ai-wake-limit.mjs'
 
 export const LoginPanel = {
+  components: { ...UI_KIT },
   setup() {
     const { ref, computed, onMounted } = globalThis.Vue
     const status = ref(null), info = ref(null), busy = ref(false), msg = ref(''), waiting = ref(false)
@@ -53,15 +55,15 @@ export const LoginPanel = {
       <p class="login-state">{{ view.title }}</p>
       <small>{{ view.detail }}</small>
       <div class="av-btns" v-if="!view.signedIn">
-        <button v-for="p in PROVIDERS" :key="p.key" class="aero-btn" type="button" :disabled="busy" @click="login(p.key)">{{ p.label }}</button>
-        <button v-if="waiting" class="aero-btn" type="button" @click="cancel">取消</button>
+        <asn-button v-for="p in PROVIDERS" :key="p.key" :disabled="busy" @click="login(p.key)">{{ p.label }}</asn-button>
+        <asn-button v-if="waiting" @click="cancel">取消</asn-button>
       </div>
       <label class="login-name" v-if="view.signedIn">我的名字
-        <span class="login-name-row"><input class="set-input" type="text" maxlength="40" v-model="nameText" :disabled="nameBusy" placeholder="例如：擁有者" aria-label="帳號名稱" @keydown.enter.prevent="saveName"><button class="aero-btn" type="button" :disabled="nameBusy" @click="saveName">儲存</button></span>
+        <span class="login-name-row"><input class="set-input" type="text" maxlength="40" v-model="nameText" :disabled="nameBusy" placeholder="例如：擁有者" aria-label="帳號名稱" @keydown.enter.prevent="saveName"><asn-button :disabled="nameBusy" @click="saveName">儲存</asn-button></span>
         <small>帳號的名字，所有設備共用。</small>
       </label>
       <label class="login-name" v-if="view.signedIn">{{ AI_WAKE_LIMIT_LABEL }}
-        <span class="login-name-row"><input class="set-input" type="number" min="0" max="200" step="1" v-model="wakeText" :disabled="wakeBusy" aria-label="AI 之間互相叫醒的上限" @keydown.enter.prevent="saveWake"><button class="aero-btn" type="button" :disabled="wakeBusy" @click="saveWake">儲存</button></span>
+        <span class="login-name-row"><input class="set-input" type="number" min="0" max="200" step="1" v-model="wakeText" :disabled="wakeBusy" aria-label="AI 之間互相叫醒的上限" @keydown.enter.prevent="saveWake"><asn-button :disabled="wakeBusy" @click="saveWake">儲存</asn-button></span>
         <small>{{ AI_WAKE_LIMIT_NOTE }}</small>
       </label>
       <small v-if="wakeMsg" role="status">{{ wakeMsg }}</small>
@@ -73,6 +75,7 @@ export const LoginPanel = {
 
 // 登出鈕：獨立放在設定第一頁最下面，與其他項目隔開；只在已登入時出現
 export const LogoutPanel = {
+  components: { ...UI_KIT },
   setup() {
     const { ref, onMounted } = globalThis.Vue
     const signedIn = ref(false), busy = ref(false), msg = ref(''), asking = ref(false), autostartOn = ref(false)
@@ -92,15 +95,15 @@ export const LogoutPanel = {
     return { signedIn, busy, msg, asking, autostartOn, ask, cancel, logout, LOGOUT_NOTE, LOGOUT_ONLY_LABEL, LOGOUT_STOP_LABEL, LOGOUT_STOP_NOTE, LOGOUT_STOP_AUTOSTART_NOTE, LOGOUT_CANCEL_LABEL }
   },
   template: `<div class="logout-set" v-if="signedIn || msg">
-      <div class="av-btns" v-if="signedIn && !asking"><button class="aero-btn logout-btn" type="button" :disabled="busy" @click="ask">登出</button></div>
+      <div class="av-btns" v-if="signedIn && !asking"><asn-button state="danger" :disabled="busy" @click="ask">登出</asn-button></div>
       <div class="logout-ask" v-if="signedIn && asking" role="alertdialog" aria-label="確認登出">
         <small>{{ LOGOUT_NOTE }}</small>
         <small>{{ LOGOUT_STOP_NOTE }}<template v-if="autostartOn"> {{ LOGOUT_STOP_AUTOSTART_NOTE }}</template></small>
-        <div class="av-btns">
-          <button class="aero-btn" type="button" :disabled="busy" @click="logout(false)">{{ LOGOUT_ONLY_LABEL }}</button>
-          <button class="aero-btn" type="button" :disabled="busy" @click="logout(true)">{{ LOGOUT_STOP_LABEL }}</button>
-          <button class="aero-btn" type="button" :disabled="busy" @click="cancel">{{ LOGOUT_CANCEL_LABEL }}</button>
-        </div>
+        <asn-actions>
+          <asn-button :disabled="busy" @click="cancel">{{ LOGOUT_CANCEL_LABEL }}</asn-button>
+          <asn-button state="danger" :disabled="busy" @click="logout(false)">{{ LOGOUT_ONLY_LABEL }}</asn-button>
+          <asn-button state="danger" :disabled="busy" @click="logout(true)">{{ LOGOUT_STOP_LABEL }}</asn-button>
+        </asn-actions>
       </div>
       <small role="status">{{ msg }}</small>
     </div>`,
