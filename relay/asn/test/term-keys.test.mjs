@@ -67,7 +67,8 @@ test('守門：按鍵列只走打字的同一條路（remoteInputApi.send 經 Re
   // 登入網址只用 open_link 開，開之前再比一次網域
   const open = chat.split('const openLogin = u => {')[1].split('\n')[0]
   assert.match(open, /findLoginUrls\(u\?\.url\)\.length/)
-  assert.match(open, /'open_link'/)
+  assert.match(open, /openLink\(u\.url\)/)   // 開連結只走出口的 openLink（#2106）
+  assert.match(fs.readFileSync(path.join(root, 'ui/lib/tauri.mjs'), 'utf8'), /openLink = url => .*invoke\('open_link', \{ url \}\)/)
 })
 
 test('按鍵串成一條：前一顆確認回來才送下一顆，順序不看誰先回（#1561 必修①）', async () => {
