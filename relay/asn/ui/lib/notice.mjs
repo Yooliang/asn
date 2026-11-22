@@ -105,6 +105,7 @@ export const NOTICE_CAT_LABEL = Object.fromEntries(NOTICE_CATS.map(c => [c.key, 
 const TOPIC_CAT = {
   inbox_watch: 'stuck', waiting: 'stuck', mux_down: 'stuck', mux_blind: 'stuck', misroute: 'stuck',
   login: 'login', waiting_login: 'login',
+  subscription: 'login',   // Claude 訂閱失效（#1646）：帳號不能用、要去換帳號或續訂，跟「登入失效」同一類；不是用量問題，不歸額度
   quota: 'quota',
   compact: 'stuck',   // 視窗壓縮 N 次自動交接／請交接（#1852）
   view: 'security', term_view: 'security', device_key: 'security', node_mismatch: 'security',

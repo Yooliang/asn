@@ -19,6 +19,8 @@ export const PLAN_MAX = 30;
 export type AcctDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json; error: unknown }>;
   ring: (topic: string) => Promise<void>;
+  /** 訂閱失效通知信寄出後，拿信件 id 去推手機（選填；由呼叫端決定怎麼推、推播失敗不影響回報，#1646 拆項 H） */
+  onSubLapsed?: (mailId: string) => void;
 };
 export type Reply = { status: number; body: Json };
 
@@ -232,6 +234,15 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
     const r = await call(deps, "asn_relay_acct_report", { p_node: me.id, p_accounts: legacy });
     if (isReply(r)) return r;
     await rosterReport(deps, me.id, accounts);
+    // 訂閱失效通知（#1646 拆項 G／H）：信已由資料庫寄出，這裡敲門鈴、再推手機。舊資料庫函式沒有這兩欄＝什麼都不做；任何失敗只記 log，不影響回報結果
+    try {
+      const topics: unknown[] = Array.isArray(r.data?.bell_topics) ? r.data.bell_topics : [];
+      for (const t of new Set<string>(topics.filter((x: unknown): x is string => typeof x === "string" && x.length > 0))) await deps.ring(t);
+      const ids: unknown[] = Array.isArray(r.data?.mail_ids) ? r.data.mail_ids : [];
+      for (const id of ids) if (typeof id === "string" && UUID_RE.test(id)) deps.onSubLapsed?.(id);
+    } catch (e) {
+      console.warn("sub_lapsed notice follow-up failed", e instanceof Error ? e.message : String(e));
+    }
     return { status: 200, body: { ok: true, count: r.data?.count ?? accounts.length } };
   }
   if (action === "acct_login_alert") {
