@@ -18,7 +18,7 @@ export const rswitchProbeSource = ({ rswitch, mode, mail, label, open = '' }) =>
   }
   const cardOf = () => [...document.querySelectorAll(S.card)].filter(vis).find(c => (c.querySelector(S.mail)?.textContent ?? '').includes(mail));
   let btn = null;
-  for (let i = 0; i < 80 && !btn; i++) { btn = [...(cardOf()?.querySelectorAll(S.btn + '.switch') ?? [])].find(vis) || null; if (!btn) await sleep(100) }
+  for (let i = 0; i < 80 && !btn; i++) { btn = [...(cardOf()?.querySelectorAll(S.btn + (S.btn === '.dv-devbtn' ? ':not(.st-current):not(.st-busy):not(.st-blocked)' : '.switch')) ?? [])].find(vis) || null; if (!btn) await sleep(100) }
   if (!btn) return { ok: false, why: '找不到 ' + mail + ' 那張卡上可按的「切換」鈕' };
   const card = cardOf(), row = btn.closest(S.row), name = (row.querySelector(mobile ? '.m-dv-devn' : '.dv-devn')?.childNodes[0]?.textContent ?? '').trim();
   const hadCur = !!card.querySelector(S.cur);

@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { renderToString as ssrRender } from 'vue/server-renderer'
+// 共用元件的插槽會在輸出裡留下片段標記（<!--[-->、<!--]-->），比對畫面文字前先拿掉
+const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 import { acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
@@ -81,7 +83,9 @@ test('#1829 電腦版詳情頁：名字空白也認得出是哪一台，下面�
   assert.ok(!html.includes('未命名設備') && !html.includes('還沒連線過'), '不能據以行動的句子收掉')
   const acts = html.slice(html.indexOf('要處理這台設備'))
   assert.match(acts, />改名</)
-  assert.match(acts, /<button class="aero-btn danger" type="button">永久移除</)
+  const rm = acts.match(/<button[^>]*class="asn-btn lv-secondary st-danger"[^>]*>永久移除</)
+  assert.ok(rm, '可以移除時有永久移除鈕')
+  assert.doesNotMatch(rm[0], /disabled/, '可以移除時永久移除鈕不能是 disabled')
   assert.ok(html.indexOf('這台是哪一台') < html.indexOf('要處理這台設備'), '辨認區在上、動作區在下')
 })
 
@@ -89,7 +93,7 @@ test('#1829 在線的設備不能移除：按鈕變灰並說明原因（本機�
   const rows = tree()
   const online = rows.map(r => (r.key === 'node-old-pc-X7K2' ? { ...r, online: true } : r))
   const html = await render(online, { dev: 'node-old-pc-X7K2', devView: 'info' })
-  assert.match(html, /<button class="aero-btn danger" type="button" disabled[^>]*>永久移除</)
+  assert.match(html, /<button[^>]*class="asn-btn lv-secondary st-danger"[^>]*disabled[^>]*>永久移除</)
   assert.ok(html.includes('設備在線時不能移除，離線後才能移除'))
   assert.ok(!(await render(rows, { dev: 'node-self-A1B2', devView: 'info' })).includes('永久移除'), '本機不能移除')
 })
@@ -123,7 +127,7 @@ test('#1829 動作區沒有拿掉原有功能；「永久移除」兩邊同一�
   const m = read('../ui/m.html')
   assert.match(m, /<button type="button" class="m-dv-refresh" v-if="acctCanShowBack" @click="acctShowBack">\{\{ DEVICE_TEXT\.showBack \}\}/)
   assert.match(m, /class="m-dv-refresh m-dv-danger" v-if="!acctCur\.self" :disabled="!acctCanRemove" @click="acctAskRemove">\{\{ DEVICE_TEXT\.remove \}\}/)
-  assert.match(read('../ui/lib/settings-panel.mjs'), /<button class="aero-btn danger" type="button" v-if="!askRemove"/)
+  assert.match(read('../ui/lib/settings-panel.mjs'), /<asn-button state="danger" v-if="!askRemove"/)
 })
 
 test('#1829 「顯示回名單」電腦和手機同一個條件（只看已隱藏）：同一組設備資料實際跑兩邊，結果相同', async () => {
@@ -176,13 +180,14 @@ test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那�
   assert.match(await withTitle({}), /<h2 class="panel-h">設定：設備<\/h2>/)
   const detail = await withTitle({ dev: 'node-old-pc-X7K2', devView: 'info' })
   assert.ok(!detail.includes('panel-h') && !detail.includes('設定：設備'))
-  assert.match(detail, /<div class="dv-dev-h"><button class="aero-btn dv-back"/)
+  assert.match(detail, /<div class="dv-dev-h"><button[^>]*dv-back/)
   assert.ok(!read('../ui/list.html').includes('<h2 class="panel-h">') && !read('../ui/panel.html').includes('<h2 class="panel-h">'), '兩個外層都不再自己疊一層標題')
 })
 
 test('#1829 電腦版細部頁的返回鈕只放「‹」（和手機一樣），讀屏與鍵盤用 aria-label="返回"', async () => {
   const html = await render(tree(), { dev: 'node-old-pc-X7K2', devView: 'info' })
-  assert.match(html, /<button class="aero-btn dv-back" type="button" aria-label="返回" title="返回">‹<\/button>/)
+  const back = html.match(/<button[^>]*dv-back[^>]*>‹<\/button>/)?.[0] ?? ''
+  assert.ok(back.includes('aria-label="返回"') && back.includes('title="返回"'), '返回鈕只放「‹」，讀屏用 aria-label')
   assert.ok(!html.includes('‹ 返回') && !html.includes('>返回<'), '畫面上不再寫「返回」兩個字')
 })
 

@@ -31,7 +31,7 @@ test('#1548 清單樣式：名稱與版本分欄（launch-tools 有 css、名稱
   assert.match(css, /\.launch-tools li\{display:flex/)
   assert.match(css, /\.launch-tools \.launch-name\{[^}]*width:\d+px/)
   assert.match(css, /\.launch-set \.upd-row\{[^}]*justify-content:flex-end/)
-  assert.match(css, /\.launch-set \.set-card>\.aero-btn\{[^}]*align-self:flex-end/)
+  assert.match(css, /\.launch-set \.set-card>\.asn-btn\{[^}]*align-self:flex-end/)
 })
 
 test('#1548 說明文字只寫使用者能動手的話：不出現解釋系統的字眼、每小時上限說明是一句', () => {

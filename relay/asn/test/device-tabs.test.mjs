@@ -3,7 +3,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { renderToString as ssrRender } from 'vue/server-renderer'
+// 共用元件的插槽會在輸出裡留下片段標記（<!--[-->、<!--]-->），比對畫面文字前先拿掉
+const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -26,12 +28,12 @@ const labels = html => [...bar(html).matchAll(/<button[^>]*>([^<]*)<\/button>/g)
 
 test('頁首收成一行：返回、名字、標籤（#1829）；沒有「設定：設備」那一層，按鈕在下面', async () => {
   const html = await render({ dev: 'H' })
-  assert.match(html, /class="dv-dev-h"[^>]*><button class="aero-btn dv-back"[^>]*>‹<\/button><h3 class="dv-name">工作機<\/h3>[\s\S]*在線[\s\S]*這台/)
+  assert.match(html, /class="dv-dev-h"[^>]*><button[^>]*dv-back[^>]*>‹<\/button><h3 class="dv-name">工作機<\/h3>[\s\S]*在線[\s\S]*這台/)
   assert.ok(!html.includes('dv-pt'), '不再有第二層標題')
   assert.ok(html.indexOf('class="dv-tabs"') > html.indexOf('class="dv-name"'), '按鈕在名字那行下面')
 })
 
-test('「返回」在頁首那一行（aero-btn）；改名只在動作區，不在上方那排按鈕（#1829）', async () => {
+test('「返回」在頁首那一行（共用按鈕）；改名只在動作區，不在上方那排按鈕（#1829）', async () => {
   const html = await render({ dev: 'H' })
   assert.ok(!bar(html).includes('返回') && !bar(html).includes('改名'))
   assert.equal((html.match(/>改名</g) ?? []).length, 1, '改名只出現一次（動作區）')
@@ -88,12 +90,12 @@ test('窄的時候整排不換行、平均排成一列（用面板寬度判斷�
   const css = read('../ui/style.css')
   assert.match(css, /\.dv-dev\{container-type:inline-size\}/)
   assert.match(css, /\.dv-tabs\{display:flex;align-items:center;flex-wrap:nowrap;/)
-  assert.match(css, /@container \(max-width:480px\)\{[^\n]*\.dv-tabs\{gap:4px\}\.dv-tabs \.aero-btn\{flex:1 1 auto;min-width:0;/)
+  assert.match(css, /@container \(max-width:480px\)\{[^\n]*\.dv-tabs\{gap:4px\}\.dv-tabs \.asn-btn\{flex:1 1 auto;min-width:0\}/)
 })
 
-test('危險鈕：永久移除用 aero-btn danger', () => {
+test('危險鈕：永久移除用共用按鈕的危險狀態', () => {
   const src = read('../ui/lib/settings-panel.mjs')
-  assert.match(src, /<button class="aero-btn danger" type="button" v-if="!askRemove" :disabled="!canRemoveRow\(curDev\)" @click="askRemove = true">/)
+  assert.match(src, /<asn-button state="danger" v-if="!askRemove" :disabled="!canRemoveRow\(curDev\)" @click="askRemove = true">/)
 })
 
 test('詳情的欄位：最後在線只寫在線與否；平台、ASN 版本；帳號的事不寫在裡面', async () => {
@@ -112,7 +114,7 @@ test('詳情的欄位：最後在線只寫在線與否；平台、ASN 版本；�
 test('指紋跟同一張表的其他值一樣大（只保留等寬字）；窄的時候工作管理員收掉次要欄位', () => {
   const css = read('../ui/style.css')
   assert.match(css, /\.dv-kv \.pair-fp\{font-size:inherit;/)
-  assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(8\)[^}]*display:none\}\.tm-table td\.cmp\{min-width:110px\}\.settings \.tm-table th,\.settings \.tm-table td\{padding:6px 4px\}\.settings \.tm-table \.aero-btn\{padding:3px 6px\}\}/)
+  assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(8\)[^}]*display:none\}\.tm-table td\.cmp\{min-width:110px\}\.settings \.tm-table th,\.settings \.tm-table td\{padding:6px 4px\}\}/)
 })
 
 test('known 的錯誤：只在動作卡出現一次（#1727）', async () => {

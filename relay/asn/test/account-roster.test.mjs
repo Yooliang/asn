@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { renderToString as ssrRender } from 'vue/server-renderer'
+// 共用元件的插槽會在輸出裡留下片段標記（<!--[-->、<!--]-->），比對畫面文字前先拿掉
+const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import {
   ROSTER_TEXT, FIVE_ONLY_WEEKLY_TEXT, ROSTER_POLL_MS, DEVICE_MAX, fetchRoster, nodeLabelOf, rosterLookup, rosterOk, rosterQuota, rosterQuotaFor, rosterView, shortDevice, windowLabel,
 } from '../ui/lib/account-roster.mjs'

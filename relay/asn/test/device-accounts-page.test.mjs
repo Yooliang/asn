@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { renderToString as ssrRender } from 'vue/server-renderer'
+// 共用元件的插槽會在輸出裡留下片段標記，比對畫面文字前先拿掉
+const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import { SETTING_CATS, SETTING_KEYS, catByKey, catSummary, normalizeCatKey } from '../ui/lib/settings-cats.mjs'
 import { SETTING_OPS, SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { panelTitle } from '../ui/lib/panels.mjs'

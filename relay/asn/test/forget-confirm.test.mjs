@@ -40,7 +40,7 @@ test('畫面接線：兩顆「忘記」都先問；確認框預設焦點在取�
   assert.equal((panel.match(/forget\.ask\(/g) ?? []).length, 2, '詳情和舊設備紀錄兩顆')
   assert.match(panel, /forget\.ask\(p\)">忘記</)
   assert.match(panel, /<asn-dialog v-if="forgetBox"[^>]*initial-focus="\.forget-cancel"/)
-  assert.match(panel, /class="aero-btn forget-cancel"[^>]*forget\.no[^>]*>\{\{ KNOWN\.forgetCancel \}\}/)
+  assert.match(panel, /<asn-button class="forget-cancel"[^>]*forget\.no[^>]*>\{\{ KNOWN\.forgetCancel \}\}/)
   assert.match(panel, /forget\.yes[^>]*>\{\{ KNOWN\.forgetYes \}\}/)
   assert.equal(TEXT.forgetYes, '忘記')
   assert.equal(TEXT.forgetCancel, '取消')

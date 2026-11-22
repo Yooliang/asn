@@ -207,8 +207,8 @@ export const SettingsPanel = {
           <div class="av-row">
             <div class="dp" :class="'st-' + st.status"><span><img :src="meAv" alt="我的大頭貼"></span></div>
             <div class="av-btns">
-              <button class="aero-btn" type="button" @click="fileEl.click()" :disabled="st.avBusy">選擇圖片…</button>
-              <button class="aero-btn" type="button" @click="act('avatar-remove')" :disabled="st.avBusy || !st.hasUpload">移除，改回自動產生</button>
+              <asn-button @click="fileEl.click()" :disabled="st.avBusy">選擇圖片…</asn-button>
+              <asn-button @click="act('avatar-remove')" :disabled="st.avBusy || !st.hasUpload">移除，改回自動產生</asn-button>
             </div>
           </div>
           <small role="status">{{ st.avMsg || (st.hasUpload ? '目前用的是這台設備上傳的大頭貼。' : '目前用的是自動產生的大頭貼。') }}</small>
@@ -245,7 +245,7 @@ export const SettingsPanel = {
           <label>語音辨識模型
             <select class="set-sel" :value="st.voice.cfg.stt_model" @change="act('voice-save', { stt_model: $event.target.value })" aria-label="語音辨識模型"><option v-for="m in STT_MODELS" :key="m" :value="m">{{ STT_MODEL_LABEL[m] }}</option></select>
           </label>
-          <div class="av-btns"><button class="aero-btn" type="button" @click="act('voice-install')" :disabled="st.voice.installBusy || st.voice.sttReady">下載語音辨識</button></div>
+          <div class="av-btns"><asn-button @click="act('voice-install')" :disabled="st.voice.installBusy || st.voice.sttReady">下載語音辨識</asn-button></div>
           <small role="status">{{ st.voice.note }}</small>
         </div>
       </template>
@@ -287,7 +287,7 @@ export const SettingsPanel = {
                       <small class="acct-warn">{{ QUOTA_TEXT.refreshWarn }}</small>
                     </template>
                     <span class="dv-ibtns">
-                      <button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-refresh', !st.quotaReaders.extraRefresh)">{{ st.quotaReaders.extraRefresh ? QUOTA_TEXT.refreshOff : st.quotaReaders.confirm === 'refresh' ? QUOTA_TEXT.refreshConfirm : QUOTA_TEXT.refreshOn }}</button>
+                      <asn-button :disabled="st.quotaReaders.busy" @click="act('quota-refresh', !st.quotaReaders.extraRefresh)">{{ st.quotaReaders.extraRefresh ? QUOTA_TEXT.refreshOff : st.quotaReaders.confirm === 'refresh' ? QUOTA_TEXT.refreshConfirm : QUOTA_TEXT.refreshOn }}</asn-button>
                     </span>
                     <details><summary>{{ QUOTA_TEXT.more }}</summary>
                       <small>{{ QUOTA_TEXT.extraNote }}</small>
@@ -305,7 +305,7 @@ export const SettingsPanel = {
                     <ul class="dv-accts" v-if="st.quotaReaders.minimax.length">
                       <li class="dv-acct" v-for="m in st.quotaReaders.minimax" :key="m.email">
                         <span class="dv-mail">{{ m.email }}</span>
-                        <span class="dv-side"><button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-mm-remove', m.email)">{{ st.quotaReaders.confirm === 'minimax\\n' + m.email ? QUOTA_TEXT.minimaxConfirmRemove : QUOTA_TEXT.minimaxRemove }}</button></span>
+                        <span class="dv-side"><asn-button state="danger" :disabled="st.quotaReaders.busy" @click="act('quota-mm-remove', m.email)">{{ st.quotaReaders.confirm === 'minimax\\n' + m.email ? QUOTA_TEXT.minimaxConfirmRemove : QUOTA_TEXT.minimaxRemove }}</asn-button></span>
                         <small class="dv-why acct-warn" v-if="!m.hasKey">{{ QUOTA_TEXT.minimaxNoKey }}</small>
                         <small class="dv-why acct-warn" v-else-if="m.status">{{ m.status }}</small>
                       </li>
@@ -313,7 +313,7 @@ export const SettingsPanel = {
                     <form class="dv-mm" v-if="st.quotaReaders.minimax.length < 2" @submit.prevent="addMinimax">
                       <input type="email" autocomplete="off" :placeholder="QUOTA_TEXT.minimaxEmail" :aria-label="QUOTA_TEXT.minimaxEmail" v-model="mmEmail" />
                       <input type="password" autocomplete="off" :placeholder="QUOTA_TEXT.minimaxKey" :aria-label="QUOTA_TEXT.minimaxKey" v-model="mmKey" />
-                      <button class="aero-btn" type="submit" :disabled="st.quotaReaders.busy">{{ QUOTA_TEXT.minimaxAdd }}</button>
+                      <asn-button type="submit" :disabled="st.quotaReaders.busy">{{ QUOTA_TEXT.minimaxAdd }}</asn-button>
                     </form>
                   </template>
                 </div>
@@ -343,14 +343,14 @@ export const SettingsPanel = {
                       <template v-for="b in devRows(v.key, a)" :key="b.node">
                       <span :class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]">
                         <span class="dv-devname"><span class="dv-devn">{{ b.label }}<small class="dv-devself" v-if="b.self">{{ DEVICE_ROW_TEXT.self }}</small></span><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
-                        <button type="button" :class="['aero-btn', 'dv-devbtn', b.state]" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</button>
+                        <asn-button fixed class="dv-devbtn" :state="b.state === 'switch' ? '' : b.state" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</asn-button>
                       </span>
                       <span :class="['dv-devres', rowResult(v.key, a, b.node).phase]" role="status" v-if="rowResult(v.key, a, b.node)">{{ rowResult(v.key, a, b.node).text }}</span>
                       </template>
                     </span>
                     <span class="dv-share" v-if="st.quotaReaders">
-                      <button class="aero-btn" type="button" :disabled="st.quotaReaders.busy" @click="act('quota-share', { vendor: v.key, account: a.account, shared: a.shared })">{{ !a.shared ? QUOTA_TEXT.share : st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmAgain : QUOTA_TEXT.shareAgain }}</button>
-                      <button class="aero-btn" type="button" v-if="a.shared" :disabled="st.quotaReaders.busy" @click="act('quota-unshare', { vendor: v.key, account: a.account })">{{ st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmRevoke : QUOTA_TEXT.shareRevoke }}</button>
+                      <asn-button :disabled="st.quotaReaders.busy" @click="act('quota-share', { vendor: v.key, account: a.account, shared: a.shared })">{{ !a.shared ? QUOTA_TEXT.share : st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmAgain : QUOTA_TEXT.shareAgain }}</asn-button>
+                      <asn-button state="danger" v-if="a.shared" :disabled="st.quotaReaders.busy" @click="act('quota-unshare', { vendor: v.key, account: a.account })">{{ st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmRevoke : QUOTA_TEXT.shareRevoke }}</asn-button>
                       <small class="acct-warn" v-if="st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareAgainWarn }}</small>
                       <small class="acct-warn" v-if="st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareRevokeWarn }}</small>
                     </span>
@@ -359,8 +359,8 @@ export const SettingsPanel = {
                       <code>{{ st.quotaReaders.code.value }}</code>
                       <small>{{ QUOTA_TEXT.codeOnce }}</small>
                       <span class="dv-ibtns">
-                        <button class="aero-btn" type="button" @click="act('quota-copy')">{{ st.quotaReaders.copied ? QUOTA_TEXT.copied : QUOTA_TEXT.copy }}</button>
-                        <button class="aero-btn" type="button" @click="act('quota-close')">{{ QUOTA_TEXT.close }}</button>
+                        <asn-button level="text" @click="act('quota-copy')">{{ st.quotaReaders.copied ? QUOTA_TEXT.copied : QUOTA_TEXT.copy }}</asn-button>
+                        <asn-button level="text" @click="act('quota-close')">{{ QUOTA_TEXT.close }}</asn-button>
                       </span>
                     </div>
                   </li>
@@ -379,12 +379,12 @@ export const SettingsPanel = {
               <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
                 <span class="dv-row-go"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="(d.kindLabel || d.kind) !== '電腦'">{{ d.kindLabel || d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><span class="dv-tag warn noreport" v-if="d.noReport" :title="DEVICE_TEXT.noReportTip" :aria-label="DEVICE_TEXT.noReportTip">{{ DEVICE_TEXT.noReportTag }}</span><fp-mark v-if="d.phone && !d.self" :kind="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).kind" :label="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).label"></fp-mark></span>
                 <span class="dv-row-move" v-if="!d.self" role="group" aria-label="設備順序">
-                  <button class="aero-btn" type="button" :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</button>
-                  <button class="aero-btn" type="button" :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</button>
+                  <asn-button :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</asn-button>
+                  <asn-button :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</asn-button>
                 </span>
                 <span class="dv-row-move dv-row-act" role="group" aria-label="設備內容">
-                  <button class="aero-btn" type="button" :aria-label="'查看 ' + d.label + ' 的帳號'" @click.stop="open(d.key)">帳號</button>
-                  <button class="aero-btn" type="button" :aria-label="'查看 ' + d.label + ' 的詳情'" @click.stop="openInfo(d.key)">詳情</button>
+                  <asn-button :aria-label="'查看 ' + d.label + ' 的帳號'" @click.stop="open(d.key)">帳號</asn-button>
+                  <asn-button :aria-label="'查看 ' + d.label + ' 的詳情'" @click.stop="openInfo(d.key)">詳情</asn-button>
                 </span>
               </li>
             </ul>
@@ -393,13 +393,13 @@ export const SettingsPanel = {
               <div class="pair-row" v-for="p in oldPeers" :key="p.id">
                 <p><b>{{ p.label }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
                 <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(p.fingerprint) }}</code>
-                <span class="pair-btns"><button class="aero-btn" type="button" :disabled="st.known.busy" @click="forget.ask(p)">忘記</button></span>
+                <span class="pair-btns"><asn-button state="danger" :disabled="st.known.busy" @click="forget.ask(p)">忘記</asn-button></span>
               </div>
             </details>
           </template>
           <section class="dv-dev" v-else :aria-label="curDev.identity.title">
             <div class="dv-dev-h">
-              <button class="aero-btn dv-back" type="button" :aria-label="DEVICE_TEXT.back" :title="DEVICE_TEXT.back" @click="backToList">{{ DEVICE_TEXT.backMark }}</button>
+              <asn-button class="dv-back" :aria-label="DEVICE_TEXT.back" :title="DEVICE_TEXT.back" @click="backToList">{{ DEVICE_TEXT.backMark }}</asn-button>
               <h3 class="dv-name">{{ curDev.identity.title }}</h3>
               <span class="dv-tag kind" v-if="(curDev.kindLabel || curDev.kind) !== '電腦'">{{ curDev.kindLabel || curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
@@ -407,10 +407,10 @@ export const SettingsPanel = {
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
             </div>
             <div class="dv-tabs" role="group" aria-label="這台設備的內容">
-              <button class="aero-btn dv-tasks" type="button" v-if="curDev.self && st.taskMgr" :aria-pressed="view === 'tasks'" @click="setView('tasks')">{{ TM.entry }}</button>
-              <button class="aero-btn" type="button" :aria-pressed="view === 'info'" @click="setView('info')">詳情</button>
-              <button class="aero-btn" type="button" v-if="curDev.self && st.known && st.known.ownFp" :aria-pressed="view === 'qr'" @click="setView('qr')">QR Code</button>
-              <button class="aero-btn" type="button" v-if="hasAcct" :aria-pressed="view === 'acct'" @click="setView('acct')">帳號</button>
+              <asn-button class="dv-tasks" v-if="curDev.self && st.taskMgr" :aria-pressed="view === 'tasks'" @click="setView('tasks')">{{ TM.entry }}</asn-button>
+              <asn-button :aria-pressed="view === 'info'" @click="setView('info')">詳情</asn-button>
+              <asn-button v-if="curDev.self && st.known && st.known.ownFp" :aria-pressed="view === 'qr'" @click="setView('qr')">QR Code</asn-button>
+              <asn-button v-if="hasAcct" :aria-pressed="view === 'acct'" @click="setView('acct')">帳號</asn-button>
             </div>
             <div class="tm" v-if="view === 'tasks' && st.taskMgr">
               <div class="tm-bar">
@@ -430,12 +430,12 @@ export const SettingsPanel = {
                       <td class="tm-name"><b>{{ r.name }}</b><span class="tm-tag dup" v-if="r.dup">{{ TM.dupTag }}</span><small class="tm-dupnote" v-if="r.dupNote">{{ r.dupNote }}</small><small class="tm-where"><span class="tm-tag native" v-if="r.native">{{ r.source }}</span><template v-else>{{ r.source }}</template></small></td>
                       <td>{{ r.engine }}</td><td>{{ r.pid }}</td><td>{{ r.memory }}</td><td>{{ r.uptime }}</td><td>{{ r.status }}</td><td class="cmp">{{ r.cmpText }}<template v-if="r.cmpTag"> <span class="tm-tag" :class="r.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ r.cmpTag }}</span></template></td><td><span class="tm-tag native" v-if="r.native">{{ r.source }}</span><template v-else>{{ r.source }}</template></td>
                       <td class="tm-act">
-                        <button class="aero-btn tm-stop" type="button" v-if="!r.viewOnly && !r.handing" :disabled="!r.canStop || st.taskMgr.busy" :title="r.why" :aria-label="TM.stop + ' ' + r.name" @click="act('tm-ask', r.key)">{{ TM.stop }}</button>
+                        <asn-button state="danger" class="tm-stop" v-if="!r.viewOnly && !r.handing" :disabled="!r.canStop || st.taskMgr.busy" :title="r.why" :aria-label="TM.stop + ' ' + r.name" @click="act('tm-ask', r.key)">{{ TM.stop }}</asn-button>
                         <small class="tm-viewonly" v-else-if="r.showViewOnly" :title="r.why">{{ TM.viewOnly }}</small>
                         <small class="tm-why" v-if="!r.viewOnly && !r.canStop && r.why">{{ r.why }}</small>
-                        <button class="aero-btn tm-handover" type="button" v-if="r.canHandover" :disabled="st.taskMgr.busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + r.name" @click="act('tm-handover', r.name)">{{ TM.handover }}</button>
-                        <button class="aero-btn tm-view-btn" type="button" v-if="r.canView" :disabled="st.taskMgr.busy" :title="TM.viewTip" :aria-label="TM.view + ' ' + r.name" @click="act('tm-view', r.name)">{{ TM.view }}</button>
-                        <button class="aero-btn tm-adopt" type="button" v-if="r.canAdopt" :disabled="st.taskMgr.busy" :title="TM.adoptTip" :aria-label="TM.adopt + ' ' + r.name" @click="act('tm-adopt', r.key)">{{ TM.adopt }}</button>
+                        <asn-button class="tm-handover" v-if="r.canHandover" :disabled="st.taskMgr.busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + r.name" @click="act('tm-handover', r.name)">{{ TM.handover }}</asn-button>
+                        <asn-button class="tm-view-btn" v-if="r.canView" :disabled="st.taskMgr.busy" :title="TM.viewTip" :aria-label="TM.view + ' ' + r.name" @click="act('tm-view', r.name)">{{ TM.view }}</asn-button>
+                        <asn-button class="tm-adopt" v-if="r.canAdopt" :disabled="st.taskMgr.busy" :title="TM.adoptTip" :aria-label="TM.adopt + ' ' + r.name" @click="act('tm-adopt', r.key)">{{ TM.adopt }}</asn-button>
                       </td>
                     </tr>
                   </tbody>
@@ -445,7 +445,7 @@ export const SettingsPanel = {
               <details class="tm-known" v-if="st.taskMgr.known.length">
                 <summary>認得但目前沒在跑（{{ st.taskMgr.known.length }}）</summary>
                 <ul>
-                  <li v-for="k in st.taskMgr.known" :key="k.name"><span class="tm-kname">{{ k.name }}</span><small>{{ k.engine }}</small><button class="aero-btn" type="button" v-if="k.canWake" :disabled="st.taskMgr.busy" @click="act('tm-wake', k.name)">{{ TM.wake }}</button><small v-else-if="k.why">{{ k.why }}</small></li>
+                  <li v-for="k in st.taskMgr.known" :key="k.name"><span class="tm-kname">{{ k.name }}</span><small>{{ k.engine }}</small><asn-button v-if="k.canWake" :disabled="st.taskMgr.busy" @click="act('tm-wake', k.name)">{{ TM.wake }}</asn-button><small v-else-if="k.why">{{ k.why }}</small></li>
                 </ul>
                 <small>重開機後會自動接回的名字；要接回請按「喚醒」，不在這裡停止。</small>
               </details>
@@ -455,10 +455,10 @@ export const SettingsPanel = {
                 <div class="tm-facts"><p v-for="l in st.taskMgr.confirm.lines" :key="l">{{ l }}</p></div>
                 <p class="launch-notice-body" v-for="n in st.taskMgr.confirm.notes" :key="n">{{ n }}</p>
                 <p class="partner-err" v-if="st.taskMgr.confirm.result" role="alert">{{ st.taskMgr.confirm.result }}</p>
-                <div class="partner-actions">
-                  <button class="aero-btn" type="button" :disabled="st.taskMgr.confirm.busy" @click="act('tm-cancel')">{{ TM.cancel }}</button>
-                  <button class="aero-btn danger tm-confirm" type="button" :disabled="st.taskMgr.confirm.busy" @click="act('tm-confirm')">{{ st.taskMgr.confirm.busy ? TM.stopping : st.taskMgr.confirm.ok }}</button>
-                </div>
+                <asn-actions class="partner-actions">
+                  <asn-button :disabled="st.taskMgr.confirm.busy" @click="act('tm-cancel')">{{ TM.cancel }}</asn-button>
+                  <asn-button state="danger" class="tm-confirm" :disabled="st.taskMgr.confirm.busy" @click="act('tm-confirm')">{{ st.taskMgr.confirm.busy ? TM.stopping : st.taskMgr.confirm.ok }}</asn-button>
+                </asn-actions>
               </asn-dialog>
             </div>
             <div class="dv-cards" v-else-if="view === 'qr' && curDev.self && st.known && st.known.ownFp">
@@ -498,22 +498,18 @@ export const SettingsPanel = {
                   <input type="text" :maxlength="NAME_MAX" autocomplete="off" v-model="renameText" aria-label="這台設備的名字" />
                   <small>所有設備都會顯示這個名字</small>
                   <small class="pair-warn" v-if="renameErr" role="alert">{{ renameErr }}</small>
-                  <span class="dv-card-act"><button class="aero-btn" type="submit" :disabled="!!deviceNameError(renameText) || (st.known && st.known.busy)">儲存</button><button class="aero-btn" type="button" @click="renameCancel">取消</button></span>
+                  <asn-actions class="dv-card-act"><asn-button @click="renameCancel">取消</asn-button><asn-button level="primary" type="submit" :disabled="!!deviceNameError(renameText) || (st.known && st.known.busy)">儲存</asn-button></asn-actions>
                 </form>
                 <div class="dv-card-act" v-else>
-                  <button class="aero-btn" type="button" @click="renameStart">{{ ACTION_TEXT.rename }}</button>
+                  <asn-button @click="renameStart">{{ ACTION_TEXT.rename }}</asn-button>
                   <template v-if="!curDev.self">
-                    <button class="aero-btn" type="button" v-if="canShowBackRow(curDev) && !askRemove" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</button>
-                    <button class="aero-btn danger" type="button" v-if="!askRemove" :disabled="!canRemoveRow(curDev)" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</button>
+                    <asn-button v-if="canShowBackRow(curDev) && !askRemove" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</asn-button>
+                    <asn-button state="danger" v-if="!askRemove" :disabled="!canRemoveRow(curDev)" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</asn-button>
                   </template>
-                  <button class="aero-btn" type="button" v-if="curKnown" :disabled="st.known.busy" @click="forget.ask(curKnown)">{{ KNOWN.forget }}</button>
+                  <asn-button state="danger" v-if="curKnown" :disabled="st.known.busy" @click="forget.ask(curKnown)">{{ KNOWN.forget }}</asn-button>
                 </div>
                 <small class="dvid-why" v-if="!curDev.self && !canRemoveRow(curDev)">{{ ACTION_TEXT.removeOnline }}</small>
-                <div class="dv-card-act" v-if="askRemove">
-                  <p class="dv-confirm" role="alert">{{ DEVICE_TEXT.confirmRemove(curDev.identity.title) }}</p>
-                  <button class="aero-btn danger" type="button" @click="removeNow">{{ DEVICE_TEXT.removeYes }}</button>
-                  <button class="aero-btn" type="button" @click="askRemove = false">{{ DEVICE_TEXT.cancel }}</button>
-                </div>
+                <asn-confirm v-if="askRemove" danger :text="DEVICE_TEXT.confirmRemove(curDev.identity.title)" :yes="DEVICE_TEXT.removeYes" :no="DEVICE_TEXT.cancel" @yes="removeNow" @no="askRemove = false"></asn-confirm>
                 <small v-if="curKnown">{{ KNOWN.forgetNote }}</small>
                 <p class="pair-warn" v-if="st.known && st.known.error" role="alert">{{ st.known.error }}</p>
               </div>
@@ -532,8 +528,8 @@ export const SettingsPanel = {
                             <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
                             <span class="dv-cur" v-if="a.current">使用中</span>
                             <span class="dv-incomplete" v-if="isIncomplete(a)">{{ INCOMPLETE_LABEL }}</span>
-                            <button class="aero-btn" type="button" @click="act('acct-switch', a.email)" :disabled="st.accounts.busy || a.current || isIncomplete(a)" :title="isIncomplete(a) ? INCOMPLETE_REASON : null">切換</button>
-                            <button class="aero-btn" type="button" @click="act('acct-remove', a.email)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.email ? '確認刪除' : '刪除' }}</button>
+                            <asn-button @click="act('acct-switch', a.email)" :disabled="st.accounts.busy || a.current || isIncomplete(a)" :title="isIncomplete(a) ? INCOMPLETE_REASON : null">切換</asn-button>
+                            <asn-button state="danger" @click="act('acct-remove', a.email)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.email ? '確認刪除' : '刪除' }}</asn-button>
                           </span>
                           <small class="dv-why acct-warn" v-if="isIncomplete(a) && !a.current">{{ INCOMPLETE_REASON }}</small>
                           <small class="dv-why dv-usable" v-if="usableAt(a)">{{ usableAt(a) }}</small>
@@ -562,26 +558,26 @@ export const SettingsPanel = {
                       <small>讓手機或別台設備替這台切換帳號。</small>
                       <div class="dv-install" v-if="AGENT_INSTALL_UI && st.install && ((v.action && v.action.kind === 'local') || st.install.stage === 'running' || st.install.stage === 'done')">
                         <template v-if="st.install.stage === 'idle'">
-                          <button class="aero-btn" type="button" :disabled="st.install.button.disabled" @click="act('install-ask')">{{ INSTALL_TEXT.button }}</button>
+                          <asn-button level="primary" :disabled="st.install.button.disabled" @click="act('install-ask')">{{ INSTALL_TEXT.button }}</asn-button>
                           <small class="acct-warn" v-if="st.install.button.hint">{{ st.install.button.hint }}</small>
                           <small v-if="st.install.msg" role="status">{{ st.install.msg }}</small>
                         </template>
                         <div class="dv-confirm" role="alertdialog" :aria-label="INSTALL_TEXT.confirmTitle" v-else-if="st.install.stage === 'confirm'">
                           <b>{{ INSTALL_TEXT.confirmTitle }}</b>
                           <p>{{ st.install.plan }}</p>
-                          <span class="dv-ibtns">
-                            <button class="aero-btn" type="button" @click="act('install-yes')">{{ INSTALL_TEXT.confirmYes }}</button>
-                            <button class="aero-btn" type="button" @click="act('install-no')">{{ INSTALL_TEXT.confirmNo }}</button>
-                          </span>
+                          <asn-actions class="dv-ibtns">
+                            <asn-button @click="act('install-no')">{{ INSTALL_TEXT.confirmNo }}</asn-button>
+                            <asn-button level="primary" @click="act('install-yes')">{{ INSTALL_TEXT.confirmYes }}</asn-button>
+                          </asn-actions>
                         </div>
                         <div class="dv-prog" role="status" aria-live="polite" v-else>
                           <b :class="['dv-ptitle', st.install.kind]">{{ st.install.title }}</b>
                           <p v-for="(l, i) in st.install.lines" :key="i" :class="{ note: i > 0 }">{{ l }}</p>
                           <small v-if="st.install.stage === 'running'">{{ INSTALL_TEXT.progressNote }}</small>
                           <span class="dv-ibtns">
-                            <button class="aero-btn" type="button" v-if="st.install.stage === 'running'" :disabled="!st.install.canCancel" @click="act('install-cancel')">{{ INSTALL_TEXT.cancel }}</button>
-                            <button class="aero-btn" type="button" v-if="st.install.stage === 'done' && st.install.terminal" @click="act('install-terminal')">{{ INSTALL_TEXT.openTerminal }}</button>
-                            <button class="aero-btn" type="button" v-if="st.install.stage === 'done'" @click="act('install-close')">{{ INSTALL_TEXT.close }}</button>
+                            <asn-button v-if="st.install.stage === 'running'" :disabled="!st.install.canCancel" @click="act('install-cancel')">{{ INSTALL_TEXT.cancel }}</asn-button>
+                            <asn-button v-if="st.install.stage === 'done' && st.install.terminal" @click="act('install-terminal')">{{ INSTALL_TEXT.openTerminal }}</asn-button>
+                            <asn-button v-if="st.install.stage === 'done'" @click="act('install-close')">{{ INSTALL_TEXT.close }}</asn-button>
                           </span>
                         </div>
                       </div>
@@ -596,8 +592,8 @@ export const SettingsPanel = {
                             <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
                             <span class="dv-incomplete" v-if="!a.current && a.incomplete">{{ INCOMPLETE_LABEL }}</span>
                             <span class="dv-cur" v-if="a.current">使用中</span>
-                            <button class="aero-btn" type="button" v-else-if="(v.key === 'claude' || v.key === 'grok') && !curDev.self && (v.switchable || v.switchHint)" :disabled="!v.switchable || a.incomplete" :title="a.incomplete ? INCOMPLETE_REASON : null" @click="act('device-switch', { node: curDev.key, email: a.email, vendor: v.key })">切換</button>
-                            <button class="aero-btn" type="button" v-else-if="v.key === 'grok' && curDev.self && v.accounts.length > 1" :disabled="st.accounts.busy" @click="act('grok-switch', a.email)">切換</button>
+                            <asn-button v-else-if="(v.key === 'claude' || v.key === 'grok') && !curDev.self && (v.switchable || v.switchHint)" :disabled="!v.switchable || a.incomplete" :title="a.incomplete ? INCOMPLETE_REASON : null" @click="act('device-switch', { node: curDev.key, email: a.email, vendor: v.key })">切換</asn-button>
+                            <asn-button v-else-if="v.key === 'grok' && curDev.self && v.accounts.length > 1" :disabled="st.accounts.busy" @click="act('grok-switch', a.email)">切換</asn-button>
                           </span>
                           <small class="dv-why acct-warn" v-if="a.incomplete && !a.current">{{ INCOMPLETE_REASON }}</small>
                           <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }" v-if="a.quota">
@@ -621,23 +617,23 @@ export const SettingsPanel = {
                     </template>
                     <div class="dv-install dv-relogin" v-if="v.key === 'claude' && st.relogin && ((v.relogin && v.relogin.kind) || (st.relogin.target === curDev.key && st.relogin.stage !== 'idle'))">
                       <template v-if="st.relogin.target !== curDev.key || st.relogin.stage === 'idle'">
-                        <button class="aero-btn" type="button" @click="act('relogin-ask', { node: curDev.key, kind: v.relogin.kind })">{{ DESK_RELOGIN_TEXT.button }}</button>
+                        <asn-button state="relogin" @click="act('relogin-ask', { node: curDev.key, kind: v.relogin.kind })">{{ DESK_RELOGIN_TEXT.button }}</asn-button>
                       </template>
                       <div class="dv-confirm" role="alertdialog" :aria-label="st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localTitle : DESK_RELOGIN_TEXT.remoteTitle(curDev.label)" v-else-if="st.relogin.stage === 'confirm'">
                         <b>{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localTitle : DESK_RELOGIN_TEXT.remoteTitle(curDev.label) }}</b>
                         <p>{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localBody : DESK_RELOGIN_TEXT.remoteBody }}</p>
                         <small v-if="st.relogin.kind !== 'local'">{{ DESK_RELOGIN_TEXT.remoteNeed }}</small>
-                        <span class="dv-ibtns">
-                          <button class="aero-btn" type="button" @click="act('relogin-yes')">{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localYes : DESK_RELOGIN_TEXT.remoteYes }}</button>
-                          <button class="aero-btn" type="button" @click="act('relogin-no')">{{ DESK_RELOGIN_TEXT.no }}</button>
-                        </span>
+                        <asn-actions class="dv-ibtns">
+                          <asn-button @click="act('relogin-no')">{{ DESK_RELOGIN_TEXT.no }}</asn-button>
+                          <asn-button level="primary" @click="act('relogin-yes')">{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localYes : DESK_RELOGIN_TEXT.remoteYes }}</asn-button>
+                        </asn-actions>
                       </div>
                       <div class="dv-prog" :role="st.relogin.stage === 'done' && !st.relogin.ok ? 'alert' : 'status'" aria-live="polite" v-else>
                         <p v-if="st.relogin.lead">{{ st.relogin.lead }}</p>
                         <p>{{ st.relogin.text }}</p>
                         <p class="note" v-if="st.relogin.note">{{ st.relogin.note }}</p>
                         <span class="dv-ibtns" v-if="st.relogin.stage === 'done'">
-                          <button class="aero-btn" type="button" @click="act('relogin-close')">{{ DESK_RELOGIN_TEXT.close }}</button>
+                          <asn-button @click="act('relogin-close')">{{ DESK_RELOGIN_TEXT.close }}</asn-button>
                         </span>
                       </div>
                     </div>
@@ -692,7 +688,7 @@ export const SettingsPanel = {
           <label class="chk"><input type="checkbox" :checked="st.guard.on" :disabled="st.guard.busy || (!!st.guard.blocked && !st.guard.on)" @change="act('guard', $event.target.checked)" aria-label="ASN 意外關閉時自動重新開啟" /><span>ASN 意外關閉時自動重新開啟</span></label>
           <small>只在 ASN 意外關閉時重開，你自己按結束不會重開。</small>
           <small v-if="st.guard.blocked" class="autostart-blocked">{{ st.guard.blocked }}</small>
-          <small v-if="st.guard.paused" class="guard-paused" role="status">{{ st.guard.paused }} <button class="aero-btn" type="button" :disabled="st.guard.busy" @click="act('guard-resume')">恢復自動重開</button></small>
+          <small v-if="st.guard.paused" class="guard-paused" role="status">{{ st.guard.paused }} <asn-button :disabled="st.guard.busy" @click="act('guard-resume')">恢復自動重開</asn-button></small>
         </template>
         <section class="set-card" aria-label="收發信功能" v-if="st.bridge">
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteLaunch" :disabled="st.bridge.busy" @change="act('bridge-launch', $event.target.checked)" aria-label="允許我的其他設備替這台開新視窗" /><span>允許我的其他設備替這台開新視窗</span></label>
@@ -707,7 +703,7 @@ export const SettingsPanel = {
             <small v-if="termServerWhyLine(st.bridge)" class="term-server-why" role="note">{{ termServerWhyLine(st.bridge) }}</small>
             <template v-if="termFetchLine(st.bridge).text">
               <small role="status">{{ termFetchLine(st.bridge).text }}</small>
-              <span class="pair-btns" v-if="termFetchLine(st.bridge).canRetry"><button class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-term-fetch-retry')">重試</button></span>
+              <span class="pair-btns" v-if="termFetchLine(st.bridge).canRetry"><asn-button level="text" :disabled="st.bridge.busy" @click="act('bridge-term-fetch-retry')">重試</asn-button></span>
             </template>
           </template>
           <small v-else-if="st.bridge.termServerMissing">{{ TERM_SERVER_MISSING_NOTE }}</small>
@@ -727,12 +723,8 @@ export const SettingsPanel = {
           <small v-if="st.bridge.running">這台的收發信功能目前由 ASN 負責。</small>
           <small v-else-if="st.bridge.legacy">這台的收發信功能目前由舊版收發信小程式負責。</small>
           <template v-if="st.bridge.legacy && st.bridge.takeoverAllowed">
-            <button v-if="!st.bridge.confirm" class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover')">改由 ASN 負責</button>
-            <div v-else class="upd-row">
-              <small>要停掉舊版收發信小程式，改由 ASN 負責嗎？</small>
-              <button class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover-yes')">確定</button>
-              <button class="aero-btn" type="button" :disabled="st.bridge.busy" @click="act('bridge-takeover-no')">取消</button>
-            </div>
+            <asn-button v-if="!st.bridge.confirm" :disabled="st.bridge.busy" @click="act('bridge-takeover')">改由 ASN 負責</asn-button>
+            <asn-confirm v-else text="要停掉舊版收發信小程式，改由 ASN 負責嗎？" yes="確定" no="取消" :busy="!!st.bridge.busy" @yes="act('bridge-takeover-yes')" @no="act('bridge-takeover-no')"></asn-confirm>
           </template>
           <small v-if="st.bridge.error">{{ st.bridge.error }}</small>
         </section>
@@ -741,7 +733,7 @@ export const SettingsPanel = {
         <section class="set-card upd-card" aria-label="更新">
           <label class="chk"><input type="checkbox" :checked="st.autoCheck" @change="act('autoCheck', $event.target.checked)" aria-label="自動檢查更新" /><span>自動檢查更新</span></label>
           <div class="upd-row">
-            <button class="aero-btn" type="button" @click="act('check-update')" :disabled="st.upd.checking || st.upd.installing">立即檢查</button>
+            <asn-button @click="act('check-update')" :disabled="st.upd.checking || st.upd.installing">立即檢查</asn-button>
             <div class="upd-status" :class="'tone-' + st.upd.status.tone" role="status">
               <b>{{ st.upd.status.head }}</b>
               <small v-for="(l, i) in st.upd.status.lines" :key="i">{{ l }}</small>
@@ -750,7 +742,7 @@ export const SettingsPanel = {
         </section>
         <section class="chlog" aria-label="版本更新記錄">
           <b>版本更新記錄</b>
-          <p v-if="st.logNote" class="chlog-none" role="status">{{ st.logNote }}<button v-if="st.logRetry" class="aero-btn" type="button" @click="act('releases-retry')">重試</button></p>
+          <p v-if="st.logNote" class="chlog-none" role="status">{{ st.logNote }}<asn-button level="text" v-if="st.logRetry" @click="act('releases-retry')">重試</asn-button></p>
           <article v-for="e in (st.log || [])" :key="e.version" class="chlog-item" :class="e.tag">
             <header><span class="chlog-ver">{{ e.version }}</span><span v-if="e.tag === 'current'" class="chlog-tag">目前版本</span><span v-else-if="e.tag === 'update'" class="chlog-tag upd">可更新</span><time v-if="e.date">{{ e.date }}</time></header>
             <ul><li v-for="(l, i) in e.lines" :key="i">{{ l }}</li></ul>
@@ -761,7 +753,7 @@ export const SettingsPanel = {
         <div class="launch-set">
           <div class="sec-head">
             <h3 class="sec-h">已安裝的工具</h3>
-            <button class="aero-btn" type="button" :disabled="st.launch.checking" @click="act('launch-recheck')">{{ st.launch.checking ? '正在檢查…' : '重新檢查' }}</button>
+            <asn-button :disabled="st.launch.checking" @click="act('launch-recheck')">{{ st.launch.checking ? '正在檢查…' : '重新檢查' }}</asn-button>
           </div>
           <ul class="launch-tools">
             <li v-for="t in st.launch.tools" :key="t.id" :class="{ off: !t.installed }">
@@ -773,7 +765,7 @@ export const SettingsPanel = {
               </template>
               <span class="launch-hint" v-else>{{ t.installHint }}</span>
               <template v-if="t.install">
-                <button class="aero-btn launch-act" type="button" v-if="t.install.showButton" @click="act('launch-install-ask', t.install.liveKind)">{{ t.install.label }}</button>
+                <asn-button level="primary" class="launch-act" v-if="t.install.showButton" @click="act('launch-install-ask', t.install.liveKind)">{{ t.install.label }}</asn-button>
                 <!-- 共用元件（#2105）：原位確認（取消在左、同意在右）與狀態行（進行中／成功／失敗） -->
                 <asn-confirm class="launch-install-note" v-if="t.install.confirm" :text="t.install.confirm.text" :yes="t.install.confirm.yes" :no="t.install.confirm.no" @yes="act('launch-install-yes')" @no="act('launch-install-no')"></asn-confirm>
                 <asn-status class="launch-install-note" v-if="t.install.running" kind="busy" :text="t.install.running"></asn-status>
@@ -792,12 +784,12 @@ export const SettingsPanel = {
             <small v-if="st.piSetup.docUrl"><a :href="st.piSetup.docUrl" target="_blank" rel="noopener">{{ st.piSetup.docLabel }}</a></small>
             <small v-if="st.piSetup.consent">{{ st.piSetup.consent }}</small>
             <div class="upd-row">
-              <button class="aero-btn" type="button" v-if="st.piSetup.showAsk" :disabled="st.piSetup.busy" @click="act('pi-setup-ask')">{{ st.piSetup.askLabel }}</button>
-              <button class="aero-btn" type="button" v-if="st.piSetup.showAgree" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.agreeLabel }}</button>
-              <button class="aero-btn" type="button" v-if="st.piSetup.showCancel" :disabled="st.piSetup.busy" @click="act('pi-setup-cancel')">{{ st.piSetup.cancelLabel }}</button>
-              <button class="aero-btn" type="button" v-if="st.piSetup.showReinstall" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.reinstallLabel }}</button>
-              <button class="aero-btn" type="button" v-if="st.piSetup.showRemove" :disabled="st.piSetup.busy" @click="act('pi-setup-remove')">{{ st.piSetup.removeLabel }}</button>
-              <button class="aero-btn" type="button" v-if="st.piSetup.showLogin" @click="act('pi-login')">{{ st.piSetup.loginLabel }}</button>
+              <asn-button level="primary" v-if="st.piSetup.showAsk" :disabled="st.piSetup.busy" @click="act('pi-setup-ask')">{{ st.piSetup.askLabel }}</asn-button>
+              <asn-button v-if="st.piSetup.showCancel" :disabled="st.piSetup.busy" @click="act('pi-setup-cancel')">{{ st.piSetup.cancelLabel }}</asn-button>
+              <asn-button level="primary" v-if="st.piSetup.showAgree" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.agreeLabel }}</asn-button>
+              <asn-button v-if="st.piSetup.showReinstall" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.reinstallLabel }}</asn-button>
+              <asn-button v-if="st.piSetup.showRemove" :disabled="st.piSetup.busy" @click="act('pi-setup-remove')">{{ st.piSetup.removeLabel }}</asn-button>
+              <asn-button v-if="st.piSetup.showLogin" @click="act('pi-login')">{{ st.piSetup.loginLabel }}</asn-button>
             </div>
             <small v-if="st.piSetup.msg" role="status">{{ st.piSetup.msg }}</small>
           </section>
@@ -805,12 +797,12 @@ export const SettingsPanel = {
           <section class="launch-cwds" aria-label="可以開新夥伴的資料夾">
             <b class="launch-cwds-h">可以開新夥伴的資料夾</b>
             <ul class="launch-cwd-list" v-if="st.launch.cwdList.length">
-              <li v-for="p in st.launch.cwdList" :key="p"><span class="launch-cwd-path">{{ p }}</span><button class="aero-btn" type="button" :aria-label="'移除 ' + p" @click="act('launch-cwd-remove', p)">移除</button></li>
+              <li v-for="p in st.launch.cwdList" :key="p"><span class="launch-cwd-path">{{ p }}</span><asn-button :aria-label="'移除 ' + p" @click="act('launch-cwd-remove', p)">移除</asn-button></li>
             </ul>
             <small class="set-note" v-else>還沒有加入資料夾，按「加入資料夾…」選一個。</small>
-            <div class="launch-cwd-add"><button class="aero-btn" type="button" @click="act('launch-cwd-add')">＋ 加入資料夾…</button></div>
+            <div class="launch-cwd-add"><asn-button @click="act('launch-cwd-add')">＋ 加入資料夾…</asn-button></div>
             <ul class="launch-cwd-list suggest" v-if="st.launch.cwdSuggest.length">
-              <li v-for="p in st.launch.cwdSuggest" :key="p"><span class="launch-cwd-path">建議：{{ p }}</span><button class="aero-btn" type="button" :aria-label="'加入 ' + p" @click="act('launch-cwd-suggest', p)">加入</button></li>
+              <li v-for="p in st.launch.cwdSuggest" :key="p"><span class="launch-cwd-path">建議：{{ p }}</span><asn-button :aria-label="'加入 ' + p" @click="act('launch-cwd-suggest', p)">加入</asn-button></li>
             </ul>
             <small class="acct-warn" v-if="st.launch.cwdMsg" role="alert">{{ st.launch.cwdMsg }}</small>
           </section>
@@ -825,7 +817,7 @@ export const SettingsPanel = {
             <section class="set-card" aria-label="密碼小幫手">
               <small>git 或 ssh 要密碼時由 ASN 跳窗請你輸入，密碼不會經過 AI。想用的話，在終端機執行下面這行（只對之後開的視窗生效；ASN 不會自動改你的設定）：</small>
               <code class="set-code">{{ st.askpass.example }}</code>
-              <button class="aero-btn" type="button" @click="act('askpass-copy')">{{ st.askpass.copied ? '已複製' : '複製路徑' }}</button>
+              <asn-button level="text" @click="act('askpass-copy')">{{ st.askpass.copied ? '已複製' : '複製路徑' }}</asn-button>
             </section>
           </details>
         </div>
@@ -833,7 +825,7 @@ export const SettingsPanel = {
       <template v-if="catKey === 'usage'">
         <div class="usage-set">
           <div class="upd-row">
-            <button class="aero-btn" type="button" @click="act('usage-refresh')" :disabled="st.usage.loading">重新整理</button>
+            <asn-button @click="act('usage-refresh')" :disabled="st.usage.loading">重新整理</asn-button>
             <small role="status">{{ st.usage.loading ? '正在讀取本機記錄…' : (st.usage.updated ? '更新於 ' + st.usage.updated : '') }}</small>
           </div>
           <small>{{ USAGE_NOTE }}</small>
@@ -861,9 +853,9 @@ export const SettingsPanel = {
         <section class="set-card about-links" aria-label="連結">
           <div class="upd-row">
             <template v-for="l in about.items" :key="l.key">
-              <button class="aero-btn" :class="'about-' + l.key" type="button" v-if="l.kind === 'link'" @click="act('open-link', l.url)">{{ l.label }}</button>
-              <button class="aero-btn" :class="'about-' + l.key" type="button" v-else-if="l.kind === 'update'" @click="act('open-update')">{{ l.label }}</button>
-              <button class="aero-btn" :class="'about-' + l.key" type="button" v-else @click="act('open-guide')">{{ l.label }}</button>
+              <asn-button :class="'about-' + l.key" v-if="l.kind === 'link'" @click="act('open-link', l.url)">{{ l.label }}</asn-button>
+              <asn-button :class="'about-' + l.key" v-else-if="l.kind === 'update'" @click="act('open-update')">{{ l.label }}</asn-button>
+              <asn-button :class="'about-' + l.key" v-else @click="act('open-guide')">{{ l.label }}</asn-button>
             </template>
           </div>
         </section>
@@ -871,7 +863,7 @@ export const SettingsPanel = {
           <b>記錄</b>
           <small>出問題時可以看這份記錄</small>
           <div class="upd-row">
-            <button class="aero-btn" type="button" @click="act('open-ui-log')">檢視記錄</button>
+            <asn-button @click="act('open-ui-log')">檢視記錄</asn-button>
           </div>
           <small v-if="st.uiLogMsg" role="status">{{ st.uiLogMsg }}</small>
         </section>
@@ -879,10 +871,10 @@ export const SettingsPanel = {
       </template>
       <asn-dialog v-if="forgetBox" :title="KNOWN.forgetTitle" initial-focus=".forget-cancel" @close="forget.no">
         <p class="launch-notice-body">{{ forgetBox.text }}</p>
-        <div class="partner-actions">
-          <button class="aero-btn forget-cancel" type="button" @click="forget.no">{{ KNOWN.forgetCancel }}</button>
-          <button class="aero-btn dv-danger" type="button" @click="forget.yes">{{ KNOWN.forgetYes }}</button>
-        </div>
+        <asn-actions class="partner-actions">
+          <asn-button class="forget-cancel" @click="forget.no">{{ KNOWN.forgetCancel }}</asn-button>
+          <asn-button state="danger" @click="forget.yes">{{ KNOWN.forgetYes }}</asn-button>
+        </asn-actions>
       </asn-dialog>
     </div>`,
 }
