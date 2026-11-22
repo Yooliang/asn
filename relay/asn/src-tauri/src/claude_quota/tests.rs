@@ -453,6 +453,72 @@ fn shape_鍵名長得像_uuid_或_email_或超過_40_字元_一律換成_key_看
     assert_eq!(shape_of(&json!({ "k".repeat(40): 1 })), json!({ "k".repeat(40): "number" }), "剛好 40 字元照印");
 }
 
+// ---------- 除錯命令 asn-cli claude-usage --profile-shape（#1646）：白名單的固定代碼欄位印值，其餘只印型別 ----------
+const P_EMAIL: &str = "someone.secret@x.test";
+const P_UUID: &str = "3f2b8a1c-9d4e-4c7a-8b1f-0a2b3c4d5e6f";
+const P_NAME: &str = "Secret Person Name";
+
+fn profile_body() -> Value {
+    json!({
+        "account": { "uuid": P_UUID, "email": P_EMAIL, "full_name": P_NAME, "display_name": "SecretNick", "has_claude_pro": false, "has_claude_max": true, "created_at": "2025-01-01T00:00:00Z" },
+        "organization": {
+            "uuid": P_UUID, "name": P_NAME, "organization_type": "claude_max", "billing_type": "stripe_subscription",
+            "rate_limit_tier": "default_claude_max_5x", "subscription_type": "max", "subscription_status": "canceled", "seats": 3, "flags": [{ "organization_type": P_EMAIL }, "plainstring"],
+            "nickname_code": "NotOnList"
+        },
+        "email_as_code": { "organization_type": P_EMAIL, "billing_type": P_UUID, "subscription_type": "has space", "rate_limit_tier": "" }
+    })
+}
+
+#[test]
+fn profile_shape_白名單欄位印值_名單外與個資只印型別() {
+    let out = serde_json::to_string_pretty(&shape_with(&profile_body(), &PROFILE_VALUE_KEYS, None, true)).unwrap();
+    for bad in [P_EMAIL, P_UUID, P_NAME, "SecretNick", "2025-01-01", "plainstring", "NotOnList"] {
+        assert!(!out.contains(bad), "值不能出現：{bad}\n{out}");
+    }
+    let v: Value = serde_json::from_str(&out).unwrap();
+    assert_eq!(v["organization"]["organization_type"], "claude_max");
+    assert_eq!(v["organization"]["billing_type"], "stripe_subscription");
+    assert_eq!(v["organization"]["rate_limit_tier"], "default_claude_max_5x");
+    assert_eq!(v["organization"]["subscription_type"], "max");
+    // 停訂的關鍵訊號（第三方專案 uwuclxdy/clauth 以 subscription_status == "canceled" 區分停訂與從未付費的免費帳號）
+    assert_eq!(v["organization"]["subscription_status"], "canceled");
+    assert_eq!(v["account"]["has_claude_pro"], false);
+    assert_eq!(v["account"]["has_claude_max"], true);
+    // 名單外：字串 <字串>、數字只印型別；鍵名照印
+    assert_eq!(v["account"]["email"], "<字串>");
+    assert_eq!(v["organization"]["nickname_code"], "<字串>");
+    assert_eq!(v["organization"]["seats"], "number");
+    // 白名單鍵但值不像代碼（email、uuid、有空白）一律不印；空字串標空字串
+    assert_eq!(v["email_as_code"]["organization_type"], "<字串>");
+    assert_eq!(v["email_as_code"]["billing_type"], "<字串>");
+    assert_eq!(v["email_as_code"]["subscription_type"], "<字串>");
+    assert_eq!(v["email_as_code"]["rate_limit_tier"], "<空字串>");
+    // 陣列裡面的物件也照白名單判斷（email 值不印），陣列裡名單外的字串只印型別
+    assert_eq!(v["organization"]["flags"], json!([{ "organization_type": "<字串>" }, "<字串>"]));
+    // usage 的 --shape 行為不變：不帶白名單時代碼也不印、字串仍是 string
+    let plain = shape_of(&profile_body()).to_string();
+    assert!(!plain.contains("\"claude_max\"") && !plain.contains("default_claude_max_5x") && plain.contains("\"string\"") && !plain.contains("<字串>"));
+}
+
+#[test]
+fn profile_shape_命令用假憑證加假伺服器_只查帳號資料端點一次() {
+    let h = home("a@x.test", NOW + 3_600_000);
+    let f = serve(http("200 OK", &profile_body().to_string()), usage_ok());
+    let out = profile_shape_report(h.path(), NOW, &f.net);
+    for bad in [P_EMAIL, P_UUID, P_NAME, TOKEN, REFRESH] {
+        assert!(!out.contains(bad), "輸出不能含值：{bad}");
+    }
+    assert!(out.contains("\"organization_type\": \"claude_max\"") && out.contains("\"has_claude_max\": true"), "{out}");
+    assert_eq!(f.count(), 1);
+    assert!(f.requests().contains("/api/oauth/profile"));
+    let f2 = serve(http("403 F", ERR_BODY), usage_ok());
+    assert_eq!(profile_shape_report(h.path(), NOW, &f2.net), "查詢失敗：HTTP 403");
+    let f3 = serve(profile_ok("a@x.test"), usage_ok());
+    assert!(profile_shape_report(home("a@x.test", NOW - 1).path(), NOW, &f3.net).contains("過期"));
+    assert_eq!(f3.count(), 0);
+}
+
 // ---------- 西川一審（#1885）：讀不懂的窗、log 去重、沒登入後登入 ----------
 fn usage_with(five: Value, week: Value) -> String {
     http("200 OK", &json!({ "five_hour": five, "seven_day": week }).to_string())
