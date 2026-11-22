@@ -136,3 +136,8 @@ test('#2105 移除／刪除／結束／忘記／撤銷這類不可復原的動�
     assert.ok(tag && !/state="danger"/.test(tag), `${h} 不是危險鈕`)
   }
 })
+
+test('#2105 黃色只給「重新登入」：重新登入鈕是 relogin 狀態，其他按鈕不用', () => {
+  assert.match(panel, /<asn-button state="relogin" @click="act\('relogin-ask'/)
+  assert.equal((panel.match(/state="relogin"/g) ?? []).length, 1)
+})
