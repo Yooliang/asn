@@ -73,16 +73,19 @@ test('發版：bump.mjs 會把 plugin.json 的 version 一起改（在暫存複�
   } finally { fs.rmSync(t, { recursive: true, force: true }) }
 })
 
-test('設定頁：狀態行由 claude_mod_status 帶進來、事件會更新、指令有註冊', async () => {
-  const invoke = async cmd => { if (cmd === 'claude_mod_status') return 'Claude 外掛：已安裝'; if (cmd === 'claude_accounts_list') return []; return null }
+test('設定頁：外掛狀態由 claude_mod_report 帶進來、事件會更新、指令有註冊、舊指令已拿掉', async () => {
+  const rep = { state: 'installed', version: '1.2.3' }
+  const invoke = async cmd => { if (cmd === 'claude_mod_report') return rep; if (cmd === 'claude_accounts_list') return []; return null }
   const ui = createAccountsUi({ invoke, reactive: o => o, sleep: async () => {} })
-  assert.equal(ui.state.mod, '')
+  assert.equal(ui.state.mod, null)
   await ui.refresh()
-  assert.equal(ui.state.mod, 'Claude 外掛：已安裝')
-  const old = createAccountsUi({ invoke: async cmd => { if (cmd === 'claude_mod_status') throw new Error('x'); return null }, reactive: o => o })
+  assert.deepEqual(ui.state.mod, rep)
+  const old = createAccountsUi({ invoke: async cmd => { if (cmd === 'claude_mod_report') throw new Error('x'); return null }, reactive: o => o })
   await old.refresh()
-  assert.equal(old.state.mod, '', '舊版 Rust 沒這個指令就不顯示')
-  assert.match(read('ui/lib/settings-panel.mjs'), /v-if="st\.accounts\.mod"[^>]*>\{\{ st\.accounts\.mod \}\}/)
+  assert.equal(old.state.mod, null, '舊版 Rust 沒這個指令就不顯示')
+  assert.match(read('ui/lib/settings-panel.mjs'), /aria-label="Claude 外掛" v-if="modLine\(st\.accounts && st\.accounts\.mod\)"/)
   assert.match(read('ui/list.js'), /listen\('claude-mod-status'/)
-  assert.ok(read('src-tauri/src/lib.rs').includes('claude_mod::claude_mod_status'))
+  const lib = read('src-tauri/src/lib.rs')
+  assert.ok(lib.includes('claude_mod::claude_mod_report') && lib.includes('claude_mod::claude_mod_check'))
+  assert.ok(!/claude_mod_auto_(get|set)|claude_mod::claude_mod_status/.test(lib + read('ui/list.js') + read('ui/onboard.js')), '打勾框用的指令已拿掉')
 })

@@ -2,6 +2,8 @@
 // 每一項各自勾選、按「完成」才依勾選執行；每項各自顯示結果，失敗不擋人進名單。沒勾的之後可以到「設定 → 啟動設定」補做。
 // 純邏輯與元件放一起；這個檔在 node 也要能載入（測試），所以 Vue 只在 setup 裡取用。
 
+import { modStatusLine } from './mod-line.mjs'
+
 // pi 的官方說明（寫死在程式裡，不從遠端讀）
 export const PI_DOC_URL = 'https://github.com/earendil-works/pi'
 
@@ -15,7 +17,7 @@ export const CONNECT_TEXT = {
   piLogin: '登入 pi',
   piLoginNote: '請在打開的視窗輸入 /login，ASN 不會看到你的登入資料',
   modTitle: 'Claude 外掛',
-  modDesc: 'ASN 必要元件，會自動安裝和更新。',
+  modDesc: 'ASN 必要元件，會自動安裝，ASN 更新時一起更新。',
   done: '完成',
   running: '處理中…',
   enter: '進入名單',
@@ -27,9 +29,9 @@ export const CONNECT_TEXT = {
 export const connectDefaults = ({ piDetected = false } = {}) => ({ pi: Boolean(piDetected), mod: true })
 
 /**
- * 依勾選執行。ops：{ piInstall(), modAuto(on) }（都是 async）。
+ * 依勾選執行。ops：{ piInstall(), modInstall() }（都是 async）。
  * - pi：有勾才做；沒勾就不動（pi 沒偵測到時不做）
- * - Claude 外掛：必要元件，不管 choice 怎麼傳都一律打開「自動安裝或更新」並馬上檢查一次
+ * - Claude 外掛：必要元件，不管 choice 怎麼傳都一律馬上檢查並安裝一次
  * 一項失敗不影響其他項。回 [{ key, ok, text }]（每項一列，給畫面照實顯示）
  */
 export async function runConnect(choice, ops, { piDetected = false } = {}) {
@@ -44,13 +46,19 @@ export async function runConnect(choice, ops, { piDetected = false } = {}) {
   }
   if (choice.pi && piDetected) await step('pi', () => ops.piInstall(), '已開啟，之後自己開的 pi 也能收發信')
   else out.push({ key: 'pi', ok: true, text: piDetected ? CONNECT_TEXT.skipped : CONNECT_TEXT.piMissing })
-  await step('mod', () => ops.modAuto(true), '會自動安裝或更新')
+  // 外掛：照 Rust 實際檢查的結果顯示（和設定頁同一份文字）；查不到結果就不寫任何成功字樣
+  try {
+    const report = await ops.modInstall()
+    out.push({ key: 'mod', ok: !['failed', 'update_failed'].includes(report?.state), text: modStatusLine(report) })
+  } catch (e) {
+    out.push({ key: 'mod', ok: false, text: `沒有成功：${String(e?.message ?? e) || '原因不明'}` })
+  }
   return out
 }
 
 export const ConnectStep = {
   props: {
-    api: { type: Object, required: true },   // { piSetupStatus(), piInstall(), modAuto(on), piLogin() }
+    api: { type: Object, required: true },   // { piSetupStatus(), piInstall(), modInstall(), piLogin() }
   },
   emits: ['done'],
   setup(props, { emit }) {
@@ -82,7 +90,7 @@ export const ConnectStep = {
         <button class="aero-btn" type="button" v-if="piDetected" @click.prevent="login">{{ T.piLogin }}</button>
         <small v-if="loginMsg">{{ loginMsg }}</small>
         <small v-if="resultOf('pi')" :class="{ 'login-err': !resultOf('pi').ok }">{{ resultOf('pi').text }}</small></span></label>
-      <label class="connect-card"><input type="checkbox" checked disabled><span><b>{{ T.modTitle }}</b><small>{{ T.modDesc }}</small><small v-if="resultOf('mod')" :class="{ 'login-err': !resultOf('mod').ok }">{{ resultOf('mod').text }}</small></span></label>
+      <label class="connect-card"><input type="checkbox" checked disabled><span><b>{{ T.modTitle }}</b><small>{{ T.modDesc }}</small><small v-if="resultOf('mod') && resultOf('mod').text" :class="{ 'login-err': !resultOf('mod').ok }">{{ resultOf('mod').text }}</small></span></label>
       <button type="button" class="aero-btn login-btn" v-if="!results" :disabled="busy" @click="submit">{{ busy ? T.running : T.done }}</button>
       <button type="button" class="aero-btn login-btn" v-else @click="enter">{{ T.enter }}</button>
     </div>`,

@@ -26,7 +26,7 @@ const app = createApp({
     const connectApi = {
       piSetupStatus: () => invoke('pi_setup_status'),
       piInstall: () => invoke('pi_setup_install'),
-      modAuto: on => invoke('claude_mod_auto_set', { on }),
+      modInstall: () => invoke('claude_mod_check'),
       piLogin: () => invoke('ai_cli_login', { toolId: 'pi' }),
     }
     const finish = async () => {

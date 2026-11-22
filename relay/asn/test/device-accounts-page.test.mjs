@@ -156,9 +156,9 @@ test('這台的頁籤：完整的帳號管理（切換、刪除、加入、自�
 })
 
 test('這台的頁籤：刪除要二次確認、忙碌時按鈕停用、警告與狀態列照實顯示；沒登入 Claude 時寫提示', async () => {
-  const a = { ...ACCT, confirmDel: 'p@b.c', busy: true, msg: '已切換', mod: '外掛已安裝', autoNote: '已自動加入 q@b.c', current: { email: 'z@b.c', saved: false } }
+  const a = { ...ACCT, confirmDel: 'p@b.c', busy: true, msg: '已切換', mod: { state: 'installed', version: '1.0.0' }, autoNote: '已自動加入 q@b.c', current: { email: 'z@b.c', saved: false } }
   const html = await render({ catKey: 'devices', dev: 'H' }, st({ accounts: a }))
-  assert.ok(html.includes('確認刪除') && html.includes('已切換') && html.includes('外掛已安裝') && html.includes('已自動加入 q@b.c'))
+  assert.ok(html.includes('確認刪除') && html.includes('已切換') && html.includes('已安裝 v1.0.0') && html.includes('已自動加入 q@b.c'))
   assert.ok(html.includes('目前登入的 z@b.c 還沒加入帳號庫'))
   const none = await render({ catKey: 'devices', dev: 'H' }, st({ accounts: { ...ACCT, list: [], current: null }, devices: [{ ...devs()[0], vendors: [] }, ...devs().slice(1)] }))
   assert.ok(none.includes('這台電腦目前沒有 Claude 登入。') && none.includes('還沒有加入過帳號。'))
