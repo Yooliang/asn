@@ -6,6 +6,10 @@
     "windows-x86_64": {
       "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpISzc0aFNvenc4NkNlWDc5RkppbElVSnRhN1F0TEVUcEFFZzhJMnZzdGZOcjdPMnVmSUdpT1o1eTd5TmRkVG5BS3lTbjZQbHlkQ3ZabWs5aUJJSGdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzU4MTc4CWZpbGU6QVNOXzAuMi42OF94NjQtc2V0dXAuZXhlCjRTVHFDYnp4elBHUDd4RVVZa0djMTlpbHRObWhyc0tTZU5uT2ZYckc5MFYrTWVVWkwwb3d1VktieGR6VkNRQjJiUEY2QjZ0WlRQSGdGZVgveW9QaEJnPT0K",
       "url": "https://asnmessenger.web.app/update/ASN_0.2.68_x64-setup.exe"
+    },
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnpaYjV5dXhmWDRjOHBseDdlcm5zTzZpcm01dmlLYTJGNnJRbGJtdVZ2TnJKUW52eG1vNm1kN21xQUxOdW8ydjZOSlF3M1lFc0ZweDRncGo0Slh5aEFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzU4Nzc4CWZpbGU6QVNOXzAuMi42OF9hbWQ2NC5BcHBJbWFnZQpuZENjeWJGaHZKdEx3aGhZWElJWUQ0aTBHTnAxOTlkdUc3Y0RXUGFacGhLTTQrUGhRMEd4MEw1SGM2NzNMUS9nOWxFY1BmT0w0VW04WE0rbnRPcTBCZz09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.68_amd64.AppImage"
     }
   }
 }
