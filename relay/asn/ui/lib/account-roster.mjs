@@ -313,7 +313,9 @@ export function accountDeviceRows(devices, vendor, email, usedOn, opts = {}) {
     // 設備樹沒有這個廠商（還沒收到那台的回報）時，後台說它用過這個帳號就列出來；有回報卻沒這個帳號＝沒登入，不列
     const unreported = !d.self && !v && Boolean(u)
     // 後台說這台正在用這個帳號，就一定列出（手機沒有自己的帳號庫、設備樹裡看不到它的帳號，也一樣）
-    const usingByBackend = u?.current === true
+    // 只在設備樹裡根本沒有這個廠商（手機沒有自己的 Claude 帳號庫）時才信後台；本機有這個廠商的帳號庫就以庫為準，
+    // 後台舊資料說在用也不畫（#2110：換過帳號、後台還沒更新時，不能把本機沒登入的帳號寫成「使用中」）
+    const usingByBackend = u?.current === true && !v
     if (!has && !unreported && !usingByBackend) continue
     const current = d.self && has ? has.current === true : (u?.current === true || has?.current === true)
     const st = rowStateOf(d, v ?? { accounts: [] }, has, vendor, current, Array.isArray(opts.vendors) ? opts.vendors : ['claude', 'grok'])
