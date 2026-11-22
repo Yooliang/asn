@@ -437,8 +437,8 @@ pub async fn claude_mod_check(app: tauri::State<'_, crate::App>, handle: tauri::
     let out = tauri::async_runtime::spawn_blocking(move || run_real(&dir)).await.unwrap_or_else(|_| Outcome::Failed("背景工作中斷".into()));
     let rep = out.report();
     set_report(Some(rep.clone()));
-    let _ = handle.emit("claude-mod-status", rep);
-    Ok(())
+    let _ = handle.emit("claude-mod-status", rep.clone());
+    Ok(rep)
 }
 
 #[cfg(test)]
