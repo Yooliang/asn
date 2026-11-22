@@ -651,7 +651,6 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .voice-note{padding:3px 10px;font-size:12px;color:var(--muted)}
 .voice-install{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 10px;font-size:12px;background:#fffbe6;border-top:1px solid var(--line)}
 .voice-install>span{flex:1 1 220px}
-.voice-install .aero-btn{padding:2px 12px}
 .voice-set{display:flex;flex-direction:column;gap:6px}
 
 .titlebar .ver { opacity: .7; font-weight: normal; }
@@ -700,7 +699,6 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .acct-txt{flex:1;min-width:0;display:flex;flex-direction:column}
 .acct-name em{font-style:normal;margin-left:6px;font-size:11px;color:#2a7a3a}
 .acct-txt small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.acct-list .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}
 .acct-add{display:flex;gap:6px}
 .acct-list .chk{display:flex;flex-direction:row;align-items:center;gap:8px;flex:1;min-width:0}
 .upd-bar{display:flex;gap:6px;align-items:center;padding:4px 8px;background:#fff6d6;border-bottom:1px solid #d9c26a;font-size:12px}
