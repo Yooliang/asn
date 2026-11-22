@@ -20,6 +20,9 @@ export const reloginErrorText = e => (typeof e === 'string' ? e : e?.message || 
 export const USAGE_FAILED_TEXT = '暫時讀不到用量，稍後再試一次。'
 export const usageErrorText = _e => USAGE_FAILED_TEXT
 
+/** 帳號卡各操作失敗：字串或 Error 都原文顯示（以前 claude-accounts.mjs 自己的 errText） */
+export const accountsErrorText = e => (typeof e === 'string' ? e : e?.message || String(e))
+
 /** 改名失敗：後台（Rust）回的是中文說明就原樣顯示，其他一律說白話 */
 export function renameErrorText(e) {
   const s = String(e?.message ?? e ?? '').trim()
