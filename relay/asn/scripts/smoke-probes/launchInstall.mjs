@@ -54,11 +54,11 @@ export const launchInstallProbeSource = ({ mode = 'install', end = 'idle' } = {}
   if (!note) return { ok: false, why: '按下去沒有在原位跳出確認說明：' + claude.textContent.trim() };
   if (btnOf(claude)) return { ok: false, why: '確認時進行安裝／更新鈕應先收起' };
   const btns = [...note.querySelectorAll('button')].filter(vis);
-  if (btns.map(x => x.textContent.trim()).join('｜') !== want.yes + '｜先不要') return { ok: false, why: '確認的兩顆鈕不對：' + btns.map(x => x.textContent.trim()).join('｜') };
+  if (btns.map(x => x.textContent.trim()).join('｜') !== '先不要｜' + want.yes) return { ok: false, why: '確認的兩顆鈕不對：' + btns.map(x => x.textContent.trim()).join('｜') };
   if (!btns.every(x => edge(x, note, 8) || x.getBoundingClientRect().right <= note.getBoundingClientRect().right)) return { ok: false, why: '確認的鈕沒有在右邊' };
   if (calls('ai_cli_install').length) return { ok: false, why: '還沒同意就呼叫了安裝' };
   if (want.end === 'idle') {
-    await real({ click: at(btns[1]) });
+    await real({ click: at(btns[0]) });
     if (!(await waitFor(() => btnOf(claude) && !claude.querySelector('.launch-install-note'), 30))) return { ok: false, why: '按「先不要」後應回到只有一顆鈕' };
     if (calls('ai_cli_install').length) return { ok: false, why: '按「先不要」不該呼叫安裝' };
     return { ok: true, why: '' };
@@ -66,7 +66,7 @@ export const launchInstallProbeSource = ({ mode = 'install', end = 'idle' } = {}
   // 3. 同意
   if (want.end === 'ok') globalThis.__smokeOverride = { ai_cli_detect: want.toolsAfter, ai_cli_status: want.statusAfter };
   const s0 = calls('ai_cli_status').length;
-  await real({ click: at(btns[0]) });
+  await real({ click: at(btns[1]) });
   const inst = await waitFor(() => calls('ai_cli_install').length === 1 ? calls('ai_cli_install')[0] : null, 30);
   if (!inst || inst[1].toolId !== 'claude') return { ok: false, why: '同意後要呼叫一次 ai_cli_install，toolId=claude：' + JSON.stringify(calls('ai_cli_install')) };
   if (want.end === 'running') {
