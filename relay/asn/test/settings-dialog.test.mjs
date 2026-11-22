@@ -71,7 +71,7 @@ const fullState = () => ({
   },
   closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
   autoCheck: true, upd: { checking: false, installing: false, manual: '', status: { tone: 'ok', head: '已是最新版', lines: ['目前版本 9.9.9', '最後檢查：今天 14:03'] } },
-  launch: { tools: [{ id: 'claude', label: 'Claude Code', installed: true, version: '2.0', installHint: '' }, { id: 'gemini', label: 'Gemini', installed: false, version: '', installHint: '先安裝 Gemini CLI' }], maxPerHour: 6, cwdText: 'D:/a\nD:/b' },
+  launch: { tools: [{ id: 'claude', label: 'Claude Code', installed: true, version: '2.0', installHint: '' }, { id: 'gemini', label: 'Gemini', installed: false, version: '', installHint: '先安裝 Gemini CLI' }], maxPerHour: 6, cwdList: ['D:/a', 'D:/b'], cwdSuggest: ['D:/c'], cwdMsg: '' },
   usage: { loading: false, error: '', updated: '14:05', data: { empty: '', unpriced: '', priceLine: '價目依 Anthropic 官方公開定價（2026-10-22 抄錄）', periods: [{ key: 'today', label: '今天', cost: '$1.20', tokens: '3,000', messages: 2, detail: '輸入 1', models: [{ model: 'claude-opus-4-5', cost: '$1.20', tokens: '3,000', messages: 2, priced: true }] }] } },
   version: '9.9.9',
   askpass: { path: 'C:/x/asn-askpass.exe', example: 'setx SSH_ASKPASS "C:/x/asn-askpass.exe"', copied: false },
@@ -104,7 +104,7 @@ test('設定表單：每一類都轉得出來，各類原本的項目都在', as
     notify: ['右下角通知', '通知聲音', '震動聲音', '收到檔案聲音'],
     voice: ['念出訊息的聲音', '收到新訊息自動念', '語音輸入的語言', '語音辨識模型', '下載語音辨識', '曉曉', '尚未安裝'],
     window: ['關閉視窗時', '登入時自動啟動 ASN'],
-    launch: ['別的設備一小時最多替這台開', '工作資料夾白名單', 'Claude Code', '先安裝 Gemini CLI'],
+    launch: ['別的設備一小時最多替這台開', '可以開新夥伴的資料夾', 'Claude Code', '先安裝 Gemini CLI'],
     usage: ['重新整理', '不是帳單', '更新於 14:05', '今天', '約 $1.20', 'claude-opus-4-5', '價目依 Anthropic 官方公開定價'],
     update: ['自動檢查更新', '立即檢查', '已是最新版', '目前版本 9.9.9', '最後檢查：今天 14:03', '版本更新記錄'],
     about: ['版本 9.9.9'],
@@ -125,7 +125,7 @@ test('設定表單：照目前的值顯示（選中項、勾選、數字、文�
   assert.match(await render('look', st), /<select[^>]*value="right"[^>]*aria-label="頭像模式"/)
   assert.match(await render('window', st), /type="checkbox"[^>]*checked/)
   assert.match(await render('launch', st), /type="number"[^>]*value="9"/)
-  assert.match(await render('launch', st), /D:\/a\nD:\/b|D:\/a&#10;D:\/b/)
+  { const html = await render('launch', st); assert.ok(html.includes('>D:/a</span>') && html.includes('>D:/b</span>') && html.includes('建議：D:/c'), '清單一列一個資料夾、建議列照顯示') }
   assert.ok((await render('me', st)).includes('目前用的是這台設備上傳的大頭貼。'))
   const off = fullState(); off.trayOk = false; off.autostart.supported = false; off.voice.enabled = false
   assert.ok((await render('window', off)).includes('建不起系統匣圖示'))
@@ -165,7 +165,7 @@ test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住
 test('守門：每個舊設定項目的行為綁定都還在（改走樞紐指令，存檔欄位不變）', () => {
   const hub = read('list.js')
   for (const k of ['setFrame(value)', 'setMode(value)', 'setTabDim(value)', 'saveVoice(value)', 'installFromSettings()', 'accounts.switchTo(value)', 'accounts.remove(value)', 'accounts.remoteSwitch(', 'accounts.setAllowSwitch(',
-    'setCloseTo(value)', 'setAutostart(', 'checkUpdate(true)', 'saveLaunchPrefs()', 'setLaunchCwdText(', 'removeAvatar()', 'notifyWith(notifyPrefs.value', 'normalizeDpMode(value)', 'normalizeBubble(value)']) {
+    'setCloseTo(value)', 'setAutostart(', 'checkUpdate(true)', 'saveLaunchPrefs()', 'addLaunchCwd()', 'removeLaunchCwd(', 'addSuggestedCwd(', 'removeAvatar()', 'notifyWith(notifyPrefs.value', 'normalizeDpMode(value)', 'normalizeBubble(value)']) {
     assert.ok(hub.includes(k), `樞紐缺 ${k}`)
   }
   // 存檔格式不變：還是這些欄位

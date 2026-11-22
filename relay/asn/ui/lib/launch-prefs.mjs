@@ -57,6 +57,15 @@ function cwdKey(p) {
   return x
 }
 
+/** 設定頁「建議資料夾」：最近用過的、還不在白名單裡的（不同寫法算同一個），最多 max 筆；只是建議，一個一個按「加入」才會存 */
+export function suggestCwds(allow, recent, max = 3) {
+  const have = new Set((allow ?? []).map(cwdKey))
+  return mergeCwdLists([recent ?? []], CWD_MAX).filter(p => !have.has(cwdKey(p))).slice(0, max)
+}
+
+/** 白名單裡有沒有這個資料夾（不同寫法算同一個） */
+export const hasCwd = (list, p) => (list ?? []).some(x => cwdKey(x) === cwdKey(p))
+
 /** 把多份清單依先後合併：去重（不同寫法算同一個）、最多 CWD_MAX 筆 */
 export function mergeCwdLists(lists, max = CWD_MAX) {
   const seen = new Set()

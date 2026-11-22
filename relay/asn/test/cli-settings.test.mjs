@@ -10,7 +10,7 @@ import { SETTING_OPS, SettingsPanel } from '../ui/lib/settings-panel.mjs'
 const base = () => ({
   closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
   cli: { path: 'C:/Users/x/AppData/Local/ASN/asn-cli.exe', example: 'C:/Users/x/AppData/Local/ASN/asn-cli.exe send --to <節點/視窗名>', copied: false },
-  launch: { tools: [], maxPerHour: 6, cwdText: '' },
+  launch: { tools: [], maxPerHour: 6, cwdList: [], cwdSuggest: [], cwdMsg: '' },
   askpass: { path: 'C:/x/asn-askpass.exe', example: 'setx SSH_ASKPASS "C:/x/asn-askpass.exe"', copied: false },
 })
 const render = async (st, catKey) => {

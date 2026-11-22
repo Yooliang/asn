@@ -28,7 +28,7 @@ test('設定的「關於」有「檢視記錄」按鈕與一行說明；別的�
   assert.ok(html.includes('出問題時可以看這份記錄'))
   assert.ok('出問題時可以看這份記錄'.length <= 20, '說明 20 字內')
   assert.ok(!html.includes('role="status"'), '還沒按過不顯示說明')
-  assert.ok(!(await render({ version: '9.9.9', launch: { tools: [], maxPerHour: 6, cwdText: '' } }, 'launch')).includes('檢視記錄'))
+  assert.ok(!(await render({ version: '9.9.9', launch: { tools: [], maxPerHour: 6, cwdList: [], cwdSuggest: [], cwdMsg: '' } }, 'launch')).includes('檢視記錄'))
 })
 
 test('退回開資料夾時，說明顯示在按鈕下面', async () => {

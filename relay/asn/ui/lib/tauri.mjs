@@ -63,6 +63,7 @@ export const transport = {
   tasksQuery: req => invoke('tasks_query', { req }),                 // 這個 Claude 視窗正在跑的背景工作（讀外掛寫的狀態檔，#539 之三）
   launchCwdCandidates: () => invoke('launch_cwd_candidates'),   // 白名單＋自動建議（Rust 端合併、去重、略過不存在的）
   launchCwdBrowse: () => invoke('launch_cwd_browse'),   // Rust 端開「選擇資料夾」；→ 路徑（已寫進本機白名單）或 null
+  launchCwdRemove: cwd => invoke('launch_cwd_remove', { cwd }),   // 設定頁「移除」：依路徑從本機白名單拿掉一筆 → 移除後的清單；找不到丟白話原因
   launchPrefsGet: () => invoke('launch_prefs_get'),
   launchPrefsSet: prefs => invoke('launch_prefs_set', { prefs }),
   claudeQuotaState: () => invoke('claude_quota_state'),             // 這台目前登入的 Claude 帳號的額度查詢狀態（#1883）：→ { email, status: ok|login_expired|rate_limited|unavailable|none, read_at, windows }

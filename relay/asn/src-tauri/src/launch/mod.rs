@@ -127,15 +127,24 @@ pub async fn launch_cwd_candidates(data_dir: PathBuf) -> Result<Vec<String>, Str
     .await
 }
 
-/// 「瀏覽…」選好的資料夾：存在才收，並寫進本機白名單；回傳正規化後的路徑。
+/// 「瀏覽…」選好的資料夾：經 [`cwds::validate_cwd`] 驗證（存在、是資料夾、不超過上限）後寫進本機白名單；回傳正規化後的路徑。
+/// 已經在清單裡的不算錯（開新夥伴對話框挑到舊資料夾照樣選得到）。
 pub async fn launch_cwd_add(data_dir: PathBuf, cwd: String) -> Result<String, String> {
-    blocking_timeout(move || {
-        let p = cwds::norm_path(&cwd).ok_or_else(|| "資料夾是空的".to_string())?;
-        if !std::path::Path::new(&p).is_dir() {
-            return Err(format!("資料夾不存在：{p}"));
+    blocking_timeout(move || match cwds::add_validated(&data_dir, &cwd) {
+        Ok(p) => Ok(p),
+        Err(cwds::CwdReject::Duplicate(p)) => Ok(p),
+        Err(e) => {
+            elog!("[launch] 加入工作資料夾被拒：{e:?}");
+            Err(e.text())
         }
-        cwds::add_to_prefs_allow(&data_dir, &p)?;
-        Ok(p)
+    })
+    .await
+}
+
+/// 設定頁「移除」：依路徑從本機白名單拿掉一筆，回傳移除後的清單。
+pub async fn launch_cwd_remove(data_dir: PathBuf, cwd: String) -> Result<Vec<String>, String> {
+    blocking_timeout(move || {
+        cwds::remove_from_prefs_allow(&data_dir, &cwd).inspect_err(|e| elog!("[launch] 移除工作資料夾失敗：{cwd}：{e}"))
     })
     .await
 }
@@ -192,7 +201,14 @@ pub fn with_effective_max(prefs: Value, file: Option<u32>) -> Value {
 }
 
 pub async fn launch_prefs_set(data_dir: PathBuf, prefs: Value) -> Result<(), String> {
-    blocking_timeout(move || launch_prefs_set_sync(&data_dir, prefs)).await
+    blocking_timeout(move || launch_prefs_set_checked(&data_dir, prefs)).await
+}
+
+/// 設定頁整份存檔：只驗「新加入」的工作資料夾（舊存檔裡的原樣保留，含已不存在的），不合格整份拒絕；詳見 [`cwds::check_prefs_write`]。
+pub fn launch_prefs_set_checked(data_dir: &std::path::Path, prefs: Value) -> Result<(), String> {
+    let current = launch_prefs_get_sync(data_dir).unwrap_or(Value::Null);
+    cwds::check_prefs_write(&current, &prefs).inspect_err(|e| elog!("[launch] 啟動設定存檔被拒：{e}"))?;
+    launch_prefs_set_sync(data_dir, prefs)
 }
 
 /// 遠端開新夥伴。有登入就帶本人簽章（成員角色的電腦不帶，後台回 403 forbidden；跟 [`relay_launchers`] 一樣），沒登入照舊不帶。

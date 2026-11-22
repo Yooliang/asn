@@ -36,7 +36,7 @@ export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 換班接手要等前任�
 export const CLOSED_REASONS = Object.freeze({
   noConsent: '到那台的 設定 → 視窗與系統匣，勾「允許我的其他設備替這台開新視窗」',
   noProfile: '那台還找不到 Claude，裝好後約一分鐘會自動更新',
-  noCwd: '到那台的 設定 → 啟動設定，在「工作資料夾白名單」加上資料夾',
+  noCwd: '到那台的 設定 → 啟動設定，在「可以開新夥伴的資料夾」加上資料夾',
 })
 
 export const REASON = {

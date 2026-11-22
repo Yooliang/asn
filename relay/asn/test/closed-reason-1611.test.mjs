@@ -47,7 +47,7 @@ test('開放中（有 launcher）不受影響，就算殘留舊原因也照開�
 test('長句講去哪裡改；短句 20 字內', () => {
   assert.match(CLOSED_REASONS.noConsent, /設定 → 視窗與系統匣，勾「允許我的其他設備替這台開新視窗」/)
   assert.match(CLOSED_REASONS.noProfile, /找不到 Claude/)
-  assert.match(CLOSED_REASONS.noCwd, /設定 → 啟動設定，在「工作資料夾白名單」加上資料夾/)
+  assert.match(CLOSED_REASONS.noCwd, /設定 → 啟動設定，在「可以開新夥伴的資料夾」加上資料夾/)
   const want = { noConsent: '那台沒勾開新視窗的允許', noProfile: '那台還找不到 Claude', noCwd: '那台白名單是空的' }
   for (const [k, short] of Object.entries(want)) {
     assert.equal(briefWhy(CLOSED_REASONS[k]), short)

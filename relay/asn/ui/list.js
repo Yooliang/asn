@@ -60,7 +60,7 @@ import { PI_SETUP_TEXT, piSetupError, piSetupView } from './lib/pi-setup.mjs'
 import { CONNECT_TEXT } from './lib/connect-tools.mjs'
 import { loadEnvNotice } from './lib/env-notice.mjs'
 import { clampCompactN } from './lib/compact-handoff.mjs'
-import { CWD_EMPTY_HINT, bumpRecentCwd, clampMaxPerHour, cwdChoices, launchPrefsToSave, mergeCwdLists, normalizeLaunchPrefs, withPickedCwd } from './lib/launch-prefs.mjs'
+import { CWD_EMPTY_HINT, bumpRecentCwd, clampMaxPerHour, cwdChoices, hasCwd, launchPrefsToSave, mergeCwdLists, normalizeLaunchPrefs, suggestCwds, withPickedCwd } from './lib/launch-prefs.mjs'
 import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleReq, engineForProfile, launchDeviceRows, localProfileEngine, launchDisableReason, remoteModelRows, showDisplayModeChoice, foregroundOnlyProfile, withTimeout } from './lib/partner-launch-ui.mjs'
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, PartnerOpStrip, createOpRunner, loadOpsContext } from './lib/partner-ops-ui.mjs'
@@ -496,7 +496,7 @@ async function openLaunchLogFolder() {
 // 設定頁「檢視記錄」：開 ui.log，開不了就退回開記錄資料夾；說明顯示在設定頁（#339）
 const uiLogMsg = ref('')
 const launchPrefs = reactive(normalizeLaunchPrefs(null))
-const launchCwdText = ref('')
+const launchCwdMsg = ref('')   // 加入／移除資料夾失敗的白話原因，顯示在清單下面（原文進 log）
 // 同一時間只偵測一份（連按「重新檢查」、開對話框同時要求，都共用正在跑的那一份）
 const refreshCliTools = singleFlight(async () => {
   try {
@@ -541,8 +541,7 @@ async function loadLaunchPrefs() {
   try {
     const p = normalizeLaunchPrefs(await transport.launchPrefsGet())
     Object.assign(launchPrefs, p)
-    launchCwdText.value = (p.cwdAllow.length ? p.cwdAllow : defaultCwdAllowFromCli()).join('\n')
-  } catch { launchCwdText.value = defaultCwdAllowFromCli().join('\n') }
+  } catch (e) { console.info('[ASN] 讀不到啟動設定', String(e?.message ?? e)) }
 }
 function defaultCwdAllowFromCli() {
   return cwdChoices({ allow: [], recent: launchPrefs.recentCwd })
@@ -554,10 +553,35 @@ async function saveLaunchPrefs() {
   const prefs = launchPrefsToSave(launchPrefs)   // 上限只寫設定頁改過的 maxPerHourSet；開新夥伴、記最近的資料夾都不寫上限
   try { await transport.launchPrefsSet(prefs); launchMsg.value = '' } catch (e) { console.info('[ASN] launch prefs', e.message); launchMsg.value = `啟動設定沒有存成功：${e?.message ?? e}` }
 }
-function setLaunchCwdText(text) {
-  launchCwdText.value = text
-  launchPrefs.cwdAllow = text.split('\n').map(s => s.trim()).filter(Boolean)
-  void saveLaunchPrefs()
+// 工作資料夾清單（#1548 ③）：加入、移除都由後端驗證（存在、是資料夾、不重複、不超過上限），這裡只顯示結果；不再提供自由打字
+const cwdReason = e => String(e?.message ?? e)
+async function addLaunchCwd() {
+  launchCwdMsg.value = ''
+  const before = [...launchPrefs.cwdAllow]
+  try {
+    const p = await transport.launchCwdBrowse()
+    if (!p) return
+    await loadLaunchPrefs()
+    if (hasCwd(before, p)) launchCwdMsg.value = '這個資料夾已經在清單裡'
+  } catch (e) { console.info('[ASN] 加入工作資料夾', cwdReason(e)); launchCwdMsg.value = `加入資料夾沒有成功：${cwdReason(e)}` }
+}
+async function addSuggestedCwd(p) {
+  launchCwdMsg.value = ''
+  const prev = [...launchPrefs.cwdAllow]
+  launchPrefs.cwdAllow = [...prev, p]
+  try { await transport.launchPrefsSet(launchPrefsToSave(launchPrefs)) } catch (e) {
+    console.info('[ASN] 加入建議資料夾', cwdReason(e))
+    launchPrefs.cwdAllow = prev
+    launchCwdMsg.value = `加入資料夾沒有成功：${cwdReason(e)}`
+  }
+}
+async function removeLaunchCwd(p) {
+  launchCwdMsg.value = ''
+  try { launchPrefs.cwdAllow = await transport.launchCwdRemove(p) } catch (e) {
+    console.info('[ASN] 移除工作資料夾', cwdReason(e))
+    launchCwdMsg.value = `移除沒有成功：${cwdReason(e)}`
+    await loadLaunchPrefs()
+  }
 }
 const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTools.value[m.toolId ?? m.id])))
 const partnerModels = computed(() => launchToolRows.value)
@@ -1723,7 +1747,7 @@ const app = createApp({
       skin: skin.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble, tabDim: dims.tabDim, groupDim: dims.groupDim,
       notify: notifyPrefs.value, voiceEnabled: ttsVoices.value.enabled, ttsAuto: voiceCfg.tts_auto, sttLang: voiceCfg.stt_lang,
       closeTo: closeTo.value, trayOk: trayOk.value, autostartSupported: autostart.supported, autostartOn: autostart.on,
-      maxPerHour: launchPrefs.maxPerHour, cwdCount: launchCwdText.value.split('\n').filter(x => x.trim()).length, autoCheck: autoCheck.value, version: info.version,
+      maxPerHour: launchPrefs.maxPerHour, cwdCount: launchPrefs.cwdAllow.length, autoCheck: autoCheck.value, version: info.version,
     })
     const view = computed(() => (ui.tabs.length ? 'chat' : 'home'))
     // 窄視窗（#1192）：兩個窗格放不下就一次只顯示一個。從名單開對話、群組、設定、終端時（每個 openChatTab 之後）直接設 pane.showList = false 切到右邊；
@@ -2042,7 +2066,7 @@ const app = createApp({
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
-      launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdText: launchCwdText.value, msg: launchMsg.value },
+      launch: { tools: launchToolRows.value, maxPerHour: launchPrefs.maxPerHour, cwdList: launchPrefs.cwdAllow, cwdSuggest: suggestCwds(launchPrefs.cwdAllow, launchPrefs.recentCwd), cwdMsg: launchCwdMsg.value, msg: launchMsg.value },
       piSetup: piSetupView(piSetup.raw, piSetup),
       version: info.version, deviceName: selfDeviceName.value, uiLogMsg: uiLogMsg.value,
       log: buildLogView({ entries: releases.entries, current: info.version, available: upd.phase === 'idle' ? null : upd.info }),
@@ -2120,7 +2144,9 @@ const app = createApp({
         case 'releases-retry': await reloadReleases(true); break
         case 'usage-refresh': await usage.refresh(); break
         case 'launch-max': launchPrefs.maxPerHourSet = launchPrefs.maxPerHour = clampMaxPerHour(value); await saveLaunchPrefs(); break   // 只有這裡寫 maxPerHourSet；夾在 1～20（跟 Rust 認的範圍一樣），不然存了也不算數
-        case 'launch-cwd': setLaunchCwdText(String(value ?? '')); break
+        case 'launch-cwd-add': await addLaunchCwd(); break
+        case 'launch-cwd-remove': await removeLaunchCwd(String(value ?? '')); break
+        case 'launch-cwd-suggest': await addSuggestedCwd(String(value ?? '')); break
         case 'pi-setup-ask': piSetup.confirm = true; piSetup.msg = ''; break
         case 'pi-setup-cancel': piSetup.confirm = false; break
         case 'pi-setup-install': await runPiSetup(() => transport.piSetupInstall(), PI_SETUP_TEXT.installed); break
@@ -2194,7 +2220,7 @@ const app = createApp({
       opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
-      launchToolRows, launchPrefs, launchCwdText, saveLaunchPrefs, setLaunchCwdText,
+      launchToolRows, launchPrefs, launchCwdMsg, saveLaunchPrefs,
     }
   },
 })

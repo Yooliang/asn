@@ -39,7 +39,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
 export const SettingsPanel = {
@@ -780,9 +780,18 @@ export const SettingsPanel = {
             <small v-if="st.piSetup.msg" role="status">{{ st.piSetup.msg }}</small>
           </section>
           <h3 class="sec-h">安全限制</h3>
-          <label>工作資料夾白名單（一行一個）
-            <textarea class="set-area" rows="4" :value="st.launch.cwdText" @change="act('launch-cwd', $event.target.value)"></textarea>
-          </label>
+          <section class="launch-cwds" aria-label="可以開新夥伴的資料夾">
+            <b class="launch-cwds-h">可以開新夥伴的資料夾</b>
+            <ul class="launch-cwd-list" v-if="st.launch.cwdList.length">
+              <li v-for="p in st.launch.cwdList" :key="p"><span class="launch-cwd-path">{{ p }}</span><button class="aero-btn" type="button" :aria-label="'移除 ' + p" @click="act('launch-cwd-remove', p)">移除</button></li>
+            </ul>
+            <small class="set-note" v-else>還沒有加入資料夾，按「加入資料夾…」選一個。</small>
+            <div class="launch-cwd-add"><button class="aero-btn" type="button" @click="act('launch-cwd-add')">＋ 加入資料夾…</button></div>
+            <ul class="launch-cwd-list suggest" v-if="st.launch.cwdSuggest.length">
+              <li v-for="p in st.launch.cwdSuggest" :key="p"><span class="launch-cwd-path">建議：{{ p }}</span><button class="aero-btn" type="button" :aria-label="'加入 ' + p" @click="act('launch-cwd-suggest', p)">加入</button></li>
+            </ul>
+            <small class="acct-warn" v-if="st.launch.cwdMsg" role="alert">{{ st.launch.cwdMsg }}</small>
+          </section>
           <small class="acct-warn" v-if="st.launch.msg" role="alert">{{ st.launch.msg }}</small>
           <label class="launch-max">別的設備一小時最多替這台開
             <input class="set-input" type="number" min="1" max="20" :value="st.launch.maxPerHour" @change="act('launch-max', Number($event.target.value))">

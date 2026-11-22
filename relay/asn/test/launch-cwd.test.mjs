@@ -42,7 +42,7 @@ test('空清單的提示字與接線：下拉旁有瀏覽鈕、空時顯示提�
   assert.match(html, /v-if="!partnerCwdChoices\.length"/)
   const lib = read('src-tauri/src/lib.rs')
   const used = [...read('ui/lib/tauri.mjs').matchAll(/invoke\('(launch_cwd_[a-z_]+)'/g)].map(m => m[1]).sort()
-  assert.deepEqual(used, ['launch_cwd_browse', 'launch_cwd_candidates'])
+  assert.deepEqual(used, ['launch_cwd_browse', 'launch_cwd_candidates', 'launch_cwd_remove'])
   for (const c of used) assert.ok(new RegExp(`async fn ${c}\\b`).test(lib) && lib.includes(`${c},`), `${c} 沒註冊`)
 })
 
