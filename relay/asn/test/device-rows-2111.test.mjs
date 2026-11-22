@@ -71,7 +71,7 @@ test('#1858 #2110 不列：已永久移除、已隱藏、設備代號在設備�
   ]
   const usedOn = [used('W', '工作機'), used('OLD', '舊代號', true), used('R', '已移除'), used('HID', '已隱藏'), used('N', '沒登入')]
   assert.deepEqual(rows(devices, usedOn).map(r => r.node), ['W'])
-  assert.deepEqual(rows([dev('H', '家用機', [claude([acc('other@example.test')])], { self: true })], [used('H', '家用機', true)]), [], '本機沒登入這個帳號也不畫')
+  assert.deepEqual(rows([dev('H', '家用機', [claude([acc('other@example.test')])], { self: true })], [used('H', '家用機', false)]), [], '本機沒登入這個帳號、後台也沒說它在用：不畫')
   assert.deepEqual(rows([dev('W', '工作機', [claude([])])], [used('W', '工作機')]), [], '有回報、但沒有這個帳號＝沒登入')
 })
 
@@ -141,4 +141,21 @@ test('#2110 手機卡片頂端的「使用中」與設備列用同一個判斷�
   assert.match(html, /<span class="m-dv-cur" v-if="acctInUseOf\(v\.key, a\)">使用中<\/span>/)
   assert.match(js, /const acctInUseOf = \(vendor, a\) => accountInUse\(acctDevRows\(vendor, a\), a\?\.current\)/)
   assert.match(read('ui/lib/settings-panel.mjs'), /<span class="dv-cur" v-if="accountInUseOf\(v\.key, a\)">使用中<\/span>/)
+})
+
+test('#2111 手機 Claude 卡：後台說手機（P）在用、手機設備樹裡沒有 Claude 帳號庫，那列仍要列出且為使用中（CI 截圖 m-acct-cards 的同一份資料）', async () => {
+  const { resetRoster, SMOKE_NOW } = await import('../scripts/smoke-lib.mjs')
+  const my = rosterView(resetRoster(SMOKE_NOW), { nodeLabel: n => (n === 'P' ? '手機（P）' : ''), now: SMOKE_NOW })
+  const a = my.vendors.find(v => v.key === 'claude').accounts[0]
+  assert.deepEqual(a.usedOn.map(u => [u.node, u.current]), [['P', true]])
+  // 這支手機：設備樹裡只有 Gemini（額度列表來的），沒有 Claude 這個廠商
+  const phone = dev('P', '手機（P）', [{ key: 'gemini', accounts: [acc('me@example.com')] }], { self: true, kind: '手機' })
+  const r = accountDeviceRows([phone], 'claude', 'me@example.com', a.usedOn, { vendors: ['claude'] })
+  assert.deepEqual(brief(r), [['P', 'current', '']])
+  assert.equal(r[0].self, true)
+  assert.equal(accountInUse(r, false), true, '頂端「使用中」也在')
+  // 手機不在用、也沒這個帳號：不畫；手機有這個帳號卻不在用：不能切換＋手機不能切換帳號
+  assert.deepEqual(accountDeviceRows([phone], 'claude', 'me@example.com', [{ node: 'P', label: '手機（P）', current: false }], { vendors: ['claude'] }), [])
+  const has = dev('P', '手機（P）', [claude([acc('me@example.com'), acc(OTHER)])], { self: true, kind: '手機' })
+  assert.deepEqual(brief(accountDeviceRows([has], 'claude', 'me@example.com', [], { vendors: ['claude'] })), [['P', 'blocked', DEVICE_BLOCK_REASON.phone]])
 })

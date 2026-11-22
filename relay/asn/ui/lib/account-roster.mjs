@@ -312,7 +312,9 @@ export function accountDeviceRows(devices, vendor, email, usedOn, opts = {}) {
     const u = used.get(d.key)
     // 設備樹沒有這個廠商（還沒收到那台的回報）時，後台說它用過這個帳號就列出來；有回報卻沒這個帳號＝沒登入，不列
     const unreported = !d.self && !v && Boolean(u)
-    if (!has && !unreported) continue
+    // 後台說這台正在用這個帳號，就一定列出（手機沒有自己的帳號庫、設備樹裡看不到它的帳號，也一樣）
+    const usingByBackend = u?.current === true
+    if (!has && !unreported && !usingByBackend) continue
     const current = d.self && has ? has.current === true : (u?.current === true || has?.current === true)
     const st = rowStateOf(d, v ?? { accounts: [] }, has, vendor, current, Array.isArray(opts.vendors) ? opts.vendors : ['claude', 'grok'])
     const busy = st.state !== 'current' && opts.switchingNode === d.key
