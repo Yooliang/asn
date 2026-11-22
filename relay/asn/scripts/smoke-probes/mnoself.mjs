@@ -30,10 +30,11 @@ export const mnoselfProbeSource = () => `(async () => {
   for (let i = 0; i < 60 && !seg; i++) { seg = document.querySelector('.m-dv-segbtn[data-tab="accounts"]'); if (!seg) await sleep(100) }
   if (!seg) return { ok: false, why: '找不到「帳號」分頁鈕' };
   seg.click(); await sleep(600);
-  const devs = [...document.querySelectorAll('.m-dv-my .m-dv-dev')].filter(vis);
+  const devs = [...document.querySelectorAll('.m-dv-my .m-dv-devrow')].filter(vis);
   const names = devs.map(b => b.textContent.trim()).join('、') || '（沒有按鈕）';
-  if (devs.some(b => (b.textContent.includes('這支手機') || b.textContent.includes('測試機')) && !b.classList.contains('on') && !b.disabled)) return { ok: false, why: '帳號頁可以把帳號切到這支手機：' + names };
-  if (!devs.some(b => b.textContent.includes('辦公室') && !b.classList.contains('on') && !b.disabled)) return { ok: false, why: '別台電腦的切換鈕不見了：' + names };
+  const btnOf = r => r.querySelector('.m-dv-dev');
+  if (devs.some(b => (b.textContent.includes('這支手機') || b.textContent.includes('測試機')) && btnOf(b).classList.contains('switch') && !btnOf(b).disabled)) return { ok: false, why: '帳號頁可以把帳號切到這支手機：' + names };
+  if (!devs.some(b => b.textContent.includes('辦公室') && btnOf(b).classList.contains('switch') && !btnOf(b).disabled)) return { ok: false, why: '別台電腦的切換鈕不見了：' + names };
   return { ok: true, why: '' };
 })()`
 

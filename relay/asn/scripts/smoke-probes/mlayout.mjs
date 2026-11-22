@@ -78,7 +78,7 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     for (const b of devs) if (b.scrollWidth > b.clientWidth + 1) return { ok: false, why: '「' + b.textContent.trim() + '」的字被切' };
     for (const c of [...document.querySelectorAll('.m-dv-acct')].filter(c => c.querySelector('.m-dv-dev'))) {
       const box = R(c);
-      for (const e of [...c.querySelectorAll('.m-dv-dev, .m-dv-devb small')].filter(vis)) if (R(e).right > box.right + 0.5 || R(e).left < box.left - 0.5) return { ok: false, why: '「' + e.textContent.trim() + '」超出帳號卡' };
+      for (const e of [...c.querySelectorAll('.m-dv-dev, .m-dv-devname small')].filter(vis)) if (R(e).right > box.right + 0.5 || R(e).left < box.left - 0.5) return { ok: false, why: '「' + e.textContent.trim() + '」超出帳號卡' };
     }
   }
   return { ok: true, why: '' };

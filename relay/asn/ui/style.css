@@ -988,18 +988,20 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-my{display:flex;flex-direction:column;gap:8px;margin:0 0 12px}
 .dv-my-h{margin:0;font-size:13px}
 .dv-share{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:4px;margin-left:auto}
-/* 帳號卡片的設備按鈕：使用中的黃色、選中、按了不做事；不能只靠顏色區分（前面有勾、後面有「使用中」），深淺色都看得清楚 */
-.dv-devs{flex:1 1 auto;display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;min-width:0}
-.dv-devbtn.on,.dv-devbtn.on:hover{border-color:#c79a00;background:#ffd84d;color:#3b2c00;font-weight:600;cursor:default}
-/* 窄的時候可以換行：要蓋過 .settings .aero-btn 的 nowrap，選擇器至少兩個 class */
-.dv-devs .dv-devbtn{flex:0 1 auto;min-width:0;max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:left}
-.dv-devb{display:inline-flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;max-width:100%}
-/* 讀這筆額度的那台：按鈕上方一條 4px 藍色粗線。每顆按鈕都有 4px 的上框（沒有線的是透明的佔住位置），所以有線沒線一樣高；
-   選擇器要比 .dv-devbtn.on:hover 和 .aero-btn:hover 的邊框顏色更具體，滑過去線也不變 */
-.dv-devs .dv-devb .dv-devbtn,.dv-devs .dv-devb .dv-devbtn:hover{border-top:4px solid transparent}
-.dv-devs .dv-devb.read .dv-devbtn,.dv-devs .dv-devb.read .dv-devbtn:hover{border-top-color:var(--accent)}
+/* 帳號卡片的設備列（#2111 ②）：一台一列，左邊設備名（原因在下方一行），右邊的鈕固定 92×28、同一欄靠右。
+   使用中＝深灰底白字；切換中＝淡色；不能切換＝虛線淡色。黃色只留給「重新登入」，這裡不用 */
+.dv-devs{flex:1 1 100%;display:flex;flex-direction:column;gap:6px;margin-top:4px;min-width:0}
+.dv-devrow{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}
+.dv-devname{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px}
+.dv-devn{overflow-wrap:anywhere}
+.dv-devself{margin-left:6px;font-size:11px;color:var(--muted)}
+.dv-devrow.read .dv-devname{border-left:3px solid var(--accent);padding-left:6px}
 .dv-devwhy{font-size:11px;color:var(--muted)}
-@media (prefers-color-scheme:dark){.dv-devbtn.on,.dv-devbtn.on:hover{border-color:#e0b400;background:#5c4700;color:#ffe680}.dv-devs .dv-devb .dv-devbtn,.dv-devs .dv-devb .dv-devbtn:hover{border-top-color:transparent}.dv-devs .dv-devb.read .dv-devbtn,.dv-devs .dv-devb.read .dv-devbtn:hover{border-top-color:var(--msg-st-read)}}
+.dv-devs .dv-devrow .dv-devbtn{flex:0 0 92px;box-sizing:border-box;width:92px;min-width:92px;max-width:92px;height:28px;min-height:28px;padding:0;white-space:nowrap;text-align:center;margin-left:auto}
+.dv-devs .dv-devrow .dv-devbtn.current,.dv-devs .dv-devrow .dv-devbtn.current:disabled{background:#4b5058;border-color:#4b5058;color:#fff;opacity:1;font-weight:600;cursor:default}
+.dv-devs .dv-devrow .dv-devbtn.busy,.dv-devs .dv-devrow .dv-devbtn.busy:disabled{opacity:.55;cursor:default}
+.dv-devs .dv-devrow .dv-devbtn.blocked,.dv-devs .dv-devrow .dv-devbtn.blocked:disabled{background:transparent;border:1px dashed var(--muted);color:var(--muted);opacity:.8;cursor:default;box-shadow:none}
+@media (prefers-color-scheme:dark){.dv-devs .dv-devrow .dv-devbtn.current,.dv-devs .dv-devrow .dv-devbtn.current:disabled{background:#6b727c;border-color:#6b727c;color:#fff}}
 .dv-code{display:flex;flex-direction:column;gap:4px;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:6px}
 .dv-code code{word-break:break-all;user-select:all}
 .dv-mm{display:flex;flex-wrap:wrap;gap:6px}

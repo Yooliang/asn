@@ -543,8 +543,8 @@ const BASE_SCENARIOS = [
   { name: 'm-noself-noplat', page: 'm.html', state: { signedIn: true, mnoself: 'noplat' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.noplat, shot: 'm-noself-noplat.png' },
   { name: 'm-noself-android', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MNOSELF_PROBES.android, shot: 'm-noself-android.png' },
   // 帳號卡片的設備按鈕：桌面兩種寬度、手機兩種寬度
-  { name: 'list-acct-devbtn', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-1100.png' },
-  { name: 'list-acct-devbtn-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-520.png' },
+  { name: 'list-acct-devbtn', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets', localAcct: true }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-1100.png' },
+  { name: 'list-acct-devbtn-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets', localAcct: true }, ready: '#app.win .dv-my .dv-acct', probe: DEVBTN_PROBES.desktop, shot: 'list-acct-devbtn-520.png' },
   { name: 'list-merged-280', page: 'list.html', width: 280, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-280.png' },
   { name: 'list-merged-360', page: 'list.html', width: 360, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.single, shot: 'list-merged-360.png' },
   { name: 'list-merged-chat-520', page: 'list.html', width: 520, widen: 700, state: { signedIn: true, partnerTab: true }, ready: '#app.win .chat-area .compose-main', probe: MPANE_CHAT_PROBES.double, shot: 'list-merged-chat-520.png' },
@@ -825,6 +825,8 @@ export const tableFor = scenario => {
   if (scenario.state.onboard) t.store_load = { by: 'name', values: {}, fallback: null }
   if (scenario.state.aboutPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ABOUT_ME) } }
   if (scenario.state.devicesPage) t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ROSTER_ME) } }
+  // #2111 ②：帳號卡的設備列以本機帳號庫為準（本機有這個帳號、且在用，那列才畫成「使用中」）
+  if (scenario.state.localAcct) t.claude_accounts_list = [{ email: 'me@example.com', plan: 'claude_max', current: true }]
   if (scenario.state.fpMark === 'desk') {   // 設備頁精簡（#1499）：電腦版
     t.relay_list = { members: FPMARK_MEMBERS.desk }
     t.store_load = { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(TASKMGR_ME) } }

@@ -272,9 +272,9 @@
                   <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
                   <ul class="m-dv-accts">
                     <!-- 帳號卡固定三行：帳號＋右邊固定的「使用中」、方案、額度條（#374） -->
-                    <li class="m-dv-acct" :class="{ cur: a.current }" v-for="a in v.accounts" :key="a.account">
+                    <li class="m-dv-acct" :class="{ cur: acctInUseOf(v.key, a) }" v-for="a in v.accounts" :key="a.account">
                       <span class="m-dv-mail">{{ a.account }}</span>
-                      <span class="m-dv-act"><span class="m-dv-cur" v-if="a.current">使用中</span></span>
+                      <span class="m-dv-act"><span class="m-dv-cur" v-if="acctInUseOf(v.key, a)">使用中</span></span>
                       <span class="m-dv-planrow"><span class="m-dv-plan">{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span></span>
                       <span class="m-dv-quota" :class="{ stale: a.quota.stale, 'quota-out': a.quota.exhausted }">
                         <span class="m-dv-bars" v-if="a.quota.bars && a.quota.bars.length">
@@ -288,8 +288,8 @@
                         <span v-else>{{ a.quota.text }}</span>
                         <span class="m-dv-qmeta" v-if="a.quota.fiveNote || a.quota.meta"><span class="m-dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span><span v-if="a.quota.meta">{{ a.quota.meta }}</span></span>
                       </span>
-                      <!-- 設備按鈕：用過這個帳號的每台一顆。使用中＝黃色底、aria-pressed，按鈕上只寫設備名，按了不做事；其他按了就是切換到那台（手機不能切換自己） -->
-                      <span class="m-dv-devs" v-if="acctDevButtons(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account"><span class="m-dv-devb" v-for="b in acctDevButtons(v.key, a)" :key="b.node"><button type="button" :class="['m-dv-dev', { on: b.current }]" :aria-pressed="b.current ? 'true' : 'false'" :disabled="!b.current && !(b.target && b.target.enabled)" @click="acctDevPress(b, a)">{{ b.label }}</button><small class="m-fine" v-if="!b.current && b.target && b.target.reason">{{ b.target.reason }}</small></span></span>
+                      <!-- 設備列：一台一列。左邊設備名（本機加「這台」），原因寫在設備名下方；右邊的鈕固定靠右、同一欄、同尺寸（和電腦版同一份規則） -->
+                      <span class="m-dv-devs" v-if="acctDevRows(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account"><span class="m-dv-devrow" v-for="b in acctDevRows(v.key, a)" :key="b.node"><span class="m-dv-devname"><span class="m-dv-devn">{{ b.label }}<small class="m-dv-devself" v-if="b.self">{{ DEVICE_ROW_TEXT.self }}</small></span><small class="m-fine" v-if="b.reason">{{ b.reason }}</small></span><button type="button" :class="['m-dv-dev', b.state]" :disabled="b.state !== 'switch'" @click="acctDevPress(b, a)">{{ DEVICE_ROW_TEXT[b.state] }}</button></span></span>
                     </li>
                   </ul>
                 </div>

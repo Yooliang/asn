@@ -263,60 +263,66 @@ export const usedOnText = row => (row?.usedOn ?? []).map(n => (n.current ? `${n.
 
 export const DEVICE_BUTTON_TEXT = { group: '用在哪幾台' }
 
-/** 設備按鈕切不過去時寫在按鈕下方的原因（電腦版；手機版的原因在 mobile-acct 的 ACCT_SWITCH_REASON） */
+/** 帳號卡設備列：按鈕上的字（電腦、手機同一份，#2111） */
+export const DEVICE_ROW_TEXT = Object.freeze({ current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', self: '這台' })
+
+/** 設備列切不過去時，寫在設備名下方的原因：每種都說清楚、說怎麼辦（#2110；電腦、手機同一份） */
 export const DEVICE_BLOCK_REASON = Object.freeze({
   vendor: '這個服務不能切換',
-  hidden: '這台已隱藏',
-  removed: '這台已移除',
-  missing: '這台沒有存這個帳號',
-  incomplete: '登入不完整',
-  single: '這台只有這一個帳號',
-  offline: '那台的 ASN 沒開著',
-  unavailable: '目前不能切換',
+  phone: '手機不能切換帳號',
+  offline: 'ASN 尚未開啟',
+  incomplete: '這台的登入沒完成，到那台重新登入這個帳號',
+  single: '這台只有這一個帳號，沒有別的可以切換',
+  unknown: '暫時切不了，請稍後再試',
 })
 
-/**
- * 某台設備為什麼切不到這個帳號（給停用的設備按鈕寫原因）。devices＝設備樹（{ key, self, hidden, removed, vendors }）；
- * vendor＝服務；email＝帳號；node＝那台。判斷順序和切換目標的條件一致；判不出來就回「目前不能切換」。
- */
-export function deviceBlockReason(devices, vendor, email, node) {
-  if (vendor !== 'claude' && vendor !== 'grok') return DEVICE_BLOCK_REASON.vendor
-  const d = (Array.isArray(devices) ? devices : []).find(x => x && x.key === node)
-  if (!d) return DEVICE_BLOCK_REASON.unavailable
-  if (d.removed) return DEVICE_BLOCK_REASON.removed
-  if (d.hidden) return DEVICE_BLOCK_REASON.hidden
-  const v = (d.vendors ?? []).find(x => x.key === vendor)
-  const mail = String(email ?? '').trim().toLowerCase()
-  const has = (v?.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)
-  if (!has) return DEVICE_BLOCK_REASON.missing
-  if (has.incomplete) return DEVICE_BLOCK_REASON.incomplete
-  if (d.self) return vendor === 'grok' && (v.accounts ?? []).length <= 1 ? DEVICE_BLOCK_REASON.single : DEVICE_BLOCK_REASON.unavailable
-  if (!v.switchable) return v.switchHint ? DEVICE_BLOCK_REASON.offline : DEVICE_BLOCK_REASON.unavailable
-  return DEVICE_BLOCK_REASON.unavailable
+/** 這台設備在這個廠商底下的狀態：{ state: 'current'|'switch'|'blocked', reason }（只看設備樹，不看「切換中」） */
+function rowStateOf(d, v, has, vendor, isCurrent, vendors) {
+  if (isCurrent) return { state: 'current', reason: '' }
+  if (!vendors.includes(vendor)) return { state: 'blocked', reason: DEVICE_BLOCK_REASON.vendor }
+  if (!has) return { state: 'blocked', reason: DEVICE_BLOCK_REASON.unknown }   // 還沒收到那台的帳號回報：不知道，不說「沒有」
+  if (has.incomplete) return { state: 'blocked', reason: DEVICE_BLOCK_REASON.incomplete }
+  if (d.phone || d.kind === '手機') return { state: 'blocked', reason: DEVICE_BLOCK_REASON.phone }
+  const count = (v.accounts ?? []).length
+  if (d.self) {
+    if (vendor === 'grok' && count <= 1) return { state: 'blocked', reason: DEVICE_BLOCK_REASON.single }
+    return { state: 'switch', reason: '' }
+  }
+  if (v.switchable) return { state: 'switch', reason: '' }
+  if (v.switchHint) return { state: 'blocked', reason: DEVICE_BLOCK_REASON.offline }
+  return { state: 'blocked', reason: count < 2 ? DEVICE_BLOCK_REASON.single : DEVICE_BLOCK_REASON.unknown }
 }
 
 /**
- * 帳號卡片的「設備按鈕」：用過這個帳號的每台設備一顆（原本的「用在：」一行和「切換到…」按鈕合在一起）。
- * usedOn＝後台回報的 [{ node, label, current }]；targets＝這個帳號可以切過去的設備 [{ node, name?, … }]，原樣放進 target 給畫面切換用；
- * selfNode＝這台；nameOf(node)＝設備名（後台沒給名字時用）。
- * 回 [{ node, label, current, self, target }]：使用中的 target 一律是 null（按了不做事）；不是使用中、也沒有切換目標的 target 也是 null（按鈕停用）。
- * 切換目標裡有、後台還沒回報的設備也補上；按鈕上只寫設備名（self 欄位給邏輯用）。
+ * 帳號卡的「用在哪幾台」：一台一列（#2111 ②、#2110、#1858，電腦與手機共用這一個函式）。
+ * devices＝設備樹（{ key, label, self, hidden, removed, phone, kind, vendors }）；usedOn＝後台回報的 [{ node, label, current }]；
+ * opts.switchingNode＝正在切換的那台（該列顯示「切換中…」）；opts.vendors＝這個平台能切換的服務（預設 Claude、Grok；手機只有 Claude）。
+ * 回 [{ node, label, self, current, state: 'current'|'switch'|'busy'|'blocked', reason }]，使用中的排前面。
+ * 不列：設備代號在設備樹找不到的舊紀錄、已隱藏、已永久移除、沒登入這個帳號的設備。
+ * 本機以本機帳號庫（設備樹裡本機自己的帳號）為準：它說在用就是「使用中」，不管後台列表怎麼說。
  */
-export function deviceButtons(usedOn, targets, selfNode, nameOf = () => '') {
-  const ts = Array.isArray(targets) ? targets : []
-  const byNode = new Map(ts.filter(t => t && t.node).map(t => [t.node, t]))
-  const out = []
-  const add = (node, label, current) => {
-    if (typeof node !== 'string' || !node || out.some(b => b.node === node)) return
-    const self = Boolean(selfNode) && node === selfNode
-    const name = label || nameOf(node) || unnamedLabelOf(node)
-    const on = current === true
-    out.push({ node, label: name, current: on, self, target: on ? null : byNode.get(node) ?? null })
+export function accountDeviceRows(devices, vendor, email, usedOn, opts = {}) {
+  const mail = String(email ?? '').trim().toLowerCase()
+  const used = new Map((Array.isArray(usedOn) ? usedOn : []).filter(u => u && typeof u.node === 'string' && u.node).map(u => [u.node, u]))
+  const rows = []
+  for (const d of Array.isArray(devices) ? devices : []) {
+    if (!d || !d.key || d.hidden || d.removed) continue
+    const v = (d.vendors ?? []).find(x => x.key === vendor)
+    const has = (v?.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)
+    const u = used.get(d.key)
+    // 設備樹沒有這個廠商（還沒收到那台的回報）時，後台說它用過這個帳號就列出來；有回報卻沒這個帳號＝沒登入，不列
+    const unreported = !d.self && !v && Boolean(u)
+    if (!has && !unreported) continue
+    const current = d.self && has ? has.current === true : (u?.current === true || has?.current === true)
+    const st = rowStateOf(d, v ?? { accounts: [] }, has, vendor, current, Array.isArray(opts.vendors) ? opts.vendors : ['claude', 'grok'])
+    const busy = st.state !== 'current' && opts.switchingNode === d.key
+    rows.push({ node: d.key, label: d.label || u?.label || unnamedLabelOf(d.key), self: d.self === true, current, state: busy ? 'busy' : st.state, reason: busy ? '' : st.reason })
   }
-  for (const u of Array.isArray(usedOn) ? usedOn : []) add(u?.node, u?.label, u?.current)
-  for (const t of ts) add(t?.node, t?.name, false)
-  return out
+  return rows.map((r, i) => ({ r, i })).sort((x, y) => Number(!x.r.current) - Number(!y.r.current) || x.i - y.i).map(x => x.r)
 }
+
+/** 卡片頂端的「使用中」：以設備列為準（列表裡沒有任何設備時才退回後台說的），兩邊不會互相矛盾（#2110） */
+export const accountInUse = (rows, backendCurrent) => (Array.isArray(rows) && rows.length ? rows.some(r => r.current) : backendCurrent === true)
 
 /**
  * 向後台讀一次列表。call：() => Promise（電腦 invoke('acct_roster')、手機 invoke('android_acct_roster')）。
