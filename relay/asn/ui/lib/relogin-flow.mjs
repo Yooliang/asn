@@ -3,6 +3,8 @@
 //   指令與後台把關沒有改；登入網址照 #1599 送到本人的手機（電腦版沒有「要你確認」頁），畫面照實講。
 // 本機：本人就在這台電腦前，直接開官方登入終端（ai_cli_login），不送網址、不經手機；開了以後每幾秒讀一次本機帳號，登入好就停，最多 5 分鐘。
 // 狀態機只在這裡；手機（m.js）沒動。給人看的文字純繁體中文。
+import { makeReloginApi } from './tauri.mjs'
+import { reloginErrorText } from './plain-errors.mjs'
 import { POLL_MS as SETUP_POLL_MS, RELOGIN_TEXT, SETUP_TEXT, setupErrorText, setupLeadOf, setupStateOf, setupStep } from './mobile-setup.mjs'
 
 export const DESK_RELOGIN_TEXT = Object.freeze({
@@ -29,8 +31,6 @@ export const DESK_RELOGIN_TEXT = Object.freeze({
 export const LOCAL_POLL_MS = 3000
 export const LOCAL_GIVE_UP_MS = 5 * 60 * 1000
 
-const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
-
 // 手機版的結果文字提到「這支手機」「允許從手機安裝並登入」：電腦版換成對應的說法，其餘（失敗原因、完成、沒有回應）原樣
 const deskText = t => (t === SETUP_TEXT.taken ? DESK_RELOGIN_TEXT.taken : t === SETUP_TEXT.expired ? DESK_RELOGIN_TEXT.expired : t)
 
@@ -41,6 +41,7 @@ const fresh = () => ({ node: '', kind: 'remote', stage: 'idle', since: 0, saw: f
  * checkLoggedIn：本機用，回 true＝這台 Claude 已經登入且沒有失效旗標。
  */
 export function createReloginFlow({ invoke, reactive, checkLoggedIn = async () => false, now = () => Date.now(), setIntervalFn = setInterval, clearIntervalFn = clearInterval }) {
+  const api = makeReloginApi(invoke)   // 指令名與參數在 tauri.mjs；invoke 仍由呼叫端注入（測試換假的）
   const s = reactive(fresh())
   let timer = null
   const stopTimer = () => { if (timer !== null) { clearIntervalFn(timer); timer = null } }
@@ -59,7 +60,7 @@ export function createReloginFlow({ invoke, reactive, checkLoggedIn = async () =
     const node = s.node
     if (!node || s.kind !== 'remote' || s.stage !== 'waiting') return
     let res = { ok: true, st: null }
-    try { res = { ok: true, st: setupStateOf((await invoke('setup_remote_status'))?.nodes, node) } } catch { res = { ok: false } }
+    try { res = { ok: true, st: setupStateOf((await api.remoteStatus())?.nodes, node) } } catch { res = { ok: false } }
     if (s.node !== node || s.stage !== 'waiting') return
     const { next, view } = setupStep({ since: s.since, saw: s.saw, reached: s.reached, fails: s.fails }, res, now())
     Object.assign(s, { saw: next.saw, reached: next.reached, fails: next.fails })
@@ -82,14 +83,14 @@ export function createReloginFlow({ invoke, reactive, checkLoggedIn = async () =
     const node = s.node
     if (s.kind === 'local') {
       s.stage = 'sending'; s.text = DESK_RELOGIN_TEXT.sending
-      try { await invoke('ai_cli_login', { toolId: 'claude' }) } catch (e) { return finish(`${DESK_RELOGIN_TEXT.localFailed}：${errText(e)}`, false) }
+      try { await api.cliLogin('claude') } catch (e) { return finish(`${DESK_RELOGIN_TEXT.localFailed}：${reloginErrorText(e)}`, false) }
       Object.assign(s, { stage: 'waiting', since: now(), text: DESK_RELOGIN_TEXT.localOpened })
       timer = setIntervalFn(() => void pollLocal(), LOCAL_POLL_MS)
       return
     }
     s.stage = 'sending'; s.text = DESK_RELOGIN_TEXT.sending
     let sent = null
-    try { sent = await invoke('setup_remote_request', { node, mode: 'relogin' }) } catch (e) {
+    try { sent = await api.remoteRequest(node) } catch (e) {
       if (s.node !== node) return
       return finish(setupErrorText(e), false)
     }

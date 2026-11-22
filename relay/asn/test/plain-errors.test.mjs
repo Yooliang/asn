@@ -13,7 +13,7 @@ const UI = fileURLToPath(new URL('../ui/', import.meta.url))
 const read = f => fs.readFileSync(UI + f, 'utf8').replace(/\r\n/g, '\n')
 
 // 已清理檔案：搬完一張就加進來
-export const CLEANED = ['lib/voice-ui.mjs', 'lib/room-hub.mjs', 'lib/mobile-known-peers.mjs', 'lib/agent-install.mjs', 'lib/mobile-remote-view.mjs', 'shot.js']
+export const CLEANED = ['lib/voice-ui.mjs', 'lib/room-hub.mjs', 'lib/mobile-known-peers.mjs', 'lib/agent-install.mjs', 'lib/mobile-remote-view.mjs', 'shot.js', 'onboard.js', 'login.js', 'lib/relogin-flow.mjs']
 
 // 沒有任何內容（連註解都沒有）的空 catch：catch { }、catch (e) { }、.catch(() => { })、.catch(e => { })
 export const EMPTY_CATCH = /\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}|\.catch\(\s*(?:\([^)]*\)|\w+)\s*=>\s*\{\s*\}\s*\)/g
@@ -75,4 +75,34 @@ test('voice-ui 畫面上的錯誤文字走 plain-errors，不直接放 e.message
   assert.match(s, /import \{ plainMessage \} from '\.\/plain-errors\.mjs'/)
   assert.doesNotMatch(s, /state\.note = e\.message/)
   assert.equal((s.match(/state\.note = plainMessage\(e\)/g) ?? []).length, 2)
+})
+
+// ---- ④：onboard／login／relogin-flow ----
+test('引導頁與本機重新登入失敗的畫面文字與搬之前一字不差', async () => {
+  const { onboardErrorText, reloginErrorText } = await import('../ui/lib/plain-errors.mjs')
+  assert.equal(onboardErrorText(new Error('寫入失敗')), '寫入失敗')
+  assert.equal(onboardErrorText('字串'), '字串')
+  assert.equal(onboardErrorText(null), 'null')
+  assert.equal(onboardErrorText({ message: '' }), '')
+  assert.equal(reloginErrorText('已經在跑了'), '已經在跑了')
+  assert.equal(reloginErrorText(new Error('沒有網路')), '沒有網路')
+  assert.equal(reloginErrorText({ message: '' }), '[object Object]')
+  assert.equal(reloginErrorText(null), 'null')
+})
+
+test('onboard／login／relogin-flow：不直接 invoke(、錯誤文字走 plain-errors、指令名在出口', () => {
+  const ob = read('onboard.js'), lg = read('login.js'), rf = read('lib/relogin-flow.mjs')
+  for (const [n, s] of [['onboard.js', ob], ['login.js', lg], ['relogin-flow.mjs', rf]]) assert.doesNotMatch(s, /(?<![\w.$])invoke\(/, `${n} 還有直接 invoke(`)
+  assert.match(ob, /failed\.value = onboardErrorText\(e\)/); assert.doesNotMatch(ob, /e\?\.message/)
+  assert.match(rf, /reloginErrorText\(e\)/); assert.doesNotMatch(rf, /e\?\.message/)
+  const ex = read('lib/tauri.mjs')
+  for (const c of ['startup_info', 'quit_app', 'show_main', 'capture_ui_ready', 'take_shot', 'claude_mod_check', 'setup_remote_status', 'setup_remote_request']) assert.ok(ex.includes(`'${c}'`), c)
+})
+
+test('重新登入出口：指令名與參數形狀不變', async () => {
+  const { makeReloginApi } = await import('../ui/lib/tauri.mjs')
+  const calls = []
+  const api = makeReloginApi(async (c, a) => { calls.push([c, a]); return null })
+  await api.remoteStatus(); await api.remoteRequest('N1'); await api.cliLogin('claude')
+  assert.deepEqual(calls, [['setup_remote_status', undefined], ['setup_remote_request', { node: 'N1', mode: 'relogin' }], ['ai_cli_login', { toolId: 'claude' }]])
 })

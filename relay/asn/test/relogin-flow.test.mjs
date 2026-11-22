@@ -138,7 +138,7 @@ test('接線：電腦版指令清單補了兩個註冊（指令本身沒改）�
   for (const op of ['relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close']) assert.ok(js.includes(`case '${op}'`), op)
   assert.match(js, /createReloginFlow\(\{/)
   const flow = read('ui/lib/relogin-flow.mjs')
-  assert.equal((flow.match(/invoke\('setup_remote_request'/g) ?? []).length, 1, '只有一處送出')
+  assert.equal((flow.match(/api\.remoteRequest\(/g) ?? []).length, 1, '只有一處送出')   // 指令名在 tauri.mjs 的 makeReloginApi（#2106 ④）
   assert.ok(!/node_setup|setup_device/.test(flow), '不繞過原本的指令')
   for (const t of Object.values(DESK_RELOGIN_TEXT).map(x => (typeof x === 'function' ? x('示範電腦') : x))) assert.doesNotMatch(t, /setup|install|asn_|https?:\/\//i, t)
 })

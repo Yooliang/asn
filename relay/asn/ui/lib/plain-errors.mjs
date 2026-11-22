@@ -10,6 +10,12 @@ export const plainMessage = e => e.message
 /** 設備細部頁安裝 Claude Code 失敗：字串或 Error 都原文顯示（以前 agent-install.mjs 自己的 errText） */
 export const agentSetupErrorText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
+/** 引導頁「完成」失敗：字串或 Error 都原文顯示（以前 onboard.js 自己的 String(e?.message ?? e)） */
+export const onboardErrorText = e => String(e?.message ?? e)
+
+/** 本機重新登入失敗：字串或 Error 都原文顯示（以前 relogin-flow.mjs 自己的 errText） */
+export const reloginErrorText = e => (typeof e === 'string' ? e : e?.message || String(e))
+
 /** 改名失敗：後台（Rust）回的是中文說明就原樣顯示，其他一律說白話 */
 export function renameErrorText(e) {
   const s = String(e?.message ?? e ?? '').trim()
