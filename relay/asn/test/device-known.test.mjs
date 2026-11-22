@@ -53,7 +53,7 @@ test('shortFp：前 8 字，4 個一組', () => {
 test('守門：設備列表每列只有 4 個按鈕（上移／下移／帳號／詳情），電腦版畫面沒有「已確認／未確認」', () => {
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const li = panel.slice(panel.indexOf('<li v-for="d in devs"'), panel.indexOf('</li>', panel.indexOf('<li v-for="d in devs"')))
-  const btns = [...li.matchAll(/<button[\s\S]*?<\/button>/g)].map(m => m[0].replace(/<[^>]+>/g, '').replace(/\{\{\s*DEVICE_TEXT\.(\w+)\s*\}\}/, '$1'))
+  const btns = [...li.matchAll(/<asn-button[\s\S]*?<\/asn-button>/g)].map(m => m[0].replace(/<[^>]+>/g, '').replace(/\{\{\s*DEVICE_TEXT\.(\w+)\s*\}\}/, '$1'))
   assert.deepEqual(btns, ['moveUp', 'moveDown', '帳號', '詳情'])
   assert.ok(li.includes('DEVICE_TEXT.moveUp') && li.includes('DEVICE_TEXT.moveDown'))
   assert.doesNotMatch(panel, /已確認|未確認/)

@@ -3,7 +3,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { renderToString as ssrRender } from 'vue/server-renderer'
+// 共用元件的插槽會在輸出裡留下片段標記，比對畫面文字前先拿掉
+const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { PI_SETUP_TEXT, normalizePiSetup, piSetupError, piSetupView } from '../ui/lib/pi-setup.mjs'
 
@@ -127,7 +129,7 @@ test('畫面：沒有 pi＝整區不出現；還沒啟用＝只有「啟用…�
 test('畫面：按了「啟用…」才看得到同意說明與「同意並安裝／取消」', async () => {
   const html = await render(piSetupView(S(), { confirm: true }))
   assert.ok(html.includes('修改 pi 的設定檔'))
-  assert.deepEqual(buttons(html).filter(b => [PI_SETUP_TEXT.ask, PI_SETUP_TEXT.agree, PI_SETUP_TEXT.cancel, PI_SETUP_TEXT.remove].includes(b)), [PI_SETUP_TEXT.agree, PI_SETUP_TEXT.cancel])
+  assert.deepEqual(buttons(html).filter(b => [PI_SETUP_TEXT.ask, PI_SETUP_TEXT.agree, PI_SETUP_TEXT.cancel, PI_SETUP_TEXT.remove].includes(b)), [PI_SETUP_TEXT.cancel, PI_SETUP_TEXT.agree])
 })
 
 test('畫面：已啟用＝只有「移除」；處理中按鈕全部 disabled；訊息會顯示', async () => {

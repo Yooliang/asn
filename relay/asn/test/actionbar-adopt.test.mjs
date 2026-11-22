@@ -44,7 +44,7 @@ test('工作管理員：自己開的、還沒交給 ASN 的那一列才有「納
 
 test('接線：工作管理員那一列的按鈕送 tm-adopt，名單視窗打開同一個接手清單；「＋」選單不再有接手', () => {
   const panel = read('lib/settings-panel.mjs'), js = read('list.js'), html = read('list.html')
-  assert.match(panel, /<button class="aero-btn tm-adopt" type="button" v-if="r\.canAdopt"[^>]*@click="act\('tm-adopt', r\.key\)">\{\{ TM\.adopt \}\}<\/button>/)
+  assert.match(panel, /<asn-button class="tm-adopt" v-if="r\.canAdopt"[^>]*@click="act\('tm-adopt', r\.key\)">\{\{ TM\.adopt \}\}<\/asn-button>/)
   assert.ok(panel.includes("'tm-adopt'"), '在設定面板允許的事件清單裡')
   assert.match(js, /case 'tm-adopt': void adoptLoad\(\); break/)
   const menu = html.slice(html.indexOf('class="av-menu launch-picker"'), html.indexOf('</ul>', html.indexOf('class="av-menu launch-picker"')))

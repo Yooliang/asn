@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { renderToString as ssrRender } from 'vue/server-renderer'
+// 共用元件的插槽會在輸出裡留下片段標記（<!--[-->、<!--]-->），比對畫面文字前先拿掉
+const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { DEVICE_BLOCK_REASON, DEVICE_ROW_TEXT, accountDeviceRows, rosterView, usedOnText } from '../ui/lib/account-roster.mjs'
 import { deviceStateLine, STATE } from '../ui/lib/device-state.mjs'
@@ -50,7 +52,7 @@ const my = () => rosterView(roster([
 
 /** 帳號頁的設備列：[{ name, text, state, disabled, why }]（依畫面順序；#2111 ② 一台一列） */
 const devBtns = html => [...html.matchAll(/<span class="dv-devrow[^"]*"><span class="dv-devname"><span class="dv-devn">([^<]*)(?:<small[^>]*>[^<]*<\/small>|<!---->)?<\/span>(?:<small class="dv-devwhy"[^>]*>([^<]*)<\/small>|<!---->)?<\/span><button([^>]*)>([\s\S]*?)<\/button>/g)].map(m => ({
-  name: m[1], why: m[2] ?? '', text: m[4].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ''), state: /dv-devbtn (current|switch|busy|blocked)/.exec(m[3])?.[1] ?? '', disabled: /\sdisabled/.test(m[3]),
+  name: m[1], why: m[2] ?? '', text: m[4].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ''), state: /st-(current|busy|blocked)/.exec(m[3])?.[1] ?? (/dv-devbtn/.test(m[3]) ? 'switch' : ''), disabled: /\sdisabled/.test(m[3]),
 }))
 
 test('帳號頁：每個帳號一台一列；使用中＝深灰不能按；沒在用的寫「切換」可以按；按鈕上不再寫設備名', async () => {

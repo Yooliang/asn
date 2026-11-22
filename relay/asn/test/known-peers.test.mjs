@@ -36,7 +36,7 @@ test('設備改名：名字只有一個（後台）、最多 40 字；只有 dev
   assert.ok(info.length > 500 && old.length > 100)
   assert.doesNotMatch(info + old, /v-html/, '名字只當文字')
   assert.match(panel, /<h3 class="dv-name">\{\{ curDev\.identity\.title \}\}<\/h3>/, '現在的名字（空白時是辨認線索）在頁首')
-  assert.match(info, /<button class="aero-btn" type="button" @click="renameStart">\{\{ ACTION_TEXT\.rename \}\}<\/button>/, '改名只在動作區（#1829），不在上方那排按鈕')
+  assert.match(info, /<asn-button @click="renameStart">\{\{ ACTION_TEXT\.rename \}\}<\/asn-button>/, '改名只在動作區（#1829），不在上方那排按鈕')
   assert.doesNotMatch(panel, /setView\('rename'\)/)
   assert.match(info, /v-model="renameText"/)
   assert.match(old, /<b>\{\{ p\.label \}\}<\/b>/)
@@ -53,7 +53,7 @@ test('設備改名：名字只有一個（後台）、最多 40 字；只有 dev
 test('設定「設備」的詳情頁：忘記只在有紀錄時出現；舊設備紀錄收合、有 N、可忘記；整個畫面沒有「已確認／未確認」', async () => {
   const fs = await import('node:fs')
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-  assert.match(panel, /<button class="aero-btn" type="button" v-if="curKnown"[^>]*forget\.ask\(curKnown\)">\{\{ KNOWN\.forget \}\}/)
+  assert.match(panel, /<asn-button state="danger" v-if="curKnown"[^>]*forget\.ask\(curKnown\)">\{\{ KNOWN\.forget \}\}/)
   assert.match(panel, /<summary>舊設備紀錄（\{\{ oldPeers\.length \}\}）<\/summary>/)
   assert.match(panel, /<details class="dv-old-rec" v-if="oldPeers\.length">/)
   assert.match(panel, /role="alert">\{\{ st\.known\.error \}\}/)

@@ -49,7 +49,7 @@ test('#1548 畫面與接線：重新檢查鈕（動作說法、靠右）、打�
   assert.match(panel, /act\('launch-recheck'\)">\{\{ st\.launch\.checking \? '正在檢查…' : '重新檢查' \}\}/)
   assert.doesNotMatch(panel, /怎麼安裝|怎麼更新|進行安裝|進行更新/, '文字只放在 lib/tool-install.mjs 一份，畫面樣板不寫死')
   assert.ok(SETTING_OPS.includes('launch-recheck'))
-  assert.match(rd('ui/style.css'), /\.launch-set \.sec-head \.aero-btn\{flex:none;margin-left:auto\}/, '窄版按鈕靠右')
+  assert.match(rd('ui/style.css'), /\.launch-set \.sec-head>\.asn-btn\{margin-left:auto\}/, '窄版按鈕靠右')
   assert.match(rd('ui/style.css'), /\.launch-tools \.launch-login\{flex:none;margin-left:auto/, '登入狀態靠右、窄版換行後也靠右')
   const js = rd('ui/list.js')
   assert.match(js, /case 'launch-recheck': toolInstall\.clear\(\); await Promise\.all\(\[refreshCliTools\(\), refreshCliStatus\(true\)\]\)/)
