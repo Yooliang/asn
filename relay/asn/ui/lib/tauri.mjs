@@ -2,9 +2,36 @@
 import { shownPhotos } from './photo.mjs'
 const T = globalThis.__TAURI__
 
-export const invoke = async (cmd, args) => {
-  try { return await T.core.invoke(cmd, args) } catch (e) { throw new Error(typeof e === 'string' ? e : (e?.message ?? String(e))) }
+// 出口失敗寫記錄（#2106）：只記指令名與原文（限長），不記 args（可能含信件內容、路徑、金鑰）。
+// 同一指令＋同一原文 60 秒內只記一行：輪詢類指令（收信、視窗狀態、終端狀態）失敗時會每幾秒重來，不去重 ui.log 會被洗掉。
+// ui_log 自己不記：它失敗→記一行→排進佇列→再呼叫 ui_log 失敗，會繞圈。
+export const INVOKE_LOG_TEXT_MAX = 300
+export const INVOKE_LOG_DEDUP_MS = 60000
+const INVOKE_LOG_SKIP = new Set(['ui_log'])
+const recentFail = new Map()
+const logFail = (cmd, msg) => {
+  try {
+    if (INVOKE_LOG_SKIP.has(cmd)) return
+    const text = String(msg).replace(/\s+/g, ' ').trim().slice(0, INVOKE_LOG_TEXT_MAX)
+    const key = `${cmd}\n${text}`
+    const now = Date.now()
+    const last = recentFail.get(key)
+    if (last !== undefined && now - last < INVOKE_LOG_DEDUP_MS) return
+    if (recentFail.size >= 200) for (const [k, t] of recentFail) if (now - t >= INVOKE_LOG_DEDUP_MS) recentFail.delete(k)
+    if (recentFail.size >= 200) recentFail.clear()
+    recentFail.set(key, now)
+    console.warn('[ASN]', `invoke 失敗：${cmd} ${text}`)
+  } catch { /* 記錄本身出錯不能影響呼叫端 */ }
 }
+export const invoke = async (cmd, args) => {
+  try { return await T.core.invoke(cmd, args) } catch (e) {
+    const msg = typeof e === 'string' ? e : (e?.message ?? String(e))
+    logFail(cmd, msg)
+    throw new Error(msg)
+  }
+}
+// 開外部連結：沒有 Tauri（純網頁、測試）就什麼都不做，回 undefined（維持 chatpane 以前的 ?. 行為）
+export const openLink = url => (T?.core?.invoke ? invoke('open_link', { url }) : undefined)
 export const listen = (evt, fn) => T.event.listen(evt, e => fn(e.payload))
 export const emit = (evt, payload) => T.event.emit(evt, payload)
 export const ctl = op => invoke('win_ctl', { op })
