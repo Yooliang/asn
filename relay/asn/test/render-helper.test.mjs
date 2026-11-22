@@ -11,7 +11,7 @@ const baseState = () => ({
   notify: { toast: true, msg: true, nudge: true, file: true }, skin: 'aero', frame: 'custom', mode: 'merged', dpMode: 'left', toolbar: 'top', bubble: 'none', tabDim: 'device', groupDim: 'status',
   closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
   autoCheck: true, upd: { checking: false, installing: false, manual: '', status: { tone: 'ok', head: '已是最新版', lines: ['目前版本 9.9.9'] } },
-  launch: { tools: [], maxPerHour: 6, cwdText: 'D:/a' },
+  launch: { tools: [], maxPerHour: 6, cwdList: ['D:/a'], cwdSuggest: [], cwdMsg: '' },
   accounts: { list: [], current: null, remote: { devices: [], list: [] } },
   devices: [
     { key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] },

@@ -119,6 +119,120 @@ fn same_dir(a: &str, b: &Path) -> bool {
     canonical_launch_cwd(a).map(|x| x == b).unwrap_or(false)
 }
 
+/// 本機白名單（launch-prefs.json 的 cwdAllow）最多幾個資料夾；跟遠端開窗那邊（bridge/launcher.rs 的 MAX_CWD）同一個數字。
+pub const MAX_ALLOW: usize = 50;
+
+/// 資料夾放進白名單時被拒絕的原因（只擋「加入」；使用時的檢查在 config::check_launch、term::authorize_cwd、bridge/launcher.rs，照舊）。
+#[derive(Debug, PartialEq, Eq)]
+pub enum CwdReject {
+    Empty,
+    NotFound(String),
+    NotDir(String),
+    Duplicate(String),
+    TooMany,
+    /// 存檔寫不進去（磁碟、權限）；原文已進 log
+    SaveFailed,
+}
+
+impl CwdReject {
+    /// 給畫面看的白話原因
+    pub fn text(&self) -> String {
+        match self {
+            CwdReject::Empty => "資料夾是空的".into(),
+            CwdReject::NotFound(p) => format!("資料夾不存在：{p}"),
+            CwdReject::NotDir(p) => format!("這不是資料夾：{p}"),
+            CwdReject::Duplicate(p) => format!("這個資料夾已經在清單裡：{p}"),
+            CwdReject::TooMany => format!("最多只能加入 {MAX_ALLOW} 個資料夾"),
+            CwdReject::SaveFailed => "設定存不進去，請稍後再試".into(),
+        }
+    }
+}
+
+/// 加入白名單的單一驗證函式：空白拒、解析後要存在且是資料夾、不能跟清單裡的重複（Windows 大小寫與斜線視為同一個）、總數不超過上限。
+/// 通過回傳正規化後要存的路徑。規則與使用時的檢查一致，不新增根目錄或網路路徑的限制。
+pub fn validate_cwd(existing: &[String], cwd: &str) -> Result<String, CwdReject> {
+    let p = norm_path(cwd).ok_or(CwdReject::Empty)?;
+    let canon = canonical_launch_cwd(&p).map_err(|_| CwdReject::NotFound(p.clone()))?;
+    if !canon.exists() {
+        return Err(CwdReject::NotFound(p));
+    }
+    if !canon.is_dir() {
+        return Err(CwdReject::NotDir(p));
+    }
+    let key = dedupe_key(&p);
+    if existing.iter().any(|x| norm_path(x).map(|y| dedupe_key(&y) == key).unwrap_or(false)) {
+        return Err(CwdReject::Duplicate(p));
+    }
+    if existing.len() >= MAX_ALLOW {
+        return Err(CwdReject::TooMany);
+    }
+    Ok(p)
+}
+
+/// 驗證後加進本機白名單，回傳存下的路徑。已經在清單裡的回 Err(Duplicate)，由呼叫端決定要不要當成功。
+pub fn add_validated(data_dir: &Path, cwd: &str) -> Result<String, CwdReject> {
+    let mut prefs = launch_prefs_get_sync(data_dir).unwrap_or(Value::Null);
+    if !prefs.is_object() {
+        prefs = json!({});
+    }
+    let mut allow = str_list(&prefs, "cwdAllow");
+    let p = validate_cwd(&allow, cwd)?;
+    allow.push(p.clone());
+    prefs["cwdAllow"] = json!(allow);
+    launch_prefs_set_sync(data_dir, prefs).map_err(|e| {
+        elog!("[launch] 寫入白名單失敗：{e}");
+        CwdReject::SaveFailed
+    })?;
+    Ok(p)
+}
+
+/// 從本機白名單移除一筆（依 dedupe_key 比對，Windows 大小寫與斜線不同也算同一個），回傳移除後的清單。清單裡沒有就回錯誤。
+pub fn remove_from_prefs_allow(data_dir: &Path, cwd: &str) -> Result<Vec<String>, String> {
+    let Some(p) = norm_path(cwd) else { return Err("資料夾是空的".into()) };
+    let key = dedupe_key(&p);
+    let mut prefs = launch_prefs_get_sync(data_dir).unwrap_or(Value::Null);
+    if !prefs.is_object() {
+        prefs = json!({});
+    }
+    let allow = str_list(&prefs, "cwdAllow");
+    let keep: Vec<String> = allow
+        .iter()
+        .filter(|x| norm_path(x).map(|y| dedupe_key(&y) != key).unwrap_or(true))
+        .cloned()
+        .collect();
+    if keep.len() == allow.len() {
+        return Err("清單裡找不到這個資料夾".into());
+    }
+    prefs["cwdAllow"] = json!(keep);
+    launch_prefs_set_sync(data_dir, prefs).map_err(|e| {
+        elog!("[launch] 移除白名單項目失敗：{e}");
+        CwdReject::SaveFailed.text()
+    })?;
+    Ok(keep)
+}
+
+/// 整份存檔前的檢查：只驗「新加入」的 cwdAllow 項目，存檔裡原本就有的（含已不存在的舊資料夾）原樣保留、不驗不清；
+/// 移除永遠放行。新項目逐一走 [`validate_cwd`]，有一個不合格就整份拒絕並回白話原因。沒帶 cwdAllow 的存檔（只改別的欄位）不檢查。
+pub fn check_prefs_write(current: &Value, incoming: &Value) -> Result<(), String> {
+    let Some(raw) = incoming.get("cwdAllow") else { return Ok(()) };
+    let Some(arr) = raw.as_array() else { return Err("工作資料夾清單格式不對".into()) };
+    let known: std::collections::HashSet<String> =
+        str_list(current, "cwdAllow").iter().filter_map(|x| norm_path(x)).map(|y| dedupe_key(&y)).collect();
+    let mut accepted: Vec<String> = Vec::new();
+    for item in arr {
+        let Some(s) = item.as_str() else { return Err("工作資料夾清單格式不對".into()) };
+        let is_known = norm_path(s).map(|y| known.contains(&dedupe_key(&y))).unwrap_or(false);
+        if is_known {
+            // 舊項目：不驗證；同一份裡重複出現的舊項目也不當錯
+            accepted.push(s.to_string());
+            continue;
+        }
+        let ok = validate_cwd(&accepted, s).map_err(|e| e.text())?;
+        accepted.push(ok);
+    }
+    Ok(())
+}
+
 /// 使用者同意的資料夾寫進本機白名單（去重）。
 pub fn add_to_prefs_allow(data_dir: &Path, cwd: &str) -> Result<(), String> {
     let Some(p) = norm_path(cwd) else { return Err("資料夾是空的".into()) };
@@ -400,5 +514,190 @@ mod tests {
         grant_local_cwd(&mut c, &p.to_string_lossy(), home.path(), data.path()).unwrap();
         assert_eq!(c.cwd_allow, vec![canon]);
         assert!(!data.path().join("launch-prefs.json").exists());
+    }
+
+    // ---- #1548 ③：加入白名單的單一驗證函式、移除、整份存檔 ----
+
+    /// 真實 launch-prefs.json 的格式（前端 launchPrefsToSave 寫出來的那種）
+    fn real_prefs(allow: &[String], recent: &[String]) -> Value {
+        json!({ "recentCwd": recent, "cwdAllow": allow, "maxPerHourSet": 3, "showAdvanced": false, "launchDisplay": "background" })
+    }
+
+    #[test]
+    fn 驗證_空白拒() {
+        assert_eq!(validate_cwd(&[], "   "), Err(CwdReject::Empty));
+        assert_eq!(validate_cwd(&[], ""), Err(CwdReject::Empty));
+    }
+
+    #[test]
+    fn 驗證_不存在拒() {
+        let d = tempfile::tempdir().unwrap();
+        let gone = d.path().join("gone").to_string_lossy().into_owned();
+        let r = validate_cwd(&[], &gone);
+        assert!(matches!(r, Err(CwdReject::NotFound(_))), "{r:?}");
+        assert!(r.unwrap_err().text().starts_with("資料夾不存在"));
+    }
+
+    #[test]
+    fn 驗證_是檔案不是資料夾拒() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("a.txt");
+        std::fs::write(&f, "x").unwrap();
+        let r = validate_cwd(&[], &f.to_string_lossy());
+        assert!(matches!(r, Err(CwdReject::NotDir(_))), "{r:?}");
+    }
+
+    #[test]
+    fn 驗證_正常回正規化路徑() {
+        let d = tempfile::tempdir().unwrap();
+        let base = d.path().to_string_lossy().into_owned();
+        assert_eq!(validate_cwd(&[], &format!("{base}/")).unwrap(), norm_path(&base).unwrap());
+    }
+
+    #[test]
+    fn 驗證_重複拒_尾端斜線一樣算() {
+        let d = tempfile::tempdir().unwrap();
+        let base = d.path().to_string_lossy().into_owned();
+        let existing = vec![norm_path(&base).unwrap()];
+        assert!(matches!(validate_cwd(&existing, &base), Err(CwdReject::Duplicate(_))));
+        assert!(matches!(validate_cwd(&existing, &format!("{base}/")), Err(CwdReject::Duplicate(_))));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 驗證_重複拒_大小寫與斜線差異() {
+        let d = tempfile::tempdir().unwrap();
+        let a = d.path().join("Proj");
+        std::fs::create_dir_all(&a).unwrap();
+        let back = a.to_string_lossy().into_owned();
+        let fwd = back.replace('\\', "/").to_lowercase();
+        assert!(matches!(validate_cwd(&[back], &fwd), Err(CwdReject::Duplicate(_))));
+    }
+
+    #[test]
+    fn 驗證_超過上限拒() {
+        let d = tempfile::tempdir().unwrap();
+        let full: Vec<String> = (0..MAX_ALLOW).map(|i| format!("/m{i}")).collect();
+        assert_eq!(validate_cwd(&full, &d.path().to_string_lossy()), Err(CwdReject::TooMany));
+        let almost = &full[..MAX_ALLOW - 1];
+        assert!(validate_cwd(almost, &d.path().to_string_lossy()).is_ok());
+        assert!(CwdReject::TooMany.text().contains("50"));
+    }
+
+    #[test]
+    fn 加入_存進真實格式的存檔並保留其他欄位() {
+        let data = tempfile::tempdir().unwrap();
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let pa = norm_path(&a.path().to_string_lossy()).unwrap();
+        w(&data.path().join("launch-prefs.json"), &real_prefs(&[pa.clone()], &[pa.clone()]).to_string());
+        let added = add_validated(data.path(), &b.path().to_string_lossy()).unwrap();
+        let prefs = launch_prefs_get_sync(data.path()).unwrap();
+        assert_eq!(str_list(&prefs, "cwdAllow"), vec![pa.clone(), added]);
+        assert_eq!(prefs["maxPerHourSet"], 3);
+        assert_eq!(prefs["launchDisplay"], "background");
+        assert!(matches!(add_validated(data.path(), &pa), Err(CwdReject::Duplicate(_))));
+        assert!(matches!(add_validated(data.path(), "  "), Err(CwdReject::Empty)));
+    }
+
+    #[test]
+    fn 移除_依正規路徑比對一筆_其他不動() {
+        let data = tempfile::tempdir().unwrap();
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (pa, pb) = (norm_path(&a.path().to_string_lossy()).unwrap(), norm_path(&b.path().to_string_lossy()).unwrap());
+        w(&data.path().join("launch-prefs.json"), &real_prefs(&[pa.clone(), pb.clone()], &[]).to_string());
+        // 尾端斜線的寫法也移得掉
+        let left = remove_from_prefs_allow(data.path(), &format!("{pa}/")).unwrap();
+        assert_eq!(left, vec![pb.clone()]);
+        let prefs = launch_prefs_get_sync(data.path()).unwrap();
+        assert_eq!(str_list(&prefs, "cwdAllow"), vec![pb]);
+        assert_eq!(prefs["maxPerHourSet"], 3);
+        // 不在清單裡：白話錯誤、存檔不變
+        assert_eq!(remove_from_prefs_allow(data.path(), &pa).unwrap_err(), "清單裡找不到這個資料夾");
+        assert!(remove_from_prefs_allow(data.path(), " ").is_err());
+    }
+
+    #[test]
+    fn 整份存檔_不合格的新項目整份拒絕() {
+        let (a, d) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let pa = norm_path(&a.path().to_string_lossy()).unwrap();
+        let current = real_prefs(&[pa.clone()], &[]);
+        let gone = d.path().join("gone").to_string_lossy().into_owned();
+        let err = check_prefs_write(&current, &real_prefs(&[pa.clone(), gone], &[])).unwrap_err();
+        assert!(err.starts_with("資料夾不存在"), "{err}");
+        // 新項目重複（同一份裡出現兩次）也拒
+        let b = tempfile::tempdir().unwrap();
+        let pb = b.path().to_string_lossy().into_owned();
+        assert!(check_prefs_write(&current, &real_prefs(&[pa.clone(), pb.clone(), format!("{pb}/")], &[])).unwrap_err().contains("已經在清單裡"));
+        // 格式不對
+        assert!(check_prefs_write(&current, &json!({ "cwdAllow": "D:/a" })).is_err());
+        assert!(check_prefs_write(&current, &json!({ "cwdAllow": [1] })).is_err());
+        // 合格的新項目通過
+        assert!(check_prefs_write(&current, &real_prefs(&[pa, pb], &[])).is_ok());
+    }
+
+    #[test]
+    fn 整份存檔_舊清單裡已不存在的資料夾保留_不被拒也不被清() {
+        let data = tempfile::tempdir().unwrap();
+        let a = tempfile::tempdir().unwrap();
+        let pa = norm_path(&a.path().to_string_lossy()).unwrap();
+        let old_gone = data.path().join("已刪掉的舊專案").to_string_lossy().into_owned();
+        let current = real_prefs(&[old_gone.clone(), pa.clone()], &[]);
+        // 只是改別的欄位（上限）、或沒帶 cwdAllow：放行
+        assert!(check_prefs_write(&current, &real_prefs(&[old_gone.clone(), pa.clone()], &[pa.clone()])).is_ok());
+        assert!(check_prefs_write(&current, &json!({ "maxPerHourSet": 5 })).is_ok());
+        // 用斜線不同的寫法帶舊項目（Windows）也算舊的
+        #[cfg(windows)]
+        assert!(check_prefs_write(&current, &real_prefs(&[old_gone.replace('\\', "/").to_uppercase(), pa.clone()], &[])).is_ok());
+        // 移除舊的不存在項目：放行
+        assert!(check_prefs_write(&current, &real_prefs(&[pa.clone()], &[])).is_ok());
+        // 舊的留著、同時加不合格的新項目：整份拒絕
+        let bad = data.path().join("nope").to_string_lossy().into_owned();
+        assert!(check_prefs_write(&current, &real_prefs(&[old_gone, pa, bad], &[])).is_err());
+    }
+
+    #[test]
+    fn 使用時的三道檢查仍擋_白名單裡存在的才放行() {
+        // 舊清單裡不存在的資料夾：存檔可以保留，但開窗時 check_launch 照舊拒絕（這張沒有拿掉任何使用時的檢查）
+        let d = tempfile::tempdir().unwrap();
+        let gone = d.path().join("gone");
+        let mut c = cfg(vec![canonical_launch_cwd(&gone.to_string_lossy()).unwrap()]);
+        c.profiles.insert(
+            "p".into(),
+            crate::launch::profiles::Profile {
+                label: "p".into(),
+                command: "x".into(),
+                args: vec![],
+                engine: String::new(),
+                mode: crate::launch::profiles::LaunchMode::Window,
+                disabled: false,
+                disabled_reason: String::new(),
+            },
+        );
+        let mut req = crate::launch::config::LaunchReq { profile: "p", name: "w1", cwd: gone.to_string_lossy().into_owned() };
+        let r = crate::launch::config::check_launch(&c, &mut req, &[], 0);
+        assert!(r.is_err(), "{r:?}");
+    }
+
+    #[test]
+    fn 存檔命令_不合格新項目被拒_舊的不存在項目保留() {
+        let data = tempfile::tempdir().unwrap();
+        let a = tempfile::tempdir().unwrap();
+        let pa = norm_path(&a.path().to_string_lossy()).unwrap();
+        let old_gone = data.path().join("已刪掉的舊專案").to_string_lossy().into_owned();
+        // 舊存檔：直接寫檔（模擬升級前存下的，含已不存在的資料夾）
+        w(&data.path().join("launch-prefs.json"), &real_prefs(&[old_gone.clone(), pa.clone()], &[]).to_string());
+        // 新增不存在的資料夾：整份拒絕，檔案不變
+        let bad = data.path().join("nope").to_string_lossy().into_owned();
+        let err = crate::launch::launch_prefs_set_checked(data.path(), real_prefs(&[old_gone.clone(), pa.clone(), bad], &[])).unwrap_err();
+        assert!(err.starts_with("資料夾不存在"), "{err}");
+        let after = launch_prefs_get_sync(data.path()).unwrap();
+        assert_eq!(str_list(&after, "cwdAllow"), vec![old_gone.clone(), pa.clone()], "被拒時存檔不變");
+        // 改上限、帶著舊清單存：通過，舊項目還在
+        let mut keep = real_prefs(&[old_gone.clone(), pa.clone()], &[]);
+        keep["maxPerHourSet"] = json!(5);
+        crate::launch::launch_prefs_set_checked(data.path(), keep).unwrap();
+        let after = launch_prefs_get_sync(data.path()).unwrap();
+        assert_eq!(str_list(&after, "cwdAllow"), vec![old_gone, pa]);
+        assert_eq!(after["maxPerHourSet"], 5);
     }
 }

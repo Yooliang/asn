@@ -11,7 +11,7 @@ import { viewModel, countdownText, parseId } from '../ui/lib/askpass-dialog.mjs'
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
 
 const base = () => ({
-  launch: { tools: [], maxPerHour: 6, cwdText: '' }, closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
+  launch: { tools: [], maxPerHour: 6, cwdList: [], cwdSuggest: [], cwdMsg: '' }, closeTo: 'tray', trayOk: true, autostart: { supported: true, on: false, busy: false },
   accounts: { list: [], current: null, codexLine: '', busy: false, confirmDel: '', msg: '', trustOwn: false, remote: { node: '', devices: [], list: [], loading: false, busy: false, msg: '' } },
 })
 const render = async st => {

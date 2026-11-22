@@ -40,7 +40,7 @@ pub const NO_CWD: &str = "工作資料夾白名單是空的";
 /// 「不開放遠端開新視窗」時給使用者看的原因句（經名單回報的 launch_closed_reason 到別台與手機）；前端 ui/lib/partner-ops.mjs 的 CLOSED_REASONS 要逐字相同
 pub const CLOSED_NO_CONSENT: &str = "到那台的 設定 → 視窗與系統匣，勾「允許我的其他設備替這台開新視窗」";
 pub const CLOSED_NO_PROFILE: &str = "那台還找不到 Claude，裝好後約一分鐘會自動更新";
-pub const CLOSED_NO_CWD: &str = "到那台的 設定 → 啟動設定，在「工作資料夾白名單」加上資料夾";
+pub const CLOSED_NO_CWD: &str = "到那台的 設定 → 啟動設定，在「可以開新夥伴的資料夾」加上資料夾";
 
 fn now_ms() -> u64 {
     crate::heartbeat::now_ms()
@@ -699,13 +699,13 @@ mod tests {
         // 白名單空：有可開的 profile，錯誤從 config.rs 的 loader 出來
         let r = build_remote_config(&d.path().join("x.json"), Some(bootstrap(vec![])), vec![], true);
         assert_eq!(r.as_ref().err().map(String::as_str), Some(crate::launch::config::ERR_CWD_ALLOW_EMPTY));
-        assert_eq!(closed_reason_of(&r), Some("到那台的 設定 → 啟動設定，在「工作資料夾白名單」加上資料夾"));
+        assert_eq!(closed_reason_of(&r), Some("到那台的 設定 → 啟動設定，在「可以開新夥伴的資料夾」加上資料夾"));
         // 白名單空：loader 過了（launcher.json 寫的資料夾不存在），launcher.rs 濾掉後才空
         let gone = d.path().join("gone");
         let f = write_launcher(d.path(), &[&gone], 3);
         let r = build_remote_config(&f, None, vec![], false);
         assert_eq!(r.as_ref().err().map(String::as_str), Some(NO_CWD));
-        assert_eq!(closed_reason_of(&r), Some("到那台的 設定 → 啟動設定，在「工作資料夾白名單」加上資料夾"));
+        assert_eq!(closed_reason_of(&r), Some("到那台的 設定 → 啟動設定，在「可以開新夥伴的資料夾」加上資料夾"));
         // launcher.json 壞掉：原因不明
         let bad = d.path().join("bad.json");
         std::fs::write(&bad, "{ 壞掉").unwrap();

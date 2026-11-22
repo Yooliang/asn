@@ -5,6 +5,8 @@
 //    不寫舊的 maxPerHour 與顯示用的生效值，而且白名單是空的時候
 //    不會把文字框裡的「建議資料夾」當成白名單存下去
 // 4. err 情境：存檔被拒絕時畫面上看得到原因
+// 6. 工作資料夾清單（#1548 ③）：一列一個資料夾＋「移除」、「＋ 加入資料夾…」、建議列「加入」；用真的滑鼠點，量得到按鈕靠右（窄版加入鈕也靠右）；
+//    加入／移除失敗時在清單下面用白話顯示；不再有文字框
 // 5. 四區標題與順序（已安裝的工具／外掛與互通／安全限制／進階）、CLI 清單每列名稱與版本分欄（量得到不重疊）
 
 export const LAUNCH_SET_TOOLS = {
@@ -24,12 +26,16 @@ export const LAUNCH_SET_MODS = {
   failed: { report: { state: 'failed', reason: 'spawn ENOENT secret-detail' }, text: '安裝沒有成功，重新開啟 ASN 會再試一次' },
 }
 const SUGGEST = 'D:\\demo'
+const SUGGEST2 = 'D:\\tmp'
+const CWD_A = 'D:\\work'
+const CWD_B = 'D:\\Yooliang\\asn'
+const CWD_NEW = 'D:\\new'
 const ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'launch' }, windows: [], panelWindows: [] } }
 
 export const launchSetProbeSource = ({ err = false, mod = 'installed' } = {}) => `(async () => {
   try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const want = ${JSON.stringify({ err, mod: LAUNCH_SET_MODS[mod].text, suggest: SUGGEST })};
+  const want = ${JSON.stringify({ err, mod: LAUNCH_SET_MODS[mod].text, suggest: SUGGEST, suggest2: SUGGEST2, a: CWD_A, b: CWD_B, n: CWD_NEW })};
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
   const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
   const real = async (req, ms) => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(ms || 300) };
@@ -59,8 +65,20 @@ export const launchSetProbeSource = ({ err = false, mod = 'installed' } = {}) =>
   if (!input || input.value !== '3') return { ok: false, why: '上限要顯示後端給的生效值 3（不是舊存檔的 6）：' + (input && input.value) };
   const note = box.querySelector('#set-note-launch-max');
   if (!vis(note) || !note.textContent.includes('自己在這台電腦上開不受限制') || !box.textContent.includes('別的設備一小時最多替這台開')) return { ok: false, why: '上限的欄位文字或底下說明不對' };
-  const area = box.querySelector('textarea.set-area');
-  if (!area || !area.value.includes(want.suggest)) return { ok: false, why: '白名單空的時候文字框要先顯示建議資料夾（測試資料不對）：' + (area && area.value) };
+  if (box.querySelector('textarea')) return { ok: false, why: '工作資料夾不該再有可以自由打字的文字框' };
+  // 6a. 清單：兩列已加入的、一列建議；每列右邊有按鈕且靠右；加入鈕寬版靠左、窄版靠右
+  const cwdBox = box.querySelector('.launch-cwds');
+  const cwdRows = () => [...cwdBox.querySelectorAll('.launch-cwd-list:not(.suggest) li')].filter(vis);
+  const sugRows = () => [...cwdBox.querySelectorAll('.launch-cwd-list.suggest li')].filter(vis);
+  const rows0 = cwdRows().map(l => l.querySelector('.launch-cwd-path').textContent.trim());
+  if (rows0.join('｜') !== [want.a, want.b].join('｜')) return { ok: false, why: '清單要一列一個資料夾：' + rows0.join('｜') };
+  if (sugRows().length !== 2 || !sugRows()[0].textContent.includes('建議：' + want.suggest) || sugRows()[0].querySelector('button').textContent.trim() !== '加入') return { ok: false, why: '建議資料夾那一列不對：' + sugRows().map(l => l.textContent.trim()).join('｜') };
+  const edgeOk = (inner, outer, slack) => Math.abs(outer.right - inner.right) <= slack;
+  for (const li of [...cwdRows(), ...sugRows()]) { const b = li.querySelector('button'); if (b.textContent.trim() !== (li.parentElement.classList.contains('suggest') ? '加入' : '移除') || !edgeOk(b.getBoundingClientRect(), li.getBoundingClientRect(), 14)) return { ok: false, why: '列右邊的按鈕沒有靠右：' + li.textContent.trim() }; }
+  const addBtn = [...cwdBox.querySelectorAll('.launch-cwd-add button')].find(vis);
+  if (!addBtn || addBtn.textContent.trim() !== '＋ 加入資料夾…') return { ok: false, why: '找不到「＋ 加入資料夾…」' };
+  const ab = addBtn.getBoundingClientRect(), cb = cwdBox.getBoundingClientRect();
+  if (window.innerWidth <= 560 ? !edgeOk(ab, cb, 4) : ab.left - cb.left > 4) return { ok: false, why: '加入資料夾的位置不對（窄版要靠右、寬版靠左）：' + JSON.stringify([ab.left, ab.right, cb.left, cb.right]) };
   const n0 = sets().length, r0 = refused();
   input.scrollIntoView({ block: 'center' }); await sleep(150);
   await real({ dblclick: at(input) });
@@ -73,7 +91,7 @@ export const launchSetProbeSource = ({ err = false, mod = 'installed' } = {}) =>
     const s = await waitFor(() => sets().length > n0 ? sets()[sets().length - 1] : null, 30);
     if (!s) return { ok: false, why: '改上限之後沒有存檔' };
     const p = s[1] && s[1].prefs;
-    if (!p || !Array.isArray(p.cwdAllow) || p.cwdAllow.length) return { ok: false, why: '白名單是空的，改上限不該把建議資料夾存成白名單：' + JSON.stringify(p && p.cwdAllow) };
+    if (!p || !Array.isArray(p.cwdAllow) || p.cwdAllow.join('｜') !== [want.a, want.b].join('｜')) return { ok: false, why: '改上限存下去的白名單要跟畫面上的清單一樣，不能夾帶建議資料夾：' + JSON.stringify(p && p.cwdAllow) };
     if (p.maxPerHourSet !== 20) return { ok: false, why: '輸入超過 20 的值應該存成 maxPerHourSet:20（夾在 1～20）：' + JSON.stringify(p.maxPerHourSet) };
     if ('maxPerHour' in p || 'maxPerHourEffective' in p) return { ok: false, why: '存檔不該再寫舊的 maxPerHour 或顯示用的生效值：' + JSON.stringify(Object.keys(p)) };
   }
@@ -81,6 +99,37 @@ export const launchSetProbeSource = ({ err = false, mod = 'installed' } = {}) =>
   const errEl = [...box.querySelectorAll('[role="alert"]')].find(e => vis(e) && e.textContent.includes('啟動設定沒有存成功'));
   if (want.err && !errEl) return { ok: false, why: '存檔被拒絕時畫面上沒有說明' };
   if (!want.err && errEl) return { ok: false, why: '存檔成功卻顯示失敗：' + errEl.textContent };
+  // 6b. 加入／移除（真的點）
+  const calls = name => (globalThis.__smokeCalls || []).filter(c => c[0] === name);
+  const msgOf = () => { const e = [...cwdBox.querySelectorAll('[role="alert"]')].find(vis); return e ? e.textContent.trim() : '' };
+  if (want.err) {
+    addBtn.scrollIntoView({ block: 'center' }); await sleep(150);
+    await real({ click: at(addBtn) });
+    if (!(await waitFor(() => msgOf().includes('加入資料夾沒有成功'), 30))) return { ok: false, why: '加入失敗時清單下面沒有白話說明：' + msgOf() };
+    await real({ click: at(cwdRows()[0].querySelector('button')) });
+    if (!(await waitFor(() => msgOf().includes('移除沒有成功'), 30))) return { ok: false, why: '移除失敗時清單下面沒有白話說明：' + msgOf() };
+    if (cwdRows().length !== 2) return { ok: false, why: '移除失敗清單不該少列' };
+    return { ok: true, why: '' };
+  }
+  const base = { maxPerHour: 6, maxPerHourEffective: 3, recentCwd: [want.suggest, want.suggest2] };
+  // 加入資料夾：後端挑好資料夾（假的），重讀設定後多一列
+  globalThis.__smokeOverride = { launch_cwd_browse: want.n, launch_prefs_get: { ...base, cwdAllow: [want.a, want.b, want.n] } };
+  await real({ click: at(addBtn) });
+  if (!(await waitFor(() => cwdRows().length === 3, 30))) return { ok: false, why: '按「加入資料夾…」後清單沒有多一列：' + cwdRows().length };
+  if (calls('launch_cwd_browse').length !== 1) return { ok: false, why: '「加入資料夾…」沒有呼叫挑選資料夾' };
+  if (msgOf()) return { ok: false, why: '加入成功不該有錯誤訊息：' + msgOf() };
+  // 建議列「加入」：走整份存檔，帶著原有的三個加上建議的那個
+  const nSet = sets().length;
+  await real({ click: at(sugRows()[0].querySelector('button')) });
+  const s2 = await waitFor(() => sets().length > nSet ? sets()[sets().length - 1] : null, 30);
+  if (!s2 || (s2[1].prefs.cwdAllow || []).join('｜') !== [want.a, want.b, want.n, want.suggest].join('｜')) return { ok: false, why: '建議列「加入」沒有存成預期的清單：' + JSON.stringify(s2 && s2[1].prefs.cwdAllow) };
+  if (!(await waitFor(() => cwdRows().length === 4 && sugRows().length === 1, 30))) return { ok: false, why: '加入建議後，清單要多一列、那個建議列要消失（剩另一個）' };
+  // 移除第一列
+  globalThis.__smokeOverride = { ...globalThis.__smokeOverride, launch_cwd_remove: [want.b, want.n, want.suggest] };
+  await real({ click: at(cwdRows()[0].querySelector('button')) });
+  if (!(await waitFor(() => cwdRows().length === 3 && !cwdRows().some(l => l.textContent.includes(want.a)), 30))) return { ok: false, why: '按「移除」後那一列沒有消失' };
+  const rm = calls('launch_cwd_remove');
+  if (rm.length !== 1 || rm[0][1].cwd !== want.a) return { ok: false, why: '「移除」呼叫的參數不對：' + JSON.stringify(rm) };
   return { ok: true, why: '' };
   } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
 })()`
@@ -92,16 +141,16 @@ export default {
   kind: '啟動設定現況修正檢查',
   source: probe => launchSetProbeSource(probe.launchSet),
   scenarios: [scene('list-launch-set'), scene('list-launch-set-modern', 'modern'), scene('list-launch-set-line', 'line'), scene('list-launch-set-err', '', true), scene('list-launch-set-nomod', '', false, 'no_claude'), scene('list-launch-set-modfail', '', false, 'failed'), scene('list-launch-set-narrow', '', false, 'installed', 420)],
-  // 假後台：偵測帶版本、外掛狀態、啟動偏好（後端填好的上限 3、白名單空、最近用過一個資料夾）；err 情境存檔被拒絕（不放 launch_prefs_set）
+  // 假後台：偵測帶版本、外掛狀態、啟動偏好（後端填好的上限 3、白名單兩個舊資料夾、最近用過兩個不在清單裡的資料夾當建議）；err 情境存檔被拒絕（不放 launch_prefs_set）
   table: (scenario, t) => {
     const k = scenario.state?.launchSet
     if (!k) return undefined
     const o = {
       ai_cli_detect: LAUNCH_SET_TOOLS, pi_setup_status: { pi: true, ext: true, installed: true, stale: false }, askpass_helper_info: { path: 'C:/asn/asn-askpass.exe', example: 'setx SSH_ASKPASS "C:/asn/asn-askpass.exe"' }, claude_mod_report: LAUNCH_SET_MODS[scenario.state.launchMod || 'installed'].report,
-      launch_prefs_get: { maxPerHour: 6, maxPerHourEffective: 3, cwdAllow: [], recentCwd: [SUGGEST] },   // 舊程式寫的 maxPerHour:6 不算；生效值 3（例如 launcher.json 寫的）
+      launch_prefs_get: { maxPerHour: 6, maxPerHourEffective: 3, cwdAllow: [CWD_A, CWD_B], recentCwd: [SUGGEST, SUGGEST2] },   // 舊程式寫的 maxPerHour:6 不算；生效值 3（例如 launcher.json 寫的）
       store_load: { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ME) } },
     }
-    if (k === 'ok') o.launch_prefs_set = null
+    if (k === 'ok') { o.launch_prefs_set = null; o.launch_cwd_browse = null; o.launch_cwd_remove = [] }   // 探測用 __smokeOverride 換成這次要的回應
     return o
   },
 }

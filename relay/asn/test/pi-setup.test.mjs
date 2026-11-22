@@ -110,7 +110,7 @@ test('接線：設定頁有區塊與四個指令；樞紐只在使用者按同�
 // ---------- 真的用 Vue 轉成 HTML 看設定頁（啟動設定那一類） ----------
 const render = async piSetup => {
   globalThis.Vue = Vue
-  const st = { launch: { tools: [], maxPerHour: 6, cwdText: '' }, piSetup }
+  const st = { launch: { tools: [], maxPerHour: 6, cwdList: [], cwdSuggest: [], cwdMsg: '' }, piSetup }
   const app = Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'launch', meAv: '' }) })
   return renderToString(app)
 }

@@ -20,7 +20,7 @@ test('#1548 各欄位歸對區：CLI 清單在工具、Claude 外掛與 pi 互�
   within('class="launch-tools"', tools, plug)
   within('aria-label="Claude 外掛"', plug, safe)
   within('aria-label="pi 與 ASN 互通"', plug, safe)
-  within('工作資料夾白名單', safe, adv)
+  within('可以開新夥伴的資料夾', safe, adv)
   within('id="set-note-launch-max"', safe, adv)
   within('aria-label="密碼小幫手"', adv, launch.length)
   assert.match(launch, /<details class="set-adv"/, '進階是可折疊的')
