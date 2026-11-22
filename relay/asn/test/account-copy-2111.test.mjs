@@ -72,7 +72,7 @@ test('#2111 (c) 帳號後面的時間只有「N 天前」之類', async () => {
 
 test('#2111 額度條固定長度：電腦 200px、手機 130px，兩邊樣式都沒有可伸縮的軌道', () => {
   const css = read('ui/style.css'), mcss = read('ui/mobile.css')
-  assert.match(css, /\.dv-track\{flex:none;width:200px;/)
-  assert.match(mcss, /\.m-dv-bar\{display:grid;grid-template-columns:3\.4em 130px /)
+  assert.match(css, /\.dv-track\{flex:0 1 200px;/)
+  assert.match(mcss, /\.m-dv-bar\{display:grid;grid-template-columns:3\.4em minmax\(40px,130px\) 4\.2em/)
   assert.doesNotMatch(css, /\.dv-track\{[^}]*(flex:1|max-width:220px)/)
 })
