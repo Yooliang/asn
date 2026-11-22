@@ -432,6 +432,36 @@ test('提交回 main：標籤之後最新 main 上的網站檔被改過→中止
   aborts(x, 12, /不覆蓋/)
   assert.ok(!kinds(x.w).includes('git push') && !kinds(x.w).includes('git commit'))
 })
+test('#2093 貼群組失敗（找不到呼叫者所屬的 Claude 視窗）：不中止，網站檔照樣提交並推送回 main，結果成功並標示貼群組失敗；丟例外也一樣', async () => {
+  const x = world()
+  x.deps.asnCli = async args => {
+    x.w.events.push({ k: `asn-cli ${args[0]}`, a: args })
+    return args[0] === 'send' ? { status: 1, stdout: '', stderr: '找不到呼叫者所屬的 Claude 視窗' } : { status: 0, stdout: '', stderr: '' }
+  }
+  const r = await localSignPublish(x.opts, x.deps)
+  assert.equal(r.ok, true, r.error)
+  assert.equal(r.postFailed, true)
+  assert.equal(r.completed.length, 13)
+  const k = kinds(x.w)
+  assert.ok(k.includes('git commit') && k.includes('git push'), k.join(' > '))
+  assert.deepEqual(x.w.events.find(e => e.k === 'git push').a, ['push', 'origin', `${'f'.repeat(40)}:main`])
+  assert.equal(k.filter(n => n === 'asn-cli send').length, 1, '失敗不再貼一次中止訊息')
+  const log = x.w.logs.find(l => /貼群組失敗/.test(l)) ?? ''
+  assert.match(log, /找不到呼叫者所屬的 Claude 視窗/)
+  assert.match(log, /請自行通知/)
+  assert.match(log, /發版完成/)
+  const y = world()
+  y.deps.asnCli = async args => { y.w.events.push({ k: `asn-cli ${args[0]}`, a: args }); if (args[0] === 'send') throw new Error('boom'); return { status: 0, stdout: '', stderr: '' } }
+  const r2 = await localSignPublish(y.opts, y.deps)
+  assert.equal(r2.ok, true, r2.error)
+  assert.equal(r2.postFailed, true)
+  assert.ok(kinds(y.w).includes('git push'))
+})
+test('#2093 貼群組成功：postFailed 為 false', async () => {
+  const x = await run()
+  assert.equal(x.r.postFailed, false)
+})
+
 test('提交回 main：推送被拒→重新 fetch 重做（最多 3 次）；用盡就中止並貼群組', async () => {
   const a = await run(w => { w.pushFailTimes = 2 })
   assert.equal(a.r.ok, true, a.r.error)

@@ -356,8 +356,14 @@ export async function localSignPublish(opts, deps) {
     // ---- 11 貼群組
     await step(11, '貼群組', async () => {
       const text = `【發版完成】v${version}：安裝檔已發 GitHub Release、官網已部署並線上核對通過、官網版本紀錄已寫入（平台：${S.record.platforms.join('、')}）。commit ${S.record.commit}。接著提交兩個網站檔回 main。`
-      const r = await asnCli(['send', '--room', room, '--body', text])
-      if (r?.status !== 0) { log(`貼群組 asn-cli 原文：${asnCliFail(r)}`); bad(`貼群組失敗（結束碼 ${r?.status}）`) }
+      // 貼群組失敗只記 log、不中止（#2093）：工作機常駐程式不在 Claude 視窗裡，asn-cli 寄信會被拒；
+      // 此時 Release、部署、官網紀錄都已完成，不能因此讓網站檔停在沒提交回 main
+      let r
+      try { r = await asnCli(['send', '--room', room, '--body', text]) } catch (e) { r = { status: 1, stderr: e?.message } }
+      if (r?.status !== 0) {
+        S.postFailed = true
+        log(`貼群組失敗（${asnCliFail(r)}），請自行通知：${text}`)
+      }
     })
 
     // ---- 12 提交回 main
@@ -401,7 +407,7 @@ export async function localSignPublish(opts, deps) {
       bad(`推送回 main 連續被拒 ${MAX_TRIES} 次（有人一直在推 main）：請人工處理，不強推`)
     })
 
-    return { ok: true, dryRun: false, failedStep: null, completed, record: S.record, latest: S.latest, dir: S.dir }
+    return { ok: true, dryRun: false, failedStep: null, completed, record: S.record, latest: S.latest, dir: S.dir, postFailed: S.postFailed === true }
   } catch (e) {
     const known = e instanceof StepError
     const done = completed.length ? completed.join('、') : '（無）'
@@ -462,6 +468,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   opts.room = opts.room ?? env.ASN_RELEASE_ROOM ?? null
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
   const r = await localSignPublish(opts, realDeps(repoRoot, env))
+  if (r.ok && r.postFailed) console.log('注意：群組沒貼成功，請自行通知（要貼的原文在上面的 log）')
   console.log(r.ok ? (r.dryRun ? '演練完成（沒有發布任何東西）' : `完成：v${opts.version}`) : `中止於第 ${r.failedStep} 步（${r.failedName}）`)
   return r.ok ? 0 : 1
 }

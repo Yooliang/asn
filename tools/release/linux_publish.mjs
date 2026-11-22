@@ -303,10 +303,10 @@ export async function linuxSignPublish(opts, deps) {
       const text = `【Linux 版發版完成】v${version}：AppImage、deb 已附加到 GitHub Release v${version}、官網 latest.json 已加 ${LINUX_PLATFORM}、首頁已加 Linux 下載連結，部署與線上核對通過，網站檔已提交回 main。`
       let r
       try { r = await asnCli(['send', '--room', room, '--body', text]) } catch (e) { r = { status: 1, stderr: e?.message } }
-      if (r?.status !== 0) log(`貼群組失敗（${asnCliFail(r)}），請自行通知：${text}`)
+      if (r?.status !== 0) { S.postFailed = true; log(`貼群組失敗（${asnCliFail(r)}），請自行通知：${text}`) }
     })
 
-    return { ok: true, dryRun: false, failedStep: null, completed, latest: S.latest, dir: S.dir }
+    return { ok: true, dryRun: false, failedStep: null, completed, latest: S.latest, dir: S.dir, postFailed: S.postFailed === true }
   } catch (e) {
     const known = e instanceof StepError
     const done = completed.length ? completed.join('、') : '（無）'
