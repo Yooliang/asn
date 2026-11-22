@@ -1,15 +1,11 @@
 {
-  "version": "0.2.60",
-  "notes": "- 改善：設定頁的 Claude 外掛改成一行狀態說明，拿掉不能按的勾選框。（#1548、#2088）",
-  "pub_date": "2026-11-22T04:28:06.714Z",
+  "version": "0.2.61",
+  "notes": "- 改善：工作資料夾改成清單，用「加入」「移除」管理；加入時就檢查資料夾存不存在、有沒有重複。（#1548、#2091）",
+  "pub_date": "2026-11-22T05:26:04.249Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlRbU9rSGlaRC9mck9tSEdhd0xIZml4dGk3dGJweVMyNnBMRUQrNFJ4UnJucnNWMWREU3ljV0VXNENaREtOUTN0RGJDdUx4cDJHbmQ5N0FxY3V0U3dzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzIxNjg2CWZpbGU6QVNOXzAuMi42MF94NjQtc2V0dXAuZXhlCnhSdUZ6dUtmYVhKUFYxRjdiSCtKQzRMWjBqaE1Kbkp4YXQ2anJwNzJNaWpxSHVzcnhHWHZsRnZiY1lkY0hwb0RDMUkrS0lzbFcyeGFiTjM4MnFHUEFnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.60_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybit2NDZ6S1IzVi9KeEFyWnR2K1JkVzc3VUdlYkJQOTc4c09TNkFUSTIzU3JtMFA4cXVZK1RPdFdrNVdTNGJiVlp5eFFXaVB6REp5aGlIZkp0SXE4TWdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzIyNDk2CWZpbGU6QVNOXzAuMi42MF9hbWQ2NC5BcHBJbWFnZQpxVndJSFhVT1lUb20wMWFpQVdnM2N5d0xFU1VHMXB3RFplOTBsWXhwN2xWbElFczg4ZDhrQXV0MHRZWHNtY3lWdXF2aDNZWmFSSWROYnlzNENHRnBBZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.60_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlEZkhKV2lXZWVZL1dkKzBHampVT1l2UXdZTEJibytmY0FYMEI3eHhtNjQwdS9HcDNydGhHK3dsemNLck1hQUpaVGRsR294UFlXeG9pNDh0UDMvbGdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzI1MTYzCWZpbGU6QVNOXzAuMi42MV94NjQtc2V0dXAuZXhlCnRZN2k5VFFuYytiNGVXWjhlSUdzdEQzNFNaemR5ZDVHREk2S0hmWkdhNXQwaXZ6cXRqR1dZR3BEcDNEdWZaK2kwLzRzRE94OGRmY1RERFZKYXVabUJBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.61_x64-setup.exe"
     }
   }
 }
