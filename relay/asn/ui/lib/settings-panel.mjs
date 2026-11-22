@@ -788,7 +788,7 @@ export const SettingsPanel = {
               <asn-button v-if="st.piSetup.showCancel" :disabled="st.piSetup.busy" @click="act('pi-setup-cancel')">{{ st.piSetup.cancelLabel }}</asn-button>
               <asn-button level="primary" v-if="st.piSetup.showAgree" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.agreeLabel }}</asn-button>
               <asn-button v-if="st.piSetup.showReinstall" :disabled="st.piSetup.busy" @click="act('pi-setup-install')">{{ st.piSetup.reinstallLabel }}</asn-button>
-              <asn-button state="danger" v-if="st.piSetup.showRemove" :disabled="st.piSetup.busy" @click="act('pi-setup-remove')">{{ st.piSetup.removeLabel }}</asn-button>
+              <asn-button v-if="st.piSetup.showRemove" :disabled="st.piSetup.busy" @click="act('pi-setup-remove')">{{ st.piSetup.removeLabel }}</asn-button>
               <asn-button v-if="st.piSetup.showLogin" @click="act('pi-login')">{{ st.piSetup.loginLabel }}</asn-button>
             </div>
             <small v-if="st.piSetup.msg" role="status">{{ st.piSetup.msg }}</small>

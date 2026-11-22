@@ -124,14 +124,14 @@ test('#2105 改由 ASN 負責的確認：處理中兩顆都不能按（原本的
 })
 
 test('#2105 移除／刪除／結束／忘記／撤銷這類不可復原的動作，按鈕都是危險狀態', () => {
-  const must = ['tm-ask', 'acct-remove', 'quota-mm-remove', 'quota-unshare', 'pi-setup-remove', 'forget.ask(p)', 'forget.ask(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
+  const must = ['tm-ask', 'acct-remove', 'quota-mm-remove', 'quota-unshare', 'forget.ask(p)', 'forget.ask(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
   for (const h of must) {
     const tag = [...panel.matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes(h))
     assert.ok(tag, `找得到按鈕：${h}`)
     assert.match(tag, /state="danger"/, `${h} 要是危險鈕：${tag}`)
   }
   // 反向：取消、一般動作不是危險鈕
-  for (const h of ["act('tm-cancel')", "act('relogin-no')", "act('install-no')", 'renameCancel']) {
+  for (const h of ["act('tm-cancel')", "act('pi-setup-remove')", "act('relogin-no')", "act('install-no')", 'renameCancel']) {
     const tag = [...panel.matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes(h))
     assert.ok(tag && !/state="danger"/.test(tag), `${h} 不是危險鈕`)
   }

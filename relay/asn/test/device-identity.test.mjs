@@ -83,7 +83,9 @@ test('#1829 電腦版詳情頁：名字空白也認得出是哪一台，下面�
   assert.ok(!html.includes('未命名設備') && !html.includes('還沒連線過'), '不能據以行動的句子收掉')
   const acts = html.slice(html.indexOf('要處理這台設備'))
   assert.match(acts, />改名</)
-  assert.match(acts, /<button[^>]*class="asn-btn lv-secondary st-danger"[^>]*>永久移除</)
+  const rm = acts.match(/<button[^>]*class="asn-btn lv-secondary st-danger"[^>]*>永久移除</)
+  assert.ok(rm, '可以移除時有永久移除鈕')
+  assert.doesNotMatch(rm[0], /disabled/, '可以移除時永久移除鈕不能是 disabled')
   assert.ok(html.indexOf('這台是哪一台') < html.indexOf('要處理這台設備'), '辨認區在上、動作區在下')
 })
 

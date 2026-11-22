@@ -56,7 +56,7 @@ export const AsnConfirm = {
     danger: { type: Boolean, default: false },   // 不可復原的動作（移除、刪除、結束）：同意鈕畫成危險（紅）
   },
   emits: ['yes', 'no'],
-  template: `<div class="asn-confirm" role="group">
+  template: `<div class="asn-confirm" :role="danger ? 'alert' : 'group'">
     <p class="asn-confirm-text">{{ text }}</p>
     <asn-actions>
       <asn-button level="secondary" :disabled="busy" @click="$emit('no')">{{ no }}</asn-button>

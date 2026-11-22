@@ -192,7 +192,7 @@ test('被隱藏設備的細部頁：標「已隱藏」，頂部有「顯示回�
 test('永久移除要二次確認：確認區寫明對話與帳號資料不會被刪，有「確定移除」「取消」；確定才送 device-remove', async () => {
   const html = await render({ dev: 'G', devView: 'info', askRemove: true })
   assert.ok(html.includes('確定永久移除「舊電腦」嗎？它的對話與帳號資料不會被刪除，只是不再顯示。'))
-  assert.match(html, /class="asn-confirm"/); assert.match(html, />確定移除</); assert.match(html, />取消</)
+  assert.match(html, /<div[^>]*class="asn-confirm"[^>]*role="alert"/, '危險確認要讓讀屏念出來'); assert.match(html, /class="asn-confirm"/); assert.match(html, />確定移除</); assert.match(html, />取消</)
   assert.ok(!html.includes('>顯示回名單<'), '確認時收起其他動作')
   const src = read('ui/lib/settings-panel.mjs')
   assert.match(src, /act\('device-remove', k\)/)
