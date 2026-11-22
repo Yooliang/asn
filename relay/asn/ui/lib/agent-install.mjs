@@ -1,6 +1,8 @@
 // 設備細部頁「安裝並登入 Claude Code」（todo-next-174 的 E2，#650）：確認窗、進度、取消、結果，以及「允許從手機替這台安裝並登入」開關。
 // 真正的安裝、驗證、登入全在 Rust（agent_setup）；這裡只呼叫指令、聽事件、整理成畫面要的資料。
 // 事件（agent-setup）的內容全是固定句子，不含網址、授權碼、路徑；本人簽章不經過前端。
+import { makeAgentSetupApi } from './tauri.mjs'
+import { agentSetupErrorText } from './plain-errors.mjs'
 import { applyEvent, canCancel, initialView, requestCancel, statusLines } from './setup-progress.mjs'
 
 export const INSTALL_TEXT = Object.freeze({
@@ -18,7 +20,7 @@ export const INSTALL_TEXT = Object.freeze({
   startFailed: '沒有開始',
 })
 
-const errText = e => (typeof e === 'string' ? e : e?.message || String(e))
+const errText = agentSetupErrorText   // 轉白話集中在 plain-errors.mjs
 
 /** 結果的種類（畫面用來決定顏色與按鈕）：還沒有結果是 '' */
 export function resultKind(view) {
@@ -37,19 +39,20 @@ export function installButton({ signedIn, running }) {
 
 /** stage：idle（只有按鈕）→ confirm（確認窗）→ running（進度）→ done（結果） */
 export function createAgentInstall({ invoke, reactive, signedIn = async () => false }) {
+  const api = makeAgentSetupApi(invoke)   // 後端呼叫一律走 tauri.mjs 的具名出口；invoke 仍可注入（測試用）
   const s = reactive({ stage: 'idle', plan: '', signedIn: false, view: initialView(), msg: '', remoteAllow: false })
 
   const load = async () => {
     try { s.signedIn = (await signedIn()) === true } catch { s.signedIn = false }
     // 讀不到就當關：不會因為讀取失敗而悄悄變成開（真正擋不擋由 Rust 端照存檔判斷）
-    try { s.remoteAllow = (await invoke('agent_setup_remote_allow_get')) === true } catch { s.remoteAllow = false }
+    try { s.remoteAllow = (await api.remoteAllowGet()) === true } catch { s.remoteAllow = false }
   }
   const ask = async () => {
     s.msg = ''
     await load()
     if (s.stage === 'running') return
     if (!s.signedIn) { s.msg = INSTALL_TEXT.needLogin; return }
-    try { s.plan = String(await invoke('agent_setup_plan')) } catch (e) { s.msg = errText(e); return }
+    try { s.plan = String(await api.plan()) } catch (e) { s.msg = errText(e); return }
     s.stage = 'confirm'
   }
   const decline = () => { if (s.stage === 'confirm') s.stage = 'idle' }
@@ -58,7 +61,7 @@ export function createAgentInstall({ invoke, reactive, signedIn = async () => fa
     s.msg = ''
     s.view = initialView()
     try {
-      await invoke('agent_setup_start', { confirmed: true })
+      await api.start()
       s.stage = 'running'
     } catch (e) {
       s.stage = 'idle'
@@ -68,7 +71,7 @@ export function createAgentInstall({ invoke, reactive, signedIn = async () => fa
   const cancel = async () => {
     if (s.stage !== 'running' || !canCancel(s.view)) return
     s.view = requestCancel(s.view)
-    try { await invoke('agent_setup_cancel') } catch { /* 略過：取消只是請它在這一步做完後停下 */ }
+    try { await api.cancel() } catch { /* 略過：取消只是請它在這一步做完後停下；失敗出口已寫進 log */ }
   }
   // agent-setup 事件：手機要求的那一輪也會來，照樣顯示（人在電腦前看得到）
   const onEvent = e => {
@@ -81,10 +84,10 @@ export function createAgentInstall({ invoke, reactive, signedIn = async () => fa
   }
   const dismiss = () => { if (s.stage === 'done') { s.stage = 'idle'; s.view = initialView() } }
   const openTerminal = async () => {
-    try { await invoke('ai_cli_login', { toolId: 'claude' }) } catch (e) { s.msg = errText(e) }
+    try { await api.cliLogin('claude') } catch (e) { s.msg = errText(e) }
   }
   const setRemoteAllow = async on => {
-    try { await invoke('agent_setup_remote_allow_set', { on: on === true }); s.remoteAllow = on === true } catch (e) { s.msg = errText(e) }
+    try { await api.remoteAllowSet(on === true); s.remoteAllow = on === true } catch (e) { s.msg = errText(e) }
   }
   return { state: s, load, ask, decline, confirm, cancel, onEvent, dismiss, openTerminal, setRemoteAllow }
 }

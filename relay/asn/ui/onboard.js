@@ -4,12 +4,13 @@ import { blockContextMenu } from './lib/nomenu.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { ConnectStep } from './lib/connect-tools.mjs'
 import { ONBOARD_STORE, TEXT, markOnboarded, planOnboarding } from './lib/onboard.mjs'
-import { RESIZE_DIRS, authApi, ctl, initFrame, invoke, resizeFrom, store } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, claudeModApi, ctl, initFrame, invoke, makeAgentSetupApi, resizeFrom, shellApi, store, transport } from './lib/tauri.mjs'
+import { onboardErrorText } from './lib/plain-errors.mjs'
 import { setDeviceNameOnboard } from './lib/device-rename.mjs'
 
 const { createApp, ref } = Vue
 await initFrame()
-const info = await invoke('startup_info')
+const info = await shellApi.startupInfo()
 document.title = `Agent Sync Network Messenger (${info.version})`
 const flag = store(ONBOARD_STORE)
 const plan = await planOnboarding({ store: flag, status: authApi.status, accountInfo: authApi.accountInfo, startup: info })
@@ -24,15 +25,15 @@ const app = createApp({
     }
     // 第 3 步「連接你的 AI 工具」（#343）：名字都填好之後才出現；只有新用戶會走到這裡（舊用戶 plan.steps 是空的，直接進名單）
     const connectApi = {
-      piSetupStatus: () => invoke('pi_setup_status'),
-      piInstall: () => invoke('pi_setup_install'),
-      modInstall: () => invoke('claude_mod_check'),
-      piLogin: () => invoke('ai_cli_login', { toolId: 'pi' }),
+      piSetupStatus: () => transport.piSetupStatus(),
+      piInstall: () => transport.piSetupInstall(),
+      modInstall: () => claudeModApi.check(),
+      piLogin: () => makeAgentSetupApi().cliLogin('pi'),
     }
     const finish = async () => {
-      try { await markOnboarded(flag); location.replace('list.html') } catch (e) { steps.value = []; connect.value = false; failed.value = String(e?.message ?? e) }
+      try { await markOnboarded(flag); location.replace('list.html') } catch (e) { steps.value = []; connect.value = false; failed.value = onboardErrorText(e) }
     }
-    return { TEXT, RESIZE_DIRS, resizeFrom, ctl, steps, failed, connect, connectApi, deviceDefault: info.window_name, api, finish, quit: () => invoke('quit_app') }
+    return { TEXT, RESIZE_DIRS, resizeFrom, ctl, steps, failed, connect, connectApi, deviceDefault: info.window_name, api, finish, quit: () => shellApi.quitApp() }
   },
 })
 app.component('onboard-card', OnboardCard)

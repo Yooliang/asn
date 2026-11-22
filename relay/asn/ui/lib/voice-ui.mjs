@@ -4,10 +4,13 @@
 import { TtsPlayer } from './tts-player.mjs'
 import { VoiceInput } from './voice-input.mjs'
 import { createCallSession, isCallActive } from './call-session.mjs'
+import { makeVoiceApi } from './tauri.mjs'
+import { plainMessage } from './plain-errors.mjs'
 
 const MB = n => `${Math.round(n / 1048576)} MB`
 
 export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive = x => x, log = () => {} }) {
+  const api = makeVoiceApi(invoke)   // 後端呼叫一律走 tauri.mjs 的具名出口；invoke 仍可注入（測試用）
   const state = reactive({
     tts: { key: '', phase: 'idle', error: '' },
     mic: { phase: 'idle' },
@@ -17,7 +20,7 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
 
   const ttsListeners = new Set()   // 通話模式要知道念完了沒
   const player = new TtsPlayer({
-    fetchAudio: text => invoke('tts_speak', { text }),
+    fetchAudio: text => api.ttsSpeak(text),
     createAudio,
     onChange: p => { state.tts.key = p.key; state.tts.phase = p.phase; state.tts.error = p.error; for (const f of [...ttsListeners]) f(p) },
   })
@@ -25,10 +28,10 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
   const input = new VoiceInput({
     mic: createMic(),
     transcribe: async wav => {
-      try { return await invoke('stt_transcribe', { wav }) }
+      try { return await api.sttTranscribe(wav) }
       catch (e) { if (/還沒下載/.test(e?.message || '')) { sttReady = false; state.install.needed = true }; throw e }
     },
-    onCancelRecognize: () => { void Promise.resolve().then(() => invoke('stt_cancel')).catch(() => {}) },   // 請 Rust 端結束正在跑的辨識程式
+    onCancelRecognize: () => { void Promise.resolve().then(() => api.sttCancel()).catch(() => { /* 取消辨識失敗不影響畫面（結果本來就丟棄）；出口已把失敗寫進 log */ }) },   // 請 Rust 端結束正在跑的辨識程式
     onState: s => { state.mic.phase = s },
     onNote: t => { state.note = t },
     log,
@@ -70,8 +73,8 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
         let st, timer
         try {
           const late = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('語音功能沒有回應，請再試一次。')), 5000); timer?.unref?.() })
-          st = await Promise.race([Promise.resolve().then(() => invoke('stt_status')), late])
-        } catch (e) { if (g === checkGen) { checking = false; state.mic.phase = 'idle'; state.note = e.message }; return undefined }
+          st = await Promise.race([Promise.resolve().then(() => api.sttStatus()), late])
+        } catch (e) { if (g === checkGen) { checking = false; state.mic.phase = 'idle'; state.note = plainMessage(e) }; return undefined }
         finally { clearTimeout(timer) }
         if (g !== checkGen) return undefined   // 等的時候被取消了
         checking = false
@@ -92,13 +95,13 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
       log,
       onTts: fn => { ttsListeners.add(fn); return () => ttsListeners.delete(fn) },
       sttStatus: async () => {
-        const st = await invoke('stt_status')
+        const st = await api.sttStatus()
         if (!st?.ready) state.install.needed = true   // 還沒下載辨識：顯示對話區上方現成的下載提示
         else sttReady = true
         return st
       },
       transcribe: async (wav, names) => {
-        try { return await invoke('stt_transcribe', names?.length ? { wav, names } : { wav }) }   // 沒有名字就照舊不帶
+        try { return await api.sttTranscribe(wav, names) }   // 沒有名字就照舊不帶
         catch (e) { if (/還沒下載/.test(e?.message || '')) { sttReady = false; state.install.needed = true }; throw e }
       },
       canStart: () => (input.state !== 'idle' || checking ? '語音輸入進行中，請先結束再通話。' : ''),
@@ -114,8 +117,8 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
       if (state.install.busy) return
       state.install.busy = true; state.install.text = '準備下載…'
       await trackProgress()
-      try { await invoke('stt_install'); state.install.needed = false; state.note = '語音輸入準備好了，按麥克風開始說話。' }
-      catch (e) { state.note = e.message }
+      try { await api.sttInstall(); state.install.needed = false; state.note = '語音輸入準備好了，按麥克風開始說話。' }
+      catch (e) { state.note = plainMessage(e) }
       finally { state.install.busy = false; state.install.text = '' }
     },
     dismissInstall: () => { state.install.needed = false },

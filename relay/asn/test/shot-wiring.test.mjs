@@ -49,3 +49,15 @@ test('覆蓋視窗用的頁面有被 Tauri 打包（ui 資料夾內）且 Esc／
   assert.match(s, /Escape/)
   assert.match(s, /contextmenu/)
 })
+
+// 截圖選取範圍送給 Rust 的參數（#2106 ④）：index、x、y、w、h 各對各，w／h 對調或漏帶都要紅
+test('shot_pick 送出的參數就是 { index, x, y, w, h }，shot.js 照順序帶 p.x p.y p.w p.h', async () => {
+  const calls = []
+  const saved = globalThis.__TAURI__
+  globalThis.__TAURI__ = { core: { invoke: async (c, a) => { calls.push([c, a]) } } }
+  let mod
+  try { mod = await import('../ui/lib/tauri.mjs?shot-pick') } finally { globalThis.__TAURI__ = saved }
+  await mod.shotOverlayApi.pick(2, 11, 22, 33, 44)
+  assert.deepEqual(calls, [['shot_pick', { index: 2, x: 11, y: 22, w: 33, h: 44 }]])
+  assert.match(read('ui/shot.js'), /api\.pick\(index, p\.x, p\.y, p\.w, p\.h\)/)
+})

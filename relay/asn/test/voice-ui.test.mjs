@@ -94,3 +94,16 @@ test('前端語音程式不碰金鑰、不直接連網', async () => {
     assert.doesNotMatch(s, /x-relay-key|x-asn-tts-secret|ASN_EDGE_TTS|\bfetch\(|XMLHttpRequest|WebSocket/, f)
   }
 })
+
+test('辨識送出的參數：沒有名字只帶 wav（不帶 names），有名字才帶（#2106 ③，直接斷言、不經麥克風）', async () => {
+  const { makeVoiceApi } = await import('../ui/lib/tauri.mjs')
+  const seen = []
+  const api = makeVoiceApi(async (cmd, args) => { seen.push([cmd, args]); return '字' })
+  await api.sttTranscribe('WAV')
+  await api.sttTranscribe('WAV', [])
+  await api.sttTranscribe('WAV', undefined)
+  await api.sttTranscribe('WAV', ['希緒', '正見'])
+  assert.deepEqual(seen.map(c => c[0]), Array(4).fill('stt_transcribe'))
+  for (const i of [0, 1, 2]) { assert.deepEqual(Object.keys(seen[i][1]), ['wav'], `沒有名字（第 ${i + 1} 種）不帶 names`); assert.equal(seen[i][1].wav, 'WAV') }
+  assert.deepEqual(seen[3][1], { wav: 'WAV', names: ['希緒', '正見'] })
+})

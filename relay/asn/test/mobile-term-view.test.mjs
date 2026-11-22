@@ -233,12 +233,16 @@ test('守門：手機頁不准直接用電腦版的 remoteViewApi（會跳過生
   assert.doesNotMatch(mob, /\.\.\.remoteInputApi/, '不能整包展開電腦版的打字介面')
   const inputApi = mob.replace(/\r\n/g, '\n').split('export function makeMobileRemoteInputApi(')[1].split('\n}\n')[0]
   // 打字的發起：先看指紋確認過、要 Rust 發的一次性憑證、拿憑證驗證本人，ok 才帶憑證發起；每一步之後作廢就不再往下
-  const order = ['android_known_list', "android_known_token', { action: 'input'", 'await confirm(challenge)', "if (r === 'ok') return invoke('term_view_remote_start', { toNode, partner, machine: machine || null, scope: 'input', challenge })"].map(x => inputApi.indexOf(x))
+  const order = ['peersApi.list()', "peersApi.token('input', toNode)", 'await confirm(challenge)', "if (r === 'ok') return api.startInput(toNode, partner, machine, challenge)"].map(x => inputApi.indexOf(x))
   assert.ok(order.every(i => i > 0) && order.every((x, i) => i === 0 || order[i - 1] < x), '順序：列表 → 憑證 → 本人驗證 → 帶憑證發起：' + order)
   assert.ok(inputApi.indexOf('if (!wanted()) throw cancelled()', inputApi.indexOf('await confirm(challenge)')) > 0, '驗證回來時那一次已作廢就不發起')
   assert.match(inputApi, /confirm = challenge => confirmWithToken\(challenge\)/, '預設的本人驗證是帶憑證的那一種')
-  assert.equal((inputApi.match(/invoke\('term_view_remote_start'/g) || []).length, 1)
-  assert.match(mob, /const r = await confirm\(\)\s+if \(typeof opts\?\.wanted === 'function' && !opts\.wanted\(\)\) throw [^\n]+\s+if \(r === 'ok'\) return invoke\('term_view_remote_start',/, '發起前一定先本人確認；確認回來時那一次已作廢就不送；ok 才送')
+  assert.equal((inputApi.match(/api\.start(Input)?\(/g) || []).length, 1)
+  // 指令名與參數形狀在出口（lib/tauri.mjs，#2106 ③）：打字的發起帶 scope 與憑證
+  const exit = read('../ui/lib/tauri.mjs')
+  assert.match(exit, /startInput: \(toNode, partner, machine, challenge\) => call\('term_view_remote_start', \{ toNode, partner, machine: machine \|\| null, scope: 'input', challenge \}\)/)
+  assert.match(exit, /start: \(toNode, partner, machine\) => call\('term_view_remote_start', \{ toNode, partner, machine: machine \|\| null \}\)/)
+  assert.match(mob, /const r = await confirm\(\)\s+if \(typeof opts\?\.wanted === 'function' && !opts\.wanted\(\)\) throw [^\n]+\s+if \(r === 'ok'\) return api\.start\(toNode, partner, machine\)/, '發起前一定先本人確認；確認回來時那一次已作廢就不送；ok 才送')
   assert.match(mob, /confirm = \(\) => confirmViewer\(\)/, '預設的確認就是 PR③ 的 confirmViewer')
 })
 

@@ -4,11 +4,11 @@
 // 權杖與節點金鑰都只在 Rust 端，這裡只看得到「登入了沒」與錯誤文字。
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { LAST_USED_LABEL, PROVIDERS, SKIP_LABEL, STILL_RUNNING_NOTE, canStart, errorText, phaseText, showSkip } from './lib/login.mjs'
-import { RESIZE_DIRS, authApi, ctl, initFrame, invoke, resizeFrom } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, ctl, initFrame, resizeFrom, shellApi } from './lib/tauri.mjs'
 
 const { createApp, ref, computed } = Vue
 await initFrame()
-const info = await invoke('startup_info')
+const info = await shellApi.startupInfo()
 document.title = `Agent Sync Network Messenger (${info.version})`
 
 const app = createApp({
@@ -37,7 +37,7 @@ const app = createApp({
       if (!showSkip(canSkip, phase.value)) return
       try { await authApi.skip(); if (!info.shot) location.replace('list.html') } catch (e) { error.value = errorText(e); phase.value = 'error' }
     }
-    return { STILL_RUNNING_NOTE, LAST_USED_LABEL, lastProvider, lastAvatar, PROVIDERS, RESIZE_DIRS, resizeFrom, ctl, phase, error, note, canStart, canSkip, SKIP_LABEL, showSkip, start, skip, finish, cancel: () => authApi.cancel(), quit: () => invoke('quit_app') }
+    return { STILL_RUNNING_NOTE, LAST_USED_LABEL, lastProvider, lastAvatar, PROVIDERS, RESIZE_DIRS, resizeFrom, ctl, phase, error, note, canStart, canSkip, SKIP_LABEL, showSkip, start, skip, finish, cancel: () => authApi.cancel(), quit: () => shellApi.quitApp() }
   },
 })
 const vm = app.mount('#app')
@@ -51,9 +51,9 @@ if (info.shot) {
   for (let i = 0; i < 3; i++) await new Promise(r => requestAnimationFrame(r))
   await resumed   // 已登入的情境：等自動建立節點做完再截
   await sleep(700)
-  await invoke('show_main').catch(() => {})
+  await shellApi.showMain().catch(() => { /* 只有 --shot 截圖才走到這裡；顯示失敗就照樣截，出口已寫進 log */ })
   await sleep(500)
-  await invoke('capture_ui_ready', { tag: 'login-ready' })
-  await invoke('take_shot', { tab: 'login' })
-  await invoke('quit_app')
+  await shellApi.captureUiReady('login-ready')
+  await shellApi.takeShot('login')
+  await shellApi.quitApp()
 }
