@@ -35,7 +35,7 @@ test('電腦、手機都讀同一份（不各寫一次）', () => {
   assert.match(deskJs, /isAboutUrl/); assert.match(mob, /isAboutUrl/)
   for (const s of [desk, mob, mobHtml]) assert.ok(!s.includes('Agent Sync Network') && !s.includes('/log`') && !s.includes('web.app/log'), '文字與網址只寫在 about-info.mjs')
   assert.match(desk, /act\('open-link', l\.url\)/); assert.match(desk, /'open-update'/); assert.match(mob, /l\.kind === 'link' \? openAboutLink\(l\.url\)/)
-  assert.match(deskJs, /case 'open-link':[^\n]*linkApi\.openLink\(value\)/); assert.match(mob, /invoke\('open_link', \{ url \}\)/)
+  assert.match(deskJs, /case 'open-link':[^\n]*linkApi\.openLink\(value\)/); assert.match(mob, /isAboutUrl\(url\)\) openLink\(url\)\?\.catch\(/)   // 指令名在出口 openLink（#2106 ⑪）
 })
 
 test('使用指引、版本紀錄：開 App 內的頁，不開外部瀏覽器', () => {

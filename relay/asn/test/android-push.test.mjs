@@ -146,7 +146,8 @@ test('前端接線：第一次收信之後與回到前景才同步；登出先�
   assert.match(js, /void roomsHook\.refresh\?\.\(\); push\?\.sync\(\)/)
   assert.match(js, /await push\?\.logout\(\); await authApi\.logout\(\)/)
   assert.match(read('src-tauri', 'src', 'relay.rs'), /api_with\("push_unregister", Some\(json!\(\{\}\)\), Duration::from_secs\(5\)\)/, '取消註冊的逾時只有 5 秒')
-  assert.match(js, /invoke\('android_push_register', \{ token \}\)/)
+  assert.match(js, /register: token => mobilePushApi\.register\(token\)/)
+  assert.match(read('ui', 'lib', 'tauri.mjs'), /register: token => call\('android_push_register', \{ token \}\)/, '指令名與參數形狀在出口（#2106 ⑪）')
 })
 
 test('設定頁（PR④）：開關接到 prefs.push 與同步；預設開；沒有 Firebase 整列不顯示', () => {

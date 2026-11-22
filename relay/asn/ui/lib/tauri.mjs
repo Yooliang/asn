@@ -455,3 +455,44 @@ export const makeMobileAskApi = (call = invoke) => ({
   termReqDecide: args => call('android_term_req_decide', { id: args.id, decision: args.decision, choiceN: args.choiceN, hash: args.hash }),
 })
 export const mobileAskApi = makeMobileAskApi()
+
+// ---- #2106 ⑪：手機（m.js）第二批。方法名＝指令的駝峰寫法，參數形狀與以前直接 invoke 時完全相同 ----
+// 「在別台電腦安裝並登入 Claude Code」：手機只送請求與查結果，安裝與驗證都在那台電腦；登入走裝置碼（網址與代碼只留在畫面，不進記錄）
+export const makeMobileSetupApi = (call = invoke) => ({
+  remoteStatus: () => call('setup_remote_status'),   // → { nodes: [...] }
+  remoteRequest: (node, relogin) => call('setup_remote_request', relogin === true ? { node, mode: 'relogin' } : { node }),
+  deviceRequest: (node, vendor) => call('setup_device_request', { node, vendor }),
+  deviceFetch: rid => call('setup_device_fetch', { rid }),
+  deviceCancel: rid => call('setup_device_cancel', { rid }),   // 連 Rust 端記著的一次性私鑰一起丟掉
+})
+export const mobileSetupApi = makeMobileSetupApi()
+// 在線狀態與前景狀態：每次切換與定時續報都會呼叫，失敗時出口的 invoke 已記一行並去重，呼叫端不再多記
+export const makeMobileStateApi = (call = invoke) => ({
+  presence: (status, psm) => call('set_presence', { status, psm }),
+  foreground: fg => call('set_foreground', { foreground: fg === true }),
+  invitePending: () => call('invite_pending'),   // → 開 App 時帶進來的邀請碼（沒有就空）
+})
+export const mobileStateApi = makeMobileStateApi()
+// 在手機上替電腦開新夥伴（啟動器）：查可開的電腦與送出請求，都由 Rust 簽章
+export const makeMobileLaunchApi = (call = invoke) => ({
+  launchers: ids => call('android_launchers', Array.isArray(ids) ? { ids } : {}),
+  launch: body => call('android_launch', { body }),
+})
+export const mobileLaunchApi = makeMobileLaunchApi()
+// 官網的版本紀錄（關於頁）：→ [{ version, date, lines }]；讀不到丟「暫時讀不到版本紀錄」
+export const makeMobileSiteApi = (call = invoke) => ({
+  releases: force => call('site_releases', { force: force === true }),
+})
+export const mobileSiteApi = makeMobileSiteApi()
+// 推播權杖：註冊與取消（權杖只在 Rust 與後台之間流動）
+export const makeMobilePushApi = (call = invoke) => ({
+  register: token => call('android_push_register', { token }),
+  unregister: () => call('android_push_unregister'),
+})
+export const mobilePushApi = makeMobilePushApi()
+// 手機自己更新：查新版與下載（Rust 端下載並驗 sha256，不符就拒絕）
+export const makeMobileUpdateApi = (call = invoke) => ({
+  check: args => call('android_update_check', args),
+  download: args => call('android_update_download', args),
+})
+export const mobileUpdateApi = makeMobileUpdateApi()

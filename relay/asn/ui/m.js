@@ -68,7 +68,7 @@ import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './lib/msg-ref.mjs'
 import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
-import { authApi, cloudApi, invoke, listen, mobileAskApi, mobileOpsApi, mobilePhotoApi, mobileRelayApi, store } from './lib/tauri.mjs'
+import { authApi, cloudApi, invoke, listen, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, deviceNameError, deviceNameOf, unnamedLabelOf } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
@@ -105,7 +105,7 @@ const bridge = androidBridge(window)
 // 推播（#797）：App 關著也要響。權杖由外殼向 Firebase 取、經這裡交給 Rust；沒有 Firebase 的建置 state 是 unavailable，什麼都不做
 const pushSt = reactive({ state: bridge?.push?.state() ?? 'unavailable' })   // 通知權限的狀態（設定頁「App 關著時也通知我」那一列看這個）
 const refreshPushSt = () => { pushSt.state = bridge?.push?.state() ?? 'unavailable' }
-const push = bridge?.push ? createPushSync({ native: bridge.push, register: token => invoke('android_push_register', { token }), unregister: () => invoke('android_push_unregister'), enabled: () => prefs.push !== false, onChange: refreshPushSt, log: m => console.info('[ASN]', m) }).start() : null
+const push = bridge?.push ? createPushSync({ native: bridge.push, register: token => mobilePushApi.register(token), unregister: () => mobilePushApi.unregister(), enabled: () => prefs.push !== false, onChange: refreshPushSt, log: m => console.info('[ASN]', m) }).start() : null
 // 偽通話（#99）：用手機內建的語音辨識與念出（外殼 CallVoice.kt）。外殼沒有、或這支手機沒有辨識服務就沒有通話鈕
 const callOn = ref(false)   // 現在有沒有通話（通話中每 2 秒多收一次信）
 let liveCall = null
@@ -128,7 +128,7 @@ const photoApi = {
   reveal: async () => bridge?.openDownloads(),
 }
 
-const info = reactive(await invoke('startup_info'))   // 響應式：改設備名後就地更新，不重載頁面
+const info = reactive(await shellApi.startupInfo())   // 響應式：改設備名後就地更新，不重載頁面
 document.title = 'ASN'
 
 const screen = ref('boot'), fatal = ref('')
@@ -196,7 +196,7 @@ async function checkUpdate(manual = false) {
   if (!upd.enabled || upd.checking || upd.phase === 'downloading') return
   upd.checking = true; if (manual) upd.manual = ''
   try {
-    const found = await invoke('android_update_check', updArgs())
+    const found = await mobileUpdateApi.check(updArgs())
     Object.assign(upd, withAvailable(upd, found))
     if (manual) upd.manual = found?.available ? `有新版本 ${found.version}。` : '目前已是最新版。'
   } catch (e) { if (manual) upd.manual = updateCheckErrorText(e.message) } finally { upd.checking = false }   // 官網連不上、回錯誤一律說「暫時無法檢查更新」，不顯示原始錯誤
@@ -205,7 +205,7 @@ async function startUpdate() {
   if (upd.phase === 'downloading') return
   Object.assign(upd, withProgress(upd, { done: 0, total: 0 }), { error: '', hint: '' })
   try {
-    const r = await invoke('android_update_download', updArgs())   // Rust 端下載並驗 sha256，不符就拒絕
+    const r = await mobileUpdateApi.download(updArgs())   // Rust 端下載並驗 sha256，不符就拒絕
     const out = installOutcome(bridge ? bridge.installApk(r.path) : 'unsupported')
     upd.phase = 'available'; upd.hint = out.hint
   } catch (e) { Object.assign(upd, withFailure(upd, e.message)) }
@@ -250,11 +250,11 @@ if (screen.value === 'main') {
   // 重開 App 回到上次的大分頁（夥伴／對話／設定／通知，存的是分頁鍵）；上次正在看某一則對話就直接回到那一則
 savedTab = restoreMobileTab(saved.navTab)
 watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? fourthSt.fourth?.from || HOME_TAB : nav.tab, navChat: nav.tab === 'chats' && !!nav.chat }) }, { deep: true })
-  watch(() => [me.status, me.psm], () => { void invoke('set_presence', { status: me.status, psm: me.psm ?? '' }).catch(() => {}) }, { immediate: true })
+  watch(() => [me.status, me.psm], () => { void mobileStateApi.presence(me.status, me.psm ?? '').catch(() => { /* 出口的 invoke 已記一行並去重，這裡不再多記，避免洗記錄 */ }) }, { immediate: true })
   // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent，
   // 再用 visibilitychange 補強；啟動時也告知一次目前狀態（推播喚醒時 Rust 預設在背景）。
   // 前景時每 30 秒再告知一次（續命）：Rust 的前景告知 90 秒就過期，背景時網頁計時器被凍住不會續命，所以「進背景」的告知就算遺失也只會多撐一下
-  const tellFg = fg => { void invoke('set_foreground', { foreground: fg === true }).catch(() => {}); try { fgListener?.(fg === true) } catch {}; if (fg === true) void reloginWatch.onForeground() }   // 回到前景也查一次登入狀態（#1764）
+  const tellFg = fg => { void mobileStateApi.foreground(fg).catch(() => { /* 出口的 invoke 已記一行並去重，這裡不再多記，避免洗記錄 */ }); try { fgListener?.(fg === true) } catch {}; if (fg === true) void reloginWatch.onForeground() }   // 回到前景也查一次登入狀態（#1764）
   window.__asnFgEvent = tellFg
   document.addEventListener('visibilitychange', () => tellFg(document.visibilityState === 'visible'))
   tellFg(document.visibilityState === 'visible')
@@ -453,7 +453,7 @@ const app = createApp({
     if (screen.value === 'main') {
       setInterval(() => { if (document.visibilityState === 'visible') void refreshRooms() }, ROOM_POLL_MS)
       void listen('asn:invite', onInviteCode)
-      void invoke('invite_pending').then(onInviteCode).catch(() => {})
+      void mobileStateApi.invitePending().then(onInviteCode).catch(() => { /* 出口已留警告記錄；沒帶邀請碼進來照常使用 */ })
       void refreshRooms()
     }
     const unreadTotal = computed(() => chatRowsUnread(unreadRows.value))   // 「夥伴」分頁的紅點（#1429）：和夥伴頁最上面的「未讀」那一組同一份（#1438）
@@ -719,7 +719,7 @@ const app = createApp({
       const prev = { ...rel }
       if (prev.phase !== 'ok') rel.phase = 'loading'   // 已有資料的重讀不閃成「讀取中」（紅點不能跟著閃掉）
       // force 預設 false：Rust 端讀成功的只留 10 分鐘，比我們的 30 分鐘過期短，所以重讀不會拿到比 30 分鐘更舊的快取
-      const res = await loadReleases(f => invoke('site_releases', { force: f === true }), { force })
+      const res = await loadReleases(f => mobileSiteApi.releases(f), { force })
       Object.assign(rel, stampReleases(prev, res, Date.now()))
       relBusy = false
     }
@@ -731,7 +731,7 @@ const app = createApp({
     const playView = computed(() => (upd.enabled ? { kind: 'unknown' } : playUpdateView(rel, info.version)))
     const playNewText = computed(() => (playView.value.kind === 'new' ? playNewTextOf(playView.value.version) : ''))
     const rowHasDot = key => key === 'update' && playNewVersion.value !== ''
-    const openPlay = () => { void openPlayStore(url => invoke('open_link', { url })) }   // 既有的 open_link（手機走系統 Intent；Android 會用 Play App 開這個 https 網址）
+    const openPlay = () => { void openPlayStore(url => openLink(url)) }   // 既有的 open_link（手機走系統 Intent；Android 會用 Play App 開這個 https 網址）
     watch(() => upd.enabled, en => { if (en === false) void relRefresh.run() }, { immediate: true })   // 不能自己更新的版本：啟動就讀版本紀錄，紅點才有依據
     watch(settingCat, c => { if (c === 'update' && releasesStale(rel, Date.now())) void loadRel() })   // 更新頁（兩種版本都有）：過期或沒讀過才讀
     watch(() => nav.tab, t => { if (t === 'me') relRefresh.check() })   // 進設定大分頁：過期才讀（只有 Play 版需要；check 內會看 enabled）
@@ -758,7 +758,7 @@ const app = createApp({
     // 設備與帳號（#268）開的是名單設備卡「選項」的同一頁（先看設備列表），其他分類開該分類的內頁；浮層開著時不開（lib/mobile-nav.mjs 擋）
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
     const about = computed(() => aboutView({ deviceName: info.window_name }))
-    const openAboutLink = url => { if (isAboutUrl(url)) invoke('open_link', { url }).catch(e => console.info('[ASN] 開啟連結失敗', String(e?.message ?? e))) }   // 交給系統瀏覽器（Rust 端 open_link 只放行 http／https）
+    const openAboutLink = url => { if (isAboutUrl(url)) openLink(url)?.catch(e => console.info('[ASN] 開啟連結失敗', String(e?.message ?? e))) }   // 交給系統瀏覽器（Rust 端 open_link 只放行 http／https）
     const aboutAct = l => (l.kind === 'link' ? openAboutLink(l.url) : l.kind === 'update' ? openSetting('update') : openGuides())   // 官網、隱私權政策開瀏覽器；版本紀錄＝「更新」頁、使用指引＝指引頁，都在 App 內
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
@@ -800,7 +800,7 @@ const app = createApp({
     function pickLaunchVendor(v) { Object.assign(lch, { vendor: v.id, profile: v.profileId, run: '', piModel: '' }) }
     async function loadLaunchers() {
       lchData.error = ''
-      try { lchData.machines = machinesByNode(await invoke('android_launchers', {})); lchData.loaded = true } catch (e) { lchData.loaded = false; lchData.error = launchErrorText(e.message) }
+      try { lchData.machines = machinesByNode(await mobileLaunchApi.launchers()); lchData.loaded = true } catch (e) { lchData.loaded = false; lchData.error = launchErrorText(e.message) }
     }
     function pickLaunchDevice(node) {
       if (!launchEligibility(node, lchCtx.value).ok) return
@@ -968,7 +968,7 @@ const app = createApp({
       const node = setupSt.node
       if (!node || setupSt.stage !== 'waiting') return
       let res = { ok: true, st: null }
-      try { res = { ok: true, st: setupStateOf((await invoke('setup_remote_status'))?.nodes, node) } } catch { res = { ok: false } }   // 查不到先下一輪再查；連續 3 次就告訴本人
+      try { res = { ok: true, st: setupStateOf((await mobileSetupApi.remoteStatus())?.nodes, node) } } catch { res = { ok: false } }   // 查不到先下一輪再查；連續 3 次就告訴本人
       if (setupSt.node !== node || setupSt.stage !== 'waiting') return
       const { next, view: v } = setupStep({ since: setupSt.since, saw: setupSt.saw, reached: setupSt.reached, fails: setupSt.fails }, res, Date.now())
       Object.assign(setupSt, { saw: next.saw, reached: next.reached, fails: next.fails })
@@ -982,7 +982,7 @@ const app = createApp({
       setupSt.stage = 'sending'; setupSt.msg = ''; setupSt.text = SETUP_TEXT.sending
       let sent = null
       try {
-        sent = await invoke('setup_remote_request', setupSt.mode === 'relogin' ? { node, mode: 'relogin' } : { node })
+        sent = await mobileSetupApi.remoteRequest(node, setupSt.mode === 'relogin')
       } catch (e) {
         if (setupSt.node !== node) return
         return setupFinish(setupErrorText(e), false)
@@ -1031,7 +1031,7 @@ const app = createApp({
     })
     const setGuideHidden = v => { guideHidden.value = v === true; saveGuideHidden(guideHidden.value) }
     // 官網：交給系統瀏覽器（open_link 只放行 http／https）；只開引導卡列出的四個網址
-    const guideSite = site => { if (GUIDE_VENDORS.some(v => v.url === site?.url)) invoke('open_link', { url: site.url }).catch(e => console.info('[ASN] 開啟官網失敗', String(e?.message ?? e))) }
+    const guideSite = site => { if (GUIDE_VENDORS.some(v => v.url === site?.url)) openLink(site.url)?.catch(e => console.info('[ASN] 開啟官網失敗', String(e?.message ?? e))) }
     async function guideAct(row) {
       const d = guideNode.value
       if (!d || !row) return
@@ -1056,7 +1056,7 @@ const app = createApp({
     const loginSt = reactive({ node: '', vendor: '', stage: 'idle', rid: '', text: '', ok: false, url: '', code: '', exp: 0, name: '', left: 0 })
     let loginTimer = null
     // 停止這一輪：連 Rust 那邊記著的一次性私鑰也丟掉（離開、進背景、到期、出錯、按關閉都走這裡）
-    const loginStop = () => { clearInterval(loginTimer); loginTimer = null; if (loginSt.rid) void invoke('setup_device_cancel', { rid: loginSt.rid }).catch(() => {}) }
+    const loginStop = () => { clearInterval(loginTimer); loginTimer = null; if (loginSt.rid) void mobileSetupApi.deviceCancel(loginSt.rid).catch(() => { /* 出口已留警告記錄；這輪已停，私鑰最後由 Rust 端過期清掉 */ }) }
     const loginWipe = () => { Object.assign(loginSt, { url: '', code: '', exp: 0, left: 0 }) }
     const loginReset = () => { loginStop(); loginWipe(); Object.assign(loginSt, { node: '', vendor: '', stage: 'idle', rid: '', text: '', ok: false, name: '' }) }
     const loginEnd = (text, good = false) => { loginStop(); loginWipe(); Object.assign(loginSt, { stage: 'done', text, ok: good }) }
@@ -1069,14 +1069,14 @@ const app = createApp({
         if (!loginSt.left) return loginEnd(LOGIN_TEXT.expired)
         // 代碼顯示中：看那台電腦回報的結果（不再取代碼）
         let st = null
-        try { st = setupStateOf((await invoke('setup_remote_status'))?.nodes, node) } catch { return }
+        try { st = setupStateOf((await mobileSetupApi.remoteStatus())?.nodes, node) } catch { return /* 出口已留警告記錄，這一輪先略過 */ }
         if (loginSt.node !== node || loginSt.stage !== 'show') return
         if (st && (st.state === 'done' || st.state === 'failed')) loginEnd(st.detail || (st.state === 'done' ? LOGIN_TEXT.doneOk : LOGIN_TEXT.failed), st.state === 'done')
         return
       }
       if (loginSt.stage !== 'waiting' || !rid) return
       let r = null
-      try { r = await invoke('setup_device_fetch', { rid }) } catch { return }   // 查不到這一輪就下一輪再查
+      try { r = await mobileSetupApi.deviceFetch(rid) } catch { return }   // 查不到這一輪就下一輪再查
       if (loginSt.rid !== rid || loginSt.stage !== 'waiting') return
       const v = fetchView(r, loginSt.vendor)
       if (v.stage === 'show') { Object.assign(loginSt, { stage: 'show', url: v.url, code: v.code, exp: v.exp, name: v.name, left: secondsLeft(v.exp) }); return }
@@ -1088,7 +1088,7 @@ const app = createApp({
       const { node, vendor } = loginSt
       Object.assign(loginSt, { stage: 'sending', text: LOGIN_TEXT.sending })
       let r = null
-      try { r = await invoke('setup_device_request', { node, vendor }) } catch (e) { if (loginSt.node === node) loginEnd(loginErrorText(e)); return }
+      try { r = await mobileSetupApi.deviceRequest(node, vendor) } catch (e) { if (loginSt.node === node) loginEnd(loginErrorText(e)); return }
       if (loginSt.node !== node) return
       const v = requestView(r)
       if (v.stage === 'done') return loginEnd(v.text)
@@ -1169,7 +1169,7 @@ const app = createApp({
       while (lch.id === t.id && Date.now() < stop) {
         await sleep(LAUNCH_POLL_MS)
         let row = null
-        try { row = ((await invoke('android_launchers', { ids: [t.id] }))?.launches ?? []).find(l => l.id === t.id) } catch { /* 下一輪再問 */ }
+        try { row = ((await mobileLaunchApi.launchers([t.id]))?.launches ?? []).find(l => l.id === t.id) } catch { /* 下一輪再問 */ }
         if (row?.status === 'ok' || row?.status === 'unconfirmed') await core.refreshRoster()
         const appeared = appearedIn(friends.value, t.node, t.name)
         const v = progressView(row, appeared, t.name, appeared ? appearedModel(friends.value, t.node, t.name) : '')
@@ -1192,7 +1192,7 @@ const app = createApp({
         const name = lch.name.trim()
         const body = lchReq.value
         if (!body) throw new Error('請選一個 pi 的模型')
-        const r = await invoke('android_launch', { body })
+        const r = await mobileLaunchApi.launch(body)
         if (!r?.id) throw new Error('送出失敗')
         Object.assign(lch, { phase: 'progress', id: r.id, since: Date.now(), friendId: '', detail: '', ...(({ phase, text }) => ({ vphase: phase, text }))(progressView(null, false)) })
         void trackLaunch({ id: r.id, node: lch.node, name })

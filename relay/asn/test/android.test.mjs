@@ -180,6 +180,13 @@ test('手機畫面（m.html／m.js／mobile.mjs）：不叫任何電腦端指令
     assert.ok(mm, `authApi.${x[1]} 不存在`)
     used.add(mm[1])
   }
+  // 搬進出口的手機指令（#2106 ⑪）：m.js 用到哪個 mobile*Api，就把那個出口裡的指令一併納入檢查
+  for (const x of new Set([...files['m.js'].matchAll(/(?<!\w)(mobile\w+Api)\./g)].map(y => y[1]))) {
+    const fac = `make${x[0].toUpperCase()}${x.slice(1)}`
+    const blk = new RegExp(String.raw`export const ${fac} = \(call = invoke\) => \(\{([\s\S]*?)\n\}\)`).exec(api)
+    assert.ok(blk, `${x} 的出口不存在`)
+    for (const c of blk[1].matchAll(/call\('(\w+)'/g)) used.add(c[1])
+  }
   assert.ok(used.size >= 10, '應該抓得到 m.js 的指令')
   assert.deepEqual([...used].filter(c => !allowed.has(c)), [], 'm.js 叫的指令都要在手機的指令清單裡')
 })
@@ -276,7 +283,7 @@ test('手機開新夥伴：只走要本人簽章的指令；不用電腦版不�
   // 畫面：送出前一定先過 lchFormErr（不在線、沒開放、沒登入、欄位不對都在這裡擋下）
   const js = read('ui', 'm.js')
   const sub = /async function submitLaunch\(\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
-  assert.ok(sub.indexOf('lchFormErr.value') >= 0 && sub.indexOf('lchFormErr.value') < sub.indexOf("invoke('android_launch'"), '先檢查再送出')
+  assert.ok(sub.indexOf('lchFormErr.value') >= 0 && sub.indexOf('lchFormErr.value') < sub.indexOf('mobileLaunchApi.launch(body)'), '先檢查再送出')
   assert.match(sub, /if \(lch\.error \|\| lch\.busy\) return/)
   assert.match(js, /pickLaunchDevice\(node\) \{\s*if \(!launchEligibility\(node, lchCtx\.value\)\.ok\) return/, '不能開的電腦選不起來')
   assert.match(read('ui', 'm.html'), /:disabled="!d\.ok"/, '不能開的電腦按鈕反灰')

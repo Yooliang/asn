@@ -20,7 +20,8 @@ test('外殼：onStop 先送 false、結束通話丟例外也一定送出且會�
 
 test('網頁：外殼事件與 visibilitychange 都呼叫 set_foreground，啟動時也告知一次', () => {
   assert.match(m, /window\.__asnFgEvent = tellFg/)
-  assert.match(m, /invoke\('set_foreground', \{ foreground: fg === true \}\)/)
+  assert.match(m, /mobileStateApi\.foreground\(fg\)/)
+  assert.match(rd('ui', 'lib', 'tauri.mjs'), /foreground: fg => call\('set_foreground', \{ foreground: fg === true \}\)/, '指令名與參數形狀在出口（#2106 ⑪）')
   assert.match(m, /addEventListener\('visibilitychange', \(\) => tellFg\(document\.visibilityState === 'visible'\)\)/)
   assert.match(m, /\n  tellFg\(document\.visibilityState === 'visible'\)\n/)
 })
