@@ -479,7 +479,6 @@ html.toast-page,html.toast-page body{background:transparent}
 .av-set{display:flex;flex-direction:column;gap:6px}
 .av-row{display:flex;gap:12px;align-items:center}
 .av-btns{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
-.av-btns .aero-btn{white-space:nowrap;font-size:12px;padding:3px 8px}
 
 /* ---------- 自己的大頭貼：點一下換照片（右鍵小選單可改回自動產生） ---------- */
 .me-av{position:relative;flex:none}
@@ -754,7 +753,6 @@ html.frame-native .win{padding:6px;border:0;box-shadow:none}
 .settings select:hover,.settings textarea:hover,.settings input:not([type=checkbox]):not([type=radio]):not([type=file]):hover{border-color:#8fb6de}
 .settings select:focus-visible,.settings textarea:focus-visible,.settings input:not([type=checkbox]):not([type=radio]):not([type=file]):focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
 .settings select:disabled,.settings input:disabled{opacity:.55}
-.settings .aero-btn{min-height:26px;padding:3px 12px;font-size:12px;white-space:nowrap}
 .list.settings label.chk{display:flex;flex-direction:row;align-items:center;gap:8px;cursor:pointer}
 .list.settings label.chk input[type=checkbox],.settings input[type=checkbox]{flex:none;width:16px;height:16px;margin:0;padding:0;border:0;accent-color:var(--accent);cursor:pointer;background:none}
 .list.settings label.chk span{flex:0 1 auto;min-width:0}
@@ -819,7 +817,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .autostart-blocked{color:#b3261e}
 
 .logout-set{margin-top:32px;display:flex;flex-direction:column;gap:6px}
-.logout-set .logout-btn{color:#b3261e;border-color:#d79a95}
 
 .set-adv{margin-top:4px}.set-adv>summary{cursor:pointer;color:var(--muted,inherit);font-size:12px;margin-bottom:8px}
 /* 啟動設定（#1548 ①）：四區標題、CLI 清單一列一家（名稱／版本分欄）、窄版按鈕靠右。三種外觀共用，只用變數 */

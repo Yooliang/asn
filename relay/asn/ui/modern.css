@@ -60,7 +60,6 @@
 
 /* ---------- 危險動作：紅色要留著（上面把一般按鈕換成白底，權重比原本的紅色高，這裡再蓋回來） ---------- */
 :root[data-skin="modern"] .aero-btn.danger,:root[data-skin="modern"] .gs-btn.danger,:root[data-skin="modern"] .aero-btn.dv-danger{border-color:#c4463d;background:#fff4f3;color:#b3261e;font-weight:600}
-:root[data-skin="modern"] .logout-set .logout-btn{border-color:#d79a95;color:#b3261e}
 
 /* ---------- 輸入框：邊框加深，現代的淺底上也看得出邊界（約 1.6:1） ---------- */
 :root[data-skin="modern"] .search input,:root[data-skin="modern"] .m-search input,:root[data-skin="modern"] .set-sel{border-color:#c9c6be}
