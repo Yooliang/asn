@@ -620,3 +620,22 @@ fn 訂閱_log_只在狀態改變時寫_暫時失敗不洗版_恢復也寫_不含
     assert_eq!(more.len(), 3);
     assert_eq!(go(&none.net, &mut lp).len(), 3);
 }
+
+/// 一審（西川）：換帳號要重新計，不能拿 A 的「失效」去跟 B 比而寫出「恢復正常」
+#[test]
+fn 訂閱_log_換帳號重新計_a_失效後換_b_正常_不寫恢復() {
+    let (l, log) = lines();
+    let mut lp = Loop::default();
+    let st = |email: &str, t: &str, s: &str| State {
+        org: Some(OrgInfo { organization_type: Some(t.into()), subscription_status: Some(s.into()) }),
+        ..State::none(Some(email.into()))
+    };
+    lp.watch_sub(&st("a@x.test", "claude_free", "canceled"), &log);
+    assert_eq!(l.lock().unwrap().len(), 1, "A 第一次就失效：記一行");
+    lp.watch_sub(&st("b@x.test", "claude_max", "active"), &log);
+    let all = l.lock().unwrap().clone();
+    assert_eq!(all.len(), 1, "換成 B（正常）是新帳號第一次觀察：不能寫「恢復正常」：{all:?}");
+    // B 之後真的失效才記
+    lp.watch_sub(&st("b@x.test", "claude_free", "canceled"), &log);
+    assert_eq!(l.lock().unwrap().len(), 2);
+}
