@@ -47,8 +47,7 @@ test('上限：只有設定頁改過才寫 maxPerHourSet（夾在 1～20）；�
   assert.match(js, /case 'launch-max': launchPrefs\.maxPerHourSet = launchPrefs\.maxPerHour = clampMaxPerHour\(value\);/)
   assert.equal((js.match(/maxPerHourSet =/g) || []).length, 1, '只有設定頁那一處寫 maxPerHourSet')
   assert.match(js, /const prefs = launchPrefsToSave\(launchPrefs\)/)
-  assert.match(LAUNCH_MAX_NOTE, /別的設備/)
-  assert.match(LAUNCH_MAX_NOTE, /自己在這台電腦上開不受影響/)
+  assert.match(LAUNCH_MAX_NOTE, /超過時對方會看到提示/)   // #1548 ①：說明精簡成一句使用者能據以行動的話
   assert.match(rd('ui/lib/settings-panel.mjs'), /<small class="set-note" id="set-note-launch-max">\{\{ LAUNCH_MAX_NOTE \}\}<\/small>/)
   // Rust：遠端開窗與設定頁讀的是同一個來源；讀的是 maxPerHourSet，生效值另放 maxPerHourEffective
   assert.match(rd('src-tauri/src/bridge/launcher.rs'), /cfg\.max_per_hour = crate::launch::config::effective_max_per_hour\(&prefs, Some\(cfg\.max_per_hour\)\);/)
