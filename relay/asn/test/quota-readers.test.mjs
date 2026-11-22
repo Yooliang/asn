@@ -116,20 +116,20 @@ test('重新產生、撤銷都要按兩次；撤銷收掉畫面上的代碼', as
 test('代碼失敗：畫面是白話，細節進主控台；沒回代碼不算成功', async () => {
   const net = make({ quota_share_create: new Error('quota_share_create HTTP 404 not_found') })
   assert.equal(await net.ui.share({ vendor: 'claude', account: 'a@x.test' }), false)
-  assert.equal(net.ui.state.msg, QUOTA_TEXT.failShare)
-  assert.ok(!net.ui.state.msg.includes('HTTP'))
+  assert.equal(net.ui.state.shareMsg.text, QUOTA_TEXT.failShare)
+  assert.ok(!net.ui.state.shareMsg.text.includes('HTTP'))
   assert.equal(net.logs.length, 1)
   const login = make({ quota_share_create: new Error('尚未登入，無法變更查詢代碼') })
   await login.ui.share({ vendor: 'claude', account: 'a@x.test' })
-  assert.equal(login.ui.state.msg, QUOTA_TEXT.failLogin)
+  assert.equal(login.ui.state.shareMsg.text, QUOTA_TEXT.failLogin)
   const empty = make({ quota_share_create: { ok: true } })
   assert.equal(await empty.ui.share({ vendor: 'claude', account: 'a@x.test' }), false)
   assert.equal(empty.ui.state.code, null)
 })
 
 test('畫面文字：agy 帳號判斷、key 不再顯示、代碼只顯示一次都寫明；沒有內部名稱', () => {
-  assert.equal(QUOTA_TEXT.agyShort, 'Gemini 額度要開著 agy 視窗才會更新。')
-  assert.match(QUOTA_TEXT.agyNote, /不會告訴我們是哪個帳號/)
+  assert.equal(QUOTA_TEXT.agyShort, '要開著 Gemini 視窗才會更新。')
+  assert.ok(!('agyNote' in QUOTA_TEXT), '#2111 ④ 拿掉解釋系統原理的長說明')
   assert.ok(!('agyAccount' in QUOTA_TEXT) && !('agyNoAccount' in QUOTA_TEXT), '不再顯示「算在哪個帳號」')
   assert.match(QUOTA_TEXT.minimaxNote, /不會再顯示/)
   assert.match(QUOTA_TEXT.codeOnce, /只顯示這一次/)
@@ -137,9 +137,8 @@ test('畫面文字：agy 帳號判斷、key 不再顯示、代碼只顯示一次
   assert.ok(!('note' in QUOTA_TEXT), '#2111 拿掉標題下「都是關的…」那句')
   const all = Object.values(QUOTA_TEXT).filter(v => typeof v === 'string').join('\n')
   assert.doesNotMatch(all, /relay|supabase|rpc|hash|雜湊|憑證管理員|HTTP|API/i)
-  // agy 是使用者看得到的程式名稱，只允許出現在 Gemini 那兩句（「要開著 agy 視窗」）
-  const rest = Object.entries(QUOTA_TEXT).filter(([k, v]) => typeof v === 'string' && !['agyShort', 'agyNote'].includes(k)).map(([, v]) => v).join('')
-  assert.doesNotMatch(rest, /agy/i)
+  // agy 是內部程式名稱，畫面文字裡不出現（#2111 ④：Gemini 那句改成「要開著 Gemini 視窗」）
+  assert.doesNotMatch(all, /agy/i)
 })
 
 test('設定頁：指令都在清單；key 欄位是密碼欄且只綁元件內部；樞紐接得住', () => {
@@ -152,7 +151,7 @@ test('設定頁：指令都在清單；key 欄位是密碼欄且只綁元件內�
     assert.ok(list.includes(`case '${op}':`), `${op} 樞紐`)
   }
   assert.match(SettingsPanel.template, /type="password"[^>]*autocomplete="off"/)
-  assert.doesNotMatch(SettingsPanel.template.replaceAll('st.quotaReaders.code.key', ''), /st\.quotaReaders\.[a-zA-Z.]*key\b/i, '快照裡沒有 MiniMax key')
+  assert.doesNotMatch(SettingsPanel.template.replaceAll('st.quotaReaders.code.key', '').replaceAll('st.quotaReaders.shareMsg.key', ''), /st\.quotaReaders\.[a-zA-Z.]*key\b/i, '快照裡沒有 MiniMax key')
 })
 
 test('電腦版註冊了四個設定指令與兩個代碼指令', () => {
@@ -212,28 +211,28 @@ test('自動換新的文字寫明只能有一個程式在換，以及失敗不�
   assert.match(QUOTA_TEXT.refreshWarn, /只能有一個程式在換新/)
   assert.match(QUOTA_TEXT.refreshWarn, /被登出/)
   assert.match(QUOTA_TEXT.refreshStopped, /不會再試/)
-  for (const t of [QUOTA_TEXT.extraNote, QUOTA_TEXT.refreshNote, QUOTA_TEXT.refreshWarn, QUOTA_TEXT.refreshStopped]) {
+  for (const t of [QUOTA_TEXT.refreshNote, QUOTA_TEXT.refreshWarn, QUOTA_TEXT.refreshStopped]) {
     assert.doesNotMatch(t, /\.claude|token|OAuth|refresh/i)
   }
 })
 
-test('帳號頁的服務區段：額度開關所在的服務沒有帳號也有區段；有帳號的照原順序；Claude 要有額外帳號才補', () => {
+test('帳號頁的服務區段（#2111 ④）：有帳號的照原順序；只有 Grok 沒開額度上報時，沒帳號也補一個空區段讓引導句有地方寫；其他服務不再因開關補空區段', () => {
   const my = { vendors: [{ key: 'codex', label: 'OpenAI（Codex）', accounts: [{ account: 'a' }] }, { key: 'grok', label: 'Grok', accounts: [{ account: 'b' }] }] }
-  const readers = { extraDirs: [] }
-  assert.deepEqual(vendorSections(my, readers).map(v => v.key), ['codex', 'grok', 'gemini', 'minimax'])
-  assert.deepEqual(vendorSections(null, { extraDirs: [{ name: 'x' }] }).map(v => v.key), ['claude', 'gemini', 'grok', 'minimax'])
-  assert.deepEqual(vendorSections(my, null), my.vendors, '額度來源還沒讀到：只畫有帳號的')
-  assert.deepEqual(vendorSections(null, readers).find(v => v.key === 'minimax'), { key: 'minimax', label: 'MiniMax', accounts: [] })
+  assert.deepEqual(vendorSections(my, { grok: false, extraDirs: [] }).map(v => v.key), ['codex', 'grok'])
+  assert.deepEqual(vendorSections(null, { grok: false, extraDirs: [{ name: 'x' }] }).map(v => v.key), ['grok'], '有額外帳號也不補 Claude 空區段')
+  assert.deepEqual(vendorSections(null, { grok: true, extraDirs: [] }), [], 'Grok 已開、沒有帳號：不補空區段')
+  assert.deepEqual(vendorSections(my, null), my.vendors, '額度讀取器還沒讀到：只畫有帳號的')
+  assert.deepEqual(vendorSections(null, { grok: false }).find(v => v.key === 'grok'), { key: 'grok', label: 'Grok', accounts: [] })
 })
 
-test('設定頁：沒有額外帳號的人看不到這一區（Claude 區段裡的開關與說明都要有額外帳號才出現）', () => {
+test('設定頁（#2111 ④）：沒有額外帳號的人，「這台讀額度」裡看不到「讀 Claude 額外帳號」那一列（開關與說明都要有額外帳號才出現）', () => {
   const t = SettingsPanel.template
-  assert.match(t, /<label class="chk" v-if="st\.quotaReaders && st\.quotaReaders\.extraDirs\.length"><input type="checkbox" :checked="st\.quotaReaders\.extra"/)
-  assert.match(t, /<div class="dv-vq" v-if="v\.key === 'claude' && st\.quotaReaders && st\.quotaReaders\.extraDirs\.length">/)
+  assert.match(t, /<li class="dv-qrow" data-reader="claude" v-if="st\.quotaReaders\.extraDirs\.length">/)
+  assert.match(t, /<input class="dv-qsw" type="checkbox" :checked="st\.quotaReaders\.extra"/)
 })
 
 test('自動換新的風險：按「確認打開」之前一定看得到（在按鈕之前）；平常收在可展開的說明裡', () => {
-  assert.equal(QUOTA_TEXT.refreshRisk, '這項使用非公開的登入方式，可能隨時失效，也可能不符合服務條款；失效時會顯示要重新登入。')
+  assert.equal(QUOTA_TEXT.refreshRisk, '這是非公開的登入方式，可能隨時失效，也可能不符合服務條款；失效時要重新登入。')
   const t = SettingsPanel.template
   const confirm = t.indexOf(`<template v-if="st.quotaReaders.confirm === 'refresh'">`)
   const risk = t.indexOf('QUOTA_TEXT.refreshRisk', confirm)
@@ -257,5 +256,5 @@ test('設定頁：Gemini 那一項不再有開關，只留固定的一句說明�
   const t = SettingsPanel.template
   assert.ok(!t.includes("source: 'agy'"), 'agy 的開關藏起來了')
   assert.match(t, /QUOTA_TEXT\.agyShort/)
-  assert.equal(QUOTA_TEXT.agyShort, 'Gemini 額度要開著 agy 視窗才會更新。')
+  assert.equal(QUOTA_TEXT.agyShort, '要開著 Gemini 視窗才會更新。')
 })
