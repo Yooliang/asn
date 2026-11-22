@@ -785,8 +785,9 @@ export const SettingsPanel = {
             <textarea class="set-area" rows="4" :value="st.launch.cwdText" @change="act('launch-cwd', $event.target.value)"></textarea>
           </label>
           <small class="acct-warn" v-if="st.launch.msg" role="alert">{{ st.launch.msg }}</small>
-          <label>每小時開新夥伴上限
+          <label class="launch-max">別的設備一小時最多替這台開
             <input class="set-input" type="number" min="1" max="20" :value="st.launch.maxPerHour" @change="act('launch-max', Number($event.target.value))">
+            個新夥伴
           </label>
           <small class="set-note" id="set-note-launch-max">{{ LAUNCH_MAX_NOTE }}</small>
           <details class="set-adv" v-if="st.askpass">

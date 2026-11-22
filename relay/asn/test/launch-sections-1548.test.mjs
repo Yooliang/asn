@@ -37,7 +37,8 @@ test('#1548 清單樣式：名稱與版本分欄（launch-tools 有 css、名稱
 test('#1548 說明文字只寫使用者能動手的話：不出現解釋系統的字眼、每小時上限說明是一句', () => {
   const texts = [launch.replace(/<[^>]+>/g, ' ').replace(/\{\{[^}]*\}\}/g, ' '), LAUNCH_MAX_NOTE].join('\n')
   for (const w of ['偵測', 'launcher.json', '自動產生', '不上傳雲端', '新裝時預設']) assert.ok(!texts.includes(w), `不該出現「${w}」`)
-  assert.equal(LAUNCH_MAX_NOTE, '超過時對方會看到提示，下一個小時就能再開。')
-  assert.ok(LAUNCH_MAX_NOTE.length <= 30, '說明很短')
+  assert.equal(LAUNCH_MAX_NOTE, '自己在這台電腦上開不受限制；超過時對方會看到提示，下一個小時就能再開。')
+  assert.ok(LAUNCH_MAX_NOTE.includes('自己在這台電腦上開不受限制'), '要寫明自己開不受限')
+  assert.match(launch, /別的設備一小時最多替這台開/)   // 欄位文字寫明只限制別的設備
   assert.doesNotMatch(launch, /class="launch-note"/)
 })

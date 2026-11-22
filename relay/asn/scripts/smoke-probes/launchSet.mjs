@@ -51,7 +51,7 @@ export const launchSetProbeSource = ({ err = false } = {}) => `(async () => {
   const input = [...box.querySelectorAll('input.set-input[type="number"]')].find(vis);
   if (!input || input.value !== '3') return { ok: false, why: '上限要顯示後端給的生效值 3（不是舊存檔的 6）：' + (input && input.value) };
   const note = box.querySelector('#set-note-launch-max');
-  if (!vis(note) || !note.textContent.includes('下一個小時就能再開')) return { ok: false, why: '上限底下沒有白話說明' };
+  if (!vis(note) || !note.textContent.includes('自己在這台電腦上開不受限制') || !box.textContent.includes('別的設備一小時最多替這台開')) return { ok: false, why: '上限的欄位文字或底下說明不對' };
   const area = box.querySelector('textarea.set-area');
   if (!area || !area.value.includes(want.suggest)) return { ok: false, why: '白名單空的時候文字框要先顯示建議資料夾（測試資料不對）：' + (area && area.value) };
   const n0 = sets().length, r0 = refused();

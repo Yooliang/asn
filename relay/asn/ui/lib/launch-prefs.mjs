@@ -2,7 +2,7 @@
 export const LAUNCH_PREFS_KEY = 'launch'
 
 // 每小時上限的說明（#1548）：只留使用者能據以行動的一句；上限只擋「別的設備替這台開」，自己在這台開不受影響；值跟 launcher.json 同一個來源（Rust 的 effective_max_per_hour）
-export const LAUNCH_MAX_NOTE = '超過時對方會看到提示，下一個小時就能再開。'
+export const LAUNCH_MAX_NOTE = '自己在這台電腦上開不受限制；超過時對方會看到提示，下一個小時就能再開。'
 
 // 每小時上限（#1548）：存檔只有使用者在設定頁真的改過才寫 maxPerHourSet（1～20 的整數）。
 // 舊版的 maxPerHour 一律不算：舊程式開過一次新夥伴就會把預設的 6 寫進存檔，拿它來算會悄悄蓋掉 launcher.json 手寫的值。
