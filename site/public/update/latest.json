@@ -1,15 +1,11 @@
 {
-  "version": "0.2.71",
-  "notes": "- 改善：設定頁的按鈕全部換成統一樣式；登入、雲端邀請、語音辨識下載也改用同一套按鈕。（#2105、#2132、#2136）\n- 改善：視窗開關、版面、終端遠端、已知電腦、托盤等處出錯時改成看得懂的話，原始錯誤寫進記錄。（#2106、#2131、#2133）",
-  "pub_date": "2026-11-22T21:37:04.744Z",
+  "version": "0.2.72",
+  "notes": "- 改善：手機版也會寫記錄檔，跟電腦版一樣自動輪替、遮掉 email，回報問題時有記錄可查。（#2129、#2139）\n- 改善：手機版收寄信、夥伴、照片、安裝登入、推播、更新等處出錯時改成看得懂的話，原始錯誤寫進記錄。（#2106、#2134、#2135）",
+  "pub_date": "2026-11-22T22:35:04.884Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhUbk5vSFdmaEozQUhvd3lKbkl3S1JWYWZ4TVRNRWdJeVhrZWRoSEY3dDFOdzNvN3Qza05aQzZYVzF1QUxlTjgxM1dSYmRMellDQTBWQ2JWMUZDcEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzgzNDI0CWZpbGU6QVNOXzAuMi43MV94NjQtc2V0dXAuZXhlCnYycFB4OW9CZXdrQVlOdkVieVM4emk0azU0cmZ3S3FZSWN5NUdjNXc3bzh6dmdQRkVUREhyNTF3eHhCTGFUZEp3dHF5YlRqa1l1b3oxT1lLK1NsUUFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.71_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNFa1U4QU9RSHFvTVZJL2hiTHV3KzRXQlBBdnhLbWlJTDFjQkRsTndHVVhES0duWjdycCtTbHhHNko4eW5YSEZ3cGErMUhEc2dTZzhabHdOemN6c3drPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzgzOTkyCWZpbGU6QVNOXzAuMi43MV9hbWQ2NC5BcHBJbWFnZQpCaXVnYW1LeGQ5blFFWEsvbWJBaU9ob1NtOEVpOG5WY09BWGZjOXFBQTBNYS80RW9tTnRXZC9WdnJNNTFnOWx3TGdvaW44RkVwZ29DY0RHOVZQeEtEQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.71_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjAvazR2eGVnWjNFK2pCbEYxeDVrNTJ0UTBzNEJuTU5URjRTVXJjenJMbHZTTXVNV2x1dm56M2daWCtvRjFXSUlVdFM5MlJjSDlwUitIQmdBbzQ4N3c4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mzg2OTA0CWZpbGU6QVNOXzAuMi43Ml94NjQtc2V0dXAuZXhlCnI4VmxvYlpZc21zRTExd3o1MDQ1UEQ1ZFQ3bkhHZUhzbVJQTlp6T0l2engxdGJSZSt5RE5NNkJndmFMeEpoRy8yU3dGTlo2SjY0VzlsQVdoMzFNVENnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.72_x64-setup.exe"
     }
   }
 }
