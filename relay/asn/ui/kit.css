@@ -1,0 +1,54 @@
+/* 共用畫面元件與設計變數（#2105，規範見 docs/畫面規範.md）。電腦與手機共用這一份；元件在 lib/ui-kit.mjs。
+   新增的樣式一律用下面的變數，不寫死 px 的字級與間距（有守門測試：test/ui-kit.test.mjs）。 */
+:root{
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
+  --fs-1:11px; --fs-2:12px; --fs-3:14px; --fs-4:16px;
+  --btn-h:28px; --btn-px:var(--sp-3);
+  --kit-ok:#2e7d32; --kit-fail:#b3261e; --kit-current:#4b5058;
+  --kit-relogin-bg:#ffd84d; --kit-relogin-fg:#3b2c00; --kit-relogin-line:#c79a00;
+}
+/* 手機：字級各加大一檔、鈕高 40（最小觸控目標） */
+.m-body{
+  --fs-1:12px; --fs-2:14px; --fs-3:16px; --fs-4:18px;
+  --btn-h:40px; --btn-px:14px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--kit-ok:#7ad07e; --kit-fail:#ff9a90; --kit-current:#6b727c}
+}
+
+/* ---- 按鈕：三級（primary／secondary／text），尺寸固定，不依所在位置覆寫 ---- */
+.asn-btn{
+  box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; flex:none;
+  min-height:var(--btn-h); padding:0 var(--btn-px); font:inherit; font-size:var(--fs-2); line-height:1;
+  white-space:nowrap; border:1px solid var(--line); border-radius:4px; background:var(--panel); color:var(--fg); cursor:pointer;
+}
+.asn-btn:hover:not(:disabled){border-color:var(--accent)}
+.asn-btn:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.asn-btn.lv-primary{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
+.asn-btn.lv-text{border-color:transparent; background:transparent; color:var(--link); padding:0 var(--sp-2)}
+.asn-btn.lv-text:hover:not(:disabled){text-decoration:underline; border-color:transparent}
+/* 狀態（只給規範裡的用途）：危險（紅）、使用中（深灰）、切換中（淡）、不能做（虛線淡色）、重新登入（黃，只給重新登入） */
+.asn-btn.st-danger{border-color:var(--kit-fail); color:var(--kit-fail); font-weight:600}
+.asn-btn.st-current,.asn-btn.st-current:disabled{background:var(--kit-current); border-color:var(--kit-current); color:#fff; font-weight:600; opacity:1; cursor:default}
+.asn-btn.st-busy,.asn-btn.st-busy:disabled{opacity:.55; cursor:default}
+.asn-btn.st-blocked,.asn-btn.st-blocked:disabled{background:transparent; border:1px dashed var(--muted); color:var(--muted); opacity:.8; cursor:default}
+.asn-btn.st-relogin{background:var(--kit-relogin-bg); border-color:var(--kit-relogin-line); color:var(--kit-relogin-fg); font-weight:600}
+.asn-btn:disabled:not(.st-current):not(.st-busy):not(.st-blocked){opacity:.55; cursor:default}
+.asn-btn.fixed{width:92px}
+.m-body .asn-btn.fixed{width:100px}
+
+/* ---- 動作列：靠右，取消在左、確定在右；窄版放不下才換行，換行後仍靠右 ---- */
+.asn-actions{display:flex; flex-wrap:wrap; justify-content:flex-end; align-items:center; gap:var(--sp-2); min-width:0}
+
+/* ---- 原位確認（一律在那顆鈕所在的那一列下方，不跳框） ---- */
+.asn-confirm{display:flex; flex-direction:column; gap:var(--sp-2); padding:var(--sp-2) var(--sp-3); border:1px solid var(--line); border-radius:4px; background:var(--panel-soft); min-width:0}
+.asn-confirm-text{margin:0; font-size:var(--fs-2); color:var(--fg); overflow-wrap:anywhere}
+
+/* ---- 狀態行：進行中／成功／失敗／空／讀不到，各一種寫法 ---- */
+.asn-status{display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-2); margin:0; font-size:var(--fs-2); line-height:1.5; min-width:0; overflow-wrap:anywhere}
+.asn-status.k-busy,.asn-status.k-empty,.asn-status.k-unreadable{color:var(--muted)}
+.asn-status.k-ok{color:var(--kit-ok)}
+.asn-status.k-fail{color:var(--kit-fail)}
+.asn-spin{display:inline-block; box-sizing:border-box; width:var(--fs-2); height:var(--fs-2); border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:asn-spin 1s linear infinite}
+@keyframes asn-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.asn-spin{animation:none}}

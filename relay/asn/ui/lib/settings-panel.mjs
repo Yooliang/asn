@@ -33,6 +33,7 @@ import { AGENT_INSTALL_UI } from './device-state.mjs'
 import { COLUMNS as TM_COLUMNS, TEXT as TM } from './task-manager.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './msg-ref.mjs'
 import { LAUNCH_MAX_NOTE } from './launch-prefs.mjs'
+import { UI_KIT } from './ui-kit.mjs'
 import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFetchLine, termServerNote } from './term-server-setting.mjs'
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
@@ -44,7 +45,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity },
+  components: { ...UI_KIT, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity },
   props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'info' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -773,15 +774,10 @@ export const SettingsPanel = {
               <span class="launch-hint" v-else>{{ t.installHint }}</span>
               <template v-if="t.install">
                 <button class="aero-btn launch-act" type="button" v-if="t.install.showButton" @click="act('launch-install-ask', t.install.liveKind)">{{ t.install.label }}</button>
-                <div class="launch-install-note" v-if="t.install.confirm">
-                  <small>{{ t.install.confirm.text }}</small>
-                  <div class="launch-install-btns">
-                    <button class="aero-btn" type="button" @click="act('launch-install-yes')">{{ t.install.confirm.yes }}</button>
-                    <button class="aero-btn" type="button" @click="act('launch-install-no')">{{ t.install.confirm.no }}</button>
-                  </div>
-                </div>
-                <small class="launch-install-note" role="status" v-if="t.install.running">{{ t.install.running }}</small>
-                <small class="launch-install-note" :class="t.install.result.ok ? 'ok' : 'bad'" role="status" v-if="t.install.result">{{ t.install.result.text }}</small>
+                <!-- 共用元件（#2105）：原位確認（取消在左、同意在右）與狀態行（進行中／成功／失敗） -->
+                <asn-confirm class="launch-install-note" v-if="t.install.confirm" :text="t.install.confirm.text" :yes="t.install.confirm.yes" :no="t.install.confirm.no" @yes="act('launch-install-yes')" @no="act('launch-install-no')"></asn-confirm>
+                <asn-status class="launch-install-note" v-if="t.install.running" kind="busy" :text="t.install.running"></asn-status>
+                <asn-status class="launch-install-note" v-if="t.install.result" :kind="t.install.result.ok ? 'ok' : 'fail'" :text="t.install.result.text"></asn-status>
               </template>
             </li>
           </ul>
