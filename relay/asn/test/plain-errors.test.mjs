@@ -6,14 +6,14 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { KNOWN_PEER_FAILED_TEXT, knownPeerErrorText, plainMessage, renameErrorText } from '../ui/lib/plain-errors.mjs'
+import { agentSetupErrorText, KNOWN_PEER_FAILED_TEXT, knownPeerErrorText, plainMessage, renameErrorText } from '../ui/lib/plain-errors.mjs'
 import { TEXT, errorText, renameErrorText as renameFromPeers } from '../ui/lib/mobile-known-peers.mjs'
 
 const UI = fileURLToPath(new URL('../ui/', import.meta.url))
 const read = f => fs.readFileSync(UI + f, 'utf8').replace(/\r\n/g, '\n')
 
 // 已清理檔案：搬完一張就加進來
-export const CLEANED = ['lib/voice-ui.mjs', 'lib/room-hub.mjs', 'lib/mobile-known-peers.mjs']
+export const CLEANED = ['lib/voice-ui.mjs', 'lib/room-hub.mjs', 'lib/mobile-known-peers.mjs', 'lib/agent-install.mjs', 'lib/mobile-remote-view.mjs', 'shot.js']
 
 // 沒有任何內容（連註解都沒有）的空 catch：catch { }、catch (e) { }、.catch(() => { })、.catch(e => { })
 export const EMPTY_CATCH = /\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}|\.catch\(\s*(?:\([^)]*\)|\w+)\s*=>\s*\{\s*\}\s*\)/g
@@ -49,6 +49,20 @@ test('畫面文字與搬之前一字不差', () => {
   assert.equal(knownPeerErrorText(undefined), '操作沒有成功，請稍後再試。')
   // 預設：沒有對照就是原文
   assert.equal(plainMessage(new Error('語音功能沒有回應，請再試一次。')), '語音功能沒有回應，請再試一次。')
+})
+
+test('安裝 Claude Code 失敗的畫面文字與搬之前一字不差（字串、Error、空 message 都照舊）', () => {
+  assert.equal(agentSetupErrorText('已經在跑了'), '已經在跑了')
+  assert.equal(agentSetupErrorText(new Error('沒有網路')), '沒有網路')
+  assert.equal(agentSetupErrorText({ message: '' }), '[object Object]')
+  assert.equal(agentSetupErrorText(null), 'null')
+})
+
+test('agent-install 失敗文字走 plain-errors，不自己寫轉換', () => {
+  const s = read('lib/agent-install.mjs')
+  assert.match(s, /import \{ agentSetupErrorText \} from '\.\/plain-errors\.mjs'/)
+  assert.match(s, /const errText = agentSetupErrorText/)
+  assert.doesNotMatch(s, /\.message \|\|/)
 })
 
 test('mobile-known-peers 照舊匯出同一份轉白話函式', () => {

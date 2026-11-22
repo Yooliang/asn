@@ -7,6 +7,9 @@ export const KNOWN_PEER_FAILED_TEXT = '操作沒有成功，請稍後再試。'
 /** 預設：沒有對照時，畫面顯示的就是錯誤原文（和以前直接放 e.message 一樣） */
 export const plainMessage = e => e.message
 
+/** 設備細部頁安裝 Claude Code 失敗：字串或 Error 都原文顯示（以前 agent-install.mjs 自己的 errText） */
+export const agentSetupErrorText = e => (typeof e === 'string' ? e : e?.message || String(e))
+
 /** 改名失敗：後台（Rust）回的是中文說明就原樣顯示，其他一律說白話 */
 export function renameErrorText(e) {
   const s = String(e?.message ?? e ?? '').trim()

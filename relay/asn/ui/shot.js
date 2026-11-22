@@ -1,6 +1,6 @@
 // 截圖覆蓋視窗（每個螢幕一扇）：顯示 Rust 端凍結的那一塊畫面，拖曳框選；換算在 lib/shot.mjs。
 import { dragRect, physicalToCss, selectionToPhysical, sizeLabelPos, validSelection } from './lib/shot.mjs'
-import { invoke } from './lib/tauri.mjs'
+import { shotOverlayApi as api } from './lib/tauri.mjs'
 
 const index = Number(new URLSearchParams(location.search).get('m') ?? 0)
 const cv = document.getElementById('cv'), hint = document.getElementById('hint')
@@ -8,7 +8,7 @@ const g = cv.getContext('2d')
 let bmp = null, start = null, sel = null, done = false
 
 const view = () => ({ w: window.innerWidth, h: window.innerHeight })
-const cancel = () => { if (done) return; done = true; void invoke('shot_cancel').catch(() => {}) }
+const cancel = () => { if (done) return; done = true; void api.cancel().catch(() => { /* 取消沒送到：Rust 端會自己收掉覆蓋視窗；失敗出口已寫進 log */ }) }
 
 function draw() {
   g.drawImage(bmp, 0, 0)
@@ -30,11 +30,11 @@ function draw() {
 }
 
 async function boot() {
-  const bytes = await invoke('shot_image', { index })
+  const bytes = await api.image(index)
   bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }))
   cv.width = bmp.width; cv.height = bmp.height
   draw()
-  await invoke('shot_ready')
+  await api.ready()
 }
 
 cv.addEventListener('pointerdown', e => {
@@ -45,7 +45,7 @@ cv.addEventListener('pointerdown', e => {
   draw()
 })
 cv.addEventListener('pointermove', e => {
-  if (!document.hasFocus()) void invoke('shot_focus').catch(() => {})   // 游標移到這個螢幕就把鍵盤焦點帶過來，Esc 才有用
+  if (!document.hasFocus()) void api.focus().catch(() => { /* 帶焦點失敗只是 Esc 暫時沒用，下次滑鼠移動會再試；出口已寫進 log */ })   // 游標移到這個螢幕就把鍵盤焦點帶過來，Esc 才有用
   if (!start) return
   sel = dragRect(start, { x: e.clientX, y: e.clientY }, view()); draw()
 })
@@ -56,7 +56,7 @@ cv.addEventListener('pointerup', async e => {
   if (!validSelection(r)) { sel = null; draw(); return }   // 只是點一下：重來
   const p = selectionToPhysical(r, view(), { w: bmp.width, h: bmp.height })
   done = true
-  try { await invoke('shot_pick', { index, x: p.x, y: p.y, w: p.w, h: p.h }) } catch { done = false; sel = null; draw() }
+  try { await api.pick(index, p.x, p.y, p.w, p.h) } catch { done = false; sel = null; draw() }
 })
 cv.addEventListener('contextmenu', e => { e.preventDefault(); cancel() })
 window.addEventListener('keydown', e => { if (e.key === 'Escape') cancel() })
