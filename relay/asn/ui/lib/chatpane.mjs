@@ -1,5 +1,6 @@
 // 對話區元件：分開模式的對話視窗（chat.html）與整合模式右邊的分頁內容（list.html）共用同一份版面。
 // 只顯示、只發事件（send／nudge／toggle-dp），不碰網路與 Tauri；信件內文與名稱一律先跳脫才進 v-html（訊息內文走 markdown.mjs，自帶跳脫與白名單淨化）。
+import { openLink } from './tauri.mjs'
 import { renderMarkdown, handleLinkClick } from './markdown.mjs'
 import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { SEND_LABEL, SEND_LABEL_TERM, composeHintTitle, composePlaceholder, composeRemoteHint, composeTermHint } from './compose.mjs'
@@ -316,7 +317,7 @@ export const ChatPane = {
       copyTimer = setTimeout(() => { copyNote.value = '' }, 2500)
     }
     // 登入網址在這台開（手機走系統瀏覽器的 Intent、電腦走預設瀏覽器）；Rust 端 open_link 再驗一次協定
-    const openLogin = u => { if (findLoginUrls(u?.url).length) globalThis.__TAURI__?.core?.invoke?.('open_link', { url: u.url })?.catch?.(e => console.info('[ASN] 開啟登入網址失敗', String(e?.message ?? e))) }
+    const openLogin = u => { if (findLoginUrls(u?.url).length) openLink(u.url)?.catch?.(e => console.info('[ASN] 開啟登入網址失敗', String(e?.message ?? e))) }
     onBeforeUnmount(() => clearTimeout(copyTimer))
     // 沒送進終端的字放回輸入框（輸入框已經有新的字就接在後面，不蓋掉）
     function restoreDraft(text) {
@@ -621,7 +622,7 @@ export const ChatPane = {
       if (el) { clearTimeout(jumpTimer); jumpNote.value = ''; flashEl(el) } else noteFor(r?.error ? '載入失敗，請稍後再試。' : '這則太舊，載不到。')
     }
     const openRef = ref => {
-      if (ref.kind === 'github') globalThis.__TAURI__?.core?.invoke?.('open_link', { url: githubUrl(ref.n) })?.catch?.(e => console.info('[ASN] 開啟 GitHub 失敗', String(e?.message ?? e)))
+      if (ref.kind === 'github') openLink(githubUrl(ref.n))?.catch?.(e => console.info('[ASN] 開啟 GitHub 失敗', String(e?.message ?? e)))
       else void jumpToSeq(ref.n)
     }
     // 長按（手指才算；滑鼠按久一點照樣是點擊）顯示提示；長按放開後的那次點擊不算
@@ -716,7 +717,7 @@ export const ChatPane = {
     const onBodyClick = ev => {
       const r = refOf(ev?.target)
       if (r) { ev.preventDefault?.(); if (pressed) { pressed = false; return } openRef(r); return }
-      handleLinkClick(ev, url => globalThis.__TAURI__?.core?.invoke?.('open_link', { url }))
+      handleLinkClick(ev, url => openLink(url))
     }
     // header 的個人訊息：背景工作件數已經在「工作項目」大按鈕上，拿掉那段（#539 之三）；群組照舊
     // 手機（noBar）沒有那顆按鈕，件數照樣留在個人訊息裡
