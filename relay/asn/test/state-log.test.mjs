@@ -93,3 +93,15 @@ test('ai-cli：收到非陣列直接 return，不當成「沒有任何工具」�
   log.aiCliStatus([row()])
   assert.equal(lines.length, 1, '中間夾一次非陣列，比較基準沒被清掉，沒變不記')
 })
+
+test('ai-cli-detect：收到非陣列直接 return，不記初始、也不動比較基準（#2104 C）', () => {
+  const { lines, log } = mk()
+  const d = [{ id: 'claude', binary_found: true, version: '1.0' }]
+  for (const bad of [null, undefined, {}, 'oops', 42]) log.aiCliDetect(bad)
+  assert.deepEqual(lines, [], '非陣列不記任何行')
+  log.aiCliDetect(d)
+  assert.match(lines[0], /^ai-cli-detect 初始：claude 已安裝 1\.0/)
+  log.aiCliDetect(null)
+  log.aiCliDetect(d)
+  assert.equal(lines.length, 1, '中間夾一次非陣列，比較基準沒被清掉，沒變不記')
+})

@@ -62,6 +62,7 @@ export function createStateLog(emit) {
     },
     /** ai_cli_detect 回來的 tools */
     aiCliDetect(tools) {
+      if (!Array.isArray(tools)) return   // 非陣列（回傳異常）不當成「沒有任何工具」，不記也不動比較基準
       const cur = toMap(tools, detectField)
       if (detect === null) {
         out(LOG_HEAD.detectInit + (ids(cur).map(id => `${id} ${cur.get(id)}`).join('；') || '（沒有任何工具）'))
