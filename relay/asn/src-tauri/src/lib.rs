@@ -3338,7 +3338,6 @@ pub fn run() {
         .manage(shot::ShotState::default())
         .manage(updater::Pending::default())
         .manage(SaveDir::default())
-        .manage(claude_mod::ModState::default())
         .manage(bridge_mgr)
         .manage(terms)
         .manage(Arc::new(askpass::dialog::DialogState::default()))
@@ -3354,7 +3353,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
-            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_status, claude_mod::claude_mod_auto_get, claude_mod::claude_mod_auto_set, claude_quota::claude_quota_state,
+            claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_report, claude_mod::claude_mod_check, claude_quota::claude_quota_state,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
             quota_readers_get, quota_readers_set, quota_minimax_add, quota_minimax_remove, quota_share_create, quota_share_revoke,
             acct_remote_report, acct_remote_list, acct_roster, acct_remote_request, acct_remote_status, acct_remote_pending, acct_remote_apply, acct_remote_decline, acct_remote_allow_get, acct_remote_allow_set, agent_setup_remote_allow_get, claude_login_failed, agent_setup_remote_allow_set, agent_setup_start, agent_setup_plan, agent_setup_cancel,
@@ -3478,19 +3477,13 @@ pub fn run() {
             if handle.state::<App>().shot.is_none() {
                 let h = handle.clone();
                 let dir = auto_acct_dir.clone();
-                *handle.state::<claude_mod::ModState>().0.lock().unwrap() = "Claude 外掛：檢查中…".into();
-                if claude_mod::auto_on(&dir) {
-                    claude_mod::set_report(Some(serde_json::json!({ "state": "checking" })));   // 內建收發室下一輪名單回報時帶給後台；關閉自動安裝時不回報
-                }
+                claude_mod::set_report(Some(serde_json::json!({ "state": "checking" })));   // 設定頁與內建收發室下一輪名單回報都讀這份
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     let out = tauri::async_runtime::spawn_blocking(move || claude_mod::run_real(&dir)).await.unwrap_or_else(|_| claude_mod::Outcome::Failed("背景工作中斷".into()));
-                    if out.reportable() {
-                        claude_mod::set_report(Some(out.report()));
-                    }
-                    let line = out.line();
-                    *h.state::<claude_mod::ModState>().0.lock().unwrap() = line.clone();
-                    let _ = h.emit("claude-mod-status", line);
+                    let rep = out.report();
+                    claude_mod::set_report(Some(rep.clone()));
+                    let _ = h.emit("claude-mod-status", rep);
                 });
             }
             // 開機自動啟動帶 --background：只常駐系統匣，不跳出名單（系統匣建失敗就照常顯示）

@@ -27,9 +27,9 @@ export const CONNECT_TEXT = {
 export const connectDefaults = ({ piDetected = false } = {}) => ({ pi: Boolean(piDetected), mod: true })
 
 /**
- * 依勾選執行。ops：{ piInstall(), modAuto(on) }（都是 async）。
+ * 依勾選執行。ops：{ piInstall(), modInstall() }（都是 async）。
  * - pi：有勾才做；沒勾就不動（pi 沒偵測到時不做）
- * - Claude 外掛：必要元件，不管 choice 怎麼傳都一律打開「自動安裝或更新」並馬上檢查一次
+ * - Claude 外掛：必要元件，不管 choice 怎麼傳都一律馬上檢查並安裝一次
  * 一項失敗不影響其他項。回 [{ key, ok, text }]（每項一列，給畫面照實顯示）
  */
 export async function runConnect(choice, ops, { piDetected = false } = {}) {
@@ -44,13 +44,13 @@ export async function runConnect(choice, ops, { piDetected = false } = {}) {
   }
   if (choice.pi && piDetected) await step('pi', () => ops.piInstall(), '已開啟，之後自己開的 pi 也能收發信')
   else out.push({ key: 'pi', ok: true, text: piDetected ? CONNECT_TEXT.skipped : CONNECT_TEXT.piMissing })
-  await step('mod', () => ops.modAuto(true), '會自動安裝或更新')
+  await step('mod', () => ops.modInstall(), '會自動安裝或更新')
   return out
 }
 
 export const ConnectStep = {
   props: {
-    api: { type: Object, required: true },   // { piSetupStatus(), piInstall(), modAuto(on), piLogin() }
+    api: { type: Object, required: true },   // { piSetupStatus(), piInstall(), modInstall(), piLogin() }
   },
   emits: ['done'],
   setup(props, { emit }) {
