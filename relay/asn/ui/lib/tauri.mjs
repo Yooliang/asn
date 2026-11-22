@@ -62,6 +62,7 @@ export const transport = {
   sendAttachment: payload => invoke('relay_send_attachment', { payload }),   // 寄照片或檔案：Rust 端檢查、要上傳網址、上傳、確認、寄信
   launch: body => invoke('relay_launch', { body }),
   launchers: ids => invoke('relay_launchers', { ids: ids ?? null }),
+  accountSwitch: (vendor, email) => invoke(vendor === 'grok' ? 'grok_account_switch' : 'claude_account_switch', { email }),   // 帳號卡「這台」那一列的切換（#2111 ③）：vendor＝claude|grok → 切換結果（失敗丟白話原因）
   cliDetect: () => invoke('ai_cli_detect'),
   cliStatus: force => invoke('ai_cli_status', { force: force === true }),   // 設定頁「已安裝的工具」：[{ id, installed, version, version_state, latest, login, login_count }]；force＝重新檢查（略過快取）
   cliInstall: toolId => invoke('ai_cli_install', { toolId }),   // 設定頁 Claude 那一列「進行安裝／進行更新」（#1548 ⑤）：已驗數位簽章的流程 → { ok, message, opened_login }；使用者同意後才呼叫

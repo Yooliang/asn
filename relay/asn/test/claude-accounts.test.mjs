@@ -332,3 +332,16 @@ test('#1880 切換失敗：畫面顯示 Rust 回的「切換沒有成功」，�
   assert.match(ui.state.msg, /^切換沒有成功/)
   assert.doesNotMatch(ui.state.msg, /已切換/)
 })
+
+test('帳號卡「這台」那一列的切換走 tauri.mjs 的 transport 出口，不直接 invoke（#2106）', async () => {
+  const sw = []
+  const transport = { accountSwitch: async (vendor, email) => { sw.push([vendor, email]); return { email } } }
+  const { f, ui } = mk({ claude_accounts_list: [], claude_account_current: null, codex_account_current: null, acct_remote_report: {}, acct_roster: [] }, { transport })
+  await ui.switchRow({ vendor: 'claude', email: 'b@x.test', node: 'H', label: '家用機', self: true })
+  await ui.switchRow({ vendor: 'grok', email: 'g@x.test', node: 'H', label: '家用機', self: true })
+  assert.deepEqual(sw, [['claude', 'b@x.test'], ['grok', 'g@x.test']])
+  assert.equal(f.calls.some(c => /_account_switch$/.test(c[0])), false, '切換指令不經注入的 invoke')
+  const tauri = read('ui/lib/tauri.mjs')
+  assert.match(tauri, /accountSwitch: \(vendor, email\) => invoke\(vendor === 'grok' \? 'grok_account_switch' : 'claude_account_switch', \{ email \}\)/)
+  assert.match(read('ui/list.js'), /createAccountsUi\(\{\s*invoke, transport,/)
+})

@@ -1931,7 +1931,7 @@ const app = createApp({
     }
     // 設定頁「帳號」（檔案操作全在 Rust 端）：Claude 帳號庫、Codex 目前登入、遠端設備的 Claude 帳號切換
     const accounts = createAccountsUi({
-      invoke, reactive,
+      invoke, transport, reactive,
       devices: () => launchDeviceRowsList.value.filter(d => d.key !== info.node && asnMap.value[d.key]),
       nodeLabel: n => launchDeviceRowsList.value.find(d => d.key === n)?.label ?? n,
     })
