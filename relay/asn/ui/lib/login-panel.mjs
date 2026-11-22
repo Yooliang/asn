@@ -2,7 +2,7 @@
 // 自己呼叫 Rust 指令（登入狀態與權杖都在 Rust 端，不經名單樞紐的設定快照）；整合模式與分離視窗共用。
 // 這個檔在 node 也要能載入（測試），所以 Vue 與 Tauri 只在元件 setup 裡才取用。
 import { LOGOUT_CANCEL_LABEL, LOGOUT_DONE_TEXT, LOGOUT_NOTE, LOGOUT_ONLY_LABEL, LOGOUT_STOP_AUTOSTART_NOTE, LOGOUT_STOP_DONE_TEXT, LOGOUT_STOP_LABEL, LOGOUT_STOP_NOTE, PROVIDERS, accountView, errorText } from './login.mjs'
-import { authApi, invoke } from './tauri.mjs'
+import { authApi, autostartApi } from './tauri.mjs'
 import { checkName } from './onboard.mjs'
 import { accountDisplayName } from './mobile.mjs'
 import { checkAiWakeLimit, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE } from './ai-wake-limit.mjs'
@@ -20,7 +20,7 @@ export const LoginPanel = {
       try {
         status.value = await authApi.status()
         info.value = null
-        if (status.value?.signed_in) { info.value = await authApi.accountInfo(); void authApi.getAiWakeLimit().then(n => { wakeText.value = String(n) }).catch(() => {}); nameText.value = accountDisplayName(info.value?.owner_name, '') === '我' ? '' : accountDisplayName(info.value?.owner_name, '') }
+        if (status.value?.signed_in) { info.value = await authApi.accountInfo(); void authApi.getAiWakeLimit().then(n => { wakeText.value = String(n) }).catch(() => { /* 取不到上限就留著輸入框原樣；出口已 console.warn */ }); nameText.value = accountDisplayName(info.value?.owner_name, '') === '我' ? '' : accountDisplayName(info.value?.owner_name, '') }
       } catch (e) { msg.value = errorText(e) }
     }
     const run = async (fn, ok = '') => {
@@ -87,7 +87,7 @@ export const LogoutPanel = {
       await refresh()
     }
     // 有設開機自動啟動：關閉 ASN 後下次開機會自己開，要讓人知道
-    const loadAutostart = async () => { try { autostartOn.value = (await invoke('autostart_get')) === true } catch { autostartOn.value = false } }
+    const loadAutostart = async () => { try { autostartOn.value = (await autostartApi.get()) === true } catch { autostartOn.value = false } }
     onMounted(() => { void refresh(); void loadAutostart() })
     return { signedIn, busy, msg, asking, autostartOn, ask, cancel, logout, LOGOUT_NOTE, LOGOUT_ONLY_LABEL, LOGOUT_STOP_LABEL, LOGOUT_STOP_NOTE, LOGOUT_STOP_AUTOSTART_NOTE, LOGOUT_CANCEL_LABEL }
   },

@@ -1,6 +1,9 @@
 // 設定頁「用量」：本機 Claude Code 對話記錄的 token 與成本估算。
 // 記錄檔的掃描與加總全在 Rust（usage.rs，只讀這台電腦、不上傳）；這裡只呼叫指令並整理成要顯示的文字。
 // 成本是用內建價目表算的估算值，不是帳單，也不是訂閱方案的剩餘額度。
+import { makeUsageApi } from './tauri.mjs'
+import { usageErrorText } from './plain-errors.mjs'
+
 export const USAGE_NOTE = '依這台電腦上 Claude Code 的對話記錄估算，不是帳單，也不是訂閱方案的剩餘額度；只在本機計算，不會上傳。'
 
 // 大數字轉成短的：1234 → 1,234；10 萬以上用「萬」「億」
@@ -46,19 +49,20 @@ export function usageView(s) {
 }
 
 export function createUsageUi({ invoke, reactive, now = () => new Date() }) {
+  const api = makeUsageApi(invoke)
   const state = reactive({ loading: false, error: '', data: null, updated: '' })
   const refresh = async () => {
     if (state.loading) return
     state.loading = true
     try {
       // getTimezoneOffset：UTC 減本機的分鐘數，Rust 端用它切「今天」「本月」
-      const s = await invoke('usage_summary', { tzOffsetMin: now().getTimezoneOffset() })
+      const s = await api.summary(now().getTimezoneOffset())
       state.data = usageView(s)
       state.error = ''
       const d = now()
       state.updated = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
     } catch (e) {
-      state.error = `讀取用量失敗：${e?.message ?? e}`
+      state.error = `讀取用量失敗：${usageErrorText(e)}`
     } finally {
       state.loading = false
     }

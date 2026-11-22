@@ -2,6 +2,7 @@
 // 附件鈕、主持人確認卡片、成員管理清單、後台動作的呼叫包裝。電腦版與手機版共用。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文；一律不顯示節點代號、視窗成員鍵與 x: 代號。
 import { isAsnWindow, isRelayRoom } from './roster.mjs'
+import { makeGroupActApi } from './tauri.mjs'
 
 export const SEED_DEFAULT = 40            // 一對一升級成群組時，複製最後幾則當開頭紀錄（預設）
 export const SEED_MAX = 50
@@ -218,7 +219,7 @@ export const isHostRoom = r => r?.is_host === true
 
 // ---------- 後台動作的呼叫包裝（invoke 由頁面帶進來；測試換成假的） ----------
 export function createGroupApi(invoke) {
-  const act = (action, body) => invoke('relay_group', { action, body })
+  const { act } = makeGroupActApi(invoke)
   return {
     create: body => act('group_create', body),
     inviteCreate: body => act('group_invite_create', body),

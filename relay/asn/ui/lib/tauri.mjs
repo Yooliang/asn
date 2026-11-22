@@ -265,6 +265,55 @@ export const makeReloginApi = (call = invoke) => ({
   cliLogin: toolId => call('ai_cli_login', { toolId }),                      // 開登入用的終端機
 })
 
+// ---------- 小檔的出口（#2106 ⑤）：參數形狀與以前直接 invoke 時完全相同 ----------
+// 密碼輸入小窗（askpass）：絕不記錄輸入內容；出口失敗只記指令名與原文，不記 args
+export const askpassApi = {
+  info: id => invoke('askpass_info', { id }),
+  answer: (id, secret) => invoke('askpass_answer', { id, secret }),   // secret＝輸入的內容或 null（取消）
+}
+// 安裝進度小窗（ui/setup-progress.js）
+export const setupProgressApi = {
+  snapshot: () => invoke('setup_progress_snapshot'),
+  cancel: () => invoke('agent_setup_cancel'),
+}
+// 提示小窗（ui/toast.js）
+export const toastApi = {
+  click: cid => invoke('toast_click', { cid }),
+  painted: () => invoke('toast_painted'),
+}
+// 改名與啟動對齊（device-rename.mjs；phone＝手機走 android_known_rename）。call 可注入
+/** 改名要叫的 Rust 命令：手機是 android_known_rename、電腦是 device_rename（兩個命令都送後台並替本機視窗名跟上） */
+export const renameCommandOf = phone => (phone === true ? 'android_known_rename' : 'device_rename')
+export const makeDeviceNameApi = (call = invoke) => ({
+  rename: (phone, node, name) => call(renameCommandOf(phone), { node, name }),
+  align: () => call('device_name_align'),
+})
+// 開記錄檔／記錄資料夾（view-log.mjs）
+export const makeLogViewApi = (call = invoke) => ({
+  openUiLog: () => call('open_ui_log'),
+  openMachineLogDir: () => call('open_machine_log_dir'),
+})
+// 群組動作（groups.mjs）：後台的群組操作都走 relay_group，以 action 區分
+export const makeGroupActApi = (call = invoke) => ({
+  act: (action, body) => call('relay_group', { action, body }),
+})
+// 登入頁的開機自啟動開關（login-panel.mjs）
+export const autostartApi = {
+  get: () => invoke('autostart_get'),
+}
+// 手機登入憑證有沒有封存（mobile-login-seal.mjs）
+export const makeLoginSealApi = (call = invoke) => ({
+  sealed: () => call('android_login_sealed'),
+})
+// 用量統計（usage.mjs）
+export const makeUsageApi = (call = invoke) => ({
+  summary: tzOffsetMin => call('usage_summary', { tzOffsetMin }),
+})
+// 前端記錄寫進 ui.log（ui-log.mjs）：invoke 出口對 ui_log 特別不記失敗，所以這條失敗不會再繞圈
+export const makeUiLogApi = (call = invoke) => ({
+  send: lines => call('ui_log', { lines }),
+})
+
 // ---------- 視窗外框（自訂／Windows 原生） ----------
 // 原生外框：html 加 frame-native，樣式把自畫的標題列、邊框與拖邊緣的把手藏起來
 export const applyFrame = native => document.documentElement.classList.toggle('frame-native', native === true)

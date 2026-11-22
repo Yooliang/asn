@@ -13,7 +13,7 @@ const UI = fileURLToPath(new URL('../ui/', import.meta.url))
 const read = f => fs.readFileSync(UI + f, 'utf8').replace(/\r\n/g, '\n')
 
 // 已清理檔案：搬完一張就加進來
-export const CLEANED = ['lib/voice-ui.mjs', 'lib/room-hub.mjs', 'lib/mobile-known-peers.mjs', 'lib/agent-install.mjs', 'lib/mobile-remote-view.mjs', 'shot.js', 'onboard.js', 'login.js', 'lib/relogin-flow.mjs']
+export const CLEANED = ['lib/voice-ui.mjs', 'lib/room-hub.mjs', 'lib/mobile-known-peers.mjs', 'lib/agent-install.mjs', 'lib/mobile-remote-view.mjs', 'shot.js', 'onboard.js', 'login.js', 'lib/relogin-flow.mjs', 'askpass.js', 'setup-progress.js', 'toast.js', 'lib/device-rename.mjs', 'lib/term-chat.mjs', 'lib/view-log.mjs', 'lib/groups.mjs', 'lib/login-panel.mjs', 'lib/mobile-login-seal.mjs', 'lib/usage.mjs', 'lib/ui-log.mjs']
 
 // 沒有任何內容（連註解都沒有）的空 catch：catch { }、catch (e) { }、.catch(() => { })、.catch(e => { })
 export const EMPTY_CATCH = /\bcatch\s*(?:\([^)]*\))?\s*\{\s*\}|\.catch\(\s*(?:\([^)]*\)|\w+)\s*=>\s*\{\s*\}\s*\)/g
@@ -105,4 +105,52 @@ test('重新登入出口：指令名與參數形狀不變', async () => {
   const api = makeReloginApi(async (c, a) => { calls.push([c, a]); return null })
   await api.remoteStatus(); await api.remoteRequest('N1'); await api.cliLogin('claude')
   assert.deepEqual(calls, [['setup_remote_status', undefined], ['setup_remote_request', { node: 'N1', mode: 'relogin' }], ['ai_cli_login', { toolId: 'claude' }]])
+})
+
+// ---- ⑤：剩下的小檔 ----
+test('onboardErrorText 收到 Error 物件要回 e.message，不能變成 "Error: 壞了"', async () => {
+  const { onboardErrorText } = await import('../ui/lib/plain-errors.mjs')
+  assert.equal(onboardErrorText(new Error('壞了')), '壞了')
+  assert.notEqual(onboardErrorText(new Error('壞了')), 'Error: 壞了')
+})
+
+test('用量讀取失敗的畫面文字與搬之前一字不差', async () => {
+  const { usageErrorText } = await import('../ui/lib/plain-errors.mjs')
+  assert.equal(usageErrorText(new Error('壞了')), '壞了')
+  assert.equal(usageErrorText('字串'), '字串')
+  assert.equal(usageErrorText(null), 'null')
+  assert.equal(usageErrorText({ message: '' }), '')
+})
+
+test('小檔的出口：指令名與參數形狀不變', async () => {
+  const m = await import('../ui/lib/tauri.mjs')
+  const calls = []
+  const call = async (c, a) => { calls.push([c, a]); return null }
+  await m.makeDeviceNameApi(call).rename(true, 'N', '名'); await m.makeDeviceNameApi(call).rename(false, 'N', '名'); await m.makeDeviceNameApi(call).align()
+  await m.makeLogViewApi(call).openUiLog(); await m.makeLogViewApi(call).openMachineLogDir()
+  await m.makeGroupActApi(call).act('group_leave', { room: 'R' })
+  await m.makeLoginSealApi(call).sealed()
+  await m.makeUsageApi(call).summary(-480)
+  await m.makeUiLogApi(call).send(['a'])
+  assert.deepEqual(calls, [
+    ['android_known_rename', { node: 'N', name: '名' }], ['device_rename', { node: 'N', name: '名' }], ['device_name_align', undefined],
+    ['open_ui_log', undefined], ['open_machine_log_dir', undefined],
+    ['relay_group', { action: 'group_leave', body: { room: 'R' } }],
+    ['android_login_sealed', undefined], ['usage_summary', { tzOffsetMin: -480 }], ['ui_log', { lines: ['a'] }],
+  ])
+  // 沒有 Tauri 時（node）固定出口物件還在、不會一載入就丟錯
+  for (const k of ['askpassApi', 'setupProgressApi', 'toastApi', 'autostartApi']) assert.equal(typeof m[k], 'object', k)
+})
+
+test('askpass／setup-progress／toast／login-panel：不直接 invoke(、走具名出口', () => {
+  for (const [f, re] of [['askpass.js', /askpassApi\.answer\(id, payload\)/], ['askpass.js', /askpassApi\.info\(id\)/], ['setup-progress.js', /setupProgressApi\.snapshot\(\)/], ['setup-progress.js', /setupProgressApi\.cancel\(\)/], ['toast.js', /toastApi\.click\(t\.cid\)/], ['toast.js', /toastApi\.painted\(\)/], ['lib/login-panel.mjs', /autostartApi\.get\(\)/]]) {
+    const s = read(f)
+    assert.doesNotMatch(s, /(?<![\w.$])invoke\(/, `${f} 還有直接 invoke(`)
+    assert.match(s, re, f)
+  }
+})
+
+test('密碼輸入小窗：輸入內容只送給出口，不進任何 console／log', () => {
+  const s = read('askpass.js')
+  assert.doesNotMatch(s, /console\.|log\(/)
 })

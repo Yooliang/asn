@@ -54,10 +54,12 @@ test('壞輸入不會炸，控制字元被清掉', () => {
 
 test('接線守門：小窗頁聽兩種事件、先要快照、取消走既有指令；Rust 端不搶焦點不進工作列、結束會關', () => {
   const js = read('ui/setup-progress.js'), html = read('ui/setup-progress.html')
-  assert.match(js, /invoke\('setup_progress_snapshot'\)/)
+  assert.match(js, /setupProgressApi\.snapshot\(\)/)
+  assert.match(read('ui/lib/tauri.mjs'), /invoke\('setup_progress_snapshot'\)/)   // 指令名在出口
   assert.match(js, /listen\('agent-setup', apply\)/)
   assert.match(js, /listen\('agent-setup-remote', apply\)/)
-  assert.match(js, /invoke\('agent_setup_cancel'\)/)
+  assert.match(js, /setupProgressApi\.cancel\(\)/)
+  assert.match(read('ui/lib/tauri.mjs'), /invoke\('agent_setup_cancel'\)/)
   assert.match(html, /@click="cancel"/)
   const wins = read('src-tauri/src/wins.rs'), lib = read('src-tauri/src/lib.rs')
   // 只看小窗那個函式（提示視窗也有同樣的設定，不能被它們蓋過去）

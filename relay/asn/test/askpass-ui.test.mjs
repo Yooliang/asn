@@ -65,7 +65,9 @@ test('守門：askpass-copy 在指令清單裡、樞紐接得住且複製的是�
   const lib = read('../src-tauri/src/lib.rs')
   const js = read('../ui/askpass.js')
   for (const cmd of ['askpass_helper_info', 'askpass_info', 'askpass_answer']) assert.ok(lib.includes(`askpass::dialog::${cmd}`), cmd)
-  for (const cmd of ['askpass_info', 'askpass_answer']) assert.ok(js.includes(`invoke('${cmd}'`), cmd)
+  const ex = read('../ui/lib/tauri.mjs')   // 指令名在出口；askpass.js 走 askpassApi
+  for (const cmd of ['askpass_info', 'askpass_answer']) assert.ok(ex.includes(`invoke('${cmd}'`), cmd)
+  assert.ok(js.includes('askpassApi.info(id)') && js.includes('askpassApi.answer(id, payload)'))
 })
 
 test('守門：設定頁面不自動改使用者的環境變數或 git 設定', () => {

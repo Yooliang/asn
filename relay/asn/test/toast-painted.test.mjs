@@ -10,7 +10,8 @@ const read = (...p) => fs.readFileSync(path.join(root, ...p), 'utf8').replace(/\
 
 test('#1953 toast.js 掛載後等兩個 requestAnimationFrame 才呼叫 toast_painted', () => {
   const js = read('ui', 'toast.js')
-  assert.match(js, /\.mount\('#app'\)[\s\S]*requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{ invoke\('toast_painted'\)/)
+  assert.match(js, /\.mount\('#app'\)[\s\S]*requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{ toastApi\.painted\(\)/)
+  assert.match(read('ui', 'lib', 'tauri.mjs'), /invoke\('toast_painted'\)/)   // 指令名在出口
 })
 
 test('#1953 toast_painted 登記成指令、Painted 狀態有註冊，且只在電腦端', () => {

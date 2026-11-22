@@ -16,6 +16,9 @@ export const onboardErrorText = e => String(e?.message ?? e)
 /** 本機重新登入失敗：字串或 Error 都原文顯示（以前 relogin-flow.mjs 自己的 errText） */
 export const reloginErrorText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
+/** 讀取用量失敗：原文接在「讀取用量失敗：」後面（以前 usage.mjs 內嵌的 ${e?.message ?? e}） */
+export const usageErrorText = e => String(e?.message ?? e)
+
 /** 改名失敗：後台（Rust）回的是中文說明就原樣顯示，其他一律說白話 */
 export function renameErrorText(e) {
   const s = String(e?.message ?? e ?? '').trim()

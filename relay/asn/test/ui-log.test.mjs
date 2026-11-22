@@ -49,3 +49,21 @@ test('接線：主視窗在 import 之後馬上裝；Rust 有註冊 ui_log、寫
   assert.match(rs, /fn ui_log\(app: State<'_, App>, lines: Vec<String>\)[^{]*\{\s*ui_log::append\(&app\.work_dir, &lines\)/)
   assert.match(rs, /relay_log_paths, ui_log, open_machine_log_dir/)
 })
+
+test('走真的 invoke 出口：ui_log 寫不進去時不呼叫任何 console.*，出口也不為它記失敗（不繞圈）', async () => {
+  const saved = globalThis.__TAURI__
+  globalThis.__TAURI__ = { core: { invoke: async () => { throw 'ui.log 寫不進去' } } }
+  const calls = []
+  const orig = { info: console.info, warn: console.warn, error: console.error }
+  try {
+    const { invoke } = await import('../ui/lib/tauri.mjs?uilog-exit')
+    const timers = []
+    const target = { info() {}, warn() {}, error() {} }
+    const log = installUiLog({ invoke, target, setTimer: fn => { timers.push(fn); return 1 } })
+    target.info('[ASN]', 'x')
+    for (const k of Object.keys(orig)) console[k] = (...a) => calls.push([k, ...a])
+    await log.flush()
+    assert.equal(log.pending(), 0)
+  } finally { Object.assign(console, orig); globalThis.__TAURI__ = saved }
+  assert.deepEqual(calls, [], '失敗時不能再印任何記錄')
+})

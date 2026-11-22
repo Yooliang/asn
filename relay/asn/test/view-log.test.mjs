@@ -71,8 +71,10 @@ test('連資料夾也開不了：說資料夾也打不開，不丟錯', async ()
 
 test('路徑由後端決定：前端不帶參數；Rust 指令沒有路徑參數、只開機器資料夾的 ui.log', () => {
   const view = read('ui', 'lib', 'view-log.mjs')
-  assert.match(view, /invoke\('open_ui_log'\)/)
-  assert.doesNotMatch(view, /invoke\(\s*['"]open_ui_log['"]\s*,/)
+  const ex = read('ui', 'lib', 'tauri.mjs')   // 指令名在出口；view-log.mjs 只走 api.openUiLog()
+  assert.match(ex, /call\('open_ui_log'\)/)
+  assert.doesNotMatch(ex, /call\(\s*['"]open_ui_log['"]\s*,/)
+  assert.match(view, /api\.openUiLog\(\)/)
   const lib = read('src-tauri', 'src', 'lib.rs')
   const m = /((?:(?:#\[[^\n]*\]|\/\/\/[^\n]*)\n)*)fn open_ui_log\(([^)]*)\)[^{]*\{([\s\S]*?)\n\}/.exec(lib)
   assert.ok(m, '找不到 open_ui_log')
