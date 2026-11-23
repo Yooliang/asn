@@ -75,10 +75,8 @@ fn add_stop(home: &Path, name: &str, mark: Option<i64>) {
     let Some(mark) = mark else { return };
     let mut all = load_stops(home);
     all.insert(name.to_string(), mark);
-    if let Some(p) = stops_path(home).parent() {
-        let _ = std::fs::create_dir_all(p);
-    }
-    let _ = std::fs::write(stops_path(home), json!(all).to_string());
+    // 停換標記，掉了只是多試一次：純狀態（統一寫入會建父資料夾）
+    let _ = crate::settings::atomic::write(&stops_path(home), json!(all).to_string().as_bytes(), crate::settings::atomic::STATE);
 }
 /// 使用者重新打開開關時清掉，下一輪才會再試
 pub fn clear_stops(home: &Path) {

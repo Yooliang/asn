@@ -261,6 +261,113 @@ mod tests {
         assert!(include_str!("../cli/send_rate.rs").contains("atomic::STATE"));
     }
 
+    // Windows 鎖定重試（#2162 2b）：另一個執行緒以「完全不共用」的方式開著目標檔，約 500 毫秒後放掉；
+    // 統一寫入的 rename 會先被擋（共用違規），重試後成功，內容正確、不留 tmp。
+    // 把 RENAME_TRIES 暫時改成 1，這支會紅（第一次被擋就直接回錯）。
+    #[cfg(windows)]
+    #[test]
+    fn windows目標檔被獨占開著時重試後成功() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("x.json");
+        std::fs::write(&p, "舊").unwrap();
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&p).unwrap();
+        // 前提：占住期間直接改名一定失敗（否則這支測試什麼都沒驗到）
+        let probe = d.path().join("probe.tmp");
+        std::fs::write(&probe, "x").unwrap();
+        assert!(std::fs::rename(&probe, &p).is_err(), "占住時改名應該失敗");
+        std::fs::remove_file(&probe).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            drop(held);
+        });
+        write(&p, "新".as_bytes(), SETTINGS).unwrap();
+        release.join().unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "新");
+        assert!(tmps(d.path()).is_empty(), "不留 tmp");
+    }
+
+    // 分類釘住（#2162 2b）：內嵌的「寫 tmp 再 rename」與非原子的 fs::write 都收進統一寫入後，每一處的 Opts。
+    // (名稱, 原始碼, 呼叫開頭, 要用的類別, 這個開頭預期出現幾次)；同一個開頭的每一次出現都要用對類別。
+    /// 正式碼的結尾：「#[cfg(test)] 後面緊接 mod tests」那一個（單一函式上的 #[cfg(test)] 不算）；找不到就整份都是正式碼
+    fn prod_end(src: &str) -> usize {
+        src.match_indices("#[cfg(test)]").map(|(i, m)| (i, i + m.len())).find(|(_, e)| src[*e..].trim_start().starts_with("mod tests")).map_or(src.len(), |(i, _)| i)
+    }
+
+    #[test]
+    fn 內嵌寫入改走統一寫入後每處的類別() {
+        let sites: [(&str, &str, &str, &str, usize); 26] = [
+            ("partner_queue 名冊 forget／rename", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, v.to_string()", "SETTINGS", 2),
+            ("upstream_retry 補送名單", include_str!("../bridge/core/upstream_retry.rs"), "atomic::write(&file, t.as_bytes()", "QUEUE", 1),
+            ("pi.rs 收件匣", include_str!("../bridge/engines/pi.rs"), "atomic::write(&target, body.as_bytes()", "QUEUE", 1),
+            ("grok_accounts write_bytes", include_str!("../grok_accounts.rs"), "atomic::write(path, bytes", "SETTINGS", 1),
+            ("quota_readers save_settings", include_str!("../quota_readers.rs"), "atomic::write(&path, text.as_bytes()", "SETTINGS", 1),
+            ("pi_setup 安裝記錄", include_str!("../launch/pi_setup.rs"), "atomic::write(&self.marker", "SETTINGS", 1),
+            ("lastlogin", include_str!("../lastlogin.rs"), "atomic::write(&dir.join(FILE)", "STATE", 1),
+            ("heartbeat", include_str!("../heartbeat.rs"), "atomic::write(&file, body.as_bytes()", "STATE", 1),
+            ("cli/room.rs room-seen", include_str!("../cli/room.rs"), "atomic::write(&f, serde_json", "STATE", 1),
+            ("invite_link 信箱檔", include_str!("../invite_link.rs"), "atomic::write(&dir.join(INBOX_FILE)", "STATE", 1),
+            ("mux_round 接回通知", include_str!("../launch/mux_round.rs"), "atomic::write(&work_dir.join(RESUME_NOTICE_FILE)", "STATE", 1),
+            ("mux_watch 看不到通知", include_str!("../launch/mux_watch.rs"), "atomic::write(&work_dir.join(BLIND_FILE)", "STATE", 1),
+            ("mux_watch 服務停通知", include_str!("../launch/mux_watch.rs"), "atomic::write(&work_dir.join(NOTICE_FILE)", "STATE", 1),
+            ("wezterm_fetch 退避紀錄", include_str!("../launch/wezterm_fetch.rs"), "atomic::write(&root.join(STATE_FILE)", "STATE", 1),
+            ("pi_control 控制請求", include_str!("../bridge/engines/pi_control.rs"), "atomic::write(&target, v.to_string()", "STATE", 1),
+            ("term.rs 畫面判斷", include_str!("../launch/term.rs"), "atomic::write(&path, body.as_bytes()", "STATE", 1),
+            ("claude_extra stops", include_str!("../claude_extra.rs"), "atomic::write(&stops_path(home)", "STATE", 1),
+            ("launcher launch-history", include_str!("../bridge/launcher.rs"), "atomic::write(&self.history_file()", "STATE", 1),
+            ("orphans bridge.last", include_str!("../bridge/orphans.rs"), "atomic::write(&last_file(work_dir)", "STATE", 1),
+            ("channel_turns 記號", include_str!("../bridge/channel_turns.rs"), "atomic::write(&p, b\"1\"", "STATE", 1),
+            ("auth_notice 日誌截半", include_str!("../auth_notice.rs"), "atomic::write(&p, keep.as_bytes()", "STATE", 1),
+            ("acct_remote 日誌截半", include_str!("../acct_remote.rs"), "atomic::write(&p, keep.as_bytes()", "STATE", 1),
+            ("quota_core/merge 日誌截半", include_str!("../quota_core/merge.rs"), "atomic::write(p, keep.as_bytes()", "STATE", 1),
+            // 2a 已改、這張順手把「名冊與補送」以外的同檔舊呼叫也釘住
+            ("partner_queue 名冊 remember", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS", 1),
+            ("bridge/pending.rs", include_str!("../bridge/pending.rs"), "atomic::write(file,", "QUEUE", 1),
+            ("acct_remote outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE", 1),
+        ];
+        for (name, src, anchor, want, times) in sites {
+            let hits: Vec<_> = src.match_indices(anchor).map(|(i, _)| i).collect();
+            assert_eq!(hits.len(), times, "{name}：寫入呼叫（{anchor}）出現 {} 次，預期 {times} 次", hits.len());
+            for i in hits {
+                assert!(i < prod_end(src), "{name}：寫入點落在測試區之後，禁用字掃描會掃不到它");
+                let line = src[i..].lines().next().unwrap();
+                assert!(line.contains(&format!("atomic::{want}")), "{name}：要用 {want}，實際：{line}");
+            }
+        }
+        // 這些檔案的正式程式（測試區之前）不准再有自己拼暫存檔的寫法或非原子的 fs::write（其他已經走 write_atomic 的舊呼叫不在這張範圍）
+        for (name, src) in [
+            ("partner_queue", include_str!("../bridge/engines/partner_queue.rs")),
+            ("upstream_retry", include_str!("../bridge/core/upstream_retry.rs")),
+            ("pi.rs", include_str!("../bridge/engines/pi.rs")),
+            ("pi_control", include_str!("../bridge/engines/pi_control.rs")),
+            ("grok_accounts", include_str!("../grok_accounts.rs")),
+            ("quota_readers", include_str!("../quota_readers.rs")),
+            ("lastlogin", include_str!("../lastlogin.rs")),
+            ("heartbeat", include_str!("../heartbeat.rs")),
+            ("cli/room.rs", include_str!("../cli/room.rs")),
+            ("invite_link", include_str!("../invite_link.rs")),
+            ("mux_round", include_str!("../launch/mux_round.rs")),
+            ("mux_watch", include_str!("../launch/mux_watch.rs")),
+            ("wezterm_fetch", include_str!("../launch/wezterm_fetch.rs")),
+            ("pi_setup", include_str!("../launch/pi_setup.rs")),
+            ("claude_extra", include_str!("../claude_extra.rs")),
+            ("launcher", include_str!("../bridge/launcher.rs")),
+            ("orphans", include_str!("../bridge/orphans.rs")),
+            ("channel_turns", include_str!("../bridge/channel_turns.rs")),
+            ("auth_notice", include_str!("../auth_notice.rs")),
+            ("quota_core/merge", include_str!("../quota_core/merge.rs")),
+        ] {
+            let prod = &src[..prod_end(src)];
+            for bad in ["std::fs::write(", "fs::write(", ".tmp\""] {
+                assert!(!prod.contains(bad), "{name}：還有 {bad}");
+            }
+            // 名冊檔的另一處（FAIL_FILE 失敗紀錄，純狀態）本來就走 crate::write_atomic（STATE），不在這張改；名冊本身不准再走它
+            if name == "partner_queue" {
+                assert_eq!(prod.matches("crate::write_atomic(").count(), 1, "{name}：只剩失敗紀錄那一處走 STATE 包裝");
+            }
+        }
+    }
+
     // 舊版 H1 寫法：直接寫 tmp 再 rename
     fn h1_old(path: &Path, text: &str) {
         let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
