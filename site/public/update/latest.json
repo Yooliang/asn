@@ -1,15 +1,11 @@
 {
-  "version": "0.2.73",
-  "notes": "- 改善：讀額度的開關搬到「設備 → 這台」，帳號頁改成一句引導，告訴你去哪裡開。（#2111、#2138）\n- 改善：帳號卡與 AI 工具登入出錯時改成看得懂的話，原始錯誤寫進記錄。（#2106、#2140）",
-  "pub_date": "2026-11-22T23:32:40.340Z",
+  "version": "0.2.74",
+  "notes": "- 改善：帳號登入失效時，那台電腦那一列會放黃色「重新登入」，上方提示寫明是哪台、哪一家。（#2111、#2144）\n- 改善：手機帳號與讀額度設定出錯時改成看得懂的話，原始錯誤寫進記錄。（#2106、#2145）",
+  "pub_date": "2026-11-23T00:43:20.030Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhzOVRTS3E3ZURhMWN4d0R1aWhySytpT2t3T2hQL25URjY0Y0M4NGxKeHVZYWp2TXpPS3FBbVNmRnBONWk3QjdCYWhJQTlUdkhjQlE2UUU1alRwRkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzkwMzU5CWZpbGU6QVNOXzAuMi43M194NjQtc2V0dXAuZXhlClBLME82K0taUmN2NWZwZnYwcVRNVkdWM3cvSHZnb0VmbmlzcTh0NUorOUhMTG5pRUNzUWFJQ21IVEpzcEJIVnpyWVA0dllTazBMczJWYTdYN0hPM0FRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.73_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjE5ZytBVWdXKzdKbWNGVjJOZnJCcW44UjhnZy8zZ3JkNWZCK0dwaEY5UmV2TXFLOS9FSkF0cGpDZFdRU0k1V2h6N0VXTEgxcEJMdU4yMUxKVUJNUlEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1MzkwOTY2CWZpbGU6QVNOXzAuMi43M19hbWQ2NC5BcHBJbWFnZQo5UEhVYVRUY0xZbEhmU1k2TG53Rlhla0huVldqREgrVThLRDFhV0FOSzdJa1FGUVg3bzRRODd1TGRBNUo1MjMzdjVrNjlUNTJINURXWlU4V2RMMktDZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.73_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhUUVYzNk9rdUNOM1JPM0NRVEllSDl6ZGlYTXRNVWVQL0NieURuSFppMC9aSE9pSnRWMnpKd2pwQ2JmZ0NEQm80Q0ZkUmhNVU9DZ2xQSUJNQTJ1YVFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mzk0NTk5CWZpbGU6QVNOXzAuMi43NF94NjQtc2V0dXAuZXhlCnJKOXZUOGVZYVdmOVJaam12WFRFR213ZDdTbFMvTFF5UDhaaWdxcDhvVllFQkhaKzJvTktjMEw2cDZqZEpHQ1loR1J6Z05CY0tJVlVwbVprbEZPMkNRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.74_x64-setup.exe"
     }
   }
 }
