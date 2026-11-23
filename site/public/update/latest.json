@@ -1,15 +1,11 @@
 {
-  "version": "0.2.82",
-  "notes": "- 修正：儲存個人設定時，不會再把其他裝置或新版加的設定丟掉。（#2162、#2168）",
-  "pub_date": "2026-11-23T13:36:08.931Z",
+  "version": "0.2.83",
+  "notes": "- 改善：登入失效通知與視窗標題上的設備名稱，改用設備頁上設定的名稱\n- 修正：終端對照表存檔時偶爾會掉檔的問題\n- 改善：佇列與設定檔存檔更穩，斷電或當機時較不容易損毀",
+  "pub_date": "2026-11-23T16:16:55.332Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhSNVhHNDVobXZ3Z3lpYVMwUk5QemJCOWhWNVN2a0RObjVPSDlxb0FhbkhCQ3hHcFlxNUNaSUdNWFdpSW9NSXpWS1hCeXJQVTBaWmJ0M0doZndhUEE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDQwOTY4CWZpbGU6QVNOXzAuMi44Ml94NjQtc2V0dXAuZXhlCmpZV3pJZ3M0M0xiTTRnRW1aRnlyZ3JxS1NCbkZiRUdUeTJUSms2b3UzY3hDdjVyN290Wm1SREw1NXBiUFNrSVp2Y2tlM09SUkJ5Qk1YNFdBWVVPSUN3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.82_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBRbXFnZ0VLMlhjOWJXRzJRSURoUGgxUndvUm1RaVdpdEo3ZythWFo2eXl0MzhETXRmdStCNXVIeEhicTVCanhUMTBzU25jQ0xsUHNaYmJFWmtGL0FBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDQxNTU5CWZpbGU6QVNOXzAuMi44Ml9hbWQ2NC5BcHBJbWFnZQo5djdFQXdma1dRa2R6Y0VIa1hzZkJVdUp5bkxHL0l3QjhoSnl2cnlIRmtGQU9Jb3BDbm94eDdDK3g3U2ZHZ3ArTmZoNmcwT3Bid2wrRXBFeTBwbENBZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.82_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFPOW5EbHRDQ1puZmJLakNhV0Q0eVJ5TWV2WWVhdzlhdUwza3VON0xqVFd5ZHVRU0hub1ZhODQxTTdmcnN5OWttSGd3SXZTdXczSEdtV3IyMzRWeEFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDUwNjE0CWZpbGU6QVNOXzAuMi44M194NjQtc2V0dXAuZXhlClVMVUZlWTFtMHlwUjBoeW11MDByeTBNOTdkdFliUXdKajdwOUhES2I0OUZUcXphREtuU0FKelJYZVV4NXJJSllKSzBMR28zUnpiaXVwVWhURDNEQ0J3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.83_x64-setup.exe"
     }
   }
 }
