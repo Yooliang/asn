@@ -24,6 +24,7 @@ pub const STATE: Opts = Opts { fsync: false, private: false, create_dirs: true }
 static SEQ: AtomicU64 = AtomicU64::new(0);
 const RENAME_TRIES: u32 = 5;
 const RENAME_WAIT_MS: u64 = 200;
+const TMP_TRIES: u32 = 8;
 
 /// `<檔>.<pid>.<行程內遞增序號>.tmp`，與目標同資料夾
 pub(crate) fn tmp_path(path: &Path) -> PathBuf {
@@ -40,11 +41,20 @@ fn write_tmp(tmp: &Path, bytes: &[u8], o: Opts) -> io::Result<()> {
         oo.mode(0o600);
     }
     let mut f = oo.open(tmp)?;
-    f.write_all(bytes)?;
-    if o.fsync {
-        f.sync_all()?;
+    // 開檔成功之後的失敗，要清掉自己建的 tmp（開檔失敗時那個檔不是我們的，不能動）
+    let r = f.write_all(bytes).and_then(|()| if o.fsync { f.sync_all() } else { Ok(()) });
+    if r.is_err() {
+        drop(f);
+        let _ = std::fs::remove_file(tmp);
     }
-    Ok(())
+    r
+}
+
+/// Windows 上目標檔被別的程式開著時，rename 會回 ERROR_ACCESS_DENIED(5)、ERROR_SHARING_VIOLATION(32)、
+/// ERROR_LOCK_VIOLATION(33)；這三個是「等一下可能就好」。其他錯誤（含 ErrorKind::Other）重試也不會好，直接回傳，
+/// 不白等。目標是資料夾時 Windows 也回 5，但等多久都不會好，所以先排除。
+fn transient_rename_error(e: &io::Error, path: &Path) -> bool {
+    cfg!(windows) && matches!(e.raw_os_error(), Some(5 | 32 | 33)) && !path.is_dir()
 }
 
 fn rename_retry(tmp: &Path, path: &Path) -> io::Result<()> {
@@ -54,10 +64,7 @@ fn rename_retry(tmp: &Path, path: &Path) -> io::Result<()> {
             Ok(()) => return Ok(()),
             Err(e) => {
                 n += 1;
-                let retry = cfg!(windows)
-                    && n < RENAME_TRIES
-                    && matches!(e.kind(), io::ErrorKind::PermissionDenied | io::ErrorKind::Other);
-                if !retry {
+                if n >= RENAME_TRIES || !transient_rename_error(&e, path) {
                     return Err(e);
                 }
                 std::thread::sleep(std::time::Duration::from_millis(RENAME_WAIT_MS));
@@ -66,7 +73,24 @@ fn rename_retry(tmp: &Path, path: &Path) -> io::Result<()> {
     }
 }
 
+/// 建 tmp：遇到殘留的同名檔（pid 重用、序號剛好相同）就換下一個名字，最多 8 次；不動殘留檔
+fn create_tmp(path: &Path, bytes: &[u8], o: Opts, next: &mut dyn FnMut(&Path) -> PathBuf) -> io::Result<PathBuf> {
+    let mut n = 0;
+    loop {
+        let tmp = next(path);
+        match write_tmp(&tmp, bytes, o) {
+            Ok(()) => return Ok(tmp),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists && n + 1 < TMP_TRIES => n += 1,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 pub fn write(path: &Path, bytes: &[u8], o: Opts) -> io::Result<()> {
+    write_with(path, bytes, o, &mut tmp_path)
+}
+
+fn write_with(path: &Path, bytes: &[u8], o: Opts, next: &mut dyn FnMut(&Path) -> PathBuf) -> io::Result<()> {
     if o.create_dirs {
         if let Some(p) = path.parent() {
             if !p.as_os_str().is_empty() {
@@ -74,9 +98,8 @@ pub fn write(path: &Path, bytes: &[u8], o: Opts) -> io::Result<()> {
             }
         }
     }
-    let tmp = tmp_path(path);
-    let r = write_tmp(&tmp, bytes, o).and_then(|()| rename_retry(&tmp, path));
-    if let Err(e) = r {
+    let tmp = create_tmp(path, bytes, o, next)?;
+    if let Err(e) = rename_retry(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
@@ -159,6 +182,46 @@ mod tests {
         assert!(r.is_err());
         assert!(tmps(d.path()).is_empty(), "失敗後 tmp 要清掉");
         assert_eq!(std::fs::read_to_string(p.join("keep.txt")).unwrap(), "舊");
+    }
+
+    #[test]
+    fn 殘留同名tmp時換名重試成功且不動殘留檔() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("x.json");
+        let stale = PathBuf::from(format!("{}.stale.tmp", p.display()));
+        std::fs::write(&stale, "殘留").unwrap();
+        let mut calls = 0;
+        let (s2, p2) = (stale.clone(), PathBuf::from(format!("{}.real.tmp", p.display())));
+        let mut next = move |_: &Path| {
+            calls += 1;
+            if calls <= 2 { s2.clone() } else { p2.clone() }
+        };
+        write_with(&p, b"new", SETTINGS, &mut next).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "new");
+        assert_eq!(std::fs::read_to_string(&stale).unwrap(), "殘留");
+    }
+
+    #[test]
+    fn 一直撞名超過8次回原錯誤且不動殘留檔() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("x.json");
+        let stale = PathBuf::from(format!("{}.stale.tmp", p.display()));
+        std::fs::write(&stale, "殘留").unwrap();
+        let s2 = stale.clone();
+        let e = write_with(&p, b"new", SETTINGS, &mut |_: &Path| s2.clone()).unwrap_err();
+        assert_eq!(e.kind(), io::ErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read_to_string(&stale).unwrap(), "殘留");
+        assert!(!p.exists());
+    }
+
+    #[test]
+    fn rename目標是資料夾時不白等() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("target");
+        std::fs::create_dir(&p).unwrap();
+        let t = std::time::Instant::now();
+        assert!(write(&p, b"x", SETTINGS).is_err());
+        assert!(t.elapsed() < std::time::Duration::from_millis(150), "不該重試睡覺");
     }
 
     // 舊版 H1 寫法：直接寫 tmp 再 rename
