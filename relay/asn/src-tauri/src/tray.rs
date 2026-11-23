@@ -22,11 +22,6 @@ impl Default for CloseToTray {
 #[derive(Default)]
 pub struct TrayFailed(pub AtomicBool);
 
-/// 存檔文字（asn-me.json）→ 是不是縮到系統匣：只有明確寫 `"closeTo":"quit"` 才是結束；沒這欄位的舊存檔、壞檔、壞值一律縮到系統匣
-pub fn close_to_tray_from_saved(text: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("closeTo")?.as_str().map(|c| c != "quit")).unwrap_or(true)
-}
-
 /// 系統匣圖示的提示文字
 pub fn tooltip(unread: u32) -> String {
     if unread == 0 { "ASN 即時通".into() } else { format!("ASN 即時通（{unread} 則未讀）") }
@@ -222,15 +217,6 @@ mod sys {
 mod tests {
     use super::*;
     use std::path::Path;
-
-    #[test]
-    fn 關閉行為_預設縮到系統匣_只有明確寫_quit_才結束() {
-        assert!(!close_to_tray_from_saved(r#"{"closeTo":"quit","sound":true}"#));
-        assert!(close_to_tray_from_saved(r#"{"closeTo":"tray"}"#));
-        for t in [r#"{"sound":true}"#, r#"{"closeTo":null}"#, r#"{"closeTo":true}"#, r#"{"closeTo":"Quit"}"#, "{壞掉", ""] {
-            assert!(close_to_tray_from_saved(t), "{t}");
-        }
-    }
 
     #[test]
     fn 攔下關閉的條件_要選了縮到系統匣且圖示真的建起來() {

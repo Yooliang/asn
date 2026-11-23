@@ -44,9 +44,10 @@ test('#2043 沒超過預算就照舊：每位夥伴存最近 2000 列，不多�
 })
 
 test('#2043 守門：預算與 Rust 上限的關係（改 Rust 上限時要一起看）', () => {
-  const rs = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8')
-  const m = /text\.len\(\) > ([\d_]+)/.exec(rs)
-  assert.ok(m, '找得到 store_save 的上限')
+  const rs = fs.readFileSync(new URL('../src-tauri/src/settings/raw.rs', import.meta.url), 'utf8')
+  const m = /pub const MAX_BYTES: usize = ([\d_]+)/.exec(rs)
+  assert.ok(m, '找得到 store_save 的上限（settings/raw.rs，#2162 ⑥）')
+  assert.match(rs, /text\.len\(\) > MAX_BYTES/)
   assert.equal(Number(m[1].replaceAll('_', '')), RUST_LIMIT)
   assert.ok(SAVE_BUDGET <= RUST_LIMIT - 1_000_000, '前端預算要比 Rust 上限至少小 1MB（友人資料等不在縮的範圍內）')
 })

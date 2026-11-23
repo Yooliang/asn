@@ -1020,12 +1020,6 @@ pub enum AutoOutcome {
     External(String),
 }
 
-/// 自動加入固定開啟（原本看 asn-me.json 的 `autoAddClaude`，現在不再有開關，寫什麼都當開）
-pub fn auto_enabled_from_saved(text: &str) -> bool {
-    let _ = text;   // 固定開啟：舊存檔裡寫 false 也一律忽略（擁有者 10-24）
-    true
-}
-
 /// 做一次：目前登入不在庫就加入；已在庫就什麼都不做；沒登入什麼都不動。
 /// 不再每分鐘回存：權杖和 .claude.json 可能被別的程式各換一半，配錯對存進庫裡會把別人的權杖存在這個帳號名下；
 /// 回存只在切走那一刻、先核對過才做（見 `switch_impl`）。
@@ -1152,7 +1146,8 @@ pub async fn auto_loop(data_dir: PathBuf, first: std::time::Duration, every: std
         let dd = data_dir.clone();
         let (mut steady_in, mut watch_in) = std::mem::take(&mut state);
         let r = tokio::task::spawn_blocking(move || {
-            let on = std::fs::read_to_string(dd.join("asn-me.json")).map(|t| auto_enabled_from_saved(&t)).unwrap_or(true);
+            // 固定開啟（擁有者 10-24：不再有開關，asn-me.json 寫什麼都當開）；經共用層唯讀讀取，不搬檔
+            let on = crate::settings::me_flags(&dd).auto_add_claude;
             if !on {
                 return (vec![], (steady_in, watch_in));
             }
@@ -2114,15 +2109,6 @@ mod tests {
         assert_eq!(body.matches("LOCK.lock()").count(), 2);
         assert!(body.contains("recheck_switched("), "等待之後走不還原的重讀");
         assert!(body.find("sleep").unwrap() > body.find("};").unwrap(), "睡之前第一把鎖已放掉");
-    }
-
-    #[test]
-    fn 開關讀法_固定開啟_寫_false_也忽略() {
-        assert!(auto_enabled_from_saved(r#"{"autoAddClaude":false,"closeTo":"tray"}"#));
-        assert!(auto_enabled_from_saved(r#"{"autoAddClaude":true}"#));
-        for t in [r#"{"sound":true}"#, r#"{"autoAddClaude":null}"#, r#"{"autoAddClaude":"false"}"#, "{壞掉", ""] {
-            assert!(auto_enabled_from_saved(t), "{t}");
-        }
     }
 
     #[test]

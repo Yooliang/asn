@@ -45,13 +45,17 @@ pub fn render<T: Doc>(v: &T, version: u32) -> Result<String, SettingsError> {
         return Err(SettingsError("設定的最上層必須是物件".into()));
     };
     let mut out = Map::new();
-    out.insert("version".into(), Value::from(version));
+    // 版本 0＝沒有版本欄位的格式（畫面整份存的三個存檔，版本留給之後的前端 patch）：不補 `version`，檔案長相與以前一樣
+    if version > 0 {
+        out.insert("version".into(), Value::from(version));
+    }
     for (k, val) in body {
         if k != "version" {
             out.insert(k, val);
         }
     }
-    serde_json::to_string_pretty(&Value::Object(out)).map_err(|e| SettingsError(e.to_string()))
+    let r = if T::COMPACT { serde_json::to_string(&Value::Object(out)) } else { serde_json::to_string_pretty(&Value::Object(out)) };
+    r.map_err(|e| SettingsError(e.to_string()))
 }
 
 fn suffixed(path: &Path, suffix: &str) -> PathBuf {

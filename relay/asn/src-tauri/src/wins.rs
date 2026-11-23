@@ -154,11 +154,6 @@ async fn wait_all_painted(open: impl Fn() -> Vec<String>, painted: impl Fn(&str)
 #[derive(Default)]
 pub struct Frame(pub AtomicBool);
 
-/// 存檔文字 → 是不是原生外框：只有 `"frame":"native"` 才是；沒這欄位的舊存檔、壞檔、壞值一律是自訂
-pub fn native_from_saved(text: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(text).ok().and_then(|v| v.get("frame")?.as_str().map(|f| f == "native")).unwrap_or(false)
-}
-
 /// 開機：照存檔設定主視窗的外框（視窗是由 tauri.conf 建的，預設無邊框）
 pub fn init_frame(app: &AppHandle, native: bool) {
     app.state::<Frame>().0.store(native, Ordering::Relaxed);
@@ -874,14 +869,6 @@ mod tests {
         assert!(!toast_url(&mk(None), "online").contains("av="));
         for bad in ["javascript:alert(1)", "data:image/svg+xml;base64,PHN2Zz4=", "data:image/png;base64,!!"] {
             assert!(!toast_url(&mk(Some(bad)), "online").contains("av="), "{bad}");
-        }
-    }
-
-    #[test]
-    fn 外框設定_沒欄位的舊存檔與壞值都是自訂() {
-        assert!(native_from_saved(r#"{"frame":"native","sound":true}"#));
-        for t in [r#"{"sound":true}"#, r#"{"frame":"custom"}"#, r#"{"frame":"Native"}"#, r#"{"frame":true}"#, r#"{"frame":null}"#, "{壞掉", ""] {
-            assert!(!native_from_saved(t), "{t}");
         }
     }
 

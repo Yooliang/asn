@@ -230,9 +230,8 @@ mod tests {
     // 每處以「呼叫的開頭」當錨點，檢查同一行用的是哪個 Opts。
     #[test]
     fn 佇列與設定的寫入點用的是會fsync的類別() {
-        let sites: [(&str, &str, &str, &str); 6] = [
+        let sites: [(&str, &str, &str, &str); 5] = [
             ("acct_remote.rs outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE"),
-            ("settings/mod.rs write_locked（視窗名稱、帳號偏好、安裝偏好、pi 自動安裝、讀額度、收發室設定、啟動偏好都從這裡寫）", include_str!("mod.rs"), "atomic::write(path, text.as_bytes()", "SETTINGS"),
             ("account.rs login_skipped", include_str!("../account.rs"), "atomic::write(&f, b\"1\"", "SETTINGS"),
             ("account.rs device_id", include_str!("../account.rs"), "atomic::write(&f, id.as_bytes()", "SETTINGS"),
             ("bridge/engines/partner_queue.rs 名冊", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS"),
@@ -244,6 +243,14 @@ mod tests {
             assert!(line.contains(&format!("atomic::{want}")), "{name}：要用 {want}，實際：{line}");
             assert!(!line.contains("atomic::STATE"), "{name}：不准用 STATE");
         }
+        // 共用層 write_locked 的類別由型別宣告：預設是 SETTINGS（視窗名稱、帳號偏好、…都從這裡寫），只有對話快取（asn-chats）改成 STATE
+        let m = include_str!("mod.rs");
+        assert!(m.contains("const ATOMIC: atomic::Opts = atomic::SETTINGS;"), "Doc 的預設寫入類別要是 SETTINGS");
+        assert_eq!(m.matches("atomic::write(path, text.as_bytes(), T::ATOMIC)").count(), 2, "write_locked 要用型別宣告的類別");
+        let r = include_str!("raw.rs");
+        assert_eq!(r.matches("atomic::STATE").count(), 1, "只有 asn-chats（快取）可以用 STATE");
+        assert!(r.contains(r#"ChatsDoc, "asn-chats", true, atomic::STATE, false"#));
+        assert!(r.contains(r#"MeDoc, "asn-me", true, atomic::SETTINGS, true"#) && r.contains(r#"OnboardDoc, "asn-onboard", true, atomic::SETTINGS, true"#));
         // 這幾處不准再有舊的 STATE 包裝呼叫（同檔其他處留給 2b，所以只查這幾處的檔案路徑）
         for (src, bad) in [
             (include_str!("../acct_remote.rs"), "crate::write_atomic(&outbox_path("),

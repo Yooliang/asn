@@ -68,10 +68,11 @@ test('這次改的指令都是非同步（todo-next-191）', () => {
   }
   // 切換帳號最多等 5 秒網路：在 spawn_blocking 裡跑，不佔非同步執行緒
   assert.match(byName.get('claude_account_switch').body, /off_main\(move \|\| local_switch\(&email\)\)/)
-  // 同時寫：存檔、畫面記錄各有自己的鎖
+  // 同時寫：存檔改走共用設定層（#2162 ⑥），每個檔一把鎖（settings/mod.rs 的 slot_of）；畫面記錄另有自己的鎖
   const lib = fs.readFileSync(path.join(SRC, 'lib.rs'), 'utf8')
-  assert.match(byName.get('store_save').body, /STORE_LOCK\.lock\(\)/)
-  assert.match(lib, /static STORE_LOCK: std::sync::Mutex<\(\)>/)
+  assert.match(byName.get('store_save').body, /settings::save_text\(/)
+  assert.doesNotMatch(lib, /STORE_LOCK/)
+  assert.match(fs.readFileSync(path.join(SRC, 'settings', 'mod.rs'), 'utf8'), /fn slot_of\(path: &Path\) -> Arc<Mutex<Slot>>/)
   assert.match(fs.readFileSync(path.join(SRC, 'ui_log.rs'), 'utf8'), /static APPEND_LOCK: std::sync::Mutex<\(\)>/)
 })
 
