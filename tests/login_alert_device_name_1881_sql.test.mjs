@@ -1,4 +1,4 @@
-// #1881（#1860 E）登入失效通知的設備名：20261123120000_login_alert_device_name.sql
+// #1881（#1860 E）登入失效通知的設備名：20261123220000_login_alert_device_name.sql
 //   通知裡的設備名要等於後台記的名字（relay.nodes.name，設備頁同一份），不是 ASN 帶來的電腦主機名稱。
 // 靜態：只換 asn_relay_login_alert 一支、簽章與權限不變；本體不再用 p_computer 組內文；回復檔＝notice_center 版本體。
 // 實跑（pglite，沒裝就略過）：套用的是 migration 裡真正的函式本體，節點名字用後台實際會存的那種（例如「30家用」），
@@ -9,7 +9,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
-const F = '20261123120000_login_alert_device_name.sql'
+const F = '20261123220000_login_alert_device_name.sql'
 const rd = s => s.replace(/\r+\n/g, '\n')
 const read = f => rd(fs.readFileSync(new URL(`../supabase/migrations/${f}`, import.meta.url), 'utf8'))
 const mig = read(F)
