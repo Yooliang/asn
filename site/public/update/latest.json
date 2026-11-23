@@ -1,15 +1,11 @@
 {
-  "version": "0.2.84",
-  "notes": "- 改善：設備清單每一列都能點開看詳情\n- 修正：手機和沒有開視窗的設備不會再從設備清單上消失\n- 改善：已移除的設備集中到同一區顯示\n- 修正：設備離線或程式在背景時，不再排程重新讀取報告\n- 改善：存檔方式全面統一，重試佇列與名冊在斷電或當機時較不容易遺失\n- 改善：Grok 帳號檔改成只有本人可讀",
-  "pub_date": "2026-11-23T18:16:19.742Z",
+  "version": "0.2.85",
+  "notes": "- 改善：設備詳情頁整理過：不再列帳號和內部代號，「允許切換」移到連線安全區\n- 改善：只有設備被擋下時，詳情頁才會出現「重新認這台」\n- 改善：交接時等夥伴操作的進度，改顯示在「上次接收訊息」那一行，不另外多一條\n- 改善：設定檔壞掉時會自動備份後重建，並保留新版程式寫入的設定\n- 修正：開頭帶 BOM 的設定檔現在也讀得出來\n- 改善：設定存檔失敗時，畫面只顯示白話說明，不再出現系統錯誤原文",
+  "pub_date": "2026-11-23T20:42:49.793Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhLalNuVDBlSk16U1F2OC9RTWJOa0pRQ2RYRWFVTm8xcGFsc25qLzBsWDdkbEEyckRhT2l5MkMwZGU0Z09DKzFwSEQyS1h5UjFVNVRHTFJaeTIzYXdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU3Nzc5CWZpbGU6QVNOXzAuMi44NF94NjQtc2V0dXAuZXhlCnBCbHJ3L0U3enlZaW4wZjBUVmZxUmFicnkwdERtblpCQ0xuaEd3Q0RFSThRWjBjMVZraGdkREZSSEQySHRlRVYyRE5SZFppSVU5TW5LeUJ3blRBTkFnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.84_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjluVzBHaEU3OFBGN0NRcE0zTFBOK2JXQ3VLQWlZNmdUcFJRemRQdVdmcndsdytqU2VsVk01OU9QSUJja21pUFM0T1VFcFU1L3ova0xNNkVWYzJFRGcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU4Mzc4CWZpbGU6QVNOXzAuMi44NF9hbWQ2NC5BcHBJbWFnZQpCRkJadEV2aUVFamQ0NVJ3ZzJGdUNKVERLOXBQdWNQTnpPemVLZVlRTFNjMXJ6Z2MwL2NycVN2RU1VV200WC9va2FXZWwySVlUTlQ1bjdlaGR6d1pBZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.84_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybndjQkY3Zk52am1abW1xdFJML1JwUHlHS0hOVnl1WEQrQjN6MG5NcmpTV0pxd1VGWXIyZVlKcFpnVVZrazgvREhpbE9Ca2VmV0gyeGxsSkEvL3RHL2dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDY2NTY5CWZpbGU6QVNOXzAuMi44NV94NjQtc2V0dXAuZXhlCkY0UkVkZHQ2NVlOcnVkSEhxZUo4YU83dXdMWHAxK0diem5ZZlNXZzl2Rk1xWTNWK3FCV2dVcWxYQXU1RkEycFJUMGVHWDQ3WnVNMlU4NUZIQ3RwMEFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.85_x64-setup.exe"
     }
   }
 }
