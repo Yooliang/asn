@@ -65,7 +65,7 @@ mod tests {
         assert_eq!(code, 0);
         let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
         assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny");
-        assert_eq!(v["hookSpecificOutput"]["permissionDecisionReason"], "收件人應為 T-甲");
+        assert_eq!(v["hookSpecificOutput"]["permissionDecisionReason"], "收件人應為 T-甲，你填的是 T-乙：請把 to 改成 T-甲 再送");
         let log = std::fs::read_to_string(d.path().join(forward_gate::GATE_LOG_FILE)).unwrap();
         assert_eq!(log.lines().count(), 2);
         assert!(log.contains("allow") && log.contains("deny") && !log.contains("機密內文"), "{log}");
