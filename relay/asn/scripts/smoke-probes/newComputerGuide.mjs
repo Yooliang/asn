@@ -154,9 +154,9 @@ export const newComputerGuidePhoneProbeSource = (open = false) => `(async () => 
   set.click(); await sleep(500);
   const row = await waitFor(() => [...document.querySelectorAll('.m-dv-row')].find(r => vis(r) && txt(r).includes('辦公室')));
   if (!row) return { ok: false, why: '找不到「辦公室」那一列' };
-  row.querySelector('.m-dv-go')?.click(); await sleep(200);
-  const go = row.querySelector('.m-dv-accbtn');
-  if (!go) return { ok: false, why: '辦公室那列沒有進細部頁的鈕' };
+  [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(300);   // 詳情 → 帳號分頁（#1860）
+  const go = document.querySelector('.m-dv-subbtn[data-sub="accounts"]');
+  if (!go) return { ok: false, why: '辦公室的詳情裡沒有「帳號」分頁' };
   go.click(); await sleep(600);
   if (!(await waitFor(card, 60))) return { ok: false, why: '辦公室沒有 AI 視窗，細部頁卻看不到新手引導卡：' + txt(document.querySelector('.m-dv') || document.body).slice(0, 160) };
   const order = [...card().querySelectorAll('.ng-row')].map(r => r.getAttribute('data-vendor')).join(',');

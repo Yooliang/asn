@@ -20,8 +20,9 @@ export const dalineProbeSource = ({ daline }) => `(async () => {
     await tap(set);
     const row = await wait(() => [...document.querySelectorAll('.m-dv-row')].find(r => vis(r) && (r.querySelector('.m-dv-rn b')?.textContent ?? '').trim() === '辦公室'));
     if (!row) return { ok: false, why: '設備列表裡找不到辦公室' };
-    await tap(row.querySelector('.m-dv-go'));
-    open = await wait(() => [...row.querySelectorAll('button')].find(b => vis(b) && b.textContent.trim() === '帳號'));
+    // 設備列只有「詳情」（#1860）：點該列的詳情，再點細部頁上的「帳號」分頁
+    await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));
+    open = await wait(() => [...document.querySelectorAll('.m-dv-subbtn[data-sub="accounts"]')].find(vis));
   } else {
     const row = await wait(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => r.querySelector('.dv-tag.me')));
     if (!row) return { ok: false, why: '設備列表裡找不到「這台」' };

@@ -72,3 +72,14 @@ test('報告重讀排程：App 在背景不跑；回到前景立刻補一次；�
   s.stop()
   assert.equal(unwatched, 1)
 })
+
+test('手機的設備詳情有「詳情／帳號」兩個分頁：帳號頁不能因為設備列拿掉「帳號」鈕而點不到（PR-C 才拿掉）', async () => {
+  const fs = await import('node:fs')
+  const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
+  const js = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
+  assert.match(html, /data-sub="info" @click="setAcctSub\('info'\)"/)
+  assert.match(html, /data-sub="accounts" @click="setAcctSub\('accounts'\)">\{\{ ACCT_TABS\[1\]\.label \}\}/)
+  assert.match(js, /if \(sub === 'accounts'\) \{ acctSw\.sub = 'accounts'; return loadAcct\(acctSw\.node\) \}/, '切到帳號才去讀這台的帳號')
+  const row = html.slice(html.indexOf('<li v-for="d in acctDevs"'), html.indexOf('</li>', html.indexOf('<li v-for="d in acctDevs"')))
+  assert.ok(!row.includes('帳號') && !row.includes('data-sub'), '設備列上不放「帳號」鈕')
+})

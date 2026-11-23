@@ -341,6 +341,11 @@
                   <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
                   <span class="m-dv-tag hid" v-if="acctCur.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                 </div>
+                <!-- 這一台的內容：詳情／帳號。帳號分頁到 PR-C 才拿掉；設備列上不放「帳號」鈕，從這裡進（#1860） -->
+                <div class="m-dv-seg m-dv-subseg" role="tablist" aria-label="這台設備的內容">
+                  <button type="button" role="tab" class="m-dv-subbtn" :class="{ on: acctSw.sub === 'info' }" :aria-selected="acctSw.sub === 'info' ? 'true' : 'false'" data-sub="info" @click="setAcctSub('info')">{{ KNOWN_TEXT.detail }}</button>
+                  <button type="button" role="tab" class="m-dv-subbtn" :class="{ on: acctSw.sub === 'accounts' }" :aria-selected="acctSw.sub === 'accounts' ? 'true' : 'false'" data-sub="accounts" @click="setAcctSub('accounts')">{{ ACCT_TABS[1].label }}</button>
+                </div>
                 <div class="m-dv-info" v-if="acctSw.sub === 'info'">
                   <h4 class="m-dv-sech">{{ IDENTITY_TEXT.title }}</h4>
                   <device-identity :identity="acctCur.identity" :note="acctCur.reportNote ? acctCur.reportNote.text : ''" :busy="Boolean(acctCur.reportNote && acctCur.reportNote.busy)"></device-identity>

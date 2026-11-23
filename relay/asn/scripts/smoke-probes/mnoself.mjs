@@ -14,8 +14,8 @@ export const mnoselfProbeSource = () => `(async () => {
   for (let i = 0; i < n; i++) {
     const row = rows()[i];
     const name = row?.textContent ?? '';
-    row?.querySelector('.m-dv-go')?.click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
-    const go = row?.querySelector('.m-dv-accbtn');
+    [...(row?.querySelectorAll('button') ?? [])].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(300);   // 詳情 → 帳號分頁（#1860）
+    const go = document.querySelector('.m-dv-subbtn[data-sub="accounts"]');
     if (!go) continue;
     go.click(); await sleep(500);
     if (name.includes('這支手機')) {

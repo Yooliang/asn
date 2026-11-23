@@ -11,8 +11,8 @@ export const mdevsheetProbeSource = () => `(async () => {
   let opened = false;
   for (const row of [...document.querySelectorAll('.m-dv-row')].filter(vis)) {
     if ((row.textContent ?? '').includes('這支手機')) continue;
-    row.querySelector('.m-dv-go')?.click(); await sleep(150);   // 先點那一列展開按鈕（#1539）
-    const go = row.querySelector('.m-dv-accbtn');
+    [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(300);   // 詳情 → 帳號分頁（#1860）
+    const go = document.querySelector('.m-dv-subbtn[data-sub="accounts"]');
     if (!go) continue;
     go.click(); await sleep(600);
     if ([...document.querySelectorAll('.m-dv-vendor')].some(vis)) { opened = true; break }

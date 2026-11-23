@@ -193,6 +193,9 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-segbtn{flex:1;min-height:44px;padding:8px 6px;border:0;background:none;color:var(--muted);font:inherit;font-size:15px;line-height:1.4;cursor:pointer}
 .m-dv-segbtn+.m-dv-segbtn{border-left:1px solid var(--line)}
 .m-dv-segbtn.on{background:var(--accent);color:#fff;font-weight:600}
+.m-dv-subbtn{flex:1;min-height:44px;padding:8px 6px;border:0;background:none;color:var(--muted);font:inherit;font-size:15px;line-height:1.4;cursor:pointer}
+.m-dv-subbtn+.m-dv-subbtn{border-left:1px solid var(--line)}
+.m-dv-subbtn.on{background:var(--accent);color:#fff;font-weight:600}
 /* 帳號卡片的設備列（手機，#2111 ②）：一台一列，左邊設備名（原因在下方一行），右邊的鈕固定 100×40、同一欄靠右；狀態的畫法和電腦版同一套 */
 .m-dv-acct>.m-dv-devs{grid-column:1 / -1;display:flex;flex-direction:column;gap:8px}
 .m-dv-devrow{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}
