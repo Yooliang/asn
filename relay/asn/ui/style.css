@@ -1281,6 +1281,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-block p{margin:0;line-height:1.5}
 .dvid-note{margin:10px 0 0;font-size:12px;color:var(--muted,#6b7785)}
 .dvid-why{display:block;margin-top:6px;color:var(--muted,#6b7785)}
-.m-dv-sech{margin:14px 0 6px;font-size:13px}
+.m-dv-sech{margin:14px 0 6px;font-size:var(--fs-3)}
 .m-dv-sech:first-child{margin-top:4px}
 .m-dv-actions{flex-wrap:wrap}

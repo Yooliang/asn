@@ -209,7 +209,7 @@ export const SettingsPanel = {
     }
   },
   template: `<div class="list settings panel-set">
-      <h2 :class="['panel-h', { 'panel-h-tabbed': catKey === 'devices' }]" v-if="title && !(catKey === 'devices' && curDev)">{{ title }}</h2>
+      <h2 :class="['panel-h', 'panel-h-tabbed']" v-if="title && !(catKey === 'devices' && curDev)">{{ title }}</h2>
       <template v-if="catKey === 'me'">
         <login-panel></login-panel>
         <div class="av-set">

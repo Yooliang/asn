@@ -8,7 +8,7 @@
 // 每個情境都帶 shot（進 ui-shots 比對），並用本檔的探測等到該類的標題與代表字（沒畫出來就失敗，不會拍到空白頁，R9）：
 //   電腦（mode: 'desk'）：存檔就停在該分類，等 .panel-h 出現「設定：<分類名>」，再確認內容區有字、含該類的代表字。
 //   手機（mode: 'phone'）：先在設定清單點那一列，等內頁標題（.m-fourth .m-title）出現，再確認內頁有字、含該類的代表字。
-// probe 欄位：{ setPage, mode, key, heading（標題全文）, want（內容區必須出現的字）, row（手機清單那一列的名稱）, settle（毫秒，狀態類情境多等一下）, flow }
+// probe 欄位：{ setPage, skin（外觀：aero｜modern｜line；電腦版據此斷言頁內標題收起與否，#1864）, mode, key, heading（標題全文）, want（內容區必須出現的字）, row（手機清單那一列的名稱）, settle（毫秒，狀態類情境多等一下）, flow }
 import { MOBILE_SETTING_KEYS, mobileSettingTitle } from '../../ui/lib/mobile-settings.mjs'
 import { SETTING_CATS } from '../../ui/lib/settings-cats.mjs'
 
@@ -44,7 +44,7 @@ const setScenario = ({ name, mode, cat, skin, width, fx }) => {
     name, page: desk ? 'list.html' : 'm.html', ...(desk ? { width: width ?? 900, height: 640 } : width ? { width } : {}),
     state: { signedIn: true, ...(skin && skin !== 'aero' ? { skin } : {}), setPage: { mode, cat, fx: fx ?? 'data' } },
     ready: desk ? (cat === 'devices' ? '#app.win .panel-pane .dv-set' : '#app.win .panel-pane .panel-h') : '#app.m .m-row-btn',
-    probe: { setPage: true, ...(fx === 'busy' && cat === 'cloud' ? { flow: 'cloud-busy' } : {}), mode, key: cat, heading: desk ? `設定：${title}` : title, want, row: title, settle: fx ? 1500 : 600 },
+    probe: { setPage: true, skin: skin ?? 'aero', ...(fx === 'busy' && cat === 'cloud' ? { flow: 'cloud-busy' } : {}), mode, key: cat, heading: desk ? `設定：${title}` : title, want, row: title, settle: fx ? 1500 : 600 },
     shot: `${name}.png`,
   }
 }
@@ -122,9 +122,9 @@ export const setPageTable = ({ mode, cat, fx }, t, now = Date.now()) => {
   return patch
 }
 
-export const setPageProbeSource = ({ mode, key, heading, want = [], row = '', settle = 600, flow = '' }) => `(async () => { try {
+export const setPageProbeSource = ({ skin = 'aero', mode, key, heading, want = [], row = '', settle = 600, flow = '' }) => `(async () => { try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
-  const mode = ${JSON.stringify(mode)}, key = ${JSON.stringify(key)}, heading = ${JSON.stringify(heading)}, want = ${JSON.stringify(want)}, rowName = ${JSON.stringify(row)}, flow = ${JSON.stringify(flow)};
+  const skin = ${JSON.stringify(skin)}, mode = ${JSON.stringify(mode)}, key = ${JSON.stringify(key)}, heading = ${JSON.stringify(heading)}, want = ${JSON.stringify(want)}, rowName = ${JSON.stringify(row)}, flow = ${JSON.stringify(flow)};
   const vis = e => e && e.offsetParent !== null;
   let root = null;
   if (mode === 'phone') {
@@ -140,14 +140,18 @@ export const setPageProbeSource = ({ mode, key, heading, want = [], row = '', se
     if (!root) return { ok: false, why: '內頁標題沒有出現「' + heading + '」：' + [...document.querySelectorAll('#app.m .m-fourth .m-title')].map(e => e.textContent.trim()).join('／') };
   } else {
     for (let i = 0; i < 80 && !root; i++) {
-      // 設備頁（#1864）：復古外觀的頁內標題用樣式收起（標題在分頁標籤），元素還在，所以不要求看得見；其他分類照舊
-      const h = key === 'devices'
-        ? document.querySelector('#app.win .panel-pane .panel-h')
-        : [...document.querySelectorAll('#app.win .panel-pane .panel-h')].find(vis);
+      // #1864：所有設定分類的頁內標題，在復古外觀都用樣式收起（標題在分頁標籤），元素還在，所以不要求看得見；現代與 LINE 沒有分頁標籤，照舊看得見（下面依外觀斷言）
+      const h = document.querySelector('#app.win .panel-pane .panel-h');
       if (h && h.textContent.trim() === heading) root = h.closest('.panel-pane');
       if (!root) await sleep(100);
     }
     if (!root) return { ok: false, why: '分類標題沒有出現「' + heading + '」：' + [...document.querySelectorAll('#app.win .panel-h')].map(e => e.textContent.trim()).join('／') };
+  }
+  if (mode === 'desk') {
+    const h = root.querySelector('.panel-h');
+    const shown = h ? getComputedStyle(h).display : 'none';
+    if (skin === 'aero' && shown !== 'none') return { ok: false, why: '復古外觀「' + key + '」頁內標題應收起（分頁標籤已寫），但 display 是 ' + shown };
+    if (skin !== 'aero' && (shown === 'none' || !vis(h))) return { ok: false, why: skin + ' 外觀「' + key + '」頁內標題應看得見（沒有分頁標籤），但被收起了' };
   }
   // 忙碌（雲端代理）：真的點「邀請雲端代理」→「建立」，後台（假）一直不回，「建立」要變成不能按
   if (flow === 'cloud-busy') {
