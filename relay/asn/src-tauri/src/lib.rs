@@ -465,7 +465,6 @@ async fn collect_and_report(relay: Arc<Relay>, work_dir: std::path::PathBuf, wri
     let gemini = tauri::async_runtime::spawn_blocking(|| gemini_quota::report_rows(&gemini_quota::load_all(&identity::home_dir()), heartbeat::now_ms() as i64)).await.unwrap_or_default();
     // 登入失效（對話紀錄判定，見 login_watch.rs）：隨帳號回報帶 login_failed；判定為失效時用節點金鑰呼叫後台 acct_login_alert 通知本人
     let ctx = login_watch::NoticeCtx {
-        computer: account::computer_name(|k| std::env::var(k).ok()),
         email: list.iter().find(|a| a.current).map(|a| a.email.clone()).unwrap_or_default(),
     };
     let notifier = login_watch::RelayNotifier { relay: relay.clone() };
@@ -1331,7 +1330,7 @@ async fn device_rename(app: State<'_, App>, auth: State<'_, auth::AuthState>, no
 async fn device_known_login_ok(app: State<'_, App>, handle: AppHandle, node: String, on: bool) -> Result<bool, String> {
     if on {
         let peer = device_id::live::known(&app.data_dir)?.peer(&node).cloned().ok_or("不認得這台")?;
-        if !input_consent::ask_login_ok(&handle, &peer.name, &peer.sign_pub).await {
+        if !input_consent::ask_login_ok(&handle, &peer.name, &peer.node, &peer.sign_pub).await {
             return Ok(false);
         }
         // 寫入時再比一次公鑰：框開著時這台被忘記、又用別把金鑰記住，就不寫

@@ -494,7 +494,7 @@ pub fn android_known_token(window: tauri::WebviewWindow, app: State<'_, App>, ac
             _ => {}
         }
     }
-    let text = crate::consent::describe(act, crate::consent::prompt_name(peer), &crate::device_id::fp_grouped(&peer.sign_pub));
+    let text = crate::consent::describe(act, crate::consent::prompt_name(peer), &peer.node, &crate::device_id::fp_grouped(&peer.sign_pub));
     let challenge = crate::consent::issue(act, &node)?;
     crate::consent::write_desc(&app.data_dir, &challenge, &text)?;
     Ok(challenge)
