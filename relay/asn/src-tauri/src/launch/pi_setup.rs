@@ -211,7 +211,8 @@ pub(crate) fn auto_read(p: &Path) -> (bool, bool) {
     (get("auto", true), get("done", false))
 }
 pub(crate) fn auto_write(p: &Path, auto: bool, done: bool) {
-    let _ = crate::write_atomic(p, &json!({ "auto": auto, "done": done }).to_string());
+    // 使用者的偏好（要不要自動安裝、是否處理過）：設定類（fsync）
+    let _ = crate::settings::atomic::write(p, json!({ "auto": auto, "done": done }).to_string().as_bytes(), crate::settings::atomic::SETTINGS);
 }
 
 /// 要不要自動安裝：允許、還沒處理過、找得到 pi 與 ASN 附的擴充、而且還沒裝

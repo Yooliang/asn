@@ -331,7 +331,8 @@ fn install_inner(d: &Deps, tools: &Path, work: &Path, target: &str, rec: &mut Re
         return fail(format!("無法就位安裝好的 Codex：{e}"));
     }
     // 寫不進去就回錯：ASN 是靠這個檔找到裝好的 Codex（installed_in），沒有它等於沒裝；再按一次會重裝同一版並覆蓋
-    std::fs::write(tools.join(CURRENT_FILE), &rel.version).map_err(|e| format!("Codex 已解開，但記不住裝好的版本，ASN 會找不到它：{e}。請再按一次安裝"))?;
+    // ASN 靠這個檔找到裝好的 Codex，掉了等於沒裝：設定類（fsync）
+    crate::settings::atomic::write(&tools.join(CURRENT_FILE), rel.version.as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("Codex 已解開，但記不住裝好的版本，ASN 會找不到它：{e}。請再按一次安裝"))?;
     Ok(format!("已安裝 Codex {}。", rel.version))
 }
 

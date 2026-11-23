@@ -192,7 +192,8 @@ pub fn write_node_files_with(relay_home: &Path, node: &str, key: &str, restrict:
             _ => return cleanup("金鑰存到這台電腦後讀回不一致".into()),
         }
     }
-    if let Err(e) = std::fs::write(relay_home.join("node"), node) {
+    // 節點代號檔（Node 舊橋也讀它，內容不變）：設定類；原本直接寫，中途斷掉會留半截代號
+    if let Err(e) = crate::settings::atomic::write(&relay_home.join("node"), node.as_bytes(), crate::settings::atomic::SETTINGS) {
         return cleanup(format!("寫不了節點代號檔：{e}"));
     }
     Ok(())

@@ -254,7 +254,8 @@ fn write_pid_file(path: &Path, pid: u32, started_ms: Option<u64>) {
         let _ = std::fs::create_dir_all(dir);
     }
     let body = serde_json::json!({ "pid": pid, "started_ms": started_ms });
-    let _ = std::fs::write(path, body.to_string());
+    // 登入子程序的 pid 記錄（下次啟動用來收殭屍），掉了只是少收一次：純狀態
+    let _ = crate::settings::atomic::write(path, body.to_string().as_bytes(), crate::settings::atomic::STATE);
 }
 
 /// 上次留下的登入子程序：檔案裡的編號現在還活著，而且建立時間和當時記的一樣才結束（編號可能已被別的程序用掉）。

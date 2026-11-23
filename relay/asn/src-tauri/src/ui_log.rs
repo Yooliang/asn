@@ -44,6 +44,9 @@ fn trim_to_second_half(p: &Path) {
         // 以前用 t.get(t.len() / 2..)，中文一個字 3 個位元組，切在字中間會回 None，整個記錄就被清空
         let mid = t.len() / 2;
         let keep = t.as_bytes()[mid..].iter().position(|&b| b == b'\n').map(|i| &t[mid + i + 1..]).unwrap_or("");
+        // 刻意不走 settings::atomic（#2162 2c）：這裡是「ui.log 改名失敗」才進來的後備，改名失敗多半是檔案被別的程式開著
+        // （Windows 的共用違規）。統一寫入要 rename 蓋掉 ui.log，被占住時一樣會失敗；原地寫入只需要寫入權限，反而是此時唯一可能成功的做法。
+        // 代價是中途斷電可能留半截記錄，但這只是除錯日誌、而且整段在 APPEND_LOCK 內，不會和別的寫入交錯。
         let _ = std::fs::write(p, keep);
     }
 }

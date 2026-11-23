@@ -57,8 +57,8 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(p) = path.parent() {
         std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
     }
-    // 帳號檔：設定類（fsync）；沿用原本的權限（不另外收緊）
-    crate::settings::atomic::write(path, bytes, crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())
+    // 帳號 auth：設定類（fsync）且只有本人可讀（0600）；暫存檔一開始就是 0600，rename 後內容不會有寬鬆權限的空窗
+    crate::settings::atomic::write(path, bytes, crate::settings::atomic::SECRET_SETTINGS).map_err(|e| e.to_string())
 }
 
 fn saved_emails(home: &Path) -> Vec<(String, PathBuf)> {
@@ -223,6 +223,25 @@ mod tests {
     }
     fn cur_tok(h: &Path) -> String {
         std::fs::read_to_string(auth_path(h)).unwrap()
+    }
+
+    // 帳號 auth 只有本人可讀（#2162 2c）：庫裡的存檔、備份、被切換寫回的目前登入檔都是 0600，即使舊檔原本是寬鬆權限
+    #[cfg(unix)]
+    #[test]
+    fn 帳號檔寫出來是0600_覆蓋寬鬆的舊檔也收緊() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let d = tempfile::tempdir().unwrap();
+        let h = d.path();
+        login(h, "a@x.test", "TA");
+        std::fs::set_permissions(auth_path(h), std::fs::Permissions::from_mode(0o644)).unwrap();
+        auto_sync(h).unwrap();
+        login(h, "b@x.test", "TB");
+        auto_sync(h).unwrap();
+        switch_to(h, "a@x.test").unwrap();
+        for p in [store_root(h).join("a@x.test").join(AUTH), store_root(h).join("b@x.test").join(AUTH), backup_path(h), auth_path(h)] {
+            assert_eq!(mode(&p), 0o600, "{}", p.display());
+        }
     }
 
     #[test]
