@@ -6,8 +6,9 @@ pub mod atomic;
 mod docs;
 pub mod migrate;
 
+pub use docs::NamesDoc;
 #[cfg(desktop)]
-pub use docs::VoiceDoc;
+pub use docs::{AcctPrefsDoc, AgentSetupPrefsDoc, PiAutoDoc, QuotaReadersDoc, VoiceDoc};
 
 use serde::{de::DeserializeOwned, Serialize};
 use std::any::Any;
@@ -333,3 +334,5 @@ fn no_root() -> SettingsError {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod moved_tests;

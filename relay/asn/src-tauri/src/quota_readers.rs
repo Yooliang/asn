@@ -10,6 +10,7 @@
 //! 紅線：不碰 `~/.claude`；金鑰、權杖與對方回應內容不進 log，也不進回報，回報只有 email 與數字。
 use crate::claude_accounts::normalize_email;
 use crate::quota_core::iso_secs;
+use crate::settings::QuotaReadersDoc;
 use crate::nowin::NoWindow;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -17,6 +18,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+#[cfg(test)]
 const FILE: &str = "quota-readers.json";
 const READ_EVERY_MS: i64 = 10 * 60_000;
 const BACKOFF_MAX_MS: i64 = 6 * 60 * 60_000;
@@ -45,26 +47,42 @@ pub struct Settings {
     pub extra_claude_refresh: bool,
 }
 
+#[cfg(test)]
 pub fn settings_path(home: &Path) -> PathBuf {
     home.join(".asn").join(FILE)
 }
 
-pub fn load_settings(home: &Path) -> Settings {
-    let Ok(text) = std::fs::read_to_string(settings_path(home)) else { return Settings::default() };
-    let mut s: Settings = serde_json::from_str(text.trim_start_matches('\u{feff}')).unwrap_or_default();
-    s.minimax = s.minimax.iter().filter_map(|e| normalize_email(e)).take(MAX_MINIMAX).collect();
-    s.extra_claude_refresh = s.extra_claude_refresh && s.extra_claude;
-    s
+/// `~/.asn`（放 quota-readers.json 的資料夾）
+fn dir_of(home: &Path) -> PathBuf {
+    home.join(".asn")
 }
 
-/// 原子寫入：先寫暫存檔再改名，寫到一半不會留下壞檔（壞檔等於全關）
-pub fn save_settings(home: &Path, s: &Settings) -> Result<(), String> {
-    let path = settings_path(home);
-    if let Some(p) = path.parent() {
-        std::fs::create_dir_all(p).map_err(|_| "無法寫入設定")?;
-    }
-    let text = serde_json::to_string_pretty(s).map_err(|_| "無法寫入設定")?;
-    crate::settings::atomic::write(&path, text.as_bytes(), crate::settings::atomic::SETTINGS).map_err(|_| "無法寫入設定".to_string())
+fn from_doc(d: QuotaReadersDoc) -> Settings {
+    Settings { grok: d.grok, agy: d.agy, minimax: d.minimax, extra_claude: d.extra_claude, extra_claude_refresh: d.extra_claude_refresh }
+}
+
+/// 讀設定（走共用設定層，#2162）：沒有檔案、壞檔、任何欄位型別不對一律全關；讀取時容忍 BOM；
+/// email 正規化與上限、「換新要先開讀取」在 `QuotaReadersDoc::normalize`
+pub fn load_settings(home: &Path) -> Settings {
+    from_doc(crate::settings::load_in::<QuotaReadersDoc>(&dir_of(home)).value)
+}
+
+/// 持鎖「讀、改、寫」（原子寫入、保留不認得的欄位）。寫不進去回錯誤字串（原本只有「無法寫入設定」一句，
+/// 現在多了「檔案暫時讀不到、備份存不下來」的白話說明）。
+///
+/// 已知限制：只有行程內的鎖。asn-cli 與 Node 橋都不寫這個檔（已查），所以目前沒有跨行程的寫入者；
+/// 將來若有，同時寫只能後寫的贏。
+fn update_settings(home: &Path, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
+    crate::settings::update_in::<QuotaReadersDoc, _>(&dir_of(home), |d| {
+        let mut s = from_doc(d.clone());
+        f(&mut s);
+        d.grok = s.grok;
+        d.agy = s.agy;
+        d.minimax = s.minimax;
+        d.extra_claude = s.extra_claude;
+        d.extra_claude_refresh = s.extra_claude_refresh;
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// 設定變了就加一：背景迴圈看到會把退避狀態清掉，換了 key 或重新打開不用等
@@ -74,25 +92,24 @@ fn changed() {
 }
 
 pub fn set_source(home: &Path, source: &str, on: bool) -> Result<(), String> {
-    let mut s = load_settings(home);
-    match source {
-        "grok" => s.grok = on,
-        "agy" => s.agy = on,
-        "extra_claude" => {
+    let apply: Box<dyn FnOnce(&mut Settings)> = match source {
+        "grok" => Box::new(move |s| s.grok = on),
+        "agy" => Box::new(move |s| s.agy = on),
+        "extra_claude" => Box::new(move |s| {
             s.extra_claude = on;
             s.extra_claude_refresh = s.extra_claude_refresh && on;
-        }
+        }),
         "extra_claude_refresh" => {
-            if on && !s.extra_claude {
+            if on && !load_settings(home).extra_claude {
                 return Err("要先打開讀取".into());
             }
-            s.extra_claude_refresh = on;
             // 使用者自己重新打開：之前換新失敗的記號清掉，下一輪才會再試
             crate::claude_extra::clear_stops(home);
+            Box::new(move |s| s.extra_claude_refresh = on)
         }
         _ => return Err("不認得的來源".into()),
-    }
-    save_settings(home, &s)?;
+    };
+    update_settings(home, apply)?;
     changed();
     Ok(())
 }
@@ -106,24 +123,23 @@ fn clean_key(key: &str) -> Option<&str> {
 pub fn add_minimax(home: &Path, email: &str, key: &str) -> Result<(), String> {
     let email = normalize_email(email).ok_or("email 格式不對")?;
     let key = clean_key(key).ok_or("key 格式不對")?;
-    let mut s = load_settings(home);
+    let s = load_settings(home);
     if !s.minimax.contains(&email) && s.minimax.len() >= MAX_MINIMAX {
         return Err("帳號已滿".into());
     }
     store_minimax_key(&email, key)?;
-    if !s.minimax.contains(&email) {
-        s.minimax.push(email);
-    }
-    save_settings(home, &s)?;
+    update_settings(home, |s| {
+        if !s.minimax.contains(&email) {
+            s.minimax.push(email);
+        }
+    })?;
     changed();
     Ok(())
 }
 
 pub fn remove_minimax(home: &Path, email: &str) -> Result<(), String> {
     let email = normalize_email(email).ok_or("email 格式不對")?;
-    let mut s = load_settings(home);
-    s.minimax.retain(|e| *e != email);
-    save_settings(home, &s)?;
+    update_settings(home, |s| s.minimax.retain(|e| *e != email))?;
     delete_minimax_key(&email);
     changed();
     Ok(())

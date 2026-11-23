@@ -2,24 +2,22 @@
 //! 存在本機設定檔裡，只有視窗的設定能改（沒有 asn-cli 的指令、夥伴能呼叫的指令）。
 //! 注意：設定檔是一般檔案，夥伴 AI 也寫得到——所以這個開關**不是**唯一防線，主要的防線是後台要求遠端請求一定帶本人簽章。
 
-use serde_json::{json, Value};
+use crate::settings::AgentSetupPrefsDoc;
 use std::path::{Path, PathBuf};
 
-const KEY: &str = "remote_allow_install";
-
+#[cfg(test)]
 pub fn prefs_path(data_dir: &Path) -> PathBuf {
     data_dir.join("agent-setup-prefs.json")
 }
 
 /// 沒設過、檔案壞掉、值不是布林，一律當「關」
 pub fn remote_allowed(data_dir: &Path) -> bool {
-    std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get(KEY).and_then(Value::as_bool)).unwrap_or(false)
+    crate::settings::load_in::<AgentSetupPrefsDoc>(data_dir).value.remote_allow_install
 }
 
 pub fn set_remote_allowed(data_dir: &Path, on: bool) -> Result<(), String> {
-    let mut v = std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
-    v[KEY] = json!(on);
-    crate::settings::atomic::write(&prefs_path(data_dir), v.to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())
+    // 走共用設定層（#2162）：持鎖讀改寫、保留不認得的欄位；寫不進去回錯誤字串
+    crate::settings::update_in::<AgentSetupPrefsDoc, _>(data_dir, |d| d.remote_allow_install = on).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
