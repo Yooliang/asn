@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import * as mobileOps from '../ui/lib/mobile-ops.mjs'
-import { OP_DONE_HIDE_MS } from '../ui/lib/partner-ops.mjs'
+import { OP_DONE_HIDE_MS, OP_POLL_MS, OP_UNCONFIRMED_HIDE_MS } from '../ui/lib/partner-ops.mjs'
 import { mountComponent } from './helpers/render.mjs'
 
 // chatpane.mjs、annotator.mjs 在載入當下就解構全域 Vue，要用 mountComponent 共用的那一份真的 Vue（不然 ref 之類是空殼）
@@ -33,6 +33,20 @@ const api = (opStatus, sent = []) => ({
   partnerOps: async () => ({ ops: [{ id: 'op1', status: opStatus.value, result: {} }] }),
 })
 const mount = async (propsFn) => { const m = mountComponent(ChatPane, propsFn); await settle(m); return m }
+// 假時鐘：狀態列「成功 4 秒／未確認 15 秒後消失」的計時器收進 pending（不真的等），測試自己決定何時觸發；
+// 後台輪詢的間隔（3 秒）直接改成立刻到。runner 的 setTimer／clearTimer 預設就是全域的 setTimeout／clearTimeout
+function fakeTimers() {
+  const real = { st: globalThis.setTimeout, ct: globalThis.clearTimeout }
+  const pending = new Map(), armed = []
+  let seq = 0
+  globalThis.setTimeout = (f, ms, ...a) => {
+    if (ms === OP_POLL_MS) return real.st(f, 0, ...a)
+    if ((ms > OP_DONE_HIDE_MS - 1500 && ms <= OP_DONE_HIDE_MS) || ms === OP_UNCONFIRMED_HIDE_MS) { const id = `fake-${++seq}`; pending.set(id, f); armed.push(ms); return id }
+    return real.st(f, ms, ...a)
+  }
+  globalThis.clearTimeout = id => { if (typeof id === 'string' && pending.has(id)) pending.delete(id); else real.ct(id) }
+  return { pending, armed, fire: () => { const fs_ = [...pending.values()]; pending.clear(); fs_.forEach(f => f()) }, restore: () => { globalThis.setTimeout = real.st; globalThis.clearTimeout = real.ct } }
+}
 const until = async (m, fn, ms) => { const t0 = Date.now(); while (!fn() && Date.now() - t0 < ms) { await new Promise(r => setTimeout(r, 50)); await m.nextTick() } }
 const lines = m => m.findAll('.typing')
 const text = m => lines(m)[0]?.textContent.replace(/\s+/g, ' ').trim() ?? ''
@@ -57,18 +71,19 @@ test('#2177 電腦：進度中最下面只有一條狀態列，進度取代「�
 
 test('#2177 電腦：操作結束、結果顯示完後，那一行恢復成「上次接收訊息是…」', async () => {
   const status = { value: 'ok' }
+  const ft = fakeTimers()
   const m = await mount(V => basePane(V, friend('小文'), api(status)))
   try {
     const before = text(m)
     await wake(m)
-    // 後台第一次回報在輪詢間隔之後；等結果出現，再等它「成功 4 秒後自己消失」
     await until(m, () => /已喚醒/.test(text(m)), 8000)
     assert.doesNotMatch(text(m), /上次接收訊息/, '結果還在顯示，還是同一條')
     assert.equal(lines(m).length, 1)
-    await until(m, () => text(m) === before, OP_DONE_HIDE_MS + 2000)
+    assert.deepEqual(ft.armed, [OP_DONE_HIDE_MS], '成功排了 4 秒後消失')
+    ft.fire(); await settle(m)   // 「成功 4 秒後自己消失」的時間到
     assert.equal(text(m), before, '恢復原文')
     assert.equal(m.find('.typing.typing-op'), null)
-  } finally { m.unmount() }
+  } finally { ft.restore(); m.unmount() }
 })
 
 test('#2177 電腦：切換對象時不殘留（換到別位夥伴看到的是他的「上次接收訊息」；換回來仍是進行中）', async () => {
@@ -178,6 +193,7 @@ test('#2177 優先順序：只有純資訊的遠端狀態才讓位給進度；�
 
 test('#2177 失敗訊息不會自動清掉；成功的在按住期間不消失、放開才恢復（真的走 runner，pointer 事件）', async () => {
   const quiet = console.info; console.info = () => {}
+  const ft = fakeTimers()
   try {
     const status = { value: 'failed' }
     const m = await mount(V => basePane(V, friend('小文'), api(status)))
@@ -185,7 +201,8 @@ test('#2177 失敗訊息不會自動清掉；成功的在按住期間不消失�
       await wake(m)
       await until(m, () => /沒有成功/.test(text(m)), 8000)
       assert.match(text(m), /沒有成功.*再按一次就會重試/)
-      await new Promise(r => setTimeout(r, OP_DONE_HIDE_MS + 500)); await settle(m)
+      assert.deepEqual(ft.armed, [], '失敗沒有排任何自動消失')
+      assert.equal(ft.pending.size, 0)
       assert.match(text(m), /沒有成功/, '失敗留著，等下一個操作蓋掉')
       assert.match(cls(m), /is-failed/)
     } finally { m.unmount() }
@@ -194,12 +211,15 @@ test('#2177 失敗訊息不會自動清掉；成功的在按住期間不消失�
     try {
       await wake(m2)
       await until(m2, () => /已喚醒/.test(text(m2)), 8000)
+      assert.equal(ft.pending.size, 1, '成功正在倒數')
       await m2.trigger(lines(m2)[0], 'pointerenter')   // 指標停在上面：暫停倒數
-      await new Promise(r => setTimeout(r, OP_DONE_HIDE_MS + 500)); await settle(m2)
+      assert.equal(ft.pending.size, 0, '按住期間計時器被清掉')
+      ft.fire(); await settle(m2)
       assert.match(text(m2), /已喚醒/, '按住期間不消失')
-      await m2.trigger(lines(m2)[0], 'pointerleave')   // 放開：重新倒數，之後恢復原文
-      await until(m2, () => /^上次接收訊息是/.test(text(m2)), OP_DONE_HIDE_MS + 2000)
-      assert.match(text(m2), /^上次接收訊息是 /)
+      await m2.trigger(lines(m2)[0], 'pointerleave')   // 放開：用剩下的時間重新倒數
+      assert.equal(ft.pending.size, 1, '放開後重新倒數')
+      ft.fire(); await settle(m2)
+      assert.match(text(m2), /^上次接收訊息是 /, '倒數到了恢復原文')
     } finally { m2.unmount() }
-  } finally { console.info = quiet }
+  } finally { ft.restore(); console.info = quiet }
 })

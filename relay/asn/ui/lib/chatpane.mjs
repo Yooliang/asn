@@ -93,7 +93,7 @@ export const ChatPane = {
     piModelsFor: { type: Function, default: null },   // 電腦版名單視窗：別台電腦的 pi 模型清單（給大按鈕「切換模型」用，和名單右鍵同一份）
     opNote: { type: Object, default: null },   // 手機：目前這位夥伴的操作進度或結果（runBanner 的結果）；進行中取代最下面那條「上次接收訊息」（#2177）。電腦版由功能列自己回報，不用給
   },
-  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended', 'back', 'viewer', 'op-hold', 'op-release'],
+  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended', 'back', 'op-hold', 'op-release', 'viewer'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     // 現代外觀：輸入框的「＋」展開上方工具列（復古 Aero 下沒有這個選單）；點了裡面的工具就收起來（表情符號例外：它要接著選）
