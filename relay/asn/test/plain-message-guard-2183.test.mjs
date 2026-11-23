@@ -53,7 +53,9 @@ function walk(dir, out = []) {
 
 test('ui/ 裡沒有把 e.message 直接拿去畫面顯示的寫法（改用 plainMessage(e)）', () => {
   const bad = []
-  for (const f of walk(UI)) {
+  const files = walk(UI)
+  assert.ok(files.length > 0, '掃不到任何 ui 檔：路徑錯了，守門會變成空集合恆真')
+  for (const f of files) {
     const rel = path.relative(UI, f).replace(/\\/g, '/')
     for (const h of findDisplayMessage(fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n'))) {
       if (ALLOW.some(a => a.file === rel && a.line === h.text)) continue
