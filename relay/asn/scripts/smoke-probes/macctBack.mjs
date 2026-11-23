@@ -17,9 +17,8 @@ export const macctBackProbeSource = () => `(async () => {
   bad = check('返回一次', await press('list'), 'list'); if (bad) return bad;
   if (!one) {
     const rows = [...document.querySelectorAll('.m-dv-row')];
-    // 點最後一列的「詳情」，再點「帳號」分頁（#1860）；分頁是同一層內容切換，返回一次仍回列表
+    // 點最後一列的「詳情」（#1860：詳情裡沒有帳號分頁了）；返回一次回列表
     [...rows[rows.length - 1].querySelectorAll('button')].find(b => b.textContent.trim() === '詳情').click(); await sleep(300);
-    document.querySelector('.m-dv-subbtn[data-sub="accounts"]').click();
     bad = check('點另一台', await waitView('detail'), 'detail'); if (bad) return bad;
     bad = check('再返回', await press('list'), 'list'); if (bad) return bad;
   }
@@ -32,7 +31,7 @@ export const macctBackProbeSource = () => `(async () => {
   if (!btn) return { ok: false, why: '找不到設定裡的「設備」（' + steps.join('；') + '）' };
   btn.click();
   bad = check('設定進來', await waitView('list'), 'list'); if (bad) return bad;
-  { const r0 = document.querySelector('.m-dv-row'); [...r0.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情').click(); await sleep(300); document.querySelector('.m-dv-subbtn[data-sub="accounts"]').click() }   // 詳情 → 帳號分頁（#1860）
+  { const r0 = document.querySelector('.m-dv-row'); [...r0.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情').click(); await sleep(300) }   // 列上的「詳情」（#1860）
   bad = check('設定點一台', await waitView('detail'), 'detail'); if (bad) return bad;
   bad = check('設定返回一次', await press('list'), 'list'); if (bad) return bad;
   bad = check('設定返回收起', await press('closed'), 'closed'); if (bad) return bad;

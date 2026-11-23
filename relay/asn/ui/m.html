@@ -273,7 +273,7 @@
                   <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
                   <ul class="m-dv-accts">
                     <!-- 帳號卡固定三行：帳號＋右邊固定的「使用中」、方案、額度條（#374） -->
-                    <li class="m-dv-acct" :class="{ cur: acctInUseOf(v.key, a) }" :data-flash="acctFocus === accountCardKey(v.key, a.account) ? '1' : null" :data-acct-card="accountCardKey(v.key, a.account)" :data-status="accountStatusOf({ loginLost: acctLoginLostOf(v.key, a), subLapsed: a.subLapsed, exhausted: a.quota.exhausted })" v-for="a in v.accounts" :key="a.account">
+                    <li class="m-dv-acct" :class="{ cur: acctInUseOf(v.key, a) }" :data-acct-card="accountCardKey(v.key, a.account)" :data-status="accountStatusOf({ loginLost: acctLoginLostOf(v.key, a), subLapsed: a.subLapsed, exhausted: a.quota.exhausted })" v-for="a in v.accounts" :key="a.account">
                       <span class="m-dv-mail">{{ a.account }}</span>
                       <span class="m-dv-act"><span class="m-dv-lost" v-if="acctLoginLostOf(v.key, a)">{{ LOGIN_LOST_TEXT.tag }}</span><span class="m-dv-cur" v-if="acctInUseOf(v.key, a)">使用中</span></span>
                       <span class="m-dv-planrow"><span class="asn-tag-fail" v-if="a.subLapsed">{{ SUB_LAPSED_TEXT.tag }}</span><span class="m-dv-plan" v-else>{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span></span>
@@ -296,6 +296,13 @@
                     </li>
                   </ul>
                 </div>
+                <!-- 還沒登入 Codex 的電腦：從這裡替它登入（#1860：原本在設備詳情裡的常駐按鈕搬到帳號頁）。按下去進那台的詳情，確認與進度在那裡原位顯示 -->
+                <ul class="m-dv-logins" v-if="acctLoginTargets.length">
+                  <li class="m-dv-loginrow" v-for="t in acctLoginTargets" :key="t.node + t.vendor" :data-login="t.node + '|' + t.vendor">
+                    <span class="m-dv-devname"><span class="m-dv-devn">{{ t.label }}</span><small class="m-fine">{{ LOGIN_TEXT.pending(LOGIN_VENDORS[t.vendor]) }}</small></span>
+                    <button type="button" class="m-btn" @click="acctLoginPress(t)">{{ LOGIN_TEXT.button(LOGIN_VENDORS[t.vendor]) }}</button>
+                  </li>
+                </ul>
               </section>
               <template v-if="acctSw.tab === 'devices'">
               <p class="m-note" v-if="!acctDevs.length">{{ DEVICE_TEXT.empty }}</p>
@@ -309,6 +316,7 @@
                     <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ acctRowLine(d) }}</span></span>
                     <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                     <span class="m-dv-tag warn noreport" v-if="d.reportTag">{{ d.reportTag }}</span>
+                    <span class="m-dv-tag warn blocked" v-if="joined.byNode[d.key] && joined.byNode[d.key].blocked">{{ KNOWN_TEXT.blockedTag }}</span>
                   </span>
                   <!-- 指紋圖示放在按鈕外面（它自己可以聚焦、長按看說明，不能包在按鈕裡） -->
                   <fp-mark v-if="!d.self && phoneFpMark(joined.byNode[d.key])" :kind="phoneFpMark(joined.byNode[d.key]).kind" :label="phoneFpMark(joined.byNode[d.key]).label"></fp-mark>
@@ -341,12 +349,16 @@
                   <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
                   <span class="m-dv-tag hid" v-if="acctCur.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
                 </div>
-                <!-- 這一台的內容：詳情／帳號。帳號分頁到 PR-C 才拿掉；設備列上不放「帳號」鈕，從這裡進（#1860） -->
-                <div class="m-dv-seg m-dv-subseg" role="tablist" aria-label="這台設備的內容">
-                  <button type="button" role="tab" class="m-dv-subbtn" :class="{ on: acctSw.sub === 'info' }" :aria-selected="acctSw.sub === 'info' ? 'true' : 'false'" data-sub="info" @click="setAcctSub('info')">{{ KNOWN_TEXT.detail }}</button>
-                  <button type="button" role="tab" class="m-dv-subbtn" :class="{ on: acctSw.sub === 'accounts' }" :aria-selected="acctSw.sub === 'accounts' ? 'true' : 'false'" data-sub="accounts" @click="setAcctSub('accounts')">{{ ACCT_TABS[1].label }}</button>
+                <!-- 被擋下的這台（指紋對不上）：最上面提示＋「重新認這台」（原位確認）；正常的設備什麼都不出（#1860） -->
+                <div class="m-dv-block" role="alert" v-if="curKnown && curKnown.blocked">
+                  <p class="m-err">{{ KNOWN_TEXT.reacceptNotice(acctCur.identity.title) }}</p>
+                  <div class="m-dv-confirm" role="alertdialog" v-if="reaccept === curKnown.node">
+                    <p>{{ KNOWN_TEXT.reacceptConfirm(acctCur.identity.title) }}</p>
+                    <div class="m-dv-sbtns"><button type="button" class="m-btn" @click="reacceptNo">{{ KNOWN_TEXT.cancel }}</button><button type="button" class="m-btn m-dv-danger" :disabled="kp.busy" @click="reacceptYes">{{ KNOWN_TEXT.reacceptYes }}</button></div>
+                  </div>
+                  <button type="button" class="m-btn m-dv-danger" v-else :disabled="kp.busy" @click="reacceptAsk(curKnown.node)">{{ KNOWN_TEXT.reaccept }}</button>
                 </div>
-                <div class="m-dv-info" v-if="acctSw.sub === 'info'">
+                <div class="m-dv-info">
                   <h4 class="m-dv-sech">{{ IDENTITY_TEXT.title }}</h4>
                   <device-identity :identity="acctCur.identity" :note="acctCur.reportNote ? acctCur.reportNote.text : ''" :busy="Boolean(acctCur.reportNote && acctCur.reportNote.busy)"></device-identity>
                   <template v-if="!acctCur.self && curKnown">
@@ -366,41 +378,20 @@
                     <button class="m-btn" type="button" :disabled="dn.busy" @click="devRenameStart(acctCur)">{{ ACTION_TEXT.rename }}</button>
                     <button type="button" class="m-dv-refresh" v-if="acctCanShowBack" @click="acctShowBack">{{ DEVICE_TEXT.showBack }}</button>
                     <button type="button" class="m-dv-refresh m-dv-danger" v-if="!acctCur.self" :disabled="!acctCanRemove" @click="acctAskRemove">{{ DEVICE_TEXT.remove }}</button>
-                    <button class="m-btn m-dv-danger" type="button" v-if="curKnown" :disabled="kp.busy" @click="forgetKnown(curKnown.node)">{{ KNOWN_TEXT.forgetThis }}</button>
                   </div>
                   <p class="m-fine dvid-why" v-if="!acctCur.self && !acctCanRemove">{{ ACTION_TEXT.removeOnline }}</p>
-                  <p class="m-fine" v-if="curKnown">{{ KNOWN_TEXT.forgetNote }}</p>
                   <p class="m-err" v-if="kp.error" role="alert">{{ kp.error }}</p>
                   <p class="m-err" v-if="vp.note && vp.noteOwn" role="alert">{{ vp.note }}</p>
                 </div>
-                <!-- /詳情 -->
-                <template v-else>
-                <p class="m-err" v-if="acctRep && acctRep.msg" role="alert">{{ acctRep.msg }}</p>
+                <!-- 新電腦引導卡與它開出來的確認／進度（只在別台、沒有夥伴視窗的電腦詳情出現）。帳號清單與帳號操作不在這裡，只在設定的「帳號」頁（#1860） -->
+                <template v-if="guideNode || (setupSt.node === acctCur.key && setupSt.stage !== 'idle') || (loginSt.node === acctCur.key && loginSt.stage !== 'idle')">
+                <p class="m-err" v-if="guideNode && acctRep && acctRep.msg" role="alert">{{ acctRep.msg }}</p>
                 <new-guide-card v-if="guideOn" btn-class="m-btn" :rows="guideRowList" :hint="guideHintView" @act="guideAct" @site="guideSite" @hide="setGuideHidden(true)"></new-guide-card>
                 <div class="ng-reshow-wrap" v-else-if="guideReshow"><button type="button" class="ng-reshow" @click="setGuideHidden(false)">{{ GUIDE_TEXT.show }}</button></div>
                 <div class="m-dv-body" :class="{ off: !acctCur.online }">
-                  <div class="m-dv-empty" v-if="!acctCur.vendors.length"><span>{{ acctRep && acctRep.loading ? '讀取中…' : (acctCur.empty || '這台設備還沒有回報任何廠商') }}</span></div>
-                  <ul class="m-dv-vendors" v-else>
-                    <li class="m-dv-vendor" :class="'v-' + v.key" v-for="v in acctCur.vendors" :key="v.key">
-                      <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
                       <div class="m-dv-vb">
-                        <ul class="m-dv-accts asn-alines" v-if="acctLines(v).length" :aria-label="'這台的 ' + v.label + ' 帳號'">
-                          <!-- 設備頁的帳號：一個帳號一行＋狀態標籤，點進帳號頁那張卡（#2111 ⑦）；額度條、切換、「⋯」只在帳號頁 -->
-                          <li class="asn-aline" v-for="l in acctLines(v)" :key="l.key" :data-aline="l.key" :data-status="l.status">
-                            <button type="button" class="asn-aline-go" :aria-label="'查看帳號 ' + l.account + '，' + l.tag" @click="acctCardGo(l)">
-                              <span class="asn-aline-mail">{{ l.account }}</span>
-                              <span class="asn-aline-side"><span :class="l.tagClass">{{ l.tag }}</span><span class="asn-aline-chev" aria-hidden="true">›</span></span>
-                            </button>
-                            <small :class="['asn-aline-note', l.status === 'lapsed' ? 'asn-note-fail' : 'asn-note-warn']" role="status" v-if="l.note">{{ l.note }}</small>
-                          </li>
-                        </ul>
-                        <div class="m-dv-none" v-else>{{ acctRep && acctRep.loading ? '讀取中…' : (v.note || '目前未回報任何帳號') }}</div>
-                        <div class="m-dv-setup" v-if="v.key === 'claude' && (((showSetupButton(v.key, v.action) || showReloginButton(v.key, v.relogin)) && setupSt.stage === 'idle') || (setupSt.node === acctCur.key && setupSt.stage !== 'idle'))">
-                          <template v-if="setupSt.stage === 'idle'">
-                            <button type="button" class="m-btn m-dv-relogin" v-if="showReloginButton(v.key, v.relogin)" @click="setupAsk(acctCur.key, 'relogin')">{{ RELOGIN_TEXT.button }}</button>
-                            <button type="button" class="m-btn" v-else @click="setupAsk(acctCur.key)">{{ SETUP_TEXT.button }}</button>
-                          </template>
-                          <div class="m-dv-confirm" role="alertdialog" :aria-label="(setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmTitle(acctCur.label)" v-else-if="setupSt.stage === 'confirm'">
+                        <div class="m-dv-setup" v-if="setupSt.node === acctCur.key && setupSt.stage !== 'idle'">
+                          <div class="m-dv-confirm" role="alertdialog" :aria-label="(setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmTitle(acctCur.label)" v-if="setupSt.stage === 'confirm'">
                             <b>{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmTitle(acctCur.label) }}</b>
                             <p>{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmBody }}</p>
                             <p class="m-fine">{{ (setupSt.mode === 'relogin' ? RELOGIN_TEXT : SETUP_TEXT).confirmNeed }}</p>
@@ -413,16 +404,15 @@
                             <div class="m-dv-sbtns" v-if="setupSt.stage === 'done'"><button type="button" class="m-btn" @click="setupClose">{{ SETUP_TEXT.close }}</button></div>
                           </div>
                         </div>
-                        <div class="m-dv-setup" v-if="LOGIN_VENDORS[v.key] && ((showLoginButton(v.key, v.login) && loginSt.stage === 'idle') || (loginSt.node === acctCur.key && loginSt.vendor === v.key && loginSt.stage !== 'idle'))">
-                          <button type="button" class="m-btn" v-if="loginSt.stage === 'idle'" @click="loginAsk(acctCur.key, v.key)">{{ LOGIN_TEXT.button(LOGIN_VENDORS[v.key]) }}</button>
-                          <div class="m-dv-confirm" role="alertdialog" :aria-label="LOGIN_TEXT.confirmTitle(acctCur.label, LOGIN_VENDORS[v.key])" v-else-if="loginSt.stage === 'confirm'">
-                            <b>{{ LOGIN_TEXT.confirmTitle(acctCur.label, LOGIN_VENDORS[v.key]) }}</b>
-                            <p>{{ LOGIN_TEXT.confirmBody(LOGIN_VENDORS[v.key]) }}</p>
+                        <div class="m-dv-setup" v-if="LOGIN_VENDORS[loginSt.vendor] && loginSt.node === acctCur.key && loginSt.stage !== 'idle'">
+                          <div class="m-dv-confirm" role="alertdialog" :aria-label="LOGIN_TEXT.confirmTitle(acctCur.label, LOGIN_VENDORS[loginSt.vendor])" v-if="loginSt.stage === 'confirm'">
+                            <b>{{ LOGIN_TEXT.confirmTitle(acctCur.label, LOGIN_VENDORS[loginSt.vendor]) }}</b>
+                            <p>{{ LOGIN_TEXT.confirmBody(LOGIN_VENDORS[loginSt.vendor]) }}</p>
                             <p class="m-fine">{{ LOGIN_TEXT.confirmNeed }}</p>
                             <div class="m-dv-sbtns"><button type="button" class="m-btn" @click="loginYes">{{ LOGIN_TEXT.yes }}</button><button type="button" class="m-btn" @click="loginNo">{{ LOGIN_TEXT.no }}</button></div>
                           </div>
-                          <div class="m-dv-login" role="region" :aria-label="LOGIN_TEXT.forWhom(loginSt.name || acctCur.label, LOGIN_VENDORS[v.key])" v-else-if="loginSt.stage === 'show'">
-                            <b>{{ LOGIN_TEXT.forWhom(loginSt.name || acctCur.label, LOGIN_VENDORS[v.key]) }}</b>
+                          <div class="m-dv-login" role="region" :aria-label="LOGIN_TEXT.forWhom(loginSt.name || acctCur.label, LOGIN_VENDORS[loginSt.vendor])" v-else-if="loginSt.stage === 'show'">
+                            <b>{{ LOGIN_TEXT.forWhom(loginSt.name || acctCur.label, LOGIN_VENDORS[loginSt.vendor]) }}</b>
                             <a class="m-btn m-btn-big" :href="loginSt.url" target="_blank" rel="noopener noreferrer">{{ LOGIN_TEXT.open }}</a>
                             <p class="m-fine">{{ LOGIN_TEXT.howTo }}</p>
                             <p class="m-dv-code" translate="no">{{ loginSt.code }}</p>
@@ -433,15 +423,11 @@
                             <div class="m-dv-sbtns" v-if="loginSt.stage === 'done'"><button type="button" class="m-btn" @click="loginClose">{{ LOGIN_TEXT.close }}</button></div>
                           </div>
                         </div>
-                        <small class="m-fine" v-if="v.switchHint">{{ v.switchHint }}</small>
                       </div>
-                    </li>
-                  </ul>
                 </div>
                 </template>
               </section>
               <button type="button" class="m-btn m-ops-cancel" @click="closePage">{{ ACCT_TEXT.close }}</button>
-              <p class="m-fine m-dv-foot">{{ ACCT_TEXT.quotaNote }}</p>
             </template>
             <template v-else-if="acctSw.phase === 'rm'">
               <p class="m-ops-lead" role="alert">{{ acctRemoveText }}</p>

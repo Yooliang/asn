@@ -127,7 +127,6 @@ test('手機：設備卡與「我的帳號」用同一套，Gemini 照樣出現�
   assert.equal(t.find(d => d.key === W).vendors.find(v => v.key === 'gemini').accounts[0].quota.text, '5 小時剩 55%、每週剩 81%')
   const my = acctRosterView(r, { friends, selfNode: 'phone', now: NOW })
   assert.deepEqual(my.vendors.find(g => g.key === 'gemini').accounts[0].quota.parts, ['5 小時剩 55%・2 小時前', '每週剩 81%・2 小時前'])
-  assert.ok(read('ui/m.html').includes("(v.note || '目前未回報任何帳號')"), '手機設備卡沒帳號時先寫 note')
 })
 
 // ---------- 電腦設定頁（實際渲染） ----------

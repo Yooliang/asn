@@ -11,15 +11,13 @@ export const mdevsheetProbeSource = () => `(async () => {
   let opened = false;
   for (const row of [...document.querySelectorAll('.m-dv-row')].filter(vis)) {
     if ((row.textContent ?? '').includes('運作中')) continue;   // 本機那一列只寫「運作中」
-    [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(300);   // 詳情 → 帳號分頁（#1860）
-    const go = document.querySelector('.m-dv-subbtn[data-sub="accounts"]');
-    if (!go) continue;
-    go.click(); await sleep(600);
-    if ([...document.querySelectorAll('.m-dv-vendor')].some(vis)) { opened = true; break }
+    [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(600);   // 列上的「詳情」（#1860：詳情裡沒有帳號分頁了，改量詳情自己的區塊）
+    if ([...document.querySelectorAll('.m-dv-info .dvid')].some(vis)) { opened = true; break }
     const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis);
     if (back) { back.click(); await sleep(400) }
   }
-  if (!opened) return { ok: false, why: '找不到有廠商卡片的電腦細部頁' };
+  if (!opened) return { ok: false, why: '找不到有詳情內容的電腦細部頁' };
+  if ([...document.querySelectorAll('.m-dv-subbtn, .asn-aline, .m-dv-vendor')].some(vis)) return { ok: false, why: '詳情裡不該再有帳號分頁、帳號行或廠商卡片（帳號只在設定的「帳號」頁）' };
   const R = e => e.getBoundingClientRect();
   const head = [...document.querySelectorAll('.m-dv .m-dv-dh')].find(vis);
   const sec = head && head.parentElement;
@@ -28,9 +26,9 @@ export const mdevsheetProbeSource = () => `(async () => {
   if (sr.left < -0.5 || sr.right > W + 0.5) return { ok: false, why: '詳情區塊超出視窗：' + Math.round(sr.left) + '～' + Math.round(sr.right) + '（視窗寬 ' + W + '）' };
   if (document.documentElement.scrollWidth > W + 1) return { ok: false, why: '頁面出現橫向捲動：' + document.documentElement.scrollWidth + '（視窗寬 ' + W + '）' };
   if (sec.scrollWidth > sec.clientWidth + 1) return { ok: false, why: '詳情區塊內容被水平切掉：' + sec.scrollWidth + '／' + sec.clientWidth };
-  const cards = [...document.querySelectorAll('.m-dv-vendor')].filter(vis);
+  const cards = [...document.querySelectorAll('.m-dv-info, .m-dv-block')].filter(vis);   // 詳情現在的區塊：辨認與動作區、被擋下時的提示
   for (const c of cards) {
-    const r = R(c), name = c.querySelector('b')?.textContent.trim() ?? '';
+    const r = R(c), name = c.querySelector('h4, b')?.textContent.trim() ?? '詳情';
     if (r.left < sr.left - 0.5 || r.right > sr.right + 0.5) return { ok: false, why: '「' + name + '」卡片超出詳情區塊：' + Math.round(r.left) + '～' + Math.round(r.right) + '，區塊 ' + Math.round(sr.left) + '～' + Math.round(sr.right) };
     if (r.right > W + 0.5) return { ok: false, why: '「' + name + '」卡片右邊超出視窗：' + Math.round(r.right) + '／' + W };
     if (c.scrollWidth > c.clientWidth + 1) return { ok: false, why: '「' + name + '」卡片內容被水平切掉' };
@@ -43,7 +41,7 @@ export const mdevsheetProbeSource = () => `(async () => {
   for (const [label, e] of [['關閉鈕', close], ['額度註腳', foot]]) {
     if (!e) continue;
     const r = R(e);
-    for (const c of cards) if (hit(r, r, R(c))) return { ok: false, why: label + '與「' + (c.querySelector('b')?.textContent.trim() ?? '') + '」卡片互疊' };
+    for (const c of cards) if (hit(r, r, R(c))) return { ok: false, why: label + '與「' + (c.querySelector('h4, b')?.textContent.trim() ?? '詳情') + '」區塊互疊' };
     if (hit(r, r, sr)) return { ok: false, why: label + '壓在詳情區塊上' };
     if (r.right > W + 0.5 || r.left < -0.5) return { ok: false, why: label + '超出視窗' };
   }

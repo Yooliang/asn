@@ -328,7 +328,7 @@ test('#1880 讀不到目前登入的帳號：畫面寫讀不到，不當成沒�
   await ui.refresh()
   assert.equal(ui.state.current, null, '不沿用舊值')
   assert.equal(ui.state.currentErr, '讀不到目前登入的帳號')
-  assert.match(read('ui/lib/settings-panel.mjs'), /st\.accounts\.currentErr/, '設定頁有顯示這句')
+  assert.match(read('ui/lib/settings-panel.mjs'), /st\.accounts\.currentErr/, '設定的帳號頁有顯示這句（#1860：從設備詳情搬來）')
   cur = { email: 'b@x.test', saved: true }
   await ui.refresh()
   assert.equal(ui.state.currentErr, '', '恢復後清掉')

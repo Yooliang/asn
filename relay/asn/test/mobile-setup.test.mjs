@@ -2,8 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { GIVE_UP_MS, PENDING_WAIT_MS, POLL_FAIL_MAX, POLL_MS, SETUP_TEXT, setupErrorText, setupLeadOf, setupStateOf, setupStep, setupView, showSetupButton } from '../ui/lib/mobile-setup.mjs'
-import { AGENT_INSTALL_UI } from '../ui/lib/device-state.mjs'
+import { GIVE_UP_MS, PENDING_WAIT_MS, POLL_FAIL_MAX, POLL_MS, SETUP_TEXT, setupErrorText, setupLeadOf, setupStateOf, setupStep, setupView } from '../ui/lib/mobile-setup.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -58,28 +57,22 @@ test('等不到：剛送出還沒寫進去就繼續等；看過後來不見＝�
   assert.equal(setupView({ state: 'taken' }, { since: now - GIVE_UP_MS + 1000, now }).done, false)
 })
 
-test('入口打開時，按鈕只在 Claude 區、而且「別台可以裝」時出現；每 5 秒查一次', () => {
-  assert.equal(showSetupButton('claude', { kind: 'remote' }, true), true)
-  for (const [k, a] of [['claude', { kind: 'local' }], ['claude', null], ['codex', { kind: 'remote' }], ['grok', { kind: 'remote' }]]) assert.equal(showSetupButton(k, a, true), false)
+test('每 5 秒查一次', () => {
   assert.equal(POLL_MS, 5000)
 })
 
-test('入口預設關：手機版看不到「從手機安裝並登入」，畫面只靠這個判斷出現', () => {
-  assert.equal(AGENT_INSTALL_UI, false)
-  assert.equal(showSetupButton('claude', { kind: 'remote' }), false)
+test('#1860 設備詳情沒有帳號區之後：手機的「安裝並登入」「重新登入」入口只剩兩處——新電腦引導卡（詳情）與帳號頁設備列的重新登入鈕；都只進確認', () => {
   const html = read('ui/m.html')
-  assert.match(html, /v-if="v\.key === 'claude' && \(\(\(showSetupButton\(v\.key, v\.action\) \|\| showReloginButton\(v\.key, v\.relogin\)\) && setupSt\.stage === 'idle'\)/)
-  // 入口兩顆（#1512 C 多了「重新登入 Claude」），都只進確認
-  assert.equal((html.match(/setupAsk\(/g) ?? []).length, 2, '送出要求的入口只有安裝與重新登入兩顆按鈕')
-  assert.match(html, /v-if="showReloginButton\(v\.key, v\.relogin\)" @click="setupAsk\(acctCur\.key, 'relogin'\)"/)
+  assert.ok(!html.includes('showSetupButton') && !html.includes('showReloginButton'), '詳情裡的按鈕判斷拿掉了')
+  assert.equal((html.match(/setupAsk\(/g) ?? []).length, 0, '畫面樣板不直接開確認')
+  const js = read('ui/m.js')
+  assert.ok(js.includes("setupAsk(d.key, 'relogin')") && js.includes('setupAsk(d.key)'), '新電腦引導卡的動作')
+  assert.ok(js.includes("setupAsk(b.node, 'relogin')"), '帳號頁設備列的重新登入')
 })
 
 test('重新登入 Claude（#1512 C）：只看那台回報登入失效，不受安裝入口的總開關影響；這只是入口，放不放行由那台電腦決定', async () => {
-  const { showReloginButton, RELOGIN_TEXT } = await import('../ui/lib/mobile-setup.mjs')
+  const { RELOGIN_TEXT } = await import('../ui/lib/mobile-setup.mjs')
   const { reloginAction, STATE } = await import('../ui/lib/device-state.mjs')
-  assert.equal(showReloginButton('claude', { kind: 'remote' }), true, '不看 AGENT_INSTALL_UI')
-  assert.equal(showReloginButton('codex', { kind: 'remote' }), false)
-  assert.equal(showReloginButton('claude', null), false)
   const base = { vendor: 'claude', online: true, asnOnline: true, state: STATE.LOGIN_FAILED }
   assert.deepEqual(reloginAction(base), { kind: 'remote' })
   for (const [k, v] of [['isSelf', true], ['phone', true], ['online', false], ['asnOnline', false], ['vendor', 'codex']]) assert.equal(reloginAction({ ...base, [k]: v }), null, k)
@@ -179,7 +172,7 @@ test('接線守門：先確認才送出、送出只在「確認安裝」、離�
   assert.match(js, /setInterval\(\(\) => void setupPoll\(\), SETUP_POLL_MS\)/)
   assert.match(js, /acctToken\+\+; acctEpoch\+\+; setupReset\(\)/, '離開設備頁就停止輪詢')
   assert.match(html, /role="alertdialog"/)
-  assert.match(html, /@click="setupAsk\(acctCur\.key\)"/)
+  assert.match(js, /if \(row\.action === 'install'\) setupAsk\(d\.key\)/, '「安裝並登入」只從新電腦引導卡進確認（#1860：詳情沒有帳號區了）')
   assert.match(html, /@click="setupYes"/)
   const phone = lib.slice(lib.indexOf('#[cfg(not(desktop))]'), lib.indexOf('let builder = builder\n        .setup'))
   assert.ok(phone.includes('account::setup_remote_request') && phone.includes('account::setup_remote_status'), '手機的指令清單要有')

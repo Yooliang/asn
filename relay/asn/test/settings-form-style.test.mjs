@@ -106,6 +106,6 @@ test('其他有勾選框的設定（登入時自動啟動、信任自己的設�
   globalThis.Vue = Vue
   const w = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: { ...state(), autostart: { supported: true, on: false, busy: false }, closeTo: 'tray', trayOk: true }, catKey: 'window' }) }))
   assert.match(w, /<label class="chk"><input type="checkbox"[^>]*\/?><span>登入時自動啟動 ASN<\/span><\/label>/)
-  const a = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state({ devices: [{ key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] }].map(withIdentity) }), catKey: 'devices', dev: 'H', devView: 'acct' }) }))
-  assert.match(a, /<label class="chk"><input type="checkbox"[^>]*\/?><span>允許切換帳號/)
+  const a = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state({ devices: [{ key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [] }].map(withIdentity) }), catKey: 'devices', dev: 'H' }) }))
+  assert.match(a, /<label class="chk"><input type="checkbox"[^>]*\/?><span>允許別台設備替這台切換帳號/)
 })

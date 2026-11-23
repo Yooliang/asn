@@ -92,7 +92,8 @@ export function hueOf(id) {
   return h % 360
 }
 
-// 前台凡要顯示「這是哪台設備」一律用該設備 ASN 的視窗名（後端 nodes.name）；沒有（例如只有收發室橋或雲端代理的設備）就顯示這個，絕不顯示節點代號
+// LEGACY（#1860）：舊版畫面上「沒名字」的字樣，只用來辨認舊存檔／舊資料裡留下的這個字串（device-known.mjs 的 LEGACY_UNNAMED 當沒名字處理）。
+// 畫面不准再輸出它：沒名字一律用 unnamedClue 的寫法「電腦（X7K2）」「手機（X7K2）」（device-identity.mjs）
 export const UNNAMED_DEVICE = '未命名設備'
 
 // 收發室寄來的「等了一陣子仍沒收到回覆」提醒信（relay/machine/bridge.mjs noticeNoReply）：不是對話訊息。

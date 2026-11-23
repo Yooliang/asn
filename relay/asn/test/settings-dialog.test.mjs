@@ -211,7 +211,7 @@ test('守門：電腦設定第一頁——登入帳號資訊與我的名字同�
   assert.ok(me.indexOf('<login-panel>') >= 0 && me.indexOf('<login-panel>') < me.indexOf('class="av-set"'), '登入狀態（含我的名字）在第一頁最前面')
   assert.ok(me.indexOf('<logout-panel>') > me.indexOf('class="np-set"'), '登出鈕在第一頁所有項目之後')
   assert.ok(!accts.includes('<login-panel>') && !accts.includes('<logout-panel>'), '設備與帳號分類不再放登入狀態與登出')
-  assert.ok(accts.includes('允許切換帳號'), '帳號管理留在原位（現在在這台的頁籤裡）')
+  assert.ok(accts.includes('允許別台設備替這台切換帳號'), '切換帳號的允許選項在這台詳情的連線安全裡（#1860）')
   assert.ok(!accts.includes('<cloud-invite-panel>'), '雲端代理搬到自己一類，設備頁不再放')
   const lp = fs.readFileSync(new URL('../ui/lib/login-panel.mjs', import.meta.url), 'utf8')
   assert.ok(lp.includes('LogoutPanel') && /<asn-button state="danger" :disabled="busy" @click="ask">登出<\/asn-button>/.test(lp))

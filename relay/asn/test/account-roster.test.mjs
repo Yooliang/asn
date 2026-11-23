@@ -50,7 +50,9 @@ test('設備名截到 8 字；空的寫「未命名設備」', () => {
   assert.equal(shortDevice('工作機'), '工作機')
   assert.equal(shortDevice('一二三四五六七八九十'), '一二三四五六七八')
   assert.equal(shortDevice('abcdefghijk'), 'abcdefgh')
-  assert.equal(shortDevice(''), '未命名設備')
+  assert.equal(shortDevice(''), '電腦', '沒名字也沒代號：只寫種類，不再寫「未命名設備」')
+  assert.equal(shortDevice('  ', 8, 'node-old-pc-X7K2'), '電腦（X7K2）', '沒名字：辨認線索和通知同一個寫法')
+  for (const out of [shortDevice(''), shortDevice(null, 8, 'abc-Q9Z8')]) assert.ok(!out.includes('未命名設備'), out)
 })
 
 test('有數字：每窗一句「5 小時剩 40%・3 小時前」，一行版時間寫「3 小時前・工作機」', () => {

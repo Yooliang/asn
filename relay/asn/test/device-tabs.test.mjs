@@ -40,10 +40,10 @@ test('「返回」在頁首那一行（共用按鈕）；改名只在動作區�
 })
 
 test('四種設備各自有哪幾顆鈕', async () => {
-  assert.deepEqual(labels(await render({ dev: 'H' })), ['工作管理員', '詳情', 'QR Code', '帳號'], '這台：四顆')
-  assert.deepEqual(labels(await render({ dev: 'W' })), ['詳情', '帳號'], '別台電腦：沒有工作管理員、沒有 QR')
-  assert.deepEqual(labels(await render({ dev: 'P' })), ['詳情'], '手機：沒有帳號可看')
-  assert.deepEqual(labels(await render({ dev: 'C' })), ['詳情', '帳號'], '雲端節點：沒有指紋，不出 QR')
+  assert.deepEqual(labels(await render({ dev: 'H' })), ['工作管理員', '詳情', 'QR Code'], '這台：三顆（帳號分頁 #1860 拿掉了）')
+  assert.deepEqual(labels(await render({ dev: 'W' })), ['詳情'], '別台電腦：沒有工作管理員、沒有 QR')
+  assert.deepEqual(labels(await render({ dev: 'P' })), ['詳情'], '手機')
+  assert.deepEqual(labels(await render({ dev: 'C' })), ['詳情'], '雲端節點：沒有指紋，不出 QR')
 })
 
 test('沒有指紋或沒有工作管理員資料時，對應的鈕不出', async () => {
@@ -58,7 +58,7 @@ test('預設打開「詳情」，按下的那顆標 aria-pressed', async () => {
   assert.match(bar(html), />詳情<\/button>/)
   assert.match(bar(html), /aria-pressed="true"[^>]*>詳情</)
   assert.match(html, /<h3 class="set-h">這台是哪一台<\/h3>/)
-  assert.match(bar(await render({ dev: 'W', devView: 'acct' })), /aria-pressed="true"[^>]*>帳號</)
+  assert.ok(!labels(html).includes('帳號'), '沒有「帳號」分頁（帳號只在設定的「帳號」頁）')
 })
 
 test('「工作管理員」展開時，那排按鈕還在、工作管理員那顆亮起', async () => {

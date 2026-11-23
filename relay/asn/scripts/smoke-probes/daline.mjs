@@ -1,7 +1,8 @@
-// 冒煙探測「設備頁的帳號一行，點下去跳到帳號頁那張卡」（probe.daline，#2111 ⑦ #1879）。
+// 冒煙探測「設備詳情沒有帳號，允許別台切換帳號在連線安全」（probe.daline，#1860 PR-C；原本檢查 #2111 ⑦ 的設備頁帳號行）。
 // scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）。不帶截圖（不動 ui-shots-diff 的基準）。
-// 電腦：設定「設備」→ 這台的「帳號」→ 帳號一行（標籤「正常」、沒有額度條／切換／「⋯」）→ 點它 → 到「帳號」頁、那張卡被框起來
-// 手機：設定「設備」→ 點辦公室那列 →「帳號」→ 帳號一行 → 點它 → 回到列表並切到「帳號」分頁、那張卡被框起來
+// 電腦：設定「設備」→ 這台的「詳情」：沒有「帳號」分頁、沒有帳號行；「連線安全」裡有「允許別台設備替這台切換帳號」，勾選能點
+// 手機：設定「設備」→ 辦公室的「詳情」：沒有「帳號」分頁、沒有帳號行
+// 帳號只在設定的「帳號」頁；帳號頁卡片與重新登入由 reloginrow、relogin、drelogin 探針各自檢查。
 // 全部用真的點擊（__smokeInput）。探測原始碼是字串，裡面不寫反斜線
 
 export const dalineProbeSource = ({ daline }) => `(async () => {
@@ -13,59 +14,39 @@ export const dalineProbeSource = ({ daline }) => `(async () => {
   const tap = async el => { el.scrollIntoView({ block: 'center' }); await sleep(150); await real({ click: at(el) }) };
   const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
   const mobile = ${JSON.stringify(daline)} === 'mobile';
-  let open;
+  let page;
   if (mobile) {
     const set = await wait(() => [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('設備')));
     if (!set) return { ok: false, why: '找不到設定裡的「設備」' };
     await tap(set);
     const row = await wait(() => [...document.querySelectorAll('.m-dv-row')].find(r => vis(r) && (r.querySelector('.m-dv-rn b')?.textContent ?? '').trim() === '辦公室'));
     if (!row) return { ok: false, why: '設備列表裡找不到辦公室' };
-    // 設備列只有「詳情」（#1860）：點該列的詳情，再點細部頁上的「帳號」分頁
     await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));
-    open = await wait(() => [...document.querySelectorAll('.m-dv-subbtn[data-sub="accounts"]')].find(vis));
-  } else {
-    // 本機那一列：第一列、沒有排序把手（畫面上不寫「這台」）；列上只有「詳情」，點進去再點「帳號」分頁（#1860）
-    const row = await wait(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => !r.querySelector('.dv-grip')));
-    if (!row) return { ok: false, why: '設備列表裡找不到本機那一列' };
-    await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));
-    open = await wait(() => [...document.querySelectorAll('.dv-tabs button')].find(b => vis(b) && b.textContent.trim() === '帳號'));
+    page = await wait(() => [...document.querySelectorAll('.m-dv-info')].find(vis));
+    if (!page) return { ok: false, why: '點了詳情，沒有進到詳情內容' };
+    if ([...document.querySelectorAll('.m-dv-subbtn, [data-sub]')].some(vis)) return { ok: false, why: '手機詳情不該再有「詳情｜帳號」分頁' };
+    if ([...document.querySelectorAll('.asn-aline, .m-dv-vendor')].some(vis)) return { ok: false, why: '手機詳情不該再有帳號行或廠商卡片' };
+    return { ok: true, why: '手機：詳情只有詳情，沒有帳號分頁、帳號行' };
   }
-  if (!open) return { ok: false, why: '詳情裡沒有「帳號」分頁' };
-  await tap(open);
-  const lines = await wait(() => { const l = [...document.querySelectorAll('.asn-aline')].filter(vis); return l.length ? l : null });
-  if (!lines) return { ok: false, why: '設備頁沒有帳號行' };
-  const line = lines.find(l => l.getAttribute('data-aline') === 'claude|me@example.com') || lines[0];
-  const key = line.getAttribute('data-aline');
-  if (line.getAttribute('data-status') !== 'normal' || !line.textContent.includes('正常')) return { ok: false, why: '沒有問題的帳號應標「正常」：' + line.textContent.trim() };
-  const page = document.querySelector(mobile ? '.m-dv' : '.dv-set');
-  if ([...page.querySelectorAll('.dv-bars, .m-dv-bars, .dv-devbtn, .m-dv-dev, .m-dv-sw')].some(vis)) return { ok: false, why: '設備頁出現了額度條、切換或「⋯」' };
-  if (line.querySelectorAll('.asn-aline-go').length !== 1) return { ok: false, why: '帳號行應只有一顆（整行）跳頁按鈕' };
-  if (!mobile) {
-    // 這台自己的帳號行右邊有「⋯」：選單只有一項「刪除」；點「⋯」不跳頁，點「刪除」在那一行原位確認，取消不刪
-    const more = line.querySelector('.asn-more-btn');
-    if (!more) return { ok: false, why: '這台的帳號行右邊沒有「⋯」' };
-    await tap(more);
-    const items = [...line.querySelectorAll('.asn-more-item')].filter(vis);
-    if (items.length !== 1 || items[0].textContent.trim() !== '刪除' || !items[0].classList.contains('danger')) return { ok: false, why: '「⋯」選單應只有一項危險色的「刪除」：' + items.map(i => i.textContent.trim()).join('、') };
-    if (document.querySelector('[data-acct-card]')) return { ok: false, why: '點「⋯」不該跳到帳號頁' };
-    await tap(items[0]);
-    const box = await wait(() => [...document.querySelectorAll('.asn-confirm')].find(vis));
-    if (!box || !box.textContent.includes('只會從這台移除') || !line.contains(box)) return { ok: false, why: '沒有在那一行原位出現「只會從這台移除」的確認' };
-    const yesBtn = [...box.querySelectorAll('button')].find(b => b.textContent.trim() === '從這台移除');
-    const noBtn = [...box.querySelectorAll('button')].find(b => b.textContent.trim() === '取消');
-    if (!yesBtn || !noBtn) return { ok: false, why: '確認缺「從這台移除」或「取消」' };
-    await tap(noBtn);
-    if ([...document.querySelectorAll('.asn-confirm')].some(vis)) return { ok: false, why: '按取消後確認沒有收起' };
-    if ((globalThis.__smokeCalls || []).some(c => /claude_account_delete/.test(c[0]))) return { ok: false, why: '取消卻刪除了' };
-  }
-  await tap(line.querySelector('button'));
-  const card = await wait(() => [...document.querySelectorAll('[data-acct-card]')].find(c => vis(c) && c.getAttribute('data-acct-card') === key));
-  if (!card) return { ok: false, why: '點了帳號行，沒有跳到帳號頁那張卡（' + key + '）' };
-  if (!(await wait(() => card.getAttribute('data-flash') === '1', 30))) return { ok: false, why: '帳號頁那張卡沒有被框起來' };
-  if (card.getAttribute('data-status') !== 'normal') return { ok: false, why: '帳號頁那張卡的狀態與設備頁不一致：' + card.getAttribute('data-status') };
-  const r = card.getBoundingClientRect();
-  if (r.bottom < 0 || r.top > innerHeight) return { ok: false, why: '那張卡沒有捲進畫面' };
-  return { ok: true, why: (mobile ? '手機' : '電腦') + '：' + key + ' 標「正常」，點進帳號頁並框起那張卡' };
+  // 本機那一列：第一列、沒有排序把手（畫面上不寫「這台」）；列上只有「詳情」
+  const row = await wait(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => !r.querySelector('.dv-grip')));
+  if (!row) return { ok: false, why: '設備列表裡找不到本機那一列' };
+  await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));
+  page = await wait(() => [...document.querySelectorAll('.dv-dev')].find(vis));
+  if (!page) return { ok: false, why: '點了詳情，沒有進到詳情頁' };
+  if ([...page.querySelectorAll('.dv-tabs button')].some(b => b.textContent.trim() === '帳號')) return { ok: false, why: '電腦詳情不該再有「帳號」分頁' };
+  if ([...page.querySelectorAll('.asn-aline, .dv-vendors, .dv-accts')].some(vis)) return { ok: false, why: '電腦詳情不該再有帳號行或廠商卡片' };
+  const safety = await wait(() => [...page.querySelectorAll('.set-card')].find(c => vis(c) && c.querySelector('.set-h')?.textContent.trim() === '連線安全'));
+  if (!safety) return { ok: false, why: '詳情裡沒有「連線安全」' };
+  const label = [...safety.querySelectorAll('label.chk')].find(l => l.textContent.includes('允許別台設備替這台切換帳號'));
+  if (!label) return { ok: false, why: '「連線安全」裡沒有「允許別台設備替這台切換帳號」：' + safety.textContent.trim().slice(0, 120) };
+  const box = label.querySelector('input[type=checkbox]');
+  if (!box || box.disabled) return { ok: false, why: '「允許別台設備替這台切換帳號」的勾選不能按' };
+  const before = box.checked;
+  await tap(box);
+  if (!(await wait(() => box.checked !== before, 30))) return { ok: false, why: '點了「允許別台設備替這台切換帳號」，勾選沒有變' };
+  await tap(box);   // 還原
+  return { ok: true, why: '電腦：詳情沒有帳號分頁，「允許別台設備替這台切換帳號」在連線安全' };
   } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
 })()`
 
@@ -73,7 +54,7 @@ const ME_DEVICES = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting'
 
 export default {
   key: 'daline',
-  kind: '設備頁帳號行跳到帳號頁檢查',
+  kind: '設備詳情沒有帳號、允許切換在連線安全檢查',
   source: probe => dalineProbeSource(probe),
   scenarios: [
     { name: 'list-device-aline', page: 'list.html', state: { signedIn: true, roster: 'resets', localAcct: true, daline: 'desktop' }, ready: '#app.win .dv-set', probe: { daline: 'desktop' } },

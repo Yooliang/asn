@@ -1247,6 +1247,11 @@ impl view_d::ViewBackend for LiveBackend {
         let (relay, peer, kind, sign_pub) = (self.relay.clone(), peer.to_string(), kind.to_string(), sign_pub.to_string());
         async move { device_id::live::alert(&relay, &peer, &kind, &sign_pub).await }
     }
+    fn block(&self, node: &str, sign_pub: &str) {
+        if let Err(e) = device_id::live::mark_blocked(&self.data_dir, node, sign_pub) {
+            elog!("[ASN] 記不下被擋下的設備：{e}");
+        }
+    }
     fn log(&self, line: String) {
         // 電腦版寫進機器資料夾的 ui.log；手機沒有這份紀錄與時間函式（quota_core 只有電腦版編），照其他手機端的 log 寫標準錯誤
         #[cfg(desktop)]
@@ -1292,7 +1297,7 @@ fn device_known_list(app: State<'_, App>) -> Result<Value, String> {
     device_id::live::view(&app.data_dir)
 }
 
-/// 本人在這台的設定頁按「忘記這台」：下次那台再連就當第一次（會再通知本人）。**只有這個本機命令能忘記**（守門測試）
+/// 本人在這台的設定頁按「重新認這台」（被擋下的那台）或已移除設備的「忘記」：下次那台再連就當第一次（會再通知本人）。**只有這個本機命令能忘記**（守門測試）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
@@ -1608,6 +1613,9 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
                     Ok(()) => match view_stream::accept_request_with(&row, &me_node, &known, &key, now_s, allow_mobile, allow_input) {
                         Err(view_stream::Refused::KeyChanged { node, sign_pub }) => {
                             rej = "key_changed";
+                            if let Err(e) = device_id::live::mark_blocked(&data_dir, &node, &sign_pub) {
+                                elog!("[ASN] 記不下被擋下的設備：{e}");
+                            }
                             device_id::live::alert(&relay, &node, "changed", &sign_pub).await;
                             Err(device_id::KEY_CHANGED.to_string())
                         }

@@ -1,6 +1,6 @@
-// 冒煙探測「電腦版設備頁重新登入 Claude」（probe.drelogin，#1645）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
+// 冒煙探測「電腦版帳號頁重新登入 Claude」（probe.drelogin，#1645；#1860 起從設定的「帳號」頁進，設備詳情沒有帳號了）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
 // 情境（probe.drelogin 的值）：
-//   remote  別台（辦公室）回報 Claude 登入失效：設備細部頁出現「重新登入 Claude」；按了只進確認（寫明網址送到你的手機、不會顯示網址），
+//   remote  別台（辦公室）回報 Claude 登入失效：帳號頁那一列出現黃色「重新登入」；按了只進確認（寫明網址送到你的手機、不會顯示網址），
 //           按「確認重新登入」才送出 setup_remote_request（帶那台的節點與 mode relogin）；接手後說網址送到手機；完成後寫結果
 //   local   這台自己登入失效：同一顆鈕；確認後呼叫 ai_cli_login（claude），不送任何遠端請求；本機帳號變成已登入就顯示「已登入」
 //   healthy 別台登入正常：沒有這顆鈕
@@ -15,24 +15,21 @@ export const dreloginProbeSource = (kind = 'remote') => `(async () => {
   const tap = async el => { el.scrollIntoView({ block: 'center' }); await sleep(120); await real({ click: at(el) }) };
   const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
   const calls = name => (globalThis.__smokeCalls || []).filter(c => c[0] === name);
-  const row = await wait(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => (KIND === 'local') === !r.querySelector('.dv-grip')));   // 本機那一列沒有排序把手（畫面上不寫「這台」）
-  if (!row) return { ok: false, why: '設備列表裡找不到' + (KIND === 'local' ? '本機那一列' : '別台') };
-  await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));   // 列上只有「詳情」，再點「帳號」分頁（#1860）
-  const open = await wait(() => [...document.querySelectorAll('.dv-tabs button')].find(b => vis(b) && b.textContent.trim() === '帳號'));
-  if (!open) return { ok: false, why: '詳情裡沒有「帳號」分頁' };
-  await tap(open);
-  const box = () => [...document.querySelectorAll('.dv-relogin')].find(vis);
+  // #1860：設備詳情沒有帳號了。重新登入改從設定的「帳號」頁進：登入失效的那一列有黃色「重新登入」鈕（本機那一列或別台那一列）
+  const box = () => [...document.querySelectorAll('.dv-my')].find(vis);
+  const entryBtn = () => { const b = box(); return b && [...b.querySelectorAll('.dv-devbtn.st-relogin')].find(vis) };
+  if (!(await wait(() => box() && box().querySelector('.dv-acct'), 80))) return { ok: false, why: '帳號頁沒有帳號卡' };
   if (KIND === 'healthy') {
-    await wait(() => document.querySelector('.dv-vendors'), 40);
     await sleep(600);
-    if (box()) return { ok: false, why: '別台登入正常，卻出現了重新登入' };
+    if (entryBtn()) return { ok: false, why: '別台登入正常，卻出現了重新登入' };
     return { ok: true, why: '' };
   }
-  const entry = await wait(() => { const b = box(); return b && [...b.querySelectorAll('button')].find(x => x.textContent.trim() === '重新登入 Claude') });
-  if (!entry) return { ok: false, why: '登入失效的設備細部頁沒有「重新登入 Claude」' };
+  const entry = await wait(entryBtn);
+  if (!entry) return { ok: false, why: '登入失效的帳號頁沒有黃色「重新登入」鈕' };
+  if (entry.textContent.trim() !== '重新登入') return { ok: false, why: '鈕上的字不對：' + entry.textContent.trim() };
   if (calls('setup_remote_request').length || calls('ai_cli_login').length) return { ok: false, why: '還沒按就送出了' };
   await tap(entry);
-  const dlg = await wait(() => box() && box().querySelector('[role=alertdialog]'));
+  const dlg = await wait(() => box() && box().querySelector('.dv-devconfirm[role=alertdialog]'));
   if (!dlg) return { ok: false, why: '按了鈕沒有出現確認框' };
   if (calls('setup_remote_request').length || calls('ai_cli_login').length) return { ok: false, why: '按鈕就送出了（應該先確認）' };
   const dtext = dlg.textContent;
@@ -41,7 +38,7 @@ export const dreloginProbeSource = (kind = 'remote') => `(async () => {
   const yes = [...dlg.querySelectorAll('button')].find(b => /確認重新登入|開始登入/.test(b.textContent));
   if (!yes) return { ok: false, why: '確認框沒有確認鈕' };
   await tap(yes);
-  const prog = () => box() && box().querySelector('.dv-prog');
+  const prog = () => box() && box().querySelector('.dv-prog.dv-devconfirm');
   if (KIND === 'local') {
     if (!(await wait(() => calls('ai_cli_login').length === 1))) return { ok: false, why: '確認後沒有開登入終端（ai_cli_login）' };
     if (JSON.stringify(calls('ai_cli_login')[0][1]) !== JSON.stringify({ toolId: 'claude' })) return { ok: false, why: '開的不是 Claude 的登入：' + JSON.stringify(calls('ai_cli_login')[0][1]) };
@@ -65,7 +62,7 @@ export const dreloginProbeSource = (kind = 'remote') => `(async () => {
   const close = [...box().querySelectorAll('button')].find(b => b.textContent.trim() === '關閉');
   if (!close) return { ok: false, why: '結果沒有關閉鈕' };
   await tap(close);
-  if (!(await wait(() => box() && [...box().querySelectorAll('button')].some(b => b.textContent.trim() === '重新登入 Claude')))) return { ok: false, why: '關閉後沒有回到只有按鈕' };
+  if (!(await wait(() => entryBtn() && !prog()))) return { ok: false, why: '關閉後沒有回到只有黃色按鈕' };
   return { ok: true, why: '' };
 })()`
 
@@ -73,7 +70,7 @@ const MEMBERS = [
   { id: 'P', agents: [{ name: 'asn真', status: 'idle', cwd_label: 'asn' }] },
   { id: 'Q', agents: [{ name: '雯', status: 'idle', cwd_label: 'asn' }] },
 ]
-const ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'devices' }, windows: [], panelWindows: [] } }
+const ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'accounts' }, windows: [], panelWindows: [] } }   // 設定的「帳號」頁（#1860：設備詳情沒有帳號了）
 
 const CASES = [
   { name: 'list-drelogin-remote', kind: 'remote', shot: 'list-drelogin-remote.png' },
@@ -85,15 +82,18 @@ export default {
   key: 'drelogin',
   kind: '電腦版重新登入 Claude 檢查',
   source: probe => dreloginProbeSource(typeof probe.drelogin === 'string' ? probe.drelogin : 'remote'),
-  scenarios: CASES.map(c => ({ name: c.name, page: 'list.html', width: 1100, height: 760, state: { signedIn: true, drelogin: c.kind }, ready: '#app.win .dv-set', probe: { drelogin: c.kind }, ...(c.shot ? { shot: c.shot } : {}) })),
+  scenarios: CASES.map(c => ({ name: c.name, page: 'list.html', width: 1100, height: 760, state: { signedIn: true, drelogin: c.kind }, ready: '#app.win .dv-my .dv-acct', probe: { drelogin: c.kind }, ...(c.shot ? { shot: c.shot } : {}) })),
   // 這台（P）與辦公室（Q）：本機情境讓這台的 Claude 登入失效；別台情境讓 Q 回報登入失效（healthy 是正常）；送出要求與查狀態都只記下來
   table: (scenario, t) => {
     const kind = scenario.state?.drelogin
     if (!kind) return undefined
     const reportedAt = new Date(Math.floor((Date.now() - 3 * 60_000) / 60_000) * 60_000).toISOString()
     const failed = kind !== 'healthy'
-    const q = { accounts: [{ vendor: 'claude', email: 'q@example.com', plan: 'max', current: true, ...(failed ? { login_failed: true } : {}) }], asn_online: true, reported_at: reportedAt }
+    const q = { accounts: [{ vendor: 'claude', email: 'me@example.com', plan: 'max', current: true, ...(failed ? { login_failed: true } : {}) }], asn_online: true, reported_at: reportedAt }
+    // 帳號頁的名單：同一個帳號（me@）本機與辦公室（Q）都在用，登入失效的那一列出黃色鈕
+    const roster = { now: reportedAt, accounts: [{ vendor: 'claude', account: 'me@example.com', plan: 'claude_max', seen_at: reportedAt, seen_node: 'P', nodes: [{ node: 'P', current: true, reported_at: reportedAt }, { node: 'Q', current: true, reported_at: reportedAt }], windows: [] }] }
     return {
+      acct_roster: roster,
       relay_list: { members: MEMBERS },
       store_load: { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(ME) } },
       relay_launchers: { machines: [{ node: 'Q', online: true, launcher: { profiles: [] } }] },

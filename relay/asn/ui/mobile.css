@@ -145,8 +145,8 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-tag.on{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
 .m-dv-tag.me{border:1px solid var(--line);background:none}
 .m-dv-body.off{filter:grayscale(.35);opacity:.8}
-.m-dv-vendors{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
-.m-dv-vendor{border:1px solid var(--line);border-radius:8px;background:var(--panel);overflow:hidden}
+.m-dv-block{display:flex;flex-direction:column;gap:var(--sp-2);margin:0 0 var(--sp-3);padding:var(--sp-3);border:1px solid var(--danger,#b3261e);border-radius:var(--sp-2);background:var(--panel-soft)}
+.m-dv-block p{margin:0;line-height:1.5}
 .m-term-preview{white-space:pre-wrap;word-break:break-word;font-family:Consolas,monospace;font-size:13px}
 .m-perm-text{max-height:40vh;overflow:auto}
 .m-perm-rule{border:0;border-top:1px solid var(--line,#ccc);height:0;margin:6px 0}
@@ -193,12 +193,11 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-segbtn{flex:1;min-height:44px;padding:8px 6px;border:0;background:none;color:var(--muted);font:inherit;font-size:15px;line-height:1.4;cursor:pointer}
 .m-dv-segbtn+.m-dv-segbtn{border-left:1px solid var(--line)}
 .m-dv-segbtn.on{background:var(--accent);color:#fff;font-weight:600}
-.m-dv-subbtn{flex:1;min-height:44px;padding:var(--sp-2) var(--sp-1);border:0;background:none;color:var(--muted);font:inherit;font-size:var(--fs-3);line-height:1.4;cursor:pointer}
-.m-dv-subbtn+.m-dv-subbtn{border-left:1px solid var(--line)}
-.m-dv-subbtn.on{background:var(--accent);color:#fff;font-weight:600}
 /* 帳號卡片的設備列（手機，#2111 ②）：一台一列，左邊設備名（原因在下方一行），右邊的鈕固定 100×40、同一欄靠右；狀態的畫法和電腦版同一套 */
 .m-dv-acct>.m-dv-devs{grid-column:1 / -1;display:flex;flex-direction:column;gap:8px}
 .m-dv-devrow{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}
+.m-dv-logins{list-style:none;margin:var(--sp-3) 0 0;padding:0;display:flex;flex-direction:column;gap:var(--sp-2)}
+.m-dv-loginrow{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);min-width:0;padding:var(--sp-2) var(--sp-3);border:1px solid var(--line);border-radius:var(--sp-2);background:var(--panel)}
 .m-dv-devname{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px;padding-top:2px}
 .m-dv-devn{font-size:15px;overflow-wrap:anywhere}
 .m-dv-devself{margin-left:6px;font-size:12px;color:var(--muted)}
@@ -244,8 +243,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-usable{display:block;font-size:12px;color:#6b7480}
 .m-dv-sw{min-height:40px;min-width:60px;padding:0 14px;border:1px solid #7a9ec4;border-radius:8px;background:linear-gradient(#fdfeff 0 45%,#dfeaf6 50%,#eaf2fb);color:var(--title-fg);font:inherit;font-size:14px;cursor:pointer}
 .m-dv-sw:disabled{opacity:.5}
-.m-dv-none{display:flex;align-items:center;min-height:40px;padding:6px 10px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);font-size:13px;font-style:italic}
-.m-dv-empty{display:flex;align-items:center;justify-content:center;padding:28px 12px;border:1px dashed var(--line);border-radius:8px;background:var(--panel-soft);color:var(--muted);text-align:center}
 .m-ghead-act{flex:none;min-height:36px;min-width:44px;padding:0 10px;border:0;background:none;color:var(--muted);font:inherit;font-size:12px;opacity:.8;cursor:pointer}
 .m-ghead-act:active{opacity:1;background:rgba(0,0,0,.06);border-radius:8px}
 .m-ops-item.picked{border-color:var(--accent);background:#e6f1fc}
