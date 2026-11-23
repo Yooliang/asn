@@ -100,6 +100,33 @@ test('#1760-2：xterm 還沒建好時收到的畫面不丟，建好立刻補畫�
   assert.ok(v.events.some(e => e[0] === 'screen' && e[1].text === '最新的一幅'))
 })
 
+test('#1760-2：start 還沒回來（還不知道 id）就收到的畫面不丟，回來後是這一次的就補畫、別的丟掉', async () => {
+  const f = fakeApi()
+  let release
+  const gate = new Promise(r => { release = r })
+  const origStart = f.api.start
+  f.api.start = async (...a) => { await gate; return origStart(...a) }
+  const v = mount(f.api)
+  await until(() => f.handlers[END_EVENT], '已註冊監聽、卡在發起')
+  f.handlers[FRAME_EVENT](frame('i1', '搶先到的一幅'))
+  release()
+  await until(() => v.st.phase.value === 'typing', '補畫後進到打字')
+  assert.match(terms.at(-1).writes.join(''), /搶先到的一幅/)
+
+  const g = fakeApi()
+  let rel2
+  const gate2 = new Promise(r => { rel2 = r })
+  const o2 = g.api.start
+  g.api.start = async (...a) => { await gate2; return o2(...a) }
+  const w = mount(g.api)
+  await until(() => g.handlers[END_EVENT], '第二格卡在發起')
+  g.handlers[FRAME_EVENT](frame('別台的', '不是這一次的'))
+  rel2()
+  await until(() => w.st.phase.value === 'waiting', '連上、等畫面')
+  await tick(10)
+  assert.equal(w.st.phase.value, 'waiting', 'id 對不上的那一幅不畫')
+})
+
 test('#1760-3：掛上時 active 是 false：不啟動、不顯示等待；變 true 才啟動', async () => {
   const f = fakeApi()
   const v = mount(f.api, { active: false })

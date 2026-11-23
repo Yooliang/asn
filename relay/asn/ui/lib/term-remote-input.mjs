@@ -142,6 +142,7 @@ export const RemoteInput = {
       cleanup()
       const gen = ++startGen
       const current = () => alive && gen === startGen && props.active
+      id = ''           // 上一次的 id 不能留著：start 回來前收到的畫面要靠「沒有 id」先暫存（#1760）
       reached = false   // 每次重新發起都重算：這次有沒有真的進過打字，不看上一次（#1760）
       phase.value = 'starting'; note.value = ''; soon.value = false; warn.value = ''; lastDropped = 0
       try {
@@ -157,7 +158,9 @@ export const RemoteInput = {
         // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）
         // 註冊完時這一次已作廢（收掉、重新發起、active 變 false）：自己註冊的馬上解除，不動新一次的
         const offF = await props.api.listen(FRAME_EVENT, f => {
-          if (!f || f.id !== id) return
+          if (!f) return
+          if (!id) { pendingFrame = f; return }   // start 還沒回來、不知道這次的 id：先留著，回來後比對 id 再補畫
+          if (f.id !== id) return
           if (!term) { pendingFrame = f; return }
           drawFrame(f)
         })
@@ -176,8 +179,9 @@ export const RemoteInput = {
           term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, current)
           if (!term) { stop(); if (current()) finish(REMOTE_TEXT.failed); return }
           wireTerm()
-          if (pendingFrame) { const f = pendingFrame; pendingFrame = null; drawFrame(f) }   // 建好前收到的那一幅，現在補畫
         }
+        // 建好前（或 start 回來前）收到的那一幅，現在補畫；不是這一次的就丟掉
+        if (pendingFrame) { const f = pendingFrame; pendingFrame = null; if (f.id === id) drawFrame(f) }
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {
