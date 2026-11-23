@@ -154,7 +154,8 @@ fn install_inner(d: &Deps, tools: &Path, work: &Path, platform: &str, rec: &mut 
         let _ = std::fs::remove_file(&new);
         return Err(format!("無法換上新的 agy（可能正在執行，請先關掉用到 Gemini 的夥伴再試）：{e}"));
     }
-    let _ = std::fs::write(tools.join(VERSION_FILE), &rel.version);
+    // 已裝版本的記號（掉了只是多提示一次更新）：純狀態
+    let _ = crate::settings::atomic::write(&tools.join(VERSION_FILE), rel.version.as_bytes(), crate::settings::atomic::STATE);
     Ok(format!("已安裝 agy {}。", rel.version))
 }
 

@@ -17,6 +17,8 @@ pub struct Opts {
 pub const SETTINGS: Opts = Opts { fsync: true, private: false, create_dirs: true };
 /// 裝著還沒送達信件的佇列、pending：斷電後要還在
 pub const QUEUE: Opts = Opts { fsync: true, private: false, create_dirs: true };
+/// 帳號 auth 這類設定：同設定類（fsync），另外只有本人可讀（Unix 0600；Windows 沿用資料夾權限）
+pub const SECRET_SETTINGS: Opts = Opts { fsync: true, private: true, create_dirs: true };
 /// 快取與純狀態：掉了可以重建，不付 fsync 的錢
 pub const STATE: Opts = Opts { fsync: false, private: false, create_dirs: true };
 
@@ -261,7 +263,7 @@ mod tests {
         assert!(include_str!("../cli/send_rate.rs").contains("atomic::STATE"));
     }
 
-    // Windows 鎖定重試（#2162 2b）：另一個執行緒以「完全不共用」的方式開著目標檔，約 500 毫秒後放掉；
+    // Windows 鎖定重試（#2162 2b）：另一個執行緒以「完全不共用」的方式開著目標檔，約 300 毫秒後放掉（重試最多睡 4×200＝800 毫秒，留約 500 毫秒餘裕；原本占 500 只剩約 300，慢 CI 會偶爾紅。選縮短占住時間而不加重試次數，因為正式程式的重試不該為了測試變長）；
     // 統一寫入的 rename 會先被擋（共用違規），重試後成功，內容正確、不留 tmp。
     // 把 RENAME_TRIES 暫時改成 1，這支會紅（第一次被擋就直接回錯）。
     #[cfg(windows)]
@@ -278,7 +280,7 @@ mod tests {
         assert!(std::fs::rename(&probe, &p).is_err(), "占住時改名應該失敗");
         std::fs::remove_file(&probe).unwrap();
         let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            std::thread::sleep(std::time::Duration::from_millis(300));
             drop(held);
         });
         write(&p, "新".as_bytes(), SETTINGS).unwrap();
@@ -296,11 +298,18 @@ mod tests {
 
     #[test]
     fn 內嵌寫入改走統一寫入後每處的類別() {
-        let sites: [(&str, &str, &str, &str, usize); 26] = [
+        let sites: [(&str, &str, &str, &str, usize); 33] = [
             ("partner_queue 名冊 forget／rename", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, v.to_string()", "SETTINGS", 2),
             ("upstream_retry 補送名單", include_str!("../bridge/core/upstream_retry.rs"), "atomic::write(&file, t.as_bytes()", "QUEUE", 1),
             ("pi.rs 收件匣", include_str!("../bridge/engines/pi.rs"), "atomic::write(&target, body.as_bytes()", "QUEUE", 1),
-            ("grok_accounts write_bytes", include_str!("../grok_accounts.rs"), "atomic::write(path, bytes", "SETTINGS", 1),
+            ("grok_accounts write_bytes（帳號 auth，只有本人可讀）", include_str!("../grok_accounts.rs"), "atomic::write(path, bytes", "SECRET_SETTINGS", 1),
+            ("mux_watch 監看狀態", include_str!("../launch/mux_watch.rs"), "atomic::write(file, t.as_bytes()", "STATE", 1),
+            ("pi_setup 自動安裝偏好", include_str!("../launch/pi_setup.rs"), "atomic::write(p, json!(", "SETTINGS", 1),
+            ("account 節點代號檔", include_str!("../account.rs"), "atomic::write(&relay_home.join(\"node\")", "SETTINGS", 1),
+            ("agy_install 版本記號", include_str!("../agent_setup/agy_install.rs"), "atomic::write(&tools.join(VERSION_FILE)", "STATE", 1),
+            ("codex_install 目前版本檔", include_str!("../agent_setup/codex_install.rs"), "atomic::write(&tools.join(CURRENT_FILE)", "SETTINGS", 1),
+            ("agent_setup/proc 登入子程序 pid", include_str!("../agent_setup/proc.rs"), "atomic::write(path, body.to_string()", "STATE", 1),
+            ("engines/mod PidBook", include_str!("../bridge/engines/mod.rs"), "atomic::write(&self.file, body.as_bytes()", "STATE", 1),
             ("quota_readers save_settings", include_str!("../quota_readers.rs"), "atomic::write(&path, text.as_bytes()", "SETTINGS", 1),
             ("pi_setup 安裝記錄", include_str!("../launch/pi_setup.rs"), "atomic::write(&self.marker", "SETTINGS", 1),
             ("lastlogin", include_str!("../lastlogin.rs"), "atomic::write(&dir.join(FILE)", "STATE", 1),
@@ -355,6 +364,12 @@ mod tests {
             ("orphans", include_str!("../bridge/orphans.rs")),
             ("channel_turns", include_str!("../bridge/channel_turns.rs")),
             ("auth_notice", include_str!("../auth_notice.rs")),
+            ("acct_remote", include_str!("../acct_remote.rs")),
+            ("account", include_str!("../account.rs")),
+            ("agy_install", include_str!("../agent_setup/agy_install.rs")),
+            ("codex_install", include_str!("../agent_setup/codex_install.rs")),
+            ("agent_setup/proc", include_str!("../agent_setup/proc.rs")),
+            ("engines/mod", include_str!("../bridge/engines/mod.rs")),
             ("quota_core/merge", include_str!("../quota_core/merge.rs")),
         ] {
             let prod = &src[..prod_end(src)];

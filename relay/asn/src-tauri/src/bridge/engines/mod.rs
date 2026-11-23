@@ -123,7 +123,9 @@ impl PidBook {
         Arc::new(PidBook { file: work_dir.join("engine.pids"), pids: Mutex::new(vec![]) })
     }
     fn save(&self, v: &[u32]) {
-        let _ = std::fs::write(&self.file, v.iter().map(|p| format!("{p}\n")).collect::<String>());
+        // 引擎開的子程序 pid 清單（ASN 被硬砍後下次啟動才用），掉了只是少關一次：純狀態
+        let body: String = v.iter().map(|p| format!("{p}\n")).collect();
+        let _ = crate::settings::atomic::write(&self.file, body.as_bytes(), crate::settings::atomic::STATE);
     }
     pub fn add(&self, pid: u32) {
         if pid == 0 {

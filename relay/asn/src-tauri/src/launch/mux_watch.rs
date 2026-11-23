@@ -97,7 +97,8 @@ impl Watch {
 
     pub fn save(&self, file: &Path) {
         if let Ok(t) = serde_json::to_string(self) {
-            let _ = crate::write_atomic(file, &t);
+            // 監看狀態（看過哪些、斷了哪些），掉了下一輪重建：純狀態
+            let _ = crate::settings::atomic::write(file, t.as_bytes(), crate::settings::atomic::STATE);
         }
     }
 
