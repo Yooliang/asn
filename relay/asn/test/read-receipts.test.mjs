@@ -97,5 +97,5 @@ test('畫面：時間同一行的小字（不增加行高）、只對自己的�
   const css = fs.readFileSync(new URL('../ui/group.css', import.meta.url), 'utf8')
   assert.match(css, /\.read-n\{[^}]*font-size:11px[^}]*\}/)
   assert.doesNotMatch(css.match(/\.read-n\{[^}]*\}/)[0], /display:(block|flex)|margin-top|padding/, '不增加行高')
-  assert.match(css, /prefers-color-scheme:dark\)\{[\s\S]*?\.read-n\{color:#9fb0c3\}\.read-n\.all\{color:#6eb5ff\}\s*\}/)
+  assert.doesNotMatch(css, /prefers-color-scheme/, 'ASN 只有亮色外觀，不跟著系統深色走（#2189）')
 })

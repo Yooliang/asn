@@ -127,7 +127,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-removed-row .asn-btn{flex:none}
 .m-dv-tag.ok{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
 .m-dv-tag.warn{background:#fff3d6;color:#7a4b00;border:1px solid #d9a441}
-@media (prefers-color-scheme:dark){.m-dv-tag.warn{background:#3b2d0c;color:#f2c66b;border-color:#8a6a22}}
 .m-dv-info{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
 .m-dv-info .m-known-edit{align-self:stretch}
 .m-dv-fprow{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0}
@@ -137,7 +136,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-hid-act{display:flex;gap:8px;flex-wrap:wrap}
 .m-dv-danger{color:#b3261e;border-color:#b3261e}
 .m-btn.m-dv-danger{background:#b3261e;color:#fff}
-@media (prefers-color-scheme:dark){.m-dv-danger{color:#ff9a90;border-color:#ff9a90}.m-btn.m-dv-danger{background:#8c1d18;color:#fff}}
 .m-dv-node{display:flex;flex-direction:column;gap:8px;min-width:0}
 .m-dv-dh{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .m-dv-name{margin:0;font-size:17px;color:var(--title-fg)}
@@ -215,7 +213,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-lost{padding:2px 9px;border:1px solid var(--kit-warn-line);border-radius:4px;font-size:var(--fs-1);font-weight:600;color:var(--kit-warn)}
 .m-dv-devconfirm{margin:0 0 var(--sp-2)}
 .m-dv-dev.blocked,.m-dv-dev.blocked:disabled{background:transparent;border:1px dashed var(--muted);color:var(--muted);opacity:.8}
-@media (prefers-color-scheme:dark){.m-dv-dev.current,.m-dv-dev.current:disabled{background:#6b727c;border-color:#6b727c;color:#fff}}
 .m-dv-acct.cur{background:var(--panel-soft)}
 .m-dv-mail{min-width:0;font-size:15px;overflow-wrap:anywhere}
 .m-dv-side{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
@@ -224,7 +221,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-quota.stale{color:var(--muted)}
 .m-dv-quota.stale .m-dv-bars{opacity:.55}
 .m-dv-quota.quota-out{color:#b3261e;font-weight:600}
-@media (prefers-color-scheme:dark){.m-dv-quota.quota-out{color:#ff9a90}.m-dv-quota.stale{color:#b4c0cc}}
 .m-dv-cur{padding:2px 9px;border-radius:4px;font-size:12px;font-weight:600;background:var(--accent);color:#fff}
 /* 使用中又登入失效（#1592）：同一格「使用中」（主色）與「登入失效」（紅）約 2 秒交替。兩個字疊在同一個格子，格寬取較寬的那個，交替不會推動旁邊；純 CSS，不靠計時器 */
 .m-dv-cur.failed{display:inline-grid;text-align:center;animation:m-dv-cur-bg 2s steps(1,end) infinite}

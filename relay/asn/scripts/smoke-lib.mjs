@@ -818,7 +818,14 @@ export const shotPath = (name, env = process.env) => path.join(env.ASN_SMOKE_SHO
 /** 要送給 Emulation.setEmulatedMedia 的 prefers-reduced-motion 設定。
  *  情境帶 reducedMotion 就開「減少動態」（交替動畫停住，截圖才每次一樣）；沒帶就明確設成 no-preference，
  *  不依賴瀏覽器預設：CI runner 的 Chrome 可能回報 reduce，讓檢查動畫的情境（例如 m-relogin-anim）全部讀到 none。 */
-export const motionMedia = sc => ({ features: [{ name: 'prefers-reduced-motion', value: sc?.reducedMotion ? 'reduce' : 'no-preference' }] })
+export const motionMedia = (sc, env = process.env) => ({
+  features: [
+    { name: 'prefers-reduced-motion', value: sc?.reducedMotion ? 'reduce' : 'no-preference' },
+    // 環境變數 ASN_SMOKE_DARK=1：模擬作業系統開深色模式（#2189 驗收用）。預設不開；
+    // ASN 只有亮色外觀，開了深色之後畫面也不該有任何一塊變暗
+    ...(env.ASN_SMOKE_DARK === '1' ? [{ name: 'prefers-color-scheme', value: 'dark' }] : []),
+  ],
+})
 export const MROSTER_ME = { navTab: 'me' }
 export const tableFor = scenario => {
   let t = fakeTable(scenario.state)

@@ -56,7 +56,7 @@ test('樣式：操作列平常隱藏，滑過／鍵盤聚焦才出現；手機�
   assert.match(css, /@media \(hover:none\)\{[^@]*\.msg\.act-on \.m-act\{[^}]*opacity:1/)
   assert.ok(!/\.reply-btn\{[^}]*opacity:0/.test(css), '回覆鈕自己不再各自隱藏，由整列控制')
   assert.match(base, /\.avb-v\{[^}]*background:#fff/, '白底小方塊，淺色深色都清楚')
-  assert.match(base, /@media \(prefers-color-scheme:dark\)\{\.avb-v\{box-shadow:/, '深色模式有外框')
+  assert.doesNotMatch(base, /prefers-color-scheme/, 'ASN 只有亮色外觀，不跟著系統深色走（#2189）')
 })
 
 test('手機點訊息切換操作列：連結、按鈕、引用不算', () => {
