@@ -127,6 +127,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-replace-err{color:var(--danger,#c0392b)}
 .m-dv-replace-list{list-style:none;margin:0;padding:0}
 .m-dv-replace-opt{display:flex;align-items:center;gap:var(--sp-2);min-height:48px;cursor:pointer}
+.m-dv-replace-opt input{flex:none;width:auto;min-width:0;margin:0}
 .m-dv-replace-tx{display:flex;flex-direction:column;min-width:0}
 .m-dv-replace-btns{display:flex;gap:var(--sp-2);justify-content:flex-end;flex-wrap:wrap}
 .m-dv-removed{margin-top:var(--sp-3)}
