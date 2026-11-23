@@ -103,7 +103,7 @@ export const SettingsPanel = {
     }
     // 鍵盤：把手聚焦後按上下鍵移動一格（順序沒有上移／下移鈕，#1860）
     const gripKey = (key, ev) => { if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') { ev.preventDefault(); act('device-move', { node: key, dir: ev.key === 'ArrowUp' ? -1 : 1 }) } }
-    const rowLine = d => deviceRowLine(d, DEVICE_TEXT.thisDevice)
+    const rowLine = d => deviceRowLine(d)
     const dragOver = (key, ev) => {
       if (!dragKey.value || dragKey.value === key) return
       ev.preventDefault()

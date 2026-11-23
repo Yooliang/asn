@@ -136,7 +136,6 @@ export const DEVICE_TEXT = {
   restore: '恢復',
   empty: '還沒有設備。',
   detail: '詳情',
-  thisDevice: '這台',
   forget: '忘記',
   gripLabel: name => `拖曳調整「${name}」的順序，或按鍵盤的上下鍵`,
   detailLabel: name => `查看「${name}」的詳情`,
@@ -145,5 +144,5 @@ export const DEVICE_TEXT = {
   confirmRemove: name => `確定永久移除「${name || '這台設備'}」嗎？它的對話與帳號資料不會被刪除，只是不再顯示。`,
 }
 
-// 設備列第二行（電腦、手機同一個函式，#1860）：「電腦 · 在線」「手機 · 離線中」，本機再接「這台」／「這支手機」。離線一律寫「離線中」
-export const deviceRowLine = (d, selfText = '') => [d?.kindLabel || d?.kind || '電腦', d?.online ? '在線' : '離線中', ...(d?.self && selfText ? [selfText] : [])].join(' · ')
+// 設備列第二行（電腦、手機同一個函式，#1860）：「電腦 · 在線」「手機 · 離線中」，本機那一列只寫「運作中」（不寫「這台」「這支手機」）。離線一律寫「離線中」
+export const deviceRowLine = d => [d?.kindLabel || d?.kind || '電腦', d?.self ? '運作中' : d?.online ? '在線' : '離線中'].join(' · ')

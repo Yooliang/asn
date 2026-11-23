@@ -10,7 +10,7 @@ export const mdevsheetProbeSource = () => `(async () => {
   btn.click(); await sleep(500);
   let opened = false;
   for (const row of [...document.querySelectorAll('.m-dv-row')].filter(vis)) {
-    if ((row.textContent ?? '').includes('這支手機')) continue;
+    if ((row.textContent ?? '').includes('運作中')) continue;   // 本機那一列只寫「運作中」
     [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(300);   // 詳情 → 帳號分頁（#1860）
     const go = document.querySelector('.m-dv-subbtn[data-sub="accounts"]');
     if (!go) continue;

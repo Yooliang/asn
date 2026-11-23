@@ -31,7 +31,7 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
       const names = rows.map(r => r.querySelector('b')?.textContent.trim());
       if (document.querySelector('.m-dv-own')) return { ok: false, why: '列表最上面不該再有「這支手機的名字」區塊' };
       if (names[0] !== ${JSON.stringify(NAME_M)}) return { ok: false, why: '清單第一列寫的是「' + names[0] + '」：' + names.join('、') };
-      if (!rows[0].textContent.includes('這支手機')) return { ok: false, why: '第一列旁邊要有「這支手機」的小標籤' };
+      if (!rows[0].textContent.includes('運作中') || rows[0].textContent.includes('這支手機')) return { ok: false, why: '第一列（本機）只寫「手機 · 運作中」，不寫「這支手機」' };
       if (names.filter(n => n === ${JSON.stringify(NAME_M)}).length !== 1) return { ok: false, why: '同一台被列了不只一次：' + names.join('、') };
       if (document.querySelector('.m-dv-list').textContent.includes('未命名設備')) return { ok: false, why: '清單裡還有「未命名設備」：' + names.join('、') };
       return { ok: true, why: '' };
@@ -67,7 +67,7 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
       };
       if (!await press('設備')) return { ok: false, why: '找不到設定裡的「設備」' };
       // 列表最上面沒有改名區塊了（#1860）：進這支手機自己那一列的「詳情」再改名
-      const selfRow = await wait(() => [...document.querySelectorAll('.m-dv-row')].find(r => vis(r) && r.textContent.includes('這支手機')));
+      const selfRow = await wait(() => [...document.querySelectorAll('.m-dv-row')].find(r => vis(r) && r.textContent.includes('運作中')));   // 本機那一列只寫「運作中」
       if (!selfRow) return { ok: false, why: '找不到這支手機那一列' };
       [...selfRow.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click();
       await sleep(400);

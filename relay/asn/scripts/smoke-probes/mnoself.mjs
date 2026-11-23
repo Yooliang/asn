@@ -18,7 +18,7 @@ export const mnoselfProbeSource = () => `(async () => {
     const go = document.querySelector('.m-dv-subbtn[data-sub="accounts"]');
     if (!go) continue;
     go.click(); await sleep(500);
-    if (name.includes('這支手機')) {
+    if (name.includes('運作中')) {   // 本機那一列只寫「運作中」
       sawSelf = true;
       if ([...document.querySelectorAll('.m-dv-sw')].some(vis)) return { ok: false, why: '「這支手機」的細部頁出現切換鈕' };
     }

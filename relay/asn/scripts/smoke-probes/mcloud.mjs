@@ -20,7 +20,7 @@ export const mcloudProbeSource = () => `(async () => {
   }
   const pc = row('辦公室');
   if (!pc || pc.kind.includes('雲端')) return { ok: false, why: '實體電腦不該標雲端：' + (pc?.kind ?? '找不到') };
-  const me = rows.find(r => r.kind.includes('這支手機'));
+  const me = rows.find(r => r.kind.includes('運作中'));   // 本機那一列只寫「手機 · 運作中」
   if (!me) return { ok: false, why: '找不到這支手機那列' };
   if (!me.kind.startsWith('手機') || me.kind.includes('雲端')) return { ok: false, why: '這支手機要是「手機」、不標雲端：' + me.kind };
   return { ok: true, why: '' };

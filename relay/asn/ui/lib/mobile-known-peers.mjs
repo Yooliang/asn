@@ -26,7 +26,6 @@ export const TEXT = {
   renameCancel: '取消',
   renameLabel: '這台設備的名字',
   renameHint: '所有設備都會顯示這個名字',
-  thisPhone: '這支手機',
   detail: '詳情',
   fpLabel: '指紋',
   firstSeen: t => `第一次見到：${t}`,

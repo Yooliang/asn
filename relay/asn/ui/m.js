@@ -859,7 +859,7 @@ const app = createApp({
     // 認得的電腦紀錄和設備列對起來（列的 key 就是紀錄的 node，指紋圖示用）；永久移除的、只剩紀錄的收進「已移除的設備」一塊（名單還沒讀到時不列）
     const joined = computed(() => joinKnown(acctAllDevs.value, kp.list))
     const removedBlock = computed(() => removedDevices(acctAllDevs.value, kp.list))
-    const acctRowLine = d => deviceRowLine(d, KNOWN_TEXT.thisPhone)
+    const acctRowLine = d => deviceRowLine(d)
     const curKnown = computed(() => (acctCur.value ? joined.value.byNode[acctCur.value.key] ?? null : null))
     const showHiddenDevice = key => { devPrefs.deviceShown = showDevice(devPrefs.deviceShown, key) }
     // 細部頁：只有 page 是 detail 且那台還在列表裡才有（被移除或消失就退回列表）
