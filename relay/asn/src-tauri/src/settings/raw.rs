@@ -1,6 +1,6 @@
 //! 畫面整份讀、整份存的三個存檔（`asn-me.json`、`asn-onboard.json`、`asn-chats.json`）的後端（#2162 第 6 張）。
 //! 前端經 `store_load`／`store_save` 讀寫整段文字，這裡讓那兩個指令改走共用設定層：
-//! 名稱用白名單、上限 8,000,000 位元組、每個檔一把鎖、原子寫入、壞檔先搬走（chats 是快取，壞了直接退回空的）。
+//! 名稱用白名單、上限 8,000,000 位元組、每個檔一把鎖、原子寫入、整份存檔原文照寫（不讀舊檔、不搬檔）。
 //! 另有 `patch_json`（欄位級合併：只動指定的頂層欄位，其餘原樣保留）與 `me_flags`（Rust 端讀 `asn-me.json` 三個欄位的唯讀讀法）。
 //! 檔名與位置不變；格式也不變（單行 JSON、**不加 `version`**，見下）。
 //!
@@ -91,6 +91,8 @@ pub fn load_text(dir: &Path, name: RawName) -> Option<String> {
     std::fs::read_to_string(&path).ok()
 }
 
+const TOO_BIG: &str = "存檔太大";
+
 fn merge<T: Doc + RawLike>(dir: &Path, patch: Map<String, Value>) -> Result<(), SettingsError> {
     let r = merge_in::<T>(dir, |d| {
         let e = d.extra_mut();
@@ -104,9 +106,17 @@ fn merge<T: Doc + RawLike>(dir: &Path, patch: Map<String, Value>) -> Result<(), 
                 e.insert(k, v);
             }
         }
+        // 合併後的整份也要守上限，超過就不寫
+        if serde_json::to_string(&*e).map(|s| s.len()).unwrap_or(usize::MAX) > MAX_BYTES {
+            return Err(TOO_BIG.to_string());
+        }
+        Ok(())
     })?;
     // 舊檔解析不了：不搬、不寫，白話回報；原因（固定句，不含內容）寫進 log
     r.map_err(|why| {
+        if why == TOO_BIG {
+            return SettingsError(TOO_BIG.into());
+        }
         elog!("[ASN] 設定檔 {}.json 無法合併（{why}），這次沒有存，原檔不動", T::NAME);
         SettingsError("設定檔內容無法合併，這次沒有存".into())
     })
@@ -121,7 +131,7 @@ macro_rules! raw_like {
 }
 raw_like!(MeDoc, OnboardDoc, ChatsDoc);
 
-/// 存整份文字（`store_save`）：只檢查 [`MAX_BYTES`]，超過整筆拒絕、原檔不動；其餘**原文照寫**（不 parse、不重新序列化）。
+/// 存整份文字（`store_save`）：只檢查 [`MAX_BYTES`]，超過整筆拒絕、原檔不動；其餘**原文照寫**（不 parse、不重新序列化、不讀舊檔、不判斷壞檔、不搬檔：整份存的內容就是畫面的全部狀態，直接蓋過去；寫入失敗時原檔不動）。
 /// 畫面的 `JSON.stringify` 遇到孤立的 surrogate 會輸出 `"\ud83d"`（孤立的半個表情符號），serde_json 讀不了這種字串，
 /// 所以這條路一律不經 serde（以前的 `store_save` 也從不解析）。錯誤是固定的白話句，不含系統原文
 pub fn save_text(dir: &Path, name: RawName, text: &str) -> Result<(), String> {
@@ -136,7 +146,7 @@ pub fn save_text(dir: &Path, name: RawName, text: &str) -> Result<(), String> {
     .map_err(bare)
 }
 
-/// 欄位級合併（`settings_patch`）：舊檔一定要 parse 才能合併；舊檔解析不了（壞檔或含孤立 surrogate）就回「設定檔內容無法合併，這次沒有存」，原檔不動、也不當壞檔搬走。
+/// 欄位級合併（`settings_patch`）：合併後的整份超過 [`MAX_BYTES`] 就不寫、回「存檔太大」、原檔不動。舊檔一定要 parse 才能合併；舊檔解析不了（壞檔或含孤立 surrogate）就回「設定檔內容無法合併，這次沒有存」，原檔不動、也不當壞檔搬走。
 /// 對頂層欄位逐一覆蓋，`null` 代表刪除該欄，沒提到的欄位（含不認得的）原樣保留。
 /// 持鎖下重讀原檔、改、寫，兩條執行緒同時改不同欄位不會互相蓋掉
 pub fn patch_json(dir: &Path, name: RawName, patch: Map<String, Value>) -> Result<(), String> {

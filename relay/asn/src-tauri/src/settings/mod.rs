@@ -310,25 +310,23 @@ fn put_text<T: Doc>(path: &Path, text: &str) -> Result<(), SettingsError> {
     })
 }
 
-/// 原文照寫（不 parse、不重新序列化，位元組照原樣）：畫面整份存檔用。持有這個檔的鎖；
-/// 寫入前照常判斷**磁碟上的舊檔**是不是壞檔（`KEEP_BAD` 的型別會先搬走）。呼叫端自己負責內容合不合法
+/// 原文照寫（不 parse、不重新序列化、**不讀舊檔、不判斷壞檔、不搬檔**，位元組照原樣）：畫面整份存檔用。
+/// 整份存的內容就是畫面的全部狀態，覆蓋就是正確結果；持有這個檔的鎖，原子寫入（失敗時原檔不動）。呼叫端自己負責內容合不合法與大小
 pub fn save_raw_in<T: Doc>(dir: &Path, text: &str) -> Result<(), SettingsError> {
     let path = path_in::<T>(dir);
     let slot = slot_of(&path);
     let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
-    let cur = read_and_cache::<T>(&mut g, &path);
-    if matches!(cur.status, LoadStatus::Unreadable { .. }) {
-        return Err(SettingsError("設定檔暫時讀不到（可能被其他程式占用），這次沒有存，稍後再試".into()));
-    }
-    // 先作廢快取：萬一寫到一半失敗，下一次讀照樣重讀
+    // 先作廢快取：寫完（或寫到一半失敗）之後下一次讀照樣重讀
     g.stamp = None;
     g.cached = None;
+    g.bad = None;
     put_text::<T>(&path, text)
 }
 
 /// 欄位級合併用：持鎖讀舊檔、改、寫。舊檔解析不了（壞檔，或含 serde 不收的內容例如孤立的 surrogate）就回 `Ok(Err(reason))`，
 /// **不搬檔、不寫檔**：舊檔可能只是 serde 讀不了而不是真的壞，不能因為要合併就把它搬走
-pub fn merge_in<T: Doc>(dir: &Path, f: impl FnOnce(&mut T)) -> Result<Result<(), String>, SettingsError> {
+/// `f` 回 `Err` 就不寫檔（例如合併後太大），原樣交回
+pub fn merge_in<T: Doc>(dir: &Path, f: impl FnOnce(&mut T) -> Result<(), String>) -> Result<Result<(), String>, SettingsError> {
     let path = path_in::<T>(dir);
     let slot = slot_of(&path);
     let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
@@ -337,7 +335,9 @@ pub fn merge_in<T: Doc>(dir: &Path, f: impl FnOnce(&mut T)) -> Result<Result<(),
         return Ok(Err(reason.clone()));
     }
     let mut v = cur.value.clone();
-    f(&mut v);
+    if let Err(e) = f(&mut v) {
+        return Ok(Err(e));
+    }
     write_locked(&mut g, &path, &cur, &v)?;
     Ok(Ok(()))
 }

@@ -86,6 +86,11 @@ test('這次改的指令都是非同步（todo-next-191）', () => {
     assert.match(body, /slot_of\(&path\)/, `${fn} 要拿這個檔的 slot`)
     assert.match(body, /slot\.lock\(\)/, `${fn} 要持鎖`)
   }
+  // 整份存檔（store_save）：持鎖後直接原子寫入，不讀舊檔、不判斷壞檔、不搬檔（二審：搬走後寫入失敗會讓檔案變空）
+  const saveBody = mod.split('pub fn save_raw_in<')[1]?.split('\n}\n')[0] ?? ''
+  assert.match(saveBody, /put_text::<T>\(&path, text\)/)
+  assert.doesNotMatch(saveBody, /read_and_cache|read_fresh|quarantine|read_to_string/)
+  assert.doesNotMatch(raw.split('pub fn save_text')[1]?.split('\n}\n')[0] ?? '', /from_str|serde_json/)
   assert.doesNotMatch(raw, /std::fs::write|atomic::write/, '共用層以外不准在 raw.rs 直接寫檔')
   assert.match(mod, /fn slot_of\(path: &Path\) -> Arc<Mutex<Slot>>/)
   assert.match(fs.readFileSync(path.join(SRC, 'ui_log.rs'), 'utf8'), /static APPEND_LOCK: std::sync::Mutex<\(\)>/)

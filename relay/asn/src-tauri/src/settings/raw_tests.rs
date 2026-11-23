@@ -160,16 +160,71 @@ fn 讀取壞檔_回原文_不搬檔不改檔() {
 }
 
 #[test]
-fn me_寫入時壞檔先搬走() {
+fn 整份存檔_舊檔是壞檔也直接蓋過去_不留備份() {
+    // 整份存的內容就是畫面的全部狀態，覆蓋就是正確結果；save_text 不讀舊檔、不判斷、不搬檔
     let d = tempfile::tempdir().unwrap();
-    for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json")] {
+    for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json"), (RawName::Chats, "asn-chats.json")] {
         put(d.path(), file, "{壞掉");
         save_text(d.path(), name, r#"{"ok":1}"#).unwrap();
         assert_eq!(read(d.path(), file), r#"{"ok":1}"#);
-        let bad = files_with(d.path(), &format!("{file}.bad-"));
-        assert_eq!(bad.len(), 1, "{file}");
-        assert_eq!(read(d.path(), &bad[0]), "{壞掉", "備份是原本的壞內容");
     }
+    assert!(files_with(d.path(), ".bad-").is_empty());
+}
+
+#[test]
+fn 整份存檔_舊檔含孤立_surrogate_連續存兩次_不產生備份_也不嘗試搬檔() {
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"keep":1,"s":"\ud83d"}"#;
+    // 讓「搬檔、複製」都失敗：要是 save_text 還去讀舊檔並嘗試搬走（也會寫 log），就會因此回錯
+    migrate::FAIL_RENAME.with(|f| f.set(true));
+    migrate::FAIL_COPY.with(|f| f.set(true));
+    let mut results = vec![];
+    for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json"), (RawName::Chats, "asn-chats.json")] {
+        put(d.path(), file, old);
+        for i in 0..2 {
+            let text = format!(r#"{{"n":{i},"s":"\ud83d"}}"#);
+            results.push((file, save_text(d.path(), name, &text)));
+            assert_eq!(read(d.path(), file), text);
+        }
+    }
+    migrate::FAIL_RENAME.with(|f| f.set(false));
+    migrate::FAIL_COPY.with(|f| f.set(false));
+    for (file, r) in results {
+        assert!(r.is_ok(), "{file}：{r:?}");
+    }
+    assert!(files_with(d.path(), ".bad-").is_empty());
+}
+
+#[test]
+fn 整份存檔_寫入失敗時原檔逐字不變_回白話錯誤() {
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"keep": 1,
+ "s":"\ud83d"}"#;
+    for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json"), (RawName::Chats, "asn-chats.json")] {
+        put(d.path(), file, old);
+        FAIL_WRITE.with(|f| f.set(true));
+        let r = save_text(d.path(), name, r#"{"new":1}"#);
+        FAIL_WRITE.with(|f| f.set(false));
+        let e = r.unwrap_err();
+        assert!(!e.contains("os error"), "{e}");
+        assert_eq!(std::fs::read(d.path().join(file)).unwrap(), old.as_bytes(), "{file} 原檔逐字不變");
+    }
+    assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".tmp").is_empty());
+}
+
+#[test]
+fn 修補_合併後超過上限就不寫_原檔不動() {
+    let d = tempfile::tempdir().unwrap();
+    // 兩邊各約 5MB：單獨都沒超過，合起來超過 8,000,000
+    let old = format!(r#"{{"a":"{}"}}"#, "x".repeat(5_000_000));
+    put(d.path(), "asn-chats.json", &old);
+    let e = patch_json(d.path(), RawName::Chats, obj(json!({"b": "y".repeat(5_000_000)}))).unwrap_err();
+    assert_eq!(e, "存檔太大");
+    assert_eq!(read(d.path(), "asn-chats.json"), old);
+    // 蓋掉同一欄、合併後沒變大：照常寫
+    patch_json(d.path(), RawName::Chats, obj(json!({"a": "z"}))).unwrap();
+    assert_eq!(read(d.path(), "asn-chats.json"), r#"{"a":"z"}"#);
+    assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".tmp").is_empty());
 }
 
 #[test]
@@ -187,20 +242,6 @@ fn chats_壞了退回空的_不產生備份() {
     save_text(d.path(), RawName::Chats, r#"{"friends":[],"logs":{}}"#).unwrap();
     assert_eq!(read(d.path(), "asn-chats.json"), r#"{"friends":[],"logs":{}}"#);
     assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".bak").is_empty());
-}
-
-#[test]
-fn 壞檔搬不走時寫入回白話錯誤_原檔不動() {
-    let d = tempfile::tempdir().unwrap();
-    put(d.path(), "asn-me.json", "{壞掉");
-    migrate::FAIL_RENAME.with(|f| f.set(true));
-    migrate::FAIL_COPY.with(|f| f.set(true));
-    let r = save_text(d.path(), RawName::Me, r#"{"a":1}"#);
-    migrate::FAIL_RENAME.with(|f| f.set(false));
-    migrate::FAIL_COPY.with(|f| f.set(false));
-    let e = r.unwrap_err();
-    assert!(!e.contains("os error"), "{e}");
-    assert_eq!(read(d.path(), "asn-me.json"), "{壞掉");
 }
 
 /// 每個 Doc 型別都要把不認得的欄位實際留下來（型別層的 `extra()` 擋掉「忘了宣告」，這裡擋掉「宣告了但沒接起來」）
