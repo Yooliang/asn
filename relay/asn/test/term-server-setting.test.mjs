@@ -76,7 +76,7 @@ test('接線：指令在清單裡、樞紐會分派、前端只呼叫存檔的�
 test('守門：改設定只存檔，不動執行中的終端服務（已開著的夥伴不被搬動或關掉）', () => {
   const rust = fs.readFileSync(new URL('../src-tauri/src/bridge/mod.rs', import.meta.url), 'utf8')
   const f = rust.split('pub fn set_term_server(')[1].split('pub fn set_unaddressed_to')[0]
-  assert.ok(f.includes('write_settings(') && f.includes('term_server_locked()'), '存檔，而且被固定時拒絕')
+  assert.ok(f.includes('update_settings(') && f.includes('term_server_locked()'), '存檔，而且被固定時拒絕')
   // 只擋明確的服務操作；讀 win_term 的「被固定」旗標是必要的（所以不能擋 term::）
   assert.ok(!/set_use_mux|kill_tree|\.stop\(|stop_if_empty|reclaim|LiveTerms|mux_handle/.test(f), '這個函式不碰執行中的終端服務：' + f)
   const cmd = fs.readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8').split('fn bridge_set_term_server(')[1].split('}')[0]

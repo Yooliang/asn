@@ -24,7 +24,8 @@ test('接線：預設開（舊後端沒有欄位也顯示開著）、開關呼�
 
 test('Rust：存在 bridge.json 的 mobile_view_off（預設開）；指令有登記', () => {
   assert.match(mod, /mobile_view: !s\.mobile_view_off/)
-  assert.match(mod, /mobile_view_off: flag\("mobile_view_off"\)/)
+  assert.match(mod, /mobile_view_off: d\.mobile_view_off/)
+  assert.match(read('../src-tauri/src/settings/docs.rs'), /deserialize_with = "lenient"\)\]\s*pub mobile_view_off: bool/, '逐欄容錯與預設（缺欄位＝開）在 BridgeDoc')
   assert.match(lib, /fn bridge_set_mobile_view\(/)
   assert.match(lib, /bridge_set_perm_phone, bridge_set_mobile_view,/)
 })

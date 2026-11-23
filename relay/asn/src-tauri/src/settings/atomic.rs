@@ -230,10 +230,9 @@ mod tests {
     // 每處以「呼叫的開頭」當錨點，檢查同一行用的是哪個 Opts。
     #[test]
     fn 佇列與設定的寫入點用的是會fsync的類別() {
-        let sites: [(&str, &str, &str, &str); 7] = [
+        let sites: [(&str, &str, &str, &str); 6] = [
             ("acct_remote.rs outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE"),
-            ("settings/mod.rs write_locked（視窗名稱、帳號偏好、安裝偏好、pi 自動安裝、讀額度都從這裡寫）", include_str!("mod.rs"), "atomic::write(path, text.as_bytes()", "SETTINGS"),
-            ("bridge/mod.rs write_settings", include_str!("../bridge/mod.rs"), "atomic::write(&settings_path(", "SETTINGS"),
+            ("settings/mod.rs write_locked（視窗名稱、帳號偏好、安裝偏好、pi 自動安裝、讀額度、收發室設定、啟動偏好都從這裡寫）", include_str!("mod.rs"), "atomic::write(path, text.as_bytes()", "SETTINGS"),
             ("account.rs login_skipped", include_str!("../account.rs"), "atomic::write(&f, b\"1\"", "SETTINGS"),
             ("account.rs device_id", include_str!("../account.rs"), "atomic::write(&f, id.as_bytes()", "SETTINGS"),
             ("bridge/engines/partner_queue.rs 名冊", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS"),
@@ -293,6 +292,30 @@ mod tests {
     /// 正式碼的結尾：「#[cfg(test)] 後面緊接 mod tests」那一個（單一函式上的 #[cfg(test)] 不算）；找不到就整份都是正式碼
     fn prod_end(src: &str) -> usize {
         src.match_indices("#[cfg(test)]").map(|(i, m)| (i, i + m.len())).find(|(_, e)| src[*e..].trim_start().starts_with("mod tests")).map_or(src.len(), |(i, _)| i)
+    }
+
+    /// 切點：行內測試模組（`#[cfg(test)]` 後接 `mod tests {`）之前才是正式碼；只有 `mod tests;`（宣告在別的檔）的檔案整份都是正式碼
+    fn prod_part(src: &str) -> &str {
+        let cut = src.match_indices("#[cfg(test)]").map(|(i, m)| (i, i + m.len())).find(|(_, e)| src[*e..].trim_start().starts_with("mod tests {")).map_or(src.len(), |(i, _)| i);
+        &src[..cut]
+    }
+
+    // #2162 ⑤：bridge.json、launch-prefs.json 的寫入只准經共用層（持鎖、搬壞檔、版本、fsync）；這三個檔的正式碼不准自己寫檔
+    #[test]
+    fn 收發室設定與啟動偏好的正式碼不准自己寫檔() {
+        for (name, src) in [
+            ("bridge/mod.rs", include_str!("../bridge/mod.rs")),
+            ("launch/prefs.rs", include_str!("../launch/prefs.rs")),
+            ("launch/cwds.rs", include_str!("../launch/cwds.rs")),
+        ] {
+            let prod = prod_part(src);
+            assert!(prod.len() > 1000, "{name}：切點切錯了，正式碼只剩 {} 位元組", prod.len());
+            for bad in ["fs::write", "write_atomic", "atomic::write", "File::create", "OpenOptions"] {
+                assert!(!prod.contains(bad), "{name}：正式碼不准出現 {bad}（寫檔一律走 settings 的 update_in／try_update_in）");
+            }
+        }
+        // 切點確實會切掉測試區：cwds.rs 的測試區有 fs::write，掃描不該看到
+        assert!(include_str!("../launch/cwds.rs").contains("std::fs::write"));
     }
 
     #[test]

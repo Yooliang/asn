@@ -8,7 +8,7 @@ pub mod migrate;
 
 pub use docs::NamesDoc;
 #[cfg(desktop)]
-pub use docs::{AcctPrefsDoc, AgentSetupPrefsDoc, PiAutoDoc, QuotaReadersDoc, VoiceDoc};
+pub use docs::{AcctPrefsDoc, AgentSetupPrefsDoc, BridgeDoc, LaunchPrefsDoc, PiAutoDoc, QuotaReadersDoc, VoiceDoc};
 
 use serde::{de::DeserializeOwned, Serialize};
 use std::any::Any;
@@ -110,6 +110,9 @@ pub enum LoadStatus {
     Unreadable { kind: String },
     /// 檔案是更新的版本寫的：照常讀，寫入時保留不認得的欄位且版本號不降
     Newer { file_version: u32 },
+    /// 壞檔，但**沒有動它**：只有唯讀讀取（`peek_in`）會回這個狀態，回預設值；
+    /// 檔案原地不動，之後有人寫入（`update_in`／`save_in`）時才搬成 `.bad-` 再寫。`reason` 是固定的中文原因（不含檔案內容）
+    Corrupt { reason: String },
 }
 
 #[derive(Clone, Debug)]
@@ -148,6 +151,11 @@ struct Cached<T> {
 struct Slot {
     stamp: Stamp,
     cached: Option<Box<dyn Any + Send>>,
+    /// 唯讀讀取看過的壞檔（修改時間與大小都沒變就不重讀、不重記）與原因；`stamp`／`cached` 不會放壞檔的結果，
+    /// 所以之後的 `load_in`／`update_in` 一定會自己重讀、照常把它搬走
+    bad: Option<(Stamp, String)>,
+    /// 唯讀讀取上一次記 log 的時間：同一個檔 60 秒最多記一行
+    last_log: Option<std::time::Instant>,
 }
 
 static SLOTS: Mutex<Option<HashMap<PathBuf, Arc<Mutex<Slot>>>>> = Mutex::new(None);
@@ -190,7 +198,8 @@ fn read_locked<T: Doc>(slot: &mut Slot, path: &Path) -> Cached<T> {
 
 /// 強制重讀（不看快取）並更新快取。暫時讀不到的結果不進快取，下次照樣重讀
 fn read_and_cache<T: Doc>(slot: &mut Slot, path: &Path) -> Cached<T> {
-    let c = read_fresh::<T>(path);
+    let c = read_fresh::<T>(path, true);
+    slot.bad = None;
     if matches!(c.status, LoadStatus::Unreadable { .. }) {
         slot.stamp = None;
         slot.cached = None;
@@ -210,18 +219,22 @@ fn quarantined(path: &Path, reason: &str) -> LoadStatus {
     }
 }
 
-fn read_fresh<T: Doc>(path: &Path) -> Cached<T> {
+/// `mutate`＝true：壞檔會被搬走（`load`／`update` 用）。false：唯讀，壞檔原地不動、回 `Corrupt`，也不記 log（由呼叫端節流後記）
+fn read_fresh<T: Doc>(path: &Path, mutate: bool) -> Cached<T> {
     let fresh = |status| Cached { value: T::default(), status, file_version: 0 };
+    let bad = |reason: &str| if mutate { quarantined(path, reason) } else { LoadStatus::Corrupt { reason: reason.to_string() } };
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return fresh(LoadStatus::Fresh),
         Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
-            return fresh(quarantined(path, "不是合法的文字編碼"));
+            return fresh(bad("不是合法的文字編碼"));
         }
         Err(e) => {
             // 暫時讀不到（被占用、沒權限）：不動檔案，這次回預設
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            elog!("[ASN] 設定檔 {name} 讀不到（{}），這次用預設，也不會寫入", e.kind());
+            if mutate {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                elog!("[ASN] 設定檔 {name} 讀不到（{}），這次用預設，也不會寫入", e.kind());
+            }
             return fresh(LoadStatus::Unreadable { kind: format!("{:?}", e.kind()) });
         }
     };
@@ -236,9 +249,7 @@ fn read_fresh<T: Doc>(path: &Path) -> Cached<T> {
             };
             Cached { value, status, file_version: fv }
         }
-        Err(reason) => {
-            fresh(quarantined(path, &reason))
-        }
+        Err(reason) => fresh(bad(&reason)),
     }
 }
 
@@ -286,6 +297,90 @@ pub fn update_in<T: Doc, R>(dir: &Path, f: impl FnOnce(&mut T) -> R) -> Result<R
     update_at(&path_in::<T>(dir), f)
 }
 
+/// 唯讀讀取：**不搬檔、不備份、不寫檔**。給「只該讀、不該動檔案」的一側用（例如收發室橋讀 `bridge.json`，
+/// 搬檔只准在畫面那一側寫入時發生）。有快取（修改時間與大小沒變就不重讀），熱路徑上不比直接讀檔慢。
+/// 壞檔回預設值與 `Corrupt`，同一個壞檔只讀一次、記一行 `[ASN]` log（之後 60 秒內不再記）；讀到更新版本寫的檔照常讀（`Newer`），不備份。
+pub fn peek_in<T: Doc>(dir: &Path) -> Loaded<T> {
+    peek_at(&path_in::<T>(dir))
+}
+
+/// 同 [`update_in`]，但 `f` 回 `Err` 就**不寫檔**（也不建檔、不備份），原樣把 `Err` 交回。
+/// 給「先驗證、驗不過就不存」的讀改寫用，免得驗不過也白寫一次
+pub fn try_update_in<T: Doc, R, E>(dir: &Path, f: impl FnOnce(&mut T) -> Result<R, E>) -> Result<Result<R, E>, SettingsError> {
+    try_update_at(&path_in::<T>(dir), f)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// 測試用：唯讀讀取實際記了幾行 log
+    pub static PEEK_LOGS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// 測試用：把唯讀讀取看到的「現在」往後撥多久（假時鐘，免得測 60 秒節流要真的等）
+    pub static PEEK_CLOCK_SKEW: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::ZERO) };
+}
+
+fn peek_now() -> std::time::Instant {
+    #[cfg(test)]
+    return std::time::Instant::now() + PEEK_CLOCK_SKEW.with(|s| s.get());
+    #[cfg(not(test))]
+    std::time::Instant::now()
+}
+
+/// 唯讀讀取的 log 節流：同一個檔 60 秒最多一行；`what` 是這一行要講的事
+fn peek_log(g: &mut Slot, path: &Path, what: &str) {
+    let now = peek_now();
+    if g.last_log.is_some_and(|t| now.saturating_duration_since(t) < PEEK_LOG_EVERY) {
+        return;
+    }
+    g.last_log = Some(now);
+    #[cfg(test)]
+    PEEK_LOGS.with(|n| n.set(n.get() + 1));
+    elog!("[ASN] 設定檔 {} {what}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+}
+
+const PEEK_LOG_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn peek_at<T: Doc>(path: &Path) -> Loaded<T> {
+    let slot = slot_of(path);
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    let stamp = stamp_of(path);
+    if stamp == g.stamp {
+        if let Some(c) = g.cached.as_ref().and_then(|b| b.downcast_ref::<Cached<T>>()) {
+            return Loaded { value: c.value.clone(), status: c.status.clone() };
+        }
+    }
+    if let Some((bad_stamp, reason)) = &g.bad {
+        if stamp.is_some() && *bad_stamp == stamp {
+            let reason = reason.clone();
+            // 不重讀；但這個壞檔還在，超過 60 秒就再提醒一行
+            peek_log(&mut g, path, &format!("仍然損毀（{reason}），這次用預設，檔案原地不動"));
+            return Loaded { value: T::default(), status: LoadStatus::Corrupt { reason } };
+        }
+    }
+    let c = read_fresh::<T>(path, false);
+    g.bad = None;
+    match &c.status {
+        LoadStatus::Corrupt { .. } | LoadStatus::Unreadable { .. } => {
+            // 壞檔與暫時讀不到的結果都不進快取；壞檔記下修改時間，同一份不重讀
+            g.stamp = None;
+            g.cached = None;
+            let what = match &c.status {
+                LoadStatus::Corrupt { reason } => {
+                    g.bad = Some((stamp, reason.clone()));
+                    format!("損毀（{reason}），這次用預設，檔案原地不動")
+                }
+                LoadStatus::Unreadable { kind } => format!("讀不到（{kind}），這次用預設"),
+                _ => String::new(),
+            };
+            peek_log(&mut g, path, &what);
+        }
+        _ => {
+            g.stamp = stamp_of(path);
+            g.cached = Some(Box::new(clone_cached(&c)));
+        }
+    }
+    Loaded { value: c.value, status: c.status }
+}
+
 fn load_at<T: Doc>(path: &Path) -> Loaded<T> {
     let slot = slot_of(path);
     let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
@@ -310,6 +405,20 @@ fn update_at<T: Doc, R>(path: &Path, f: impl FnOnce(&mut T) -> R) -> Result<R, S
     let r = f(&mut v);
     write_locked(&mut g, path, &cur, &v)?;
     Ok(r)
+}
+
+fn try_update_at<T: Doc, R, E>(path: &Path, f: impl FnOnce(&mut T) -> Result<R, E>) -> Result<Result<R, E>, SettingsError> {
+    let slot = slot_of(path);
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    let cur = read_and_cache::<T>(&mut g, path);
+    let mut v = cur.value.clone();
+    match f(&mut v) {
+        Ok(r) => {
+            write_locked(&mut g, path, &cur, &v)?;
+            Ok(Ok(r))
+        }
+        Err(e) => Ok(Err(e)),
+    }
 }
 
 // ---------------------------------------------------------------- 以 Roots 為準的正式介面
@@ -351,3 +460,5 @@ fn no_root() -> SettingsError {
 mod tests;
 #[cfg(test)]
 mod moved_tests;
+#[cfg(all(test, desktop))]
+mod bridge_prefs_tests;

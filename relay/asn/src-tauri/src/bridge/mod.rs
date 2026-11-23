@@ -110,18 +110,45 @@ fn term_fetch_status() -> crate::launch::wezterm_fetch::FetchStatus {
     crate::launch::mux::default_base().map_or(none, |b| crate::launch::wezterm_fetch::status(&b))
 }
 
+/// 讀收發室設定。**唯讀**：不搬檔、不寫檔（收發室每輪都讀、橋也在讀，搬檔只准在畫面那一側寫入時發生，見 [`update_settings`]）。
+/// 壞檔、缺檔、型別不對都回預設（壞檔記一行 `[ASN]` log，同一個檔 60 秒最多一行）。有記憶體快取：檔案修改時間與大小沒變就不重讀。
+/// 檔案位置是 `<data_dir>/bridge.json`，`data_dir` 由呼叫端給（無視窗橋給的是節點工作資料夾），所以不走固定的 Scope。
 pub fn read_settings(data_dir: &Path) -> BridgeSettings {
     // 內建收發室固定開啟（擁有者 10-24：預設且不可關閉）；檔案缺少、損壞、寫 false 都一樣
-    BridgeSettings { enabled: true, ..read_settings_raw(data_dir) }
+    doc_to_settings(&crate::settings::peek_in::<crate::settings::BridgeDoc>(data_dir).value)
 }
-fn read_settings_raw(data_dir: &Path) -> BridgeSettings {
-    let Ok(text) = std::fs::read_to_string(settings_path(data_dir)) else { return BridgeSettings::default() };
-    let Ok(v) = serde_json::from_str::<Value>(&text) else { return BridgeSettings::default() };
-    let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off"), remote_input_off: flag("remote_input_off"), compact_handoff_off: flag("compact_handoff_off"), compact_handoff_n: compact::clamp_n(v.get("compact_handoff_n").and_then(Value::as_i64)) }
+fn doc_to_settings(d: &crate::settings::BridgeDoc) -> BridgeSettings {
+    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: d.allow_takeover, allow_remote_launch: d.allow_remote_launch, unaddressed_to: d.unaddressed_to.clone(), auto_resume_off: d.auto_resume_off, term_server_off: d.term_server_off, term_server_on: d.term_server_on, screen_watch_off: d.screen_watch_off, perm_phone_off: d.perm_phone_off, mobile_view_off: d.mobile_view_off, remote_input_off: d.remote_input_off, compact_handoff_off: d.compact_handoff_off, compact_handoff_n: compact::clamp_n(Some(i64::from(d.compact_handoff_n))) }
 }
+/// 只動這 13 個欄位，檔裡不認得的欄位（較新版本寫的）原樣留著
+fn apply_settings(d: &mut crate::settings::BridgeDoc, s: &BridgeSettings) {
+    d.enabled = s.enabled;
+    d.allow_takeover = s.allow_takeover;
+    d.allow_remote_launch = s.allow_remote_launch;
+    d.unaddressed_to = s.unaddressed_to.clone();
+    d.auto_resume_off = s.auto_resume_off;
+    d.term_server_off = s.term_server_off;
+    d.term_server_on = s.term_server_on;
+    d.screen_watch_off = s.screen_watch_off;
+    d.perm_phone_off = s.perm_phone_off;
+    d.mobile_view_off = s.mobile_view_off;
+    d.remote_input_off = s.remote_input_off;
+    d.compact_handoff_off = s.compact_handoff_off;
+    d.compact_handoff_n = compact::clamp_n(Some(i64::from(s.compact_handoff_n)));
+}
+/// 持鎖「讀、改、寫」（一律重讀原檔）：兩處同時改不同欄位不會互相蓋掉。**這是唯一會動 bridge.json 的路徑**；
+/// 檔案是壞的就先搬成 `.bad-` 再寫。寫不進去回固定的白話句（系統原文只進 log）
+pub fn update_settings(data_dir: &Path, f: impl FnOnce(&mut BridgeSettings)) -> Result<(), String> {
+    crate::settings::update_in::<crate::settings::BridgeDoc, _>(data_dir, |d| {
+        let mut s = doc_to_settings(d);
+        f(&mut s);
+        apply_settings(d, &s);
+    })
+    .map_err(|e| e.to_string())
+}
+/// 整份寫入（轉接用，保留舊簽章）：只換這 13 個欄位，不認得的欄位照留。新程式請用 [`update_settings`]，免得拿舊值蓋掉別處剛改的欄位
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
-    crate::settings::atomic::write(&settings_path(data_dir), json!({ "enabled": s.enabled, "allow_takeover": s.allow_takeover, "allow_remote_launch": s.allow_remote_launch, "unaddressed_to": s.unaddressed_to, "auto_resume_off": s.auto_resume_off, "term_server_off": s.term_server_off, "term_server_on": s.term_server_on, "screen_watch_off": s.screen_watch_off, "perm_phone_off": s.perm_phone_off, "mobile_view_off": s.mobile_view_off, "remote_input_off": s.remote_input_off, "compact_handoff_off": s.compact_handoff_off, "compact_handoff_n": compact::clamp_n(Some(i64::from(s.compact_handoff_n))) }).to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())
+    update_settings(data_dir, |cur| *cur = s)
 }
 
 // ---- 執行 --------------------------------------------------------------------------------------
@@ -497,26 +524,26 @@ impl Manager {
 
     /// 打開／關閉「允許我的其他設備替這台開新視窗」。不用重啟橋：每次處理請求和回報名單都重讀設定
     pub fn set_remote_launch(&self, on: bool) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
-        s.allow_remote_launch = on;
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.allow_remote_launch = on;
+        })?;
         Ok(self.status())
     }
 
     /// 打開／關閉「電腦重開後自動接回夥伴」（#767）。下次開機才用到
     pub fn set_auto_resume(&self, on: bool) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
-        s.auto_resume_off = !on;
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.auto_resume_off = !on;
+        })?;
         Ok(self.status())
     }
 
     /// 打開／關閉「壓縮 N 次自動交接」並設定次數（#1852）。次數夾在 2～10；下一輪巡檢就生效
     pub fn set_compact_handoff(&self, on: bool, n: u32) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
-        s.compact_handoff_off = !on;
-        s.compact_handoff_n = compact::clamp_n(Some(i64::from(n)));
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.compact_handoff_off = !on;
+            s.compact_handoff_n = compact::clamp_n(Some(i64::from(n)));
+        })?;
         Ok(self.status())
     }
 
@@ -527,10 +554,10 @@ impl Manager {
         if crate::launch::win_term::term_server_locked() {
             return Err("這個設定已由系統設定固定".into());
         }
-        let mut s = read_settings(&self.data_dir);
-        s.term_server_off = !on;
-        s.term_server_on = on;
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.term_server_off = !on;
+            s.term_server_on = on;
+        })?;
         // Linux 剛打開、而且找不到終端程式：馬上在背景去取（一天內失敗過就照退避不連網），畫面才有狀態可以顯示
         if on && !cfg!(windows) {
             let (env_wez, env_mux) = (std::env::var(crate::launch::win_term::ENV_WEZTERM).ok(), std::env::var(crate::launch::win_term::ENV_MUX).ok());
@@ -554,40 +581,40 @@ impl Manager {
     /// 打開／關閉「夥伴卡住時跳提示」（todo-next-162）。這裡只存檔，馬上生效由呼叫端通知背景工作
     /// 打開／關閉「權限框傳到手機」（#853）。這裡只存檔，馬上生效由呼叫端通知背景工作
     pub fn set_perm_phone(&self, on: bool) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
-        s.perm_phone_off = !on;
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.perm_phone_off = !on;
+        })?;
         Ok(self.status())
     }
 
     /// 打開／關閉「允許移動設備查看終端」。只存檔：被看的這台每次領請求、每次查控制面都重讀設定，不用通知背景工作
     pub fn set_mobile_view(&self, on: bool) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
-        s.mobile_view_off = !on;
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.mobile_view_off = !on;
+        })?;
         Ok(self.status())
     }
 
     /// 打開／關閉「允許遠端在這台打字」（#1745）。只存檔：被打字的這台每次領請求、每次交字前都重讀設定，不用通知背景工作
     pub fn set_remote_input(&self, on: bool) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
-        s.remote_input_off = !on;
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.remote_input_off = !on;
+        })?;
         Ok(self.status())
     }
 
     pub fn set_screen_watch(&self, on: bool) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
-        s.screen_watch_off = !on;
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.screen_watch_off = !on;
+        })?;
         Ok(self.status())
     }
 
     /// 設定「沒指定收件人的信交給哪個視窗」（空＝交給本人）。不用重啟橋：每封信都重讀設定
     pub fn set_unaddressed_to(&self, name: &str) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
-        s.unaddressed_to = name.trim().chars().take(100).collect();
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.unaddressed_to = name.trim().chars().take(100).collect();
+        })?;
         Ok(self.status())
     }
 
@@ -599,10 +626,10 @@ impl Manager {
     }
 
     pub fn set_enabled(&self, on: bool) -> Result<Status, String> {
-        let mut s = read_settings(&self.data_dir);
         let on = on || true;   // 不可關閉：關閉的要求一律當成開啟
-        s.enabled = on;
-        write_settings(&self.data_dir, s)?;
+        update_settings(&self.data_dir, |s| {
+            s.enabled = on;
+        })?;
         if on {
             self.try_start();
         } else {
@@ -623,9 +650,9 @@ impl Manager {
             }
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
         }
-        let mut s2 = s;
-        s2.enabled = true;
-        write_settings(&self.data_dir, s2)?;
+        update_settings(&self.data_dir, |s| {
+            s.enabled = true;
+        })?;
         self.try_start();
         Ok(self.status())
     }
