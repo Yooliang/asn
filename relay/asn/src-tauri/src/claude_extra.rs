@@ -25,7 +25,6 @@ pub const MAX_DIRS: usize = 5;
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const LOCK: &str = ".asn-refresh.lock";
-/// 改名失敗要再試：Windows 上防毒或索引程式短暫開著檔案就會失敗，而這時舊的 refresh token 已經作廢，放棄就要重新登入
 /// 鎖檔放這麼久就當作上一個程式當掉留下的（一次換新最多幾十秒）
 const LOCK_STALE: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -152,7 +151,9 @@ pub fn merged(raw: &Value, got: &Value, now_ms: i64) -> Option<Value> {
     Some(out)
 }
 
-/// 先寫同資料夾的暫存檔再改名：任何一步失敗，舊檔都還在，暫存檔也清掉。改名被占用時的重試由統一寫入處理。
+/// 先寫同資料夾的暫存檔再改名：任何一步失敗，舊檔都還在，暫存檔也清掉。
+/// 改名失敗要再試：Windows 上防毒或索引程式短暫開著檔案就會失敗，而這時舊的 refresh token 已經作廢，放棄就要重新登入。
+/// 重試由 settings::atomic 負責，只認 Windows 的 5／32／33（存取被拒、共用違規、鎖定違規），最多 5 次、每次隔 200 毫秒。
 pub fn write_atomic(path: &Path, value: &Value) -> Result<(), ()> {
     // 憑證只有本人能讀（Unix 0600；Windows 繼承資料夾的權限）；要 fsync；不建父資料夾
     let o = crate::settings::atomic::Opts { fsync: true, private: true, create_dirs: false };
