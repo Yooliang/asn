@@ -15,7 +15,10 @@ const rdAbs = p => fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n')
 const BASELINE = '20261122210000'
 
 // 允許清單：檔名（例如 '20261201000000_foo.sql'）。確實「不是在線門檻」的 3 分鐘（例如某功能自己的逾時）才加進來，必須在這裡寫理由。
-const ALLOW = []
+const ALLOW = [
+  // #2161 第 1 段：relay.online_window() 本體（行尾標 online-window-definition）與三處 done_at（剛開好的窗，不是在線門檻）。其餘在線門檻都已引用 relay.online_window()
+  '20261123120000_online_window.sql',
+]
 
 /** 剝掉 SQL 註解（`--` 到行尾、區塊註解），但保留單引號字串內的內容（字串裡的 -- 不是註解）。 */
 export function stripSqlComments(sql) {
