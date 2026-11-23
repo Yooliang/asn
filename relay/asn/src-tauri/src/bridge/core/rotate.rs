@@ -104,6 +104,11 @@ impl Core {
         self.log.line(&format!("WARN forward-gate-rotate reason={} count={n} rotation={}/{}: same gate denial in a row, replacing the mailbox worker conversation (queued forwards will be resent)", kind.code(), self.rotate.chain, ROTATE_MAX_CHAIN));
         self.rotate_notice(&window, kind, n, false).await;
         self.rotate.resend = true;
+        // 殺掉舊 worker 到新 worker 起來之間（等結束、重啟退避、啟動）可能超過轉交逾時：先把轉交中的信逾時重新算起，才會被重送而不是逾時
+        let now = self.now;
+        for p in self.pending.iter_mut().filter(|p| p.state == State::Forwarding) {
+            p.t0 = now;
+        }
         self.sink.kill();
     }
 

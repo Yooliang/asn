@@ -253,3 +253,48 @@ async fn 紀錄檔暫時讀不到_不算連續被擋_不換輪() {
     deny_n(&mut h, 1, &why_frame(), T0 + 4).await;
     assert!(h.sink.killed.load(Ordering::SeqCst));
 }
+
+#[tokio::test]
+async fn 換輪空檔超過轉交逾時_信仍被重送_不逾時() {
+    let mut h = rig().await;
+    let t = T0 + 110_000; // 信已經等了 110 秒，離 120 秒逾時只剩 10 秒
+    deny_n(&mut h, 3, &why_frame(), t).await;
+    assert!(h.sink.killed.load(Ordering::SeqCst));
+    h.core.on_worker_line(WorkerLine::Exited(None), t + 1_000).await;
+    // 新 worker 還沒起來（結束等待、重啟退避、啟動），已經過了原本的逾時時間
+    h.core.tick(t + 15_000).await;
+    assert_eq!(h.core.pending.len(), 1, "換輪空檔不能讓信逾時");
+    assert!(!h.core.log.has("forward-fail kind=mail-timeout"));
+    h.core.on_worker_line(WorkerLine::Started(2), t + 16_000).await;
+    assert_eq!(h.core.pending.len(), 1);
+    assert_eq!(forwards_of_1(&h), 2, "新的一輪重送");
+}
+
+/// 真實形狀（30家用收發室 worker 的對話紀錄）：tool_result 的鍵是 content、is_error、tool_use_id、type；
+/// is_error=true，content 是字串（也可能是 [{type:"text",text}] 陣列），內容就是閘門的退回理由，前後沒有包裝字樣
+fn real_denied(tid: &str, content: Value) -> Vec<WorkerLine> {
+    let call = json!({"type": "assistant", "message": {"model": "claude-haiku", "content": [{"type": "tool_use", "id": tid, "name": "SendMessage", "input": {"to": "T-乙", "message": "x", "summary": "s"}}]}});
+    let result = json!({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": tid, "is_error": true, "content": content}]}});
+    vec![WorkerLine::Line(call.to_string()), WorkerLine::Line(result.to_string())]
+}
+
+#[tokio::test]
+async fn 真實_tool_result_形狀_字串與陣列都認得_舊理由與新理由都分到類() {
+    let old = "訊息第一行行尾沒有轉交編號"; // #2155 之前的舊理由，24 字，沒有任何前綴
+    assert_eq!(forward_gate::classify_deny(old), Some(DenyKind::NoId));
+    assert_eq!(forward_gate::classify_deny(&why_no_id()), Some(DenyKind::NoId));
+    assert_eq!(forward_gate::classify_deny("收件人應為 T-甲"), Some(DenyKind::WrongTo), "舊的收件人理由");
+    assert_eq!(forward_gate::classify_deny("這個轉交編號不在進行中，請不要轉交"), Some(DenyKind::NotInFlight), "舊理由");
+    assert_eq!(forward_gate::classify_deny("訊息抬頭與橋送出的不一致，請原樣轉交"), Some(DenyKind::HeadMismatch), "舊理由");
+    for (name, mk) in [("字串", 0), ("陣列", 1)] {
+        let mut h = rig().await;
+        for i in 0..3 {
+            let c = if mk == 0 { json!(old) } else { json!([{"type": "text", "text": old}]) };
+            for l in real_denied(&format!("toolu_r{i}"), c) {
+                h.core.on_worker_line(l, T0 + 1 + i).await;
+            }
+        }
+        assert!(h.sink.killed.load(Ordering::SeqCst), "{name}形狀：連續三次要換輪");
+        assert!(h.core.log.has("reason=no_id count=3"), "{name}");
+    }
+}
