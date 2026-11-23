@@ -1,15 +1,11 @@
 {
-  "version": "0.2.77",
-  "notes": "- 改善：手機設定頁的登出、雲端邀請、檢查更新改用統一的按鈕樣式。（#2105、#2154）",
-  "pub_date": "2026-11-23T03:47:14.197Z",
+  "version": "0.2.78",
+  "notes": "- 改善：設備頁的帳號改成一行加狀態標籤，點了就跳到帳號頁那張卡。（#2111、#1879、#2153）\n- 改善：拿掉「夥伴停在一個選單」提醒框。（#1799、#2157）",
+  "pub_date": "2026-11-23T04:51:22.220Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9oV0dONEhvbDVHbVlKY0ZSR3hkcnBmTnpJRGRlaXE3eGVUcnNVWHFFeDZ1bStGbUN6dUVPQWNKMkhIV0hsQXZCS1FwYloxS0xnanJDWk9ra1ZlWlFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDA1NjMzCWZpbGU6QVNOXzAuMi43N194NjQtc2V0dXAuZXhlCnRuVlFIUmZsTWIxSXFCM0NuMm8zN0ZqWkl2UGZWUWtNd0ltYlRqbjZuRWVVWWtvTThaSWlWTS9rMFN3d015QisvZTI0UEhTWlBjbncwNWttNDMwZ0RRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.77_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNSWkRUNjBUak9CVGh6YWZ5bFF6WlpJRTlXWmY0eDZFL2RGL2pteW5ZOTFYOExGd1NoQmxJaSt0WHNDUDkraVJjOEVLc240SldRR0kyRy9rUkhCZ2dnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDA2MjAxCWZpbGU6QVNOXzAuMi43N19hbWQ2NC5BcHBJbWFnZQpQbWtVb29lS0NoR0dQQTNNRFdtUG9MdVcwRzMvYWt2ZGlZb216SUtGMFJ1RVN5em4reWZEa3RKN052L2NFOWx6SmJTbnNiWHE5NE5YN0wvTTR1YVFBdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.77_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnduNlVXa3pvL24xbUJ6Y3dqVkxqYW5hNkRCY1JaeHIzYndWNk84SmlKd3pWN0VheTFhZWsyYlpxb0hpaWNZREExSTN4dVhBcjVyQ0ZLTjB0eWNldHdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDA5NDgxCWZpbGU6QVNOXzAuMi43OF94NjQtc2V0dXAuZXhlCnNqczdBWU53eDk4c25KQW8vSklnQnRZZUNWNTlxcXVzU2hiOWJ4L3U4K25PY3JnN01HWFBrejhHUXZ0Sm9yZHFkTlJHRlRjV2plSGMzQW5GRm1iOEN3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.78_x64-setup.exe"
     }
   }
 }
