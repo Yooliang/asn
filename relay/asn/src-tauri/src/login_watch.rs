@@ -4,7 +4,7 @@
 //! 有結構化欄位 `isApiErrorMessage:true` 與 `error`，不必比對文字。本檔做這幾件事：
 //! 1. 增量讀紀錄新增的行，轉成 [`Ev`]（只有「登入類錯誤」與「真的模型回覆」兩種，欄位只有種類與時間）；
 //! 2. [`Watch`] 狀態機判定失效／恢復／該不該通知；**每個家目錄各一份**（[`Monitor`]），不同家目錄的錯誤與回覆不混算；
-//! 3. [`notice`] 組通知的四個欄位（純函式），經 [`OwnerNotifier`] 交給後台動作 `acct_login_alert`，
+//! 3. [`notice`] 組通知的三個欄位（純函式），經 [`OwnerNotifier`] 交給後台動作 `acct_login_alert`，
 //!    收件人與內文由後台決定，這裡不指定收件人。
 //!
 //! 隱私規定（asn真 審 #579）：讀紀錄只取 `type`／`isApiErrorMessage`／`error`／`model`／`usage` 是否存在／時間戳；
@@ -335,10 +335,10 @@ pub fn forward_timeouts_between(lo_ms: i64, hi_ms: i64) -> u32 {
 }
 
 // ---------- 通知（純函式＋出口） ----------
-/// 送給後台的四個欄位（後台依節點查擁有者與組內文；時間一律 UTC）
+/// 送給後台的三個欄位（後台依節點查擁有者與設備名、組內文；時間一律 UTC）。
+/// 不送電腦主機名稱：通知裡的設備名只認後台記的名字（設備頁同一份，#1881）
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Notice {
-    pub computer: String,
     /// 最後一次登入錯誤的時間，UTC ISO 8601
     pub last_at: String,
     /// 目前帳號 email；讀不到或格式不像 email 就是 None
@@ -348,9 +348,9 @@ pub struct Notice {
 }
 
 impl Notice {
-    /// 後台動作 `acct_login_alert` 的 body：只有四個欄位，沒有收件人、沒有錯誤原文
+    /// 後台動作 `acct_login_alert` 的 body：只有三個欄位，沒有收件人、沒有設備名、沒有錯誤原文
     pub fn payload(&self) -> Value {
-        json!({ "computer": self.computer, "last_at": self.last_at, "email": self.email, "timeouts": self.timeouts })
+        json!({ "last_at": self.last_at, "email": self.email, "timeouts": self.timeouts })
     }
 }
 
@@ -363,13 +363,11 @@ pub fn iso_utc(ms: i64) -> String {
     let r = ms.rem_euclid(86_400_000);
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.000Z", r / 3_600_000, r / 60_000 % 60, r / 1000 % 60)
 }
-/// 組通知：只放電腦名、最後錯誤時間、帳號 email、轉交逾時次數
-pub fn notice(computer: &str, last_error_ms: i64, email: &str, timeouts: u32) -> Notice {
-    let computer = clean(computer, 40);
+/// 組通知：只放最後錯誤時間、帳號 email、轉交逾時次數
+pub fn notice(last_error_ms: i64, email: &str, timeouts: u32) -> Notice {
     let email = clean(email, 100).to_lowercase();
     let email_ok = email.contains('@') && !email.contains(char::is_whitespace);
     Notice {
-        computer: if computer.is_empty() { "這台電腦".to_string() } else { computer },
         last_at: iso_utc(last_error_ms),
         email: email_ok.then_some(email),
         timeouts: timeouts.min(999),
@@ -406,7 +404,6 @@ impl OwnerNotifier for RelayNotifier {
 }
 
 pub struct NoticeCtx {
-    pub computer: String,
     /// 目前帳號 email（讀不到給空字串）
     pub email: String,
 }
@@ -448,7 +445,7 @@ impl Monitor {
         }
         self.injected.clear();
         if let Some(a) = alert {
-            let n = notice(&ctx.computer, a.last_error_ms, &ctx.email, timeouts_since(a.episode_start_ms));
+            let n = notice(a.last_error_ms, &ctx.email, timeouts_since(a.episode_start_ms));
             let which = if a.kind == AlertKind::First { "首次" } else { "提醒" };
             match notifier.notify_owner(&n) {
                 Ok(()) => log(format!("登入失效通知已送出（{which}）")),
@@ -821,7 +818,7 @@ mod tests {
         }
     }
     fn ctx() -> NoticeCtx {
-        NoticeCtx { computer: "工作機".into(), email: "a@x.test".into() }
+        NoticeCtx { email: "a@x.test".into() }
     }
 
     #[test]
@@ -946,7 +943,6 @@ mod tests {
         for bad in ["SECRET", "sk-ant", "機密", "Login expired"] {
             assert!(!all.contains(bad), "通知、log、狀態不含紀錄內容（{bad}）：{all}");
         }
-        assert_eq!(sent[0].computer, "工作機");
         assert_eq!(sent[0].email.as_deref(), Some("a@x.test"));
         assert_eq!(sent[0].timeouts, 2, "逾時次數取自 timeouts_since");
     }
@@ -960,18 +956,16 @@ mod tests {
     }
 
     #[test]
-    fn 通知只有四個欄位_時間是_utc_沒有時差殘留() {
-        let n = notice("工作機", crate::usage::parse_ts_ms("2026-10-30T13:35:00Z").unwrap(), "A@X.test", 3);
-        assert_eq!(n.payload(), json!({ "computer": "工作機", "last_at": "2026-10-30T13:35:00.000Z", "email": "a@x.test", "timeouts": 3 }));
-        assert_eq!(n.payload().as_object().unwrap().len(), 4, "沒有收件人、沒有其他欄位");
-        let n0 = notice("W", 0, "", 0);
-        assert_eq!(n0.payload(), json!({ "computer": "W", "last_at": "1970-01-01T00:00:00.000Z", "email": null, "timeouts": 0 }));
-        let n1 = notice("A\nB\u{0}", 0, "x y@z", 5000);
-        assert!(!n1.computer.contains('\n') && !n1.computer.contains('\u{0}'));
+    fn 通知只有三個欄位_時間是_utc_沒有時差殘留_不帶主機名稱() {
+        let n = notice(crate::usage::parse_ts_ms("2026-10-30T13:35:00Z").unwrap(), "A@X.test", 3);
+        assert_eq!(n.payload(), json!({ "last_at": "2026-10-30T13:35:00.000Z", "email": "a@x.test", "timeouts": 3 }));
+        assert_eq!(n.payload().as_object().unwrap().len(), 3, "沒有收件人、沒有設備名、沒有其他欄位");
+        assert!(n.payload().get("computer").is_none(), "不帶電腦主機名稱（#1881）");
+        let n0 = notice(0, "", 0);
+        assert_eq!(n0.payload(), json!({ "last_at": "1970-01-01T00:00:00.000Z", "email": null, "timeouts": 0 }));
+        let n1 = notice(0, "x y@z", 5000);
         assert_eq!(n1.email, None, "不像 email 就不送");
         assert_eq!(n1.timeouts, 999);
-        assert_eq!(notice("  ", 0, "", 0).computer, "這台電腦");
-        assert_eq!(notice(&"長".repeat(80), 0, "", 0).computer.chars().count(), 40);
         let src = include_str!("login_watch.rs");
         assert!(!src.contains(&["tz_offset", "_min"].concat()), "不再有本機時差殘留");
     }
@@ -1020,16 +1014,16 @@ mod tests {
     }
 
     #[test]
-    fn 真送出_打_acct_login_alert_只帶四個欄位() {
+    fn 真送出_打_acct_login_alert_只帶三個欄位() {
         let (url, seen) = fake_server("200 OK", r#"{"ok":true}"#);
         let relay = std::sync::Arc::new(crate::relay::Relay::new(url, "TEST-KEY".into(), "node-w".into(), "w".into()));
         let n = RelayNotifier { relay };
-        assert_eq!(n.notify_owner(&notice("工作機", 0, "a@x.test", 2)), Ok(()));
+        assert_eq!(n.notify_owner(&notice(0, "a@x.test", 2)), Ok(()));
         let reqs = seen.lock().unwrap();
         assert_eq!(reqs.len(), 1);
         assert!(reqs[0].starts_with("POST /relay?action=acct_login_alert"), "{}", reqs[0]);
         let body: Value = serde_json::from_str(reqs[0].split("\r\n\r\n").nth(1).unwrap()).unwrap();
-        assert_eq!(body, json!({ "computer": "工作機", "last_at": "1970-01-01T00:00:00.000Z", "email": "a@x.test", "timeouts": 2 }));
+        assert_eq!(body, json!({ "last_at": "1970-01-01T00:00:00.000Z", "email": "a@x.test", "timeouts": 2 }));
     }
 
     #[test]
@@ -1037,13 +1031,13 @@ mod tests {
         for (status, body, cat) in [("429 Too Many Requests", r#"{"error":"rate_limited"}"#, "rate_limited"), ("403 Forbidden", r#"{"error":"not_claimed"}"#, "not_claimed"), ("404 Not Found", r#"{"error":"unknown_to_node"}"#, "unknown_to_node")] {
             let (url, seen) = fake_server(status, body);
             let n = RelayNotifier { relay: std::sync::Arc::new(crate::relay::Relay::new(url, "TEST-KEY".into(), "node-w".into(), "w".into())) };
-            assert_eq!(n.notify_owner(&notice("W", 0, "", 0)), Err(cat.to_string()));
+            assert_eq!(n.notify_owner(&notice(0, "", 0)), Err(cat.to_string()));
             assert_eq!(seen.lock().unwrap().len(), 1, "只打一次，不重試");
         }
         // 連不上（沒有人在聽的埠）：網路錯誤，不 panic。0 號埠一定連不上；不用「先綁再放掉」的埠（平行測試的假後端可能剛好拿去用，#994）
         let url = "http://127.0.0.1:0/relay".to_string();
         let n = RelayNotifier { relay: std::sync::Arc::new(crate::relay::Relay::new(url, "TEST-KEY".into(), "node-w".into(), "w".into())) };
-        assert_eq!(n.notify_owner(&notice("W", 0, "", 0)), Err("network".to_string()));
+        assert_eq!(n.notify_owner(&notice(0, "", 0)), Err("network".to_string()));
     }
 
     #[test]

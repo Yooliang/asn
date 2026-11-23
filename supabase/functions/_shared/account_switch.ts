@@ -246,12 +246,13 @@ export async function handleAcctAction(deps: AcctDeps, me: { id: string }, actio
     return { status: 200, body: { ok: true, count: r.data?.count ?? accounts.length } };
   }
   if (action === "acct_login_alert") {
-    // 登入失效通知（0.1.113）：只寄給「這個節點自己的擁有者」，收件人與內文都由資料庫決定；這裡只收四個固定欄位，其餘（含錯誤原文）一律丟掉
+    // 登入失效通知（0.1.113）：只寄給「這個節點自己的擁有者」，收件人與內文都由資料庫決定；這裡只收固定欄位，其餘（含錯誤原文）一律丟掉
+    // computer（舊版 ASN 帶的電腦主機名稱）已不採用：通知裡的設備名由資料庫讀後台記的名字（#1881）；新版 ASN 不帶，舊版帶了仍照舊檢查格式
     const computer = typeof params?.computer === "string" ? params.computer : "";
     const email = params?.email == null ? null : cleanEmail(params.email);
     const timeouts = params?.timeouts == null ? 0 : params.timeouts;
     const lastAt = typeof params?.last_at === "string" && params.last_at.length <= 40 && !Number.isNaN(Date.parse(params.last_at)) ? new Date(params.last_at).toISOString() : null;
-    if (!computer || Array.from(computer).length > 40 || /[\u0000-\u001f\u007f-\u009f]/.test(computer) || !lastAt || (params?.email != null && !email) || !Number.isInteger(timeouts) || timeouts < 0 || timeouts > 999) return fail("bad_request");
+    if (Array.from(computer).length > 40 || /[\u0000-\u001f\u007f-\u009f]/.test(computer) || !lastAt || (params?.email != null && !email) || !Number.isInteger(timeouts) || timeouts < 0 || timeouts > 999) return fail("bad_request");
     const r = await call(deps, "asn_relay_login_alert", { p_node: me.id, p_computer: computer.trim(), p_last_at: lastAt, p_email: email, p_timeouts: timeouts });
     if (isReply(r)) return r;
     const bells: unknown[] = Array.isArray(r.data?.bell_topics) ? r.data.bell_topics : [r.data?.bell_topic];

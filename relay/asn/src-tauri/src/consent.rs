@@ -225,12 +225,12 @@ pub fn prompt_name(peer: &crate::device_id::KnownPeer) -> &str {
     crate::device_id::owner_given_name(peer)
 }
 
-/// 框上要寫的字（純函式）：動作＋本人取的名字（沒有就「未命名的電腦」，去掉控制字元與改變文字方向的字元、最多 32 字）＋指紋前兩組。
+/// 框上要寫的字（純函式）：動作＋本人取的名字（沒有就寫辨認線索「電腦（代號末 4 碼）」，和介面同一套，#1882；去掉控制字元與改變文字方向的字元、最多 32 字）＋指紋前兩組。
 /// 指紋永遠在最後、不會被截掉：名字先處理好長度，再用組合的方式接上；網頁給的字一律不進來。
 /// 最長 2＋34＋1＋9＋1＝47 字，小於外殼的 DESC_MAX（60）
-pub fn describe(action: Action, local_name: &str, fp_grouped: &str) -> String {
+pub fn describe(action: Action, local_name: &str, node: &str, fp_grouped: &str) -> String {
     let cleaned: String = crate::device_id::clean_owner_name(local_name).chars().take(NAME_SHOW_MAX).collect();
-    let name = if cleaned.trim().is_empty() { "未命名的電腦".to_string() } else { format!("「{}」", cleaned.trim()) };
+    let name = if cleaned.trim().is_empty() { format!("「{}」", crate::device_id::unnamed_clue(node, false)) } else { format!("「{}」", cleaned.trim()) };
     let fp: String = fp_grouped.chars().filter(|c| !c.is_control()).take(9).collect();
     match action {
         Action::Confirm => format!("記住{name}（{fp}）"),
@@ -314,23 +314,23 @@ mod tests {
 
     #[test]
     fn 框上的字_動作加本人取的名字加指紋前兩組_沒有名字寫未命名_控制字元和方向字元去掉() {
-        assert_eq!(describe(Action::Confirm, "工作機", FPG), "記住「工作機」（a93c c519）");
-        assert_eq!(describe(Action::Forget, "", FPG), "忘記未命名的電腦（a93c c519）");
-        assert_eq!(describe(Action::Confirm, "甲\n乙", FPG), "記住「甲 乙」（a93c c519）");
-        let s = describe(Action::Confirm, "甲\u{202e}乙\u{2066}丙", FPG);
+        assert_eq!(describe(Action::Confirm, "工作機", "n-x7k2", FPG), "記住「工作機」（a93c c519）");
+        assert_eq!(describe(Action::Forget, "", "n-x7k2", FPG), "忘記「電腦（X7K2）」（a93c c519）");
+        assert_eq!(describe(Action::Confirm, "甲\n乙", "n-x7k2", FPG), "記住「甲 乙」（a93c c519）");
+        let s = describe(Action::Confirm, "甲\u{202e}乙\u{2066}丙", "n-x7k2", FPG);
         assert!(!s.contains('\u{202e}') && !s.contains('\u{2066}'), "{s}");
     }
 
     #[test]
     fn 框上的字_名字很長也不會截掉指紋_名字最多三十二字_總長不超過外殼上限() {
-        let s = describe(Action::Forget, &"長".repeat(200), FPG);
+        let s = describe(Action::Forget, &"長".repeat(200), "n", FPG);
         assert!(s.ends_with("（a93c c519）"), "{s}");
         assert!(s.chars().count() <= DESC_MAX);
         let name_part = s.strip_prefix("忘記「").unwrap().strip_suffix("」（a93c c519）").unwrap();
         assert_eq!(name_part.chars().count(), 32);
         // 最長的一種：32 字名字、忘記／記住
         for act in [Action::Confirm, Action::Forget] {
-            let s = describe(act, &"長".repeat(500), "a93c c519 1f2e 3b4d");
+            let s = describe(act, &"長".repeat(500), "n", "a93c c519 1f2e 3b4d");
             assert!(s.chars().count() <= DESC_MAX, "{}", s.chars().count());
             assert!(s.ends_with("（a93c c519）"));
         }
@@ -339,11 +339,11 @@ mod tests {
 
     #[test]
     fn 框上的字_名字裡假冒的指紋改不了最後真的那一組() {
-        let s = describe(Action::Confirm, "甲」（a93c c519）記住「乙（0000 1111）", FPG);
+        let s = describe(Action::Confirm, "甲」（a93c c519）記住「乙（0000 1111）", "n", FPG);
         assert!(s.ends_with("（a93c c519）"), "{s}");
         let name_part = s.strip_prefix("記住「").unwrap().strip_suffix("」（a93c c519）").unwrap();
         assert!(name_part.chars().count() <= 32, "{name_part}");
-        let s2 = describe(Action::Confirm, &format!("{}（0000 1111）", "甲".repeat(40)), FPG);
+        let s2 = describe(Action::Confirm, &format!("{}（0000 1111）", "甲".repeat(40)), "n", FPG);
         assert!(s2.ends_with("（a93c c519）") && s2.chars().count() <= DESC_MAX, "{s2}");
     }
 
@@ -352,8 +352,8 @@ mod tests {
         assert_eq!(prompt_name(&peer("工作機", true)), "工作機");
         assert_eq!(prompt_name(&peer("工作機", false)), "工作機", "舊的本機小名旗標不再影響");
         assert_eq!(prompt_name(&peer("a93cc519", false)), "");
-        let t = describe(Action::Confirm, prompt_name(&peer("我的指紋 a93c c519", false)), FPG);
-        assert_eq!(t, "記住未命名的電腦（a93c c519）");
+        let t = describe(Action::Confirm, prompt_name(&peer("我的指紋 a93c c519", false)), "n-x7k2", FPG);
+        assert_eq!(t, "記住「電腦（X7K2）」（a93c c519）");
     }
 
     #[test]
@@ -384,8 +384,8 @@ mod tests {
     fn 掃描動作_框上的字_動作代號() {
         assert_eq!(Action::parse("scan"), Some(Action::Scan));
         assert_eq!(Action::parse("Scan"), None);
-        assert_eq!(describe(Action::Scan, "工作機", "a93c c519 1f2e 3b4d"), "核對「工作機」的指紋（a93c c519）");
-        assert_eq!(describe(Action::Scan, "", "a93c c519 1f2e 3b4d"), "核對未命名的電腦的指紋（a93c c519）");
+        assert_eq!(describe(Action::Scan, "工作機", "n-x7k2", "a93c c519 1f2e 3b4d"), "核對「工作機」的指紋（a93c c519）");
+        assert_eq!(describe(Action::Scan, "", "n-x7k2", "a93c c519 1f2e 3b4d"), "核對「電腦（X7K2）」的指紋（a93c c519）");
     }
 
     #[test]
@@ -443,7 +443,7 @@ mod tests {
         let t = Duration::from_secs(1000);
         let mut s = Store::default();
         assert_eq!(Action::parse("input"), Some(Action::Input));
-        assert_eq!(describe(Action::Input, "工作機", FPG), "在「工作機」打字（a93c c519）");
+        assert_eq!(describe(Action::Input, "工作機", "n", FPG), "在「工作機」打字（a93c c519）");
         // 沒帶憑證
         assert_eq!(s.gate_start(Scope::Input, "pc", None, t, |_| true).err().unwrap(), INPUT_NOT_VERIFIED);
         // 本人還沒驗證（憑證檔沒出現）：不算，紀錄留著
