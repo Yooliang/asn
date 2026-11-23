@@ -1,15 +1,11 @@
 {
-  "version": "0.2.81",
-  "notes": "- 修正：信轉不進視窗時，收發室換一輪重送後會給足等待時間，不會一換輪就判定逾時。（#2146、#2166）\n- 新功能：信件一直轉不進視窗時，會通知擁有者需要人工處理；通知送不出去會自動重試。（#2146、#2166）",
-  "pub_date": "2026-11-23T12:27:16.698Z",
+  "version": "0.2.82",
+  "notes": "- 修正：儲存個人設定時，不會再把其他裝置或新版加的設定丟掉。（#2162、#2168）",
+  "pub_date": "2026-11-23T13:36:08.931Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNhWUdQVTdGd1NRTjNIalZSVm1ocVFpWXNLRHVNbFJGajhaSGFHQjZNZWlnUnROWUFnTzNhMGxYSnYrVUU4aksxOFFyMC8yT0JvWkZvY0FwbWRJWFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDM2ODM2CWZpbGU6QVNOXzAuMi44MV94NjQtc2V0dXAuZXhlCmFuK25acUh5QVFjZHh4anBlbExaN0IrTllKcXhMSzBrRVRocVhsbTFVT0ZxdVVERUtqcU81U204RUJ4MEZSR1JnRFdxelFwR0ZFYSs2dFlUd2VUSUNRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.81_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjMwM3RqalNKeUUvZW1PeFVPR3ZVZ2xOV3Q5Slk2UWtQdnkvb1M1MmJVcnpSY0pES0xXcThkekhUMU04Um5vdDRNSjI2bVdqOFpmVlVjb3ZTOVRhZVE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDM3NDM5CWZpbGU6QVNOXzAuMi44MV9hbWQ2NC5BcHBJbWFnZQpvaDQ0K2MvbGdLKzJ2UDI4a2xJSkZqU3FXb0dsSHZPa2I5VzZhWUdWaHdVN3Q1bzhvbXN0Sm1mUkxEUHlobDRCNzlZRHptVlpaa2lOSlc0WDZEeExEUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.81_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhSNVhHNDVobXZ3Z3lpYVMwUk5QemJCOWhWNVN2a0RObjVPSDlxb0FhbkhCQ3hHcFlxNUNaSUdNWFdpSW9NSXpWS1hCeXJQVTBaWmJ0M0doZndhUEE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDQwOTY4CWZpbGU6QVNOXzAuMi44Ml94NjQtc2V0dXAuZXhlCmpZV3pJZ3M0M0xiTTRnRW1aRnlyZ3JxS1NCbkZiRUdUeTJUSms2b3UzY3hDdjVyN290Wm1SREw1NXBiUFNrSVp2Y2tlM09SUkJ5Qk1YNFdBWVVPSUN3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.82_x64-setup.exe"
     }
   }
 }
