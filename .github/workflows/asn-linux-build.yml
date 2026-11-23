@@ -385,7 +385,7 @@ jobs:
         run: cargo check --locked --lib
 
       - name: 跑 Windows 才有的統一寫入測試（目標檔被占住時重試）
-        run: cargo test --locked --lib -j 2 settings::
+        run: "cargo test --locked --lib -j 2 settings::"
 
   # 冒煙測試（畫面啟動，#1973）：獨立 job，與 build 並行。
   # 冒煙只用 runner 自帶的無頭 Chrome 開 relay/asn/ui/*.html，只需要 prep.mjs 產的 vendor，不需要 Rust 成品、
