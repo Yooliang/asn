@@ -74,7 +74,7 @@ test('點列表進細部頁、v-model 輸入框（input 事件）、送出表單
   try {
     // 設備列表 → 點「家用機」的詳情 → 改名
     assert.equal(m.findAll('button[aria-label^="查看"]').length >= 2, true)
-    await m.trigger(m.find('button[aria-label="查看 家用機 的詳情"]'), 'click')
+    await m.trigger(m.find('button[aria-label="查看「家用機」的詳情"]'), 'click')
     assert.equal(m.find('section.dv-dev .dv-name').textContent, '家用機', '進了細部頁')
     await m.trigger(m.findByText('改名'), 'click')
     const input = m.find('input[aria-label="這台設備的名字"]')

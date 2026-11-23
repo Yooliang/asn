@@ -107,42 +107,37 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-row.drop-after::after{bottom:-1px}
 .m-dv-grip{flex:none;width:48px;min-height:48px;display:flex;align-items:center;justify-content:center;border:0;background:none;color:var(--muted);cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none}
 .m-dv-grip-gap{flex:none;width:48px}
-.m-dv-go{flex:1;min-width:0;height:auto;align-self:stretch;display:flex;align-items:center;gap:10px;min-height:56px;padding:0 12px 0 0;border:0;background:none;color:var(--fg);font:inherit;text-align:left;cursor:pointer}
 .m-dv-rn{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;padding:9px 0;line-height:1.35;color:var(--fg)}
 .m-dv-rn b{font-size:16px;font-weight:600;overflow-wrap:anywhere}
 .m-dv-rs{font-size:13px;color:var(--muted)}
 .m-dv-chev{flex:none;font-size:26px;line-height:1;color:var(--muted)}
-.m-dv-row{flex-wrap:wrap}
 .m-dv-btns{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.m-dv-rowbtns{flex-basis:100%;padding:0 12px 10px 48px}
-.m-dv-rowbtns .m-btn{min-height:40px;padding:0 12px}
 /* 點一列才展開它的按鈕（#1539）：選中的那一列有明顯底色；指紋圖示在按鈕外面、跟名字同一行靠右 */
-.m-dv-row.sel{background:#e3effb;box-shadow:inset 3px 0 0 var(--accent)}
-.m-dv-row > .fpm{align-self:center;margin:0 12px 0 0}
-.m-dv-go:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.m-dv-row{align-items:center}
+.m-dv-rowinfo{flex:1;min-width:0;display:flex;align-items:center;gap:10px}
+.m-dv-row > .fpm{margin:0 0 0 8px}
+.m-dv-row > .asn-btn{flex:none;margin:0 12px 0 8px}
+/* 已移除的設備：能恢復的給「恢復」，只剩紀錄的給「忘記」（#1860） */
+.m-dv-removed{margin-top:var(--sp-3)}
+.m-dv-removed summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--link)}
+.m-dv-removed-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.m-dv-removed-row{display:flex;align-items:center;gap:var(--sp-2);min-height:56px;padding:0 var(--sp-3);border-bottom:1px solid var(--line)}
+.m-dv-removed-row:last-child{border-bottom:0}
+.m-dv-removed-row .m-row-tx{flex:1;min-width:0}
+.m-dv-removed-row .asn-btn{flex:none}
 .m-dv-tag.ok{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
 .m-dv-tag.warn{background:#fff3d6;color:#7a4b00;border:1px solid #d9a441}
 @media (prefers-color-scheme:dark){.m-dv-tag.warn{background:#3b2d0c;color:#f2c66b;border-color:#8a6a22}}
-.m-dv-own{display:flex;flex-direction:column;gap:8px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
-.m-dv-nameline{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
-.m-dv-own-l{font-size:13px;color:var(--muted)}
-.m-dv-curname{flex:1;min-width:0;font-size:16px;overflow-wrap:anywhere}
 .m-dv-info{display:flex;flex-direction:column;align-items:flex-start;gap:10px}
 .m-dv-info .m-known-edit{align-self:stretch}
 .m-dv-fprow{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0}
 .m-dv-fp{font-family:ui-monospace,monospace;font-size:15px;overflow-wrap:anywhere}
-.m-dv-old{margin-top:12px}
-.m-dv-old summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--link)}
 .m-dv-tag.hid{border:1px solid var(--line);background:none;color:var(--muted)}
 .m-dv-back{align-self:flex-start;min-height:44px;padding:0 12px;border:0;background:none;color:var(--link);font:inherit;font-size:16px;cursor:pointer}
 .m-dv-hid-act{display:flex;gap:8px;flex-wrap:wrap}
 .m-dv-danger{color:#b3261e;border-color:#b3261e}
 .m-btn.m-dv-danger{background:#b3261e;color:#fff}
 @media (prefers-color-scheme:dark){.m-dv-danger{color:#ff9a90;border-color:#ff9a90}.m-btn.m-dv-danger{background:#8c1d18;color:#fff}}
-.m-dv-removed{margin-top:4px}
-.m-dv-removed-link{min-height:44px;padding:0 4px;border:0;background:none;color:var(--link);font:inherit;font-size:14px;cursor:pointer}
-.m-dv-removed ul{list-style:none;margin:0;padding:0}
-.m-dv-removed li{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:48px;color:var(--fg)}
 .m-dv-node{display:flex;flex-direction:column;gap:8px;min-width:0}
 .m-dv-dh{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .m-dv-name{margin:0;font-size:17px;color:var(--title-fg)}
@@ -192,13 +187,15 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-br{color:var(--muted);white-space:nowrap;font-size:12px}
 .m-dv-bar.done .m-dv-br{color:var(--fg)}
 .m-dv-qmeta{display:flex;flex-wrap:wrap;gap:0 8px;color:var(--muted);font-size:12px}
-.m-dv-old{padding:0 6px;border:1px solid var(--line);border-radius:4px}
 .m-dv-foot{margin:10px 0 0;text-align:center}
 /* 設備與帳號內頁上方的兩個分頁（#650）、設備列的一行 AI 狀態、帳號卡的「用在哪幾台」與「切換到…」 */
 .m-dv-seg{display:flex;gap:0;margin:0 0 12px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel-soft)}
 .m-dv-segbtn{flex:1;min-height:44px;padding:8px 6px;border:0;background:none;color:var(--muted);font:inherit;font-size:15px;line-height:1.4;cursor:pointer}
 .m-dv-segbtn+.m-dv-segbtn{border-left:1px solid var(--line)}
 .m-dv-segbtn.on{background:var(--accent);color:#fff;font-weight:600}
+.m-dv-subbtn{flex:1;min-height:44px;padding:var(--sp-2) var(--sp-1);border:0;background:none;color:var(--muted);font:inherit;font-size:var(--fs-3);line-height:1.4;cursor:pointer}
+.m-dv-subbtn+.m-dv-subbtn{border-left:1px solid var(--line)}
+.m-dv-subbtn.on{background:var(--accent);color:#fff;font-weight:600}
 /* 帳號卡片的設備列（手機，#2111 ②）：一台一列，左邊設備名（原因在下方一行），右邊的鈕固定 100×40、同一欄靠右；狀態的畫法和電腦版同一套 */
 .m-dv-acct>.m-dv-devs{grid-column:1 / -1;display:flex;flex-direction:column;gap:8px}
 .m-dv-devrow{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0}

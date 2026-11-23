@@ -104,14 +104,8 @@ export const inDevicePageOrder = rows => {
   return [...list.filter(d => d?.self === true), ...list.filter(d => d?.self !== true)]
 }
 export const visibleRows = rows => inDevicePageOrder(rows).filter(d => !d.removed)
-export const removedRows = rows => (Array.isArray(rows) ? rows : []).filter(d => d.removed)
 
-// ---------- 列表：排序把手／拖放／上下移（電腦版與手機共用）----------
-// 每列可否上移／下移：本機固定第一不可動；其他設備在非本機列之間移動
-export function moveFlags(rows, selfNode) {
-  const keys = (Array.isArray(rows) ? rows : []).map(r => r.key).filter(k => k !== selfNode)
-  return Object.fromEntries(keys.map((k, i) => [k, { up: i > 0, down: i < keys.length - 1 }]))
-}
+// ---------- 列表：排序把手／拖放（電腦版與手機共用；順序只用拖曳或鍵盤上下鍵，沒有上移／下移鈕，#1860）----------
 // 游標在列的下半部＝插在它後面
 export const dropAfter = (y, top, height) => y > top + height / 2
 // 手機把手拖曳：rows＝每列的 { key, top, height }（畫面由上到下），y＝游標高度；落在列外就用最近的一端
@@ -140,8 +134,14 @@ export const DEVICE_TEXT = {
   hiddenTag: '已隱藏',
   restore: '恢復',
   empty: '還沒有設備。',
-  moveUp: '上移',
-  moveDown: '下移',
-  removedLink: n => `已永久移除（${n}）`,
+  detail: '詳情',
+  forget: '忘記',
+  gripLabel: name => `拖曳調整「${name}」的順序，或按鍵盤的上下鍵`,
+  detailLabel: name => `查看「${name}」的詳情`,
+  removedTitle: n => `已移除的設備（${n}）`,
+  firstConnected: t => `第一次連線 ${t}`,
   confirmRemove: name => `確定永久移除「${name || '這台設備'}」嗎？它的對話與帳號資料不會被刪除，只是不再顯示。`,
 }
+
+// 設備列第二行（電腦、手機同一個函式，#1860）：「電腦 · 在線」「手機 · 離線中」，本機那一列只寫「運作中」（不寫「這台」「這支手機」）。離線一律寫「離線中」
+export const deviceRowLine = d => [d?.kindLabel || d?.kind || '電腦', d?.self ? '運作中' : d?.online ? '在線' : '離線中'].join(' · ')

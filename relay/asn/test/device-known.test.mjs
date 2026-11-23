@@ -24,8 +24,8 @@ test('joinKnown：列的 key＝紀錄的 node；不在畫面列表裡的（含�
   assert.deepEqual(j.old.map(p => p.node), ['R', 'Z'])
   assert.deepEqual(joinKnown(undefined, undefined), { byNode: {}, old: [] })
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  assert.match(panel, /joinKnown\(devs\.value, peers\.value\)/, '只傳畫面上的列，不傳已移除的')
-  assert.match(panel, /return devs\.value\.length \? j : \{ \.\.\.j, old: \[\] \}/, '名單還沒讀到不全歸舊紀錄')
+  assert.match(panel, /joinKnown\(allDevs\.value, peers\.value\)/, '傳全部的列（含已移除的），指紋圖示才對得到')
+  assert.match(panel, /removedDevices\(allDevs\.value, peers\.value\)/, '只剩紀錄的收進「已移除的設備」，名單還沒讀到時不列')
 })
 
 test('「允許替這台登入」：是手機、或已經勾過（不論是不是手機）都要顯示，勾過的一定取消得掉', () => {
@@ -50,12 +50,12 @@ test('shortFp：前 8 字，4 個一組', () => {
   assert.equal(shortFp(''), '')
 })
 
-test('守門：設備列表每列只有 4 個按鈕（上移／下移／帳號／詳情），電腦版畫面沒有「已確認／未確認」', () => {
+test('守門：設備列表每列只有 1 顆按鈕「詳情」（沒有上移／下移／帳號），電腦版畫面沒有「已確認／未確認」', () => {
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const li = panel.slice(panel.indexOf('<li v-for="d in devs"'), panel.indexOf('</li>', panel.indexOf('<li v-for="d in devs"')))
   const btns = [...li.matchAll(/<asn-button[\s\S]*?<\/asn-button>/g)].map(m => m[0].replace(/<[^>]+>/g, '').replace(/\{\{\s*DEVICE_TEXT\.(\w+)\s*\}\}/, '$1'))
-  assert.deepEqual(btns, ['moveUp', 'moveDown', '帳號', '詳情'])
-  assert.ok(li.includes('DEVICE_TEXT.moveUp') && li.includes('DEVICE_TEXT.moveDown'))
+  assert.deepEqual(btns.filter(Boolean), ['detail'], '除了排序把手（沒有文字），只有「詳情」')
+  assert.ok(!li.includes('moveUp') && !li.includes('moveDown'))
   assert.doesNotMatch(panel, /已確認|未確認/)
   assert.ok(li.includes('shortFp(joined.byNode[d.key].fingerprint)') && li.includes('d.phone'))
 })

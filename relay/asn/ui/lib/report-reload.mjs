@@ -24,13 +24,14 @@ export function nextReport(prev, outcome, now) {
 
 /**
  * 這一輪該重讀哪幾台。reports：節點 → 紀錄（可以是手機版存的形狀；failedOf 判斷「這筆是不是讀失敗」，預設看 error，手機版看 msg）。
- * 沒讀過的 → 讀；上次讀失敗的 → 過了 retryMs 才再讀（force＝剛登入，不等）；讀成功的 → 距離上次讀超過 reloadMs 就重讀（沒記時間的視為該重讀）
+ * 沒讀過的 → 讀（離線的也讀一次）；離線中的設備讀過就不再重讀（isOnline 回 false；剛登入 force 也一樣）；上次讀失敗的 → 過了 retryMs 才再讀（force＝剛登入，不等）；讀成功的 → 距離上次讀超過 reloadMs 就重讀（沒記時間的視為該重讀）
  */
-export function reportsDue({ nodes = [], reports = {}, now = Date.now(), retryMs = REPORT_RETRY_MS, reloadMs = REPORT_RELOAD_MS, force = false, failedOf = r => Boolean(r?.error) } = {}) {
+export function reportsDue({ nodes = [], reports = {}, now = Date.now(), retryMs = REPORT_RETRY_MS, reloadMs = REPORT_RELOAD_MS, force = false, failedOf = r => Boolean(r?.error), isOnline = () => true } = {}) {
   return [...new Set(nodes)].filter(n => {
     if (!n) return false
     const rep = reports[n]
-    if (!rep) return true
+    if (!rep) return true   // 沒讀過的（含離線的）至少讀一次
+    if (!isOnline(n)) return false   // 離線中的設備不重讀：不然讀取報錯時每分鐘打一次（#2160 一審）
     if (rep.loading === true) return false   // 手機版：點進去的那次讀取還在跑
     if (failedOf(rep)) return force || shouldRetryReport({ read: true, failedAt: rep.failedAt ?? Number.NaN }, now, retryMs)
     return now - (rep.readAt ?? 0) >= reloadMs
@@ -40,20 +41,35 @@ export function reportsDue({ nodes = [], reports = {}, now = Date.now(), retryMs
 /**
  * 排程：start() 立刻跑一輪（immediate: false 就不跑這一輪）、之後每 everyMs 跑一輪；stop() 停掉（設備頁關掉時呼叫）。
  * run：一輪要做的事（讀該讀的回報）；isOpen：頁面是不是還開著，關了就自己停（保險，防呼叫端漏了 stop）。上一輪還沒跑完不重疊。
+ * isVisible／onVisibleChange：App 在背景（document.visibilityState 不是 visible）時不排程重讀；回到前景（onVisibleChange 的回呼被叫）立刻補一次。
+ * 預設看 document；沒有 document（測試、node）就一直當成在前景
  */
-export function createReportScheduler({ run, isOpen = () => true, everyMs = REPORT_RETRY_MS, setTimer = (f, ms) => setInterval(f, ms), clearTimer = id => clearInterval(id), log = (...a) => console.info(...a) } = {}) {
+const docVisible = () => !globalThis.document || globalThis.document.visibilityState === 'visible'
+const docWatch = cb => {
+  const d = globalThis.document
+  if (!d?.addEventListener) return () => {}
+  d.addEventListener('visibilitychange', cb)
+  return () => d.removeEventListener('visibilitychange', cb)
+}
+export function createReportScheduler({ run, isOpen = () => true, everyMs = REPORT_RETRY_MS, setTimer = (f, ms) => setInterval(f, ms), clearTimer = id => clearInterval(id), log = (...a) => console.info(...a), isVisible = docVisible, onVisibleChange = docWatch } = {}) {
   let timer = null
   let running = false
+  let unwatch = null
   const tick = async () => {
     if (!isOpen()) { stop(); return 0 }
+    if (!isVisible()) return 0   // 背景：不讀，回到前景再補
     if (running) return 0
     running = true
     try { return (await run()) ?? 0 } catch (e) { log('[帳號回報] 自動重讀失敗：', String(e?.message ?? e)); return 0 } finally { running = false }
   }
-  function stop() { if (timer !== null) { clearTimer(timer); timer = null } }
+  function stop() {
+    if (timer !== null) { clearTimer(timer); timer = null }
+    if (unwatch) { unwatch(); unwatch = null }
+  }
   function start({ immediate = true } = {}) {
     if (timer !== null) return
     timer = setTimer(() => { void tick() }, everyMs)
+    unwatch = onVisibleChange(() => { if (isVisible()) void tick() })   // 回到前景立刻補一次
     if (immediate) void tick()
   }
   return { start, stop, tick, get active() { return timer !== null } }

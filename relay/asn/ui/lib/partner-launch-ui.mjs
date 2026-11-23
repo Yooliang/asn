@@ -1,7 +1,7 @@
 // 開新夥伴：設備選單、能否在此設備開啟、顯示方式（前台／背景）。
 import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { isAsnWindow, isDeviceLiveStatus } from './roster.mjs'
-import { applyDeviceOrder, deviceFriends, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
+import { applyDeviceOrder, deviceFriends, isDeviceOnline, isDeviceRemoved, normalizeKeys } from './device-order.mjs'
 import { deviceNameOf } from './device-known.mjs'
 
 export const DISPLAY_MODES = [
@@ -68,13 +68,15 @@ export function canLaunchOnNode(nodeKey, ctx) {
 
 /** 設備列：本機優先，其餘照名單順序 */
 // removed＝使用者「永久移除」的設備（設定 → 設備與帳號）：跟設備頁籤一樣不列出來（本機不會被移除）
-export function launchDeviceRows(allFriends, { selfNode, nodeNames = null, nodeOrder = [], deviceOrder = [], removed = [] }) {
+// withMembers＝名單成員（nodeOrder）裡沒有夥伴視窗的設備也各給一列（設備頁用；手機沒有夥伴視窗，不給列就會從清單消失，#1860）。開新夥伴的設備選單不帶，維持只列有夥伴視窗的
+export function launchDeviceRows(allFriends, { selfNode, nodeNames = null, nodeOrder = [], deviceOrder = [], removed = [], withMembers = false }) {
   const friends = deviceFriends(allFriends)
   const byNode = new Map()
   for (const f of friends) {
     if (isDeviceRemoved(f.node, removed, { selfNode })) continue
     if (!byNode.has(f.node)) byNode.set(f.node, { key: f.node, label: deviceNameOf(f.node, { nodeNames, fallback: f.device }) || f.device || f.node })
   }
+  if (withMembers) for (const n of normalizeKeys(nodeOrder)) if (!byNode.has(n) && !isDeviceRemoved(n, removed, { selfNode })) byNode.set(n, { key: n, label: deviceNameOf(n, { nodeNames }) || n })
   if (!byNode.has(selfNode)) byNode.set(selfNode, { key: selfNode, label: deviceNameOf(selfNode, { nodeNames }) || selfNode })
   const order = [selfNode, ...nodeOrder.filter(n => n !== selfNode)]
   const seen = new Set()

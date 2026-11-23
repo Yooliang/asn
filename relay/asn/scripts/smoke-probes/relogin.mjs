@@ -32,8 +32,8 @@ export const reloginProbeSource = (kind = 'base') => `(async () => {
   const openDevice = async name => {
     const row = await wait(() => [...document.querySelectorAll('.m-dv-row')].filter(vis).find(r => (r.querySelector('.m-dv-rn b')?.textContent ?? '').trim() === name));
     if (!row) return false;
-    await tap(row.querySelector('.m-dv-go'));
-    const go = await wait(() => [...row.querySelectorAll('.m-dv-accbtn')].find(vis));
+    await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));
+    const go = await wait(() => [...document.querySelectorAll('.m-dv-subbtn[data-sub="accounts"]')].find(vis));   // 詳情 → 帳號分頁（#1860）
     if (!go) return false;
     await tap(go);
     return !!(await wait(() => [...document.querySelectorAll('.m-dv-vendor')].some(vis)));

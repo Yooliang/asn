@@ -65,7 +65,7 @@ test('沒回報的顯示「未回報」；手機沒有廠商就寫沒有回報',
 
 test('在線狀態：本機與有 ASN 或有在線視窗的算在線', () => {
   const t = buildDeviceTree(base())
-  assert.deepEqual(t.map(d => d.onlineText), ['在線', '在線', '離線'])
+  assert.deepEqual(t.map(d => d.onlineText), ['在線', '在線', '離線中'])
   assert.equal(deviceSummary(t), '3 台設備，2 台在線')
   assert.equal(deviceSummary([]), '還沒有設備')
 })

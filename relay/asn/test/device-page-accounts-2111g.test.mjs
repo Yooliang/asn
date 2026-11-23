@@ -107,7 +107,7 @@ test('#2111 #1879 後台名單讀不到：帳號行仍然列出（只剩這台�
 test('#2111 #1879 點一行＝送 open-accounts 到帳號頁，帶著要框起的那張卡（電腦）', () => {
   globalThis.Vue = Vue
   const calls = []
-  const props = Vue.reactive({ title: '', st: st(), catKey: 'devices', meAv: '', dev: 'W', devView: 'acct', askRemove: false, removedOpen: false })
+  const props = Vue.reactive({ title: '', st: st(), catKey: 'devices', meAv: '', dev: 'W', devView: 'acct', askRemove: false })
   const r = SettingsPanel.setup(props, { emit: (...a) => calls.push(a) })
   const line = r.linesOf(r.curVendors.value[0]).find(l => l.account === LOST)
   r.goAccount(line)
@@ -139,7 +139,7 @@ const selfState = () => st({
 })
 const selfSetup = (calls) => {
   globalThis.Vue = Vue
-  const props = Vue.reactive({ title: '', st: selfState(), catKey: 'devices', meAv: '', dev: 'H', devView: 'acct', askRemove: false, removedOpen: false })
+  const props = Vue.reactive({ title: '', st: selfState(), catKey: 'devices', meAv: '', dev: 'H', devView: 'acct', askRemove: false })
   return SettingsPanel.setup(props, { emit: (...a) => calls.push(a) })
 }
 

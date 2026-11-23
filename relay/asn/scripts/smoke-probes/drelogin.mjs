@@ -15,10 +15,11 @@ export const dreloginProbeSource = (kind = 'remote') => `(async () => {
   const tap = async el => { el.scrollIntoView({ block: 'center' }); await sleep(120); await real({ click: at(el) }) };
   const wait = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
   const calls = name => (globalThis.__smokeCalls || []).filter(c => c[0] === name);
-  const row = await wait(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => (KIND === 'local') === !!r.querySelector('.dv-tag.me')));
-  if (!row) return { ok: false, why: '設備列表裡找不到' + (KIND === 'local' ? '「這台」' : '別台') };
-  const open = [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '帳號');
-  if (!open) return { ok: false, why: '那一列沒有「帳號」鈕' };
+  const row = await wait(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => (KIND === 'local') === !r.querySelector('.dv-grip')));   // 本機那一列沒有排序把手（畫面上不寫「這台」）
+  if (!row) return { ok: false, why: '設備列表裡找不到' + (KIND === 'local' ? '本機那一列' : '別台') };
+  await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));   // 列上只有「詳情」，再點「帳號」分頁（#1860）
+  const open = await wait(() => [...document.querySelectorAll('.dv-tabs button')].find(b => vis(b) && b.textContent.trim() === '帳號'));
+  if (!open) return { ok: false, why: '詳情裡沒有「帳號」分頁' };
   await tap(open);
   const box = () => [...document.querySelectorAll('.dv-relogin')].find(vis);
   if (KIND === 'healthy') {

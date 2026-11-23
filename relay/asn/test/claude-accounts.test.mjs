@@ -294,7 +294,10 @@ test('設備分類讀帳號回報：失敗後過了一分鐘會再讀；成功�
 test('守門：電腦版每分鐘檢查、只在設備分類開著時重讀；登入事件接上', () => {
   const src = read('ui/list.js')
   // #2158 改：排程換成共用的 createReportScheduler（每分鐘檢查、頁面關掉就停、讀成功的每 5 分鐘也重讀）
-  assert.match(src, /createReportScheduler\(\{ run: \(\) => accounts\.retryReports\(otherDeviceNodes\(\)\), isOpen: devicesOpen \}\)/)
+  // #1860：離線的設備不排重讀（isOnline），背景不排程（排程預設看 document.visibilityState，見 report-reload.mjs）；仍只在設備分類開著時重讀（isOpen: devicesOpen）
+  assert.match(src, /createReportScheduler\(\{ run: \(\) => accounts\.retryReports\(otherDeviceNodes\(\), \{ isOnline: deviceOnline \}\), isOpen: devicesOpen \}\)/)
+  assert.match(src, /const deviceOnline = n => isDeviceOnline\(n, friends\.value, \{ selfNode: info\.node, asn: asnMap\.value \}\)/)
+  assert.match(read('ui/lib/report-reload.mjs'), /isVisible = docVisible/, '背景不排程')
   assert.match(src, /watch\(devicesOpen, open => \{ if \(open\) reportScheduler\.start\(\); else reportScheduler\.stop\(\) \}, \{ immediate: true \}\)/)
   assert.match(src, /onSignedIn = \(\) => void accounts\.retryReports\(otherDeviceNodes\(\), \{ force: true \}\)/)
 })
