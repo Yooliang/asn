@@ -108,7 +108,7 @@ test('#928 改名完成：進度搬到新位址，舊位址清掉；沒有進度
 test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目前對話那位，送出、封存、知道了都帶夥伴位址', () => {
   const js = read('ui', 'm.js')
   assert.doesNotMatch(js, /\bopsRun\b/, '單一全域進度拿掉')
-  assert.match(js, /const opsBanner = computed\(\(\) => runBanner\(runFor\(opsRuns\.value, chatFriend\.value\?\.id\)\)\)/)
+  assert.match(js, /const opsBanner = computed\(\(\) => opLineNote\(runFor\(opsRuns\.value, chatFriend\.value\?\.id\)\)\)/)   // #2177：進度顯示在對話最下面那條狀態列
   // #1800：非詳情的操作（含封存）改走電腦版共用的 createOpRunner，進度存在下指令那位（連同送出的內容，重試用）；行為測試在 op-progress-inline-1800.test.mjs
   assert.match(js, /const opsRunState = \{ get runs\(\) \{ return opsRuns\.value \}, set runs\(v\) \{ opsRuns\.value = v \} \}/)
   assert.match(js, /createOpRunner\(\{ api: opsTransport, state: opsRunState, run: makeOpRun\(\{ onArchived \}\)/)
@@ -118,7 +118,9 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
   assert.match(js, /const holdRun = \(\) => \{ const f = chatFriend\.value; if \(f\) opRunner\.hold\(f\.id\) \}/)
   assert.match(js, /const releaseRun = \(\) => \{ const f = chatFriend\.value; if \(f\) opRunner\.release\(f\.id\) \}/)
   assert.match(js, /retryInfo = \(\) => \{ const f = opsFriend\.value; if \(f\) void execOp\(f, 'info', \{\}\) \}/, '詳情的重試照舊')
-  assert.match(read('ui', 'm.html'), /@touchstart\.passive="holdRun" @touchend="releaseRun" @touchcancel="releaseRun"/)
+  // #2177：按住暫停倒數改掛在 chat-pane 最下面那條狀態列（@touchstart／@touchend 在 chatpane.mjs），手機頁接 op-hold／op-release
+  assert.match(read('ui', 'm.html'), /@op-hold="holdRun" @op-release="releaseRun"/)
+  assert.match(read('ui', 'lib', 'chatpane.mjs'), /@pointerenter="opHold" @pointerleave="opRelease" @pointerdown="opPressHold" @pointerup="opPressRelease" @pointercancel="opPressRelease"/)
 })
 
 // ---------- 頁面接線 ----------
@@ -162,7 +164,7 @@ test('接線：送出走手機的 Rust 指令、先過 opFormError、輪詢用 r
   assert.match(js, /if \(!item \|\| !item\.ok\) return/, '點反灰的項目不送出任何動作')
   assert.match(html, /v-for="m in opsModels"/); assert.match(html, /\{\{ opsModelNote \}\}/)
   assert.match(html, /v-model="ops\.newName"/); assert.match(html, /v-model="ops\.note"/)
-  assert.match(html, /v-if="opsBanner"/, '對話頁頂端顯示進度')
+  assert.match(html, /:op-note="opsBanner"/, '對話最下面那條狀態列顯示進度（#2177）')
 })
 
 test('接線：最後使用的那位存在手機本機設定、點夥伴就成為最後使用並進到那一則對話；舊的對話層與列表程式已移除', () => {

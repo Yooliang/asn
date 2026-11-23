@@ -243,5 +243,5 @@ test('語音狀態文字放在底下狀態列，不放在輸入框上方', () =>
   assert.ok(iDanger >= 0 && iDanger < iVoice && iVoice < iOther, '警示 → 語音提示 → 其他遠端狀態')
   assert.match(bar, /v-if="remoteBar\.stoppable"[^>]*@click="stopTyping"/, '警示裡有結束打字')
   assert.match(bar, /v-if="voiceNote">\s*\{\{ voiceNote \}\}<\/span>/, '警示與語音提示並列')
-  assert.match(bar, /<template v-else-if="voiceNote">\{\{ voiceNote \}\}<\/template>/)
+  assert.match(bar, /<template v-else-if="voiceNote">\{\{ voiceNote \}\}<span class="typing-extra" v-if="opLine"> \{\{ opLine\.text \}\}<\/span><\/template>/, '語音狀態文字放在底下狀態列；夥伴操作的進度字（#2177）附在後面，不被蓋掉')
 })

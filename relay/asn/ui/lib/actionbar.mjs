@@ -13,6 +13,7 @@ import { confirmText, createModelSwitcher, modelSwitchBlock } from './model-swit
 import { SUBAGENT_POLL_MS, subagentView } from './subagents.mjs'
 import { idleCountOf, taskCountOf, taskView } from './tasks.mjs'
 import { CONSOLE_QUERY_TIMEOUT_MS, consoleReq, engineForProfile, withTimeout } from './partner-launch-ui.mjs'
+import { opLineNote, runFor } from './mobile-ops.mjs'
 import { WAKE_ENGINES, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
 import { runArchive } from './archive.mjs'
 import { WHY_MAX, briefWhy, buildPartnerMenu } from './partner-menu.mjs'
@@ -397,7 +398,8 @@ export const ActionBar = {
   name: 'ActionBar',
   components: { AsnDialog, PartnerOpDialog, PartnerOpStrip, OpsMenuButton, MoreMenuButton, OfflineMenuButton, AsnAvatar },
   props: {
-    opSlot: { type: Object, default: null },   // 夥伴操作狀態列要放的位置（對話窗最下面，#1907）；沒給就留在功能列裡
+    opSlot: { type: Object, default: null },   // 夥伴操作狀態列要放的位置（終端分頁最下面，#1907）；沒給就留在功能列裡
+    opLine: { type: Boolean, default: false },   // 對話分頁：進度不另外畫一條，改由 op-note 事件交給對話最下面那條狀態列顯示（取代「上次接收訊息」，#2177）
     friend: { type: Object, default: null },
     selfNode: { type: String, default: '' },
     api: { type: Object, default: null },        // 要有 partnerConsoleQuery／partnerConsoleSet／modelSwitchQuery／modelSwitchRun（lib/tauri.mjs 的 transport）；沒給就不放一對一的 6 格
@@ -412,7 +414,7 @@ export const ActionBar = {
     showBack: { type: Boolean, default: false },   // 窄視窗單窗格時才有返回鍵（LINE 外觀）
     term: { type: Object, default: null },   // 終端（#902）：{ ready：在共用終端服務裡、第 2 格放「終端」, on：終端開著 }；按下發 term 事件，由對話區切換
   },
-  emits: ['call', 'ops', 'term', 'back', 'member', 'launch-new'],   // launch-new：喚醒找不到對話紀錄，請畫面開「開新夥伴」（#1800）；member：點了群組「N 人離線」名單裡的人（#1515）
+  emits: ['call', 'ops', 'term', 'back', 'member', 'launch-new', 'op-note'],   // launch-new：喚醒找不到對話紀錄，請畫面開「開新夥伴」（#1800）；member：點了群組「N 人離線」名單裡的人（#1515）
   setup(props, { emit }) {
     const { ref, computed, reactive, watch, onMounted, onBeforeUnmount } = globalThis.Vue
     const cons = reactive({ state: 'none', visible: true, busy: false, reason: '' })   // state：none／checking／toggle
@@ -428,6 +430,12 @@ export const ActionBar = {
     const opRun = reactive({ runs: {} })
     const opRunner = createOpRunner({ api: props.api, state: opRun })
     const onOpRun = e => { void opRunner.start(props.friend, e.op, e.input) }
+    // #2177：只回報「這位夥伴」的那一格；換對象、進度消失都會回報 null（並帶著 friendId，收的一方不認別人的）
+    if (props.opLine) {
+      const note = computed(() => opLineNote(runFor(opRun.runs, props.friend?.id)))
+      watch([note, () => props.friend?.id], () => emit('op-note', { friendId: props.friend?.id ?? '', b: note.value, hold: () => opRunner.hold(props.friend?.id), release: () => opRunner.release(props.friend?.id) }), { immediate: true })
+      onBeforeUnmount(() => emit('op-note', null))
+    }
     const onLaunchNew = () => { opDlg.open = false; emit('launch-new', { node: props.friend?.node || '' }) }
     const engine = computed(() => friendEngine(props.friend))
     const name = computed(() => props.friend?.agent || props.friend?.nick || '')
@@ -656,7 +664,7 @@ export const ActionBar = {
     </div>
   </template>
   <partner-op-dialog v-if="opDlg.open" :friend="friend" :op="opDlg.item.key" :item="opDlg.item" :api="api" :self-node="selfNode" :pi-models="piModels" @close="opDlg.open = false" @run="onOpRun" @launch-new="onLaunchNew"></partner-op-dialog>
-  <teleport :to="opSlot" :disabled="!opSlot"><partner-op-strip :runner="opRunner" :runs="opRun.runs" :only="friend && friend.id"></partner-op-strip></teleport>
+  <teleport :to="opSlot" :disabled="!opSlot" v-if="!opLine"><partner-op-strip :runner="opRunner" :runs="opRun.runs" :only="friend && friend.id"></partner-op-strip></teleport>
   <ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img/ab-group.svg" tip="邀請、加 AI、成員與設定" :items="groupAll" @pick="pickGroup"></ops-menu-button>
   <ops-menu-button v-if="(!isRoom && api) || opsAll.length" :items="opsAll" :disabled="!isRoom && !slot.manage.ok" :reason="slot.manage.reason" @pick="pickOps"></ops-menu-button>
   <span class="ab-note" v-if="archiveNote" role="status">{{ archiveNote }}</span>

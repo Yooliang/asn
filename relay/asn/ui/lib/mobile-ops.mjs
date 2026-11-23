@@ -67,6 +67,13 @@ export function runBanner(run) {
   const text = v.phase === 'failed' && !v.noRetry ? `${String(v.text ?? '').trim().replace(/[。.]$/, '')}${FAIL_NEXT_STEP}` : v.text
   return { phase: v.phase, done: v.done === true, text, hideMs: hideAfterMs(v) }
 }
+// 對話最下面那條狀態列要顯示的夥伴操作進度或結果（#2177）：電腦與手機共用；跟原本的狀態列一樣「夥伴名：句子」。沒有進度回 null（那一行就回到「上次接收訊息」）
+export function opLineNote(run) {
+  const b = runBanner(run)
+  if (!b) return null
+  const name = String(run?.name ?? '').trim()
+  return { phase: b.phase, done: b.done, text: name ? `${name}：${b.text}` : b.text }
+}
 // 成功 4 秒後自己消失；「已送出、還沒確認」15 秒後消失（沒有按鈕可按，不能留到按）；失敗與進行中不消失。
 // 有 rows（詳情）的成功結果是給對話框看的，不在狀態列自動收
 export const hideAfterMs = v => (v?.phase === 'done' && !(v.rows ?? []).length ? OP_DONE_HIDE_MS : v?.phase === 'unconfirmed' ? OP_UNCONFIRMED_HIDE_MS : 0)
