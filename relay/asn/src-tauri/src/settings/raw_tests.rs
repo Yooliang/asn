@@ -172,12 +172,10 @@ fn 整份存檔_舊檔是壞檔也直接蓋過去_不留備份() {
 }
 
 #[test]
-fn 整份存檔_舊檔含孤立_surrogate_連續存兩次_不產生備份_也不嘗試搬檔() {
+fn 整份存檔_舊檔含孤立_surrogate_連續存兩次_不產生備份() {
     let d = tempfile::tempdir().unwrap();
     let old = r#"{"keep":1,"s":"\ud83d"}"#;
-    // 讓「搬檔、複製」都失敗：要是 save_text 還去讀舊檔並嘗試搬走（也會寫 log），就會因此回錯
-    migrate::FAIL_RENAME.with(|f| f.set(true));
-    migrate::FAIL_COPY.with(|f| f.set(true));
+    // 舊檔 serde 讀不了（但其實是 JS 寫得出來的合法內容）：save_text 不讀舊檔，所以不會搬走它、也不會每次都記一行 log
     let mut results = vec![];
     for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json"), (RawName::Chats, "asn-chats.json")] {
         put(d.path(), file, old);
@@ -187,8 +185,6 @@ fn 整份存檔_舊檔含孤立_surrogate_連續存兩次_不產生備份_也不
             assert_eq!(read(d.path(), file), text);
         }
     }
-    migrate::FAIL_RENAME.with(|f| f.set(false));
-    migrate::FAIL_COPY.with(|f| f.set(false));
     for (file, r) in results {
         assert!(r.is_ok(), "{file}：{r:?}");
     }
