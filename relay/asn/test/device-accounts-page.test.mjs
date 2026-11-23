@@ -92,8 +92,9 @@ test('第 1 層：進入先是設備列表（不再是橫向頁籤）：每台�
   assert.equal(rows.length, 4)
   assert.ok(!html.includes('role="tablist"') && !html.includes('role="tab"'))
   assert.match(rows[0], /家用機/)
-  assert.match(rows[1], /dv-tag on[^>]*>在線/); assert.match(rows[2], /dv-tag off[^>]*>離線/)
-  for (const r of rows) assert.ok(!r.includes('dv-chev') && r.includes('>帳號<') && r.includes('>詳情<'))
+  assert.match(rows[1], /<small class="dv-sub">電腦 · 在線<\/small>/)
+  assert.match(rows[2], /<small class="dv-sub">電腦 · 離線中<\/small>/)
+  for (const r of rows) assert.ok(!r.includes('dv-chev') && !r.includes('>帳號<') && r.includes('>詳情<'), '右邊只有一顆「詳情」')
 })
 
 test('進入細部頁：指定 dev 才進；沒指定或認不得的鍵都留在列表（不再自動選「這台」）', async () => {
