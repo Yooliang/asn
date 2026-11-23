@@ -40,6 +40,8 @@ export const WEB_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   "register", "reissue", "invite", "node_create", "node_claim", "node_rotate_key", "cloud_node_create", "cloud_node_list", "cloud_node_revoke", "cloud_node_rename",
   "node_setup_request", "node_setup_status", "node_setup_code_fetch", "node_update_request", "node_update_status",
   "device_code_start", "device_code_poll", "device_code_approve", "device_key_publish", "device_key_alert", "device_rename", "leave",
+  // 設備取代（#1860 H）：資料庫的 asn_user_owns_node 不排除網頁節點，網頁不能做取代靠這份清單擋
+  "device_replace_candidates", "device_replace", "device_replace_dismiss",
   // 帳號層設定（之後依需要逐項開放）
   "account_bootstrap", "account_name", "account_settings", "account_device_prefs", "account_chat_pins",
   // 需要本人在手機確認的決定類，與會洩漏請求內容的清單
