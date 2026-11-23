@@ -52,6 +52,7 @@ const MIN = String.raw`min(?:ute)?s?`
 const RAW_PATTERNS = [
   new RegExp(String.raw`'\s*3\s+${MIN}\s*'`, 'i'),                 // interval '3 minutes'、'3 min'、'3 minute'::interval
   /'\s*180\s+sec(?:ond)?s?\s*'/i,                                    // interval '180 seconds'
+  new RegExp(String.raw`interval\s+'\s*3\s*'\s*${MIN}`, 'i'),                // interval '3' minute（標準寫法）
   /'\s*0?0:03:00(?:\.0+)?\s*'/,                                      // interval '00:03:00'
   /\bmake_interval\s*\([^)]*\bmins\s*=>\s*3(?![\d.])/i,              // make_interval(mins => 3)
   new RegExp(String.raw`(?<![\d.])3\s*\*\s*interval\s+'\s*1\s+${MIN}\s*'`, 'i'),   // 3 * interval '1 minute'
@@ -89,6 +90,7 @@ test('#2161 findRawOnlineWindow：正例都抓得到', () => {
     "select now() - interval '3 mins'",
     "select now() - '3 minutes'::interval",
     "select now() - interval '180 seconds'",
+    "select now() - interval '3' minute",
     "select now() - interval '180 secs'",
     "select now() - interval '00:03:00'",
     "select now() - make_interval(mins => 3)",
