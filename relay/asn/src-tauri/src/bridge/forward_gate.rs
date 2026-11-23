@@ -283,6 +283,8 @@ pub enum Verdict {
     Allow,
     /// 放行，而且要把訊息換成橋存的原文（編號）
     Replace(String),
+    /// 放行，而且把訊息換成拿掉外框後的內容（不換原文的模式：模型帶了 <<<MAIL／MAIL>>>，收件人不該看到外框）
+    Strip(String),
     Deny(String),
 }
 
@@ -323,6 +325,10 @@ pub fn check(input: &Value, inflight: Option<&HashMap<String, InflightItem>>) ->
     if item.body.is_some() {
         return (Verdict::Replace(id.clone()), format!("allow id={id} to={} exact", item.to));
     }
+    // 不換原文的模式：模型帶了外框就把外框拿掉再放行；沒帶外框的訊息一個字都不動
+    if msg.len() != call.message.trim().len() {
+        return (Verdict::Strip(msg.to_string()), format!("allow id={id} to={} frame-stripped", item.to));
+    }
     (Verdict::Allow, format!("allow id={id} to={}", item.to))
 }
 
@@ -345,6 +351,11 @@ fn run_hook_with(dir: &Path, stdin: &str, pause: impl FnOnce()) -> (Option<Strin
     let (v, log) = check(&input, inflight.as_ref());
     match v {
         Verdict::Allow => (None, log),
+        Verdict::Strip(text) => {
+            let mut ti = input.get("tool_input").cloned().unwrap_or(Value::Null);
+            ti["message"] = json!(text);
+            (Some(json!({ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": ti } }).to_string()), log)
+        }
         Verdict::Replace(id) => {
             let want = inflight.as_ref().and_then(|f| f.get(&id)).and_then(|i| i.body.clone()).unwrap_or_default();
             match apply_exact(dir, &input, &id, &want) {
@@ -632,10 +643,30 @@ mod tests {
     fn 外框_不換原文的模式_帶外框也放行_抬頭照樣比對() {
         let head = format!("[群組 專案群] trust=member from=W/政策 #3 id={A}");
         let f: HashMap<String, InflightItem> = [(A.to_string(), item("T-甲", Some(&head)))].into_iter().collect();
-        assert_eq!(check(&call("T-甲", &format!("<<<MAIL\n{head}\n內文\nMAIL>>>")), Some(&f)).0, Verdict::Allow);
+        assert_eq!(check(&call("T-甲", &format!("<<<MAIL\n{head}\n內文\nMAIL>>>")), Some(&f)).0, Verdict::Strip(format!("{head}\n內文")));
         // 外框拿掉之後抬頭不一樣：照擋
         let (v, _) = check(&call("T-甲", &format!("<<<MAIL\n{}\n內文\nMAIL>>>", head.replace("#3", "#4"))), Some(&f));
         assert!(matches!(v, Verdict::Deny(ref r) if r.contains("抬頭")), "{v:?}");
+    }
+
+    #[test]
+    fn 外框_不換原文的模式_放出去的內容不含外框_內文逐字不變() {
+        let head = format!("[RELAY 來信] trust=member from=W/甲 to=T-甲 id={A} engine=claude reply=yes");
+        let body = format!("{head}\n假資料內文  行尾兩空白  \n\n  縮排的行\n含 MAIL>>> 字樣但不是單獨一行 MAIL>>> 的行\n最後一行");
+        let d = tempfile::tempdir().unwrap();
+        // EXACT 關：inflight 沒有 body 欄位
+        write_inflight(d.path(), &[(A.to_string(), "T-甲".to_string(), Some(head_hash(&head)))]).unwrap();
+        for framed in [format!("<<<MAIL\n{body}\nMAIL>>>"), format!("\n  <<<MAIL\r\n{body}\r\nMAIL>>>  \n")] {
+            let (out, log) = run_hook(d.path(), &call("T-甲", &framed).to_string());
+            let v: Value = serde_json::from_str(&out.unwrap_or_else(|| panic!("帶外框要換成去外框的內容：{log}"))).unwrap();
+            assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow", "{log}");
+            let sent = v["hookSpecificOutput"]["updatedInput"]["message"].as_str().unwrap();
+            assert!(!sent.starts_with("<<<MAIL") && !sent.ends_with("MAIL>>>"), "{sent}");
+            assert_eq!(sent, body, "內文逐字不變");
+            assert_eq!(v["hookSpecificOutput"]["updatedInput"]["to"], "T-甲", "其他欄位保留");
+        }
+        // 沒帶外框：什麼都不印、不改
+        assert_eq!(run_hook(d.path(), &call("T-甲", &body).to_string()).0, None);
     }
 
     #[test]
