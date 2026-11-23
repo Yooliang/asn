@@ -151,8 +151,10 @@ export const RemoteInput = {
         // 有最後一幅畫面（snap）：先建 xterm、把原文寫進去，等連上那台的這段保留原本的彩色畫面（#1762）。沒有就照舊，連上了才建
         if (props.snap !== null) {
           await nextTick()
-          term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, current)
-          if (!term) { if (current()) finish(REMOTE_TEXT.failed); return }
+          const t0 = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, current)
+          if (!current()) { t0?.dispose?.(); return }   // 建好時這一次已作廢：不要蓋掉新一次的 term（#1760 一審）
+          term = t0
+          if (!term) { finish(REMOTE_TEXT.failed); return }
           wireTerm()
           term.write(frameToWrite({ text: props.snap }))
         }
