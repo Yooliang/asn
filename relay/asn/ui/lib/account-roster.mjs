@@ -234,8 +234,9 @@ export function rosterView(roster, opts = {}) {
     const row = {
       vendor, account, plan: planLabel(e.plan),
       current: Array.isArray(e.nodes) && e.nodes.some(n => n?.current === true),
-      quota: rosterQuota(e, opts),
+      quota: subLapsedOf(e) ? { ...rosterQuota(e, opts), fiveNote: '' } : rosterQuota(e, opts),   // 失效時不寫「只回報每週額度」這類額度備註（額度本身不畫）
       shared: e.shared === true,   // 有沒有開查詢代碼（代碼本身讀不回來）
+      subLapsed: subLapsedOf(e),   // 訂閱已失效（#1646 F）：卡片標紅、不畫額度條
       // 用在哪幾台（目前還有在回報這個帳號的設備；使用中的排前面）
       usedOn: usedOnOf(e, opts),
     }
@@ -260,6 +261,23 @@ function usedOnOf(e, opts) {
   }
   return list.sort((a, b) => Number(b.current) - Number(a.current))   // 使用中的排前面，其餘保持後台給的順序（不依語系排，免得不同機器順序不一樣）
 }
+/** 訂閱已失效（#1646 F，電腦、手機同一份）：卡片頂端標籤與一句下一步。不放續訂鈕（擁有者定） */
+export const SUB_LAPSED_TEXT = Object.freeze({
+  tag: '訂閱已失效',
+  note: '訂閱已停止，額度只剩免費方案。請續訂，或改用其他帳號。',
+})
+
+/**
+ * 這個帳號的訂閱是不是已失效：後台名單每台設備各回一個 sub_state（'active'／'lapsed'／'unknown'，nodes[] 每格一個）。
+ * 只有 Claude 帳號判；至少一台明說 'lapsed'、且沒有任何一台明說 'active'（兩邊說法不同＝不確定，不猜）才算失效。
+ * 沒有欄位、不是字串、未知的值一律不算失效，卡片照現況顯示。
+ */
+export function subLapsedOf(entry) {
+  if (String(entry?.vendor ?? '').toLowerCase() !== 'claude' || !Array.isArray(entry?.nodes)) return false
+  const states = entry.nodes.map(n => (typeof n?.sub_state === 'string' ? n.sub_state : ''))
+  return states.includes('lapsed') && !states.includes('active')
+}
+
 export const usedOnText = row => (row?.usedOn ?? []).map(n => (n.current ? `${n.label}（使用中）` : n.label)).join('、')
 
 export const DEVICE_BUTTON_TEXT = { group: '用在哪幾台' }
