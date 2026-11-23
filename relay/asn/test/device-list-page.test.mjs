@@ -8,7 +8,7 @@ import { renderToString as ssrRender } from 'vue/server-renderer'
 const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import {
   DEVICE_TEXT, canRemoveRow, deviceFieldsFromSaved, deviceFieldsToSave, dropAfter, dropSlot, isDeviceRemoved, moveDevice, pruneRemoved,
-  removeDevice, removedRows, reorderDevice, restoreDevice, visibleRows,
+  removeDevice, reorderDevice, restoreDevice, visibleRows,
 } from '../ui/lib/device-order.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
 import { deviceTabs } from '../ui/lib/tabs.mjs'
@@ -76,7 +76,7 @@ test('左邊頁籤、設定列表、手機三處：被移除的設備都不見�
   assert.deepEqual(pageTabs(friends, 'device', { selfNode: S, nodeOrder: [A, B], removed: [A] }).hidden, [])
   const tree = buildDeviceTree({ friends, nodeOrder: [A, B], selfNode: S, removed: [A] })
   assert.deepEqual(tree.map(d => [d.key, d.removed, d.hidden]), [[S, false, false], [B, false, false], [A, true, true]])
-  assert.deepEqual(visibleRows(tree).map(d => d.key), [S, B]); assert.deepEqual(removedRows(tree).map(d => d.key), [A])
+  assert.deepEqual(visibleRows(tree).map(d => d.key), [S, B]); assert.deepEqual(tree.filter(d => d.removed).map(d => d.key), [A])
   assert.deepEqual(acctDeviceTree({ friends, nodeOrder: [A, B], selfNode: S, removed: [A] }).filter(d => d.removed).map(d => d.key), [A])
   assert.equal(buildDeviceTree({ friends, nodeOrder: [A], selfNode: S, removed: [S] })[0].removed, false, '本機永遠不被移除')
 })

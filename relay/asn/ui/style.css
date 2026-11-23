@@ -938,10 +938,10 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-confirm{margin:0;flex:1 0 100%;color:var(--fg)}
 .dv-danger{color:#b3261e}
 @media (prefers-color-scheme:dark){.dv-danger{color:#ff9a90}}
-.dv-removed{margin-top:12px}
+.dv-removed{margin-top:var(--sp-3)}
 .dv-removed summary{padding:2px 0;cursor:pointer;color:var(--link)}
-.dv-removed-list{list-style:none;margin:6px 0 0;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
-.dv-removed-row{display:flex;align-items:center;gap:8px;padding:0 10px 0 0;border-bottom:1px solid var(--line);color:var(--fg)}
+.dv-removed-list{list-style:none;margin:var(--sp-2) 0 0;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.dv-removed-row{display:flex;align-items:center;gap:var(--sp-2);padding:0 var(--sp-3) 0 0;border-bottom:1px solid var(--line);color:var(--fg)}
 .dv-removed-row:last-child{border-bottom:0}
 .dv-removed-row .asn-btn{flex:none}
 .rtab.dev-dragging{opacity:.4}

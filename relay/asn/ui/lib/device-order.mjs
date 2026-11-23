@@ -104,7 +104,6 @@ export const inDevicePageOrder = rows => {
   return [...list.filter(d => d?.self === true), ...list.filter(d => d?.self !== true)]
 }
 export const visibleRows = rows => inDevicePageOrder(rows).filter(d => !d.removed)
-export const removedRows = rows => (Array.isArray(rows) ? rows : []).filter(d => d.removed)
 
 // ---------- 列表：排序把手／拖放（電腦版與手機共用；順序只用拖曳或鍵盤上下鍵，沒有上移／下移鈕，#1860）----------
 // 游標在列的下半部＝插在它後面

@@ -118,10 +118,10 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-row > .fpm{margin:0 0 0 8px}
 .m-dv-row > .asn-btn{flex:none;margin:0 12px 0 8px}
 /* 已移除的設備：能恢復的給「恢復」，只剩紀錄的給「忘記」（#1860） */
-.m-dv-removed{margin-top:12px}
+.m-dv-removed{margin-top:var(--sp-3)}
 .m-dv-removed summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--link)}
 .m-dv-removed-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
-.m-dv-removed-row{display:flex;align-items:center;gap:8px;min-height:56px;padding:0 12px;border-bottom:1px solid var(--line)}
+.m-dv-removed-row{display:flex;align-items:center;gap:var(--sp-2);min-height:56px;padding:0 var(--sp-3);border-bottom:1px solid var(--line)}
 .m-dv-removed-row:last-child{border-bottom:0}
 .m-dv-removed-row .m-row-tx{flex:1;min-width:0}
 .m-dv-removed-row .asn-btn{flex:none}
@@ -193,7 +193,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-segbtn{flex:1;min-height:44px;padding:8px 6px;border:0;background:none;color:var(--muted);font:inherit;font-size:15px;line-height:1.4;cursor:pointer}
 .m-dv-segbtn+.m-dv-segbtn{border-left:1px solid var(--line)}
 .m-dv-segbtn.on{background:var(--accent);color:#fff;font-weight:600}
-.m-dv-subbtn{flex:1;min-height:44px;padding:8px 6px;border:0;background:none;color:var(--muted);font:inherit;font-size:15px;line-height:1.4;cursor:pointer}
+.m-dv-subbtn{flex:1;min-height:44px;padding:var(--sp-2) var(--sp-1);border:0;background:none;color:var(--muted);font:inherit;font-size:var(--fs-3);line-height:1.4;cursor:pointer}
 .m-dv-subbtn+.m-dv-subbtn{border-left:1px solid var(--line)}
 .m-dv-subbtn.on{background:var(--accent);color:#fff;font-weight:600}
 /* 帳號卡片的設備列（手機，#2111 ②）：一台一列，左邊設備名（原因在下方一行），右邊的鈕固定 100×40、同一欄靠右；狀態的畫法和電腦版同一套 */
