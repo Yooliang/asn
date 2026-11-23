@@ -248,3 +248,140 @@ fn 寫入走原子寫入_不留下_tmp() {
     assert!(names(d.path(), "t-a.json.").is_empty());
     assert_eq!(names(d.path(), "").len(), 1);
 }
+
+const NEWER_TEXT: &str = r#"{"version":7,"a":1,"b":2,"future":{"k":[1,2]}}"#;
+
+/// 讀不到時的共同斷言：回預設與 Unreadable；存檔、更新都回錯；放開後原內容一字不差、重讀回到正常、extra 與版本還在
+fn 暫時讀不到時的斷言(dir: &Path, release: impl FnOnce()) {
+    let l = load_in::<TA>(dir);
+    assert!(matches!(l.status, LoadStatus::Unreadable { .. }), "{:?}", l.status);
+    assert_eq!(l.value, TA::default());
+    let e = update_in::<TA, _>(dir, |t| t.a = 99).unwrap_err();
+    assert!(e.0.contains("暫時讀不到"), "{e}");
+    assert!(save_in::<TA>(dir, &TA::default()).is_err());
+    // 不快取：還是讀不到時每次都是 Unreadable
+    assert!(matches!(load_in::<TA>(dir).status, LoadStatus::Unreadable { .. }));
+    release();
+    assert_eq!(std::fs::read_to_string(dir.join("t-a.json")).unwrap(), NEWER_TEXT, "原檔要一字不差");
+    assert!(names(dir, "t-a.json.").is_empty(), "不該有 .bad 或 .tmp");
+    let l = load_in::<TA>(dir);
+    assert_eq!(l.status, LoadStatus::Newer { file_version: 7 });
+    assert_eq!(l.value.a, 1);
+    update_in::<TA, _>(dir, |t| t.a = 5).unwrap();
+    let v = disk(dir, "t-a.json");
+    assert_eq!((v["version"].as_u64(), v["future"].clone(), v["a"].as_i64()), (Some(7), json!({"k":[1,2]}), Some(5)));
+}
+
+#[cfg(windows)]
+#[test]
+fn 讀的時候檔案被占用_存檔不覆蓋原檔_windows() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", NEWER_TEXT);
+    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(d.path().join("t-a.json")).unwrap();
+    let mut held = Some(held);
+    暫時讀不到時的斷言(d.path(), || drop(held.take()));
+}
+
+#[cfg(unix)]
+#[test]
+fn 讀的時候沒有權限_存檔不覆蓋原檔_unix() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", NEWER_TEXT);
+    let p = d.path().join("t-a.json");
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read_to_string(&p).is_ok() {
+        // 用 root 跑時權限擋不住，這支測不到，略過
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+        return;
+    }
+    暫時讀不到時的斷言(d.path(), || std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap());
+}
+
+struct Inject;
+impl Inject {
+    fn rename() -> Self {
+        migrate::FAIL_RENAME.with(|f| f.set(true));
+        Inject
+    }
+}
+impl Drop for Inject {
+    fn drop(&mut self) {
+        migrate::FAIL_RENAME.with(|f| f.set(false));
+        migrate::FAIL_COPY.with(|f| f.set(false));
+    }
+}
+
+#[test]
+fn 改名失敗改用複製備份_副本內容等於原壞檔() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", "{壞掉的內容");
+    let _g = Inject::rename();
+    let l = load_in::<TA>(d.path());
+    assert_eq!(l.status, LoadStatus::Recovered);
+    let bad = names(d.path(), "t-a.json.bad-");
+    assert_eq!(bad.len(), 1);
+    assert_eq!(std::fs::read_to_string(d.path().join(&bad[0])).unwrap(), "{壞掉的內容");
+    // 副本在，之後存檔才可以寫
+    update_in::<TA, _>(d.path(), |t| t.a = 3).unwrap();
+    assert_eq!(std::fs::read_to_string(d.path().join(&bad[0])).unwrap(), "{壞掉的內容");
+    assert_eq!(disk(d.path(), "t-a.json")["a"], 3);
+}
+
+#[test]
+fn 改名與複製都失敗_存檔不准覆蓋原壞檔() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", "{壞掉的內容");
+    let _g = Inject::rename();
+    migrate::FAIL_COPY.with(|f| f.set(true));
+    let l = load_in::<TA>(d.path());
+    assert!(matches!(l.status, LoadStatus::Unreadable { .. }), "{:?}", l.status);
+    assert!(update_in::<TA, _>(d.path(), |t| t.a = 3).is_err());
+    assert!(save_in::<TA>(d.path(), &TA::default()).is_err());
+    assert_eq!(std::fs::read_to_string(d.path().join("t-a.json")).unwrap(), "{壞掉的內容");
+    assert!(names(d.path(), "t-a.json.bad-").is_empty(), "失敗時不留半份副本");
+}
+
+/// 真的讓改名失敗：另一個控制代碼以「只准讀、不准改名刪除」開著，改名會被拒，但複製讀得到
+#[cfg(windows)]
+#[test]
+fn 真的改名失敗時副本存在_windows() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", "{壞掉的內容");
+    let held = std::fs::OpenOptions::new().read(true).share_mode(1).open(d.path().join("t-a.json")).unwrap();
+    let l = load_in::<TA>(d.path());
+    assert_eq!(l.status, LoadStatus::Recovered);
+    let bad = names(d.path(), "t-a.json.bad-");
+    assert_eq!(bad.len(), 1);
+    assert_eq!(std::fs::read_to_string(d.path().join(&bad[0])).unwrap(), "{壞掉的內容");
+    drop(held);
+}
+
+#[test]
+fn 時鐘倒退時剛建的副本不會被刪() {
+    let d = tempfile::tempdir().unwrap();
+    // 先放五份「未來」時間的舊副本，剛建的那份檔名會排在它們前面
+    for i in 0..5 {
+        put(d.path(), &format!("t-a.json.bad-9{:014}-{:06}", i, 0), "舊");
+    }
+    put(d.path(), "t-a.json", "{壞掉的內容");
+    assert_eq!(load_in::<TA>(d.path()).status, LoadStatus::Recovered);
+    let bad = names(d.path(), "t-a.json.bad-");
+    assert_eq!(bad.len(), 3);
+    let fresh: Vec<_> = bad.iter().filter(|n| std::fs::read_to_string(d.path().join(n)).unwrap() == "{壞掉的內容").collect();
+    assert_eq!(fresh.len(), 1, "剛建的那份必須還在：{bad:?}");
+}
+
+#[test]
+fn update_每次都重讀檔_外部改了同樣大小的內容也不會被蓋掉() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", r#"{"version":1,"a":1,"b":2}"#);
+    assert_eq!(load_in::<TA>(d.path()).value.b, 2);
+    // 外部改成同樣長度（快取比對大小與時間可能認不出來）
+    std::fs::write(d.path().join("t-a.json"), r#"{"version":1,"a":1,"b":7}"#).unwrap();
+    update_in::<TA, _>(d.path(), |t| t.a = 5).unwrap();
+    let v = disk(d.path(), "t-a.json");
+    assert_eq!((v["a"].as_i64(), v["b"].as_i64()), (Some(5), Some(7)));
+}

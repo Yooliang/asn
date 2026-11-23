@@ -2,7 +2,7 @@
 //! 規則（#2162 方案 B-5）：
 //! - 檔案沒有 `version`＝版本 0＝舊檔。讀取時只在記憶體裡升版，**不改檔**；第一次正常寫入才補上 `version`。
 //! - 升版前先備份 `<檔>.json.v<舊版>.bak`（同名已存在就不覆蓋）；備份發生在「第一次要把升版結果寫回去」之前。
-//! - 壞檔改名 `<檔>.json.bad-<時間>`，最多留 3 份；記錄只寫檔名與原因，不寫內容。
+//! - 壞檔改名（失敗改複製）成 `<檔>.json.bad-<時間>`，最多留 3 份；記錄只寫檔名與原因，不寫內容。兩個都失敗就不准覆蓋原檔。
 use super::{Doc, SettingsError};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -68,26 +68,70 @@ pub fn backup_old(path: &Path, from: u32) {
 
 static BAD_SEQ: AtomicU64 = AtomicU64::new(0);
 
-/// 壞檔改名為 `<檔>.bad-<毫秒>-<序號>`，舊的只留 KEEP_BAD 份；記一行，只含檔名與原因
-pub fn quarantine(path: &Path, reason: &str) {
+/// 測試用的失敗注入（只有當前執行緒；正式版沒有這段）
+#[cfg(test)]
+thread_local! {
+    pub static FAIL_RENAME: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    pub static FAIL_COPY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn do_rename(from: &Path, to: &Path) -> std::io::Result<()> {
+    #[cfg(test)]
+    if FAIL_RENAME.with(|f| f.get()) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "測試注入：改名失敗"));
+    }
+    std::fs::rename(from, to)
+}
+
+fn do_copy(from: &Path, to: &Path) -> std::io::Result<u64> {
+    #[cfg(test)]
+    if FAIL_COPY.with(|f| f.get()) {
+        return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "測試注入：複製失敗"));
+    }
+    std::fs::copy(from, to)
+}
+
+/// 壞檔留一份副本：優先改名為 `<檔>.bad-<毫秒>-<序號>`；改名失敗就複製（成功後再盡量刪掉原檔）。
+/// 兩個都失敗回 Err（錯誤種類）：原檔還在原位，呼叫端不准寫入覆蓋它。
+/// 舊的副本只留 KEEP_BAD 份，剛建的這份絕不刪。記一行，只含檔名與原因
+pub fn quarantine(path: &Path, reason: &str) -> Result<(), String> {
     let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
     let seq = BAD_SEQ.fetch_add(1, Ordering::Relaxed);
     let bad = suffixed(path, &format!(".bad-{ms:015}-{seq:06}"));
-    match std::fs::rename(path, &bad) {
-        Ok(()) => elog!("[ASN] 設定檔 {} 損毀（{reason}），已改名為 {} 並退回預設", file_name(path), file_name(&bad)),
-        Err(e) => elog!("[ASN] 設定檔 {} 損毀（{reason}），改名保存失敗（{}），退回預設", file_name(path), e.kind()),
+    let r = match do_rename(path, &bad) {
+        Ok(()) => {
+            elog!("[ASN] 設定檔 {} 損毀（{reason}），已改名為 {} 並退回預設", file_name(path), file_name(&bad));
+            Ok(())
+        }
+        Err(e) => match do_copy(path, &bad) {
+            Ok(_) => {
+                let _ = std::fs::remove_file(path);
+                elog!("[ASN] 設定檔 {} 損毀（{reason}），改名失敗（{}），已複製為 {} 並退回預設", file_name(path), e.kind(), file_name(&bad));
+                Ok(())
+            }
+            Err(e2) => {
+                let _ = std::fs::remove_file(&bad);
+                elog!("[ASN] 設定檔 {} 損毀（{reason}），改名失敗（{}）、複製也失敗（{}），不覆蓋原檔", file_name(path), e.kind(), e2.kind());
+                Err(format!("{:?}", e2.kind()))
+            }
+        },
+    };
+    if r.is_ok() {
+        prune_bad(path, &bad);
     }
-    prune_bad(path);
+    r
 }
 
-fn prune_bad(path: &Path) {
+/// 只留 KEEP_BAD 份：依檔名排序刪最舊的，`keep`（剛建的）絕不刪——時鐘倒退時它可能排在最前面
+fn prune_bad(path: &Path, keep: &Path) {
     let (Some(dir), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str())) else { return };
     let prefix = format!("{name}.bad-");
+    let keep_name = file_name(keep);
     let Ok(rd) = std::fs::read_dir(dir) else { return };
-    let mut bad: Vec<String> = rd.flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.starts_with(&prefix)).collect();
-    bad.sort(); // 毫秒補零到固定位數，字典序＝時間序
-    while bad.len() > KEEP_BAD {
-        let old = bad.remove(0);
+    let mut others: Vec<String> = rd.flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.starts_with(&prefix) && *n != keep_name).collect();
+    others.sort(); // 毫秒補零到固定位數，字典序＝時間序
+    while others.len() + 1 > KEEP_BAD {
+        let old = others.remove(0);
         let _ = std::fs::remove_file(dir.join(old));
     }
 }
