@@ -38,6 +38,8 @@ pub trait ViewBackend: Send + Sync + 'static {
     fn see(&self, node: &str, name: &str, sign_pub: &str, now_ms: u64) -> Result<Tofu, String>;
     /// 通知本人（公鑰換了）
     fn alert(&self, peer: &str, kind: &str, sign_pub: &str) -> impl Future<Output = ()> + Send;
+    /// 公鑰換了、已經拒絕之後，記一筆讓畫面標「已擋下」（#1860 C）。只記不放行；預設不做（測試用的假後台）
+    fn block(&self, _node: &str, _sign_pub: &str) {}
     /// 寫一行握手紀錄（#1700，只有雜湊前 6 碼與固定代號，見 view_log）。預設不寫（測試用的假後台）
     fn log(&self, _line: String) {}
 }
@@ -161,6 +163,7 @@ async fn begin_on<B: ViewBackend>(b: &B, views: &RemoteViews, inputs: &RemoteInp
     if tofu == Tofu::Changed {
         release();
         report_ended(b, &id, &token).await;
+        b.block(&to_node, &to_pub);
         b.alert(&to_node, "changed", &to_pub).await;
         let msg = if phone {
             let (local_name, old_pub, was_confirmed) = remembered.unwrap_or_default();
