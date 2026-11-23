@@ -479,7 +479,7 @@ pub fn android_known_token(window: tauri::WebviewWindow, app: State<'_, App>, ac
     if node.is_empty() || node.len() > 64 {
         return Err("bad_node".to_string());
     }
-    // 框上的字由這裡決定：動作＋本人自己取的名字（沒取就未命名）＋記住的那把公鑰的指紋前兩組（網頁給的字不進框）
+    // 框上的字由這裡決定：動作＋本人自己取的名字（沒取就寫辨認線索「電腦（代號末 4 碼）」）＋記住的那把公鑰的指紋前兩組（網頁給的字不進框）
     let known = crate::device_id::live::known(&app.data_dir)?;
     // 打字：那台的指紋要先在這支手機確認過才發憑證（不跳本人驗證，直接回怎麼做）
     if act == crate::consent::Action::Input && !crate::device_id::phone_input_allowed(known.peer(&node)) {
