@@ -13,7 +13,7 @@ import { deviceIdentity } from './device-identity.mjs'
 import { isPhoneNode } from './node-platform.mjs'
 import { ROSTER_TEXT, nodeLabelOf, rosterAccountsOn, rosterLookup, rosterQuota, selfClaudeQuota } from './account-roster.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
-import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, deviceNoReport, deviceStateLine, installAction, isCloudNode, loginAction, localReloginAction, reloginAction, rememberCloud, reportFreshness, vendorState } from './device-state.mjs'
+import { CORE_VENDORS, STATE, STATE_TEXT, deviceKindLabel, REPORT_TEXT, deviceReportStatus, deviceStateLine, installAction, isCloudNode, loginAction, localReloginAction, reloginAction, rememberCloud, reportFreshness, reportNote, vendorState } from './device-state.mjs'
 
 export const NOT_REPORTED = '未回報'
 // 引擎名稱 → 廠商鍵（gpt 與 codex 是同一家）；asn 視窗與其他不算廠商
@@ -160,8 +160,9 @@ export function buildDeviceTree({ friends: allFriends = [], nodeOrder = [], devi
       const action = installAction({ vendor: k, isSelf, phone, online: isOn, asnOnline: rep?.asnOnline, state })
       return { key: k, label: vendorLabel(k), state, stateText: STATE_TEXT[state], ...(action ? { action } : {}) }
     })
+    const reportStatus = deviceReportStatus({ rep, online: isOn, self: isSelf, phone, cloud, now })   // 別台帳號回報在畫面上的四種狀態之一（#2158）
     return {
-      key: node, label, named: Boolean(named), identity: deviceIdentity({ node, label, named: Boolean(named), platform, phone, online: isOn, createdMs: nodeFacts?.[node]?.createdMs ?? 0, seenMs: nodeFacts?.[node]?.seenMs ?? 0, version: isSelf ? version : '', now }), self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), noReport: deviceNoReport({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
+      key: node, label, named: Boolean(named), identity: deviceIdentity({ node, label, named: Boolean(named), platform, phone, online: isOn, createdMs: nodeFacts?.[node]?.createdMs ?? 0, seenMs: nodeFacts?.[node]?.seenMs ?? 0, version: isSelf ? version : '', now }), self: isSelf, platform, phone, cloud, missing, cloudStore, stateLine: deviceStateLine({ vendors, missing, phone, online: isOn, self: isSelf, cloud }), reportStatus, reportTag: reportStatus === 'failed' ? REPORT_TEXT.failedTag : '', reportNote: reportNote(reportStatus), hidden: isDeviceHidden(node, friends, { selfNode, shown }), removed: isDeviceRemoved(node, removed, { selfNode }), kind: phone ? '手機' : '電腦', kindLabel: deviceKindLabel({ kind: phone ? '手機' : '電腦', cloud }), online: isOn, onlineText: isOn ? '在線' : '離線',
       reportedText: ago ? `帳號最後回報：${ago}` : (!isSelf && rep?.error ? '帳號回報讀取失敗' : ''),
       vendors, empty: vendors.length ? '' : '這台設備還沒有回報任何廠商',
     }

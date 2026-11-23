@@ -217,19 +217,45 @@ export const SHORT_TEXT = Object.freeze({
   [STATE.UNKNOWN_INSTALL]: '不確定是否安裝',
 })
 
+// ---- 別台帳號回報的四種畫面狀態（#2158，電腦、手機共用一份判斷與文字）----
+// 只會有四種：在線有回報（不多寫）、在線剛連上還沒回報（詳情灰字＋轉圈）、在線但連續讀不到（列上警告標籤＋詳情說明）、離線（不寫任何回報字樣）。
+// 「在線」和「沒回報」不會同時出現：在線卻讀不到時，先當成「正在讀」，連續失敗到門檻才說「讀不到」。
+
+/** 設備頁開著時，別台帳號回報每隔這麼久自動重讀一次（不加按鈕；頁面關掉就停）。與 REPORT_FRESH_MS（15 分鐘）搭配：回報超過 15 分鐘也一定會被重讀 */
+export const REPORT_RELOAD_MS = 5 * 60 * 1000
+/** 連續幾次讀不到（讀取失敗，或讀到的回報仍然過期）才在畫面上說「讀不到」。計次要間隔 REPORT_RELOAD_MS（見 report-reload.mjs 的 nextReport），所以第一次失敗後約 5 分鐘仍讀不到才會出現 */
+export const REPORT_FAIL_LIMIT = 2
+
+export const REPORT_STATUS = Object.freeze({ OK: 'ok', LOADING: 'loading', FAILED: 'failed', NONE: 'none' })
+
+/** 畫面文字（只放這一份；原始錯誤只進 ui.log） */
+export const REPORT_TEXT = Object.freeze({
+  loading: '正在讀取這台的帳號資料…',
+  failedTag: '讀不到帳號資料',
+  failed: '讀不到這台的帳號資料，會自動重試。一直讀不到，請在那台重新登入。',
+})
+
 /**
- * 這台在線（或是本機）卻還沒收到它的回報：設備列上要一眼看得出來（#1499：狀態那一行搬到詳情後，列上留「沒回報」小標記）。
- * 條件跟 deviceStateLine 回「還沒收到這台的回報」完全一樣
+ * 這台設備的帳號回報在畫面上屬於哪一種：
+ *   none（本機、手機、雲端夥伴、離線中：不寫任何回報字樣）／ok（有新的回報）／loading（在線，還沒有新的回報）／failed（在線，連續讀不到）
+ * rep.failCount＝連續沒讀到新回報的次數（claude-accounts／手機版讀完回報時記，見 report-reload.mjs 的 nextReport）
  */
-export const NO_REPORT_TAG = '沒回報'
-export function deviceNoReport({ vendors = [], missing = [], phone = false, online = true, self = false, cloud = null } = {}) {
-  if (phone || cloud === true || (!self && !online)) return false
-  return [...vendors, ...missing].some(v => v.state === STATE.NO_REPORT)
+export function deviceReportStatus({ rep = null, online = true, self = false, phone = false, cloud = null, now = Date.now() } = {}) {
+  if (self || phone || cloud === true || !online) return REPORT_STATUS.NONE
+  if (reportFreshness(rep, now) === 'fresh') return REPORT_STATUS.OK
+  return (rep?.failCount ?? 0) >= REPORT_FAIL_LIMIT ? REPORT_STATUS.FAILED : REPORT_STATUS.LOADING
+}
+
+/** 設備詳情「這台是誰」下方那一行灰字：{ text, busy }（busy＝前面轉圈）；不用寫的回 null。電腦、手機共用 */
+export function reportNote(status) {
+  if (status === REPORT_STATUS.LOADING) return { text: REPORT_TEXT.loading, busy: true }
+  if (status === REPORT_STATUS.FAILED) return { text: REPORT_TEXT.failed, busy: false }
+  return null
 }
 
 /**
  * 設備列表每一列的一行摘要，例如「Claude 已登入、Codex 未安裝」。
- * 手機沒有；別台離線看不到狀態；別台回報不是新的就只說一句「還沒收到這台的回報」（不逐家說，免得被讀成沒登入）
+ * 手機沒有；別台離線看不到狀態；別台回報不是新的就只說一句「還沒收到這台的回報」（不逐家說，免得被讀成沒登入）。這句只是內部判斷用，畫面不放（#2158，畫面看 deviceReportStatus）
  */
 export function deviceStateLine({ vendors = [], missing = [], phone = false, online = true, self = false, cloud = null } = {}) {
   if (phone) return ''

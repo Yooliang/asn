@@ -10,6 +10,7 @@ import { isFinalStatus, remoteStatusText } from './claude-accounts.mjs'
 import { QUOTA_NOTE } from './account-quota.mjs'
 import { buildDeviceTree } from './device-tree.mjs'
 import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
+import { nextReport } from './report-reload.mjs'
 
 export const ACCT_TEXT = {
   button: '選項',
@@ -31,7 +32,13 @@ export const ACCT_TITLES = Object.freeze({ devices: '設備', accounts: '帳號'
 export const acctPageTitle = tab => ACCT_TITLES[tab === 'accounts' ? 'accounts' : 'devices']
 
 // reports：節點 → { loading, asnOnline, reportedAt, msg, list:[{vendor,email,plan,current}] }（手機自己存的形狀）
-export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnline: r.asnOnline === true, reportedAt: r.reportedAt || '', accounts: Array.isArray(r.list) ? r.list : [] } : undefined)
+export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnline: r.asnOnline === true, reportedAt: r.reportedAt || '', accounts: Array.isArray(r.list) ? r.list : [], failCount: r.failCount ?? 0 } : undefined)
+// 讀完一台的回報後要存的紀錄（手機自己的形狀 + 讀取時間與連續失敗次數，#2158；判斷跟電腦版同一個 nextReport）。
+// outcome：{ value }（後台回的）或 { error }（給畫面的白話）
+export function acctReportEntry(prev, outcome, now = Date.now()) {
+  const r = nextReport(prev, outcome, now)
+  return { loading: false, asnOnline: r.asnOnline, reportedAt: r.reportedAt, msg: r.error, list: r.accounts, readAt: r.readAt, ...(r.failedAt ? { failedAt: r.failedAt } : {}), failCount: r.failCount, ...(r.countedAt ? { countedAt: r.countedAt } : {}) }
+}
 // 切換流程只認 Claude：把某台的回報濾成 acctSheetView 要的形狀
 export const acctClaudeRemote = r => ({ loading: r?.loading === true, asnOnline: r?.asnOnline === true, reportedAt: r?.reportedAt ?? '', msg: r?.msg ?? '', list: (Array.isArray(r?.list) ? r.list : []).filter(a => a?.vendor === 'claude') })
 

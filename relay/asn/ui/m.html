@@ -319,7 +319,7 @@
                     <span class="m-dv-dot" :class="d.online ? 'on' : 'off'" aria-hidden="true"></span>
                     <span class="m-dv-rn"><b>{{ d.label }}</b><span class="m-dv-rs">{{ d.kindLabel }} · {{ d.onlineText }}<template v-if="d.self"> · {{ KNOWN_TEXT.thisPhone }}</template></span></span>
                     <span class="m-dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
-                    <span class="m-dv-tag warn noreport" v-if="d.noReport" :title="DEVICE_TEXT.noReportTip" :aria-label="DEVICE_TEXT.noReportTip">{{ DEVICE_TEXT.noReportTag }}</span>
+                    <span class="m-dv-tag warn noreport" v-if="d.reportTag">{{ d.reportTag }}</span>
                   </button>
                   <!-- 指紋圖示放在按鈕外面（它自己可以聚焦、長按看說明，不能包在按鈕裡） -->
                   <fp-mark v-if="!d.self && phoneFpMark(joined.byNode[d.key])" :kind="phoneFpMark(joined.byNode[d.key]).kind" :label="phoneFpMark(joined.byNode[d.key]).label"></fp-mark>
@@ -364,7 +364,7 @@
                 </div>
                 <div class="m-dv-info" v-if="acctSw.sub === 'info'">
                   <h4 class="m-dv-sech">{{ IDENTITY_TEXT.title }}</h4>
-                  <device-identity :identity="acctCur.identity" :note="acctCur.noReport ? acctCur.stateLine : ''"></device-identity>
+                  <device-identity :identity="acctCur.identity" :note="acctCur.reportNote ? acctCur.reportNote.text : ''" :busy="Boolean(acctCur.reportNote && acctCur.reportNote.busy)"></device-identity>
                   <template v-if="!acctCur.self && curKnown">
                     <p class="m-dv-fprow" v-if="curKnown.confirmed"><fp-mark kind="confirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span><template v-if="curKnown.fpShow"> <code class="m-dv-fp" :aria-label="KNOWN_TEXT.fpLabel">{{ curKnown.fpShow }}</code></template></p>
                     <p class="m-dv-fprow" v-else><fp-mark kind="unconfirmed" :label="phoneFpMark(curKnown).label"></fp-mark><span>{{ phoneFpMark(curKnown).label }}</span> <button class="m-btn" type="button" v-if="!curKnown.confirmed" :disabled="kp.busy || vp.busy" @click="confirmKnown(curKnown)">{{ KNOWN_TEXT.confirmButton }}</button></p>

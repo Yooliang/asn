@@ -64,7 +64,7 @@ export function deviceIdentity({ node = '', label = '', named = false, platform 
 /** 畫面元件：<device-identity :identity="curDev.identity" :note="…">（電腦版設定頁、手機設備頁共用；樣式 .dvid 在 style.css） */
 export const DeviceIdentity = {
   name: 'DeviceIdentity',
-  props: { identity: { type: Object, required: true }, note: { type: String, default: '' } },
+  props: { identity: { type: Object, required: true }, note: { type: String, default: '' }, busy: { type: Boolean, default: false } },   // busy＝note 前面轉圈（#2158：正在讀這台的帳號資料）
   setup(props) {
     const { h } = globalThis.Vue
     return () => h('div', { class: 'dvid', role: 'group', 'aria-label': IDENTITY_TEXT.title }, [
@@ -72,7 +72,7 @@ export const DeviceIdentity = {
         h('dt', { key: `${r.key}-t` }, r.label),
         h('dd', { key: `${r.key}-d`, class: ['dvid-v', `dvid-${r.key}`] }, r.value),
       ])),
-      props.note ? h('p', { class: 'dvid-note' }, props.note) : null,
+      props.note ? h('p', { class: 'dvid-note', role: 'status' }, [props.busy ? h('span', { class: 'asn-spin', 'aria-hidden': 'true' }) : null, props.busy ? ' ' : null, props.note]) : null,
     ])
   },
 }
