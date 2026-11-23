@@ -356,16 +356,16 @@ export const SettingsPanel = {
       <template v-if="cat === 'devices'">
         <div class="dv-set">
           <template v-if="!curDev">
-            <section class="dv-replace" v-for="c in rp.cards" :key="c.node" :data-replace="c.node" role="region" :aria-label="c.title">
+            <section class="dv-replace" v-for="c in rp.cards" :key="c.id" :data-replace="c.id" role="region" :aria-label="c.title">
               <h3 class="dv-replace-h">{{ c.title }}</h3>
               <p class="dv-replace-p">{{ c.intro }}</p>
               <ul class="dv-replace-list">
-                <li v-for="o in c.candidates" :key="o.node"><label class="dv-replace-opt"><input type="radio" :name="'rp-' + c.node" :value="o.node" :checked="c.sel === o.node" :disabled="Boolean(rp.busy)" :aria-label="REPLACE_TEXT.candidateAria(o.label)" @change="act('replace-pick', { node: c.node, old: o.node })"><span class="dv-replace-tx"><b>{{ o.label }}</b><small>{{ o.line }}</small></span></label></li>
+                <li v-for="o in c.candidates" :key="o.id"><label class="dv-replace-opt"><input type="radio" :name="'rp-' + c.id" :value="o.id" :checked="c.sel === o.id" :disabled="Boolean(rp.busy)" :aria-label="REPLACE_TEXT.candidateAria(o.label)" @change="act('replace-pick', { node: c.id, old: o.id })"><span class="dv-replace-tx"><b>{{ o.label }}</b><small>{{ o.line }}</small></span></label></li>
               </ul>
               <p class="dv-replace-fine">{{ c.explain }}</p>
               <div class="dv-replace-btns">
-                <asn-button :disabled="Boolean(rp.busy)" @click="act('replace-keep', c.node)">{{ c.keepLabel }}</asn-button>
-                <asn-button level="primary" :disabled="Boolean(rp.busy)" @click="act('replace-do', { node: c.node, old: c.sel })">{{ rp.busy === c.node ? REPLACE_TEXT.busy : c.replaceLabel }}</asn-button>
+                <asn-button :disabled="Boolean(rp.busy)" @click="act('replace-keep', c.id)">{{ c.keepLabel }}</asn-button>
+                <asn-button level="primary" :disabled="Boolean(rp.busy)" @click="act('replace-do', { node: c.id, old: c.sel })">{{ rp.busy === c.id ? REPLACE_TEXT.busy : c.replaceLabel }}</asn-button>
               </div>
             </section>
             <p class="dv-replace-note" role="status" v-if="rp.note">{{ rp.note }}</p>

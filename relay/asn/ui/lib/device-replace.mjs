@@ -42,13 +42,13 @@ export function replaceCardsView(raw, { now = Date.now(), pick = {} } = {}) {
     const node = str(c?.node)
     const cands = (Array.isArray(c?.candidates) ? c.candidates : [])
       .filter(x => str(x?.node))
-      .map(x => ({ node: str(x.node), label: str(x.name) || '舊設備', line: lastSeenText(x.last_seen, now) }))
+      .map(x => ({ id: str(x.node), label: str(x.name) || '舊設備', line: lastSeenText(x.last_seen, now) }))
     if (!node || !cands.length) continue
     const name = str(c.name) || '新設備'
-    const sel = cands.some(x => x.node === pick[node]) ? pick[node] : cands[0].node
-    const selLabel = cands.find(x => x.node === sel).label
+    const sel = cands.some(x => x.id === pick[node]) ? pick[node] : cands[0].id
+    const selLabel = cands.find(x => x.id === sel).label
     out.push({
-      node, phone: isPhoneDevice({ platform: str(c.platform) }), name, sel,
+      id: node, phone: isPhoneDevice({ platform: str(c.platform) }), name, sel,
       title: REPLACE_TEXT.title(isPhoneDevice({ platform: str(c.platform) })), intro: REPLACE_TEXT.intro(name),
       candidates: cands, keepLabel: REPLACE_TEXT.keep, replaceLabel: REPLACE_TEXT.replace(selLabel), explain: REPLACE_TEXT.explain(selLabel),
     })
@@ -91,8 +91,8 @@ export function createReplaceFlow({ state, api, afterReplace = async () => {}, l
   const choose = (newNode, oldNode) => { state.pick = { ...state.pick, [newNode]: oldNode } }
   async function replace(newNode, oldNode) {
     if (state.busy) return false
-    const card = view().find(c => c.node === newNode)
-    const old = card?.candidates.find(c => c.node === oldNode)
+    const card = view().find(c => c.id === newNode)
+    const old = card?.candidates.find(c => c.id === oldNode)
     if (!card || !old) return false
     state.busy = newNode; state.error = ''; state.note = ''
     try {

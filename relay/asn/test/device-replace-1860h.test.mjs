@@ -46,9 +46,9 @@ test('#1860H 沒卡、沒候選、壞資料都不出卡', () => {
   assert.deepEqual(replaceCardsView({ cards: [{ node: '', name: 'x', candidates: [{ node: OLD1, name: 'a' }] }] }), [])
 })
 
-test('#1860H 畫面字串不含節點代號與 email（節點只留在 node／sel 欄位給按鈕回呼用）', () => {
+test('#1860H 畫面字串不含節點代號與 email（節點只留在 id／sel 欄位給按鈕回呼用）', () => {
   const [c] = replaceCardsView(REAL(), { now: NOW })
-  const shown = JSON.stringify(c, (k, v) => (k === 'node' || k === 'sel' ? undefined : v))
+  const shown = JSON.stringify(c, (k, v) => (k === 'id' || k === 'sel' ? undefined : v))
   for (const code of [NEW_NODE, OLD1, OLD2]) assert.ok(!shown.includes(code), `畫面字串不能含 ${code}`)
   assert.ok(!/@/.test(shown))
   // 模板不畫代號：兩個畫面的卡片區塊裡都沒有 {{ …node }}

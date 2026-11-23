@@ -303,16 +303,16 @@
               </section>
               <template v-if="acctSw.tab === 'devices'">
               <!-- 新設備「是不是取代舊的」卡片（#1860 H）：清單最上面；文字與流程跟電腦版同一份（lib/device-replace.mjs） -->
-              <section class="m-dv-replace" v-for="c in replaceCards" :key="c.node" :data-replace="c.node" role="region" :aria-label="c.title">
+              <section class="m-dv-replace" v-for="c in replaceCards" :key="c.id" :data-replace="c.id" role="region" :aria-label="c.title">
                 <h3 class="m-dv-replace-h">{{ c.title }}</h3>
                 <p class="m-dv-replace-p">{{ c.intro }}</p>
                 <ul class="m-dv-replace-list">
-                  <li v-for="o in c.candidates" :key="o.node"><label class="m-dv-replace-opt"><input type="radio" :name="'rp-' + c.node" :value="o.node" :checked="c.sel === o.node" :disabled="Boolean(replaceSt.busy)" :aria-label="REPLACE_TEXT.candidateAria(o.label)" @change="replacePick(c.node, o.node)"><span class="m-dv-replace-tx"><b>{{ o.label }}</b><small class="m-fine">{{ o.line }}</small></span></label></li>
+                  <li v-for="o in c.candidates" :key="o.id"><label class="m-dv-replace-opt"><input type="radio" :name="'rp-' + c.id" :value="o.id" :checked="c.sel === o.id" :disabled="Boolean(replaceSt.busy)" :aria-label="REPLACE_TEXT.candidateAria(o.label)" @change="replacePick(c.id, o.id)"><span class="m-dv-replace-tx"><b>{{ o.label }}</b><small class="m-fine">{{ o.line }}</small></span></label></li>
                 </ul>
                 <p class="m-fine m-dv-replace-fine">{{ c.explain }}</p>
                 <div class="m-dv-replace-btns">
-                  <button type="button" class="m-btn" :disabled="Boolean(replaceSt.busy)" @click="replaceKeep(c.node)">{{ c.keepLabel }}</button>
-                  <button type="button" class="m-btn" :disabled="Boolean(replaceSt.busy)" @click="replaceDo(c.node, c.sel)">{{ replaceSt.busy === c.node ? REPLACE_TEXT.busy : c.replaceLabel }}</button>
+                  <button type="button" class="m-btn" :disabled="Boolean(replaceSt.busy)" @click="replaceKeep(c.id)">{{ c.keepLabel }}</button>
+                  <button type="button" class="m-btn" :disabled="Boolean(replaceSt.busy)" @click="replaceDo(c.id, c.sel)">{{ replaceSt.busy === c.id ? REPLACE_TEXT.busy : c.replaceLabel }}</button>
                 </div>
               </section>
               <p class="m-note m-dv-replace-note" role="status" v-if="replaceSt.note">{{ replaceSt.note }}</p>
