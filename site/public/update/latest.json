@@ -1,15 +1,11 @@
 {
-  "version": "0.2.83",
-  "notes": "- 改善：登入失效通知與視窗標題上的設備名稱，改用設備頁上設定的名稱\n- 修正：終端對照表存檔時偶爾會掉檔的問題\n- 改善：佇列與設定檔存檔更穩，斷電或當機時較不容易損毀",
-  "pub_date": "2026-11-23T16:16:55.332Z",
+  "version": "0.2.84",
+  "notes": "- 改善：設備清單每一列都能點開看詳情\n- 修正：手機和沒有開視窗的設備不會再從設備清單上消失\n- 改善：已移除的設備集中到同一區顯示\n- 修正：設備離線或程式在背景時，不再排程重新讀取報告\n- 改善：存檔方式全面統一，重試佇列與名冊在斷電或當機時較不容易遺失\n- 改善：Grok 帳號檔改成只有本人可讀",
+  "pub_date": "2026-11-23T18:16:19.742Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFPOW5EbHRDQ1puZmJLakNhV0Q0eVJ5TWV2WWVhdzlhdUwza3VON0xqVFd5ZHVRU0hub1ZhODQxTTdmcnN5OWttSGd3SXZTdXczSEdtV3IyMzRWeEFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDUwNjE0CWZpbGU6QVNOXzAuMi44M194NjQtc2V0dXAuZXhlClVMVUZlWTFtMHlwUjBoeW11MDByeTBNOTdkdFliUXdKajdwOUhES2I0OUZUcXphREtuU0FKelJYZVV4NXJJSllKSzBMR28zUnpiaXVwVWhURDNEQ0J3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.83_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhkZHNUZ2xxcVp5SUxpUzlac2M5T1I3TGduVXJGSkMrNUhyNWdNSEZpUHViazJQelY5ODBHQzJpa0tIVXREVTE5ZlUvQWRGcWFlM29URHZSaWo3b0FFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDUxMjEyCWZpbGU6QVNOXzAuMi44M19hbWQ2NC5BcHBJbWFnZQpJRFpna1grVm96ZXZOb0dFV1prcm1MUC9EMUkxclNoVXIxcVNmdDFwcHl1eEJnUE8rOWtmVTZtcEpxTnkxMHlNSW4rRGdwRE9SWWhxdFgvNnhsUGlDUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.83_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhLalNuVDBlSk16U1F2OC9RTWJOa0pRQ2RYRWFVTm8xcGFsc25qLzBsWDdkbEEyckRhT2l5MkMwZGU0Z09DKzFwSEQyS1h5UjFVNVRHTFJaeTIzYXdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDU3Nzc5CWZpbGU6QVNOXzAuMi44NF94NjQtc2V0dXAuZXhlCnBCbHJ3L0U3enlZaW4wZjBUVmZxUmFicnkwdERtblpCQ0xuaEd3Q0RFSThRWjBjMVZraGdkREZSSEQySHRlRVYyRE5SZFppSVU5TW5LeUJ3blRBTkFnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.84_x64-setup.exe"
     }
   }
 }
