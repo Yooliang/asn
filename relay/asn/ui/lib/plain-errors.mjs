@@ -4,8 +4,16 @@
 // 手機「認得的電腦」操作沒成功的通用白話
 export const KNOWN_PEER_FAILED_TEXT = '操作沒有成功，請稍後再試。'
 
-/** 預設：沒有對照時，畫面顯示的就是錯誤原文（和以前直接放 e.message 一樣） */
-export const plainMessage = e => e.message
+/**
+ * 預設：沒有對照時，畫面顯示的就是錯誤原文。
+ * Tauri 的 Err(String) 若沒經過 lib/tauri.mjs 會以「字串」拋出（e.message 是 undefined），所以字串、Error、
+ * 帶 message 的物件都取得出文字；取不到（undefined、null、空字串、沒有 message 的物件）就回通用白話，絕不回空字串。
+ */
+export const plainMessage = e => {
+  const raw = typeof e === 'string' ? e : e?.message
+  const s = typeof raw === 'string' ? raw.trim() : ''
+  return s || KNOWN_PEER_FAILED_TEXT
+}
 
 /** 設備細部頁安裝 Claude Code 失敗：字串或 Error 都原文顯示（以前 agent-install.mjs 自己的 errText） */
 export const agentSetupErrorText = e => (typeof e === 'string' ? e : e?.message || String(e))

@@ -1,6 +1,7 @@
 // 對話區元件：分開模式的對話視窗（chat.html）與整合模式右邊的分頁內容（list.html）共用同一份版面。
 // 只顯示、只發事件（send／nudge／toggle-dp），不碰網路與 Tauri；信件內文與名稱一律先跳脫才進 v-html（訊息內文走 markdown.mjs，自帶跳脫與白名單淨化）。
 import { openLink } from './tauri.mjs'
+import { plainMessage } from './plain-errors.mjs'
 import { renderMarkdown, handleLinkClick } from './markdown.mjs'
 import { EMO, emo, fmt, fmtDate, initial, plain } from './text.mjs'
 import { SEND_LABEL, SEND_LABEL_TERM, composeHintTitle, composePlaceholder, composeRemoteHint, composeTermHint } from './compose.mjs'
@@ -467,7 +468,7 @@ export const ChatPane = {
     async function startShot() {
       if (!props.shotApi || photoBusy.value || annot.value) return
       photoBusy.value = true; photoMsg.value = ''
-      try { openAnnot(await props.shotApi.capture(), 'shot') } catch (e) { photoMsg.value = e.message } finally { photoBusy.value = false }
+      try { openAnnot(await props.shotApi.capture(), 'shot') } catch (e) { photoMsg.value = plainMessage(e) } finally { photoBusy.value = false }
     }
     async function annotDone({ blob, caption }) {
       const a = annot.value; if (!a || a.busy) return
@@ -478,7 +479,7 @@ export const ChatPane = {
         emit('attach', photo, caption || draft.value.trim())
         draft.value = ''; annot.value = null
         nextTick(() => composeEl.value && composeEl.value.focus())
-      } catch (e) { a.msg = e.message; a.busy = false }
+      } catch (e) { a.msg = plainMessage(e); a.busy = false }
     }
     function annotCancel() { annot.value = null; nextTick(() => composeEl.value && composeEl.value.focus()) }
     // ---- 放大看：點縮圖才向收發室換下載網址（Rust 端）；另存時由系統對話框選位置 ----
@@ -495,10 +496,10 @@ export const ChatPane = {
       try {
         const path = await props.photoApi.save(p.id, p.name)
         if (path) { photoMsg.value = `已存到：${path}`; savedHere.value = true }
-      } catch (e) { photoMsg.value = e.message }
+      } catch (e) { photoMsg.value = plainMessage(e) }
     }
     async function revealSaved() {
-      try { await props.photoApi.reveal() } catch (e) { photoMsg.value = e.message; savedHere.value = false }
+      try { await props.photoApi.reveal() } catch (e) { photoMsg.value = plainMessage(e); savedHere.value = false }
     }
     async function openPhoto(p) {
       if (!props.photoApi || photoExpired(p)) return
@@ -512,7 +513,7 @@ export const ChatPane = {
         const r = await props.photoApi.fetch(p.id, expiryMs(p))
         recentShown.set(p.id, r.data_url)
         if (viewer.value && viewer.value.id === p.id) { viewer.value.src = r.data_url; viewer.value.msg = '' }
-      } catch (e) { if (viewer.value && viewer.value.id === p.id) viewer.value.msg = e.message }
+      } catch (e) { if (viewer.value && viewer.value.id === p.id) viewer.value.msg = plainMessage(e) }
     }
     // 同一個對話（或群組）的照片串（#1728）：只看這個畫面的 log，依信件時間排；看圖開著時新訊息進來也會跟著更新張數
     const seqNow = () => photoSeq(props.log, { who: m => (m.k === 'me' ? plain(props.me.nick) : plain(m.who || props.friend.nick)), now: Date.now() })
@@ -555,7 +556,7 @@ export const ChatPane = {
       try {
         const path = await props.photoApi.save(v.id, v.name)
         if (path) { v.msg = `已存到：${path}`; v.saved = true } else v.msg = ''
-      } catch (e) { v.msg = e.message } finally { v.busy = false }
+      } catch (e) { v.msg = plainMessage(e) } finally { v.busy = false }
     }
     const closeViewer = () => { viewer.value = null; zoomer.reset() }
     // 看大圖開了／關了告訴外面（手機用來推、退一筆瀏覽記錄，讓系統返回鍵只關掉看圖，#1537）；電腦不接

@@ -15,6 +15,7 @@ import { normalize } from './stt-text.mjs'
 import { speakableText } from './tts-player.mjs'
 import { speechSegments } from './speech-split.mjs'
 import { engineKey } from './tabs.mjs'
+import { plainMessage } from './plain-errors.mjs'
 import { isAsnWindow } from './roster.mjs'
 import { isDisplayOnly } from './display-only.mjs'
 import { CALL_END_NOTE, splitCallEnd } from './call-end.mjs'
@@ -163,7 +164,7 @@ export function createMobileCall({
         if (!speakingNow()) speakDone()
         return
       case 'tts-error':
-        state.note = `念不出來：${e.message || '語音合成失敗'}`
+        state.note = `念不出來：${plainMessage(e)}`
         outstanding.clear(); try { native.stopSpeak() } catch { /* 已停 */ }
         speakDone(); return
       case 'background': if (state.active) { state.note = BACKGROUND_TEXT; void end({ keepNote: true }) } return

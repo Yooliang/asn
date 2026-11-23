@@ -6,6 +6,7 @@
 //      自己 → 本機節點有上傳就用上傳的，沒有就自動產生。
 
 import { createAvatar, shapes } from '../vendor/dicebear.mjs'
+import { plainMessage } from './plain-errors.mjs'
 
 export const AVATAR_PX = 96
 export const AVATAR_MAX_BYTES = 32 * 1024        // 圖檔本身（解碼後）上限
@@ -118,12 +119,12 @@ export async function uploadAvatarFile(file, { toDataUrl, setAvatar }) {
     const url = await toDataUrl(file)
     const r = await setAvatar(url)
     return r.ok ? { ok: true, message: '大頭貼已更新。' } : { ok: false, message: friendlyAvatarError(r.error) }
-  } catch (e) { return { ok: false, message: e.message } }
+  } catch (e) { return { ok: false, message: plainMessage(e) } }
 }
 // 移除上傳的圖，改回自動產生
 export async function removeAvatarUpload({ setAvatar }) {
   try {
     const r = await setAvatar(null)
     return r.ok ? { ok: true, message: '已移除，改回自動產生。' } : { ok: false, message: friendlyAvatarError(r.error) }
-  } catch (e) { return { ok: false, message: e.message } }
+  } catch (e) { return { ok: false, message: plainMessage(e) } }
 }
