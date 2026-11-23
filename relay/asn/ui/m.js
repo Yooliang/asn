@@ -882,7 +882,7 @@ const app = createApp({
       const old = acctSw.reports[node]
       if (!force && old && (old.loading || !old.msg)) return   // 讀過或正在讀就不重讀；上次失敗的再點一次會重試
       const epoch = acctEpoch
-      acctSw.reports[node] = { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [], failCount: old?.failCount ?? 0 }
+      acctSw.reports[node] = { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [], failCount: old?.failCount ?? 0, ...(old?.countedAt ? { countedAt: old.countedAt } : {}) }
       try {
         const v = await acctTransport.acctList(node)
         if (epoch === acctEpoch) acctSw.reports[node] = acctReportEntry(old, { value: v })

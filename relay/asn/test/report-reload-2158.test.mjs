@@ -111,9 +111,14 @@ test('#2158 連續失敗兩次才顯示「讀不到」；讀到新的回報就�
   await ui.retryReports([W])
   assert.equal(status(), REPORT_STATUS.LOADING, '第一次失敗：還是「正在讀取」，不說讀不到')
   assert.equal(tree({ rep: ui.state.reports[W], now: t }).reportTag, '')
-  t += 60_000
+  // 每分鐘照樣重試，但計次要距上次計次滿 5 分鐘：失敗 2 次、3 次、4 次但不到 5 分鐘 → 仍是「正在讀取」
+  for (let i = 0; i < 4; i++) { t += 60_000; await ui.retryReports([W]); assert.equal(status(), REPORT_STATUS.LOADING, `第 ${i + 2} 次失敗、距第一次不到 5 分鐘：仍是正在讀取`) }
+  t = T0 + REPORT_RELOAD_MS - 1
   await ui.retryReports([W])
-  assert.equal(status(), REPORT_STATUS.FAILED, '連續第二次失敗：讀不到')
+  assert.equal(status(), REPORT_STATUS.LOADING, '差 1 毫秒滿 5 分鐘：仍是正在讀取')
+  t = T0 + REPORT_RELOAD_MS
+  await ui.retryReports([W])
+  assert.equal(status(), REPORT_STATUS.FAILED, '第一次失敗後滿 5 分鐘仍讀不到：讀不到')
   assert.equal(tree({ rep: ui.state.reports[W], now: t }).reportTag, '讀不到帳號資料')
   assert.ok(log.some(l => l.includes('503 raw-detail')), '原始錯誤進 log')
   assert.ok(!JSON.stringify(tree({ rep: ui.state.reports[W], now: t })).includes('503'), '原始錯誤不上畫面')
@@ -169,7 +174,9 @@ test('#2158 電腦與手機同一份判斷與文字：同樣的回報，兩邊�
   }
   // 手機存的回報形狀也走同一個 nextReport
   const e = acctReportEntry(null, { error: '暫時讀不到' }, T0)
-  const e2 = acctReportEntry(e, { error: '暫時讀不到' }, T0 + 60_000)
+  const e1m = acctReportEntry(e, { error: '暫時讀不到' }, T0 + 60_000)
+  assert.equal(e1m.failCount, 1, '手機同一個計次規則：不到 5 分鐘不加')
+  const e2 = acctReportEntry(e1m, { error: '暫時讀不到' }, T0 + REPORT_RELOAD_MS)
   assert.deepEqual([e.failCount, e2.failCount, e2.msg], [1, 2, '暫時讀不到'])
   assert.equal(acctReportEntry(e2, { value: { asn_online: true, reported_at: iso(T0), accounts: [] } }, T0).failCount, 0)
   // 文字只有一份：樣板與設定頁都讀 row.reportTag／reportNote，不寫死

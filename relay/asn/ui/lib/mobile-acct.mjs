@@ -37,7 +37,7 @@ export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnl
 // outcome：{ value }（後台回的）或 { error }（給畫面的白話）
 export function acctReportEntry(prev, outcome, now = Date.now()) {
   const r = nextReport(prev, outcome, now)
-  return { loading: false, asnOnline: r.asnOnline, reportedAt: r.reportedAt, msg: r.error, list: r.accounts, readAt: r.readAt, ...(r.failedAt ? { failedAt: r.failedAt } : {}), failCount: r.failCount }
+  return { loading: false, asnOnline: r.asnOnline, reportedAt: r.reportedAt, msg: r.error, list: r.accounts, readAt: r.readAt, ...(r.failedAt ? { failedAt: r.failedAt } : {}), failCount: r.failCount, ...(r.countedAt ? { countedAt: r.countedAt } : {}) }
 }
 // 切換流程只認 Claude：把某台的回報濾成 acctSheetView 要的形狀
 export const acctClaudeRemote = r => ({ loading: r?.loading === true, asnOnline: r?.asnOnline === true, reportedAt: r?.reportedAt ?? '', msg: r?.msg ?? '', list: (Array.isArray(r?.list) ? r.list : []).filter(a => a?.vendor === 'claude') })

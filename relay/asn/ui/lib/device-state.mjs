@@ -223,7 +223,7 @@ export const SHORT_TEXT = Object.freeze({
 
 /** 設備頁開著時，別台帳號回報每隔這麼久自動重讀一次（不加按鈕；頁面關掉就停）。與 REPORT_FRESH_MS（15 分鐘）搭配：回報超過 15 分鐘也一定會被重讀 */
 export const REPORT_RELOAD_MS = 5 * 60 * 1000
-/** 連續幾次讀不到（讀取失敗，或讀到的回報仍然過期）才在畫面上說「讀不到」。排程每次重讀間隔 REPORT_RETRY_MS～REPORT_RELOAD_MS，所以大約 5 分鐘內才會出現 */
+/** 連續幾次讀不到（讀取失敗，或讀到的回報仍然過期）才在畫面上說「讀不到」。計次要間隔 REPORT_RELOAD_MS（見 report-reload.mjs 的 nextReport），所以第一次失敗後約 5 分鐘仍讀不到才會出現 */
 export const REPORT_FAIL_LIMIT = 2
 
 export const REPORT_STATUS = Object.freeze({ OK: 'ok', LOADING: 'loading', FAILED: 'failed', NONE: 'none' })

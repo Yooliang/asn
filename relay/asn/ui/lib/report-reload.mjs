@@ -7,14 +7,19 @@ import { REPORT_RELOAD_MS, REPORT_RETRY_MS, reportFreshness, shouldRetryReport }
 /**
  * 讀完一台的回報，算出要存的新紀錄（純函式）。
  * prev：上一筆紀錄；outcome：{ value }（後台回的 { asn_online, reported_at, accounts }）或 { error }（給畫面的白話）
- * failCount＝連續沒讀到新回報的次數：讀失敗、或讀到的回報仍然過期（那台在線卻沒在回報）都算一次；讀到新的就歸零
+ * failCount＝連續沒讀到新回報的次數：讀失敗、或讀到的回報仍然過期（那台在線卻沒在回報）都算；讀到新的就歸零。
+ * 計次要間隔：距上次計次滿 REPORT_RELOAD_MS（5 分鐘）才再 +1（countedAt 記上次計次的時間）。失敗後每分鐘照樣重試，讀到就恢復，
+ * 但畫面要等第一次失敗後約 5 分鐘仍讀不到才說「讀不到」（設計定案），不會因為每分鐘重試而 2 分鐘就跳出來
  */
 export function nextReport(prev, outcome, now) {
-  const failCount = (prev?.failCount ?? 0) + 1
-  if (outcome?.error !== undefined) return { error: String(outcome.error) || '讀取失敗', failedAt: now, asnOnline: false, reportedAt: '', accounts: [], readAt: now, failCount }
+  const before = prev?.failCount ?? 0
+  const due = !before || !Number.isFinite(prev?.countedAt) || now - prev.countedAt >= REPORT_RELOAD_MS
+  const failCount = due ? before + 1 : before
+  const countedAt = due ? now : prev.countedAt
+  if (outcome?.error !== undefined) return { error: String(outcome.error) || '讀取失敗', failedAt: now, asnOnline: false, reportedAt: '', accounts: [], readAt: now, failCount, countedAt }
   const v = outcome?.value
   const rep = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [], readAt: now }
-  return { ...rep, failCount: reportFreshness(rep, now) === 'fresh' ? 0 : failCount }
+  return reportFreshness(rep, now) === 'fresh' ? { ...rep, failCount: 0 } : { ...rep, failCount, countedAt }
 }
 
 /**
