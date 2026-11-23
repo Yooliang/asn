@@ -31,6 +31,19 @@ export const ACCT_TEXT = {
 export const ACCT_TITLES = Object.freeze({ devices: '設備', accounts: '帳號' })
 export const acctPageTitle = tab => ACCT_TITLES[tab === 'accounts' ? 'accounts' : 'devices']
 
+// #1864 標題只留一層：看某台設備的細部頁時，標題列直接寫「設備名 ＋ 狀態」，頁內不再有第二個設備名。
+// 列表與帳號頁沒有 cur，維持原本的頁標題。手機的「這台」不另寫標籤（電腦版的「這台」標籤照舊）。
+// 狀態標籤的規則跟電腦細部頁同一份：不是「電腦」的種類才標、再來是在線／離線、最後是已隱藏。
+export const acctHeadView = (tab, cur, hiddenTag = '') => {
+  if (!cur) return { title: acctPageTitle(tab), tags: [] }
+  const kind = cur.kindLabel || cur.kind || ''
+  const tags = []
+  if (kind && kind !== '電腦') tags.push({ text: kind, cls: 'kind' })
+  tags.push({ text: cur.onlineText || '', cls: cur.online ? 'on' : 'off' })
+  if (cur.hidden && hiddenTag) tags.push({ text: hiddenTag, cls: 'hid' })
+  return { title: cur.identity?.title || cur.label || '', tags: tags.filter(t => t.text) }
+}
+
 // reports：節點 → { loading, asnOnline, reportedAt, msg, list:[{vendor,email,plan,current}] }（手機自己存的形狀）
 export const acctReportOf = r => (r && !r.loading ? { error: r.msg || '', asnOnline: r.asnOnline === true, reportedAt: r.reportedAt || '', accounts: Array.isArray(r.list) ? r.list : [], failCount: r.failCount ?? 0 } : undefined)
 // 讀完一台的回報後要存的紀錄（手機自己的形狀 + 讀取時間與連續失敗次數，#2158；判斷跟電腦版同一個 nextReport）。

@@ -98,7 +98,7 @@ test('整頁畫面接線（細部頁）：廠商卡片、帳號列、虛線未�
   assert.equal(acctPageTitle('devices'), '設備')
   assert.equal(acctPageTitle('accounts'), '帳號')
   assert.equal(acctPageTitle('x'), '設備', '壞值當設備')
-  assert.match(pane, /\{\{ acctTitle \}\}/, '標題用 acctTitle（跟著分頁），不再寫死')
+  assert.match(pane, /\{\{ acctHead\.title \}\}/, '標題用 acctHead.title（跟著分頁；看某台細部時是設備名，#1864），不再寫死')
   assert.doesNotMatch(pane.replace(/<!--[\s\S]*?-->/g, ''), /ACCT_PAGE_TITLE|設備與帳號/)
   // 資料只走電腦版的整理函式，手機端不另寫一套
   assert.match(read('ui', 'lib', 'mobile-acct.mjs'), /from '\.\/device-tree\.mjs'/)

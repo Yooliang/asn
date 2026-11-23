@@ -43,7 +43,7 @@ const setScenario = ({ name, mode, cat, skin, width, fx }) => {
   return {
     name, page: desk ? 'list.html' : 'm.html', ...(desk ? { width: width ?? 900, height: 640 } : width ? { width } : {}),
     state: { signedIn: true, ...(skin && skin !== 'aero' ? { skin } : {}), setPage: { mode, cat, fx: fx ?? 'data' } },
-    ready: desk ? '#app.win .panel-pane .panel-h' : '#app.m .m-row-btn',
+    ready: desk ? (cat === 'devices' ? '#app.win .panel-pane .dv-set' : '#app.win .panel-pane .panel-h') : '#app.m .m-row-btn',
     probe: { setPage: true, ...(fx === 'busy' && cat === 'cloud' ? { flow: 'cloud-busy' } : {}), mode, key: cat, heading: desk ? `設定：${title}` : title, want, row: title, settle: fx ? 1500 : 600 },
     shot: `${name}.png`,
   }
@@ -140,7 +140,10 @@ export const setPageProbeSource = ({ mode, key, heading, want = [], row = '', se
     if (!root) return { ok: false, why: '內頁標題沒有出現「' + heading + '」：' + [...document.querySelectorAll('#app.m .m-fourth .m-title')].map(e => e.textContent.trim()).join('／') };
   } else {
     for (let i = 0; i < 80 && !root; i++) {
-      const h = [...document.querySelectorAll('#app.win .panel-pane .panel-h')].find(vis);
+      // 設備頁（#1864）：復古外觀的頁內標題用樣式收起（標題在分頁標籤），元素還在，所以不要求看得見；其他分類照舊
+      const h = key === 'devices'
+        ? document.querySelector('#app.win .panel-pane .panel-h')
+        : [...document.querySelectorAll('#app.win .panel-pane .panel-h')].find(vis);
       if (h && h.textContent.trim() === heading) root = h.closest('.panel-pane');
       if (!root) await sleep(100);
     }

@@ -79,10 +79,10 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
       await sleep(100);
       document.querySelector('.m-known-edit button[type=submit]').click();
       if (mode === 'ok') {
-        const done = await wait(() => document.querySelector('.m-dv-name')?.textContent.includes(${JSON.stringify(NAME_NEW)}), 50);
+        const done = await wait(() => document.querySelector('.m-dv-headtx .m-title')?.textContent.includes(${JSON.stringify(NAME_NEW)}), 50);
         await sleep(300);
         if (!check) return { ok: true, why: '' };
-        if (!done) return { ok: false, why: '改名成功後，詳情頁頂部沒有立刻顯示新名字：' + document.querySelector('.m-dv-name')?.textContent.trim() };
+        if (!done) return { ok: false, why: '改名成功後，詳情頁頂部沒有立刻顯示新名字：' + document.querySelector('.m-dv-headtx .m-title')?.textContent.trim() };
         [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis)?.click();
         await sleep(500);
         const first = [...document.querySelectorAll('.m-dv-row')].filter(vis)[0]?.querySelector('b')?.textContent.trim();
@@ -95,7 +95,7 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
         await sleep(200);
         if (!check) return { ok: true, why: '' };
         if (!err) return { ok: false, why: '改名失敗，畫面沒有說原因' };
-        if (!document.querySelector('.m-dv-name')?.textContent.includes(${JSON.stringify(NAME_M)})) return { ok: false, why: '改名失敗，名字不該變' };
+        if (!document.querySelector('.m-dv-headtx .m-title')?.textContent.includes(${JSON.stringify(NAME_M)})) return { ok: false, why: '改名失敗，名字不該變' };
         return { ok: true, why: '' };
       }
       const toast = await wait(() => { const t = document.querySelector('.m-toast'); return t && t.textContent.includes('寄信時用的名字沒有換成功') ? t : null }, 40);
