@@ -31,25 +31,27 @@ pub const FRAME_OPEN: &str = "<<<MAIL";
 pub const FRAME_CLOSE: &str = "MAIL>>>";
 
 /// 拿掉模型誤帶進來的信件外框：開頭單獨一行的 `<<<MAIL`、結尾單獨一行的 `MAIL>>>`（各至多一個），
-/// 外框旁邊的空白一併去掉。只拿外框，內文一個字都不動。判斷編號、比對抬頭、SENT 比對之前都先過這一關。
+/// 只拿外框那一行與緊鄰的一個換行（外框外面的空白與空行也去掉），內文一個字都不動（含第一行的行首空白、最後一行的行尾）。判斷編號、比對抬頭、SENT 比對之前都先過這一關。
 /// 沒有外框就原樣回傳（連前後空白都不動）：判斷用的字串和放行時實際送出的字串要一致
 pub fn strip_frame(text: &str) -> &str {
-    let mut t = text.trim();
+    let mut t = text;
     let mut framed = false;
-    if let Some((h, rest)) = t.split_once('\n') {
+    // 開頭外框：外框前面的空白與空行在外框外面，可以去掉；只拿外框那一行和它後面的那一個換行，內文第一行的行首空白不動
+    if let Some((h, rest)) = t.trim_start().split_once('\n') {
         if h.trim() == FRAME_OPEN {
-            t = rest.trim_start();
+            t = rest;
             framed = true;
-            if t == FRAME_CLOSE {
-                return ""; // 只有外框、中間沒有內容
-            }
         }
     }
-    if let Some((rest, l)) = t.rsplit_once('\n') {
-        if l.trim() == FRAME_CLOSE {
-            t = rest.trim_end();
+    // 結尾外框：外框後面的空白與空行在外框外面，可以去掉；只拿 MAIL>>> 那一行和它前面的那一個換行，內文最後一行的行尾不動
+    let e = t.trim_end();
+    match e.rsplit_once('\n') {
+        Some((rest, l)) if l.trim() == FRAME_CLOSE => {
+            t = rest.strip_suffix('\r').unwrap_or(rest);
             framed = true;
         }
+        None if framed && e.trim() == FRAME_CLOSE => return "", // 只有外框、中間沒有內容
+        _ => {}
     }
     if framed { t } else { text }
 }
@@ -620,6 +622,13 @@ mod tests {
         assert_eq!(strip_frame("<<<MAIL\n甲\n乙\nMAIL>>>"), "甲\n乙");
         assert_eq!(strip_frame("  \n<<<MAIL  \r\n甲\r\n乙\r\nMAIL>>>  \n"), "甲\r\n乙");
         assert_eq!(strip_frame("<<<MAIL\n甲"), "甲", "只有開頭外框");
+        // 只拿外框那一行和緊鄰的一個換行：內文第一行的行首空白、最後一行的行尾空白、空行都不動
+        assert_eq!(strip_frame("<<<MAIL\n  甲\nMAIL>>>"), "  甲");
+        assert_eq!(strip_frame("<<<MAIL\n甲  \nMAIL>>>"), "甲  ");
+        assert_eq!(strip_frame("<<<MAIL\n\n甲\n\nMAIL>>>"), "\n甲\n");
+        assert_eq!(strip_frame("<<<MAIL\r\n\t甲\r\n乙 \r\nMAIL>>>"), "\t甲\r\n乙 ");
+        assert_eq!(strip_frame("<<<MAIL\n  甲"), "  甲", "只有開頭外框：後面不動");
+        assert_eq!(strip_frame("  甲 \nMAIL>>>"), "  甲 ", "只有結尾外框：前面不動");
         assert_eq!(strip_frame("甲\nMAIL>>>"), "甲", "只有結尾外框");
         assert_eq!(strip_frame("沒有外框"), "沒有外框");
         // 沒有外框：連前後空白都不動
@@ -735,6 +744,13 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         write_inflight(d.path(), &[(A.to_string(), "T-甲".to_string(), None)]).unwrap();
         assert_eq!(run_hook(d.path(), &call("T-甲", &format!(" 前面有空白 id={A}\n內文")).to_string()).0, None, "沒外框：不改寫");
+        // 有外框、但內文第一行自己有行首空白：空白保留，閘門照擋（和沒外框時一樣）
+        let lead = format!("  {body}");
+        for framed in [format!("<<<MAIL\n{lead}\nMAIL>>>"), format!("\n <<<MAIL\r\n{lead}\r\nMAIL>>> \n")] {
+            assert_eq!(strip_frame(&framed), lead, "行首空白要保留");
+            assert!(matches!(check(&call("T-甲", &framed), Some(&f)).0, Verdict::Deny(_)), "{framed:?}");
+        }
+        assert!(matches!(check(&call("T-甲", &lead), Some(&f)).0, Verdict::Deny(_)), "沒外框、行首有空白：一樣擋");
         // 有抬頭指紋時，行首空白（沒外框）照擋，不會因為判斷前被 trim 而放行
         assert!(matches!(check(&call("T-甲", &format!(" {body}")), Some(&f)).0, Verdict::Deny(_)));
         assert!(matches!(check(&call("T-甲", &format!("\n{body}")), Some(&f)).0, Verdict::Deny(_)));

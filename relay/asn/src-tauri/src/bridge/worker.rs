@@ -1210,6 +1210,12 @@ mod tests {
         p.feed(&call("toolu_1", "T-甲", &format!(" {head}\n內文")));
         assert!(p.feed(&done_ok("toolu_1")).events.is_empty());
         assert_eq!(p.inflight_len(), 1);
+        // 有外框、但內文第一行自己有行首空白：空白保留，worker 一樣不算轉交成功
+        let mut p2 = Parser::new(N);
+        p2.register_head(A, "T-甲", head_hash(&head));
+        p2.feed(&call("toolu_9", "T-甲", &format!("<<<MAIL\n  {head}\n內文\nMAIL>>>")));
+        assert!(p2.feed(&done_ok("toolu_9")).events.is_empty());
+        assert_eq!(p2.inflight_len(), 1);
         // 閘門對同一份也擋
         let f: HashMap<String, InflightItem> = [(A.to_string(), InflightItem { to: "T-甲".into(), head: Some(head_hash(&head)), body: None })].into_iter().collect();
         let g = |m: &str| check(&serde_json::json!({"tool_name": "SendMessage", "tool_input": {"to": "T-甲", "message": m}}), Some(&f)).0;
@@ -1224,6 +1230,8 @@ mod tests {
             format!("{body}\nMAIL>>>"),
             format!(" {body}"),
             format!("\n{body}"),
+            format!("<<<MAIL\n  {body}\nMAIL>>>"),
+            format!("<<<MAIL\r\n\t{body}\r\nMAIL>>>"),
             format!("<<<MAIL\n <<<MAIL\n{body}\nMAIL>>>"),
             "<<<MAIL\nMAIL>>>".to_string(),
         ];
@@ -1236,7 +1244,7 @@ mod tests {
             let gate_ok = !matches!(g(m), Verdict::Deny(_));
             assert_eq!(worker_ok, gate_ok, "worker 與閘門判斷不一致：{m:?}");
         }
-        // 以上九種裡，只有五種（沒外框、單層外框各種空白、只有開頭、只有結尾）會過
+        // 以上十一種裡，只有五種（沒外框、單層外框各種空白、只有開頭、只有結尾）會過
         let ok_n = cases.iter().filter(|m| !matches!(g(m), Verdict::Deny(_))).count();
         assert_eq!(ok_n, 5);
     }
