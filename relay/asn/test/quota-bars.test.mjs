@@ -19,7 +19,7 @@ test('重置時間：不到 1 小時、已過、沒有', () => {
 test('接線：設定頁自己這台的 Claude 帳號畫額度條（讀 a.quota）（有 progressbar 角色與數值）；Codex／Grok 寫「沒有額度資料」', () => {
   const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   assert.match(src, /<span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b\.pct"/)
-  assert.match(src, /v-else-if="v\.key === 'codex' \|\| v\.key === 'grok'">\{\{ NO_QUOTA_TEXT \}\}/)
+  // #2111 ⑦：設備頁不畫額度（含 Codex／Grok 的「沒有額度資料」），額度只在帳號頁
   assert.equal(NO_QUOTA_TEXT, '沒有額度資料')
   assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.dv-fill\.low\{/)
 })

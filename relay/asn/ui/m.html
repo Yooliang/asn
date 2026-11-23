@@ -273,7 +273,7 @@
                   <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
                   <ul class="m-dv-accts">
                     <!-- 帳號卡固定三行：帳號＋右邊固定的「使用中」、方案、額度條（#374） -->
-                    <li class="m-dv-acct" :class="{ cur: acctInUseOf(v.key, a) }" v-for="a in v.accounts" :key="a.account">
+                    <li class="m-dv-acct" :class="{ cur: acctInUseOf(v.key, a) }" :data-flash="acctFocus === accountCardKey(v.key, a.account) ? '1' : null" :data-acct-card="accountCardKey(v.key, a.account)" :data-status="accountStatusOf({ loginLost: acctLoginLostOf(v.key, a), subLapsed: a.subLapsed, exhausted: a.quota.exhausted })" v-for="a in v.accounts" :key="a.account">
                       <span class="m-dv-mail">{{ a.account }}</span>
                       <span class="m-dv-act"><span class="m-dv-lost" v-if="acctLoginLostOf(v.key, a)">{{ LOGIN_LOST_TEXT.tag }}</span><span class="m-dv-cur" v-if="acctInUseOf(v.key, a)">使用中</span></span>
                       <span class="m-dv-planrow"><span class="asn-tag-fail" v-if="a.subLapsed">{{ SUB_LAPSED_TEXT.tag }}</span><span class="m-dv-plan" v-else>{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span></span>
@@ -400,29 +400,14 @@
                     <li class="m-dv-vendor" :class="'v-' + v.key" v-for="v in acctCur.vendors" :key="v.key">
                       <header class="m-dv-vh"><span class="m-dv-vi" aria-hidden="true" v-html="vendorIconSvg(v.key)"></span><b>{{ v.label }}</b></header>
                       <div class="m-dv-vb">
-                        <ul class="m-dv-accts" v-if="v.accounts.length">
-                          <!-- 帳號卡固定三行：帳號＋右邊固定的「切換」／「使用中」、方案、額度條（#374） -->
-                          <li class="m-dv-acct" :class="{ cur: a.current }" v-for="a in v.accounts" :key="a.email">
-                            <span class="m-dv-mail">{{ a.email }}</span>
-                            <span class="m-dv-act">
-                              <span class="m-dv-cur" :class="{ failed: a.loginFailed }" v-if="a.current" :role="a.loginFailed ? 'img' : null" :aria-label="a.loginFailed ? CURRENT_FAILED_ARIA : null"><span class="m-dv-cur-a" :aria-hidden="a.loginFailed ? 'true' : null">{{ CURRENT_LABEL }}</span><span class="m-dv-cur-b" v-if="a.loginFailed" aria-hidden="true">{{ LOGIN_FAILED_LABEL }}</span></span>
-                              <button type="button" class="m-dv-sw" v-else-if="v.key === 'claude' && (v.switchable || v.switchHint) && acctCanSwitchTo(acctCur.key)" :disabled="!v.switchable || a.incomplete" @click="startAcctSwitch(a.email)">切換</button>
-                            </span>
-                            <span class="m-dv-planrow"><span class="m-dv-plan">{{ planLabel(a.plan) || PLAN_UNKNOWN }}</span><span class="m-dv-failed" v-if="a.loginFailed && !a.current">{{ LOGIN_FAILED_LABEL }}</span><span class="m-dv-incomplete" v-if="a.incomplete && !a.current">{{ INCOMPLETE_LABEL }}</span></span>
-                            <span class="m-dv-why" v-if="a.incomplete && !a.current">{{ INCOMPLETE_REASON }}</span>
-                            <span class="m-dv-usable" v-if="a.usableAt">{{ a.usableAt }}</span>
-                            <span class="m-dv-quota" :class="{ stale: a.quota.stale, 'quota-out': a.quota.exhausted }" v-if="a.quota">
-                              <span class="m-dv-bars" v-if="a.quota.bars && a.quota.bars.length">
-                                <span class="m-dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
-                                  <span class="m-dv-bl">{{ b.label }}</span>
-                                  <span class="m-dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="m-dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
-                                  <span class="m-dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
-                                  <span class="m-dv-br" v-if="b.reset">{{ b.reset }}</span>
-                                </span>
-                              </span>
-                              <span v-else>{{ a.quota.text }}</span>
-                              <span class="m-dv-qmeta" v-if="a.quota.fiveNote || a.quota.meta"><span class="m-dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span><span v-if="a.quota.meta">{{ a.quota.meta }}</span></span>
-                            </span>
+                        <ul class="m-dv-accts asn-alines" v-if="acctLines(v).length" :aria-label="'這台的 ' + v.label + ' 帳號'">
+                          <!-- 設備頁的帳號：一個帳號一行＋狀態標籤，點進帳號頁那張卡（#2111 ⑦）；額度條、切換、「⋯」只在帳號頁 -->
+                          <li class="asn-aline" v-for="l in acctLines(v)" :key="l.key" :data-aline="l.key" :data-status="l.status">
+                            <button type="button" class="asn-aline-go" :aria-label="'查看帳號 ' + l.account + '，' + l.tag" @click="acctCardGo(l)">
+                              <span class="asn-aline-mail">{{ l.account }}</span>
+                              <span class="asn-aline-side"><span :class="l.tagClass">{{ l.tag }}</span><span class="asn-aline-chev" aria-hidden="true">›</span></span>
+                            </button>
+                            <small :class="['asn-aline-note', l.status === 'lapsed' ? 'asn-note-fail' : 'asn-note-warn']" role="status" v-if="l.note">{{ l.note }}</small>
                           </li>
                         </ul>
                         <div class="m-dv-none" v-else>{{ acctRep && acctRep.loading ? '讀取中…' : (v.note || '目前未回報任何帳號') }}</div>

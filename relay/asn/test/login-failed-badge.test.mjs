@@ -46,21 +46,13 @@ test('只有 Claude 帳號會標登入失效（其他廠牌帶了也不理）', 
   assert.equal(d.vendors.find(v => v.key === 'grok').accounts[0].loginFailed, undefined)
 })
 
-test('手機頁接線（#1592）：沒有獨立的紅色「登入失效」標籤，改成「使用中」那一格交替顯示', () => {
+test('手機頁接線（#1592→#2111 ⑦）：設備頁的帳號改成一行＋狀態標籤，不再有獨立的紅色標籤與「使用中」交替格', () => {
   const html = read('ui', 'm.html')
-  // 獨立紅標籤只給「沒在使用」的失效帳號；使用中的走交替格
-  assert.equal((html.match(/m-dv-failed/g) ?? []).length, 1)
-  assert.match(html, /<span class="m-dv-failed" v-if="a\.loginFailed && !a\.current">\{\{ LOGIN_FAILED_LABEL \}\}<\/span>/)
+  assert.equal((html.match(/m-dv-failed/g) ?? []).length, 0, '設備頁沒有獨立的紅色「登入失效」標籤')
+  assert.ok(!html.includes('m-dv-cur-b'), '設備頁沒有「使用中」交替格')
+  assert.match(html, /v-for="l in acctLines\(v\)"/, '登入失效由帳號行的狀態標籤表達（device-account-lines.mjs）')
   assert.match(read('ui', 'mobile.css'), /\.m-dv-failed\{[^}]*background:#b3261e[^}]*color:#fff/)
-  // 同一格：使用中才有；登入失效時加 failed、兩個字節點都 aria-hidden，整格用 aria-label 讀出兩個狀態
-  assert.match(html, /<span class="m-dv-cur" :class="\{ failed: a\.loginFailed \}" v-if="a\.current"/)
-  assert.match(html, /:aria-label="a\.loginFailed \? CURRENT_FAILED_ARIA : null"/)
-  assert.match(html, /<span class="m-dv-cur-a" :aria-hidden="a\.loginFailed \? 'true' : null">\{\{ CURRENT_LABEL \}\}<\/span>/)
-  assert.match(html, /<span class="m-dv-cur-b" v-if="a\.loginFailed" aria-hidden="true">\{\{ LOGIN_FAILED_LABEL \}\}<\/span>/)
   assert.match(read('ui', 'm.js'), /CURRENT_LABEL, CURRENT_FAILED_ARIA/)
-  // 文字都在 lib，不寫死在 html
-  assert.equal(CURRENT_FAILED_ARIA, '使用中，登入失效')
-  assert.equal(CURRENT_LABEL, '使用中')
 })
 
 test('手機頁樣式（#1592）：純 CSS 交替、兩字疊同一格不推版面、減少動態時固定顯示紅色「登入失效」', () => {
