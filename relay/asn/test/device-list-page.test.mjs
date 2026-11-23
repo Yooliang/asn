@@ -138,7 +138,7 @@ test('進入先看全部設備的列表：由上到下一台一列，名稱＋�
   assert.match(rows[0], /家用機[\s\S]*電腦 · 在線 · 這台/)
   assert.match(rows[1], /工作機[\s\S]*電腦 · 在線/)
   assert.match(rows[2], /舊電腦[\s\S]*電腦 · 離線中/); assert.ok(!html.includes('離線<'), '離線一律寫「離線中」')
-  for (const r of rows) assert.equal((r.match(/<button[^>]*class="asn-btn/g) ?? []).length, 1, '每列只有一顆文字按鈕')
+  for (const r of rows) assert.equal((r.match(/<button[^>]*class="asn-btn(?![^"]*dv-grip)/g) ?? []).length, 1, '每列只有一顆文字按鈕（排序把手不算）')
   for (const r of rows) assert.match(r, /<button[^>]*class="asn-btn[^"]*"[^>]*aria-label="查看「[^」]+」的詳情"[^>]*>詳情<\/button>/)
   for (const r of rows) assert.ok(!r.includes('dv-chev') && !r.includes('dv-row-go" type="button"'), '不再整列點擊／右箭頭')
   assert.ok(!html.includes('dv-vendor') && !html.includes('w@b.c'), '列表不含廠商與帳號內容')
@@ -151,7 +151,7 @@ test('列表裡被隱藏的設備：淡色（hid）、標「已隱藏」；本�
   assert.match(rows[2], /class="dv-row[^"]*\bhid\b/); assert.match(rows[2], /dv-tag hid[^>]*>已隱藏/)
   assert.doesNotMatch(rows[1], /\bhid\b/)
   assert.ok(!/dv-grip"/.test(rows[0]) && !/draggable="true"/.test(rows[0]), '本機沒有把手')
-  assert.match(rows[1], /<button[^>]*class="dv-grip"[^>]*draggable="true"/); assert.match(rows[1], /aria-label="拖曳調整「工作機」的順序/)
+  assert.match(rows[1], /<button[^>]*class="asn-btn[^"]*dv-grip"[^>]*draggable="true"/); assert.match(rows[1], /aria-label="拖曳調整「工作機」的順序/)
 })
 
 test('沒有上移／下移：順序只用把手拖曳；把手聚焦後上下鍵移動一格（送 device-move）', async () => {

@@ -24,11 +24,13 @@ export const dalineProbeSource = ({ daline }) => `(async () => {
     await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));
     open = await wait(() => [...document.querySelectorAll('.m-dv-subbtn[data-sub="accounts"]')].find(vis));
   } else {
-    const row = await wait(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => r.querySelector('.dv-tag.me')));
-    if (!row) return { ok: false, why: '設備列表裡找不到「這台」' };
-    open = [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '帳號');
+    // 本機那一列：第一列、沒有排序把手（畫面上不寫「這台」）；列上只有「詳情」，點進去再點「帳號」分頁（#1860）
+    const row = await wait(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => !r.querySelector('.dv-grip')));
+    if (!row) return { ok: false, why: '設備列表裡找不到本機那一列' };
+    await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));
+    open = await wait(() => [...document.querySelectorAll('.dv-tabs button')].find(b => vis(b) && b.textContent.trim() === '帳號'));
   }
-  if (!open) return { ok: false, why: '那一列沒有「帳號」鈕' };
+  if (!open) return { ok: false, why: '詳情裡沒有「帳號」分頁' };
   await tap(open);
   const lines = await wait(() => { const l = [...document.querySelectorAll('.asn-aline')].filter(vis); return l.length ? l : null });
   if (!lines) return { ok: false, why: '設備頁沒有帳號行' };

@@ -54,7 +54,7 @@ test('守門：設備列表每列只有 1 顆按鈕「詳情」（沒有上移�
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const li = panel.slice(panel.indexOf('<li v-for="d in devs"'), panel.indexOf('</li>', panel.indexOf('<li v-for="d in devs"')))
   const btns = [...li.matchAll(/<asn-button[\s\S]*?<\/asn-button>/g)].map(m => m[0].replace(/<[^>]+>/g, '').replace(/\{\{\s*DEVICE_TEXT\.(\w+)\s*\}\}/, '$1'))
-  assert.deepEqual(btns, ['detail'])
+  assert.deepEqual(btns.filter(Boolean), ['detail'], '除了排序把手（沒有文字），只有「詳情」')
   assert.ok(!li.includes('moveUp') && !li.includes('moveDown'))
   assert.doesNotMatch(panel, /已確認|未確認/)
   assert.ok(li.includes('shortFp(joined.byNode[d.key].fingerprint)') && li.includes('d.phone'))
