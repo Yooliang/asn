@@ -43,9 +43,9 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
   if (tab === 'devices') {
     const rows = [...document.querySelectorAll('.m-dv-row')].filter(vis);
     if (rows.length < 3) return { ok: false, why: '設備列少於 3 列：' + rows.length };
-    if (rows.some(r => r.querySelector('.m-dv-line') || r.textContent.includes('還沒收到這台的回報'))) return { ok: false, why: '列上不該再有狀態那一行（#1499 搬到詳情）' };
-    { const w = rows.find(r => (r.querySelector('b')?.textContent ?? '').trim() === '工作機'); const tag = w && w.querySelector('.noreport'); if (!tag || tag.textContent.trim() !== '沒回報' || !vis(tag)) return { ok: false, why: '工作機沒有回報，列上要看得到「沒回報」標記' } }
-    if (rows.filter(r => r.querySelector('.noreport')).length !== 1) return { ok: false, why: '只有沒回報的那台要有「沒回報」標記' };
+    if (rows.some(r => r.querySelector('.m-dv-line') || r.textContent.includes('沒回報') || r.textContent.includes('還沒收到這台的回報'))) return { ok: false, why: '列上不該再有狀態那一行（#1499 搬到詳情；#2158 起也不再有「沒回報」）' };
+    // #2158：在線剛連上、還沒讀到回報時，列上不放標籤（「讀不到帳號資料」要連續失敗才出現）；狀態寫在詳情
+    if (rows.some(r => r.querySelector('.noreport'))) return { ok: false, why: '還沒讀到回報時列上不該有任何回報標籤' };
     const list = R(document.querySelector('.m-dv-list'));
     for (const row of rows) {
       const rr = R(row);
@@ -57,7 +57,7 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     const dots = rows.map(r => R(r.querySelector('.m-dv-dot')).left);
     if (Math.max(...dots) - Math.min(...dots) > 1) return { ok: false, why: '圓點沒對齊：' + dots.map(x => x.toFixed(1)).join('／') };
     if (foot) return { ok: false, why: '設備頁不該有額度註腳' };
-    // #1499：「還沒收到這台的回報」搬到詳情，仍然要看得到（真的點「詳情」進去找）
+    // #2158：還在讀回報時，詳情寫「正在讀取這台的帳號資料…」（灰字加轉圈），仍然要看得到（真的點「詳情」進去找）
     // 先真的點工作機那一列，展開它的按鈕（#1539）
     { const w = rows.find(r => (r.querySelector('b')?.textContent ?? '').trim() === '工作機'); const g = w && w.querySelector('.m-dv-go'); if (g) { g.scrollIntoView({ block: 'center' }); await sleep(150); const r = R(g); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })); await sleep(300) } }
     const info = [...document.querySelectorAll('.m-dv-row button')].find(b => vis(b) && b.getAttribute('aria-label') === '查看 工作機 的詳情');
@@ -66,7 +66,8 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     { const r = R(info); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })) }
     let st = null;
     for (let i = 0; i < 30 && !st; i++) { st = [...document.querySelectorAll('.dvid-note')].find(vis) || null; if (!st) await sleep(100) }
-    if (!st || !st.textContent.includes('還沒收到這台的回報')) return { ok: false, why: '工作機的詳情裡看不到「還沒收到這台的回報」' };
+    if (!st || !st.textContent.includes('正在讀取這台的帳號資料…') || !st.querySelector('.asn-spin')) return { ok: false, why: '工作機的詳情裡看不到「正在讀取這台的帳號資料…」與轉圈' };
+    if (document.body.textContent.includes('沒回報')) return { ok: false, why: '畫面上不該再有「沒回報」' };
     const box = R(st.closest('.m-dv-info') || st.parentElement);
     if (R(st).right > box.right + 0.5) return { ok: false, why: '詳情裡的狀態那一行超出版面' };
   } else {
