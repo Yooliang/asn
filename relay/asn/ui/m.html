@@ -252,7 +252,7 @@
               <!-- 設備與帳號（替電腦切換 Claude 帳號）：先看設備列表，點一台進細部（多一層，返回鍵回列表）；選帳號 → 確認 → 送出並等對方電腦回報 -->
               <header class="m-head m-chathead">
                 <button class="m-icon-btn" type="button" aria-label="返回" @click="back"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M15 4.5L7.5 12 15 19.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-                <div class="m-head-tx"><div class="m-title">{{ acctTitle }}</div></div>
+                <div class="m-head-tx m-dv-headtx"><div class="m-title">{{ acctHead.title }}</div><span class="m-dv-tag" :class="t.cls" v-for="t in acctHead.tags" :key="t.cls">{{ t.text }}</span></div>
               </header>
           <div class="m-sheet-body m-dv">
             <template v-if="acctSw.phase === 'pick' && !acctCur">
@@ -338,13 +338,6 @@
             </template>
             <template v-else-if="acctSw.phase === 'pick'">
               <section class="m-dv-node" role="region" :aria-label="acctCur.label">
-                <div class="m-dv-dh">
-                  <h3 class="m-dv-name">{{ acctCur.identity.title }}</h3>
-                  <span class="m-dv-tag">{{ acctCur.kindLabel || acctCur.kind }}</span>
-                  <span class="m-dv-tag" :class="acctCur.online ? 'on' : 'off'">{{ acctCur.onlineText }}</span>
-                  <span class="m-dv-tag me" v-if="acctCur.self">這支手機</span>
-                  <span class="m-dv-tag hid" v-if="acctCur.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
-                </div>
                 <!-- 被擋下的這台（指紋對不上）：最上面提示＋「重新認這台」（原位確認）；正常的設備什麼都不出（#1860） -->
                 <div class="m-dv-block" role="alert" v-if="curKnown && curKnown.blocked">
                   <p class="m-err">{{ KNOWN_TEXT.reacceptNotice(acctCur.identity.title) }}</p>

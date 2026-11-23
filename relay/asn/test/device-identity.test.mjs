@@ -177,9 +177,9 @@ test('#1829 畫面檔裡不再有自己寫死的「未命名設備」（只剩�
   assert.match(read('../ui/lib/text.mjs'), /LEGACY（#1860）[\s\S]*export const UNNAMED_DEVICE/)
 })
 
-test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那一行（外層標題）進細部頁時收掉，列表頁照舊', async () => {
+test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那一行（外層標題）列表頁與細部頁都不疊（#1864）', async () => {
   const withTitle = async props => { globalThis.Vue = Vue; return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { title: '設定：設備', st: { version: '0.2.35', devices: tree(), accounts: { list: [], current: null, msg: '', autoNote: '', busy: false, confirmDel: '' }, known: { ownFp: '', qr: null, busy: false, peers: [], error: '', renameError: '' } }, meAv: '', catKey: 'devices', ...props }) })) }
-  assert.match(await withTitle({}), /<h2 class="panel-h">設定：設備<\/h2>/)
+  assert.match(await withTitle({}), /<h2 class="panel-h panel-h-tabbed">設定：設備<\/h2>/, '#1864 列表頁的頁內標題標成「有分頁標籤時收起」')
   const detail = await withTitle({ dev: 'node-old-pc-X7K2', devView: 'info' })
   assert.ok(!detail.includes('panel-h') && !detail.includes('設定：設備'))
   assert.match(detail, /<div class="dv-dev-h"><button[^>]*dv-back/)

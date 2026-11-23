@@ -62,7 +62,7 @@ test('新增的情境全部帶 shot、探測（等標題＋代表字）、特徵
   assert.deepEqual(SCENARIOS.slice(-SET_SCENARIOS.length).map(s => s.name), SET_SCENARIOS.map(s => s.name))
   for (const s of SET_SCENARIOS) {
     assert.equal(s.shot, `${s.name}.png`, `${s.name} 要帶 shot（進畫面比對）`)
-    assert.ok(s.ready && /panel-h|m-row-btn/.test(s.ready), `${s.name} 要等設定頁的特徵元素`)
+    assert.ok(s.ready && /panel-h|dv-set|m-row-btn/.test(s.ready), `${s.name} 要等設定頁的特徵元素`)
     assert.ok(s.probe?.setPage === true, `${s.name} 要用 setPage 探測`)
     assert.ok(s.probe.heading && s.probe.key, `${s.name} 要斷言分類標題`)
     assert.ok(Array.isArray(s.probe.want) && s.probe.want.length > 0 && s.probe.want.every(w => typeof w === 'string' && w.length >= 2), `${s.name} 要斷言畫面上有該類的代表字`)

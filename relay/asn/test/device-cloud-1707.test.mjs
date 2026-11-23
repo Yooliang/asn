@@ -7,7 +7,7 @@ import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
-import { acctDeviceTree } from '../ui/lib/mobile-acct.mjs'
+import { acctDeviceTree, acctHeadView } from '../ui/lib/mobile-acct.mjs'
 
 const CLOUD = 'cloud-node-aegis-7Q2M'
 const friends = [{ id: `${CLOUD}/麗麗`, node: CLOUD, agent: '麗麗', nick: '麗麗', status: 'idle', engine: 'aegis', kind: 'claude' }]   // 存檔還原的夥伴列：沒有 device
@@ -44,7 +44,9 @@ test('#1707 同一份資料，手機和電腦的種類標籤都是「雲端」�
   assert.equal(phone.kindLabel, '雲端')
   // 電腦版詳情頁頭寫「雲端」；手機詳情頁頭綁的是同一個 kindLabel，不是只有「電腦／手機」的 kind
   assert.match(await render({ dev: CLOUD, devView: 'info' }), /<span class="dv-tag kind">雲端<\/span>/)
+  // #1864 起手機詳情的種類標籤搬到標題列（acctHeadView），讀的仍是 kindLabel
+  assert.deepEqual(acctHeadView('devices', phone).tags.find(t => t.cls === 'kind'), { text: '雲端', cls: 'kind' })
   const m = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
-  assert.match(m, /<span class="m-dv-tag">\{\{ acctCur\.kindLabel \|\| acctCur\.kind \}\}<\/span>/)
-  assert.doesNotMatch(m, /<span class="m-dv-tag">\{\{ acctCur\.kind \}\}<\/span>/)
+  assert.match(m, /v-for="t in acctHead\.tags"/, '手機標題列畫的是 acctHeadView 的標籤')
+  assert.doesNotMatch(m, /\{\{ acctCur\.kind \}\}/)
 })

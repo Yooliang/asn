@@ -19,8 +19,7 @@ export const mdevsheetProbeSource = () => `(async () => {
   if (!opened) return { ok: false, why: '找不到有詳情內容的電腦細部頁' };
   if ([...document.querySelectorAll('.m-dv-subbtn, .asn-aline, .m-dv-vendor')].some(vis)) return { ok: false, why: '詳情裡不該再有帳號分頁、帳號行或廠商卡片（帳號只在設定的「帳號」頁）' };
   const R = e => e.getBoundingClientRect();
-  const head = [...document.querySelectorAll('.m-dv .m-dv-dh')].find(vis);
-  const sec = head && head.parentElement;
+  const sec = [...document.querySelectorAll('.m-dv .m-dv-node')].find(vis);
   if (!sec) return { ok: false, why: '找不到設備詳情區塊' };
   const sr = R(sec);
   if (sr.left < -0.5 || sr.right > W + 0.5) return { ok: false, why: '詳情區塊超出視窗：' + Math.round(sr.left) + '～' + Math.round(sr.right) + '（視窗寬 ' + W + '）' };
