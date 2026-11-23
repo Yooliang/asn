@@ -276,8 +276,8 @@ pub fn valid_window_name(s: &str) -> bool {
     !s.is_empty() && s.chars().count() <= 60 && s.trim() == s && !s.chars().any(|c| c.is_control())
 }
 pub fn read_settings_name(data_dir: &Path) -> Option<String> {
-    let v: Value = serde_json::from_str(&std::fs::read_to_string(data_dir.join("settings.json")).ok()?).ok()?;
-    v.get("window_name")?.as_str().filter(|s| valid_window_name(s)).map(String::from)
+    // 走共用設定層（#2162）；合不合法在 NamesDoc::normalize 判斷
+    settings::load_in::<settings::NamesDoc>(data_dir).value.window_name
 }
 pub fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
     settings::atomic::write(path, text.as_bytes(), settings::atomic::STATE)

@@ -1,8 +1,7 @@
 //! 暱稱＝視窗名＝對外寄信的 from_agent／收信的 agent 名。改名驗證、舊名清單（最多 5 個、保留 7 天）、改名流程。
 //! 舊名繼續用 inbox&agent=<舊名> 收信並各自寫心跳，過期就停，所以改名前寄來的回信不會遺失。
-use crate::{heartbeat, relay::Relay, write_atomic};
+use crate::{heartbeat, relay::Relay, settings::NamesDoc};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::path::Path;
 
 pub const NAME_MAX_CHARS: usize = 40;
@@ -50,14 +49,19 @@ pub fn with_renamed(old: &[OldName], prev: &str, current: &str, now: u64) -> Vec
     prune(&v, current, now)
 }
 
+/// 讀 settings.json 的舊名稱清單（走共用設定層，#2162）。壞檔、缺欄位、任何一筆不對＝空清單
 pub fn read_old_names(data_dir: &Path) -> Vec<OldName> {
-    let Ok(text) = std::fs::read_to_string(data_dir.join("settings.json")) else { return vec![] };
-    let Ok(v) = serde_json::from_str::<Value>(&text) else { return vec![] };
-    v.get("old_names").and_then(|o| serde_json::from_value::<Vec<OldName>>(o.clone()).ok()).unwrap_or_default()
+    crate::settings::load_in::<NamesDoc>(data_dir).value.old_names
 }
 
+/// 存視窗名與舊名稱：只改這兩欄，其他不認得的欄位（較新版本寫的）原樣保留。
+/// 讀不到原檔或備份失敗時回錯（呼叫端 `rename` 會把錯誤原樣往上回，什麼都不改）
 fn write_settings(data_dir: &Path, name: &str, old: &[OldName]) -> Result<(), String> {
-    write_atomic(&data_dir.join("settings.json"), &json!({ "window_name": name, "old_names": old }).to_string()).map_err(|e| e.to_string())
+    crate::settings::update_in::<NamesDoc, _>(data_dir, |d| {
+        d.window_name = Some(name.to_string());
+        d.old_names = old.to_vec();
+    })
+    .map_err(|e| e.to_string())
 }
 
 /// 改名流程（指令與測試共用）：驗證 → 存檔 → 換現用名 → 舊名進清單 → 立刻寫新名心跳。
@@ -114,6 +118,7 @@ pub fn align_with_backend(local: &str, custom: bool, backend: &str, backend_ok: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     const DAY: u64 = 24 * 3600 * 1000;
     fn o(n: &str, t: u64) -> OldName {

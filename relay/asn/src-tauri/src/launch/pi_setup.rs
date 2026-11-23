@@ -202,17 +202,19 @@ pub(crate) fn remove(pi: &Path, ext_dir: Option<&Path>, runner: &dyn Runner, fil
 
 // ---------------------------------------------------------------- 預設開啟：第一次偵測到 pi 就自動安裝（#305）
 
-pub(crate) const AUTO_PREF: &str = "pi-auto.json";
-
-/// 讀偏好：(auto＝允許自動安裝（預設 true）, done＝自動安裝已經處理過（裝過，或本來就裝了）)。檔案壞掉當預設。
-pub(crate) fn auto_read(p: &Path) -> (bool, bool) {
-    let v = std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
-    let get = |k: &str, d: bool| v.as_ref().and_then(|v| v.get(k)).and_then(Value::as_bool).unwrap_or(d);
-    (get("auto", true), get("done", false))
+/// 讀偏好（`dir` 是放 pi-auto.json 的資料夾＝relay_home）：(auto＝允許自動安裝（預設 true）, done＝自動安裝已經處理過（裝過，或本來就裝了）)。
+/// 檔案壞掉當預設。走共用設定層（#2162）：`auto` 是設定、`done` 是狀態，同一個檔同一個 Doc
+pub(crate) fn auto_read(dir: &Path) -> (bool, bool) {
+    let d = crate::settings::load_in::<crate::settings::PiAutoDoc>(dir).value;
+    (d.auto, d.done)
 }
-pub(crate) fn auto_write(p: &Path, auto: bool, done: bool) {
-    // 使用者的偏好（要不要自動安裝、是否處理過）：設定類（fsync）
-    let _ = crate::settings::atomic::write(p, json!({ "auto": auto, "done": done }).to_string().as_bytes(), crate::settings::atomic::SETTINGS);
+/// 寫偏好：只改這兩欄，不認得的欄位保留。寫不進去（讀不到原檔、備份失敗）照舊吞掉：
+/// 最壞是這次沒記下，下次啟動再判斷一次，不影響畫面
+pub(crate) fn auto_write(dir: &Path, auto: bool, done: bool) {
+    let _ = crate::settings::update_in::<crate::settings::PiAutoDoc, _>(dir, |d| {
+        d.auto = auto;
+        d.done = done;
+    });
 }
 
 /// 要不要自動安裝：允許、還沒處理過、找得到 pi 與 ASN 附的擴充、而且還沒裝
@@ -228,7 +230,7 @@ pub(crate) enum AutoOutcome {
 }
 
 /// 啟動時跑一次。裝好就記 done；本來就裝了也記 done（之後有人手動拿掉，不會又被裝回來）；使用者關掉（auto=false）一律不動。
-/// 安裝失敗不記 done（下次啟動再試一次）。`do_install` 由呼叫端注入。
+/// 安裝失敗不記 done（下次啟動再試一次）。`pref` 是放 pi-auto.json 的資料夾；`do_install` 由呼叫端注入。
 pub(crate) fn auto_step(pref: &Path, st: &SetupState, do_install: impl FnOnce() -> Result<(), String>) -> AutoOutcome {
     let (auto, done) = auto_read(pref);
     if !auto || done {
@@ -382,13 +384,13 @@ fn real_state(files: &RealFiles) -> (SetupState, Option<PathBuf>, bool) {
     (st, ext, auto)
 }
 
-fn auto_pref_path() -> PathBuf {
-    crate::identity::relay_home().join(AUTO_PREF)
+fn auto_pref_dir() -> PathBuf {
+    crate::identity::relay_home()
 }
 
 /// 狀態的 JSON 多帶一個 auto：目前是否允許自動安裝（畫面用來說明「已關閉自動安裝」）
 fn with_auto(mut v: Value) -> Value {
-    v["auto"] = json!(auto_read(&auto_pref_path()).0);
+    v["auto"] = json!(auto_read(&auto_pref_dir()).0);
     v
 }
 
@@ -402,7 +404,7 @@ pub fn auto_install_real() -> Option<Result<Value, String>> {
     let (agent, marker) = real_env();
     let files = RealFiles { agent, marker };
     let (st, ext, auto_dir) = real_state(&files);
-    let pref = auto_pref_path();
+    let pref = auto_pref_dir();
     let pi = real_pi();
     let out = auto_step(&pref, &st, || {
         let (pi, ext) = (pi.ok_or(NO_PI_MSG)?, ext.ok_or("找不到 ASN 附的 pi 擴充")?);
@@ -422,7 +424,7 @@ pub fn install_real() -> Result<Value, String> {
     let (_, ext, auto) = real_state(&files);
     let ext = ext.ok_or("找不到 ASN 附的 pi 擴充（安裝可能不完整），請重新安裝 ASN")?;
     install(&pi, &ext, auto, &RealRunner::default(), &files)?;
-    auto_write(&auto_pref_path(), true, true);   // 使用者自己按了啟用：之後視為允許自動安裝
+    auto_write(&auto_pref_dir(), true, true);   // 使用者自己按了啟用：之後視為允許自動安裝
     Ok(with_auto(real_state(&files).0.to_json()))
 }
 
@@ -432,7 +434,7 @@ pub fn remove_real() -> Result<Value, String> {
     let pi = real_pi().ok_or("這台電腦找不到 pi，沒辦法執行移除")?;
     let (_, ext, _) = real_state(&files);
     remove(&pi, ext.as_deref(), &RealRunner::default(), &files)?;
-    auto_write(&auto_pref_path(), false, true);   // 使用者關掉：不再自動裝回
+    auto_write(&auto_pref_dir(), false, true);   // 使用者關掉：不再自動裝回
     Ok(with_auto(real_state(&files).0.to_json()))
 }
 
@@ -721,11 +723,11 @@ mod tests {
     #[test]
     fn 自動安裝偏好_預設允許且未處理_壞檔用預設() {
         let d = tempfile::tempdir().unwrap();
-        let p = d.path().join(AUTO_PREF);
+        let p = d.path().to_path_buf(); // 偏好檔所在的資料夾
         assert_eq!(auto_read(&p), (true, false));
         auto_write(&p, false, true);
         assert_eq!(auto_read(&p), (false, true));
-        std::fs::write(&p, "{壞掉").unwrap();
+        std::fs::write(p.join("pi-auto.json"), "{壞掉").unwrap();
         assert_eq!(auto_read(&p), (true, false));
     }
 
@@ -742,7 +744,7 @@ mod tests {
     #[test]
     fn 自動安裝_第一次裝並記下_之後使用者關掉就不再裝回() {
         let d = tempfile::tempdir().unwrap();
-        let p = d.path().join(AUTO_PREF);
+        let p = d.path().to_path_buf(); // 偏好檔所在的資料夾
         let mut calls = 0;
         assert_eq!(auto_step(&p, &st(true, true, false), || { calls += 1; Ok(()) }), AutoOutcome::Installed);
         assert_eq!((calls, auto_read(&p)), (1, (true, true)));
@@ -753,7 +755,7 @@ mod tests {
         auto_write(&p, false, true);
         assert_eq!(auto_step(&p, &st(true, true, false), || panic!("不該裝")), AutoOutcome::Skipped);
         // 沒有紀錄檔、使用者一開始就關掉：不裝
-        let p2 = d.path().join("other.json");
+        let p2 = d.path().join("other");
         auto_write(&p2, false, false);
         assert_eq!(auto_step(&p2, &st(true, true, false), || panic!("不該裝")), AutoOutcome::Skipped);
     }
@@ -761,7 +763,7 @@ mod tests {
     #[test]
     fn 自動安裝_本來就裝了記下已處理_失敗不記下次再試_沒有_pi_不動() {
         let d = tempfile::tempdir().unwrap();
-        let p = d.path().join(AUTO_PREF);
+        let p = d.path().to_path_buf(); // 偏好檔所在的資料夾
         assert_eq!(auto_step(&p, &st(false, true, false), || panic!("不該裝")), AutoOutcome::Skipped);
         assert_eq!(auto_read(&p), (true, false), "沒有 pi：不留紀錄，之後裝了 pi 還能自動裝");
         assert_eq!(auto_step(&p, &st(true, true, false), || Err("壞了".into())), AutoOutcome::Failed("壞了".into()));

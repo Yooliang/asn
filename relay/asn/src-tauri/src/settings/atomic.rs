@@ -230,11 +230,10 @@ mod tests {
     // 每處以「呼叫的開頭」當錨點，檢查同一行用的是哪個 Opts。
     #[test]
     fn 佇列與設定的寫入點用的是會fsync的類別() {
-        let sites: [(&str, &str, &str, &str); 8] = [
+        let sites: [(&str, &str, &str, &str); 7] = [
             ("acct_remote.rs outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE"),
-            ("acct_remote.rs set_pref", include_str!("../acct_remote.rs"), "atomic::write(&prefs_path(", "SETTINGS"),
+            ("settings/mod.rs write_locked（視窗名稱、帳號偏好、安裝偏好、pi 自動安裝、讀額度都從這裡寫）", include_str!("mod.rs"), "atomic::write(path, text.as_bytes()", "SETTINGS"),
             ("bridge/mod.rs write_settings", include_str!("../bridge/mod.rs"), "atomic::write(&settings_path(", "SETTINGS"),
-            ("agent_setup/switch.rs", include_str!("../agent_setup/switch.rs"), "atomic::write(&prefs_path(", "SETTINGS"),
             ("account.rs login_skipped", include_str!("../account.rs"), "atomic::write(&f, b\"1\"", "SETTINGS"),
             ("account.rs device_id", include_str!("../account.rs"), "atomic::write(&f, id.as_bytes()", "SETTINGS"),
             ("bridge/engines/partner_queue.rs 名冊", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS"),
@@ -298,19 +297,17 @@ mod tests {
 
     #[test]
     fn 內嵌寫入改走統一寫入後每處的類別() {
-        let sites: [(&str, &str, &str, &str, usize); 33] = [
+        let sites: [(&str, &str, &str, &str, usize); 31] = [
             ("partner_queue 名冊 forget／rename", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, v.to_string()", "SETTINGS", 2),
             ("upstream_retry 補送名單", include_str!("../bridge/core/upstream_retry.rs"), "atomic::write(&file, t.as_bytes()", "QUEUE", 1),
             ("pi.rs 收件匣", include_str!("../bridge/engines/pi.rs"), "atomic::write(&target, body.as_bytes()", "QUEUE", 1),
             ("grok_accounts write_bytes（帳號 auth，只有本人可讀）", include_str!("../grok_accounts.rs"), "atomic::write(path, bytes", "SECRET_SETTINGS", 1),
             ("mux_watch 監看狀態", include_str!("../launch/mux_watch.rs"), "atomic::write(file, t.as_bytes()", "STATE", 1),
-            ("pi_setup 自動安裝偏好", include_str!("../launch/pi_setup.rs"), "atomic::write(p, json!(", "SETTINGS", 1),
             ("account 節點代號檔", include_str!("../account.rs"), "atomic::write(&relay_home.join(\"node\")", "SETTINGS", 1),
             ("agy_install 版本記號", include_str!("../agent_setup/agy_install.rs"), "atomic::write(&tools.join(VERSION_FILE)", "STATE", 1),
             ("codex_install 目前版本檔", include_str!("../agent_setup/codex_install.rs"), "atomic::write(&tools.join(CURRENT_FILE)", "SETTINGS", 1),
             ("agent_setup/proc 登入子程序 pid", include_str!("../agent_setup/proc.rs"), "atomic::write(path, body.to_string()", "STATE", 1),
             ("engines/mod PidBook", include_str!("../bridge/engines/mod.rs"), "atomic::write(&self.file, body.as_bytes()", "STATE", 1),
-            ("quota_readers save_settings", include_str!("../quota_readers.rs"), "atomic::write(&path, text.as_bytes()", "SETTINGS", 1),
             ("pi_setup 安裝記錄", include_str!("../launch/pi_setup.rs"), "atomic::write(&self.marker", "SETTINGS", 1),
             ("lastlogin", include_str!("../lastlogin.rs"), "atomic::write(&dir.join(FILE)", "STATE", 1),
             ("heartbeat", include_str!("../heartbeat.rs"), "atomic::write(&file, body.as_bytes()", "STATE", 1),

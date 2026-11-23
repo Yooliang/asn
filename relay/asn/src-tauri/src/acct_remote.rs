@@ -258,31 +258,32 @@ where
 }
 
 /// 設定：remote_trust_own＝信任自己的設備，不用本機確認（預設 false）
+#[cfg(test)]
 pub fn prefs_path(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("acct-prefs.json")
 }
-fn pref_bool(data_dir: &Path, key: &str, default: bool) -> bool {
-    std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get(key).and_then(Value::as_bool)).unwrap_or(default)
+/// 讀整份偏好（走共用設定層，#2162）。壞檔、缺欄位、型別不對各欄退回預設（預設值見 `AcctPrefsDoc`）
+fn prefs(data_dir: &Path) -> crate::settings::AcctPrefsDoc {
+    crate::settings::load_in::<crate::settings::AcctPrefsDoc>(data_dir).value
 }
-/// 寫一個設定：保留檔裡其他設定（檔壞掉就從空的開始）
-fn set_pref(data_dir: &Path, key: &str, on: bool) -> Result<(), String> {
-    let mut v = std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
-    v[key] = json!(on);
-    crate::settings::atomic::write(&prefs_path(data_dir), v.to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())
+/// 寫一個設定：持鎖「讀、改、寫」，保留檔裡其他設定與不認得的欄位。
+/// 寫不進去（讀不到原檔、備份失敗、磁碟錯誤）回錯誤字串，呼叫端照舊處理
+fn set_pref(data_dir: &Path, f: impl FnOnce(&mut crate::settings::AcctPrefsDoc)) -> Result<(), String> {
+    crate::settings::update_in::<crate::settings::AcctPrefsDoc, _>(data_dir, f).map_err(|e| e.to_string())
 }
 pub fn trust_own(data_dir: &Path) -> bool {
-    pref_bool(data_dir, "remote_trust_own", false)
+    prefs(data_dir).remote_trust_own
 }
 pub fn set_trust_own(data_dir: &Path, on: bool) -> Result<(), String> {
-    set_pref(data_dir, "remote_trust_own", on)
+    set_pref(data_dir, |p| p.remote_trust_own = on)
 }
 /// 設定：remote_trust_signed＝後端標了「本人簽章」的指令（手機上用本人帳號發出）不用在本機確認（預設 true，可關）。
 /// 沒簽章、簽章不成立的指令不受這項影響，一律照舊要本機確認。
 pub fn trust_signed(data_dir: &Path) -> bool {
-    pref_bool(data_dir, "remote_trust_signed", true)
+    prefs(data_dir).remote_trust_signed
 }
 pub fn set_trust_signed(data_dir: &Path, on: bool) -> Result<(), String> {
-    set_pref(data_dir, "remote_trust_signed", on)
+    set_pref(data_dir, |p| p.remote_trust_signed = on)
 }
 
 /// 設定：remote_allow_switch＝「允許切換帳號」（#371，取代上面兩個勾）。不允許＝別台送來的切換一律拒絕；
@@ -290,11 +291,11 @@ pub fn set_trust_signed(data_dir: &Path, on: bool) -> Result<(), String> {
 /// 還沒存過新設定時從舊的兩個換算：只要有一個是開的就算允許（remote_trust_signed 預設開，所以預設允許）。
 /// 舊的 remote_trust_own 不再顯示，原本勾了的人照舊連沒簽章的也免確認，不改變他已經選好的信任範圍。
 pub fn allow_switch(data_dir: &Path) -> bool {
-    let stored = std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v.get("remote_allow_switch").and_then(Value::as_bool));
-    stored.unwrap_or_else(|| trust_own(data_dir) || trust_signed(data_dir))
+    let p = prefs(data_dir);
+    p.remote_allow_switch.unwrap_or(p.remote_trust_own || p.remote_trust_signed)
 }
 pub fn set_allow_switch(data_dir: &Path, on: bool) -> Result<(), String> {
-    set_pref(data_dir, "remote_allow_switch", on)
+    set_pref(data_dir, |p| p.remote_allow_switch = Some(on))
 }
 /// 不允許切換帳號時回給發起端的原因
 pub const NOT_ALLOWED: &str = "這台沒有允許切換帳號";
