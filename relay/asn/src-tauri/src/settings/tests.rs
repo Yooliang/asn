@@ -16,6 +16,12 @@ impl Doc for TA {
     const NAME: &'static str = "t-a";
     const SCOPE: Scope = Scope::Data;
     const VERSION: u32 = 1;
+
+    fn extra(&self) -> &Map<String, Value> {
+
+        &self.extra
+
+    }
 }
 
 /// 版本 2：0→1 把 old 改名 mid，1→2 把 mid 改名 name（各自冪等：沒有舊欄位就不動）
@@ -30,6 +36,12 @@ impl Doc for TM {
     const NAME: &'static str = "t-m";
     const SCOPE: Scope = Scope::Home;
     const VERSION: u32 = 2;
+
+    fn extra(&self) -> &Map<String, Value> {
+
+        &self.extra
+
+    }
     fn migrate(from: u32, raw: &mut Value) -> Result<(), String> {
         let o = raw.as_object_mut().ok_or("不是物件")?;
         let (src, dst) = match from {
@@ -54,6 +66,12 @@ impl Doc for TF {
     const NAME: &'static str = "t-f";
     const SCOPE: Scope = Scope::Work;
     const VERSION: u32 = 1;
+
+    fn extra(&self) -> &Map<String, Value> {
+
+        &self.extra
+
+    }
     fn migrate(_: u32, _: &mut Value) -> Result<(), String> {
         Err("故意失敗".into())
     }

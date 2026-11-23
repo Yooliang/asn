@@ -2950,31 +2950,23 @@ async fn device_name_align(app: State<'_, App>, auth: State<'_, auth::AuthState>
     }
 }
 
-fn store_path(app: &App, name: &str) -> Result<PathBuf, String> {
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_lowercase()) {
-        return Err("存檔名稱不合格".into());
-    }
-    Ok(app.data_dir.join(format!("asn-{name}.json")))
-}
-// 存檔讀寫在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）；寫入用 STORE_LOCK 排隊（統一寫入的暫存檔名每次不同，不會互相蓋掉；排隊是為了讓同一個存檔「後送的後落地」）。
-// 呼叫順序由前端保證（lib/tauri.mjs 的 store().save 同一個存檔名一支寫完才送下一支）
-#[cfg(feature = "gui")]
-static STORE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// 存檔讀寫在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）。存檔名稱白名單、8,000,000 位元組上限、每個檔一把鎖、
+// 原子寫入與壞檔處理都在共用設定層（settings::raw，#2162 ⑥）；同一個存檔「後送的後落地」靠前端 store().save 一支寫完才送下一支。
 #[cfg(feature = "gui")]
 #[tauri::command(async)]
 fn store_load(app: State<'_, App>, name: String) -> Result<Option<String>, String> {
-    Ok(std::fs::read_to_string(store_path(&app, &name)?).ok())
+    Ok(settings::load_text(&app.data_dir, settings::RawName::parse(&name).map_err(|e| e.0)?))
 }
 #[cfg(feature = "gui")]
 #[tauri::command(async)]
 fn store_save(app: State<'_, App>, name: String, text: String) -> Result<(), String> {
-    if text.len() > 8_000_000 {
-        return Err("存檔太大".into());
-    }
-    let _g = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    // me、onboard 是設定（fsync）；chats 是快取（不 fsync）
-    let o = if name == "chats" { settings::atomic::STATE } else { settings::atomic::SETTINGS };
-    settings::atomic::write(&store_path(&app, &name)?, text.as_bytes(), o).map_err(|e| e.to_string())
+    settings::save_text(&app.data_dir, settings::RawName::parse(&name).map_err(|e| e.0)?, &text)
+}
+/// 欄位級合併：對頂層欄位逐一覆蓋，`null` 刪該欄，其餘保留（前端出口在 #2162 ⑦）
+#[cfg(feature = "gui")]
+#[tauri::command(async)]
+fn settings_patch(app: State<'_, App>, name: String, patch: serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    settings::patch_json(&app.data_dir, settings::RawName::parse(&name).map_err(|e| e.0)?, patch)
 }
 
 /// 語音設定（念出訊息的聲音與自動念、語音輸入的語言與模型）；存在資料夾的 voice.json
@@ -3397,7 +3389,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, launch_cwd_remove, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, log_report_preview, log_report_send, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, launch_cwd_remove, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, log_report_preview, log_report_send, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, settings_patch, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_report, claude_mod::claude_mod_check, claude_quota::claude_quota_state,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
@@ -3414,7 +3406,7 @@ pub fn run() {
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_partner_avatar, relay_set_avatar,
-        set_presence, set_foreground, device_name_align, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, ui_log, log_report_preview, log_report_send, open_link,
+        set_presence, set_foreground, device_name_align, store_load, store_save, settings_patch, quit_app, capture_ui_ready, shot_frontend_log, ui_log, log_report_preview, log_report_send, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_chat_pins_get, account::auth_chat_pins_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
@@ -3464,11 +3456,11 @@ pub fn run() {
             #[cfg(desktop)]
             {
             // 視窗外框設定存在前端的 asn-me.json；沒有或壞掉就是自訂外框
-            let native = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| wins::native_from_saved(&t)).unwrap_or(false);
-            wins::init_frame(&handle, native);
+            // 兩個欄位一次唯讀讀完（不搬檔、不寫檔）
+            let me_flags = settings::me_flags(&frame_data_dir);
+            wins::init_frame(&handle, me_flags.native_frame);
             // 關閉行為同樣讀 asn-me.json 的 closeTo；系統匣圖示永遠建立（左鍵叫回、右鍵開啟／結束）
-            let to_tray = std::fs::read_to_string(frame_data_dir.join("asn-me.json")).map(|t| tray::close_to_tray_from_saved(&t)).unwrap_or(true);
-            tray::init(&handle, to_tray);
+            tray::init(&handle, me_flags.close_to_tray);
             tray::build(&handle);
             // 畫面端（名單視窗）超過 5 分鐘沒收信（開機自啟縮在系統匣、畫面沒在跑）：Rust 代收寄給本機 ASN 視窗的信並 ack，
             // 存進代收區等畫面下次收信時交給它；匣圖示提示框顯示未讀數，並通知畫面（開著時立刻補收）。--shot 截圖模式不動

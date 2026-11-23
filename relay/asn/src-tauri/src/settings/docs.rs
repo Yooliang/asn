@@ -44,6 +44,12 @@ mod names_doc {
         const NAME: &'static str = "settings";
         const SCOPE: Scope = Scope::Data;
         const VERSION: u32 = 1;
+
+        fn extra(&self) -> &Map<String, Value> {
+
+            &self.extra
+
+        }
         fn normalize(&mut self) {
             if self.window_name.as_deref().is_some_and(|s| !crate::valid_window_name(s)) {
                 self.window_name = None;
@@ -91,6 +97,12 @@ mod prefs {
         const NAME: &'static str = "acct-prefs";
         const SCOPE: Scope = Scope::Data;
         const VERSION: u32 = 1;
+
+        fn extra(&self) -> &Map<String, Value> {
+
+            &self.extra
+
+        }
     }
 
     /// agent-setup-prefs.json（data_dir）：允許別台替這台安裝並登入，預設關
@@ -107,6 +119,12 @@ mod prefs {
         const NAME: &'static str = "agent-setup-prefs";
         const SCOPE: Scope = Scope::Data;
         const VERSION: u32 = 1;
+
+        fn extra(&self) -> &Map<String, Value> {
+
+            &self.extra
+
+        }
     }
 
     /// pi-auto.json（relay_home）：`auto` 是設定（允許自動安裝，預設開），`done` 是狀態（已處理過，預設否），同一個檔
@@ -131,6 +149,12 @@ mod prefs {
         const NAME: &'static str = "pi-auto";
         const SCOPE: Scope = Scope::Home;
         const VERSION: u32 = 1;
+
+        fn extra(&self) -> &Map<String, Value> {
+
+            &self.extra
+
+        }
     }
 
     /// quota-readers.json（relay_home）：額度讀取器的開關，每一項預設關。
@@ -181,6 +205,12 @@ mod prefs {
         const NAME: &'static str = "quota-readers";
         const SCOPE: Scope = Scope::Home;
         const VERSION: u32 = 1;
+
+        fn extra(&self) -> &Map<String, Value> {
+
+            &self.extra
+
+        }
         /// 原本 `load_settings` 的後處理：email 正規化並丟掉壞的、最多 MAX_MINIMAX 個；只開換新不算（要先開讀取）
         fn normalize(&mut self) {
             self.minimax = self.minimax.iter().filter_map(|e| crate::claude_accounts::normalize_email(e)).take(MAX_MINIMAX).collect();
@@ -223,6 +253,12 @@ mod voice {
         const NAME: &'static str = "voice";
         const SCOPE: Scope = Scope::Data;
         const VERSION: u32 = 1;
+
+        fn extra(&self) -> &Map<String, Value> {
+
+            &self.extra
+
+        }
         /// 原本 `voicecfg::load` 的逐欄過濾：壞值、舊值各自退回預設
         fn normalize(&mut self) {
             let d = VoiceDoc::default();
@@ -261,6 +297,12 @@ mod launch_bridge {
         const NAME: &'static str = "launch-prefs";
         const SCOPE: Scope = Scope::Data;
         const VERSION: u32 = 1;
+
+        fn extra(&self) -> &Map<String, Value> {
+
+            &self.extra
+
+        }
     }
 
     /// 壓縮次數：不是整數（含小數、超出範圍、字串）一律當沒存＝預設 3；整數夾在 2～10。跟舊的 `clamp_n(v.get(..).and_then(as_i64))` 一致
@@ -339,6 +381,12 @@ mod launch_bridge {
         const NAME: &'static str = "bridge";
         const SCOPE: Scope = Scope::Data;
         const VERSION: u32 = 1;
+
+        fn extra(&self) -> &Map<String, Value> {
+
+            &self.extra
+
+        }
         fn normalize(&mut self) {
             self.unaddressed_to = self.unaddressed_to.trim().to_string();
             self.compact_handoff_n = clamp_n(Some(i64::from(self.compact_handoff_n)));

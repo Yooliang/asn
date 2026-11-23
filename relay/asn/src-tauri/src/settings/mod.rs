@@ -5,8 +5,12 @@
 pub mod atomic;
 mod docs;
 pub mod migrate;
+mod raw;
 
 pub use docs::NamesDoc;
+#[cfg(desktop)]
+pub use raw::{me_flags, MeFlags};
+pub use raw::{load_text, patch_json, save_text, ChatsDoc, MeDoc, OnboardDoc, RawName, MAX_BYTES};
 #[cfg(desktop)]
 pub use docs::{AcctPrefsDoc, AgentSetupPrefsDoc, BridgeDoc, LaunchPrefsDoc, PiAutoDoc, QuotaReadersDoc, VoiceDoc};
 
@@ -94,6 +98,16 @@ pub trait Doc: Serialize + DeserializeOwned + Default + Clone + Send + 'static {
     }
     /// 讀進來之後的最後一道：過濾壞值、套上限
     fn normalize(&mut self) {}
+    /// 不認得的欄位（較新版本寫的）。**必須實作**：型別要有一個 `#[serde(flatten)] extra: Map<String, Value>`
+    /// 並從這裡交出來，忘了宣告 `extra` 的新型別就編不過，不會默默把新版欄位丟掉。
+    /// 光有這個方法還不夠，另有測試（`extra_kept_by_every_doc`）對每個型別用不認得的欄位實際走一遍讀、寫，確認有留下。
+    fn extra(&self) -> &serde_json::Map<String, serde_json::Value>;
+    /// 寫成單行（預設是縮排的好讀格式）。給畫面整份存的大檔用，省下排版的時間與空間
+    const COMPACT: bool = false;
+    /// 原子寫入的類別：設定要 fsync，快取不用
+    const ATOMIC: atomic::Opts = atomic::SETTINGS;
+    /// 壞檔要不要先搬成 `.bad-`。快取類（對話快取）壞了直接退回空的、照常覆蓋，不留備份
+    const KEEP_BAD: bool = true;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -222,7 +236,17 @@ fn quarantined(path: &Path, reason: &str) -> LoadStatus {
 /// `mutate`＝true：壞檔會被搬走（`load`／`update` 用）。false：唯讀，壞檔原地不動、回 `Corrupt`，也不記 log（由呼叫端節流後記）
 fn read_fresh<T: Doc>(path: &Path, mutate: bool) -> Cached<T> {
     let fresh = |status| Cached { value: T::default(), status, file_version: 0 };
-    let bad = |reason: &str| if mutate { quarantined(path, reason) } else { LoadStatus::Corrupt { reason: reason.to_string() } };
+    let bad = |reason: &str| {
+        if mutate && T::KEEP_BAD {
+            quarantined(path, reason)
+        } else {
+            if mutate {
+                // 不留備份的檔（快取）：記一行就退回空的，原檔等下次寫入時直接被覆蓋
+                elog!("[ASN] 設定檔 {} 損毀（{reason}），是可重建的快取，退回空的、不留備份", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+            }
+            LoadStatus::Corrupt { reason: reason.to_string() }
+        }
+    };
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return fresh(LoadStatus::Fresh),
@@ -261,25 +285,61 @@ fn write_locked<T: Doc>(slot: &mut Slot, path: &Path, cur: &Cached<T>, v: &T) ->
     }
     let version = T::VERSION.max(cur.file_version);
     // 檔案版本不等於本版（舊版要升、或較新版寫的）：第一次寫入前先備份；較新版的檔會被 normalize 洗掉已知欄位的新值
-    if cur.file_version != T::VERSION && !matches!(cur.status, LoadStatus::Fresh | LoadStatus::Recovered) {
+    if cur.file_version != T::VERSION && !matches!(cur.status, LoadStatus::Fresh | LoadStatus::Recovered | LoadStatus::Corrupt { .. }) {
         migrate::backup_old(path, cur.file_version).map_err(|_| SettingsError("設定檔寫入前的備份存不下來，這次沒有存，稍後再試".into()))?;
     }
     let text = migrate::render(v, version)?;
-    // 給畫面的錯誤固定成白話句，系統原文（例如「拒絕存取 (os error 5)」）只寫進 log（不含檔案內容）
-    #[cfg(test)]
-    let written = if FAIL_WRITE.with(|f| f.get()) { Err(std::io::Error::from_raw_os_error(5)) } else { atomic::write(path, text.as_bytes(), atomic::SETTINGS) };
-    #[cfg(not(test))]
-    let written = atomic::write(path, text.as_bytes(), atomic::SETTINGS);
-    written.map_err(|e| {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        elog!("[ASN] 設定檔 {name} 寫入失敗（{e}），這次沒有存");
-        SettingsError("設定檔寫入失敗，這次沒有存，稍後再試".into())
-    })?;
+    put_text::<T>(path, &text)?;
     let mut value = v.clone();
     value.normalize();
     slot.stamp = stamp_of(path);
     slot.cached = Some(Box::new(Cached { value, status: LoadStatus::Ok, file_version: version }));
     Ok(())
+}
+
+/// 原子寫入文字。給畫面的錯誤固定成白話句，系統原文（例如「拒絕存取 (os error 5)」）只寫進 log（不含檔案內容）
+fn put_text<T: Doc>(path: &Path, text: &str) -> Result<(), SettingsError> {
+    #[cfg(test)]
+    let written = if FAIL_WRITE.with(|f| f.get()) { Err(std::io::Error::from_raw_os_error(5)) } else { atomic::write(path, text.as_bytes(), T::ATOMIC) };
+    #[cfg(not(test))]
+    let written = atomic::write(path, text.as_bytes(), T::ATOMIC);
+    written.map_err(|e| {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        elog!("[ASN] 設定檔 {name} 寫入失敗（{e}），這次沒有存");
+        SettingsError("設定檔寫入失敗，這次沒有存，稍後再試".into())
+    })
+}
+
+/// 原文照寫（不 parse、不重新序列化、**不讀舊檔、不判斷壞檔、不搬檔**，位元組照原樣）：畫面整份存檔用。
+/// 整份存的內容就是畫面的全部狀態，覆蓋就是正確結果；持有這個檔的鎖，原子寫入（失敗時原檔不動）。呼叫端自己負責內容合不合法與大小
+pub fn save_raw_in<T: Doc>(dir: &Path, text: &str) -> Result<(), SettingsError> {
+    let path = path_in::<T>(dir);
+    let slot = slot_of(&path);
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    // 先作廢快取：寫完（或寫到一半失敗）之後下一次讀照樣重讀
+    g.stamp = None;
+    g.cached = None;
+    g.bad = None;
+    put_text::<T>(&path, text)
+}
+
+/// 欄位級合併用：持鎖讀舊檔、改、寫。舊檔解析不了（壞檔，或含 serde 不收的內容例如孤立的 surrogate）就回 `Ok(Err(reason))`，
+/// **不搬檔、不寫檔**：舊檔可能只是 serde 讀不了而不是真的壞，不能因為要合併就把它搬走
+/// `f` 回 `Err` 就不寫檔（例如合併後太大），原樣交回
+pub fn merge_in<T: Doc>(dir: &Path, f: impl FnOnce(&mut T) -> Result<(), String>) -> Result<Result<(), String>, SettingsError> {
+    let path = path_in::<T>(dir);
+    let slot = slot_of(&path);
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    let cur = read_fresh::<T>(&path, false);
+    if let LoadStatus::Corrupt { reason } = &cur.status {
+        return Ok(Err(reason.clone()));
+    }
+    let mut v = cur.value.clone();
+    if let Err(e) = f(&mut v) {
+        return Ok(Err(e));
+    }
+    write_locked(&mut g, &path, &cur, &v)?;
+    Ok(Ok(()))
 }
 
 // ---------------------------------------------------------------- 以資料夾為準的版本（呼叫端自己帶資料夾：測試，以及還沒改成用 Roots 的呼叫端）
@@ -458,6 +518,10 @@ fn no_root() -> SettingsError {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod raw_tests;
+#[cfg(all(test, desktop))]
+mod me_flags_tests;
 #[cfg(test)]
 mod moved_tests;
 #[cfg(all(test, desktop))]

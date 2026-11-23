@@ -68,10 +68,31 @@ test('這次改的指令都是非同步（todo-next-191）', () => {
   }
   // 切換帳號最多等 5 秒網路：在 spawn_blocking 裡跑，不佔非同步執行緒
   assert.match(byName.get('claude_account_switch').body, /off_main\(move \|\| local_switch\(&email\)\)/)
-  // 同時寫：存檔、畫面記錄各有自己的鎖
+  // 同時寫：存檔改走共用設定層（#2162 ⑥），每個檔一把鎖（settings/mod.rs 的 slot_of）；畫面記錄另有自己的鎖
   const lib = fs.readFileSync(path.join(SRC, 'lib.rs'), 'utf8')
-  assert.match(byName.get('store_save').body, /STORE_LOCK\.lock\(\)/)
-  assert.match(lib, /static STORE_LOCK: std::sync::Mutex<\(\)>/)
+  assert.match(byName.get('store_save').body, /settings::save_text\(/)
+  assert.doesNotMatch(lib, /STORE_LOCK/)
+  assert.match(byName.get('settings_patch').body, /settings::patch_json\(/)
+  assert.equal(byName.get('settings_patch').async, true)
+  const lf = t => t.split('\r\n').join('\n')
+  const raw = lf(fs.readFileSync(path.join(SRC, 'settings', 'raw.rs'), 'utf8'))
+  const mod = lf(fs.readFileSync(path.join(SRC, 'settings', 'mod.rs'), 'utf8'))
+  // 兩條寫入路徑都要經過共用層持鎖的函式（save_raw_in／merge_in），而不是自己直接寫檔
+  assert.match(raw, /pub fn save_text[\s\S]*?save_raw_in::<MeDoc>[\s\S]*?\n\}/)
+  assert.match(raw, /pub fn patch_json[\s\S]*?merge::<MeDoc>[\s\S]*?\n\}/)
+  assert.match(raw, /fn merge<[^\n]*\{\s*let r = merge_in::</)
+  for (const fn of ['save_raw_in', 'merge_in']) {
+    const body = mod.split(`pub fn ${fn}<`)[1]?.split('\n}\n')[0] ?? ''
+    assert.match(body, /slot_of\(&path\)/, `${fn} 要拿這個檔的 slot`)
+    assert.match(body, /slot\.lock\(\)/, `${fn} 要持鎖`)
+  }
+  // 整份存檔（store_save）：持鎖後直接原子寫入，不讀舊檔、不判斷壞檔、不搬檔（二審：搬走後寫入失敗會讓檔案變空）
+  const saveBody = mod.split('pub fn save_raw_in<')[1]?.split('\n}\n')[0] ?? ''
+  assert.match(saveBody, /put_text::<T>\(&path, text\)/)
+  assert.doesNotMatch(saveBody, /read_and_cache|read_fresh|quarantine|read_to_string/)
+  assert.doesNotMatch(raw.split('pub fn save_text')[1]?.split('\n}\n')[0] ?? '', /from_str|serde_json/)
+  assert.doesNotMatch(raw, /std::fs::write|atomic::write/, '共用層以外不准在 raw.rs 直接寫檔')
+  assert.match(mod, /fn slot_of\(path: &Path\) -> Arc<Mutex<Slot>>/)
   assert.match(fs.readFileSync(path.join(SRC, 'ui_log.rs'), 'utf8'), /static APPEND_LOCK: std::sync::Mutex<\(\)>/)
 })
 
