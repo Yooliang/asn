@@ -2,7 +2,7 @@
 //! 回給畫面預覽，或存成一個文字附件寄到固定的私人「ASN 開發」群組。電腦與手機共用。
 //!
 //! 遮罩只在這裡做：本機的 ui.log 照舊保留完整路徑（ui_log::append 只遮 email，不遮家目錄與權杖樣式的字串；有測試守著）。
-//! 遮三種：email、權杖樣式（sk-…、Bearer …、JWT 三段式、32 字以上含數字的英數長串）、家目錄路徑（換成 ~）。
+//! 遮三大類：email；祕密（password／secret／token／api_key／authorization 這類鍵後面的值、私鑰整段、AKIA 金鑰、gh*_ 與 github_pat_、sk-…、Bearer …、JWT 三段式、32 字以上含數字的英數長串）；家目錄路徑（任何使用者的 Windows、macOS、Linux 家目錄與 /root，換成 ~）。
 //! 收件處 `RECIPIENT_ROOM` 是寫死的設定值，目前留空（群組還沒建立）：留空一律拒絕寄出，不碰網路。
 use serde_json::{json, Value};
 use std::path::Path;
@@ -89,19 +89,56 @@ impl Report {
     }
 }
 
-fn token_regexes() -> &'static [(regex::Regex, &'static str); 4] {
-    static RE: std::sync::OnceLock<[(regex::Regex, &'static str); 4]> = std::sync::OnceLock::new();
+struct Rule {
+    re: regex::Regex,
+    rep: &'static str,
+    /// 比對到的字串要有數字才算（長串那條用，整串純字母不遮）
+    need_digit: bool,
+}
+
+fn token_rules() -> &'static [Rule] {
+    static RE: std::sync::OnceLock<Vec<Rule>> = std::sync::OnceLock::new();
     RE.get_or_init(|| {
-        [
+        let r = |p: &str, rep: &'static str, need_digit: bool| Rule { re: regex::Regex::new(p).unwrap(), rep, need_digit };
+        vec![
+            // 鍵值類：鍵名（大小寫不分，前面可以有別的字，例如 refresh_token、x-api-key）後面接 = 或 :，值整個遮掉。
+            // 三種寫法都抓：key=value、key: value、"key": "value"（含單引號）；authorization 後面的 Bearer／Basic 連同憑證一起遮。
+            // 鍵名後面一定要緊接引號、空白或 = :，所以 tokenizer、token_count 這類字不會被當成鍵
+            r(r#"(?i)(["']?[A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|authorization)["']?\s*[:=]\s*)("[^"]*"|'[^']*'|(?:bearer|basic)\s+[^\s,;"'}]+|[^\s,;&"'}]+)"#, "${1}<secret>", false),
             // JWT 三段式：eyJ 開頭的 base64url 三段，以點相連
-            (regex::Regex::new(r"eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}").unwrap(), "<token>"),
+            r(r"eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}", "<token>", false),
             // Bearer 後面接的整串
-            (regex::Regex::new(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}").unwrap(), "Bearer <token>"),
+            r(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", "Bearer <token>", false),
+            // AWS 存取金鑰：AKIA 後面 16 個大寫英數（不足長度不遮）
+            r(r"\bAKIA[0-9A-Z]{16}\b", "<token>", false),
+            // GitHub：gh 加 p／o／u／s／r 再底線，後面 20 字以上；細粒度的 github_pat_
+            r(r"\bgh[pousr]_[A-Za-z0-9]{20,}", "<token>", false),
+            r(r"\bgithub_pat_[A-Za-z0-9_]{20,}", "<token>", false),
             // sk- 開頭的金鑰（sk-ant-…、sk-proj-… 都有連字號與底線）
-            (regex::Regex::new(r"\bsk-[A-Za-z0-9_-]{16,}").unwrap(), "<token>"),
+            r(r"\bsk-[A-Za-z0-9_-]{16,}", "<token>", false),
             // 32 字以上、只含英數與 +=、而且至少有一個數字的長串（hex、base64）。不含 / - _：路徑與 kebab-case 的長名字不會誤遮
-            (regex::Regex::new(r"[A-Za-z0-9+=]{32,}").unwrap(), "<token>"),
+            r(r"[A-Za-z0-9+=]{32,}", "<token>", true),
         ]
+    })
+}
+
+/// 私鑰：從 BEGIN 到 END 整段（同一行或跨行都行）；只有 BEGIN 沒有 END 就遮到行尾
+const KEY_MARK: &str = "<private-key>";
+fn key_regex() -> &'static regex::Regex {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(r"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----(?:.*?-----END [A-Z0-9 ]*PRIVATE KEY-----|[^\n]*)").unwrap())
+}
+
+/// 通用的家目錄規則（不只目前這個使用者）：Windows 的 `X:\Users\<名>`（反斜線、正斜線、JSON 的雙反斜線都算）、
+/// macOS 的 `/Users/<名>`、Linux 的 `/home/<名>`、`/root`。名字一律整個吃到下一個路徑分隔，所以 bobby 不會變成「~by」
+fn generic_home_regexes() -> &'static (regex::Regex, regex::Regex, regex::Regex) {
+    static RE: std::sync::OnceLock<(regex::Regex, regex::Regex, regex::Regex)> = std::sync::OnceLock::new();
+    RE.get_or_init(|| {
+        (
+            regex::Regex::new(r#"(?i)[A-Za-z]:(?:\\\\|\\|/)Users(?:\\\\|\\|/)[^\\/\s"'<>:*?|,;)\]]+"#).unwrap(),
+            regex::Regex::new(r#"(^|[\s"'=(\[,;:])/(?:Users|home)/[^/\\\s"'<>:*?|,;)\]]+"#).unwrap(),
+            regex::Regex::new(r#"(^|[\s"'=(\[,;:])/root([/\\\s"',;:)\]]|$)"#).unwrap(),
+        )
     })
 }
 
@@ -115,34 +152,43 @@ fn home_regex(home: &str) -> Option<regex::Regex> {
     forms.sort();
     forms.dedup();
     let alt = forms.iter().map(|f| regex::escape(f)).collect::<Vec<_>>().join("|");
-    regex::Regex::new(&format!("(?i)(?:{alt})")).ok()
+    // 後面一定要接路徑分隔、空白、標點或字串結尾（捕捉起來原樣放回）：名字只是前綴相同的別人（bobby）不吃這一條
+    regex::Regex::new(&format!(r#"(?i)(?:{alt})([\\/\s"',;:)\]]|$)"#)).ok()
 }
 
 /// 送出前遮一行：先家目錄、再 email、最後權杖樣式。回遮過的行與各種遮了幾處。
 /// 只給送出出口用（預覽、寄出）；寫本機 ui.log 的 append 不呼叫這個
 pub fn redact_line(line: &str, home: Option<&regex::Regex>) -> (String, MaskCounts) {
     let mut c = MaskCounts::default();
-    let mut s = line.to_string();
+    // 私鑰整段先處理（裡面的內容不能再被別的規則切碎）
+    let mut s = key_regex().replace_all(line, KEY_MARK).into_owned();
+    c.token += s.matches(KEY_MARK).count();
+    // 家目錄：先換目前使用者那一條（名字可以有空白），再套通用規則
     if let Some(re) = home {
-        c.home = re.find_iter(&s).count();
-        if c.home > 0 {
-            s = re.replace_all(&s, "~").into_owned();
-        }
+        c.home += re.find_iter(&s).count();
+        s = re.replace_all(&s, "~$1").into_owned();
     }
+    let (win, unix, root) = generic_home_regexes();
+    c.home += win.find_iter(&s).count() + unix.find_iter(&s).count() + root.find_iter(&s).count();
+    s = win.replace_all(&s, "~").into_owned();
+    s = unix.replace_all(&s, "${1}~").into_owned();
+    s = root.replace_all(&s, "${1}~${2}").into_owned();
     let before = s.matches("<email>").count();
     s = crate::ui_log::mask_emails(&s);
     c.email = s.matches("<email>").count().saturating_sub(before);
-    for (i, (re, rep)) in token_regexes().iter().enumerate() {
+    for rule in token_rules() {
         let mut n = 0;
-        s = re
+        s = rule
+            .re
             .replace_all(&s, |caps: &regex::Captures| {
                 let m = &caps[0];
-                // 最後一條（長串）要有數字才算，整串純字母（很長的英文字）不遮
-                if i == 3 && !m.bytes().any(|b| b.is_ascii_digit()) {
+                if rule.need_digit && !m.bytes().any(|b| b.is_ascii_digit()) {
                     return m.to_string();
                 }
                 n += 1;
-                rep.to_string()
+                let mut out = String::new();
+                caps.expand(rule.rep, &mut out);
+                out
             })
             .into_owned();
         c.token += n;
@@ -152,7 +198,11 @@ pub fn redact_line(line: &str, home: Option<&regex::Regex>) -> (String, MaskCoun
 
 fn read_lines(p: &Path) -> Vec<String> {
     match std::fs::read(p) {
-        Ok(b) => String::from_utf8_lossy(&b).lines().map(str::to_string).collect(),
+        // 私鑰跨行的整段先在整份檔案上遮掉：本文每一行都沒有時間戳，逐行處理會漏
+        Ok(b) => {
+            let t = String::from_utf8_lossy(&b);
+            key_regex().replace_all(&t, KEY_MARK).lines().map(str::to_string).collect()
+        }
         Err(_) => vec![],
     }
 }
@@ -277,8 +327,8 @@ mod tests {
         let (o, c) = redact_line(&format!("jwt={jwt} end"), None);
         assert_eq!(o, "jwt=<token> end");
         assert_eq!(c.token, 1);
-        let (o, c) = redact_line("header Authorization: Bearer abcDEF123456.fake-token_xyz done", None);
-        assert_eq!(o, "header Authorization: Bearer <token> done");
+        let (o, c) = redact_line("header X-Foo: Bearer abcDEF123456.fake-token_xyz done", None);
+        assert_eq!(o, "header X-Foo: Bearer <token> done");
         assert_eq!(c.token, 1);
         let (o, c) = redact_line("key sk-ant-api03-FAKEFAKEFAKEFAKE1234 ok", None);
         assert_eq!(o, "key <token> ok");
@@ -309,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn 遮家目錄_正例與反例() {
+    fn 遮家目錄_目前使用者_正例與反例() {
         let re = home_regex(HOME_WIN);
         let (o, c) = redact_line(r"open C:\Users\fakeuser\AppData\x.json and c:/users/fakeuser/y", re.as_ref());
         assert_eq!(o, r"open ~\AppData\x.json and ~/y");
@@ -317,14 +367,155 @@ mod tests {
         let (o, c) = redact_line(r#"{"p":"C:\\Users\\fakeuser\\z"}"#, re.as_ref());
         assert_eq!(o, r#"{"p":"~\\z"}"#);
         assert_eq!(c.home, 1);
-        // 反例：別的使用者的資料夾不遮
-        let (o, c) = redact_line(r"C:\Users\someoneelse\a", re.as_ref());
-        assert_eq!(o, r"C:\Users\someoneelse\a");
-        assert_eq!(c.home, 0);
-        // 家目錄是空的或太短就不遮；Linux 路徑
+        // 名字有空白的使用者（通用規則吃不到空白，靠這條）
+        let sp = home_regex(r"C:\Users\John Smith");
+        let (o, _) = redact_line(r"open C:\Users\John Smith\x.txt", sp.as_ref());
+        assert_eq!(o, r"open ~\x.txt");
+        // 家目錄是空的或太短就不套這一條
         assert!(home_regex("").is_none() && home_regex("/").is_none());
         let (o, _) = redact_line("/home/bob/x", home_regex("/home/bob").as_ref());
         assert_eq!(o, "~/x");
+    }
+
+    #[test]
+    fn 遮家目錄_通用規則_任何使用者_各平台() {
+        for (src, want) in [
+            (r"open C:\Users\anyone\AppData\x", r"open ~\AppData\x"),
+            (r"open d:/users/zed/y.txt", "open ~/y.txt"),
+            (r#"{"p":"E:\\Users\\kim\\z"}"#, r#"{"p":"~\\z"}"#),
+            (r"C:\Users\anyone", "~"),
+            ("read /Users/alice/Library/x", "read ~/Library/x"),
+            ("read /home/carol/.config/asn", "read ~/.config/asn"),
+            ("path=/home/dave/x", "path=~/x"),
+            ("cwd /root/work and /root", "cwd ~/work and ~"),
+            ("(/root)", "(~)"),
+        ] {
+            let (o, c) = redact_line(src, None);
+            assert_eq!(o, want, "{src}");
+            assert!(c.home >= 1, "{src}");
+        }
+    }
+
+    #[test]
+    fn 遮家目錄_邊界_bobby_不會變成_by_與看起來像但不是家目錄的路徑() {
+        // 目前使用者是 bob，路徑是 bobby：名字整個遮掉，不能漏出「by」
+        let re = home_regex(r"C:\Users\bob");
+        let (o, _) = redact_line(r"C:\Users\bobby\x", re.as_ref());
+        assert_eq!(o, r"~\x");
+        assert!(!o.contains("by"));
+        let (o, _) = redact_line(r"C:\Users\bob\x", re.as_ref());
+        assert_eq!(o, r"~\x");
+        let (o, _) = redact_line("/home/bobby/x and /home/bob", home_regex("/home/bob").as_ref());
+        assert_eq!(o, "~/x and ~");
+        assert!(!o.contains("by"));
+        // 反例：不是家目錄的就不動
+        for s in [
+            "mount /rootfs/x and /roots",
+            "https://example.com/home/page",
+            "see /homes/x and /usr/home",
+            r"C:\Windows\System32 與 D:\Program Files\x",
+            "Users home 只是兩個字",
+        ] {
+            let (o, c) = redact_line(s, None);
+            assert_eq!(o, s, "不該被遮：{s}");
+            assert_eq!(c.home, 0, "{s}");
+        }
+    }
+
+    #[test]
+    fn 遮鍵值類_正例_三種寫法_大小寫不分() {
+        for (src, left) in [
+            ("login password=hunter2 ok", "login password=<secret> ok"),
+            ("PASSWORD: abc123", "PASSWORD: <secret>"),
+            ("passwd=x", "passwd=<secret>"),
+            ("secret = s3cr3t-v4lue", "secret = <secret>"),
+            ("token=ab/cd-ef_gh", "token=<secret>"),
+            ("x-api-key=abc", "x-api-key=<secret>"),
+            ("api_key='k-1/2'", "api_key=<secret>"),
+            ("apikey: zzz", "apikey: <secret>"),
+            (r#"{"refresh_token":"1//0gAbC-d_eFg"}"#, r#"{"refresh_token":<secret>}"#),
+            (r#"{"Password": "p w d", "n": 1}"#, r#"{"Password": <secret>, "n": 1}"#),
+            ("Authorization: Bearer abc.def-ghi", "Authorization: <secret>"),
+            ("authorization=Basic dXNlcjpwYXNz", "authorization=<secret>"),
+        ] {
+            let (o, c) = redact_line(src, None);
+            assert_eq!(o, left, "{src}");
+            assert_eq!(c.token, 1, "{src}");
+        }
+        // 後面的欄位不受影響
+        let (o, _) = redact_line("a=1&token=xyz&b=2", None);
+        assert_eq!(o, "a=1&token=<secret>&b=2");
+    }
+
+    #[test]
+    fn 遮鍵值類_反例_看起來像但不是祕密() {
+        for s in [
+            "tokenizer=fast 與 tokenizer: bpe",
+            "token_count=5 secrets=none passwords: 3",
+            "the password was reset，token 已過期",
+            "password",
+            "token = ",
+            "mytokens=1",
+        ] {
+            let (o, c) = redact_line(s, None);
+            assert_eq!(o, s, "不該被遮：{s}");
+            assert_eq!(c.token, 0, "{s}");
+        }
+    }
+
+    #[test]
+    fn 遮_aws_與_github_金鑰_正例與反例() {
+        let (o, c) = redact_line("key AKIAIOSFODNN7EXAMPLE used", None);
+        assert_eq!(o, "key <token> used");
+        assert_eq!(c.token, 1);
+        for p in ["ghp_", "gho_", "ghs_", "ghu_", "ghr_"] {
+            let (o, c) = redact_line(&format!("auth {p}abcdefghijklmnopqrstuvwxyz0123456789 end"), None);
+            assert_eq!(o, "auth <token> end", "{p}");
+            assert_eq!(c.token, 1);
+        }
+        let (o, _) = redact_line("pat github_pat_11ABCDEFG0abcdefghijkl_mnopqrstuvwxyz end", None);
+        assert_eq!(o, "pat <token> end");
+        // 反例：長度不足、前綴不對、前面還連著別的字
+        for s in [
+            "AKIAIOSFODNN7EXAMPL 少一個字",
+            "AKIAIOSFODNN7EXAMPLEXX 多了字不是金鑰",
+            "akiaiosfodnn7example 小寫",
+            "ghp_short",
+            "ghx_abcdefghijklmnopqrstuvwxyz",
+            "light_ghp_abcdefghijklmnopqrstuvwxyz",
+            "github_pat_short",
+        ] {
+            let (o, c) = redact_line(s, None);
+            assert_eq!(o, s, "不該被遮：{s}");
+            assert_eq!(c.token, 0, "{s}");
+        }
+    }
+
+    #[test]
+    fn 遮私鑰_同一行與跨行整段_反例不動() {
+        // 同一行（ui.log 的換行會被換成空白，實際上是這種）
+        let (o, c) = redact_line("ts info key=-----BEGIN RSA PRIVATE KEY----- MIIEabc def -----END RSA PRIVATE KEY----- after", None);
+        assert_eq!(o, "ts info key=<private-key> after");
+        assert_eq!(c.token, 1);
+        // 只有 BEGIN、沒有 END：遮到行尾
+        let (o, c) = redact_line("x -----BEGIN PRIVATE KEY----- MIIEabc 後面全部", None);
+        assert_eq!(o, "x <private-key>");
+        assert_eq!(c.token, 1);
+        // 跨行：本文每一行都沒有時間戳、也不到 32 字，整份檔案先遮才不會漏
+        let d = tempfile::tempdir().unwrap();
+        let body = "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXk\nAAAAB3NzaC1yc2E\nSECRETLINE\n-----END OPENSSH PRIVATE KEY-----";
+        let l1 = format!("{} info [ASN] dump: {body}", iso(NOW - 2000));
+        std::fs::write(d.path().join("ui.log"), format!("{l1}\n{}\n", line(1000, "後一行"))).unwrap();
+        let r = collect(d.path(), Range::Hour1, NOW, "");
+        assert!(!r.text.contains("SECRETLINE") && !r.text.contains("b3BlbnNz") && !r.text.contains("PRIVATE KEY"), "{}", r.text);
+        assert!(r.text.contains("<private-key>") && r.text.contains("後一行"));
+        assert_eq!(r.masked.token, 1);
+        // 反例：不是私鑰的 PEM、只是提到這幾個字
+        for s in ["-----BEGIN CERTIFICATE----- MIIC -----END CERTIFICATE-----", "沒有 private key 檔案", "BEGIN PRIVATE KEY 沒有橫線"] {
+            let (o, c) = redact_line(s, None);
+            assert_eq!(o, s, "{s}");
+            assert_eq!(c.token, 0);
+        }
     }
 
     #[test]
