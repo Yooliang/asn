@@ -19,7 +19,8 @@ test('認得的電腦：欄位壞的丟掉，名字清掉控制字元', () => {
 })
 
 test('認得的電腦：只能看和忘記，錯誤不露出內部訊息', () => {
-  assert.equal(TEXT.forget, '忘記這台')
+  assert.equal(TEXT.forget, undefined, '詳情不再常駐「忘記這台」（#1860 C）；只剩被擋下時的「重新認這台」與已移除設備的「忘記」')
+  assert.equal(TEXT.reaccept, '重新認這台')
   assert.equal(errorText(new Error('/home/x/device_known.json 讀不到')), '操作沒有成功，請稍後再試。')
   assert.equal(errorText('記住的設備紀錄壞了'), '記住的設備紀錄壞了，請告訴開發團隊。')
 })
@@ -31,7 +32,7 @@ test('設備改名：名字只有一個（後台）、最多 40 字；只有 dev
   const fs = await import('node:fs')
   const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const panel = read('../ui/lib/settings-panel.mjs')
-  const info = panel.slice(panel.indexOf("<div class=\"dv-cards\" v-else-if=\"view === 'info'\">"), panel.indexOf("<div :class=\"['dv-body'"))
+  const info = panel.slice(panel.indexOf('<div class="dv-cards" v-else>'), panel.indexOf('</section>', panel.indexOf('<div class="dv-cards" v-else>')))
   const old = panel.slice(panel.indexOf('<details class="dv-removed"'), panel.indexOf('</details>', panel.indexOf('<details class="dv-removed"')))
   assert.ok(info.length > 500 && old.length > 100)
   assert.doesNotMatch(info + old, /v-html/, '名字只當文字')
@@ -50,10 +51,12 @@ test('設備改名：名字只有一個（後台）、最多 40 字；只有 dev
   assert.doesNotMatch(read('../src-tauri/src/lib.rs'), /device_known_rename/)
 })
 
-test('設定「設備」的詳情頁：忘記只在有紀錄時出現；「已移除的設備」收合、有 N、只剩紀錄的可忘記（不寫指紋）；整個畫面沒有「已確認／未確認」', async () => {
+test('設定「設備」的詳情頁：「重新認這台」只在被擋下時出現（危險鈕）；「已移除的設備」收合、有 N、只剩紀錄的可忘記（不寫指紋）；整個畫面沒有「已確認／未確認」', async () => {
   const fs = await import('node:fs')
   const panel = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-  assert.match(panel, /<asn-button state="danger" v-if="curKnown"[^>]*forget\.ask\(curKnown\)">\{\{ KNOWN\.forget \}\}/)
+  assert.match(panel, /<div class="dv-block" role="alert" v-if="curBlocked && curKnown">/)
+  assert.match(panel, /<asn-button state="danger" class="dv-reaccept"[^>]*forget\.askReaccept\(curKnown\)">\{\{ KNOWN\.reaccept \}\}/)
+  assert.doesNotMatch(panel, /forget\.ask\(curKnown\)/, '詳情沒有常駐的「忘記這台」')
   assert.match(panel, /<summary>\{\{ DEVICE_TEXT\.removedTitle\(removed\.count\) \}\}<\/summary>/)
   assert.match(panel, /<details class="dv-removed" v-if="removed\.count">/)
   const blk = panel.slice(panel.indexOf('<details class="dv-removed"'), panel.indexOf('</details>', panel.indexOf('<details class="dv-removed"')))

@@ -1,5 +1,5 @@
 // 冒煙探測「手機重新登入 Claude 檢查」（probe.relogin，#1512 C、#1592）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
-// 那台電腦回報 Claude 登入失效時，設備細部頁的 Claude 區出現「重新登入 Claude」（安裝入口的總開關關著也有）；
+// 那台電腦回報 Claude 登入失效時，設定的「帳號」頁：帳號卡標「登入已失效」、名單上方有提示、那台電腦的列有黃色「重新登入」鈕（安裝入口的總開關關著也有；設備詳情已沒有帳號，#1860）；
 // 按了只進確認（確認字寫明登入網址送到這支手機、登入正常會告訴你不需要重新登入），按「確認重新登入」才送出要求
 // （同一個 setup_remote_request，帶那台的節點與 mode: relogin）。另一台沒回報失效的：沒有這顆。全部用真的點擊（__smokeInput）。
 // 情境（probe.relogin 的值）：
@@ -24,38 +24,25 @@ export const reloginProbeSource = (kind = 'base') => `(async () => {
   const tap = async el => { el.scrollIntoView({ block: 'center' }); await sleep(120); await real({ click: at(el) }) };
   const wait = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
   const sent = () => (globalThis.__smokeCalls || []).filter(c => c[0] === 'setup_remote_request');
-  const prog = () => [...document.querySelectorAll('.m-dv-setup .m-dv-prog')].find(vis);
+  const prog = () => [...document.querySelectorAll('.m-dv-prog.m-dv-devconfirm')].find(vis);
   const inView = el => { const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight };
-  const btn = await wait(() => [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('設備')));
-  if (!btn) return { ok: false, why: '找不到設定裡的「設備」' };
+  // #1860：設備詳情沒有帳號了，重新登入改從設定的「帳號」頁進：帳號卡上標「登入已失效」，辦公室那一列有黃色「重新登入」鈕
+  const btn = await wait(() => [...document.querySelectorAll('.m-row-btn')].find(b => vis(b) && b.textContent.includes('帳號')));
+  if (!btn) return { ok: false, why: '找不到設定裡的「帳號」' };
   await tap(btn);
-  const openDevice = async name => {
-    const row = await wait(() => [...document.querySelectorAll('.m-dv-row')].filter(vis).find(r => (r.querySelector('.m-dv-rn b')?.textContent ?? '').trim() === name));
-    if (!row) return false;
-    await tap([...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));
-    const go = await wait(() => [...document.querySelectorAll('.m-dv-subbtn[data-sub="accounts"]')].find(vis));   // 詳情 → 帳號分頁（#1860）
-    if (!go) return false;
-    await tap(go);
-    return !!(await wait(() => [...document.querySelectorAll('.m-dv-vendor')].some(vis)));
-  };
-  if (!(await openDevice('辦公室'))) return { ok: false, why: '打不開「辦公室」的細部頁' };
-  // #2111 ⑦：設備頁的帳號是一行＋狀態標籤（取代 #1592 的「使用中／登入失效」交替格與獨立紅標籤）：
-  // 登入失效的（目前使用的、沒在使用的 old@）各一行都標「登入已失效」並附一句說明；沒失效的 Codex 帳號標「正常」
-  const lines = await wait(() => { const l = [...document.querySelectorAll('.asn-aline')].filter(vis); return l.length >= 3 ? l : null }, 200);
-  if (!lines) return { ok: false, why: '辦公室的細部頁沒有帳號行（至少 3 行）' };
-  const lost = lines.filter(l => l.getAttribute('data-status') === 'lost');
-  if (lost.length !== 2) return { ok: false, why: '登入失效的帳號（目前使用的與 old@）都該標「登入已失效」，實際 ' + lost.length + ' 行' };
-  for (const l of lost) {
-    if (!l.querySelector('.asn-tag-warn') || l.querySelector('.asn-tag-warn').textContent.trim() !== '登入已失效') return { ok: false, why: '失效的帳號行沒有「登入已失效」標籤：' + l.textContent.trim() };
-    if (!l.querySelector('.asn-aline-note') || !l.querySelector('.asn-aline-note').textContent.includes('需要重新登入')) return { ok: false, why: '失效的帳號行下面沒有「需要重新登入」的說明：' + l.textContent.trim() };
+  const lost = await wait(() => { const l = [...document.querySelectorAll('.m-dv-my .m-dv-acct[data-status="lost"]')].filter(vis); return l.length ? l : null }, 200);
+  if (!lost) return { ok: false, why: '帳號頁沒有標「登入已失效」的帳號卡' };
+  for (const c of lost) {
+    const tag = c.querySelector('.m-dv-lost');
+    if (!tag || tag.textContent.trim() !== '登入已失效') return { ok: false, why: '失效的帳號卡沒有「登入已失效」標籤：' + c.textContent.trim().slice(0, 80) };
   }
-  const okLine = lines.find(l => l.getAttribute('data-status') === 'normal');
-  if (!okLine || okLine.querySelector('.asn-aline-note') || !okLine.textContent.includes('正常')) return { ok: false, why: '沒失效的帳號（Codex）該標「正常」、沒有說明句' };
-  if ([...document.querySelectorAll('.m-dv-cur, .m-dv-failed')].some(vis)) return { ok: false, why: '設備頁不該再有「使用中」交替格或獨立的紅色標籤' };
-  const relogin = await wait(() => [...document.querySelectorAll('.m-dv-relogin')].find(vis), 200);   // 帳號回報讀回來才有入口：全套並行跑時比較慢，多等一點
-  if (!relogin) return { ok: false, why: '那台回報 Claude 登入失效，細部頁卻沒有「重新登入 Claude」' };
-  if (relogin.textContent.trim() !== '重新登入 Claude') return { ok: false, why: '按鈕的字不對：' + relogin.textContent };
-  if ([...document.querySelectorAll('.m-dv-setup .m-btn')].filter(vis).some(b => b.textContent.includes('安裝並登入'))) return { ok: false, why: '安裝入口的總開關關著，不該出現「從手機安裝並登入」' };
+  const notes = [...document.querySelectorAll('.m-dv-lostnotes')].find(vis);
+  if (!notes || !notes.textContent.includes('需要重新登入')) return { ok: false, why: '帳號頁名單上方沒有「需要重新登入」的提示' };
+  if ([...document.querySelectorAll('.m-dv-acct:not([data-status="lost"]) .m-dv-lost')].some(vis)) return { ok: false, why: '沒失效的帳號卡不該有「登入已失效」標籤' };
+  const relogin = await wait(() => [...document.querySelectorAll('.m-dv-my .m-dv-dev.relogin')].find(vis), 200);   // 帳號回報讀回來才有入口：全套並行跑時比較慢，多等一點
+  if (!relogin) return { ok: false, why: '那台回報 Claude 登入失效，帳號頁卻沒有「重新登入」鈕' };
+  if (relogin.textContent.trim() !== '重新登入') return { ok: false, why: '按鈕的字不對：' + relogin.textContent };
+  if ([...document.querySelectorAll('.m-dv-my .m-btn, .m-dv-my button')].filter(vis).some(b => b.textContent.includes('安裝並登入'))) return { ok: false, why: '安裝入口的總開關關著，不該出現「從手機安裝並登入」' };
   await tap(relogin);
   const dlg = await wait(() => [...document.querySelectorAll('.m-dv-confirm')].find(vis));
   if (!dlg) return { ok: false, why: '按了沒有進確認' };

@@ -136,25 +136,20 @@ test('接線守門：七個操作都有接、按鈕與確認窗在同一個畫�
   const ops = ['install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow']
   const list = read('ui/list.js'), panel = read('ui/lib/settings-panel.mjs')
   for (const op of ops) {
-    assert.ok(SETTING_OPS.includes(op), `${op} 要在元件的操作清單`)
-    assert.match(list, new RegExp(`case '${op}':`), `${op} 樞紐要接`)
-    assert.ok(panel.includes(`act('${op}'`), `${op} 畫面要有`)
+    assert.ok(!SETTING_OPS.includes(op), `${op} 畫面沒有入口，不在元件的操作清單（#1860）`)
+    assert.match(list, new RegExp(`case '${op}':`), `${op} 樞紐仍接著（旗標開起來時給新入口用）`)
+    // #1860 PR-C：設備詳情拿掉帳號區（安裝入口原本在那裡，且總開關 AGENT_INSTALL_UI 一直是關的），畫面暫時沒有入口；操作與樞紐留著，之後開旗標時再決定放哪
+    assert.ok(!panel.includes(`act('${op}'`), `${op} 畫面不再有`)
   }
-  assert.match(panel, /curDev\.self && v\.key === 'claude'/)
-  assert.match(panel, /v\.action && v\.action\.kind === 'local'/, '只有這台的 Claude 還能裝時才出現按鈕')
-  assert.match(panel, /role="alertdialog"/, '確認窗跟按鈕同時上')
   assert.match(list, /void listen\('agent-setup', e => agentInstall\.onEvent\(e\)\)/)
   assert.match(list, /install: installView\(agentInstall\.state\)/)
   for (const t of Object.values(INSTALL_TEXT)) assert.doesNotMatch(t, /agent|setup|install|asn_|https?:/i, t)
 })
 
-test('入口預設關：電腦版的按鈕、允許從手機安裝的勾選和說明，畫面上都要先看入口開了沒', () => {
+test('入口預設關：旗標仍是關，電腦版設定頁（設備詳情拿掉帳號區後）沒有任何地方讀 st.install', () => {
   const panel = read('ui/lib/settings-panel.mjs')
-  assert.match(panel, /\bAGENT_INSTALL_UI, switchTargets/, '常數要交給畫面，不然永遠看不到')
-  // 每個讀 st.install 決定顯示的區塊都要先看入口；裡面的子元素跟著外層一起藏
-  const gates = panel.match(/v-if="[^"]*st\.install(?:\s|")[^"]*"?/g) ?? []
-  assert.equal(gates.length, 3)
-  for (const g of gates) assert.match(g, /^v-if="AGENT_INSTALL_UI && st\.install/, g)
+  assert.ok(!panel.includes('AGENT_INSTALL_UI') && !panel.includes('st.install'), '電腦設定頁不再有安裝入口（#1860）')
+  assert.match(read('ui/lib/device-state.mjs'), /export const AGENT_INSTALL_UI = false/)
 })
 
 test('電腦上按的那一輪也用右下角小窗；已有一輪在跑就不去動它的小窗', () => {

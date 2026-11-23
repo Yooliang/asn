@@ -2,19 +2,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { DEVICE_LOGIN_UI, LOGIN_TEXT, VENDORS, VENDOR_HOSTS, fetchView, requestView, safeLoginUrl, secondsLeft, showLoginButton } from '../ui/lib/mobile-device-login.mjs'
+import { LOGIN_TEXT, VENDORS, VENDOR_HOSTS, fetchView, requestView, safeLoginUrl, secondsLeft } from '../ui/lib/mobile-device-login.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
-test('入口開了（只有 Codex）；只有支援的種類、對象是別台電腦才有按鈕', () => {
-  assert.equal(DEVICE_LOGIN_UI, true)
-  assert.equal(showLoginButton('codex', { kind: 'remote' }), true, '預設開')
-  assert.equal(showLoginButton('codex', { kind: 'remote' }, false), false, '關掉就沒有')
-  assert.equal(showLoginButton('codex', undefined), false, '沒有登入動作（例如本機、離線、已登入）就沒有')
-  assert.equal(showLoginButton('codex', { kind: 'remote' }, true), true)
-  assert.equal(showLoginButton('codex', { kind: 'local' }, true), false)
-  assert.equal(showLoginButton('claude', { kind: 'remote' }, true), false, 'Claude 走原本的安裝並登入')
-  assert.equal(showLoginButton('grok', { kind: 'remote' }, true), false, 'Grok 之後才支援')
+test('只支援 Codex（Grok 之後才支援）', () => {
   assert.deepEqual(Object.keys(VENDORS), ['codex'])
 })
 
@@ -151,8 +143,9 @@ test('登入網址主機清單：JS 與 Rust（device_relay.rs）一模一樣', 
   assert.equal(safeLoginUrl('https://auth.openai.com/x', 'grok'), '')
 })
 
-test('接線：手機設備細部頁的登入按鈕看 v.login（只登入的動作），不看安裝的 v.action', () => {
-  const html = read('../ui/m.html')
-  assert.ok(html.includes('showLoginButton(v.key, v.login)'))
-  assert.ok(!html.includes('showLoginButton(v.key, v.action)'))
+test('接線（#1860）：手機設備細部頁不再有登入按鈕，只剩新電腦引導卡的「登入」開確認；確認與進度仍在詳情裡原位顯示', () => {
+  const html = read('../ui/m.html'), js = read('../ui/m.js')
+  assert.ok(!html.includes('showLoginButton') && !js.includes('showLoginButton'))
+  assert.ok(js.includes("else if (row.key === 'codex') loginAsk(d.key, 'codex')"), '引導卡的 Codex 登入')
+  assert.ok(html.includes("loginSt.node === acctCur.key && loginSt.stage !== 'idle'"), '確認與進度在詳情裡')
 })

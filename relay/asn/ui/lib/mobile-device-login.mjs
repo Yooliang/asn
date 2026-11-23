@@ -4,8 +4,6 @@
 import { setupErrorText } from './mobile-setup.mjs'
 import { loginLinkHost } from './secret-ask.mjs'
 
-/** 入口開了（0.2.17，只開 Codex）：後台另有版本閘門，只交給 0.2.17 以上的電腦 */
-export const DEVICE_LOGIN_UI = true
 export const POLL_MS = 3000
 export const VENDORS = Object.freeze({ codex: 'Codex' })
 /** 各家登入頁的主機（完全相等才收；要和 Rust 的 device_relay.rs 的 CODEX／GROK_LOGIN_HOSTS 完全一致，有測試比對）：網址交給畫面之前，除了共同規則（https、ASCII、沒帳密、埠 443、官方網域）還要是這一家的 */
@@ -21,6 +19,7 @@ export function safeLoginUrl(url, vendor) {
 
 export const LOGIN_TEXT = Object.freeze({
   button: name => `從手機替這台登入 ${name}`,
+  pending: name => `還沒登入 ${name}`,
   confirmTitle: (label, name) => `要讓「${label}」登入 ${name} 嗎？`,
   confirmBody: name => `這台電腦會開始登入 ${name}，登入網址和代碼會加密送到這支手機，由你在手機上打開網址、輸入代碼並核准。`,
   confirmNeed: '那台電腦要先在「設定 → 設備」，打開這支手機的「詳情」，勾選「允許替這台登入」，並且登入著同一個 ASN 帳號；你在電腦前也可以隨時取消。',
@@ -47,8 +46,6 @@ export const LOGIN_TEXT = Object.freeze({
 
 export const loginErrorText = e => setupErrorText(e)
 
-/** 設備細部頁要不要出現這個按鈕：入口開了、是支援的種類、對象是別台電腦（installAction 是 remote） */
-export const showLoginButton = (vendorKey, action, enabled = DEVICE_LOGIN_UI) => enabled === true && Object.hasOwn(VENDORS, vendorKey) && action?.kind === 'remote'
 
 /** setup_device_request 的回應 → 下一步 */
 export function requestView(r) {

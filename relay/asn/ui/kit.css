@@ -69,22 +69,3 @@
 /* ---- 訂閱已失效（#1646 F）：卡片頂端的紅色標籤與一句紅色說明；電腦、手機共用這一份 ---- */
 .asn-tag-fail{display:inline-block; padding:0 var(--sp-1); font-size:var(--fs-1); font-weight:600; line-height:1.6; color:var(--kit-fail); border:1px solid var(--kit-fail); border-radius:var(--radius-1)}
 .asn-note-fail{display:block; font-size:var(--fs-2); line-height:1.5; color:var(--kit-fail); overflow-wrap:anywhere}
-
-/* ---- 帳號狀態標籤（#2111 ⑦）：設備頁帳號列與帳號頁卡片同一套顏色；正常／警告（登入已失效、額度用完）／失敗（訂閱已失效） ---- */
-.asn-tag-ok,.asn-tag-warn{display:inline-block; padding:0 var(--sp-1); font-size:var(--fs-1); font-weight:600; line-height:1.6; border:1px solid; border-radius:var(--radius-1)}
-.asn-tag-ok{color:var(--kit-ok)}
-.asn-tag-warn{color:var(--kit-warn); border-color:var(--kit-warn-line)}
-.asn-note-warn{display:block; font-size:var(--fs-2); line-height:1.5; color:var(--kit-warn); overflow-wrap:anywhere}
-/* 從設備頁跳到帳號頁那張卡時，把那張卡框起來閃一下 */
-[data-flash="1"]{outline:2px solid var(--accent); outline-offset:1px}
-/* 設備頁的帳號列：整行是一顆按鈕，帳號在左、狀態標籤與「›」靠右 */
-.asn-aline{list-style:none; margin:0; padding:0}
-.asn-aline-row{display:flex; align-items:center; gap:var(--sp-1)}
-.asn-aline-row .asn-aline-go{flex:1; width:auto; min-width:0}
-.asn-aline-go{box-sizing:border-box; display:flex; align-items:center; justify-content:space-between; gap:var(--sp-2); width:100%; min-height:var(--menu-h); padding:var(--sp-1) var(--sp-3); font:inherit; font-size:var(--fs-3); text-align:left; white-space:normal; border:1px solid var(--line); border-radius:var(--radius-1); background:var(--panel); color:var(--fg); cursor:pointer}
-.asn-aline-go:hover{border-color:var(--accent)}
-.asn-aline-go:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
-.asn-aline-mail{min-width:0; overflow-wrap:anywhere}
-.asn-aline-side{display:flex; align-items:center; gap:var(--sp-2); flex:none}
-.asn-aline-chev{color:var(--muted)}
-.asn-aline-note{margin:var(--sp-1) var(--sp-3) 0}

@@ -51,14 +51,14 @@ test('#1829 名字空白時，標題是「種類（代號末 4 碼）」，不�
   assert.equal(unnamedClue({ node: 'zz12' }), '電腦（ZZ12）')
 })
 
-test('#1829 辨認區四列：建立時間、平台、最後在線、代號；後台沒給建立時間就整列不放，最後在線沒有紀錄寫「沒有紀錄」', () => {
+test('#1829 辨認區三列：建立時間、平台、最後在線（#1860 起不列代號末 4 碼）；後台沒給建立時間就整列不放，最後在線沒有紀錄寫「沒有紀錄」', () => {
   const r = rowOf(tree(), 'node-old-pc-X7K2').identity
   const by = Object.fromEntries(r.rows.map(x => [x.key, x]))
-  assert.deepEqual(r.rows.map(x => x.label), [IDENTITY_TEXT.created, IDENTITY_TEXT.platform, IDENTITY_TEXT.seen, IDENTITY_TEXT.code])
+  assert.deepEqual(r.rows.map(x => x.label), [IDENTITY_TEXT.created, IDENTITY_TEXT.platform, IDENTITY_TEXT.seen])
+  assert.equal(by.code, undefined, '詳情不列代號')
   assert.match(by.created.value, /^2026\/11\/05 \d\d:\d\d$/)
   assert.equal(by.platform.value, 'Windows')
   assert.match(by.seen.value, /^2026\/11\/19 \d\d:\d\d（3 小時前）$/)
-  assert.equal(by.code.value, 'X7K2')
   const none = rowOf(tree(), 'node-fp-name-Q9Z8').identity
   assert.ok(!none.rows.some(x => x.key === 'created'), '沒有建立時間就整列不放')
   assert.equal(none.rows.find(x => x.key === 'seen').value, '沒有紀錄')
@@ -79,7 +79,9 @@ const render = async (devices, props) => {
 test('#1829 電腦版詳情頁：名字空白也認得出是哪一台，下面有「改名」和「永久移除」', async () => {
   const html = (await render(tree(), { dev: 'node-old-pc-X7K2', devView: 'info' })).replace(/<!--.*?-->/g, '')
   assert.match(html, /<h3 class="dv-name">電腦（X7K2）<\/h3>/)
-  for (const t of ['建立時間', '平台', '最後在線', '代號', 'X7K2', '2026/11/05']) assert.ok(html.includes(t), t)
+  for (const t of ['建立時間', '平台', '最後在線', '2026/11/05']) assert.ok(html.includes(t), t)
+  assert.ok(!html.includes('<dt>代號</dt>'), '詳情不列代號；名字空白時的「電腦（X7K2）」只在標題')
+  assert.ok(!html.includes('dvid-code'))
   assert.ok(!html.includes('未命名設備') && !html.includes('還沒連線過'), '不能據以行動的句子收掉')
   const acts = html.slice(html.indexOf('要處理這台設備'))
   assert.match(acts, />改名</)
@@ -169,10 +171,10 @@ test('#1829 畫面檔裡不再有自己寫死的「未命名設備」（只剩�
     if (/UNNAMED_DEVICE|'未命名設備'/.test(src.replace(/\/\/.*$/gm, ''))) hits.push(f)
   }
   // 白名單每一項的理由：
-  //   account-roster.mjs：shortDevice('') 沒有節點代號可用時的最後備援（只有空字串才會走到）
   //   device-known.mjs：LEGACY_UNNAMED，舊版畫面上的「沒名字」字樣；讀回來被當成名字存著的，一律當沒名字（通知、認得的電腦共用）
-  //   text.mjs：UNNAMED_DEVICE 常數本身的定義
-  assert.deepEqual(hits.sort(), ['account-roster.mjs', 'device-known.mjs', 'text.mjs'])
+  //   text.mjs：UNNAMED_DEVICE 常數本身的定義（標 LEGACY，畫面不輸出；#1860 起 shortDevice 也改用辨認線索）
+  assert.deepEqual(hits.sort(), ['device-known.mjs', 'text.mjs'])
+  assert.match(read('../ui/lib/text.mjs'), /LEGACY（#1860）[\s\S]*export const UNNAMED_DEVICE/)
 })
 
 test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那一行（外層標題）進細部頁時收掉，列表頁照舊', async () => {

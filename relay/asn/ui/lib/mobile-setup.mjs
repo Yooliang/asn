@@ -2,8 +2,6 @@
 // 送出後每 5 秒查一次狀態、狀態對應成畫面上的字。node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文。
 // 真正的安裝與登入在電腦上做（要電腦開著「允許從手機替這台安裝並登入」）；登入網址送到這支手機後，會用既有的「要你確認」頁打開，
 // 在那裡開啟網址、貼回授權碼，所以這裡不碰網址與授權碼。
-import { AGENT_INSTALL_UI } from './device-state.mjs'
-
 export const POLL_MS = 5000
 /** 等太久就不再等：後台 10 分鐘沒被電腦接手會自己當作過期；接手後 40 分鐘沒結果也會當作逾時 */
 export const GIVE_UP_MS = 45 * 60 * 1000
@@ -45,9 +43,6 @@ export const RELOGIN_TEXT = Object.freeze({
   confirmNeed: '那台電腦要開著 ASN、登入著同一個 ASN 帳號，而且已經裝好 Claude Code（重新登入不會替它安裝）；你在電腦前也可以隨時取消。',
   yes: '確認重新登入',
 })
-
-/** 設備細部頁要不要出現「重新登入 Claude」：只有 Claude 區、而且 reloginAction 說可以（那台回報登入失效）。只登入不安裝，所以不看 AGENT_INSTALL_UI */
-export const showReloginButton = (vendorKey, relogin) => vendorKey === 'claude' && relogin?.kind === 'remote'
 
 // 後台錯誤代碼（Rust 端的錯誤字串形如 `setup:asn_outdated`）→ 中文
 const ERR = [
@@ -106,6 +101,3 @@ export function setupStep(s, res, now = Date.now()) {
 
 /** 送出要求後的回應 → 畫面要先說的話：後台說這台已經有進行中的要求（already）時明說，再顯示它的狀態 */
 export const setupLeadOf = res => (res?.already === true ? SETUP_TEXT.already : '')
-
-/** 設備細部頁要不要出現這個按鈕：入口有開（AGENT_INSTALL_UI）、只有 Claude 區、而且 installAction 說「別台可以裝」（kind 'remote'） */
-export const showSetupButton = (vendorKey, action, enabled = AGENT_INSTALL_UI) => enabled === true && vendorKey === 'claude' && action?.kind === 'remote'

@@ -1,4 +1,4 @@
-// 設備詳情的「辨認區」（#1829）：讓人一眼認得這是哪一台——名字、建立時間、平台、最後在線時間、代號末 4 碼。
+// 設備詳情的「辨認區」（#1829）：讓人一眼認得這是哪一台——名字、建立時間、平台、最後在線時間（代號末 4 碼只用在名字空白時的標題，詳情不列，#1860）。
 // 電腦、手機、網頁共用這一份：文字、整理資料的規則（名字空白時的線索、時間怎麼寫）、畫面元件都只在這裡。
 // 資料都是現有的：名單成員（nodeFacts：建立時間、最後在線）、後台回報的平台、節點代號；建立時間後台沒給就整列不放；最後在線沒有紀錄寫「沒有紀錄」。
 import { agoText } from './cloud-invite.mjs'
@@ -8,7 +8,6 @@ export const IDENTITY_TEXT = Object.freeze({
   created: '建立時間',
   platform: '平台',
   seen: '最後在線',
-  code: '代號',
   version: 'ASN 版本',
   online: '現在在線',
   noRecord: '沒有紀錄',
@@ -54,8 +53,7 @@ export function deviceIdentity({ node = '', label = '', named = false, platform 
   const rows = [
     ...(createdMs ? [{ key: 'created', label: T.created, value: dateTimeText(createdMs) }] : []),   // 後台沒給建立時間就整列不放（#1829 領隊拍板）
     ...(pText ? [{ key: 'platform', label: T.platform, value: pText }] : []),   // 平台拿不到就整列不放（使用者看了做不了什麼）
-    { key: 'seen', label: T.seen, value: seen },
-    { key: 'code', label: T.code, value: nodeTail(node) || T.noRecord },
+    { key: 'seen', label: T.seen, value: seen },   // 代號末 4 碼不在詳情裡：使用者看不到也改不了代號，寫出來沒有意義（#1860）。名字空白時的「電腦（X7K2）」照留（標題）
   ]
   if (version) rows.push({ key: 'version', label: T.version, value: String(version) })
   return { title, named: Boolean(named), rows }

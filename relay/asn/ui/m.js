@@ -43,12 +43,12 @@ import { headCallView } from './lib/head-call.mjs'
 import { offlineView } from './lib/group-offline.mjs'
 import { OP_LABEL, OP_PROGRESS_TEXT, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
-import { accountCardKey, accountStatusOf, deviceAccountLines } from './lib/device-account-lines.mjs'
+import { accountCardKey, accountStatusOf } from './lib/device-account-lines.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, SUB_LAPSED_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { CURRENT_FAILED_ARIA, CURRENT_LABEL, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
-import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, RELOGIN_TEXT, setupErrorText, setupStateOf, setupStep, setupLeadOf, showSetupButton, showReloginButton } from './lib/mobile-setup.mjs'
-import { LOGIN_TEXT, POLL_MS as LOGIN_POLL_MS, VENDORS as LOGIN_VENDORS, fetchView, loginErrorText, requestView, secondsLeft, showLoginButton } from './lib/mobile-device-login.mjs'
+import { POLL_MS as SETUP_POLL_MS, SETUP_TEXT, RELOGIN_TEXT, setupErrorText, setupStateOf, setupStep, setupLeadOf } from './lib/mobile-setup.mjs'
+import { LOGIN_TEXT, POLL_MS as LOGIN_POLL_MS, VENDORS as LOGIN_VENDORS, fetchView, loginErrorText, requestView, secondsLeft } from './lib/mobile-device-login.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { GUIDE_TEXT, GUIDE_VENDORS, guideRows, guideVisible, guideReshowVisible, loadGuideHidden, saveGuideHidden } from './lib/new-computer-guide.mjs'
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
@@ -625,6 +625,11 @@ const app = createApp({
       kp.busy = true; kp.error = ''
       try { await knownPeers.forget(node); await loadKnown() } catch (e) { console.info('[ASN] 忘記這台沒成功', String(e?.message ?? e)); kp.error = knownErrorText(e) } finally { kp.busy = false }
     }
+    // 「重新認這台」（#1860）：只有被擋下的那台出現。按下去先在原位問（寫明會發生什麼），確認才走原本「忘記」的流程（先過本人確認，再清掉記住的指紋）
+    const reaccept = ref('')
+    const reacceptAsk = node => { if (!kp.busy) reaccept.value = node }
+    const reacceptNo = () => { reaccept.value = '' }
+    const reacceptYes = async () => { const node = reaccept.value; reaccept.value = ''; if (node) await forgetKnown(node) }
     // 改名（這支手機自己、電腦、別的手機、雲端代理都一樣）：名字存在後台，所有設備都顯示；規則與送出都在 Rust（帳號簽章）。
     // 輸入框的內容只當文字；成功後重讀名單（名字跟著變）與認得的電腦；失敗顯示後台回的中文說明
     const dn = reactive({ node: '', text: '', busy: false, err: '' })
@@ -844,7 +849,7 @@ const app = createApp({
     // ---------- 設備卡「切換 Claude 帳號」：選帳號 → 確認 → 送出並等對方電腦回報 ----------
     const acctKeys = computed(() => new Set(acctButtonDevices(groups.value, info.node).filter(g => !devPrefs.deviceRemoved.includes(g.node)).map(g => g.key)))
     // 整頁＝電腦版「設備與帳號」：資料用電腦版同一份整理函式；別台電腦的帳號逐台向後台讀（只讀選到的那台）
-    const acctSw = reactive({ phase: 'pick', page: 'list', sub: 'accounts', tab: 'devices', node: '', picked: '', reports: {}, view: null })
+    const acctSw = reactive({ phase: 'pick', page: 'list', tab: 'devices', node: '', picked: '', reports: {}, view: null })
     // 帳號列表（#374）：進「設備與帳號」讀一次，開著時每 5 分鐘再讀（跟電腦版同一個節奏）；
     // 讀不到沿用上一次讀成功的，從沒成功過才是 null（畫面退回各台自己回報的）
     const acctRoster = ref(null)
@@ -927,7 +932,7 @@ const app = createApp({
     async function openAcctNow(g) {
       if (nav.sheet) return
       acctEpoch++; acctToken++   // 重新打開：之前還在跑的讀取與切換不再更新這個畫面（切換的結果改用提示說）
-      Object.assign(acctSw, { phase: 'pick', page: 'list', sub: 'accounts', picked: '', view: null, reports: {}, tab: acctTabOf(g?.tab) })
+      Object.assign(acctSw, { phase: 'pick', page: 'list', picked: '', view: null, reports: {}, tab: acctTabOf(g?.tab) })
       if (g?.tab === 'devices' || !g?.tab) void loadKnown()
       // 從夥伴列表某台設備旁的「選項」進來：直接開那一台的細部頁（底下墊一層列表，返回鍵回列表）；從別處進來先看列表
       if (g?.node && acctDevs.value.some(d => d.key === g.node)) { acctSw.node = g.node; acctSw.page = 'detail' } else acctSw.node = ''
@@ -940,24 +945,19 @@ const app = createApp({
     function openAcctDevice(key) {
       if (acctSw.phase !== 'pick') return
       const stale = !!fourthPage.value?.node   // 細部那台不見了（畫面退回列表）又點另一台：取代那一層，不多留一筆
-      acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'; acctSw.sub = 'accounts'
+      acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'
       fourthNav.pushLayer(acctPage(key), { replace: stale })
       return loadAcct(key)
     }
-    // 設備列的「詳情」：同一層細部頁，換成詳情內容（名字、指紋、第一次見到、隱藏與移除、忘記這台）；不讀帳號
+    // 設備列的「詳情」：同一層細部頁（名字、指紋、第一次見到、隱藏與移除、被擋下時的「重新認這台」）。帳號不在這裡，只在設定的「帳號」頁（#1860）；
+    // 還是讀一次那台的回報：新電腦引導卡要靠它知道四家各裝了沒
     function openAcctInfo(key) {
       if (acctSw.phase !== 'pick') return
       const stale = !!fourthPage.value?.node
-      acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'; acctSw.sub = 'info'
+      acctSw.node = key; acctSw.picked = ''; acctSw.page = 'detail'; reaccept.value = ''
       fourthNav.pushLayer(acctPage(key), { replace: stale })
       void loadKnown()
-    }
-    // 細部頁上方的「詳情／帳號」：同一層頁面換內容，不多推一層返回記錄（帳號分頁到 PR-C 才拿掉，#1860）
-    function setAcctSub(sub) {
-      if (acctSw.phase !== 'pick' || acctSw.page !== 'detail' || !acctSw.node) return
-      if (sub === 'accounts') { acctSw.sub = 'accounts'; return loadAcct(acctSw.node) }
-      acctSw.sub = 'info'
-      void loadKnown()
+      void loadAcct(key)
     }
     // 帳號分頁的「切換到某台」：開那台的細部頁、等它的帳號讀回來，再進確認畫面（現有的選帳號→確認→送出流程，不另做一套）
     const setAcctTab = t => { acctSw.tab = acctTabOf(t) }
@@ -967,29 +967,13 @@ const app = createApp({
     // 帳號卡片的設備列（#2111 ②）：一台一列，列的狀態由共用的 accountDeviceRows 決定（電腦同一個函式；手機只有 Claude 能切換）；切換進行中的那台顯示「切換中…」
     const acctDevRows = (vendor, a) => accountDeviceRows(acctDevs.value, vendor, a?.account, a?.usedOn, { vendors: ['claude'], switchingNode: acctSw.phase === 'run' ? acctSw.node : switchBusyNode(acctRowSwitch, vendor, a?.account, acctDevs.value.map(d => d.key)) })
     const acctInUseOf = (vendor, a) => accountInUse(acctDevRows(vendor, a), a?.current)
-    // 設備頁的帳號列（#2111 ⑦）：和電腦同一個函式（device-account-lines.mjs）。點一行＝退回列表、切到「帳號」分頁，捲到並框起那張卡
-    const acctLines = v => deviceAccountLines(acctCur.value, v, acctMy.value)
-    const acctFocus = ref('')
-    let acctFocusTimer = null
-    const acctCardGo = async line => {
-      acctSw.tab = 'accounts'
-      acctBackToList()
-      await fourthNav.whenSettled()
-      for (let i = 0; i < 20; i++) {
-        await Vue.nextTick()
-        const el = [...document.querySelectorAll('[data-acct-card]')].find(e => e.getAttribute('data-acct-card') === line.key)
-        if (el) {
-          el.scrollIntoView?.({ block: 'center' })
-          acctFocus.value = line.key
-          clearTimeout(acctFocusTimer); acctFocusTimer = setTimeout(() => { acctFocus.value = '' }, 2500)
-          return
-        }
-        await new Promise(r => setTimeout(r, 100))   // 帳號列表還在讀：等它畫出來再捲
-      }
-    }
     // 登入失效（#1960）：和電腦同一組函式（account-roster.mjs）；「重新登入」走手機既有的 setupAsk(…, 'relogin')，確認與進度在那一列下方原位顯示
     const acctLoginLostOf = (vendor, a) => accountLoginLost(acctDevRows(vendor, a))
     const acctLoginNotices = computed(() => loginLostNotices(acctMy.value?.vendors ?? [], acctDevRows))
+    // 還沒登入 Codex 的別台電腦（那台回報「可以從手機替它登入」）：帳號頁列出，按下去開確認（確認與進度在那台的詳情裡原位顯示）
+    const acctLoginTargets = computed(() => acctDevs.value.filter(d => !d.self && !d.phone && d.online && d.cloud !== true)
+      .flatMap(d => [...d.vendors, ...d.missing].filter(v => Object.hasOwn(LOGIN_VENDORS, v.key) && v.login?.kind === 'remote').map(v => ({ node: d.key, label: d.label, vendor: v.key }))))
+    const acctLoginPress = t => { loginAsk(t.node, t.vendor); openAcctInfo(t.node) }
     const acctReloginPress = b => { if (b.state === 'relogin' && !acctReloginHere(b.node)) setupAsk(b.node, 'relogin') }
     const acctReloginHere = node => setupSt.mode === 'relogin' && setupSt.node === node && setupSt.stage !== 'idle'
     // 按帳號卡設備列的「切換」（#2111 ③）：不跳框、不進確認頁，那一列顯示「切換中…」，結果在那一列下方原位顯示；成功後重讀帳號列表，卡片頂端與設備列一起變。
@@ -1018,7 +1002,7 @@ const app = createApp({
     const setupStop = () => { clearInterval(setupTimer); setupTimer = null }
     const setupReset = () => { setupStop(); Object.assign(setupSt, { node: '', mode: 'install', stage: 'idle', since: 0, saw: false, reached: false, fails: 0, lead: '', text: '', note: '', ok: false, msg: '' }) }
     // 失敗的結果一定要看得到：用 role="alert" 顯示，並把設備卡捲到看得見的地方（結果在畫面外，本人會以為沒事）
-    const setupShowFailure = () => { void Vue.nextTick(() => document.querySelector('.m-dv-setup .m-dv-prog')?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })) }
+    const setupShowFailure = () => { void Vue.nextTick(() => document.querySelector('.m-dv-setup .m-dv-prog, .m-dv-devconfirm.m-dv-prog')?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })) }
     const setupFinish = (text, ok, note = '') => {
       setupStop(); Object.assign(setupSt, { stage: 'done', ok, text, note }); if (!ok) setupShowFailure()
       if (ok && setupSt.mode === 'relogin') { void loadRoster(); void loadAcct(setupSt.node, true) }   // 登入好了：重讀帳號列表與那台的回報，帳號頁的「登入已失效」提示與標籤一起消失（#1960）
@@ -1167,10 +1151,10 @@ const app = createApp({
       if (p?.kind !== 'acct') { if (old?.kind === 'acct') { acctToken++; acctEpoch++; setupReset(); loginReset() } return }
       if (p.node) { acctSw.node = p.node; acctSw.page = 'detail'; return }
       if (old?.kind === 'acct' && old.node) acctToken++   // 細部退回列表：進行中的切換不再更新畫面
-      Object.assign(acctSw, { phase: 'pick', page: 'list', sub: 'accounts', node: '', picked: '' })
+      Object.assign(acctSw, { phase: 'pick', page: 'list', node: '', picked: '' })
     })
     // 離開或重進詳情：清掉詳情裡開確認留下的失敗提示（成功時 scanPeer／choosePeer 已清）、收掉沒送出的改名
-    watch(() => acctSw.page === 'detail' && acctSw.sub === 'info', (now, was) => { if (now !== was) { if (vp.noteOwn) { vp.note = ''; vp.noteOwn = false }; kp.error = ''; if (!dn.busy) Object.assign(dn, { node: '', text: '', err: '' }) } })
+    watch(() => acctSw.page === 'detail', (now, was) => { if (now !== was) { if (vp.noteOwn) { vp.note = ''; vp.noteOwn = false }; kp.error = ''; if (!dn.busy) Object.assign(dn, { node: '', text: '', err: '' }) } })
     // 被隱藏的設備：顯示回名單／永久移除（要先看過二次確認）／恢復
     const acctShowBack = () => { if (acctCur.value) showHiddenDevice(acctCur.value.key) }
     const acctAskRemove = () => { if (acctSw.phase === 'pick' && acctCanRemove.value) acctSw.phase = 'rm' }
@@ -1711,10 +1695,10 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, removedBlock, acctRowLine, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, reaccept, reacceptAsk, reacceptNo, reacceptYes, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, removedBlock, acctRowLine, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
-      GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
-      SUB_LAPSED_TEXT, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLines, acctCardGo, acctFocus, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, setAcctSub, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
+      GUIDE_TEXT, guideNode, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
+      SUB_LAPSED_TEXT, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLoginTargets, acctLoginPress, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,

@@ -141,7 +141,8 @@ export const newComputerGuidePhoneProbeSource = (open = false) => `(async () => 
   try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+  // 引導卡在詳情裡排在「這台是哪一台」和動作區下面（#1860：詳情沒有帳號分頁了），不一定在第一屏：點之前先捲到看得見，不然真的點擊落在別的東西上
+  const at = el => { el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
   const real = async (req, ms) => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(ms || 300) };
   const waitFor = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
   const txt = e => (e ? e.textContent.replace(/\s+/g, ' ').trim() : '');
@@ -154,10 +155,8 @@ export const newComputerGuidePhoneProbeSource = (open = false) => `(async () => 
   set.click(); await sleep(500);
   const row = await waitFor(() => [...document.querySelectorAll('.m-dv-row')].find(r => vis(r) && txt(r).includes('辦公室')));
   if (!row) return { ok: false, why: '找不到「辦公室」那一列' };
-  [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(300);   // 詳情 → 帳號分頁（#1860）
-  const go = document.querySelector('.m-dv-subbtn[data-sub="accounts"]');
-  if (!go) return { ok: false, why: '辦公室的詳情裡沒有「帳號」分頁' };
-  go.click(); await sleep(600);
+  [...row.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(600);   // 列上的「詳情」：新手引導卡直接放在詳情裡（#1860：詳情沒有帳號分頁了）
+  if ([...document.querySelectorAll('.m-dv-subbtn')].some(vis)) return { ok: false, why: '辦公室的詳情裡不該再有「帳號」分頁' };
   if (!(await waitFor(card, 60))) return { ok: false, why: '辦公室沒有 AI 視窗，細部頁卻看不到新手引導卡：' + txt(document.querySelector('.m-dv') || document.body).slice(0, 160) };
   const order = [...card().querySelectorAll('.ng-row')].map(r => r.getAttribute('data-vendor')).join(',');
   if (order !== 'claude,codex,gemini,grok') return { ok: false, why: '四家順序不對：' + order };

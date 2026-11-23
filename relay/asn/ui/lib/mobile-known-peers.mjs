@@ -10,7 +10,7 @@ import { KNOWN_PEER_FAILED_TEXT, knownPeerErrorText, renameErrorText } from './p
 import { ONBOARD_STORE } from './onboard.mjs'
 import { displayDeviceName, unnamedLabelOf } from './device-known.mjs'
 import { renameDeviceFromPage } from './device-rename.mjs'
-import { NAME_MAX, clean as cleanText } from './known-peers.mjs'
+import { NAME_MAX, TEXT as KNOWN_TEXT, clean as cleanText } from './known-peers.mjs'
 
 // 清掉控制字元與雙向字元：和電腦版同一個（known-peers.mjs），手機多一步前後去空白
 const clean = (s, n = 80) => cleanText(s, Infinity).trim().slice(0, n)
@@ -29,13 +29,18 @@ export const TEXT = {
   detail: '詳情',
   fpLabel: '指紋',
   firstSeen: t => `第一次見到：${t}`,
-  forgetThis: '忘記這台',
+  // 「重新認這台」：只有被擋下的才出現；字與電腦版同一份（known-peers.mjs）
+  reaccept: KNOWN_TEXT.reaccept,
+  reacceptYes: KNOWN_TEXT.reacceptYes,
+  reacceptNotice: KNOWN_TEXT.reacceptNotice,
+  reacceptConfirm: KNOWN_TEXT.reacceptConfirm,
+  blockedTag: KNOWN_TEXT.blockedTag,
   stripTitle: '這台還沒確認指紋',
   stripButton: '確認指紋',
   methodBody: '請在那台電腦的設定頁按「顯示 QR code」，再用相機掃它；也可以改成用選的。',
   scanButton: '用相機掃電腦上的 QR code',
   scanFallback: '沒辦法掃，改用選的',
-  scanMismatch: '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 設備，開那台的「詳情」按「忘記這台」，再重新連線。',
+  scanMismatch: '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 設備，開那台的「詳情」按「重新認這台」，再重新連線。',
   scanBad: '這不是 ASN 的指紋 QR code，請掃電腦設定頁上的那個。',
   scanNoCamera: '沒辦法用相機，改用選的。',
   sheetTitle: name => `確認「${name}」的指紋`,
@@ -45,8 +50,8 @@ export const TEXT = {
   wrong: '選的和電腦上顯示的不一樣，這次沒有記住。10 分鐘後才能再確認。',
   locked: n => `答錯過一次，請 ${n} 分鐘後再確認。`,
   lockedNow: '答錯過一次，請稍後再確認。',
-  blocked: '這台的指紋兩次對不上，可能被換過。請到設定 → 設備，開那台的「詳情」按「忘記這台」，再重新連線。',
-  noneMatch: '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 設備，開那台的「詳情」按「忘記這台」，才能重新確認。',
+  blocked: '這台的指紋兩次對不上，可能被換過。請到設定 → 設備，開那台的「詳情」按「重新認這台」，再重新連線。',
+  noneMatch: '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 設備，開那台的「詳情」按「重新認這台」，才能重新確認。',
   expired: '太久沒選，請重新按「確認指紋」。',
   confirmButton: '確認',
   fp: fp => `指紋 ${fp}`,
@@ -93,7 +98,7 @@ export function normalizeList(raw) {
       const confirmed = p.confirmed === true
       const name = cleanName(p.name)
       // name＝記的名字（可能是空的）；label＝畫面上顯示的。沒名字顯示「未命名的電腦」，指紋只有確認過的才帶（沒確認的畫面不能知道）
-      return { node: p.node, name, label: displayDeviceName(name) || unnamedLabelOf(p.node), fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms), firstSeenMs: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? p.first_seen_ms : 0 }
+      return { node: p.node, name, label: displayDeviceName(name) || unnamedLabelOf(p.node), fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms), firstSeenMs: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? p.first_seen_ms : 0, ...(p.blocked === true ? { blocked: true } : {}) }   // blocked＝指紋對不上、已被擋下（Rust 帶了才有）
     })
 }
 
