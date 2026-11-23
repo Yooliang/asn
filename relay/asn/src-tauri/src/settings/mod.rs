@@ -289,7 +289,16 @@ fn write_locked<T: Doc>(slot: &mut Slot, path: &Path, cur: &Cached<T>, v: &T) ->
         migrate::backup_old(path, cur.file_version).map_err(|_| SettingsError("設定檔寫入前的備份存不下來，這次沒有存，稍後再試".into()))?;
     }
     let text = migrate::render(v, version)?;
-    // 給畫面的錯誤固定成白話句，系統原文（例如「拒絕存取 (os error 5)」）只寫進 log（不含檔案內容）
+    put_text::<T>(path, &text)?;
+    let mut value = v.clone();
+    value.normalize();
+    slot.stamp = stamp_of(path);
+    slot.cached = Some(Box::new(Cached { value, status: LoadStatus::Ok, file_version: version }));
+    Ok(())
+}
+
+/// 原子寫入文字。給畫面的錯誤固定成白話句，系統原文（例如「拒絕存取 (os error 5)」）只寫進 log（不含檔案內容）
+fn put_text<T: Doc>(path: &Path, text: &str) -> Result<(), SettingsError> {
     #[cfg(test)]
     let written = if FAIL_WRITE.with(|f| f.get()) { Err(std::io::Error::from_raw_os_error(5)) } else { atomic::write(path, text.as_bytes(), T::ATOMIC) };
     #[cfg(not(test))]
@@ -298,12 +307,39 @@ fn write_locked<T: Doc>(slot: &mut Slot, path: &Path, cur: &Cached<T>, v: &T) ->
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         elog!("[ASN] 設定檔 {name} 寫入失敗（{e}），這次沒有存");
         SettingsError("設定檔寫入失敗，這次沒有存，稍後再試".into())
-    })?;
-    let mut value = v.clone();
-    value.normalize();
-    slot.stamp = stamp_of(path);
-    slot.cached = Some(Box::new(Cached { value, status: LoadStatus::Ok, file_version: version }));
-    Ok(())
+    })
+}
+
+/// 原文照寫（不 parse、不重新序列化，位元組照原樣）：畫面整份存檔用。持有這個檔的鎖；
+/// 寫入前照常判斷**磁碟上的舊檔**是不是壞檔（`KEEP_BAD` 的型別會先搬走）。呼叫端自己負責內容合不合法
+pub fn save_raw_in<T: Doc>(dir: &Path, text: &str) -> Result<(), SettingsError> {
+    let path = path_in::<T>(dir);
+    let slot = slot_of(&path);
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    let cur = read_and_cache::<T>(&mut g, &path);
+    if matches!(cur.status, LoadStatus::Unreadable { .. }) {
+        return Err(SettingsError("設定檔暫時讀不到（可能被其他程式占用），這次沒有存，稍後再試".into()));
+    }
+    // 先作廢快取：萬一寫到一半失敗，下一次讀照樣重讀
+    g.stamp = None;
+    g.cached = None;
+    put_text::<T>(&path, text)
+}
+
+/// 欄位級合併用：持鎖讀舊檔、改、寫。舊檔解析不了（壞檔，或含 serde 不收的內容例如孤立的 surrogate）就回 `Ok(Err(reason))`，
+/// **不搬檔、不寫檔**：舊檔可能只是 serde 讀不了而不是真的壞，不能因為要合併就把它搬走
+pub fn merge_in<T: Doc>(dir: &Path, f: impl FnOnce(&mut T)) -> Result<Result<(), String>, SettingsError> {
+    let path = path_in::<T>(dir);
+    let slot = slot_of(&path);
+    let mut g = slot.lock().unwrap_or_else(|e| e.into_inner());
+    let cur = read_fresh::<T>(&path, false);
+    if let LoadStatus::Corrupt { reason } = &cur.status {
+        return Ok(Err(reason.clone()));
+    }
+    let mut v = cur.value.clone();
+    f(&mut v);
+    write_locked(&mut g, &path, &cur, &v)?;
+    Ok(Ok(()))
 }
 
 // ---------------------------------------------------------------- 以資料夾為準的版本（呼叫端自己帶資料夾：測試，以及還沒改成用 Roots 的呼叫端）

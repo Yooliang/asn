@@ -47,22 +47,54 @@ fn 白名單外的名稱被拒() {
 }
 
 #[test]
-fn 存檔內容不是物件就拒絕() {
+fn 存檔不檢查內容_原文照寫_位元組一模一樣() {
+    // 以前的 store_save 從不解析；現在也不能因為解析不了而拒存（含孤立 surrogate 的文字 serde_json 讀不了，但 JSON.stringify 會產出）
     let d = tempfile::tempdir().unwrap();
-    put(d.path(), "asn-onboard.json", r#"{"done":true}"#);
-    for t in ["[1]", "5", "null", "\"x\"", "{壞掉", ""] {
-        assert!(save_text(d.path(), RawName::Onboard, t).is_err(), "{t}");
+    let texts = [
+        r#"{"friends":[{"id":"a","name":"\ud83d"}],"logs":{"a":[{"t":1,"text":"被截斷的表情 \ud83d"}]}}"#,
+        "{
+  \"k\" : [1,
+2]  }
+",
+        "[1]",
+        "5",
+        "{壞掉",
+        "",
+    ];
+    for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json"), (RawName::Chats, "asn-chats.json")] {
+        for t in texts {
+            save_text(d.path(), name, t).unwrap_or_else(|e| panic!("{file} {t:?}：{e}"));
+            assert_eq!(std::fs::read(d.path().join(file)).unwrap(), t.as_bytes(), "{file} {t:?}");
+            assert_eq!(load_text(d.path(), name).as_deref(), Some(t));
+        }
     }
-    assert_eq!(read(d.path(), "asn-onboard.json"), r#"{"done":true}"#);
 }
 
 #[test]
-fn 存檔_整份寫入_單行_不加版本_欄位順序不變() {
+fn 修補_舊檔含孤立_surrogate_回白話錯誤_原檔不動_也不搬成壞檔() {
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"keep":1,"s":"\ud83d"}"#;
+    for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json"), (RawName::Chats, "asn-chats.json")] {
+        put(d.path(), file, old);
+        let e = patch_json(d.path(), name, obj(json!({"a":1}))).unwrap_err();
+        assert_eq!(e, "設定檔內容無法合併，這次沒有存", "{file}");
+        assert_eq!(read(d.path(), file), old, "{file} 原檔不動");
+    }
+    assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".tmp").is_empty());
+    // 舊檔本來就是壞的 JSON，patch 也一樣不動它（要救得先整份存）
+    put(d.path(), "asn-me.json", "{壞掉");
+    assert!(patch_json(d.path(), RawName::Me, obj(json!({"a":1}))).is_err());
+    assert_eq!(read(d.path(), "asn-me.json"), "{壞掉");
+    assert!(files_with(d.path(), ".bad-").is_empty());
+}
+
+#[test]
+fn 存檔_整份寫入_原文照寫_不補版本() {
     let d = tempfile::tempdir().unwrap();
     let text = r#"{"z":1,"a":{"b":[1,2]},"version":7,"frame":"native"}"#;
     save_text(d.path(), RawName::Me, text).unwrap();
-    // 前端帶來的 version 不照寫（版本號由共用層管，這張還沒開始用）
-    assert_eq!(read(d.path(), "asn-me.json"), r#"{"z":1,"a":{"b":[1,2]},"frame":"native"}"#);
+    // 原文照寫（連前端帶來的 version 也一樣，這張不碰版本）
+    assert_eq!(read(d.path(), "asn-me.json"), text);
     // 讀出來是原文字串
     assert_eq!(load_text(d.path(), RawName::Me).unwrap(), read(d.path(), "asn-me.json"));
     assert_eq!(load_text(d.path(), RawName::Chats), None, "沒有就是 None，也不建檔");
@@ -138,10 +170,6 @@ fn me_寫入時壞檔先搬走() {
         assert_eq!(bad.len(), 1, "{file}");
         assert_eq!(read(d.path(), &bad[0]), "{壞掉", "備份是原本的壞內容");
     }
-    // 用 patch 寫入也一樣
-    put(d.path(), "asn-me.json", "[壞");
-    patch_json(d.path(), RawName::Me, obj(json!({"a":1}))).unwrap();
-    assert_eq!(files_with(d.path(), "asn-me.json.bad-").len(), 2);
 }
 
 #[test]
@@ -159,11 +187,6 @@ fn chats_壞了退回空的_不產生備份() {
     save_text(d.path(), RawName::Chats, r#"{"friends":[],"logs":{}}"#).unwrap();
     assert_eq!(read(d.path(), "asn-chats.json"), r#"{"friends":[],"logs":{}}"#);
     assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".bak").is_empty());
-    // patch 壞檔也一樣
-    put(d.path(), "asn-chats.json", "{壞掉");
-    patch_json(d.path(), RawName::Chats, obj(json!({"a":1}))).unwrap();
-    assert_eq!(read(d.path(), "asn-chats.json"), r#"{"a":1}"#);
-    assert!(files_with(d.path(), ".bad-").is_empty());
 }
 
 #[test]
@@ -190,20 +213,65 @@ fn assert_keeps_extra<T: Doc>() {
     assert_eq!(back.get("zz_n"), Some(&json!(5)), "{}", T::NAME);
 }
 
+/// 所有 Doc 型別的名單（名稱，檢查函式）。新增 Doc 要加進來，`doc_list_is_complete` 會掃原始碼比對數量
+fn all_docs() -> Vec<(&'static str, fn())> {
+    let mut v: Vec<(&'static str, fn())> = vec![
+        ("NamesDoc", assert_keeps_extra::<NamesDoc>),
+        ("MeDoc", assert_keeps_extra::<MeDoc>),
+        ("OnboardDoc", assert_keeps_extra::<OnboardDoc>),
+        ("ChatsDoc", assert_keeps_extra::<ChatsDoc>),
+    ];
+    #[cfg(desktop)]
+    v.extend([
+        ("AcctPrefsDoc", assert_keeps_extra::<AcctPrefsDoc> as fn()),
+        ("AgentSetupPrefsDoc", assert_keeps_extra::<AgentSetupPrefsDoc>),
+        ("PiAutoDoc", assert_keeps_extra::<PiAutoDoc>),
+        ("QuotaReadersDoc", assert_keeps_extra::<QuotaReadersDoc>), // 手寫 Deserialize 的那個：已知欄位全對時一樣有留下
+        ("VoiceDoc", assert_keeps_extra::<VoiceDoc>),
+        ("LaunchPrefsDoc", assert_keeps_extra::<LaunchPrefsDoc>),
+        ("BridgeDoc", assert_keeps_extra::<BridgeDoc>),
+    ]);
+    v
+}
+
 #[test]
 fn extra_kept_by_every_doc() {
-    assert_keeps_extra::<NamesDoc>();
-    assert_keeps_extra::<MeDoc>();
-    assert_keeps_extra::<OnboardDoc>();
-    assert_keeps_extra::<ChatsDoc>();
-    #[cfg(desktop)]
-    {
-        assert_keeps_extra::<AcctPrefsDoc>();
-        assert_keeps_extra::<AgentSetupPrefsDoc>();
-        assert_keeps_extra::<PiAutoDoc>();
-        assert_keeps_extra::<QuotaReadersDoc>(); // 手寫 Deserialize 的那個：已知欄位全對時一樣有留下
-        assert_keeps_extra::<VoiceDoc>();
-        assert_keeps_extra::<LaunchPrefsDoc>();
-        assert_keeps_extra::<BridgeDoc>();
+    for (_, f) in all_docs() {
+        f();
     }
+}
+
+/// 掃 src 底下所有非測試檔的 `impl Doc for`（`raw.rs` 的巨集一次產三個型別，改數 `raw_doc!(` 的呼叫），
+/// 數量要等於上面名單的長度：新增 Doc 型別卻忘了加進名單，這裡就紅
+#[test]
+fn doc_list_is_complete() {
+    fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = vec![];
+    walk(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
+    let (mut impls, mut scanned_raw) = (0, false);
+    for f in files {
+        let name = f.file_name().unwrap().to_string_lossy().into_owned();
+        if name == "tests.rs" || name.ends_with("_tests.rs") {
+            continue; // 測試檔裡自己宣告的假 Doc 不算
+        }
+        let text = std::fs::read_to_string(&f).unwrap();
+        if name == "raw.rs" && f.parent().is_some_and(|d| d.ends_with("settings")) {
+            // 巨集本體裡有一行 `impl Doc for $name`，實際產生幾個型別看 `raw_doc!(` 呼叫（行首）有幾處
+            impls += text.lines().filter(|l| l.starts_with("raw_doc!(")).count();
+            scanned_raw = true;
+        } else {
+            impls += text.matches("impl Doc for ").count() + text.matches("impl crate::settings::Doc for ").count();
+        }
+    }
+    assert!(scanned_raw, "掃不到 settings/raw.rs，掃描規則失效");
+    assert_eq!(impls, all_docs().len(), "原始碼裡的 Doc 型別數與 extra_kept_by_every_doc 的名單長度不同：新增的型別要加進 all_docs()");
 }

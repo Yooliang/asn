@@ -72,7 +72,22 @@ test('這次改的指令都是非同步（todo-next-191）', () => {
   const lib = fs.readFileSync(path.join(SRC, 'lib.rs'), 'utf8')
   assert.match(byName.get('store_save').body, /settings::save_text\(/)
   assert.doesNotMatch(lib, /STORE_LOCK/)
-  assert.match(fs.readFileSync(path.join(SRC, 'settings', 'mod.rs'), 'utf8'), /fn slot_of\(path: &Path\) -> Arc<Mutex<Slot>>/)
+  assert.match(byName.get('settings_patch').body, /settings::patch_json\(/)
+  assert.equal(byName.get('settings_patch').async, true)
+  const lf = t => t.split('\r\n').join('\n')
+  const raw = lf(fs.readFileSync(path.join(SRC, 'settings', 'raw.rs'), 'utf8'))
+  const mod = lf(fs.readFileSync(path.join(SRC, 'settings', 'mod.rs'), 'utf8'))
+  // 兩條寫入路徑都要經過共用層持鎖的函式（save_raw_in／merge_in），而不是自己直接寫檔
+  assert.match(raw, /pub fn save_text[\s\S]*?save_raw_in::<MeDoc>[\s\S]*?\n\}/)
+  assert.match(raw, /pub fn patch_json[\s\S]*?merge::<MeDoc>[\s\S]*?\n\}/)
+  assert.match(raw, /fn merge<[^\n]*\{\s*let r = merge_in::</)
+  for (const fn of ['save_raw_in', 'merge_in']) {
+    const body = mod.split(`pub fn ${fn}<`)[1]?.split('\n}\n')[0] ?? ''
+    assert.match(body, /slot_of\(&path\)/, `${fn} 要拿這個檔的 slot`)
+    assert.match(body, /slot\.lock\(\)/, `${fn} 要持鎖`)
+  }
+  assert.doesNotMatch(raw, /std::fs::write|atomic::write/, '共用層以外不准在 raw.rs 直接寫檔')
+  assert.match(mod, /fn slot_of\(path: &Path\) -> Arc<Mutex<Slot>>/)
   assert.match(fs.readFileSync(path.join(SRC, 'ui_log.rs'), 'utf8'), /static APPEND_LOCK: std::sync::Mutex<\(\)>/)
 })
 

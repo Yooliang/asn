@@ -7,7 +7,7 @@
 //! 版本：這三個檔先不加 `version`（`VERSION = 0`，寫檔時不補欄位）。畫面整份存檔時不一定帶著它：
 //! chats 是從記憶體整份重組、onboard／me 是 `...saved` 展開，載入前就寫過的檔才有，所以前端存檔可能把它洗掉。
 //! 要等畫面改成走 `settings_patch`（#2162 第 7 張）、不再整份覆寫之後一起加。
-use super::{atomic, path_in, slot_of, update_in, Doc, Scope, SettingsError};
+use super::{atomic, merge_in, path_in, save_raw_in, slot_of, Doc, Scope, SettingsError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -91,23 +91,8 @@ pub fn load_text(dir: &Path, name: RawName) -> Option<String> {
     std::fs::read_to_string(&path).ok()
 }
 
-fn object_of(text: &str) -> Result<Map<String, Value>, SettingsError> {
-    match serde_json::from_str::<Value>(text.strip_prefix('\u{feff}').unwrap_or(text)) {
-        Ok(Value::Object(m)) => Ok(m),
-        _ => Err(SettingsError("存檔內容必須是 JSON 物件".into())),
-    }
-}
-
-fn replace_all<T: Doc>(dir: &Path, mut m: Map<String, Value>) -> Result<(), SettingsError>
-where
-    T: RawLike,
-{
-    m.remove("version");
-    update_in::<T, _>(dir, |d| *d.extra_mut() = m)
-}
-
 fn merge<T: Doc + RawLike>(dir: &Path, patch: Map<String, Value>) -> Result<(), SettingsError> {
-    update_in::<T, _>(dir, |d| {
+    let r = merge_in::<T>(dir, |d| {
         let e = d.extra_mut();
         for (k, v) in patch {
             if k == "version" {
@@ -119,6 +104,11 @@ fn merge<T: Doc + RawLike>(dir: &Path, patch: Map<String, Value>) -> Result<(), 
                 e.insert(k, v);
             }
         }
+    })?;
+    // 舊檔解析不了：不搬、不寫，白話回報；原因（固定句，不含內容）寫進 log
+    r.map_err(|why| {
+        elog!("[ASN] 設定檔 {}.json 無法合併（{why}），這次沒有存，原檔不動", T::NAME);
+        SettingsError("設定檔內容無法合併，這次沒有存".into())
     })
 }
 
@@ -131,22 +121,23 @@ macro_rules! raw_like {
 }
 raw_like!(MeDoc, OnboardDoc, ChatsDoc);
 
-/// 存整份文字（`store_save`）。超過 [`MAX_BYTES`] 或不是 JSON 物件就整筆拒絕、原檔不動。
-/// 錯誤是固定的白話句，不含系統原文
+/// 存整份文字（`store_save`）：只檢查 [`MAX_BYTES`]，超過整筆拒絕、原檔不動；其餘**原文照寫**（不 parse、不重新序列化）。
+/// 畫面的 `JSON.stringify` 遇到孤立的 surrogate 會輸出 `"\ud83d"`（孤立的半個表情符號），serde_json 讀不了這種字串，
+/// 所以這條路一律不經 serde（以前的 `store_save` 也從不解析）。錯誤是固定的白話句，不含系統原文
 pub fn save_text(dir: &Path, name: RawName, text: &str) -> Result<(), String> {
     if text.len() > MAX_BYTES {
         return Err("存檔太大".into());
     }
-    let m = object_of(text).map_err(bare)?;
     match name {
-        RawName::Me => replace_all::<MeDoc>(dir, m),
-        RawName::Onboard => replace_all::<OnboardDoc>(dir, m),
-        RawName::Chats => replace_all::<ChatsDoc>(dir, m),
+        RawName::Me => save_raw_in::<MeDoc>(dir, text),
+        RawName::Onboard => save_raw_in::<OnboardDoc>(dir, text),
+        RawName::Chats => save_raw_in::<ChatsDoc>(dir, text),
     }
     .map_err(bare)
 }
 
-/// 欄位級合併（`settings_patch`）：對頂層欄位逐一覆蓋，`null` 代表刪除該欄，沒提到的欄位（含不認得的）原樣保留。
+/// 欄位級合併（`settings_patch`）：舊檔一定要 parse 才能合併；舊檔解析不了（壞檔或含孤立 surrogate）就回「設定檔內容無法合併，這次沒有存」，原檔不動、也不當壞檔搬走。
+/// 對頂層欄位逐一覆蓋，`null` 代表刪除該欄，沒提到的欄位（含不認得的）原樣保留。
 /// 持鎖下重讀原檔、改、寫，兩條執行緒同時改不同欄位不會互相蓋掉
 pub fn patch_json(dir: &Path, name: RawName, patch: Map<String, Value>) -> Result<(), String> {
     if serde_json::to_string(&patch).map(|s| s.len()).unwrap_or(usize::MAX) > MAX_BYTES {
