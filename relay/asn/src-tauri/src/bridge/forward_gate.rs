@@ -37,6 +37,9 @@ pub fn strip_frame(text: &str) -> &str {
     if let Some((h, rest)) = t.split_once('\n') {
         if h.trim() == FRAME_OPEN {
             t = rest.trim_start();
+            if t == FRAME_CLOSE {
+                return ""; // 只有外框、中間沒有內容
+            }
         }
     }
     if let Some((rest, l)) = t.rsplit_once('\n') {
@@ -51,6 +54,9 @@ pub fn strip_frame(text: &str) -> &str {
 pub fn no_id_reason(raw: &str) -> String {
     let stripped = strip_frame(raw);
     let head = first_line(stripped);
+    if stripped.is_empty() {
+        return "message 是空的，或只有 <<<MAIL／MAIL>>> 外框而中間沒有內容：message 要放外框中間的信件內容，第一行是 [RELAY 來信]…".into();
+    }
     if head.starts_with(FRAME_OPEN) {
         return "第一行不可以是 <<<MAIL，請去掉外框：message 只放 <<<MAIL 與 MAIL>>> 這兩行中間的內容，第一行是 [RELAY 來信]…".into();
     }
@@ -667,6 +673,44 @@ mod tests {
         }
         // 沒帶外框：什麼都不印、不改
         assert_eq!(run_hook(d.path(), &call("T-甲", &body).to_string()).0, None);
+    }
+
+    #[test]
+    fn 外框_同一輪先送帶外框的再送不帶外框的_兩種模式兩封都放行_內容都正確() {
+        const C: &str = "00000000-0000-0000-0000-00000000000c";
+        const D: &str = "00000000-0000-0000-0000-00000000000d";
+        let mk = |id: &str| format!("[RELAY 來信] trust=member from=W/甲 to=T-甲 id={id} engine=claude reply=yes");
+        let orig = |id: &str| format!("{}\n假資料內文 {id}\n第二行", mk(id));
+        let d = tempfile::tempdir().unwrap();
+        // A、B 走原文替換（EXACT 開）；C、D 不換原文（EXACT 關）
+        let items: Vec<(String, String, Option<String>)> = [A, B, C, D].iter().map(|i| (i.to_string(), "T-甲".to_string(), Some(head_hash(&mk(i))))).collect();
+        let bodies: HashMap<String, String> = [A, B].iter().map(|i| (i.to_string(), body_hash(&orig(i)))).collect();
+        write_inflight_with(d.path(), &items, &bodies).unwrap();
+        for i in [A, B] {
+            write_body(d.path(), i, &orig(i)).unwrap();
+        }
+        let run = |m: String| run_hook(d.path(), &call("T-甲", &m).to_string()).0.map(|o| serde_json::from_str::<Value>(&o).unwrap());
+        let msg_of = |v: &Value| v["hookSpecificOutput"]["updatedInput"]["message"].as_str().unwrap().to_string();
+        // 換原文：先帶外框、再不帶外框，放出去的都是橋存的原文
+        let v = run(format!("<<<MAIL\n{}\nMAIL>>>", orig(A))).expect("A 要放行並換原文");
+        assert_eq!(msg_of(&v), orig(A));
+        let v = run(orig(B)).expect("B 要放行並換原文");
+        assert_eq!(msg_of(&v), orig(B));
+        // 不換原文：帶外框的去外框放出，不帶外框的什麼都不印（照原樣放行）
+        let v = run(format!("<<<MAIL\n{}\nMAIL>>>", orig(C))).expect("C 要去外框");
+        assert_eq!(msg_of(&v), orig(C));
+        assert_eq!(run(orig(D)), None, "D 不帶外框：放行且不改");
+    }
+
+    #[test]
+    fn 外框_message_只有外框_中間空白或沒有東西_要擋下_理由講清楚() {
+        let f = flight();
+        for m in ["<<<MAIL\nMAIL>>>", "<<<MAIL\n\nMAIL>>>", "<<<MAIL\n   \n  MAIL>>>\n", "  <<<MAIL\r\nMAIL>>>  ", "", "  \n "] {
+            let (v, log) = check(&call("T-甲", m), Some(&f));
+            let Verdict::Deny(r) = v else { panic!("{m:?} 應該擋：{v:?}") };
+            assert!(r.contains("message 是空的，或只有 <<<MAIL／MAIL>>> 外框而中間沒有內容"), "{m:?} → {r}");
+            assert!(!r.contains("原樣") && log.contains("no trailing id"), "{r} / {log}");
+        }
     }
 
     #[test]
