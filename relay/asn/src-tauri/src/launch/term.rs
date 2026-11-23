@@ -3423,6 +3423,20 @@ pub struct PartnerNotice {
     pub code: &'static str,
 }
 
+/// 判成這個代號＝認不得種類的選單（#1799）：只寫進 ui.log，不跳提醒、不推播
+pub const ATTENTION_CODE: &str = "attention";
+
+/// 這一次判斷要不要給畫面提醒（#1799）。認不得種類的選單一律不提醒：
+/// 擁有者到那個視窗看常常根本沒有選項，提醒沒有人能據以行動。其他代號照舊
+pub fn notice_for(name: &str, code: &'static str) -> Option<PartnerNotice> {
+    (code != ATTENTION_CODE).then(|| PartnerNotice { name: name.to_string(), code })
+}
+
+/// 認不得種類的選單寫進 ui.log 的一行（只有視窗名，沒有畫面內容）
+pub fn attention_log_line(name: &str) -> String {
+    format!("[ASN] 夥伴「{name}」的畫面像停在一個認不得的選單，只記錄、不提醒")
+}
+
 /// 背景工作最新的判斷結果（只給本機畫面的命令讀）
 #[cfg(feature = "gui")]
 static PARTNER_NOTICES: Mutex<Vec<PartnerNotice>> = Mutex::new(Vec::new());
@@ -3506,6 +3520,8 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
         };
         // 編號 → 目前的提醒
         let mut notices: std::collections::BTreeMap<String, PartnerNotice> = Default::default();
+        // 已經寫過「認不得的選單」的視窗：同一段停留只寫一次（#1799）
+        let mut attention_logged: std::collections::BTreeSet<String> = Default::default();
         loop {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
             // 設定頁關掉：不讀畫面，已顯示的提醒也收掉；名單上的固定字過期（2 分鐘）就不再顯示。打開就接著讀
@@ -3545,11 +3561,21 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
                     write_screen_code(&screen_dir, sid, code, now);
                 }
                 match (code, all.iter().find(|(w, _)| *w == id)) {
-                    (Some(code), Some((_, name))) => {
-                        notices.insert(id.clone(), PartnerNotice { name: name.clone(), code });
-                    }
+                    (Some(code), Some((_, name))) => match notice_for(name, code) {
+                        Some(n) => {
+                            notices.insert(id.clone(), n);
+                            attention_logged.remove(&id);
+                        }
+                        None => {
+                            notices.remove(&id);
+                            if attention_logged.insert(id.clone()) {
+                                note(now, &attention_log_line(name));
+                            }
+                        }
+                    },
                     _ => {
                         notices.remove(&id);
+                        attention_logged.remove(&id);
                     }
                 }
                 if let Some(line) = schedule.done(&id, pace, result.is_ok(), now) {
@@ -8444,6 +8470,37 @@ mod tests {
             }
             let v = serde_json::to_value(PartnerNotice { name: "甲".into(), code: "login" }).unwrap();
             assert_eq!(v, serde_json::json!({"name": "甲", "code": "login"}), "只有這兩欄");
+        }
+
+        #[test]
+        fn issue_1799_認不得的選單只寫記錄_不給畫面提醒() {
+            // 認不得種類的選單：沒有提醒（電腦的提醒框、終端畫面的提示都從這份清單來）；其他代號照舊
+            assert_eq!(notice_for("甲", "attention"), None);
+            for code in ["permission", "trust", "bypass_warning", "login", "usage_limit", "usage_menu", "question", "question_view", "held_message"] {
+                assert_eq!(notice_for("甲", code), Some(PartnerNotice { name: "甲".into(), code }), "{code} 的提醒不受影響");
+            }
+            assert!(attention_log_line("甲").contains("甲") && attention_log_line("甲").contains("只記錄、不提醒"));
+            // 背景工作一定經過 notice_for，不能直接把判斷結果塞進提醒清單；而且要寫 ui.log
+            let src = include_str!("term.rs").replace("\r\n", "\n");
+            let body = src.split("pub fn start_screen_watch(").nth(1).unwrap().split("pub fn live(").next().unwrap();
+            assert!(body.contains("notice_for(name, code)"), "提醒清單要經過 notice_for");
+            assert!(!body.contains("PartnerNotice { name: name.clone(), code }"), "不能繞過 notice_for 直接放進提醒清單");
+            assert!(body.contains("attention_log_line(name)"), "認不得的選單要寫進 ui.log");
+        }
+
+        #[test]
+        fn issue_1799_這張不影響權限確認轉手機與本機確認畫面() {
+            // 手機的權限框走 partner_phone_offer／phone_offer_with，本機的確認框走 partner_permission_*；
+            // 兩條路都不讀 PARTNER_NOTICES 提醒清單，也不碰 notice_for
+            let src = include_str!("term.rs").replace("\r\n", "\n");
+            for f in ["pub fn partner_phone_offer(", "pub fn partner_phone_answer(", "pub fn partner_permission_prompt(", "pub fn partner_permission_answer(", "pub fn partner_permission_choose("] {
+                let body = src.split(f).nth(1).unwrap().split("
+}
+").next().unwrap();
+                assert!(!body.contains("PARTNER_NOTICES") && !body.contains("notice_for"), "{f}");
+            }
+            // 權限詢問與提問的代號沒有被擋
+            assert!(notice_for("甲", "permission").is_some() && notice_for("甲", "question").is_some());
         }
 
         #[test]
