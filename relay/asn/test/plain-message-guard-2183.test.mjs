@@ -95,3 +95,11 @@ test('plainMessage：字串、Error、帶 message 的物件都取得出白話；
   }
   assert.notEqual(plainMessage(undefined), '')
 })
+
+test('plainMessage 第二個參數：取不到文字才用呼叫端給的後備句；有文字就不用', () => {
+  assert.equal(plainMessage(undefined, '語音合成失敗'), '語音合成失敗')
+  assert.equal(plainMessage({ message: '' }, '語音合成失敗'), '語音合成失敗')
+  assert.equal(plainMessage('這支手機沒有中文語音', '語音合成失敗'), '這支手機沒有中文語音')
+  assert.equal(plainMessage(undefined, ''), KNOWN_PEER_FAILED_TEXT)
+  assert.equal(plainMessage(undefined, undefined), KNOWN_PEER_FAILED_TEXT)
+})

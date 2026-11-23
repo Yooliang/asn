@@ -164,7 +164,7 @@ export function createMobileCall({
         if (!speakingNow()) speakDone()
         return
       case 'tts-error':
-        state.note = `念不出來：${plainMessage(e)}`
+        state.note = `念不出來：${plainMessage(e, '語音合成失敗')}`
         outstanding.clear(); try { native.stopSpeak() } catch { /* 已停 */ }
         speakDone(); return
       case 'background': if (state.active) { state.note = BACKGROUND_TEXT; void end({ keepNote: true }) } return

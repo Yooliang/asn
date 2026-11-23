@@ -9,10 +9,10 @@ export const KNOWN_PEER_FAILED_TEXT = '操作沒有成功，請稍後再試。'
  * Tauri 的 Err(String) 若沒經過 lib/tauri.mjs 會以「字串」拋出（e.message 是 undefined），所以字串、Error、
  * 帶 message 的物件都取得出文字；取不到（undefined、null、空字串、沒有 message 的物件）就回通用白話，絕不回空字串。
  */
-export const plainMessage = e => {
+export const plainMessage = (e, fallback) => {
   const raw = typeof e === 'string' ? e : e?.message
   const s = typeof raw === 'string' ? raw.trim() : ''
-  return s || KNOWN_PEER_FAILED_TEXT
+  return s || (typeof fallback === 'string' && fallback.trim()) || KNOWN_PEER_FAILED_TEXT
 }
 
 /** 設備細部頁安裝 Claude Code 失敗：字串或 Error 都原文顯示（以前 agent-install.mjs 自己的 errText） */
