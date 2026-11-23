@@ -1,15 +1,11 @@
 {
-  "version": "0.2.74",
-  "notes": "- 改善：帳號登入失效時，那台電腦那一列會放黃色「重新登入」，上方提示寫明是哪台、哪一家。（#2111、#2144）\n- 改善：手機帳號與讀額度設定出錯時改成看得懂的話，原始錯誤寫進記錄。（#2106、#2145）",
-  "pub_date": "2026-11-23T00:43:20.030Z",
+  "version": "0.2.75",
+  "notes": "- 改善：帳號頁的代碼按鈕收進「⋯」，設備順序固定，離線一律顯示「離線中」，拿掉「我的帳號」。（#2111、#2148）",
+  "pub_date": "2026-11-23T01:40:15.807Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhUUVYzNk9rdUNOM1JPM0NRVEllSDl6ZGlYTXRNVWVQL0NieURuSFppMC9aSE9pSnRWMnpKd2pwQ2JmZ0NEQm80Q0ZkUmhNVU9DZ2xQSUJNQTJ1YVFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mzk0NTk5CWZpbGU6QVNOXzAuMi43NF94NjQtc2V0dXAuZXhlCnJKOXZUOGVZYVdmOVJaam12WFRFR213ZDdTbFMvTFF5UDhaaWdxcDhvVllFQkhaKzJvTktjMEw2cDZqZEpHQ1loR1J6Z05CY0tJVlVwbVprbEZPMkNRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.74_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBYNmFhQU5NYldTU0xnU3NVMVo3NVovRUY2eWxuQXByeTl0UVhFWktYSFZnRmNNODVGVkNOa21DUGRQQ1N5bkJOeXRiWXZGL2M4MVdGUHY4bVc5VHdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mzk1MjQxCWZpbGU6QVNOXzAuMi43NF9hbWQ2NC5BcHBJbWFnZQpVczRHWHNDekI3a0RLb3BKSU1xNm4rRlovNW1aVGQwRUJBSjNuakcrbzBnbTdsdG01SEYwYlhYMlhvWFRncXFCOVBKSFh3aWpwOXJjMllma2JMQ0NCdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.74_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhGT0hEWkh2bkJOYVNKRy9VVXBaUUpKZWdoMTNSUDQrajV6WVM5Z1VZeVBFSFBEdkZXaUQwdWtDTExGamtMM2hBWDl3WTZyZVFLWHJ2a2lXc0IrVHdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1Mzk4MDE1CWZpbGU6QVNOXzAuMi43NV94NjQtc2V0dXAuZXhlCjJEbnlDb2FrQzE1ZWIzdjRFaTZYVjZyc3o0QWFUNnlxL1dxa3pEN2V5ejlkUmQ1M1g2YXVRdTZJSG02UXRSZlU2NW5nVFJZU1NqeDMrR2UzZlJQc0R3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.75_x64-setup.exe"
     }
   }
 }
