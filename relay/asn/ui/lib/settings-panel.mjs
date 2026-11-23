@@ -265,7 +265,15 @@ export const SettingsPanel = {
       </template>
       <template v-if="cat === 'accounts'">
         <div class="dv-set dv-acctpage">
-          <section class="dv-my" v-if="st.myAccounts || st.quotaReaders" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.accountsTitle">
+          <!-- 這台電腦自己的 Claude 登入狀態（#1860：原本在設備詳情的帳號區，搬到帳號頁；失敗或缺漏不能無聲） -->
+          <div class="dv-acctnotes" v-if="st.accounts">
+            <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，ASN 會在一分鐘內自動加入，加入後才能切換到別的帳號。</small>
+            <small v-else-if="st.accounts.currentErr" class="acct-warn" role="status">{{ st.accounts.currentErr }}。請確認 Claude 是否還登入著，或稍後再看。</small>
+            <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
+            <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
+            <small v-if="st.accounts.msg" role="status">{{ st.accounts.msg }}</small>
+          </div>
+          <section class="dv-my"v-if="st.myAccounts || st.quotaReaders" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.accountsTitle">
               <small v-if="st.myAccounts && st.myAccounts.empty">{{ st.myAccounts.empty }}</small>
               <ul class="dv-lostnotes" role="status" v-if="loginNotices.length"><li v-for="n in loginNotices" :key="n.key">{{ n.text }}</li></ul>
               <div class="dv-my-v" v-for="v in vendorSections(st.myAccounts, st.quotaReaders)" :key="v.key" :data-vendor="v.key">

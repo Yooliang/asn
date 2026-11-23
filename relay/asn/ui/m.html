@@ -296,6 +296,13 @@
                     </li>
                   </ul>
                 </div>
+                <!-- 還沒登入 Codex 的電腦：從這裡替它登入（#1860：原本在設備詳情裡的常駐按鈕搬到帳號頁）。按下去進那台的詳情，確認與進度在那裡原位顯示 -->
+                <ul class="m-dv-logins" v-if="acctLoginTargets.length">
+                  <li class="m-dv-loginrow" v-for="t in acctLoginTargets" :key="t.node + t.vendor" :data-login="t.node + '|' + t.vendor">
+                    <span class="m-dv-devname"><span class="m-dv-devn">{{ t.label }}</span><small class="m-fine">{{ LOGIN_TEXT.pending(LOGIN_VENDORS[t.vendor]) }}</small></span>
+                    <button type="button" class="m-btn" @click="acctLoginPress(t)">{{ LOGIN_TEXT.button(LOGIN_VENDORS[t.vendor]) }}</button>
+                  </li>
+                </ul>
               </section>
               <template v-if="acctSw.tab === 'devices'">
               <p class="m-note" v-if="!acctDevs.length">{{ DEVICE_TEXT.empty }}</p>
@@ -377,8 +384,8 @@
                   <p class="m-err" v-if="vp.note && vp.noteOwn" role="alert">{{ vp.note }}</p>
                 </div>
                 <!-- 新電腦引導卡與它開出來的確認／進度（只在別台、沒有夥伴視窗的電腦詳情出現）。帳號清單與帳號操作不在這裡，只在設定的「帳號」頁（#1860） -->
-                <template v-if="guideNode">
-                <p class="m-err" v-if="acctRep && acctRep.msg" role="alert">{{ acctRep.msg }}</p>
+                <template v-if="guideNode || (setupSt.node === acctCur.key && setupSt.stage !== 'idle') || (loginSt.node === acctCur.key && loginSt.stage !== 'idle')">
+                <p class="m-err" v-if="guideNode && acctRep && acctRep.msg" role="alert">{{ acctRep.msg }}</p>
                 <new-guide-card v-if="guideOn" btn-class="m-btn" :rows="guideRowList" :hint="guideHintView" @act="guideAct" @site="guideSite" @hide="setGuideHidden(true)"></new-guide-card>
                 <div class="ng-reshow-wrap" v-else-if="guideReshow"><button type="button" class="ng-reshow" @click="setGuideHidden(false)">{{ GUIDE_TEXT.show }}</button></div>
                 <div class="m-dv-body" :class="{ off: !acctCur.online }">

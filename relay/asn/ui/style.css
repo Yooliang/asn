@@ -866,6 +866,8 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .launch-set .set-adv>summary{font-size:13px;font-weight:700;color:var(--title-fg);margin:8px 0}
 /* 設定「設備與帳號」：設備頁籤 → 廠商卡片 → 帳號列（只用上面的 CSS 變數，深色時跟著變） */
 .dv-set{display:flex;flex-direction:column;gap:12px;min-width:0}
+.dv-acctnotes{display:flex;flex-direction:column;gap:var(--sp-1)}
+.dv-acctnotes:empty{display:none}
 .dv-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
 .dv-head-tx{display:flex;flex-direction:column;gap:4px;min-width:0}
 .dv-title{margin:0;display:flex;align-items:center;gap:6px;font-size:15px;color:var(--title-fg)}

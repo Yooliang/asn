@@ -8,6 +8,7 @@ import { renderToString as ssrRender } from 'vue/server-renderer'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { TEXT as KNOWN, createForgetConfirm, isBlockedPeer, normalizeView } from '../ui/lib/known-peers.mjs'
 import { TEXT as M_KNOWN, normalizeList } from '../ui/lib/mobile-known-peers.mjs'
+import { LOGIN_TEXT as M_LOGIN } from '../ui/lib/mobile-device-login.mjs'
 import { IDENTITY_TEXT, deviceIdentity, unnamedClue } from '../ui/lib/device-identity.mjs'
 import { withIdentity } from './helpers/with-identity.mjs'
 
@@ -152,4 +153,28 @@ test('手機：被擋下才出提示與「重新認這台」（原位確認，�
 test('各處被擋下的提示句都指到「重新認這台」，不再叫人按「忘記這台」', () => {
   for (const t of [M_KNOWN.blocked, M_KNOWN.noneMatch, M_KNOWN.scanMismatch]) assert.ok(t.includes('「重新認這台」') && !t.includes('忘記這台'), t)
   for (const f of ['src-tauri/src/device_id.rs', 'src-tauri/src/view_remote.rs']) assert.ok(!read(f).includes('「忘記這台」'), f)
+})
+
+// ---------- 5. 原本在帳號區的失敗與缺漏提示，改放在設定的「帳號」頁 ----------
+test('帳號頁：這台的 Claude 登入狀態（還沒加入帳號庫、讀不到、沒有登入、自動加入、操作結果）照實顯示，不因拿掉帳號區而無聲', async () => {
+  const acct = o => ({ list: [], current: null, msg: '', autoNote: '', busy: false, confirmDel: '', allowSwitch: true, ...o })
+  const html = async a => (await render({ catKey: 'accounts' }, st({ accounts: acct(a) })))
+  assert.ok((await html({ current: { email: 'z@b.c', saved: false } })).includes('目前登入的 z@b.c 還沒加入帳號庫'))
+  assert.ok((await html({ currentErr: '讀不到目前登入的帳號' })).includes('讀不到目前登入的帳號。請確認 Claude 是否還登入著，或稍後再看。'))
+  assert.ok((await html({ current: null })).includes('這台電腦目前沒有 Claude 登入。'))
+  const ok = await html({ current: { email: 'a@b.c', saved: true }, autoNote: '已自動加入 q@b.c', msg: '已切換' })
+  assert.ok(ok.includes('已自動加入 q@b.c') && ok.includes('已切換') && !ok.includes('還沒加入帳號庫') && !ok.includes('沒有 Claude 登入'))
+  assert.ok(!(await render({ catKey: 'devices', dev: 'H' })).includes('還沒加入帳號庫'), '設備詳情不放這些')
+})
+
+test('手機帳號頁：還沒登入 Codex 的別台電腦有一列「從手機替這台登入 Codex」，按下去開確認（確認與進度在那台的詳情）；詳情裡沒有常駐按鈕', () => {
+  const html = read('ui/m.html'), js = read('ui/m.js')
+  assert.match(html, /<li class="m-dv-loginrow" v-for="t in acctLoginTargets"/)
+  assert.match(html, /@click="acctLoginPress\(t\)">\{\{ LOGIN_TEXT\.button\(LOGIN_VENDORS\[t\.vendor\]\) \}\}/)
+  assert.match(js, /const acctLoginPress = t => \{ loginAsk\(t\.node, t\.vendor\); openAcctInfo\(t\.node\) \}/)
+  assert.match(js, /v\.login\?\.kind === 'remote'/, '只列那台回報「可以從手機替它登入」的')
+  assert.ok(M_LOGIN.pending('Codex') === '還沒登入 Codex' && M_LOGIN.button('Codex') === '從手機替這台登入 Codex')
+  const detail = html.slice(html.indexOf('class="m-dv-info"'))
+  assert.ok(!/@click="loginAsk\(/.test(detail), '詳情裡沒有常駐的登入鈕')
+  assert.ok(html.includes("loginSt.node === acctCur.key && loginSt.stage !== 'idle'"), '確認與進度在詳情裡原位顯示')
 })
