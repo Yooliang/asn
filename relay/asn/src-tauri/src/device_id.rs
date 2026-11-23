@@ -227,6 +227,15 @@ pub struct KnownPeer {
 pub const OWNER_NAME_MAX: usize = 40;
 
 /// 整理本人輸入的名字：控制字元、改變文字方向的字元、不可見的填充／組合／變體選擇／標籤字元換成空白，去頭尾空白，最多 40 個字（和後台設備名上限一致）。空字串＝沒有名字（畫面顯示「未命名的電腦」）
+/// 名字空白時的辨認線索：「電腦（X7K2）」「手機（Q9Z8）」（#1882）。和介面 `unnamedClue`（ui/lib/device-identity.mjs）同一套寫法：
+/// 節點代號只留英數字、取末 4 碼、轉大寫；沒有代號就只寫「電腦」「手機」。原生視窗（授權框、紅條）也走這一個，不另外發明名字
+pub fn unnamed_clue(node: &str, phone: bool) -> String {
+    let kind = if phone { "手機" } else { "電腦" };
+    let alnum: Vec<char> = node.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    let tail: String = alnum[alnum.len().saturating_sub(4)..].iter().collect::<String>().to_uppercase();
+    if tail.is_empty() { kind.to_string() } else { format!("{kind}（{tail}）") }
+}
+
 /// 確認框用的名字：後台的設備名（#1388：每台只有一個名字，本人可以從任一台改，最近一次連線時記下來的）。
 /// 名字是後台給的、不可信，所以框上一律緊接指紋；看起來像指紋或含「指紋」的名字當成沒有名字（見 display_name）
 pub fn owner_given_name(peer: &KnownPeer) -> &str {

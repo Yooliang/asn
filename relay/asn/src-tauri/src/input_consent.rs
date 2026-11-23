@@ -5,7 +5,7 @@
 //! 握手的驗章、公鑰比對（TOFU）、金鑰變了的處理都照舊（見 view_stream.rs 的 accept_request_with）。
 //!
 //! - 這裡只剩兩樣：紅條與連線紀錄用的「誰」（[`who_of`]、[`bar_label`]），和設定頁勾「允許這支手機替這台登入」之前的確認框（[`ask_login_ok`]）。
-//! - **框與紅條上的名字用後台現在給的設備名，並接上本機算出的指紋：** 名字不可信，像指紋的當未命名（[`UNNAMED`]），讓本人用指紋核對。
+//! - **框與紅條上的名字用後台現在給的設備名，並接上本機算出的指紋：** 名字不可信，像指紋的當沒有名字（寫辨認線索，見 [`crate::device_id::unnamed_clue`]），讓本人用指紋核對。
 use crate::device_id::{fingerprint, fp_grouped, KnownPeers, Tofu};
 use tauri::AppHandle;
 
@@ -25,6 +25,8 @@ pub struct Who {
     pub fp_full: String,
     /// 本機還沒記住這台（第一次連線）：名字是後台給的
     pub first: bool,
+    /// 節點代號：名字空白時用來寫辨認線索「電腦（代號末 4 碼）」（#1882）
+    pub node: String,
 }
 
 /// 去掉控制字元與改變文字方向的字元，截長度
@@ -45,18 +47,16 @@ pub fn who_of(known: &KnownPeers, node: &str, backend_name: &str, sign_pub: &str
         fp8: fingerprint(sign_pub).chars().take(8).collect(),
         fp_full: fp_grouped(sign_pub),
         first: local.is_none(),
+        node: node.to_string(),
     }
 }
 
-/// 沒有名字的電腦一律叫這個，後面接完整指紋讓本人核對（不從後台補名字）
-pub const UNNAMED: &str = "未命名的電腦";
-
-/// 框與紅條上的「名字、指紋」：有名字用名字＋前 8 碼；沒有名字用「未命名的電腦」＋完整分組指紋
-fn head_of(who: &Who) -> (&str, &str, bool) {
+/// 框與紅條上的「名字、指紋」：有名字用名字＋前 8 碼；沒有名字寫辨認線索「電腦（代號末 4 碼）」（和介面同一套，#1882）＋完整分組指紋
+fn head_of(who: &Who) -> (String, &str, bool) {
     if who.name.is_empty() {
-        (UNNAMED, who.fp_full.as_str(), false)
+        (crate::device_id::unnamed_clue(&who.node, false), who.fp_full.as_str(), false)
     } else {
-        (who.name.as_str(), who.fp8.as_str(), true)
+        (who.name.clone(), who.fp8.as_str(), true)
     }
 }
 
@@ -68,9 +68,10 @@ pub fn bar_label(who: &Who) -> String {
 }
 
 /// #933：本人在設定頁勾「允許這支手機替這台登入」之前的確認框文字：名字＋指紋前 8 碼（和紅條同一種），寫清楚勾了能做什麼
-pub fn login_ok_text(name: &str, sign_pub: &str) -> String {
+pub fn login_ok_text(name: &str, node: &str, sign_pub: &str) -> String {
     let name = clean(name, NAME_MAX);
-    let name = if name.is_empty() { "這支手機".to_string() } else { format!("「{name}」") };
+    // 名字空白寫辨認線索「手機（代號末 4 碼）」，和介面同一套（#1882）
+    let name = if name.is_empty() { format!("「{}」", crate::device_id::unnamed_clue(node, true)) } else { format!("「{name}」") };
     let fp8: String = fingerprint(sign_pub).chars().take(8).collect();
     format!("{name}（指紋 {fp8}）\n\n勾了以後，這支手機可以讓這台電腦登入 Codex 等帳號：這台會開始登入，登入網址和代碼只會加密送到那支手機。\n\n請先確認指紋和那支手機設定頁顯示的一樣，而且是你自己的手機。要允許嗎？")
 }
@@ -91,7 +92,7 @@ fn allowed(r: &tauri_plugin_dialog::MessageDialogResult) -> bool {
 
 /// 勾「允許替這台登入」前問本人。允許回 true；不要、取消、關掉、逾時都回 false。
 /// 同一時間只開一個框：已經有框開著就直接回 false
-pub async fn ask_login_ok(app: &AppHandle, name: &str, sign_pub: &str) -> bool {
+pub async fn ask_login_ok(app: &AppHandle, name: &str, node: &str, sign_pub: &str) -> bool {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
     static ASKING: AtomicBool = AtomicBool::new(false);
@@ -107,7 +108,7 @@ pub async fn ask_login_ok(app: &AppHandle, name: &str, sign_pub: &str) -> bool {
     let _done = Done;
     let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
     app.dialog()
-        .message(login_ok_text(name, sign_pub))
+        .message(login_ok_text(name, node, sign_pub))
         .title("ASN：允許手機替這台登入")
         .kind(MessageDialogKind::Warning)
         .buttons(buttons("先不要"))
@@ -153,11 +154,11 @@ mod tests {
 
     #[test]
     fn 允許替這台登入的確認框_有名字與指紋前八碼_寫清楚能做什麼() {
-        let t = login_ok_text("我的手機", PUB);
+        let t = login_ok_text("我的手機", "n-q9z8", PUB);
         let fp8: String = fingerprint(PUB).chars().take(8).collect();
         assert!(t.starts_with(&format!("「我的手機」（指紋 {fp8}）")), "{t}");
         assert!(t.contains("可以讓這台電腦登入 Codex 等帳號"));
-        assert!(login_ok_text("", PUB).starts_with("這支手機（指紋 "));
+        assert!(login_ok_text("", "n-q9z8", PUB).starts_with("「手機（Q9Z8）」（指紋 "));
     }
 
     /// 接線守門：打開「允許替這台登入」一定先問本人（確認框），按允許才寫入；關掉不用問
@@ -183,7 +184,7 @@ mod tests {
         for fake in ["工作機 a93cc519", "假的指紋", "工作機（a93c c519）"] {
             let w = who_of(&known_d(), "d", fake, PUB, Tofu::Same);
             assert_eq!(w.name, "", "{fake}");
-            assert!(bar_label(&w).starts_with("未命名的電腦（指紋 "), "{fake}");
+            assert!(bar_label(&w).starts_with("電腦（D）（指紋 "), "{fake}");
         }
     }
 
@@ -219,13 +220,22 @@ mod tests {
     }
 
     #[test]
+    fn 辨認線索_和介面同一套寫法_末四碼大寫_沒代號只寫種類() {
+        use crate::device_id::unnamed_clue;
+        assert_eq!(unnamed_clue("xisu7k2m", false), "電腦（7K2M）");
+        assert_eq!(unnamed_clue("n-q9z8", true), "手機（Q9Z8）");
+        assert_eq!(unnamed_clue("ab", false), "電腦（AB）");
+        assert_eq!(unnamed_clue("--", false), "電腦");
+    }
+
+    #[test]
     fn 紅條上的誰_設備名和指紋_第一次連線標示() {
         let same = who_of(&known_d(), "d", "工作機", PUB, Tofu::Same);
         let t = bar_label(&same);
         assert_eq!(t, format!("工作機（指紋 {}）", same.fp8));
         let first = bar_label(&who_of(&KnownPeers::default(), "d", "工作機", PUB, Tofu::New));
         assert!(first.starts_with("工作機（指紋 ") && first.ends_with("，第一次連線）"), "{first}");
-        assert_eq!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), fp_full: "0123 4567 89ab cdef".into(), first: false }), "未命名的電腦（指紋 0123 4567 89ab cdef）");
+        assert_eq!(bar_label(&Who { name: String::new(), fp8: "01234567".into(), fp_full: "0123 4567 89ab cdef".into(), first: false, node: "n-x7k2".into() }), "電腦（X7K2）（指紋 0123 4567 89ab cdef）");
     }
 
     #[test]
