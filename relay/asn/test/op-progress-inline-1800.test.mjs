@@ -221,7 +221,7 @@ test('#1800 後台回報失敗、沒確認：原文完整寫進 log（不截斷�
 
 test('#1800 電腦功能列：狀態列不再有開新夥伴的接線；對話框（partner-op-dialog）的開新夥伴仍一路接到清單頁', () => {
   const bar = read('ui/lib/actionbar.mjs'), list = read('ui/list.html')
-  assert.match(bar, /emits: \['call', 'ops', 'term', 'back', 'member', 'launch-new'\]/)
+  assert.match(bar, /emits: \['call', 'ops', 'term', 'back', 'member', 'launch-new', 'op-note'\]/)
   assert.match(bar, /<partner-op-strip /)
   assert.doesNotMatch(bar, /<partner-op-strip [^>]*@launch-new/, '狀態列沒有按鈕，不再發 launch-new')
   assert.doesNotMatch(list, /<partner-op-strip [^>]*@launch-new/)
@@ -313,12 +313,12 @@ test('#1907 守門：狀態列（PartnerOpStrip 範本、list.html／actionbar �
   }
   assert.ok(strips >= 1, 'list.html 有 partner-op-strip')
   assert.match(read('ui/lib/actionbar.mjs'), /<partner-op-strip [^>]*><\/partner-op-strip>/)
+  // #2177：手機也不再有獨立橫幅，進度是 chat-pane 最下面那條狀態列；那一行沒有按鈕，按住暫停倒數接到 holdRun／releaseRun
   const m = read('ui/m.html')
-  const block = m.match(/<div class="m-ops-run"[^>]*>([\s\S]*?)<\/div>/)
-  assert.ok(block, '取得 .m-ops-run 區塊')
-  assert.doesNotMatch(block[0], /<button|<ol|m-ops-run-more|@click/, '手機狀態列沒有按鈕、步驟、補充')
-  assert.match(block[1], /^\s*<p class="m-ops-run-tx">\{\{ opsBanner\.text \}\}<\/p>\s*$/, '只剩一行字')
-  assert.match(block[0], /@touchstart\.passive="holdRun" @touchend="releaseRun" @touchcancel="releaseRun"/)
+  assert.doesNotMatch(m, /m-ops-run/)
+  assert.match(m, /:op-note="opsBanner" @op-hold="holdRun" @op-release="releaseRun"/)
+  const line = read('ui/lib/chatpane.mjs').match(/<template v-else-if="opLine">([^<]*)<\/template>/)
+  assert.ok(line); assert.equal(line[1], '{{ opLine.text }}', '只剩一行字，沒有按鈕')
 })
 
 test('#1907 換班接手成功的那一行字：沒有路徑（斜線、反斜線）也沒有模型名稱；這些都在 log', () => {
@@ -423,18 +423,16 @@ test('#1907 失敗但再按也沒用（找不到對話紀錄）：不接「再�
 // #1907 位置：夥伴操作的狀態列在畫面最下面（電腦＝對話窗最下面的 .op-slot；手機＝輸入區下面、導覽列上面）
 test('#1907 位置守門：電腦版 teleport 到 chatpane 最下面的 .op-slot；手機橫幅在 chat-pane 之後；不再蓋在功能列下面', () => {
   const chat = read('ui/lib/chatpane.mjs'), bar = read('ui/lib/actionbar.mjs'), html = read('ui/m.html'), css = read('ui/style.css') + read('ui/skin-common.css')
-  assert.ok(chat.indexOf('<div class="typing"') < chat.indexOf('<div class="op-slot" ref="opSlotEl">'), '.op-slot 在最下面那條狀態列（.typing）之後')
-  assert.match(chat, /<action-bar [^>]*:op-slot="opSlotEl"/)
-  assert.match(bar, /<teleport :to="opSlot" :disabled="!opSlot"><partner-op-strip /)
-  // 每個 action-bar 都要有 :op-slot，而且指到實際存在的 .op-slot（含終端分頁）：沒有的話狀態列會留在功能列裡、擠開按鈕或蓋在內容上
+  assert.doesNotMatch(chat, /class="op-slot"/, '對話分頁沒有另外一格 .op-slot')
+  // #2177：對話分頁的進度改由最下面那條狀態列顯示（:op-line），不再有 .op-slot；終端分頁沒有「上次接收訊息」那一行，仍用 .op-slot
+  assert.match(chat, /<action-bar [^>]*:op-line="true" @op-note="onOpNote"/)
+  assert.match(bar, /<teleport :to="opSlot" :disabled="!opSlot" v-if="!opLine"><partner-op-strip /)
   const list = read('ui/list.html')
   const bars = [...(list + read('ui/chat.html') + chat).matchAll(/<action-bar [^>]*>/g)].map(m => m[0])
   assert.ok(bars.length >= 2, '找得到 action-bar')
-  for (const x of bars) assert.match(x, /:op-slot=/, '每個功能列都要有 :op-slot：' + x.slice(0, 60))
+  for (const x of bars) assert.match(x, /:op-slot=|:op-line=/, '每個功能列都要有 :op-slot 或 :op-line：' + x.slice(0, 60))
   assert.match(list, /:op-slot="termOpSlotEl"/); assert.match(list, /<div class="op-slot" ref="termOpSlotEl">/, '終端分頁最下面有 .op-slot')
   assert.match(read('ui/list.js'), /termOpSlotEl,\s*\n?\s*version:/, 'list.js 有把 termOpSlotEl 交給範本')
   assert.doesNotMatch(css, /\.actionbar \.op-strip\s*[{,]/, '不再用 absolute 蓋在內容上')
-  const ci = html.indexOf('<chat-pane v-if="chatFriend"'), bi = html.indexOf('class="m-ops-run"')
-  assert.ok(ci > 0 && bi > ci, '手機橫幅在 chat-pane 之後')
-  assert.ok(bi < html.indexOf('</section>', bi), '仍在對話頁的 section 裡（導覽列之上）')
+  assert.ok(html.indexOf('<chat-pane v-if="chatFriend"') > 0)
 })

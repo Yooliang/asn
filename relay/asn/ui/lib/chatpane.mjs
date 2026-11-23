@@ -91,8 +91,9 @@ export const ChatPane = {
     showBack: { type: Boolean, default: false },   // LINE 外觀標題列的「返回」（只在窄視窗單窗格時由名單視窗給 true）
     openMember: { type: Function, default: null },   // 群組：點成員（發言者的名字、頭像、「N 人離線」名單）跳到跟他的一對一（#1515）；回 false＝不在夥伴名單裡
     piModelsFor: { type: Function, default: null },   // 電腦版名單視窗：別台電腦的 pi 模型清單（給大按鈕「切換模型」用，和名單右鍵同一份）
+    opNote: { type: Object, default: null },   // 手機：目前這位夥伴的操作進度或結果（runBanner 的結果）；進行中取代最下面那條「上次接收訊息」（#2177）。電腦版由功能列自己回報，不用給
   },
-  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended', 'back', 'viewer'],
+  emits: ['send', 'nudge', 'toggle-dp', 'attach', 'call-state', 'group-decide', 'group-menu', 'remote-started', 'remote-ended', 'back', 'viewer', 'op-hold', 'op-release'],
   setup(props, { emit }) {
     const draft = ref(''), pickerOpen = ref(false), nudgeCooling = ref(false)
     // 現代外觀：輸入框的「＋」展開上方工具列（復古 Aero 下沒有這個選單）；點了裡面的工具就收起來（表情符號例外：它要接著選）
@@ -114,7 +115,17 @@ export const ChatPane = {
     onBeforeUnmount(() => document.removeEventListener('pointerdown', onOutsidePress, true))
     const replying = ref(null)   // 正在回覆的那一則：{ author, excerpt, seq, index, mention }
     const msgsEl = ref(null), composeEl = ref(null)
-    const opSlotEl = ref(null)   // 夥伴操作的進度與結果（#1907）：功能列的 PartnerOpStrip 用 teleport 放到視窗最下面這一格
+    // 夥伴操作的進度與結果（#2177）：直接顯示在最下面那條狀態列（取代「上次接收訊息」），不另外多一條。
+    // 電腦版由功能列回報（barNote，記著是哪位夥伴的，換對象就不認）；手機由 opNote 給
+    const barNote = ref(null)
+    const onOpNote = n => { barNote.value = n }
+    const opLine = computed(() => {
+      if (props.opNote) return props.opNote
+      const n = barNote.value
+      return n && n.friendId === props.friend?.id ? n.b : null
+    })
+    const opHold = () => { if (props.opNote) emit('op-hold'); else barNote.value?.hold?.() }
+    const opRelease = () => { if (props.opNote) emit('op-release'); else barNote.value?.release?.() }
     const isRoom = computed(() => props.friend?.room === true)
     const opsItems = computed(() => (props.groupMenu ? opsMenuItems(props.friend) : []))   // 大按鈕區「管理」選單裡的邀請（一對一）
     const groupItems = computed(() => (props.groupMenu ? groupMenuItems(props.friend) : []))   // 群組對話的「群組」按鈕選單
@@ -734,11 +745,11 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { opSlotEl, confirmNote, stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, stepViewer, swipeDown, swipeUp, swipeCancel, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { opLine, opHold, opRelease, onOpNote, confirmNote, stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, stepViewer, swipeDown, swipeUp, swipeCancel, photoTitle, foldLocked, zoom, zoomer, pvStyle }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :op-slot="opSlotEl" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')" @member="jumpMember"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :op-line="true" @op-note="onOpNote" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')" @member="jumpMember"></action-bar>
   <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <p class="term-reopen-note term-stuck-note" v-if="!noBar && !isRoom && stuckNoteText" role="note">{{ stuckNoteText }}</p>
   <p class="term-reopen-note term-confirm-note" v-if="confirmNote" role="note">{{ confirmNote }}</p>
@@ -940,8 +951,9 @@ export const ChatPane = {
     <button class="dp-fold-strip" type="button" v-if="collapsed" @click="$emit('toggle-dp')" :disabled="foldLocked" :aria-label="foldTip" :aria-expanded="false" :title="foldTip">{{ barArrow }}</button>
   </aside>
   </div>
-  <div class="typing" :class="remoteBar && ['typing-remote', 'typing-' + remoteBar.level]" role="status">
+  <div class="typing" :class="[remoteBar && ['typing-remote', 'typing-' + remoteBar.level], opLine && !(remoteBar && remoteBar.level === 'danger') && ['typing-op', 'is-' + opLine.phase]]" role="status" @mouseenter="opHold" @mouseleave="opRelease" @touchstart.passive="opHold" @touchend="opRelease" @touchcancel="opRelease">
     <template v-if="remoteBar && remoteBar.level === 'danger'">{{ remoteBar.text }}<button v-if="remoteBar.stoppable" class="aero-btn" type="button" @click="stopTyping">{{ INPUT_TEXT.stop }}</button><span class="typing-extra" v-if="voiceNote"> {{ voiceNote }}</span></template>
+    <template v-else-if="opLine">{{ opLine.text }}</template>
     <template v-else-if="voiceNote">{{ voiceNote }}</template>
     <template v-else-if="remoteBar">{{ remoteBar.text }}<button v-if="remoteBar.restartable" class="aero-btn" type="button" @click="restartView">{{ GRACE_AGAIN_LABEL }}</button></template>
     <template v-else-if="jumpNote">{{ jumpNote }}</template>
@@ -949,7 +961,6 @@ export const ChatPane = {
     <template v-else-if="showWaiting">✎ 已送出，等對方回信…</template>
     <template v-else-if="friend.lastAt">上次接收訊息是 {{ fmtDate(friend.lastAt) }}</template>
   </div>
-  <div class="op-slot" ref="opSlotEl"></div>
   <teleport to="body" :disabled="!callApi">
     <call-view v-if="callActive" :state="call.state" :name="plain(friend.nick)" :avatar="friendAv" :hue="friend.hue" :status="friend.status" :phase-text="callApi && callApi.phaseText" @hangup="hangUp" @mute="call.toggleMute()"></call-view>
   </teleport>

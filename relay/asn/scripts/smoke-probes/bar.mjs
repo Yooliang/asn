@@ -42,7 +42,7 @@ export const barProbeSource = ({ bar, badge, taskItems, header, wake }) => `(asy
           if (left.length) return { ok: false, why: '「管理」裡還有喚醒' };
           wb.click();
           let row = null;
-          for (let j = 0; j < 30 && !row; j++) { await sleep(100); row = document.querySelector('.op-strip-row') }
+          for (let j = 0; j < 30 && !row; j++) { await sleep(100); row = document.querySelector('.chatpane .typing.typing-op') }
           // #1800：喚醒沒有要使用者選的東西（auto），送出後只在提示列就地顯示進度，不開對話框
           if (document.querySelector('.dlg[role="dialog"]')) return { ok: false, why: '喚醒送出後不該有擋畫面的對話框' };
           if (!row) return { ok: false, why: '點了喚醒，提示列沒有出現進度' };

@@ -1152,6 +1152,10 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 /* 最下面的狀態列（.typing）放看／打字別台畫面的狀態：可以折行、顏色跟著等級；打字中最醒目 */
 .typing.typing-remote{height:auto;min-height:22px;white-space:normal;overflow:visible;font-size:13px;font-weight:600}
 .typing-remote .aero-btn{margin-left:8px}
+/* 夥伴操作的進度與結果（#2177）：取代「上次接收訊息」那一行，同一條、同一個位置；電腦與手機共用 */
+.typing.typing-op{height:auto;min-height:var(--sp-5);white-space:normal;overflow:visible;font-size:var(--fs-2);background:#e6f1fc;color:var(--title-fg);overflow-wrap:anywhere}
+.typing-op.is-failed{background:#fde8e6;color:#7a1710}
+.typing-op.is-done{background:#e4f5e6}
 .typing-info{background:#e8f0fe;color:#1a3d7c}
 .typing-ask,.typing-warn{background:#fff4ce;color:#5c4400}
 .typing-danger{background:#7a0d0d;color:#fff;font-weight:700;border-top:2px solid #ffcc00}
