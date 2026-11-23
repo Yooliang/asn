@@ -1,15 +1,11 @@
 {
-  "version": "0.2.80",
-  "notes": "- 修正：設備頁不再同時出現「在線」和「還沒收到回報」，帳號資料會自動更新。（#1860、#2158、#2160）",
-  "pub_date": "2026-11-23T06:33:45.719Z",
+  "version": "0.2.81",
+  "notes": "- 修正：信轉不進視窗時，收發室換一輪重送後會給足等待時間，不會一換輪就判定逾時。（#2146、#2166）\n- 新功能：信件一直轉不進視窗時，會通知擁有者需要人工處理；通知送不出去會自動重試。（#2146、#2166）",
+  "pub_date": "2026-11-23T12:27:16.698Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjE1WFZ2UXBYUzRaTitqUm5TLzFHYWZCcGZZcWc0OVU5QWxNYWczcmIrNy9oSEtiQW43MjRPUmxnRzljRHByQmJHcGptUlNBRk9URjI5TmM3ZTBZanc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDE1NjI1CWZpbGU6QVNOXzAuMi44MF94NjQtc2V0dXAuZXhlCjVRcnVubDdxblFvWnlIRTEvS2d6Z2lieFVtRlYydDBRY3RqdklXa3A2MEdrQW1jY1RGWlFSS1prMzVXbFFYa0xwNjEvUTVEN1k3WVVxNHJXSzR6UERRPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.80_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhnY3VEMVYzbzlqVGhzak9nWjAzUjA1S2QwUDNCVFpMVlg1UUZUdmI0Z3R5MExlZGNCay9LRDZTOW9WSTd5V2pFM1BJVUU5ZWN2Rk9HWHFLWWRocWdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDE2MjU5CWZpbGU6QVNOXzAuMi44MF9hbWQ2NC5BcHBJbWFnZQpWdnZxb2hCL3V6TlRaeE8vUzRUdHJnRUFzVnhPTFM3SGVZM2NCeWVrMVAvSnFxbzNJMEx5aG44M3JLV0xFQkpGd0EwUmNodllzMWVURnJTa2R6SXpBUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.80_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjNhWUdQVTdGd1NRTjNIalZSVm1ocVFpWXNLRHVNbFJGajhaSGFHQjZNZWlnUnROWUFnTzNhMGxYSnYrVUU4aksxOFFyMC8yT0JvWkZvY0FwbWRJWFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDM2ODM2CWZpbGU6QVNOXzAuMi44MV94NjQtc2V0dXAuZXhlCmFuK25acUh5QVFjZHh4anBlbExaN0IrTllKcXhMSzBrRVRocVhsbTFVT0ZxdVVERUtqcU81U204RUJ4MEZSR1JnRFdxelFwR0ZFYSs2dFlUd2VUSUNRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.81_x64-setup.exe"
     }
   }
 }
