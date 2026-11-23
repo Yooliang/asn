@@ -396,7 +396,7 @@ export function loginLostNotices(sections, rowsOf) {
 export const accountInUse = (rows, backendCurrent) => (Array.isArray(rows) && rows.length ? rows.some(r => r.current) : backendCurrent === true)
 
 /**
- * 向後台讀一次列表。call：() => Promise（電腦 invoke('acct_roster')、手機 invoke('android_acct_roster')）。
+ * 向後台讀一次列表。call：() => Promise（電腦走出口 makeAccountsApi().roster、手機走 mobileAccountApi.roster；指令名都在 lib/tauri.mjs，#2106 ⑭）。
  * 讀不到（後台沒部署 404、沒登入、forbidden、格式不對）時回 prev（上一次讀成功的列表，照它自己的「N 小時前」顯示），
  * 網路短斷不會在新舊數字間跳；從沒讀成功過（prev 是 null）才回 null，畫面退回各設備自己回報的數字。只在 console 記一筆，不報錯給使用者。
  */
