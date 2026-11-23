@@ -104,7 +104,7 @@ begin
   v_what := case when n.platform in ('android', 'ios') then '手機' else '電腦' end;
   v_body := '有一台新的' || v_what || '連上了：' || relay.device_label(n.id) || '。它是用來取代舊設備的話，到設定 → 設備處理。';
   -- 同一個節點只通知一次：旗標在上面看、這裡寫；限流用節點鍵（7 天內最多 1 則）再擋一道
-  v_res := public.asn_relay_send_notice(n.id, 'new_device', v_body, 1, interval '7 days');
+  v_res := public.asn_relay_send_notice(n.id, 'new_device', v_body, 1, relay.device_replace_new_within());
   if v_res is not null and v_res ->> 'notify' = 'sent' then
     update relay.nodes set new_device_noticed_at = now() where id = n.id;
   end if;
