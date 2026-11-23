@@ -14,9 +14,9 @@ export const tmAdoptProbeSource = () => `(async () => {
   const real = async (req, ms) => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(ms || 400) };
   const click = async el => { el.scrollIntoView({ block: 'center' }); await sleep(150); await real({ click: at(el) }) };
   const waitFor = async (fn, n = 80) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
-  const self = await waitFor(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => r.querySelector('.dv-tag.me')));
-  if (!self) return { ok: false, why: '設備列表裡找不到「這台」' };
-  await click([...self.querySelectorAll('button')].find(b => b.textContent.trim() === '帳號'));
+  const self = await waitFor(() => [...document.querySelectorAll('.dv-list .dv-row')].find(r => !r.querySelector('.dv-grip')));   // 本機那一列沒有排序把手（畫面上不寫「這台」）
+  if (!self) return { ok: false, why: '設備列表裡找不到本機那一列' };
+  await click([...self.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情'));   // 工作管理員入口在詳情頁籤列（#1860）
   const entry = await waitFor(() => [...document.querySelectorAll('.dv-tabs .dv-tasks')].find(vis));
   if (!entry) return { ok: false, why: '這台電腦的詳情頁沒有「工作管理員」入口' };
   await click(entry);

@@ -91,5 +91,30 @@ export function joinKnown(devs, peers) {
   return { byNode, old }
 }
 
+/**
+ * 「已移除的設備」一塊（電腦、手機同一個函式，#1860）：
+ *  - 使用者永久移除、還能恢復的設備列（rows 裡 removed）→ kind 'restore'（按「恢復」）
+ *  - 只剩認得紀錄、沒有任何一列的 → kind 'forget'（按「忘記」，只寫名稱和第一次連線的日期，不寫指紋）
+ * 正在用的設備一律不進來：紀錄的節點只要在 rows 裡（不論有沒有被移除）就不算「只剩紀錄」；
+ * 同名的紀錄（同一台重裝後換了節點，舊紀錄沒清）併回現在那一列，不另外列
+ */
+export function removedDevices(rows, peers) {
+  const list = Array.isArray(rows) ? rows : []
+  const inRows = new Set(list.map(d => d?.key).filter(Boolean))
+  const live = new Set(list.filter(d => d && !d.removed && d.label).map(d => d.label))
+  const restore = list.filter(d => d?.removed).map(d => ({ key: d.key, label: d.label, kind: 'restore', firstSeen: '' }))
+  // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時當成「只剩紀錄」
+  const forget = (!list.length ? [] : Array.isArray(peers) ? peers : []).filter(p => p?.node && !inRows.has(p.node) && !live.has(p.label))
+    .map(p => ({ key: p.node, label: p.label, kind: 'forget', firstSeen: dateText(p.firstSeenMs), peer: p }))
+  return { items: [...restore, ...forget], count: restore.length + forget.length }
+}
+
+/** 「第一次連線」的日期：YYYY/MM/DD（本地時間）；沒有時間就回空字串（已移除的設備區用，#1860） */
+export const dateText = ms => {
+  if (!Number.isFinite(ms) || ms <= 0) return ''
+  const d = new Date(ms)
+  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** 手機列顯示的短指紋：前 8 字，4 個一組 */
 export const shortFp = fp => String(fp ?? '').replace(/\s+/g, '').slice(0, 8).replace(/(.{4})(?=.)/, '$1 ')

@@ -26,16 +26,10 @@ export const TEXT = {
   renameCancel: '取消',
   renameLabel: '這台設備的名字',
   renameHint: '所有設備都會顯示這個名字',
-  ownNameLabel: '這支手機的名字',
-  thisPhone: '這支手機',
-  moveUp: '上移',
-  moveDown: '下移',
-  accounts: '帳號',
   detail: '詳情',
   fpLabel: '指紋',
   firstSeen: t => `第一次見到：${t}`,
   forgetThis: '忘記這台',
-  oldTitle: n => `舊設備紀錄（${n}）`,
   stripTitle: '這台還沒確認指紋',
   stripButton: '確認指紋',
   methodBody: '請在那台電腦的設定頁按「顯示 QR code」，再用相機掃它；也可以改成用選的。',
@@ -99,7 +93,7 @@ export function normalizeList(raw) {
       const confirmed = p.confirmed === true
       const name = cleanName(p.name)
       // name＝記的名字（可能是空的）；label＝畫面上顯示的。沒名字顯示「未命名的電腦」，指紋只有確認過的才帶（沒確認的畫面不能知道）
-      return { node: p.node, name, label: displayDeviceName(name) || unnamedLabelOf(p.node), fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms) }
+      return { node: p.node, name, label: displayDeviceName(name) || unnamedLabelOf(p.node), fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms), firstSeenMs: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? p.first_seen_ms : 0 }
     })
 }
 

@@ -59,6 +59,7 @@ export function normalizeView(raw) {
       label: displayDeviceName(clean(p.name, NAME_MAX)) || unnamedLabelOf(p.node),   // 畫面上顯示的：像指紋的名字、舊的「未命名的電腦」都當沒名字，改寫辨認線索（#1829）
       fingerprint: clean(p.fingerprint, 32),
       loginOk: p.login_ok === true,
+      firstSeenMs: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? p.first_seen_ms : 0,
       firstSeen: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? new Date(p.first_seen_ms).toLocaleString('zh-TW', { hour12: false }) : '',
     })),
   }

@@ -37,8 +37,8 @@ test('取消不送 known-forget；按「忘記」才送，參數是那筆的 id'
 
 test('畫面接線：兩顆「忘記」都先問；確認框預設焦點在取消', () => {
   assert.doesNotMatch(panel, /@click="act\('known-forget'/, '不能繞過確認直接忘記')
-  assert.equal((panel.match(/forget\.ask\(/g) ?? []).length, 2, '詳情和舊設備紀錄兩顆')
-  assert.match(panel, /forget\.ask\(p\)">忘記</)
+  assert.equal((panel.match(/forget\.ask\(/g) ?? []).length, 2, '詳情和已移除的設備兩顆')
+  assert.match(panel, /forget\.ask\(r\.peer\)">\{\{ DEVICE_TEXT\.forget \}\}</)
   assert.match(panel, /<asn-dialog v-if="forgetBox"[^>]*initial-focus="\.forget-cancel"/)
   assert.match(panel, /<asn-button class="forget-cancel"[^>]*forget\.no[^>]*>\{\{ KNOWN\.forgetCancel \}\}/)
   assert.match(panel, /forget\.yes[^>]*>\{\{ KNOWN\.forgetYes \}\}/)

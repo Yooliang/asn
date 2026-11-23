@@ -9,17 +9,7 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
   btn.click();
   // 帳號頁的「切換到…」要先讀過各台的帳號回報（點進那台細部才讀）：逐台點進去再返回
   if (tab === 'accounts') {
-    await sleep(500);
-    const n = document.querySelectorAll('.m-dv-row .m-dv-grip').length;
-    for (let i = 0; i < n; i++) {
-      const row = [...document.querySelectorAll('.m-dv-row')].filter(r => r.querySelector('.m-dv-grip'))[i];
-      if (row) { row.querySelector('.m-dv-go').click(); await sleep(150) }   // 先點那一列展開按鈕（#1539）
-      const go = row?.querySelector('.m-dv-accbtn');
-      if (!go) break;
-      go.click(); await sleep(500);
-      const back = [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(e => e.offsetParent !== null);
-      if (back) { back.click(); await sleep(400) }
-    }
+    await sleep(1200);   // 設備列沒有「帳號」鈕了（#1860）：進頁面時各台的回報會自己先讀
   }
   let seg = null;
   for (let i = 0; i < 60 && !seg; i++) { seg = document.querySelector('.m-dv-segbtn[data-tab="' + tab + '"]'); if (!seg) await sleep(100) }
@@ -58,15 +48,19 @@ export const mlayoutProbeSource = ({ tab, big }) => `(async () => {
     if (Math.max(...dots) - Math.min(...dots) > 1) return { ok: false, why: '圓點沒對齊：' + dots.map(x => x.toFixed(1)).join('／') };
     if (foot) return { ok: false, why: '設備頁不該有額度註腳' };
     // #2158：還在讀回報時，詳情寫「正在讀取這台的帳號資料…」（灰字加轉圈），仍然要看得到（真的點「詳情」進去找）
-    // 先真的點工作機那一列，展開它的按鈕（#1539）
-    { const w = rows.find(r => (r.querySelector('b')?.textContent ?? '').trim() === '工作機'); const g = w && w.querySelector('.m-dv-go'); if (g) { g.scrollIntoView({ block: 'center' }); await sleep(150); const r = R(g); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })); await sleep(300) } }
-    const info = [...document.querySelectorAll('.m-dv-row button')].find(b => vis(b) && b.getAttribute('aria-label') === '查看 工作機 的詳情');
+    // 每一列右邊直接就有「詳情」，沒有上移／下移，也不用先點一列展開（#1860）
+    if (rows.some(r => [...r.querySelectorAll('button')].some(b => /上移|下移/.test(b.getAttribute('aria-label') || b.textContent)))) return { ok: false, why: '設備列上不該再有上移／下移' };
+    if (rows.some(r => !r.querySelector('.asn-btn') || r.querySelector('.asn-btn').textContent.trim() !== '詳情')) return { ok: false, why: '每一列都該直接有一顆「詳情」' };
+    if (rows.some(r => r.textContent.includes('離線') && !r.textContent.includes('離線中'))) return { ok: false, why: '離線的設備該寫「離線中」' };
+    const info = [...document.querySelectorAll('.m-dv-row button')].find(b => vis(b) && b.getAttribute('aria-label') === '查看「工作機」的詳情');
     if (!info) return { ok: false, why: '找不到工作機的「詳情」' };
     info.scrollIntoView({ block: 'center' }); await sleep(150);
     { const r = R(info); globalThis.__smokeInput(JSON.stringify({ click: [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] })) }
     let st = null;
     for (let i = 0; i < 30 && !st; i++) { st = [...document.querySelectorAll('.dvid-note')].find(vis) || null; if (!st) await sleep(100) }
     if (!st || !st.textContent.includes('正在讀取這台的帳號資料…') || !st.querySelector('.asn-spin')) return { ok: false, why: '工作機的詳情裡看不到「正在讀取這台的帳號資料…」與轉圈' };
+    // 正向檢查：「讀取中」真的是灰字（和一般內文不同色），不是被樣式吃掉變成黑字或看不見
+    if (getComputedStyle(st).color === getComputedStyle(document.body).color || getComputedStyle(st).visibility === 'hidden') return { ok: false, why: '「正在讀取這台的帳號資料…」不是灰字' };
     if (document.body.textContent.includes('沒回報')) return { ok: false, why: '畫面上不該再有「沒回報」' };
     const box = R(st.closest('.m-dv-info') || st.parentElement);
     if (R(st).right > box.right + 0.5) return { ok: false, why: '詳情裡的狀態那一行超出版面' };

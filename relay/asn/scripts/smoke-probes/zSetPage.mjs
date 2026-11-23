@@ -23,16 +23,16 @@ export const SET_STATE_GAPS = {
 export const SET_PHONE_360 = ['look', 'update', 'notify', 'about']
 // 每一類畫面上固定會出現的字（電腦：設定頁內容區；手機：內頁內容區）。標題另外驗（「設定：<分類名>」／手機內頁標題）
 const SET_WANT_DESK = {
-  me: ['我的名字'], devices: ['這台'], accounts: ['Claude'], cloud: ['邀請雲端代理'], look: ['復古 Aero', 'LINE 風格', '分組依'], notify: ['通知聲音'],
+  me: ['我的名字'], devices: ['運作中'], accounts: ['Claude'], cloud: ['邀請雲端代理'], look: ['復古 Aero', 'LINE 風格', '分組依'], notify: ['通知聲音'],
   voice: ['念出訊息的聲音'], window: ['關閉視窗時'], launch: ['別的設備一小時最多替這台開'], usage: ['重新整理'], update: ['自動檢查更新'], about: ['隱私權政策'],
 }
-const SET_WANT_PHONE = { me: ['我的名字'], devices: ['這支手機'], accounts: ['Claude'], cloud: ['邀請雲端代理'], look: ['復古 Aero', '現代'], notify: ['收到新訊息時輕輕震一下'], update: ['版本紀錄'], about: ['隱私權政策'] }
+const SET_WANT_PHONE = { me: ['我的名字'], devices: ['運作中'], accounts: ['Claude'], cloud: ['邀請雲端代理'], look: ['復古 Aero', '現代'], notify: ['收到新訊息時輕輕震一下'], update: ['版本紀錄'], about: ['隱私權政策'] }
 // 狀態類情境的代表字：空／錯誤／忙碌各自該看到的字（沒列的代表只驗標題與內容非空）
 const SET_WANT_STATE = {
-  'desk:devices': { empty: ['這台'], error: ['這台'] },
+  'desk:devices': { empty: ['運作中'], error: ['運作中'] },
   'desk:accounts': { empty: ['Grok'], error: ['Grok'] },
   'desk:cloud': { empty: ['還沒有邀請過雲端代理'], error: ['連線逾時，請稍後再試'], busy: ['代理的名字'] },
-  'phone:devices': { empty: ['這支手機'], error: ['操作沒有成功'] },
+  'phone:devices': { empty: ['運作中'], error: ['操作沒有成功'] },
   'phone:accounts': { empty: ['帳號'], error: ['現在讀不到帳號列表'] },
   'phone:cloud': { empty: ['還沒有邀請過雲端代理'], error: ['連線逾時，請稍後再試'], busy: ['代理的名字'] },
 }

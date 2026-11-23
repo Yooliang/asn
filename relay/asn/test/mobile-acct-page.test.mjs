@@ -83,7 +83,7 @@ test('Claude 的確認畫面資料：只取 Claude 帳號交給既有的 acctShe
 test('整頁畫面接線（細部頁）：廠商卡片、帳號列、虛線未回報、離線偏灰、整台空狀態；設備列表與排序見 device-list-page.test.mjs', () => {
   const html = read('ui', 'm.html'), css = read('ui', 'mobile.css'), js = read('ui', 'm.js')
   const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
-  assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-go"/, '先是設備列表')
+  assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-detail"/, '先是設備列表')
   assert.match(pane, /m-dv-dot/)
   assert.match(pane, /v-for="v in acctCur\.vendors"/)
   assert.match(pane, /vendorIconSvg\(v\.key\)/)
