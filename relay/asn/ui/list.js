@@ -476,6 +476,7 @@ async function setKnownLoginOk(node, on) {
 const replaceSt = reactive(newReplaceState())
 const replaceFlow = createReplaceFlow({
   state: replaceSt, api: deviceReplaceApi, log: (...a) => console.info(...a),
+  beforeReplace: () => devSync.flush(),
   afterReplace: () => syncAfterReplace({ getPrefs: authApi.getDevicePrefs, devSync, refreshRoster: () => core.refreshRoster(), log: (...a) => console.info(...a) }),
 })
 // 替某台設備改名（名字只有一個、存在後台）：規則與送出都在 Rust，成功後重讀設備列表與認得的電腦

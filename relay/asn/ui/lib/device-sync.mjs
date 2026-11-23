@@ -47,7 +47,8 @@ export function decide({ local, remote, now }) {
  * 同步控制器。prefs 是會被改的那個 reactive 物件（devPrefs）；api＝{ get(): {prefs}, set(prefs): {prefs, stale} }；
  * canSync()＝有登入才同步。schedule／clear／now 可注入（測試用）。
  */
-export function createDeviceSync({ prefs, api, canSync = async () => true, now = () => Date.now(), schedule = setTimeout, clear = clearTimeout, gapMs = PUSH_GAP_MS, everyMs = PULL_EVERY_MS, onError = () => {} }) {
+export function createDeviceSync({ prefs, api, canSync = async () => true, now = () => Date.now(), schedule = setTimeout, clear = clearTimeout, gapMs = PUSH_GAP_MS, everyMs = PULL_EVERY_MS, retryMs = 2100, onError = () => {} }) {
+  let pending = false   // 本機有還沒推上去的變動
   let lastCanon = canon(prefs), lastSent = null, lastPushAt = -Infinity, timer = null, poll = null, busy = false, stopped = false
   const apply = next => {
     const o = { deviceOrder: next.order, deviceShown: next.shown, deviceRemoved: next.removed, deviceRev: next.rev }
@@ -57,9 +58,9 @@ export function createDeviceSync({ prefs, api, canSync = async () => true, now =
   async function push() {
     if (stopped || busy) return
     const body = toRemote(prefs)
-    if (body.rev <= 0) return
+    if (body.rev <= 0) { pending = false; return }
     const key = canon(prefs) + '|' + body.rev
-    if (key === lastSent) return   // 同內容同版本不重送
+    if (key === lastSent) { pending = false; return }   // 同內容同版本不重送
     if (!(await canSync())) return
     busy = true
     try {
@@ -67,9 +68,27 @@ export function createDeviceSync({ prefs, api, canSync = async () => true, now =
       const r = await api.set(body)
       if (r?.stale && r.prefs) apply(r.prefs)   // 後台比較新：改採用它，不覆蓋
       else { lastSent = key; prefs.deviceSynced = true }
+      pending = false
     } catch (e) { onError(e) } finally { busy = false }
   }
+  /**
+   * 取代設備這類「後台自己會改帳號層設定」的動作之前，要先把本機排隊中的推送送完：
+   * 否則取代後本機較新的版本會被排隊的推送送上去，蓋掉後台剛寫進「已移除」的舊設備。
+   * 沒有待推送就直接回 true；送不出去（沒登入、離線、後台冷卻中重試一次仍失敗）回 false，呼叫端不該繼續取代。
+   */
+  async function flush() {
+    if (stopped) return true
+    if (!pending && !timer) return true
+    if (timer) { clear(timer); timer = null }
+    for (let i = 0; i < 2 && pending; i++) {
+      while (busy) await new Promise(res => schedule(res, 50))
+      await push()
+      if (pending && i === 0) await new Promise(res => schedule(res, retryMs))   // 後台推送冷卻 2 秒：等過再試一次
+    }
+    return !pending
+  }
   function requestPush() {
+    pending = true
     if (stopped || timer) return
     const wait = Math.max(0, lastPushAt + gapMs - now())
     timer = schedule(() => { timer = null; void push() }, wait)
@@ -110,5 +129,5 @@ export function createDeviceSync({ prefs, api, canSync = async () => true, now =
     poll = schedule(function tick() { void pull(); poll = schedule(tick, everyMs) }, everyMs)
   }
   function stop() { stopped = true; if (timer) clear(timer); if (poll) clear(poll); timer = poll = null }
-  return { start, stop, pull, push, noteLocal, requestPush, adoptRemote }
+  return { start, stop, pull, push, noteLocal, requestPush, adoptRemote, flush }
 }

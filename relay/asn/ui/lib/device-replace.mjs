@@ -19,6 +19,7 @@ export const REPLACE_TEXT = {
   doneAlready: '這台新設備已經處理過了。',
   doneKept: '好的，兩台都留，之後不再問這台。',
   failed: '沒有成功，請稍後再試。',
+  syncFirst: '你剛調整的設備順序還沒同步完，請稍後再按一次取代。',
   needLogin: '要先登入 ASN 帳號才能處理新設備。',
 }
 
@@ -77,7 +78,7 @@ export async function syncAfterReplace({ getPrefs, devSync, refreshRoster, log =
  * 卡片的操作流程（電腦與手機共用）。state 是會被改的 reactive 物件：{ raw, pick, busy, error, note }。
  * api＝{ candidates(), replace(newNode, oldNode), dismiss(newNode) }；afterReplace(oldNode) 由呼叫端交（同步設定與名單）。
  */
-export function createReplaceFlow({ state, api, afterReplace = async () => {}, log = console.info, now = () => Date.now() }) {
+export function createReplaceFlow({ state, api, beforeReplace = async () => true, afterReplace = async () => {}, log = console.info, now = () => Date.now() }) {
   const fail = (what, e) => { log(`[ASN] ${what}沒成功`, msgOf(e)); state.error = msgOf(e) || REPLACE_TEXT.failed }
   async function load() {
     try {
@@ -95,6 +96,10 @@ export function createReplaceFlow({ state, api, afterReplace = async () => {}, l
     const old = card?.candidates.find(c => c.id === oldNode)
     if (!card || !old) return false
     state.busy = newNode; state.error = ''; state.note = ''
+    // 本機排隊中的設備設定要先送完，不然取代之後它會蓋掉後台剛寫進「已移除」的舊設備；送不出去就不取代
+    let ready = false
+    try { ready = (await beforeReplace(oldNode, newNode)) !== false } catch (e) { log('[ASN] 取代前同步設備設定沒成功', msgOf(e)) }
+    if (!ready) { state.error = REPLACE_TEXT.syncFirst; state.busy = ''; return false }
     try {
       const r = await api.replace(newNode, oldNode)
       state.note = replaceDoneNote({ already: r?.already === true, renamed: r?.renamed === true }, old.label)
