@@ -313,6 +313,13 @@ export const makeLogViewApi = (call = invoke) => ({
   relayLogPaths: () => call('relay_log_paths'),            // → { bridgeLog, machineDir }（只回路徑，通知上「看記錄」用）
 })
 export const logViewApi = makeLogViewApi()
+// 送記錄給開發者（#2129 ②）：範圍 '1h'｜'24h'｜'7d'（沒給＝24 小時）。遮罩在 Rust 端送出那一層做，前端拿到的就是遮過的
+// preview → { text, lines, bytes, masked: { email, token, home }, range }；send 收件處沒設定時回白話錯誤，不碰網路
+export const makeLogReportApi = (call = invoke) => ({
+  preview: range => call('log_report_preview', { range }),
+  send: range => call('log_report_send', { range }),
+})
+export const logReportApi = makeLogReportApi()
 // 電腦版設定頁「認得的電腦」（#2106 ⑨）：這台自己的指紋、認得的別台、允許手機替這台登入、忘記。判斷都在 Rust（device_id.rs）
 export const makeKnownDeviceApi = (call = invoke) => ({
   ownFingerprint: () => call('device_own_fingerprint'),
