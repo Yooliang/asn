@@ -28,7 +28,7 @@ import { switchRowKey, switchResultOf } from './switch-result.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, ROSTER_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
-import { QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections } from './quota-readers.mjs'
+import { QUOTA_TEXT, accountMenuItems, quotaGuideFor, shareConfirmOf, shareKey, vendorSections } from './quota-readers.mjs'
 import { AGENT_INSTALL_UI } from './device-state.mjs'
 import { COLUMNS as TM_COLUMNS, TEXT as TM } from './task-manager.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './msg-ref.mjs'
@@ -38,7 +38,7 @@ import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFet
 
 // 元件會送出的指令（樞紐的 applySetting 要每個都接得住；測試對照這份清單）
 export const SETTING_OPS = [
-  'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close',
+  'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close', 'quota-cancel',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
@@ -154,6 +154,15 @@ export const SettingsPanel = {
     const loginNotices = computed(() => loginLostNotices(vendorSections(props.st.myAccounts, props.st.quotaReaders), devRows))
     const reloginHere = node => Boolean(props.st.relogin) && props.st.relogin.target === node && props.st.relogin.stage !== 'idle'
     const busyNow = computed(() => Boolean(props.st.accounts && (props.st.accounts.busy || (props.st.accounts.remote && props.st.accounts.remote.busy))))
+    // 帳號卡「⋯」選單：項目呼叫原本的命令（產生／重新產生／撤銷）；重新產生與撤銷照舊要再確認一次，確認在卡片上原位顯示
+    const pickMenu = (vendor, a, key) => {
+      if (key === 'share') act('quota-share', { vendor, account: a.account, shared: a.shared })
+      else if (key === 'unshare') act('quota-unshare', { vendor, account: a.account })
+    }
+    const pressShareYes = (vendor, a) => {
+      const c = shareConfirmOf(props.st.quotaReaders.confirm, shareKey(vendor, a.account))
+      if (c) act(c.op, c.op === 'quota-share' ? { vendor, account: a.account, shared: a.shared } : { vendor, account: a.account })
+    }
     const pressDev = (vendor, a, b) => {
       if (b.state === 'relogin') { act('relogin-ask', { node: b.node, kind: b.relogin }); return }
       if (b.state !== 'switch' || busyNow.value) return
@@ -196,7 +205,7 @@ export const SettingsPanel = {
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
-      QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, accountInUseOf, loginLostOf, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
+      QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -262,7 +271,6 @@ export const SettingsPanel = {
       <template v-if="cat === 'accounts'">
         <div class="dv-set dv-acctpage">
           <section class="dv-my" v-if="st.myAccounts || st.quotaReaders" :aria-label="st.myAccounts ? st.myAccounts.title : QUOTA_TEXT.accountsTitle">
-              <h3 class="dv-my-h" v-if="st.myAccounts">{{ st.myAccounts.title }}</h3>
               <small v-if="st.myAccounts && st.myAccounts.empty">{{ st.myAccounts.empty }}</small>
               <ul class="dv-lostnotes" role="status" v-if="loginNotices.length"><li v-for="n in loginNotices" :key="n.key">{{ n.text }}</li></ul>
               <div class="dv-my-v" v-for="v in vendorSections(st.myAccounts, st.quotaReaders)" :key="v.key" :data-vendor="v.key">
@@ -271,12 +279,13 @@ export const SettingsPanel = {
                 <div class="dv-vq" v-if="quotaGuideFor(v.key, st.quotaReaders)"><small class="dv-guide">{{ quotaGuideFor(v.key, st.quotaReaders) }}</small></div>
                 <ul class="dv-accts">
                   <li :class="['dv-acct', { cur: accountInUseOf(v.key, a) }]" v-for="a in v.accounts" :key="a.account">
-                    <span class="dv-who"><span class="dv-mail">{{ a.account }}</span><span class="dv-age" v-if="a.quota.ageLabel">（{{ a.quota.ageLabel }}）</span></span>
+                    <span class="dv-who"><span class="dv-mail">{{ a.account }}</span><span class="dv-age" v-if="a.quota.ageLabel">{{ a.quota.ageLabel }}</span></span>
                     <span class="dv-side">
                       <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
                       <span class="dv-lost" v-if="loginLostOf(v.key, a)">{{ LOGIN_LOST_TEXT.tag }}</span>
                       <span class="dv-cur" v-if="accountInUseOf(v.key, a)">使用中</span>
                       <span class="dv-plan dv-shared" v-if="a.shared">{{ QUOTA_TEXT.shareOn }}</span>
+                      <asn-more-menu v-if="st.quotaReaders" :items="accountMenuItems(a.shared)" :disabled="st.quotaReaders.busy" :label="'更多動作 ' + a.account" @pick="pickMenu(v.key, a, $event)"></asn-more-menu>
                     </span>
                     <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }">
                       <span v-if="loginLostOf(v.key, a)">{{ LOGIN_LOST_TEXT.quota }}</span>
@@ -297,7 +306,7 @@ export const SettingsPanel = {
                       <template v-for="b in devRows(v.key, a)" :key="b.node">
                       <span :class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]">
                         <span class="dv-devname"><span class="dv-devn">{{ b.label }}<small class="dv-devself" v-if="b.self">{{ DEVICE_ROW_TEXT.self }}</small></span><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
-                        <asn-button fixed class="dv-devbtn" v-if="b.state !== 'expired' && b.state !== 'relogin'" :state="b.state === 'switch' ? '' : b.state" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</asn-button>
+                        <asn-button fixed class="dv-devbtn" v-if="b.state !== 'expired' && b.state !== 'relogin'" :state="b.look === 'switch' ? '' : b.look" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</asn-button>
                         <asn-button fixed class="dv-devbtn dv-relogin-btn" :state="b.state" v-else-if="b.state === 'relogin'" :disabled="busyNow || reloginHere(b.node)" @click="pressDev(v.key, a, b)">{{ LOGIN_LOST_TEXT.button }}</asn-button>
                       </span>
                       <div class="dv-confirm dv-devconfirm" role="alertdialog" v-if="b.state === 'relogin' && reloginHere(b.node) && st.relogin.stage === 'confirm'">
@@ -318,12 +327,7 @@ export const SettingsPanel = {
                       <span :class="['dv-devres', rowResult(v.key, a, b.node).phase]" role="status" v-if="rowResult(v.key, a, b.node)">{{ rowResult(v.key, a, b.node).text }}</span>
                       </template>
                     </span>
-                    <span class="dv-share" v-if="st.quotaReaders">
-                      <asn-button :disabled="st.quotaReaders.busy" @click="act('quota-share', { vendor: v.key, account: a.account, shared: a.shared })">{{ !a.shared ? QUOTA_TEXT.share : st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmAgain : QUOTA_TEXT.shareAgain }}</asn-button>
-                      <asn-button state="danger" v-if="a.shared" :disabled="st.quotaReaders.busy" @click="act('quota-unshare', { vendor: v.key, account: a.account })">{{ st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account) ? QUOTA_TEXT.shareConfirmRevoke : QUOTA_TEXT.shareRevoke }}</asn-button>
-                      <small class="acct-warn" v-if="st.quotaReaders.confirm === 'again\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareAgainWarn }}</small>
-                      <small class="acct-warn" v-if="st.quotaReaders.confirm === 'revoke\\n' + shareKey(v.key, a.account)">{{ QUOTA_TEXT.shareRevokeWarn }}</small>
-                    </span>
+                    <asn-confirm class="dv-shareconfirm" v-if="st.quotaReaders && shareConfirmOf(st.quotaReaders.confirm, shareKey(v.key, a.account))" :danger="shareConfirmOf(st.quotaReaders.confirm, shareKey(v.key, a.account)).danger" :busy="st.quotaReaders.busy" :text="shareConfirmOf(st.quotaReaders.confirm, shareKey(v.key, a.account)).text" :yes="shareConfirmOf(st.quotaReaders.confirm, shareKey(v.key, a.account)).yes" :no="QUOTA_TEXT.shareCancel" @yes="pressShareYes(v.key, a)" @no="act('quota-cancel')"></asn-confirm>
                     <small class="dv-sharemsg" role="status" v-if="st.quotaReaders && st.quotaReaders.shareMsg && st.quotaReaders.shareMsg.key === shareKey(v.key, a.account)">{{ st.quotaReaders.shareMsg.text }}</small>
                     <div class="dv-code" role="status" v-if="st.quotaReaders && st.quotaReaders.code && st.quotaReaders.code.key === shareKey(v.key, a.account)">
                       <b>{{ QUOTA_TEXT.codeTitle }}</b>

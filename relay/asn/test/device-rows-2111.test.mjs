@@ -35,8 +35,8 @@ test('#2110 本機帳號庫說這台在用這個帳號：那列一定是「使�
 test('#2110 每種不能切換的原因都說清楚、說怎麼辦；沒有籠統的「目前不能切換」', () => {
   const R = DEVICE_BLOCK_REASON
   const one = d => brief(rows([d], [used(d.key, d.label)]))
-  assert.deepEqual(one(dev('W', '工作機', [claude([acc(), acc(OTHER)], { switchHint: '對方電腦的 ASN 沒有在線，無法切換' })])), [['W', 'blocked', 'ASN 尚未開啟']])
-  assert.equal(R.offline, 'ASN 尚未開啟')
+  assert.deepEqual(one(dev('W', '工作機', [claude([acc(), acc(OTHER)], { switchHint: '對方電腦的 ASN 沒有在線，無法切換' })])), [['W', 'offline', '']], '#2111 ⑥ ASN 沒開＝離線中，設備名下方不再寫原因')
+  assert.equal(R.offline, 'ASN 尚未開啟')   // 舊常數仍給手機「切換到…」頁用
   assert.deepEqual(one(dev('W', '工作機', [claude([acc(MAIL, false, { incomplete: true }), acc(OTHER)], { switchable: true })])), [['W', 'blocked', '這台的登入沒完成，到那台重新登入這個帳號']])
   assert.deepEqual(one(dev('W', '工作機', [claude([acc()])])), [['W', 'blocked', R.single]])
   const grok = dev('H', '家用機', [{ key: 'grok', accounts: [acc()] }], { self: true })
@@ -60,7 +60,7 @@ test('#2111 切換中的那台：寫「切換中…」、不能按；別台不�
   ]
   assert.deepEqual(brief(rows(devices, [], { switchingNode: 'W' })), [['H', 'current', ''], ['W', 'busy', ''], ['V', 'switch', '']])
   assert.deepEqual(brief(rows(devices, [], { switchingNode: 'H' })).find(r => r[0] === 'H'), ['H', 'current', ''])
-  assert.deepEqual({ ...DEVICE_ROW_TEXT }, { current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', self: '這台' })
+  assert.deepEqual({ ...DEVICE_ROW_TEXT }, { current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', offline: '離線中', self: '這台' })
 })
 
 test('#1858 #2110 不列：已永久移除、已隱藏、設備代號在設備列表找不到的舊紀錄、沒登入這個帳號的設備', () => {
@@ -110,9 +110,9 @@ test('#2111 電腦與手機用同一個判斷函式、同一份文字：同一�
   const st = { devices, accounts: { list: [], current: null, busy: false, msg: '', allowSwitch: true }, myAccounts: my }
   const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey: 'accounts', meAv: '' }) }))
   const shown = [...html.matchAll(/<button[^>]*class="asn-btn lv-secondary(?: st-(current|busy|blocked))? fixed dv-devbtn"[^>]*>([^<]*)</g)].map(m => [m[1] ?? 'switch', m[2]])
-  assert.deepEqual(shown, expected.map(r => [r.state, DEVICE_ROW_TEXT[r.state]]))
+  assert.deepEqual(shown, expected.map(r => [r.look || 'switch', DEVICE_ROW_TEXT[r.state]]))
   for (const r of expected.filter(x => x.reason)) assert.ok(html.includes(r.reason), `電腦畫面有原因：${r.reason}`)
-  assert.deepEqual(expected.map(r => r.reason), ['', 'ASN 尚未開啟', ''])
+  assert.deepEqual(expected.map(r => r.reason), ['', '', ''])
   // 手機的設備列也走同一個函式與同一份文字常數，沒有自己再寫一份判斷
   const mjs = read('ui/m.js'), mhtml = read('ui/m.html'), panel = read('ui/lib/settings-panel.mjs')
   assert.match(mjs, /accountDeviceRows\(acctDevs\.value, vendor, a\?\.account, a\?\.usedOn, \{ vendors: \['claude'\]/)

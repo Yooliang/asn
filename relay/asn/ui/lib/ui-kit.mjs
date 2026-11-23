@@ -91,5 +91,32 @@ export const AsnStatus = {
   template: `<p :class="view.classes" role="status"><span v-if="view.spin" class="asn-spin" aria-hidden="true"></span><span>{{ text || (view.kind === 'busy' ? STATUS_TEXT.loading : '') }}</span><asn-button v-if="view.retry" level="text" @click="$emit('retry')">{{ STATUS_TEXT.retry }}</asn-button></p>`,
 }
 
+// ---------- 「⋯」選單（#2111 ⑥） ----------
+// 卡片右上角的更多動作：項目是動作說法（danger＝危險色，要走原位確認）；沒有項目就不畫「⋯」。點外面、按 Esc、選了項目都會收起
+export const MORE_MENU_LABEL = '更多動作'
+export function moreMenuItems(items) {
+  return (Array.isArray(items) ? items : []).filter(i => i && typeof i.key === 'string' && i.key && typeof i.label === 'string' && i.label)
+    .map(i => ({ key: i.key, label: i.label, danger: i.danger === true }))
+}
+export const AsnMoreMenu = {
+  name: 'AsnMoreMenu',
+  props: { items: { type: Array, default: () => [] }, label: { type: String, default: MORE_MENU_LABEL }, disabled: { type: Boolean, default: false } },
+  emits: ['pick'],
+  setup(props, { emit }) {
+    const { ref, computed } = globalThis.Vue
+    const open = ref(false)
+    const list = computed(() => moreMenuItems(props.items))
+    const toggle = () => { if (!props.disabled) open.value = !open.value }
+    const close = () => { open.value = false }
+    const pick = it => { open.value = false; emit('pick', it.key) }
+    return { open, list, toggle, close, pick }
+  },
+  template: `<span class="asn-more" v-if="list.length" @keydown.esc="close">
+    <button type="button" class="asn-more-btn" aria-haspopup="menu" :aria-expanded="open ? 'true' : 'false'" :aria-label="label" :disabled="disabled" @click="toggle">⋯</button>
+    <span class="asn-more-back" v-if="open" @click="close"></span>
+    <ul class="asn-more-list" role="menu" v-if="open"><li v-for="it in list" :key="it.key" role="none"><button type="button" role="menuitem" :class="['asn-more-item', { danger: it.danger }]" @click="pick(it)">{{ it.label }}</button></li></ul>
+  </span>`,
+}
+
 /** 要註冊進 app 的共用元件（電腦 list.js、手機 m.js 都用這一份） */
-export const UI_KIT = Object.freeze({ AsnButton, AsnActions, AsnConfirm, AsnStatus })
+export const UI_KIT = Object.freeze({ AsnButton, AsnActions, AsnConfirm, AsnStatus, AsnMoreMenu })

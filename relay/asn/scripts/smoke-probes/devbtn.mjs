@@ -14,8 +14,8 @@ export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
   let btns = [];
   for (let i = 0; i < 60; i++) { btns = [...document.querySelectorAll(sel)].filter(vis); if (btns.some(b => (b.classList.contains('current') || b.classList.contains('st-current')))) break; await sleep(100) }
   const on = btns.filter(b => (b.classList.contains('current') || b.classList.contains('st-current')));
-  const WORDS = ['使用中', '切換', '切換中…', '不能切換'];
-  for (const b of btns) { const t = b.textContent.trim(); if (!WORDS.includes(t)) return { ok: false, why: '設備鈕上的字「' + t + '」不在固定的四種裡' } }
+  const WORDS = ['使用中', '切換', '切換中…', '不能切換', '離線中'];
+  for (const b of btns) { const t = b.textContent.trim(); if (!WORDS.includes(t)) return { ok: false, why: '設備鈕上的字「' + t + '」不在固定的五種裡' } }
   // #2111 ②：同一張卡裡所有鈕同尺寸（電腦 92×28、手機 100×40）、同一欄靠右（右緣一致、貼近卡片右邊）
   const W = mobile ? 100 : 92, H = mobile ? 40 : 28;
   for (const c of [...document.querySelectorAll(mobile ? '.m-dv-my .m-dv-acct' : '.dv-my .dv-acct')].filter(vis)) {
@@ -64,6 +64,26 @@ export const devbtnProbeSource = ({ devbtn, open = '' }) => `(async () => {
       if (tr.right > k.right + 0.5) return { ok: false, why: '開放查詢 tag 超出卡片' };
     }
     if (![...box.querySelectorAll('.dv-side .dv-shared')].some(vis)) return { ok: false, why: '情境資料有開放分享的帳號，卻沒有看到「開放查詢」tag' };
+  }
+  // #2111 ⑥：帳號頁沒有「我的帳號」標題；時間不加括號；電腦卡片右上角的「⋯」選單可開合、項目可按，卡片上沒有獨立的產生／撤銷鈕
+  if ([...box.querySelectorAll(mobile ? '.m-dv-my-h' : '.dv-my-h')].some(vis)) return { ok: false, why: '帳號頁還有「我的帳號」那行標題' };
+  if (/（\d+ (分鐘|小時|天)前）/.test(box.textContent)) return { ok: false, why: '時間還加了括號' };
+  if (!mobile) {
+    if ([...box.querySelectorAll('.dv-share')].some(vis)) return { ok: false, why: '卡片上還有獨立的產生／撤銷鈕' };
+    const more = [...box.querySelectorAll('.dv-acct .asn-more-btn')].filter(vis);
+    if (!more.length) return { ok: false, why: '帳號卡右上角沒有「⋯」' };
+    const m = more[0], card = m.closest('.dv-acct');
+    m.click(); await sleep(200);
+    const items = [...card.querySelectorAll('.asn-more-item')].filter(vis);
+    const names = items.map(i => i.textContent.trim());
+    if (!items.length || !names.some(t => t === '產生查詢代碼' || t === '重新產生查詢代碼')) return { ok: false, why: '「⋯」選單沒有產生查詢代碼：' + names.join('、') };
+    if (items.some(i => i.disabled)) return { ok: false, why: '「⋯」選單的項目不能按' };
+    m.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(200);
+    if ([...card.querySelectorAll('.asn-more-item')].some(vis)) return { ok: false, why: '按 Esc 後「⋯」選單沒有收起' };
+    m.click(); await sleep(200);
+    const back = card.querySelector('.asn-more-back'); if (!back) return { ok: false, why: '選單展開後沒有點外面收起的底層' };
+    back.click(); await sleep(200);
+    if ([...card.querySelectorAll('.asn-more-item')].some(vis)) return { ok: false, why: '點外面後「⋯」選單沒有收起' };
   }
   const before = (globalThis.__smokeCalls || []).length;
   on[0].click();

@@ -37,10 +37,11 @@ export const QUOTA_TEXT = {
   // 長說明收進可展開的「說明」
   more: '說明',
   share: '產生查詢代碼',
-  shareAgain: '重新產生',
-  shareConfirmAgain: '確認重新產生',
+  shareAgain: '重新產生查詢代碼',   // 帳號卡「⋯」選單的項目（動作說法，#2111 ⑥）
+  shareConfirmAgain: '重新產生查詢代碼',   // 原位確認的同意鈕
+  shareCancel: '取消',
   shareRevoke: '撤銷代碼',
-  shareConfirmRevoke: '確認撤銷',
+  shareConfirmRevoke: '撤銷代碼',
   shareOn: '開放查詢',
   shareAgainWarn: '舊代碼會立刻失效，用舊代碼的服務要換新的。',
   shareRevokeWarn: '撤銷後，用這組代碼的服務就查不到了。',
@@ -106,6 +107,18 @@ export function vendorSections(my, readers) {
     if (quotaGuideFor(key, readers) && !out.some(v => v.key === key)) out.push({ key, label: QUOTA_GUIDE_VENDORS[key], accounts: [] })
   }
   return out
+}
+
+/** 帳號卡「⋯」選單的項目（電腦；手機沒有查詢代碼功能所以不放）：沒有代碼＝產生；已有代碼＝重新產生＋撤銷（撤銷用危險色）。刪除帳號走另一頁的既有流程，不放在這裡 */
+export const accountMenuItems = shared => (shared === true
+  ? [{ key: 'share', label: QUOTA_TEXT.shareAgain }, { key: 'unshare', label: QUOTA_TEXT.shareRevoke, danger: true }]
+  : [{ key: 'share', label: QUOTA_TEXT.share }])
+
+/** 這張卡正在等原位確認的是哪一個動作（重新產生／撤銷）：null＝沒有；yes 鈕與警語都從這裡來 */
+export function shareConfirmOf(confirm, key) {
+  if (confirm === `again\n${key}`) return { op: 'quota-share', text: QUOTA_TEXT.shareAgainWarn, yes: QUOTA_TEXT.shareConfirmAgain, danger: false }
+  if (confirm === `revoke\n${key}`) return { op: 'quota-unshare', text: QUOTA_TEXT.shareRevokeWarn, yes: QUOTA_TEXT.shareConfirmRevoke, danger: true }
+  return null
 }
 
 export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged = () => {}, clipboard = t => globalThis.navigator.clipboard.writeText(t), log = (...a) => console.info(...a) }) {
@@ -179,8 +192,9 @@ export function createQuotaReaders({ invoke, reactive = x => x, onShareChanged =
     if (!s.code) return
     try { await clipboard(s.code.value); s.copied = true } catch (e) { shareFailed(s.code.key, QUOTA_TEXT.copyFail, e) }
   }
+  const cancelConfirm = () => { s.confirm = '' }
   const closeCode = () => { s.code = null; s.copied = false }
-  return { state: s, load, setSource, setRefresh, addMinimax, removeMinimax, share, unshare, copyCode, closeCode }
+  return { state: s, load, setSource, setRefresh, addMinimax, removeMinimax, share, unshare, copyCode, closeCode, cancelConfirm }
 }
 
 /** 設定頁快照：沒有 key，只有帳號與有沒有存。 */

@@ -3,7 +3,7 @@
 :root{
   --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px;
   --fs-1:11px; --fs-2:12px; --fs-3:14px; --fs-4:16px;
-  --btn-h:28px; --btn-px:var(--sp-3);
+  --btn-h:28px; --menu-h:28px; --btn-px:var(--sp-3);
   --kit-ok:#2e7d32; --kit-fail:#b3261e; --kit-current:#4b5058;
   --kit-warn:#a86f00; --kit-warn-line:#d9b25a;   /* 警告色（登入已失效的提示與標籤）；黃色鈕另用 --kit-relogin-* */
   --kit-relogin-bg:#ffd84d; --kit-relogin-fg:#3b2c00; --kit-relogin-line:#c79a00;
@@ -11,7 +11,7 @@
 /* 手機：字級各加大一檔、鈕高 40（最小觸控目標） */
 .m-body{
   --fs-1:12px; --fs-2:14px; --fs-3:16px; --fs-4:18px;
-  --btn-h:40px; --btn-px:14px;
+  --btn-h:40px; --menu-h:44px; --btn-px:14px;
 }
 @media (prefers-color-scheme:dark){
   :root{--kit-ok:#7ad07e; --kit-fail:#ff9a90; --kit-current:#6b727c; --kit-warn:#e0b04a; --kit-warn-line:#8a6a1f}
@@ -53,3 +53,14 @@
 .asn-spin{display:inline-block; box-sizing:border-box; width:var(--fs-2); height:var(--fs-2); border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:asn-spin 1s linear infinite}
 @keyframes asn-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.asn-spin{animation:none}}
+
+/* ---- 「⋯」選單：卡片右上角；項目是動作說法，危險項用紅色；手機項目高 44（觸控目標） ---- */
+.asn-more{position:relative; display:inline-flex; flex:none}
+.asn-more-btn{box-sizing:border-box; min-width:var(--menu-h); min-height:var(--menu-h); padding:0; font:inherit; font-size:var(--fs-4); line-height:1; border:1px solid transparent; border-radius:4px; background:transparent; color:var(--fg); cursor:pointer}
+.asn-more-btn:hover:not(:disabled){border-color:var(--accent)}
+.asn-more-btn:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.asn-more-back{position:fixed; inset:0; z-index:20}
+.asn-more-list{position:absolute; right:0; top:100%; z-index:21; margin:0; padding:var(--sp-1) 0; list-style:none; min-width:max-content; border:1px solid var(--line); border-radius:4px; background:var(--panel); box-shadow:0 4px 14px rgba(0,0,0,.18)}
+.asn-more-item{box-sizing:border-box; display:block; width:100%; min-height:var(--menu-h); padding:0 var(--sp-4); font:inherit; font-size:var(--fs-3); text-align:left; white-space:nowrap; border:0; background:transparent; color:var(--fg); cursor:pointer}
+.asn-more-item:hover,.asn-more-item:focus-visible{background:var(--panel-soft)}
+.asn-more-item.danger{color:var(--kit-fail)}
