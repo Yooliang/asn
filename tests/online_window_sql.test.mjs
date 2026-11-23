@@ -123,7 +123,8 @@ const SETUP = `create role service_role; create role anon; create role authentic
 async function boot({ skipNew = false } = {}) {
   const db = track(new PGlite())
   await db.exec(SETUP)
-  for (const f of files) { if (skipNew && f === MIG) continue; await db.exec(read(f)) }
+  // 只套到本 migration 為止：之後新增的 migration（例如又重定義 asn_relay_inbox_watch）不屬於「改前／改後」的比對範圍
+  for (const f of files) { if (f > MIG) break; if (skipNew && f === MIG) continue; await db.exec(read(f)) }
   return db
 }
 
