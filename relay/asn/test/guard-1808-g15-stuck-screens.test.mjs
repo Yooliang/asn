@@ -37,9 +37,10 @@ test('#1254 #1512 #1632 #1792 每一種畫面種類都有固定代號、名單�
   const noLabel = kinds.filter(k => !labelCodes.has(codeOf[k]))
   assert.deepEqual(noLabel, [], '名單（bridge/roster.rs screen_label）沒有說明的種類：名單上只會看到卡住卻不知道卡在哪')
   // 前端：每個代號都要有提醒（本人不在電腦前也能知道）；代號不認得就不顯示——正是「沒人知道」的來源
-  const noNotice = kinds.filter(k => !noticeText({ code: codeOf[k], name: '甲' }))
+  // #1799：認不得種類的選單（attention）不再跳提醒，只寫 ui.log；其餘種類照舊都要有提醒文字
+  const noNotice = kinds.filter(k => codeOf[k] !== 'attention' && !noticeText({ code: codeOf[k], name: '甲' }))
   assert.deepEqual(noNotice, [], '前端 partner-notice 沒有提醒文字的種類')
-  for (const k of kinds) {
+  for (const k of kinds.filter(k => codeOf[k] !== 'attention')) {
     const n = noticeText({ code: codeOf[k], name: '甲' })
     assert.match(n.title + n.body, /[一-鿿]/)
     assert.doesNotMatch(n.title + n.body, /[a-z]+_[a-z_]+|HTTP/, `${codeOf[k]} 的提醒不能秀內部代號`)
@@ -70,7 +71,7 @@ test('#1512 #1254 #1632 偵測用的字串都在真實畫面樣本裡找得到�
 
 test('#1640 #1637 卡在首次確認畫面：終端畫面上的提示（viewHint）與提醒用同一組代號，不能有只在一處出現的', () => {
   // viewHint 是「畫面開著時」的一行提示；它認得的代號必須是 status_code 的子集，且至少涵蓋要人回答的幾種
-  for (const code of ['permission', 'trust', 'bypass_warning', 'attention', 'usage_menu', 'held_message']) {
+  for (const code of ['permission', 'trust', 'bypass_warning', 'usage_menu', 'held_message']) {
     assert.ok(viewHint([{ code, name: '甲' }], '甲'), `${code} 在終端畫面上要有提示`)
     assert.ok(Object.values(codeOf).includes(code), `${code} 是 Rust 認得的代號`)
   }
