@@ -8,7 +8,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { REPLACE_TEXT, createReplaceFlow, lastSeenText, newReplaceState, replaceCardsView, replaceDoneNote, syncAfterReplace } from '../ui/lib/device-replace.mjs'
 import { createDeviceSync } from '../ui/lib/device-sync.mjs'
-import { NOTICE_CAT_LABEL, noticeCategory, noticeGoOf, noticeRows } from '../ui/lib/notice.mjs'
+import { NOTICE_CAT_LABEL, noticeCategory, noticeGoOf, noticeGoRows, noticeRows } from '../ui/lib/notice.mjs'
 
 const UI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 const src = f => fs.readFileSync(path.join(UI, f), 'utf8')
@@ -189,7 +189,79 @@ test('#1860H 取代後讀設定失敗：只記 log，名單照樣重讀', async 
   assert.ok(logs.some(l => l.includes('逾時'))); assert.deepEqual(refreshed, [1])
 })
 
+// ---- 本機有待推送時取代：先送完排隊的推送，之後採用後台的「已移除」（device-sync 真實函式＋模擬後台） ----
+function fakeBackend(initial) {
+  let cur = initial; const sets = []
+  return {
+    sets, get cur() { return cur },
+    get: async () => ({ prefs: cur }),
+    set: async b => { sets.push(b); if (cur && cur.rev >= b.rev) return { prefs: cur, stale: true }; cur = { order: b.order, shown: b.shown, removed: b.removed, rev: b.rev }; return { prefs: cur, stale: false } },
+    replace: () => { cur = { ...cur, removed: [...cur.removed, OLD1], rev: Math.max(NOW - 1000, cur.rev + 1) } },   // 後台取代：舊設備進 removed、rev＝後台時鐘（這台電腦的時鐘快 1 秒）與現有 rev＋1 較大者
+  }
+}
+async function replaceWithPending({ useFlush }) {
+  const be = fakeBackend({ order: [], shown: [], removed: ['x1'], rev: NOW - 60000 })
+  const prefs = { deviceOrder: [], deviceShown: [], deviceRemoved: ['x1'], deviceRev: NOW - 60000, deviceSynced: true }
+  const timers = []
+  const sync = createDeviceSync({ prefs, now: () => NOW, schedule: (fn, ms) => { timers.push([fn, ms]); return timers.length }, clear: () => {}, retryMs: 0, api: { get: be.get, set: be.set } })
+  prefs.deviceShown = ['x2']; sync.noteLocal()   // 使用者剛調過設定，5 秒內的推送還在排隊
+  const state = newReplaceState()
+  const flow = createReplaceFlow({
+    state, now: () => NOW, log: () => {},
+    api: { candidates: async () => REAL(), replace: async () => { be.replace(); return { ok: true, renamed: true } }, dismiss: async () => ({}) },
+    beforeReplace: useFlush ? () => sync.flush() : async () => true,
+    afterReplace: () => syncAfterReplace({ getPrefs: be.get, devSync: sync, refreshRoster: async () => {}, log: () => {} }),
+  })
+  await flow.load(); await flow.replace(NEW_NODE, OLD1)
+  for (const [fn] of timers.splice(0)) fn()   // 排隊的計時器到期（若還有）
+  await new Promise(r => setImmediate(r)); await new Promise(r => setImmediate(r))
+  return { be, prefs }
+}
+
+test('#1860H 本機有待推送時按取代：舊設備不會被排隊的推送蓋回清單，本機調整也沒丟', async () => {
+  const { be, prefs } = await replaceWithPending({ useFlush: true })
+  assert.ok(be.cur.removed.includes(OLD1), '後台最後的 removed 含舊設備')
+  assert.ok(prefs.deviceRemoved.includes(OLD1), '本機採用後 removed 含舊設備')
+  assert.deepEqual(be.cur.shown, ['x2'], '取代前本機的調整先送出去了')
+})
+
+test('#1860H 對照：不先送完排隊的推送，舊設備會被蓋回清單（拿掉 beforeReplace 的 flush 就紅）', async () => {
+  const { be } = await replaceWithPending({ useFlush: false })
+  assert.ok(!be.cur.removed.includes(OLD1), '沒有修正時後台的 removed 被蓋掉')
+})
+
+test('#1860H 取代前送不出去（離線／後台冷卻）：不取代、畫面講白話、不呼叫取代', async () => {
+  const calls = []; const state = newReplaceState()
+  const flow = createReplaceFlow({ state, now: () => NOW, log: () => {}, api: { candidates: async () => REAL(), replace: async () => { calls.push('replace') } }, beforeReplace: async () => false })
+  await flow.load()
+  assert.equal(await flow.replace(NEW_NODE, OLD1), false)
+  assert.deepEqual(calls, []); assert.equal(state.error, REPLACE_TEXT.syncFirst); assert.equal(state.busy, '')
+})
+
+test('#1860H flush：沒有待推送直接放行；推送被後台冷卻擋下會重試一次', async () => {
+  const prefs = synced(); let n = 0; const sets = []
+  const sync = createDeviceSync({ prefs, now: () => NOW, retryMs: 0, api: { get: async () => ({ prefs: null }), set: async b => { sets.push(b); if (++n === 1) throw new Error('rate_limited'); return { prefs: b } } }, schedule: (fn, ms) => setTimeout(fn, 0), clear: clearTimeout })
+  assert.equal(await sync.flush(), true); assert.equal(sets.length, 0)
+  prefs.deviceShown = ['x9']; sync.noteLocal()
+  assert.equal(await sync.flush(), true); assert.equal(sets.length, 2)
+})
+
+test('#1860H 接線：兩邊的取代流程都帶 beforeReplace: devSync.flush()', () => {
+  for (const f of ['list.js', 'm.js']) assert.match(src(f), /beforeReplace:\s*\(\)\s*=>\s*devSync\.flush\(\)/, f)
+})
+
 // ---- 通知 ----
+test('#1860H 手機通知去處：按鈕掛在每一則新設備通知上，後面來別種通知也不消失', () => {
+  const log = [
+    { k: 'them', t: 1, id: 'nd', kind: 'notice:new_device', text: '有一台新的電腦連上了\n請到設備頁確認' },
+    { k: 'them', t: 2, id: 'q', kind: 'notice:quota', text: '額度\n快用完' },
+  ]
+  const rows = noticeGoRows(log)
+  assert.deepEqual(rows.map(r => [r.key, r.go.label, r.title]), [['nd', '查看設備', '有一台新的電腦連上了']])
+  assert.deepEqual(noticeGoRows([log[1]]), [])
+  assert.equal(noticeGoRows([...log, { ...log[0], t: 3, id: 'nd2' }, { ...log[0], t: 4, id: 'nd3' }, { ...log[0], t: 5, id: 'nd4' }]).length, 3, '最多 3 則')
+  const m = src('m.html'); assert.match(m, /v-for="r in noticeGos"/); assert.match(src('m.js'), /noticeGoRows\(noticeLog\.value\)/)
+})
 test('#1860H 通知 notice:new_device：歸「安全」、帶「查看設備」去處；其他通知沒有去處', () => {
   assert.equal(noticeCategory('notice:new_device'), 'security')
   assert.equal(NOTICE_CAT_LABEL.security, '安全')

@@ -173,9 +173,11 @@ pub fn device_replace_error(e: &str) -> String {
         "這台新設備已經處理過了。".into()
     } else if has("removed_full") {
         "「已移除的設備」已達上限，請先恢復幾台再取代。".into()
+    } else if has("bad_request") {
+        "請求內容不正確。".into()
     } else if has("HTTP 401") {
         "登入過期了，請重新登入後再試".into()
-    } else if has("HTTP 404") {
+    } else if has("not_found") || has("HTTP 404") {
         "找不到這台設備，可能已經被移除。".into()
     } else if has("HTTP 429") {
         "操作太頻繁，請過一分鐘再試".into()
@@ -1700,8 +1702,9 @@ mod tests {
         assert!(device_replace_error("device_replace HTTP 409 removed_full").contains("已達上限"));
         assert!(device_replace_error("device_replace HTTP 401 unauthorized").contains("重新登入"));
         assert!(device_replace_error("device_replace HTTP 404 not_found").contains("找不到"));
+        assert_eq!(device_replace_error("device_replace HTTP 400 bad_request"), "請求內容不正確。");
         assert_eq!(device_replace_error("device_replace 連線失敗：逾時"), "沒有成功，請稍後再試");
-        for e in ["HTTP 409 not_candidate", "HTTP 404 not_found", "HTTP 500 internal", "x"] {
+        for e in ["HTTP 409 not_candidate", "HTTP 404 not_found", "HTTP 400 bad_request","HTTP 500 internal", "x"] {
             let t = device_replace_error(e);
             assert!(!t.contains("HTTP") && !t.contains("not_") && !t.contains("後台"), "{t}");
         }
