@@ -520,7 +520,7 @@
                       </div>
                       <!-- 登出在「個人」內頁最下面（#1093：不放在設定列表） -->
                       <div class="m-logout">
-                        <button class="m-btn m-danger" type="button" :disabled="loggingOut" @click="doLogout">登出</button>
+                        <asn-button state="danger" :disabled="loggingOut" @click="doLogout">登出</asn-button>
                       </div>
                 </template>
                 <template v-else-if="settingCat === 'cloud'">
@@ -534,56 +534,56 @@
                         <p class="m-cloud-step">{{ CLOUD_TEXT.step1 }}</p>
                         <input class="set-input m-cloud-key" readonly :type="cloudSt.reveal ? 'text' : 'password'" :value="cloudSt.created.key" aria-label="金鑰" autocomplete="off" autocapitalize="off" spellcheck="false">
                         <div class="m-cloud-btns">
-                          <button class="m-btn" type="button" @click="cloudSt.reveal = !cloudSt.reveal">{{ cloudSt.reveal ? CLOUD_TEXT.hide : CLOUD_TEXT.show }}</button>
-                          <button class="m-btn" type="button" @click="cloud.copyKey">{{ cloudSt.copiedKey ? CLOUD_TEXT.copiedKey : CLOUD_TEXT.copyKey }}</button>
+                          <asn-button @click="cloudSt.reveal = !cloudSt.reveal">{{ cloudSt.reveal ? CLOUD_TEXT.hide : CLOUD_TEXT.show }}</asn-button>
+                          <asn-button @click="cloud.copyKey">{{ cloudSt.copiedKey ? CLOUD_TEXT.copiedKey : CLOUD_TEXT.copyKey }}</asn-button>
                         </div>
                         <p class="m-fine">{{ CLOUD_COPY_NOTE }}</p>
                         <p class="m-fine">{{ CLOUD_TEXT.clipNote }}</p>
                         <p class="m-fine" v-if="cloudSt.clipNote" role="status">{{ cloudSt.clipNote }}</p>
                         <p class="m-cloud-step">{{ CLOUD_TEXT.step2 }}</p>
-                        <div class="m-cloud-btns"><button class="m-btn" type="button" @click="cloud.copyInvite">{{ cloudSt.copiedInvite ? CLOUD_TEXT.copiedInvite : CLOUD_TEXT.copyInvite }}</button></div>
+                        <div class="m-cloud-btns"><asn-button @click="cloud.copyInvite">{{ cloudSt.copiedInvite ? CLOUD_TEXT.copiedInvite : CLOUD_TEXT.copyInvite }}</asn-button></div>
                         <p class="m-fine">{{ CLOUD_INVITE_NOTE }}</p>
                         <p class="m-cloud-step">{{ CLOUD_TEXT.step3 }}</p>
                         <p class="m-fine" role="status">{{ cloud.justJoined() ? CLOUD_TEXT.joined(cloudSt.created.name) : CLOUD_TEXT.waiting }}</p>
-                        <div class="m-cloud-btns"><button class="m-btn" type="button" @click="cloud.done">{{ CLOUD_TEXT.done }}</button></div>
+                        <div class="m-cloud-btns"><asn-button level="primary" @click="cloud.done">{{ CLOUD_TEXT.done }}</asn-button></div>
                       </div>
                       <div class="m-cloud-form" v-else-if="cloudSt.stage === 'form'">
                         <label>{{ CLOUD_TEXT.nameLabel }}<input class="set-input" v-model="cloudSt.name" maxlength="40" enterkeyhint="done" :aria-label="CLOUD_TEXT.nameLabel" @keydown.enter.prevent="cloud.create"></label>
                         <p class="m-fine">{{ CLOUD_TEXT.nameHint }}</p>
-                        <div class="m-cloud-btns">
-                          <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.create">{{ CLOUD_TEXT.create }}</button>
-                          <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.cancelForm">{{ CLOUD_TEXT.cancel }}</button>
-                        </div>
+                        <asn-actions>
+                          <asn-button :disabled="cloudSt.busy" @click="cloud.cancelForm">{{ CLOUD_TEXT.cancel }}</asn-button>
+                          <asn-button level="primary" :disabled="cloudSt.busy" @click="cloud.create">{{ CLOUD_TEXT.create }}</asn-button>
+                        </asn-actions>
                       </div>
                       <template v-else>
-                        <div class="m-cloud-btns"><button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.openForm()">{{ CLOUD_TEXT.invite }}</button></div>
+                        <div class="m-cloud-btns"><asn-button :disabled="cloudSt.busy" @click="cloud.openForm()">{{ CLOUD_TEXT.invite }}</asn-button></div>
                         <div class="m-cloud-form" v-if="cloudSt.approveForm">
                           <b>{{ CLOUD_TEXT.approveTitle }}</b>
                           <label>{{ CLOUD_TEXT.approveCode }}<input class="set-input" v-model="cloudSt.code" maxlength="12" placeholder="ABCD-2345" autocomplete="off" autocapitalize="characters" spellcheck="false" :aria-label="CLOUD_TEXT.approveCode"></label>
                           <label>{{ CLOUD_TEXT.approveName }}<input class="set-input" v-model="cloudSt.hostName" maxlength="40" :aria-label="CLOUD_TEXT.approveName"></label>
                           <label>{{ CLOUD_TEXT.approveId }}<input class="set-input" v-model="cloudSt.hostId" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" :aria-label="CLOUD_TEXT.approveId"></label>
-                          <div class="m-cloud-btns">
-                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.approve">{{ CLOUD_TEXT.approveGo }}</button>
-                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.cancelApprove">{{ CLOUD_TEXT.cancel }}</button>
-                          </div>
+                          <asn-actions>
+                            <asn-button :disabled="cloudSt.busy" @click="cloud.cancelApprove">{{ CLOUD_TEXT.cancel }}</asn-button>
+                            <asn-button level="primary" :disabled="cloudSt.busy" @click="cloud.approve">{{ CLOUD_TEXT.approveGo }}</asn-button>
+                          </asn-actions>
                         </div>
-                        <div class="m-cloud-btns" v-else><button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.openApprove">{{ CLOUD_TEXT.approveBtn }}</button></div>
+                        <div class="m-cloud-btns" v-else><asn-button :disabled="cloudSt.busy" @click="cloud.openApprove">{{ CLOUD_TEXT.approveBtn }}</asn-button></div>
                         <p class="m-fine" v-if="cloudSt.approved" role="status">{{ cloudSt.approved }}</p>
                         <ul class="m-cloud-list" v-if="cloudSt.rows.length" :aria-label="CLOUD_TEXT.title">
                           <li v-for="r in cloudSt.rows" :key="r.id">
                             <span class="m-cloud-tx"><b>{{ r.name }}<em v-if="r.state === 'online'">在線</em></b><small :title="r.title">{{ r.status }}</small></span>
-                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.openRename(r.id)">{{ CLOUD_TEXT.rename }}</button>
-                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.revoke(r.id)">{{ cloudSt.confirmId === r.id ? CLOUD_TEXT.revokeSure : CLOUD_TEXT.revoke }}</button>
+                            <asn-button :disabled="cloudSt.busy" @click="cloud.openRename(r.id)">{{ CLOUD_TEXT.rename }}</asn-button>
+                            <asn-button state="danger" :disabled="cloudSt.busy" @click="cloud.revoke(r.id)">{{ cloudSt.confirmId === r.id ? CLOUD_TEXT.revokeSure : CLOUD_TEXT.revoke }}</asn-button>
                           </li>
                         </ul>
                         <p class="m-fine" v-else>{{ CLOUD_TEXT.empty }}</p>
                         <div class="m-cloud-form" v-if="cloudSt.renameId">
                           <label>{{ CLOUD_TEXT.rename }}<input class="set-input" v-model="cloudSt.renameName" maxlength="40" enterkeyhint="done" :aria-label="CLOUD_TEXT.rename" @keydown.enter.prevent="cloud.rename"></label>
                           <p class="m-fine">{{ CLOUD_TEXT.renameNote }}</p>
-                          <div class="m-cloud-btns">
-                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.rename">{{ CLOUD_TEXT.renameSave }}</button>
-                            <button class="m-btn" type="button" :disabled="cloudSt.busy" @click="cloud.cancelRename">{{ CLOUD_TEXT.cancel }}</button>
-                          </div>
+                          <asn-actions>
+                            <asn-button :disabled="cloudSt.busy" @click="cloud.cancelRename">{{ CLOUD_TEXT.cancel }}</asn-button>
+                            <asn-button level="primary" :disabled="cloudSt.busy" @click="cloud.rename">{{ CLOUD_TEXT.renameSave }}</asn-button>
+                          </asn-actions>
                         </div>
                         <p class="m-fine" v-if="cloudSt.confirmId">{{ CLOUD_TEXT.revokeNote }}</p>
                         <p class="m-fine">{{ CLOUD_TEXT.lostKey }}</p>
@@ -620,12 +620,12 @@
                   <div class="m-card m-form">
                         <template v-if="upd.enabled">
                           <label class="m-check"><input type="checkbox" v-model="prefs.autoUpdate"> 自動檢查新版本</label>
-                          <button class="m-btn" type="button" :disabled="upd.checking || upd.phase === 'downloading'" @click="checkUpdate(true)">{{ upd.checking ? '檢查中…' : '檢查更新' }}</button>
+                          <asn-button :disabled="upd.checking || upd.phase === 'downloading'" @click="checkUpdate(true)">{{ upd.checking ? '檢查中…' : '檢查更新' }}</asn-button>
                           <p class="m-note" v-if="upd.manual" role="status">{{ upd.manual }}</p>
                         </template>
                     <template v-else-if="playView.kind === 'new'">
                       <p class="m-note" role="status">{{ playNewText }}</p>
-                      <button class="m-btn" type="button" @click="openPlay">{{ PLAY_BUTTON_LABEL }}</button>
+                      <asn-button @click="openPlay">{{ PLAY_BUTTON_LABEL }}</asn-button>
                     </template>
                     <p class="m-note" v-else-if="playView.kind === 'latest'" role="status">{{ PLAY_LATEST_TEXT }}</p>
                     <p class="m-note" v-else>{{ PLAY_NOTICE_NOT_AUTO }}</p>
@@ -633,7 +633,7 @@
                   <div class="m-card m-form m-rel" aria-label="版本更新記錄">
                     <b>版本更新記錄</b>
                     <p class="m-note" v-if="relNote" role="status">{{ relNote }}</p>
-                    <button class="m-btn" type="button" v-if="rel.phase === 'error'" @click="loadRel(true)">{{ RETRY_LABEL }}</button>
+                    <asn-button v-if="rel.phase === 'error'" @click="loadRel(true)">{{ RETRY_LABEL }}</asn-button>
                     <article class="m-rel-item" v-for="e in relLog" :key="e.version">
                       <header><span class="m-rel-ver">{{ e.version }}</span><span class="m-rel-tag" v-if="e.tag === 'current'">目前版本</span><span class="m-rel-date" v-if="e.date">{{ e.date }}</span></header>
                       <ul><li v-for="(l, i) in e.lines" :key="i">{{ l }}</li></ul>
