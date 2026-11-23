@@ -9,7 +9,7 @@ import { createPartnerNoticePoller, nextNotices, noticeStillFor, noticeText, per
 const here = path.dirname(fileURLToPath(import.meta.url))
 
 test('每個代號都有固定的字，不認得的代號或內容不顯示', () => {
-  for (const code of ['permission', 'trust', 'bypass_warning', 'login', 'usage_limit', 'usage_menu', 'attention']) {
+  for (const code of ['permission', 'trust', 'bypass_warning', 'login', 'usage_limit', 'usage_menu']) {
     const t = noticeText({ code, name: '甲' })
     assert.ok(t.title && t.body.includes('「甲」'), code)
   }
@@ -85,7 +85,7 @@ test('守門：命令只接在本機畫面，截圖模式不輪詢', () => {
 })
 
 test('夥伴回答了：開著的提醒要收掉，別的提醒不動', async () => {
-  const a = { code: 'attention', name: '甲' }, b = { code: 'attention', name: '乙' }
+  const a = { code: 'login', name: '甲' }, b = { code: 'login', name: '乙' }
   let r = nextNotices([a, b])
   assert.deepEqual(r.gone, [])
   r = nextNotices([b], r.seen)
