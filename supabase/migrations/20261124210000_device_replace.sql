@@ -1,22 +1,23 @@
--- 換新設備時處理舊設備（#1860 H，PR-1 只有後台）：新的一台第一次回報平台後，若同一個帳號底下有「同平台、已離線超過一天」的舊設備，
---   通知本人「有一台新的電腦連上了」，並讓本人在設定頁選：這台取代哪一台舊的／不取代（兩台都留、不再問）。
--- 這個 migration 做六件事：
+-- 換新設備時處理舊設備（#1860 H，PR-1 只有後台）：新的一台第一次回報平台後，若同一個帳號底下有「同平台、目前離線、
+--   而且最後上線早於這台新設備建立」的舊設備，通知本人「有一台新的電腦連上了」，並讓本人在設定頁選：這台取代哪一台舊的／不取代（兩台都留、不再問）。
+--   為什麼不用「離線多久」：重灌時舊設備通常剛離線，用天數門檻會漏掉最常見的情況；剛睡著的電腦只要醒來一次
+--   （最後上線晚於新設備建立）就自動排除，不會被誤當成舊的。
+-- 這個 migration 做五件事：
 --   1. relay.nodes 加兩欄：
 --        replace_asked_at       使用者已回答過（取代或不取代）的時間；有值＝不再出卡、不再通知。
 --        new_device_noticed_at  已經寄過「新設備」通知的時間。「只通知一次」的做法選這個獨立欄位：
 --                               new_device_check 在節點上加鎖後先看它、寄成功（notify = sent）才寫入，所以同一台只會通知一次；
 --                               不拿 replace_asked_at 當旗標，因為那個欄位的意思是「使用者回答了」，通知寄出不等於使用者回答。
 --                               寄失敗（回傳 failed）不寫旗標，之後若又有機會被呼叫還能再試；限流另由 asn_relay_send_notice 以節點鍵再擋一道。
---   2. relay.device_replace_offline_after()：舊設備離線多久才算「可以被取代」，現值 1 天。
---      relay.device_replace_new_within()：新設備建立多久之內才問，現值 7 天。兩個都是單一定義，要調只改這裡。
---      注意：這不是「在線門檻」（那個是 relay.online_window()，3 分鐘），語意不同，不要混用。
+--   2. relay.device_replace_new_within()：新設備建立多久之內才問，現值 7 天，單一定義，要調只改這裡。
 --   3. relay.device_replace_old_nodes(p_new)：給一台新節點，回傳它的候選舊設備（名稱用 relay.device_label、最後在線時間取
 --      greatest(nodes.last_seen_at, asn_presence 最新回報)）。候選規則只在這一處：同帳號同租戶、同平台、啟用中、不是網頁、
---      不在帳號設定的 device_prefs.removed、離線超過 device_replace_offline_after()。通知、候選清單、取代三個入口都呼叫它。
+--      不在帳號設定的 device_prefs.removed、目前不在線（最後上線早於 now() - relay.online_window()）、
+--      而且最後上線早於新設備建立時間。通知、候選清單、取代三個入口都呼叫它。
 --   4. relay.new_device_check(p_node)：自己冪等的觸發判斷（見上），條件符合就經 asn_relay_send_notice 寄一則 notice:new_device。
 --      內文用 relay.device_label，不出代號、不出 email。
 --   5. public.asn_relay_set_node_platform：只在 platform 由空變成有值的那一次呼叫 new_device_check；呼叫包在自己的 begin … exception 區塊，
---      通知出任何狀況都不會讓回報平台失敗（原有的行逐字不變）。
+--      通知出任何狀況都不會讓回報平台失敗（原有的行逐字不變）；出狀況時除了 warning，還寫一筆 account_events（new_device_check_failed）留底。
 --   6. 三個給 Edge 用的函式（security definer、search_path 空、只授權 service_role）：
 --        asn_device_replace_candidates(p_user, p_actor)         待回答的新設備與其候選舊設備
 --        asn_device_replace(p_user, p_actor, p_new, p_old)      取代：單一交易，只能動本人名下的兩台
@@ -31,13 +32,6 @@ begin;
 
 alter table relay.nodes add column if not exists replace_asked_at timestamptz;
 alter table relay.nodes add column if not exists new_device_noticed_at timestamptz;
-
--- 舊設備離線超過這麼久才算可以被取代（不是在線門檻；在線門檻見 relay.online_window()）
-create or replace function relay.device_replace_offline_after()
- returns interval language sql immutable set search_path to ''
-as $function$
-  select interval '1 day'
-$function$;
 
 -- 新設備建立這麼久之內才問「是不是取代舊的」
 create or replace function relay.device_replace_new_within()
@@ -69,7 +63,10 @@ as $function$
      and o.platform = n.platform
      and coalesce(o.kind, '') <> 'web'
      and not coalesce(t.features -> 'device_prefs' -> 'removed' ? o.id, false)
-     and coalesce(s.last_seen, '-infinity'::timestamptz) < now() - relay.device_replace_offline_after()
+     -- 目前不在線（在線門檻只有 relay.online_window() 一處定義）
+     and coalesce(s.last_seen, '-infinity'::timestamptz) < now() - relay.online_window()
+     -- 而且最後上線早於新設備建立：重灌時舊設備通常剛離線；剛睡著的電腦只要醒來一次（last_seen 晚於新設備建立）就自動排除
+     and coalesce(s.last_seen, '-infinity'::timestamptz) < n.created_at
    order by s.last_seen desc nulls last, o.id;
 $function$;
 
@@ -111,7 +108,6 @@ begin
   return jsonb_build_object('ok', true, 'notify', coalesce(v_res ->> 'notify', 'failed'));
 end;
 $function$;
-revoke all on function relay.device_replace_offline_after() from public, anon, authenticated;
 revoke all on function relay.device_replace_new_within() from public, anon, authenticated;
 revoke all on function relay.device_replace_old_nodes(text) from public, anon, authenticated;
 revoke all on function relay.new_device_check(text) from public, anon, authenticated;
@@ -126,6 +122,7 @@ as $function$
 declare
   v_prev text;
   v_found boolean;
+  v_owner uuid;
 begin
   if p_platform is null or p_platform not in ('linux', 'windows', 'macos', 'android', 'ios') then
     return jsonb_build_object('error', 'bad_request');
@@ -139,6 +136,16 @@ begin
       perform relay.new_device_check(p_node);
     exception when others then
       raise warning 'new_device_check: node % failed: %', p_node, sqlerrm;
+      -- 留一筆稽核，事後查得到；這筆寫入本身也不能讓回報平台失敗，節點沒有擁有者就不寫
+      begin
+        select owner_user into v_owner from relay.nodes where id = p_node;
+        if v_owner is not null then
+          insert into relay.account_events (user_id, event, node, detail)
+            values (v_owner, 'new_device_check_failed', p_node, jsonb_build_object('error', sqlerrm));
+        end if;
+      exception when others then
+        null;
+      end;
     end;
   end if;
   return jsonb_build_object('ok', true);
@@ -235,7 +242,7 @@ begin
     end if;
     return jsonb_build_object('error', 'answered');
   end if;
-  -- 候選規則只有一份：同平台、離線超過門檻、還沒被移除
+  -- 候選規則只有一份：同平台、目前離線且早於新設備建立、還沒被移除
   if not exists (select 1 from relay.device_replace_old_nodes(p_new) c where c.node = p_old) then
     return jsonb_build_object('error', 'not_candidate');
   end if;

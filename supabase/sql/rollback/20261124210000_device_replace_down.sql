@@ -25,7 +25,6 @@ drop function if exists public.asn_device_replace_candidates(uuid, text);
 drop function if exists relay.new_device_check(text);
 drop function if exists relay.device_replace_old_nodes(text);
 drop function if exists relay.device_replace_new_within();
-drop function if exists relay.device_replace_offline_after();
 alter table relay.nodes drop column if exists new_device_noticed_at;
 alter table relay.nodes drop column if exists replace_asked_at;
 

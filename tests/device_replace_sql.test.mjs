@@ -10,6 +10,7 @@ const rd = f => fs.readFileSync(new URL(`../supabase/${f}`, import.meta.url), 'u
 const MIG = rd('migrations/20261124210000_device_replace.sql')
 const DOWN = rd('sql/rollback/20261124210000_device_replace_down.sql')
 const PLAT = rd('migrations/20261102170000_node_platform_phone.sql')
+const WINDOW = rd('migrations/20261123120000_online_window.sql')
 const LABEL = rd('migrations/20261124100000_unnamed_device_label.sql')
 const RENAME = rd('migrations/20261113500000_device_rename.sql')
 const OWNS = rd('migrations/20261021060000_owner_signed.sql')
@@ -38,9 +39,14 @@ test('靜態：取代函式核對 actor、新、舊三台都是本人的；候�
   assert.match(grab(MIG, 'create or replace function public.asn_device_replace_candidates('), /relay\.device_replace_old_nodes\(n\.id\)/)
 })
 
-test('靜態：離線門檻是常數函式、migration 沒有裸寫 3 分鐘', () => {
-  assert.match(grab(MIG, 'create or replace function relay.device_replace_offline_after('), /interval '1 day'/)
+test('靜態：候選的離線條件＝目前不在線（引用 online_window）且最後上線早於新設備建立；沒有天數門檻、沒有裸寫 3 分鐘', () => {
+  const body = grab(MIG, 'create or replace function relay.device_replace_old_nodes(')
+  assert.match(body, /< now\(\) - relay\.online_window\(\)/)
+  assert.match(body, /< n\.created_at/)
+  assert.doesNotMatch(code, /device_replace_offline_after/)
+  assert.doesNotMatch(code, /interval '1 day'/)
   assert.doesNotMatch(code, /'\s*3\s+min/i)
+  assert.doesNotMatch(DOWN, /device_replace_offline_after/)
 })
 
 test('靜態：回復檔把 set_node_platform 換回上一版本體，drop 新函式與欄位，換回在拿掉欄位之前', () => {
@@ -79,6 +85,7 @@ async function boot({ down = false } = {}) {
       end $$;
     insert into relay.tenants values ('${T1}', '${U1}', 'active', null), ('${T2}', '${U2}', 'active', null);`)
   await db.exec(OWNS.slice(OWNS.indexOf('create or replace function public.asn_user_owns_node'), OWNS.indexOf('grant execute on function public.asn_user_owns_node')))
+  await db.exec(grab(WINDOW, 'create or replace function relay.online_window()'))
   await db.exec(grab(RENAME, 'create or replace function relay.device_name_ok('))
   await db.exec(grab(LABEL, 'create or replace function relay.device_label('))
   await db.exec(grab(PLAT, 'create or replace function public.asn_relay_set_node_platform('))
@@ -89,7 +96,7 @@ async function boot({ down = false } = {}) {
   const one = async (t, a) => (await q(t, a))[0].r
   const api = {
     db, q, prevDef,
-    // 節點：天數＝最後在線距今幾天（null＝沒有紀錄）
+    // 節點：seen＝最後上線距今幾小時、age＝建立距今幾小時（可帶小數）；新舊先後靠這兩個數字控制
     node: (id, o = {}) => db.query(`insert into relay.nodes (id, name, owner_user, tenant_id, status, kind, platform, last_seen_at, created_at, name_by_owner)
       values ($1, $2, $3, $4, $5, $6, $7, now() - ($8 || ' hours')::interval, now() - ($9 || ' hours')::interval, $10)`,
       [id, o.name ?? null, o.user ?? U1, o.tenant ?? (o.user === U2 ? T2 : T1), o.status ?? 'active', o.kind ?? null, o.platform === undefined ? 'windows' : o.platform,
@@ -112,12 +119,12 @@ async function basic(b) {
   await b.node('o1', { name: '舊的辦公室電腦', seen: 48, age: 500 })
 }
 
-test('實跑：只有「同平台、離線超過一天」的才列候選；不同平台、在線、離線不到一天、已移除、別人的、已撤銷、presence 還在線的都不列', { skip }, async () => {
+test('實跑：只有「同平台、目前離線、最後上線早於新設備建立」的才列候選；不同平台、在線、新設備建立後又上線過、已移除、別人的、已撤銷、presence 還在線的都不列', { skip }, async () => {
   const b = await boot()
   await basic(b)
   await b.node('o2', { name: '別平台', platform: 'linux', seen: 48, age: 500 })
   await b.node('o3', { name: '在線的', seen: 0, age: 500 })
-  await b.node('o4', { name: '才離線半天', seen: 12, age: 500 })
+  await b.node('o4', { name: '新設備建立後醒來過', seen: 0.5, age: 500 })
   await b.node('o5', { name: '已移除的', seen: 48, age: 500 })
   await b.node('o6', { name: '心跳舊但 presence 在線', seen: 48, age: 500 })
   await b.node('o7', { name: '已撤銷', status: 'left', seen: 48, age: 500 })
@@ -217,6 +224,45 @@ test('實跑：new_device_check 內部丟例外時 set_node_platform 仍成功�
   await b.db.exec(`create or replace function relay.new_device_check(p_node text) returns jsonb language plpgsql as $$ begin raise exception 'boom'; end $$`)
   assert.deepEqual(await b.setPlat('fresh', 'windows'), { ok: true })
   assert.equal((await b.row('fresh')).platform, 'windows')
+  assert.deepEqual(await b.q("select user_id, event, node, detail from relay.account_events"),
+    [{ user_id: U1, event: 'new_device_check_failed', node: 'fresh', detail: { error: 'boom' } }], '留一筆稽核')
+})
+
+test('實跑：new_device_check 丟例外、節點沒有擁有者時不寫稽核、設平台照樣成功', { skip }, async () => {
+  const b = await boot()
+  await b.db.exec(`insert into relay.nodes (id, name, owner_user, tenant_id, platform) values ('orphan', 'x', null, null, null)`)
+  await b.db.exec(`create or replace function relay.new_device_check(p_node text) returns jsonb language plpgsql as $$ begin raise exception 'boom'; end $$`)
+  assert.deepEqual(await b.setPlat('orphan', 'windows'), { ok: true })
+  assert.equal((await b.row('orphan')).platform, 'windows')
+  assert.equal((await b.q('select count(*)::int n from relay.account_events'))[0].n, 0)
+})
+
+test('實跑：重灌情境：舊設備 10 分鐘前離線、之後沒再上線，新設備第一次回報平台就通知、候選有它', { skip }, async () => {
+  const b = await boot()
+  await b.node('o1', { name: '舊的辦公室電腦', seen: 1 / 6, age: 500 })
+  await b.node('fresh', { name: '新電腦', platform: null, seen: 0, age: 0.05 })
+  assert.equal((await b.setPlat('fresh', 'windows')).ok, true)
+  assert.equal((await b.notices()).length, 1)
+  assert.deepEqual((await b.cands(U1, 'fresh')).cards[0].candidates.map(c => c.node), ['o1'])
+})
+
+test('實跑：舊設備在新設備建立之後又上線過（醒來過）、現在才離線：不列、不通知', { skip }, async () => {
+  const b = await boot()
+  await b.node('o1', { name: '剛睡著的電腦', seen: 1, age: 500 })
+  await b.node('fresh', { name: '新電腦', platform: null, seen: 0, age: 2 })
+  assert.equal((await b.setPlat('fresh', 'windows')).ok, true)
+  assert.deepEqual(await b.notices(), [])
+  assert.deepEqual((await b.cands(U1, 'fresh')).cards, [])
+  assert.equal((await b.replace(U1, 'fresh', 'fresh', 'o1')).error, 'not_candidate')
+})
+
+test('實跑：舊設備目前在線（最後上線在 online_window 內）：不列、不通知', { skip }, async () => {
+  const b = await boot()
+  await b.node('o1', { name: '在線的電腦', seen: 0.01, age: 500 })
+  await b.node('fresh', { name: '新電腦', platform: null, seen: 0, age: 1 })
+  assert.equal((await b.setPlat('fresh', 'windows')).ok, true)
+  assert.deepEqual(await b.notices(), [])
+  assert.deepEqual((await b.cands(U1, 'fresh')).cards, [])
 })
 
 test('實跑：取代後舊的在 removed、新的 name＝舊名且 name_by_owner、replace_asked_at 有值、舊的保留原名、account_events 一筆', { skip }, async () => {
