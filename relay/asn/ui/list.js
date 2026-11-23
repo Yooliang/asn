@@ -558,7 +558,7 @@ function defaultCwdAllowFromCli() {
 const launchMsg = ref('')
 async function saveLaunchPrefs() {
   const prefs = launchPrefsToSave(launchPrefs)   // 上限只寫設定頁改過的 maxPerHourSet；開新夥伴、記最近的資料夾都不寫上限
-  try { await transport.launchPrefsSet(prefs); launchMsg.value = '' } catch (e) { console.info('[ASN] launch prefs', e.message); launchMsg.value = `啟動設定沒有存成功：${e?.message ?? e}` }
+  try { await transport.launchPrefsSet(prefs); launchMsg.value = '' } catch (e) { console.info('[ASN] launch prefs', e.message); launchMsg.value = `啟動設定沒有存成功：${plainMessage(e)}` }
 }
 // 工作資料夾清單（#1548 ③）：加入、移除都由後端驗證（存在、是資料夾、不重複、不超過上限），這裡只顯示結果；不再提供自由打字
 const cwdReason = e => String(e?.message ?? e)
@@ -707,7 +707,7 @@ async function browsePartnerCwd() {
     partnerDlg.cwd = p
     await loadLaunchPrefs()
     stateLog.cwdAdded(p)
-  } catch (e) { partnerDlg.error = e.message; stateLog.cwdRejected('加入', cwdReason(e)) }
+  } catch (e) { partnerDlg.error = plainMessage(e); stateLog.cwdRejected('加入', cwdReason(e)) }
 }
 function pickPartnerModel(m) {
   if (!m.installed) return
@@ -1062,7 +1062,7 @@ async function submitPartnerDlg() {
     }
   } catch (e) {
     launchPending.value = launchPending.value.filter(p => p.id !== pend.id)
-    partnerDlg.error = e.message
+    partnerDlg.error = plainMessage(e)
     partnerDlg.open = true
   } finally { partnerDlg.busy = false }
 }

@@ -2,6 +2,7 @@
 // Rust 端再檢查一次：開著的畫面、視窗在前景、窗格是 ASN 開的、授權），字一次一支送進窗格、不丟字。
 // xterm.js 打包在 ui/vendor，要看時才載入。全程在本機，不連外。
 import { viewHint } from './partner-notice.mjs'
+import { plainMessage } from './plain-errors.mjs'
 import { installWideChars } from './term-width.mjs'
 import { HISTORY_LINES, atBottom, createHistory, historyScrollTop, historyToWrite, scrollWantsHistory, wheelWantsHistory } from './term-history.mjs'
 import { createLineSender } from './term-line.mjs'
@@ -432,7 +433,7 @@ export const TermView = {
         close: viewId => props.api.close(viewId),
         listen: props.api.listen,
         sendInput: props.api.input ? (viewId, data, paste, imeFlag) => props.api.input(viewId, data, paste, imeFlag) : undefined,
-        onInputError: e => { inputError.value = e.lost_bytes ? `${e.message}（有 ${e.lost_bytes} 位元組沒送出）` : e.message },
+        onInputError: e => { inputError.value = e.lost_bytes ? `${plainMessage(e)}（有 ${e.lost_bytes} 位元組沒送出）` : plainMessage(e) },
         createTerm: async size => {
           const Terminal = await loadXterm()
           await nextTick()
