@@ -2,6 +2,7 @@
 // 純邏輯（node 與瀏覽器都能跑，不碰 Tauri）；電腦版（onboard.html）與手機版（m.html 的引導畫面）共用。
 // 「引導已完成」旗標存在本機存檔 asn-onboard.json（store('onboard')），兩個版本各自的本機各記一份。
 import { PLACEHOLDER_NAMES } from './mobile.mjs'
+import { patchWithFallback } from './settings-save.mjs'
 
 export const ONBOARD_STORE = 'onboard'
 export const NAME_MAX = 40
@@ -66,11 +67,12 @@ export async function planOnboarding({ store, status, accountInfo, startup }) {
   try { info = await accountInfo() } catch { return { steps: [], accountName: '', unknown: true } }
   const accountName = typeof info?.owner_name === 'string' ? info.owner_name : ''
   const steps = onboardSteps({ done: false, accountName, deviceCustom: startup.window_name_custom === true })
-  if (steps.length === 0) await store.save({ ...saved, done: true }).catch(() => {})
+  if (steps.length === 0) await patchWithFallback(store, { done: true }, { ...saved, done: true }).catch(() => {})
   return { steps, accountName }
 }
 
+// 只送自己的欄位（done），不認得的欄位由後端保留（#2162 ⑦）。壞檔退回整份存、被占用等 3 秒再試（見 settings-save.mjs）；還是存不下來就丟錯，引導畫面會說「沒完成」
 export const markOnboarded = async store => {
   const saved = (await store.load().catch(() => null)) ?? {}
-  await store.save({ ...saved, done: true })
+  if (!(await patchWithFallback(store, { done: true }, { ...saved, done: true }))) throw new Error('設定檔暫時讀不到，這次沒有存，請稍後再試')
 }

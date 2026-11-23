@@ -31,7 +31,7 @@ fn 存檔超過上限整筆拒絕_原檔不動() {
     assert!(save_text(d.path(), RawName::Me, &at).is_ok());
     put(d.path(), "asn-me.json", r#"{"keep":1}"#);
     let over = pad(MAX_BYTES + 1);
-    assert_eq!(save_text(d.path(), RawName::Me, &over).unwrap_err(), "存檔太大");
+    assert_eq!(save_text(d.path(), RawName::Me, &over).unwrap_err(), "[settings:too_big] 存檔太大");
     assert_eq!(read(d.path(), "asn-me.json"), r#"{"keep":1}"#, "原檔不動");
     assert!(files_with(d.path(), ".tmp").is_empty() && files_with(d.path(), ".bad-").is_empty());
 }
@@ -39,7 +39,7 @@ fn 存檔超過上限整筆拒絕_原檔不動() {
 #[test]
 fn 白名單外的名稱被拒() {
     for bad in ["", "foo", "ME", "Me", "me.json", "asn-me", "../me", "me/", "settings", "voice", "chats2", " me"] {
-        assert_eq!(RawName::parse(bad).unwrap_err(), SettingsError("存檔名稱不合格".into()), "{bad:?}");
+        assert_eq!(RawName::parse(bad).unwrap_err(), SettingsError("[settings:name] 存檔名稱不合格".into()), "{bad:?}");
     }
     assert_eq!(RawName::parse("me"), Ok(RawName::Me));
     assert_eq!(RawName::parse("onboard"), Ok(RawName::Onboard));
@@ -77,7 +77,7 @@ fn 修補_舊檔含孤立_surrogate_回白話錯誤_原檔不動_也不搬成壞
     for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json"), (RawName::Chats, "asn-chats.json")] {
         put(d.path(), file, old);
         let e = patch_json(d.path(), name, obj(json!({"a":1}))).unwrap_err();
-        assert_eq!(e, "設定檔內容無法合併，這次沒有存", "{file}");
+        assert_eq!(e, "[settings:merge] 設定檔內容無法合併，這次沒有存", "{file}");
         assert_eq!(read(d.path(), file), old, "{file} 原檔不動");
     }
     assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".tmp").is_empty());
@@ -144,7 +144,7 @@ fn 修補_過大的內容整筆拒絕() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "asn-me.json", r#"{"keep":1}"#);
     let big = obj(json!({"k": "x".repeat(MAX_BYTES)}));
-    assert_eq!(patch_json(d.path(), RawName::Me, big).unwrap_err(), "存檔太大");
+    assert_eq!(patch_json(d.path(), RawName::Me, big).unwrap_err(), "[settings:too_big] 存檔太大");
     assert_eq!(read(d.path(), "asn-me.json"), r#"{"keep":1}"#);
 }
 
@@ -215,7 +215,7 @@ fn 修補_合併後超過上限就不寫_原檔不動() {
     let old = format!(r#"{{"a":"{}"}}"#, "x".repeat(5_000_000));
     put(d.path(), "asn-chats.json", &old);
     let e = patch_json(d.path(), RawName::Chats, obj(json!({"b": "y".repeat(5_000_000)}))).unwrap_err();
-    assert_eq!(e, "存檔太大");
+    assert_eq!(e, "[settings:too_big] 存檔太大");
     assert_eq!(read(d.path(), "asn-chats.json"), old);
     // 蓋掉同一欄、合併後沒變大：照常寫
     patch_json(d.path(), RawName::Chats, obj(json!({"a": "z"}))).unwrap();

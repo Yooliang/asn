@@ -135,6 +135,16 @@ pub struct Loaded<T> {
     pub status: LoadStatus,
 }
 
+/// 給畫面的錯誤，開頭固定帶 `[settings:代號]`，前端（`ui/lib/settings-save.mjs`）靠代號判斷、不比對中文；
+/// 顯示給人看時由 `plain-errors.mjs` 的 `stripCode` 拿掉代號，log 保留。代號清單：merge、unreadable、too_big、backup、write、name、dir、shape
+pub const CODE_MERGE: &str = "[settings:merge]";
+pub const CODE_UNREADABLE: &str = "[settings:unreadable]";
+pub const CODE_BACKUP: &str = "[settings:backup]";
+pub const CODE_WRITE: &str = "[settings:write]";
+pub const CODE_NAME: &str = "[settings:name]";
+pub const CODE_DIR: &str = "[settings:dir]";
+pub const CODE_SHAPE: &str = "[settings:shape]";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettingsError(pub String);
 
@@ -281,12 +291,12 @@ fn read_fresh<T: Doc>(path: &Path, mutate: bool) -> Cached<T> {
 fn write_locked<T: Doc>(slot: &mut Slot, path: &Path, cur: &Cached<T>, v: &T) -> Result<(), SettingsError> {
     // 沒讀到原檔就不准寫：寫下去會把原檔（含新版欄位與較高的版本號）整份蓋掉
     if matches!(cur.status, LoadStatus::Unreadable { .. }) {
-        return Err(SettingsError("設定檔暫時讀不到（可能被其他程式占用），這次沒有存，稍後再試".into()));
+        return Err(SettingsError(format!("{CODE_UNREADABLE} 設定檔暫時讀不到（可能被其他程式占用），這次沒有存，稍後再試")));
     }
     let version = T::VERSION.max(cur.file_version);
     // 檔案版本不等於本版（舊版要升、或較新版寫的）：第一次寫入前先備份；較新版的檔會被 normalize 洗掉已知欄位的新值
     if cur.file_version != T::VERSION && !matches!(cur.status, LoadStatus::Fresh | LoadStatus::Recovered | LoadStatus::Corrupt { .. }) {
-        migrate::backup_old(path, cur.file_version).map_err(|_| SettingsError("設定檔寫入前的備份存不下來，這次沒有存，稍後再試".into()))?;
+        migrate::backup_old(path, cur.file_version).map_err(|_| SettingsError(format!("{CODE_BACKUP} 設定檔寫入前的備份存不下來，這次沒有存，稍後再試")))?;
     }
     let text = migrate::render(v, version)?;
     put_text::<T>(path, &text)?;
@@ -306,7 +316,7 @@ fn put_text<T: Doc>(path: &Path, text: &str) -> Result<(), SettingsError> {
     written.map_err(|e| {
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         elog!("[ASN] 設定檔 {name} 寫入失敗（{e}），這次沒有存");
-        SettingsError("設定檔寫入失敗，這次沒有存，稍後再試".into())
+        SettingsError(format!("{CODE_WRITE} 設定檔寫入失敗，這次沒有存，稍後再試"))
     })
 }
 
@@ -513,7 +523,7 @@ pub fn update<T: Doc, R>(f: impl FnOnce(&mut T) -> R) -> Result<R, SettingsError
 }
 
 fn no_root() -> SettingsError {
-    SettingsError("設定資料夾還沒決定".into())
+    SettingsError(format!("{CODE_DIR} 設定資料夾還沒決定"))
 }
 
 #[cfg(test)]

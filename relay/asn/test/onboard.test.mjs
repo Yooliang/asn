@@ -8,7 +8,7 @@ import { ONBOARD_STORE, checkName, hasAccountName, markOnboarded, onboardSteps, 
 import { OnboardCard } from '../ui/lib/onboard-card.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-const memFlag = init => { let v = init; return { load: async () => v, save: async d => { v = d }, get: () => v } }
+const memFlag = init => { let v = init; return { load: async () => v, save: async d => { v = d }, patch: async f => { const d = { ...(v ?? {}) }; for (const [k, x] of Object.entries(f)) { if (x === null) delete d[k]; else d[k] = x } v = d }, get: () => v } }
 
 test('帳號有沒有名字：空白與建租戶時的預設稱呼不算', () => {
   assert.equal(hasAccountName('擁有者'), true)

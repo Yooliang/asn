@@ -42,7 +42,7 @@ fn take_version(obj: &mut Map<String, Value>) -> u32 {
 /// 把 Doc 序列化成要寫的文字：`version` 放第一個欄位，其餘照序列化順序
 pub fn render<T: Doc>(v: &T, version: u32) -> Result<String, SettingsError> {
     let Value::Object(body) = serde_json::to_value(v).map_err(|e| SettingsError(e.to_string()))? else {
-        return Err(SettingsError("設定的最上層必須是物件".into()));
+        return Err(SettingsError(format!("{} 設定的最上層必須是物件", super::CODE_SHAPE)));
     };
     let mut out = Map::new();
     // 版本 0＝沒有版本欄位的格式（畫面整份存的三個存檔，版本留給之後的前端 patch）：不補 `version`，檔案長相與以前一樣

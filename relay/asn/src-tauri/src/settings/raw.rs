@@ -2,12 +2,14 @@
 //! 前端經 `store_load`／`store_save` 讀寫整段文字，這裡讓那兩個指令改走共用設定層：
 //! 名稱用白名單、上限 8,000,000 位元組、每個檔一把鎖、原子寫入、整份存檔原文照寫（不讀舊檔、不搬檔）。
 //! 另有 `patch_json`（欄位級合併：只動指定的頂層欄位，其餘原樣保留）與 `me_flags`（Rust 端讀 `asn-me.json` 三個欄位的唯讀讀法）。
-//! 檔名與位置不變；格式也不變（單行 JSON、**不加 `version`**，見下）。
+//! 檔名與位置不變；格式也不變（單行 JSON）。
 //!
-//! 版本：這三個檔先不加 `version`（`VERSION = 0`，寫檔時不補欄位）。畫面整份存檔時不一定帶著它：
-//! chats 是從記憶體整份重組、onboard／me 是 `...saved` 展開，載入前就寫過的檔才有，所以前端存檔可能把它洗掉。
-//! 要等畫面改成走 `settings_patch`（#2162 第 7 張）、不再整份覆寫之後一起加。
-use super::{atomic, merge_in, path_in, save_raw_in, slot_of, Doc, Scope, SettingsError};
+//! 版本（#2162 第 7 張）：`asn-me.json`、`asn-onboard.json` 的 `VERSION = 1`（0→1 只是補上 `version` 欄位，遷移函式是空的）。
+//! 前端改走 `settings_patch` 之後不再整份覆寫，`version` 不會被洗掉；`patch` 不准改 `version`。
+//! 讀到版本 0 的舊檔照常讀、不改寫，第一次經共用層寫入（patch）才補上；整份 `store_save` 仍是原文照寫（不補、也不洗掉前端帶來的值）。
+//! `asn-chats.json` 仍整份存、不加 `version`（`VERSION = 0`）：它是從記憶體整份重組的可重建快取，前端不走 patch，沒有欄位會被洗掉的問題，
+//! 加了版本只會讓每次整份存檔的原文多一個前端不認得的欄位。
+use super::{atomic, CODE_MERGE, CODE_NAME, merge_in, path_in, save_raw_in, slot_of, Doc, Scope, SettingsError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
@@ -29,7 +31,7 @@ impl RawName {
             "me" => Ok(RawName::Me),
             "onboard" => Ok(RawName::Onboard),
             "chats" => Ok(RawName::Chats),
-            _ => Err(SettingsError("存檔名稱不合格".into())),
+            _ => Err(SettingsError(format!("{CODE_NAME} 存檔名稱不合格"))),
         }
     }
 
@@ -44,7 +46,7 @@ impl RawName {
 
 /// 三個存檔都是「整個檔案都是 `extra`」：欄位由畫面決定，這裡不宣告任何欄位（宣告了反而會把畫面新加的欄位吃掉）
 macro_rules! raw_doc {
-    ($(#[$m:meta])* $name:ident, $file:literal, $compact:literal, $atomic:expr, $keep_bad:literal) => {
+    ($(#[$m:meta])* $name:ident, $file:literal, $version:literal, $compact:literal, $atomic:expr, $keep_bad:literal) => {
         $(#[$m])*
         #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
         pub struct $name {
@@ -54,7 +56,7 @@ macro_rules! raw_doc {
         impl Doc for $name {
             const NAME: &'static str = $file;
             const SCOPE: Scope = Scope::Data;
-            const VERSION: u32 = 0;
+            const VERSION: u32 = $version;
             const COMPACT: bool = $compact;
             const ATOMIC: atomic::Opts = $atomic;
             const KEEP_BAD: bool = $keep_bad;
@@ -67,15 +69,15 @@ macro_rules! raw_doc {
 
 raw_doc!(
     /// asn-me.json：個人設定。Rust 端也會讀其中的 `frame`、`closeTo`、`autoAddClaude`（見 [`me_flags`]），所以不拆檔
-    MeDoc, "asn-me", true, atomic::SETTINGS, true
+    MeDoc, "asn-me", 1, true, atomic::SETTINGS, true
 );
 raw_doc!(
     /// asn-onboard.json：新手引導完成旗標
-    OnboardDoc, "asn-onboard", true, atomic::SETTINGS, true
+    OnboardDoc, "asn-onboard", 1, true, atomic::SETTINGS, true
 );
 raw_doc!(
     /// asn-chats.json：對話快取（可從後台重建）。不 fsync；壞了退回空的、不留 `.bad-`
-    ChatsDoc, "asn-chats", true, atomic::STATE, false
+    ChatsDoc, "asn-chats", 0, true, atomic::STATE, false
 );
 
 fn bare(e: SettingsError) -> String {
@@ -91,7 +93,8 @@ pub fn load_text(dir: &Path, name: RawName) -> Option<String> {
     std::fs::read_to_string(&path).ok()
 }
 
-const TOO_BIG: &str = "存檔太大";
+/// 存檔太大的白話句（含固定代號）。整筆拒絕、原檔不動
+pub const TOO_BIG: &str = "[settings:too_big] 存檔太大";
 
 fn merge<T: Doc + RawLike>(dir: &Path, patch: Map<String, Value>) -> Result<(), SettingsError> {
     let r = merge_in::<T>(dir, |d| {
@@ -118,7 +121,7 @@ fn merge<T: Doc + RawLike>(dir: &Path, patch: Map<String, Value>) -> Result<(), 
             return SettingsError(TOO_BIG.into());
         }
         elog!("[ASN] 設定檔 {}.json 無法合併（{why}），這次沒有存，原檔不動", T::NAME);
-        SettingsError("設定檔內容無法合併，這次沒有存".into())
+        SettingsError(format!("{CODE_MERGE} 設定檔內容無法合併，這次沒有存"))
     })
 }
 
@@ -136,7 +139,7 @@ raw_like!(MeDoc, OnboardDoc, ChatsDoc);
 /// 所以這條路一律不經 serde（以前的 `store_save` 也從不解析）。錯誤是固定的白話句，不含系統原文
 pub fn save_text(dir: &Path, name: RawName, text: &str) -> Result<(), String> {
     if text.len() > MAX_BYTES {
-        return Err("存檔太大".into());
+        return Err(TOO_BIG.into());
     }
     match name {
         RawName::Me => save_raw_in::<MeDoc>(dir, text),
@@ -146,12 +149,12 @@ pub fn save_text(dir: &Path, name: RawName, text: &str) -> Result<(), String> {
     .map_err(bare)
 }
 
-/// 欄位級合併（`settings_patch`）：合併後的整份超過 [`MAX_BYTES`] 就不寫、回「存檔太大」、原檔不動。舊檔一定要 parse 才能合併；舊檔解析不了（壞檔或含孤立 surrogate）就回「設定檔內容無法合併，這次沒有存」，原檔不動、也不當壞檔搬走。
+/// 欄位級合併（`settings_patch`）：合併後的整份超過 [`MAX_BYTES`] 就不寫、回「[settings:too_big] 存檔太大」、原檔不動。舊檔一定要 parse 才能合併；舊檔解析不了（壞檔或含孤立 surrogate）就回「[settings:merge] 設定檔內容無法合併，這次沒有存」，原檔不動、也不當壞檔搬走。
 /// 對頂層欄位逐一覆蓋，`null` 代表刪除該欄，沒提到的欄位（含不認得的）原樣保留。
 /// 持鎖下重讀原檔、改、寫，兩條執行緒同時改不同欄位不會互相蓋掉
 pub fn patch_json(dir: &Path, name: RawName, patch: Map<String, Value>) -> Result<(), String> {
     if serde_json::to_string(&patch).map(|s| s.len()).unwrap_or(usize::MAX) > MAX_BYTES {
-        return Err("存檔太大".into());
+        return Err(TOO_BIG.into());
     }
     match name {
         RawName::Me => merge::<MeDoc>(dir, patch),
