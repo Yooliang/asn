@@ -13,6 +13,8 @@ pub const KEEP_BAD: usize = 3;
 
 /// 純函式：把檔案文字解析成 Doc。回傳（值，檔案上的版本）；失敗回固定的中文原因（不含檔案內容）。
 pub fn parse<T: Doc>(text: &str) -> Result<(T, u32), String> {
+    // 手改設定的人常帶 UTF-8 BOM：先去掉再解析，不因此搬成壞檔
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let raw: Value = serde_json::from_str(text).map_err(|_| "不是合法的 JSON".to_string())?;
     let Value::Object(mut obj) = raw else {
         return Err("最上層不是物件".into());
@@ -55,15 +57,18 @@ fn suffixed(path: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// 升版後第一次寫回之前備份舊內容：`<檔>.v<舊版>.bak`，已存在就不動
-pub fn backup_old(path: &Path, from: u32) {
+/// 升版（或讀到比程式新的版本）後第一次寫回之前備份舊內容：`<檔>.v<檔案版本>.bak`，已存在就不動。
+/// 備份失敗回 Err（錯誤種類），呼叫端不准寫入，免得舊檔在沒有備份下被蓋掉
+pub fn backup_old(path: &Path, from: u32) -> Result<(), String> {
     let bak = suffixed(path, &format!(".v{from}.bak"));
     if bak.exists() || !path.is_file() {
-        return;
+        return Ok(());
     }
-    if let Err(e) = std::fs::copy(path, &bak) {
-        elog!("[ASN] 設定檔 {} 升版前備份失敗：{}", file_name(path), e.kind());
-    }
+    do_copy(path, &bak).map(|_| ()).map_err(|e| {
+        elog!("[ASN] 設定檔 {} 寫入前備份失敗：{}，這次不寫入", file_name(path), e.kind());
+        let _ = std::fs::remove_file(&bak);
+        format!("{:?}", e.kind())
+    })
 }
 
 static BAD_SEQ: AtomicU64 = AtomicU64::new(0);

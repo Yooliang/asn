@@ -169,11 +169,17 @@ mod tests {
         for (i, c) in cases.iter().enumerate() {
             let d = tempfile::tempdir().unwrap();
             std::fs::write(d.path().join("voice.json"), c).unwrap();
-            assert_eq!(load(d.path()), old_load(d.path()), "第 {i} 組：{c}");
+            let want = old_load(d.path()); // 先算舊的，免得新的 load 把檔案搬走後舊的讀到空檔而假綠
+            let got = load(d.path());
+            assert_eq!(got, want, "第 {i} 組：{c}");
+            if serde_json::from_str::<serde_json::Value>(c).map(|v| v.is_object()).unwrap_or(false) {
+                assert!(std::fs::read_dir(d.path()).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().contains(".bad-")), "第 {i} 組：物件內容不得產生 .bad-");
+            }
         }
         // 檔案不存在
         let d = tempfile::tempdir().unwrap();
-        assert_eq!(load(d.path()), old_load(d.path()));
+        let want = old_load(d.path());
+        assert_eq!(load(d.path()), want);
         assert!(!d.path().join("voice.json").exists(), "讀取不建檔");
     }
 
@@ -213,5 +219,14 @@ mod tests {
         assert_eq!(load(d.path()), VoiceCfg::default());
         assert!(!d.path().join("voice.json").exists());
         assert_eq!(std::fs::read_dir(d.path()).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with("voice.json.bad-")).count(), 1);
+    }
+
+    #[test]
+    fn 帶_bom_的語音檔讀得出值() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("voice.json"), "\u{feff}{\"tts_auto\":true,\"stt_lang\":\"en\"}").unwrap();
+        let c = load(d.path());
+        assert!(c.tts_auto && c.stt_lang == "en");
+        assert!(std::fs::read_dir(d.path()).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().contains(".bad-")));
     }
 }

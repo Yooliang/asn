@@ -158,7 +158,7 @@ fn 新版的檔保留不認得的欄位且版本不降() {
     assert_eq!(v["version"], 7, "版本號不降");
     assert_eq!(v["future"], json!({"k":[1,2]}), "不認得的欄位要保留");
     assert_eq!((v["a"].as_i64(), v["b"].as_i64()), (Some(100), Some(2)));
-    assert!(names(d.path(), "t-a.json.").is_empty(), "新版檔不備份也不遷移");
+    assert_eq!(names(d.path(), "t-a.json."), vec!["t-a.json.v7.bak".to_string()], "新版檔只備份一份 .v7.bak，不遷移");
 }
 
 #[test]
@@ -384,4 +384,68 @@ fn update_每次都重讀檔_外部改了同樣大小的內容也不會被蓋掉
     update_in::<TA, _>(d.path(), |t| t.a = 5).unwrap();
     let v = disk(d.path(), "t-a.json");
     assert_eq!((v["a"].as_i64(), v["b"].as_i64()), (Some(5), Some(7)));
+}
+
+impl Inject {
+    fn copy() -> Self {
+        migrate::FAIL_COPY.with(|f| f.set(true));
+        Inject
+    }
+}
+
+#[test]
+fn 升版前備份失敗_存檔回錯_原檔一字不差() {
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"a":3,"b":4,"舊欄位":1}"#;
+    put(d.path(), "t-a.json", old);
+    let _g = Inject::copy();
+    let e = update_in::<TA, _>(d.path(), |t| t.a = 9).unwrap_err();
+    assert!(e.0.contains("備份存不下來"), "{e}");
+    assert!(save_in::<TA>(d.path(), &TA::default()).is_err());
+    assert_eq!(std::fs::read_to_string(d.path().join("t-a.json")).unwrap(), old);
+    assert!(names(d.path(), "t-a.json.").is_empty());
+}
+
+#[test]
+fn 讀到較新版本_第一次存檔前備份_第二次不重建() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", NEWER_TEXT);
+    update_in::<TA, _>(d.path(), |t| t.a = 50).unwrap();
+    let bak = d.path().join("t-a.json.v7.bak");
+    assert_eq!(std::fs::read_to_string(&bak).unwrap(), NEWER_TEXT, "備份內容等於原檔");
+    let stamp = std::fs::metadata(&bak).unwrap().modified().unwrap();
+    update_in::<TA, _>(d.path(), |t| t.a = 51).unwrap();
+    assert_eq!(std::fs::read_to_string(&bak).unwrap(), NEWER_TEXT, "第二次不能重建或覆蓋");
+    assert_eq!(std::fs::metadata(&bak).unwrap().modified().unwrap(), stamp);
+    assert_eq!(disk(d.path(), "t-a.json")["a"], 51);
+}
+
+#[test]
+fn 較新版本的檔備份失敗_存檔回錯() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", NEWER_TEXT);
+    let _g = Inject::copy();
+    assert!(update_in::<TA, _>(d.path(), |t| t.a = 50).is_err());
+    assert_eq!(std::fs::read_to_string(d.path().join("t-a.json")).unwrap(), NEWER_TEXT);
+}
+
+#[test]
+fn 帶_bom_的合法_json_讀得出值_不搬成壞檔() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "t-a.json", "\u{feff}{\"version\":1,\"a\":8}");
+    let l = load_in::<TA>(d.path());
+    assert_eq!(l.status, LoadStatus::Ok);
+    assert_eq!(l.value.a, 8);
+    assert!(names(d.path(), "t-a.json.bad-").is_empty());
+    assert!(d.path().join("t-a.json").is_file());
+}
+
+#[test]
+fn 非物件與空檔照舊搬成壞檔() {
+    let d = tempfile::tempdir().unwrap();
+    for txt in ["[1]", "5", ""] {
+        put(d.path(), "t-a.json", txt);
+        assert_eq!(load_in::<TA>(d.path()).status, LoadStatus::Recovered, "{txt:?}");
+        assert!(!d.path().join("t-a.json").exists());
+    }
 }

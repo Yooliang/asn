@@ -242,8 +242,9 @@ fn write_locked<T: Doc>(slot: &mut Slot, path: &Path, cur: &Cached<T>, v: &T) ->
         return Err(SettingsError("設定檔暫時讀不到（可能被其他程式占用），這次沒有存，稍後再試".into()));
     }
     let version = T::VERSION.max(cur.file_version);
-    if cur.file_version < T::VERSION && !matches!(cur.status, LoadStatus::Fresh | LoadStatus::Recovered) {
-        migrate::backup_old(path, cur.file_version);
+    // 檔案版本不等於本版（舊版要升、或較新版寫的）：第一次寫入前先備份；較新版的檔會被 normalize 洗掉已知欄位的新值
+    if cur.file_version != T::VERSION && !matches!(cur.status, LoadStatus::Fresh | LoadStatus::Recovered) {
+        migrate::backup_old(path, cur.file_version).map_err(|_| SettingsError("設定檔寫入前的備份存不下來，這次沒有存，稍後再試".into()))?;
     }
     let text = migrate::render(v, version)?;
     atomic::write(path, text.as_bytes(), atomic::SETTINGS)?;
