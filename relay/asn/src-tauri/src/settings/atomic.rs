@@ -228,13 +228,14 @@ mod tests {
     // 每處以「呼叫的開頭」當錨點，檢查同一行用的是哪個 Opts。
     #[test]
     fn 佇列與設定的寫入點用的是會fsync的類別() {
-        let sites: [(&str, &str, &str, &str); 7] = [
+        let sites: [(&str, &str, &str, &str); 8] = [
             ("acct_remote.rs outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE"),
             ("acct_remote.rs set_pref", include_str!("../acct_remote.rs"), "atomic::write(&prefs_path(", "SETTINGS"),
             ("bridge/mod.rs write_settings", include_str!("../bridge/mod.rs"), "atomic::write(&settings_path(", "SETTINGS"),
             ("agent_setup/switch.rs", include_str!("../agent_setup/switch.rs"), "atomic::write(&prefs_path(", "SETTINGS"),
             ("account.rs login_skipped", include_str!("../account.rs"), "atomic::write(&f, b\"1\"", "SETTINGS"),
             ("account.rs device_id", include_str!("../account.rs"), "atomic::write(&f, id.as_bytes()", "SETTINGS"),
+            ("bridge/engines/partner_queue.rs 名冊", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS"),
             ("bridge/pending.rs save_atomic", include_str!("../bridge/pending.rs"), "atomic::write(file,", "QUEUE"),
         ];
         for (name, src, anchor, want) in sites {
@@ -250,6 +251,7 @@ mod tests {
             (include_str!("../agent_setup/switch.rs"), "crate::write_atomic("),
             (include_str!("../account.rs"), "crate::write_atomic("),
             (include_str!("../bridge/mod.rs"), "crate::write_atomic(&settings_path("),
+            (include_str!("../bridge/engines/partner_queue.rs"), "crate::write_atomic(file, &json!("),
         ] {
             assert!(!src.contains(bad), "還有走 {bad}（STATE）的呼叫");
         }
