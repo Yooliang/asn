@@ -2140,7 +2140,7 @@ const app = createApp({
         case 'voice-install': await installFromSettings(); break
         case 'acct-switch': await accounts.switchTo(value); break
         case 'row-switch': await switchAccountRow(value); break
-        case 'acct-remove': await accounts.remove(value); break
+        case 'acct-remove': await (value && typeof value === 'object' ? accounts.remove(String(value.email ?? ''), value.confirmed === true) : accounts.remove(value)); break   // 設備頁帳號行「⋯」的刪除：在那一行確認過就帶 confirmed
         case 'acct-allow-switch': await accounts.setAllowSwitch(value === true); break
         case 'quota-source': await quotaReaders.setSource(value?.source, value?.on); break
         case 'quota-refresh': await quotaReaders.setRefresh(value); break

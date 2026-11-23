@@ -10,6 +10,15 @@ export const QUOTA_OUT_TEXT = Object.freeze({
   note: '這個帳號的額度用完了，重置後才能再用，或改用其他帳號。',
 })
 
+/** 設備頁帳號行「⋯」裡的刪除（只有這台自己的 Claude 帳號庫能刪）：選單項、原位確認的文字與兩顆鈕 */
+export const ACCOUNT_REMOVE_TEXT = Object.freeze({
+  menu: '刪除',
+  confirm: email => `從這台移除 ${email}？只會從這台移除，其他設備不受影響。`,
+  yes: '從這台移除',
+  no: '取消',
+})
+export const ACCOUNT_REMOVE_MENU = Object.freeze([{ key: 'remove', label: ACCOUNT_REMOVE_TEXT.menu, danger: true }])
+
 export const ACCOUNT_STATUS_TEXT = Object.freeze({ normal: '正常', lost: LOGIN_LOST_TEXT.tag, out: QUOTA_OUT_TEXT.tag, lapsed: SUB_LAPSED_TEXT.tag })
 /** 標籤的 kit 類別（kit.css；帳號頁卡片的標籤同一套顏色） */
 export const ACCOUNT_STATUS_CLASS = Object.freeze({ normal: 'asn-tag-ok', lost: 'asn-tag-warn', out: 'asn-tag-warn', lapsed: 'asn-tag-fail' })

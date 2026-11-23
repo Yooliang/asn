@@ -6,8 +6,10 @@ import fs from 'node:fs'
 import * as Vue from 'vue'
 import { renderToString as ssrRender } from 'vue/server-renderer'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
+import { AsnConfirm, AsnMoreMenu } from '../ui/lib/ui-kit.mjs'
+import { createAccountsUi } from '../ui/lib/claude-accounts.mjs'
 import { LOGIN_LOST_TEXT, SUB_LAPSED_TEXT, rosterView } from '../ui/lib/account-roster.mjs'
-import { ACCOUNT_STATUS_CLASS, ACCOUNT_STATUS_TEXT, QUOTA_OUT_TEXT, accountCardKey, accountStatusOf, deviceAccountLines } from '../ui/lib/device-account-lines.mjs'
+import { ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, ACCOUNT_STATUS_CLASS, ACCOUNT_STATUS_TEXT, QUOTA_OUT_TEXT, accountCardKey, accountStatusOf, deviceAccountLines } from '../ui/lib/device-account-lines.mjs'
 import { withIdentity } from './helpers/with-identity.mjs'
 
 const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
@@ -56,15 +58,17 @@ test('#2111 #1879 有問題時那行下面多一句說明（文字同帳號頁�
   for (const email of [LOST, OUT, LAPSED]) assert.ok(!/<button[^>]*>(切換|續訂|重新登入)</.test(lineOf(html, email)), '帳號行裡只有「點進帳號頁」那顆按鈕，沒有別的鈕')
 })
 
-test('#2111 #1879 設備頁沒有額度條、切換、「⋯」、刪除（只在帳號頁）', async () => {
+test('#2111 #1879 設備頁沒有額度條、切換、獨立的刪除鈕；別台沒有「⋯」', async () => {
   const html = await render({ catKey: 'devices', dev: 'W', devView: 'acct' })
-  for (const bad of ['dv-bars', 'dv-track', 'progressbar', 'asn-more', '更多動作', 'dv-devbtn', '剩 ']) assert.ok(!html.includes(bad), `設備頁不該有 ${bad}`)
+  for (const bad of ['dv-bars', 'dv-track', 'progressbar', 'asn-more', '更多動作', 'dv-devbtn', '剩 '])  // 別台設備沒有「⋯」（只有這台自己的帳號庫能刪）
+   assert.ok(!html.includes(bad), `設備頁不該有 ${bad}`)
   assert.ok(!/<button[^>]*>(切換|刪除|確認刪除)<\/button>/.test(html))
   const self = await render({ catKey: 'devices', dev: 'H', devView: 'acct' }, st({
     devices: [withIdentity({ key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [{ key: 'claude', label: 'Claude', accounts: [acctOf(OK, { current: true })], switchable: true, switchHint: '' }] })],
     accounts: { list: [{ email: OK, plan: 'pro', current: true, saved: true, quota: { known: true, text: '剩 80%', bars: [{ key: 'five_hour', label: '5 小時', pct: 80, low: false, reset: '', expired: false }] } }], current: { email: OK, saved: true } },
   }))
-  for (const bad of ['dv-bars', 'dv-track', 'asn-more', 'dv-devbtn']) assert.ok(!self.includes(bad), `這台的設備頁也不該有 ${bad}`)
+  for (const bad of ['dv-bars', 'dv-track', 'dv-devbtn']) assert.ok(!self.includes(bad), `這台的設備頁也不該有 ${bad}`)
+  assert.equal([...self.matchAll(/class="asn-more"/g)].length, 1, '這台每個帳號行只有一個「⋯」（只放刪除）')
   assert.ok(!/<button[^>]*>(切換|刪除|確認刪除)<\/button>/.test(self))
   assert.ok(self.includes('data-aline="claude|' + OK + '"'), '本機帳號庫的帳號也是一行')
 })
@@ -126,4 +130,81 @@ test('#2111 #1879 手機：點一行＝退回列表、切到「帳號」分頁�
   const kit = read('ui/kit.css')
   for (const sel of ['.asn-tag-ok', '.asn-tag-warn', '.asn-aline-go', '[data-flash="1"]']) assert.ok(kit.includes(sel), `kit.css 要有 ${sel}`)
   assert.ok(!/#[0-9a-f]{3,6}\b/i.test(kit.slice(kit.indexOf('.asn-tag-ok,')).replace(/\/\*[\s\S]*?\*\//g, '')), '顏色只用 kit 變數')
+})
+
+// ---- 刪除收進每行的「⋯」（領隊定案）：選單一項「刪除」（危險色）、在那一行原位確認、取消不刪 ----
+const selfState = () => st({
+  devices: [withIdentity({ key: 'H', label: '家用機', self: true, kind: '電腦', online: true, onlineText: '在線', reportedText: '', empty: '', vendors: [{ key: 'claude', label: 'Claude', accounts: [acctOf(OK, { current: true }), acctOf('b@example.test')], switchable: true, switchHint: '' }] })],
+  accounts: { list: [{ email: OK, plan: 'pro', current: true, saved: true }, { email: 'b@example.test', plan: 'pro', current: false, saved: true }], current: { email: OK, saved: true }, busy: false, confirmDel: '', msg: '' },
+})
+const selfSetup = (calls) => {
+  globalThis.Vue = Vue
+  const props = Vue.reactive({ title: '', st: selfState(), catKey: 'devices', meAv: '', dev: 'H', devView: 'acct', askRemove: false, removedOpen: false })
+  return SettingsPanel.setup(props, { emit: (...a) => calls.push(a) })
+}
+
+test('#2111 #1879 刪除：這台每個帳號行有「⋯」，選單只有一項「刪除」且是危險色；行上沒有直接擺的刪除鈕', async () => {
+  const html = await render({ catKey: 'devices', dev: 'H', devView: 'acct' }, selfState())
+  assert.equal([...html.matchAll(/class="asn-more"/g)].length, 2, '兩個帳號各一個「⋯」')
+  assert.ok(!/<button[^>]*>(刪除|確認刪除|從這台移除)<\/button>/.test(html), '行上沒有直接擺刪除鈕')
+  assert.deepEqual(ACCOUNT_REMOVE_MENU, [{ key: 'remove', label: '刪除', danger: true }])
+  // 選單打開後的項目：同一份 items 交給共用的 asn-more-menu，危險項畫成 danger
+  globalThis.Vue = Vue
+  const open = Vue.createSSRApp({ render: () => Vue.h(AsnMoreMenu, { items: ACCOUNT_REMOVE_MENU }) })
+  const menu = await renderToString(open)
+  assert.ok(!menu.includes('asn-more-item'), '預設是收起的')
+  assert.match(read('ui/lib/settings-panel.mjs'), /<asn-more-menu v-if="canRemove\(v\)" :items="ACCOUNT_REMOVE_MENU"/)
+  assert.match(read('ui/lib/ui-kit.mjs'), /\{ danger: it\.danger \}/, '危險項畫成 danger 樣式')
+})
+
+test('#2111 #1879 刪除：「⋯」在帳號行本體的按鈕外面，點它不會跳帳號頁；別台設備沒有「⋯」', async () => {
+  const html = await render({ catKey: 'devices', dev: 'H', devView: 'acct' }, selfState())
+  const li = lineOf(html, OK)
+  const go = /<button[^>]*asn-aline-go[\s\S]*?<\/button>/.exec(li)[0]
+  assert.ok(!go.includes('asn-more'), '「⋯」不在跳頁的那顆按鈕裡')
+  assert.ok(li.includes('class="asn-more"'))
+  const other = await render({ catKey: 'devices', dev: 'W', devView: 'acct' })
+  assert.ok(!other.includes('asn-more'), '只有這台自己的帳號庫能刪，別台沒有')
+  const calls = []
+  const r = selfSetup(calls)
+  r.pickLine(r.linesOf(r.curVendors.value[0])[0], 'remove')
+  assert.deepEqual(calls, [], '選「刪除」只是在那一行問，不跳頁、不刪')
+})
+
+test('#2111 #1879 刪除：原位確認寫明「只會從這台移除」，動作鈕「從這台移除」是危險色、取消在左；確認才呼叫刪除命令，取消不呼叫', async () => {
+  const calls = []
+  const r = selfSetup(calls)
+  const line = r.linesOf(r.curVendors.value[0])[1]
+  r.pickLine(line, 'remove')
+  assert.equal(r.askDel.value, 'b@example.test', '問的是那一行')
+  assert.ok(ACCOUNT_REMOVE_TEXT.confirm('b@example.test').includes('只會從這台移除') && ACCOUNT_REMOVE_TEXT.confirm('b@example.test').includes('b@example.test'))
+  assert.ok(ACCOUNT_REMOVE_TEXT.confirm('b@example.test').includes('其他設備不受影響'))
+  const html = await renderToString(Vue.createSSRApp({ render: () => Vue.h(AsnConfirm, { danger: true, text: ACCOUNT_REMOVE_TEXT.confirm('b@example.test'), yes: ACCOUNT_REMOVE_TEXT.yes, no: ACCOUNT_REMOVE_TEXT.no }) }))
+  assert.ok(html.includes('只會從這台移除'))
+  assert.ok(html.indexOf('>取消<') < html.indexOf('>從這台移除<'), '取消在左')
+  assert.match(html, /st-danger[^>]*>從這台移除</, '動作鈕是危險色')
+  assert.match(read('ui/lib/settings-panel.mjs'), /<asn-confirm danger v-if="canRemove\(v\) && askDel === l\.account" :text="ACCOUNT_REMOVE_TEXT\.confirm\(l\.account\)"/)
+  // 取消：模板的 @no 只清掉本地狀態，不送任何命令
+  assert.match(read('ui/lib/settings-panel.mjs'), /@no="askDel = ''"/)
+  assert.deepEqual(calls, [])
+  r.removeYes(line)
+  assert.deepEqual(calls, [['act', 'acct-remove', { email: 'b@example.test', confirmed: true }]], '確認才送刪除命令')
+  assert.equal(r.askDel.value, '')
+})
+
+test('#2111 #1879 刪除：帳號庫收到 confirmed 就直接刪（不再要按兩次），結果寫在原位的狀態行；舊的按兩次流程不變', async () => {
+  const calls = []
+  const mkUi = () => {
+    const f = { calls: [] }
+    const invoke = async (name, args) => { f.calls.push([name, args]); if (name === 'claude_account_delete') return null; if (name === 'claude_accounts_list') return []; return null }
+    return { f, ui: createAccountsUi({ invoke, reactive: Vue.reactive, sleep: async () => {} }) }
+  }
+  const { f, ui } = mkUi()
+  await ui.remove('a@x.test', true)
+  assert.deepEqual(f.calls[0], ['claude_account_delete', { email: 'a@x.test' }])
+  assert.match(ui.state.msg, /已刪除 a@x\.test/)
+  const m2 = mkUi()
+  await m2.ui.remove('a@x.test')
+  assert.equal(m2.f.calls.length, 0, '沒帶 confirmed 仍然先要確認')
+  assert.ok(read('ui/list.js').includes("accounts.remove(String(value.email ?? ''), value.confirmed === true)"))
 })

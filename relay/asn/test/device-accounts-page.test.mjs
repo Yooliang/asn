@@ -184,8 +184,8 @@ test('遠端設備下拉選單已被頁籤取代：元件與樞紐不再有 acct
   assert.ok(!SETTING_OPS.includes('acct-remote-node') && !SETTING_OPS.includes('acct-remote-switch'))
   assert.ok(!read('ui/lib/settings-panel.mjs').includes('acct-remote'))
   assert.ok(!read('ui/list.js').includes("case 'acct-remote"))
-  for (const op of ['acct-allow-switch', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
-  for (const op of ['acct-switch', 'acct-remove', 'grok-switch', 'device-switch']) assert.ok(!SETTING_OPS.includes(op), `#2111 ⑦：設備頁不再送 ${op}（切換只在帳號頁，刪除由 #2150 放進帳號卡「⋯」）`)
+  for (const op of ['acct-allow-switch', 'acct-remove', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['acct-switch', 'grok-switch', 'device-switch']) assert.ok(!SETTING_OPS.includes(op), `#2111 ⑦：設備頁不再送 ${op}（切換只在帳號頁）；刪除（acct-remove）收進帳號行的「⋯」`)
 })
 
 test('守門：不引入 Tailwind 或外部網址；樣式只用既有的 CSS 變數；畫面不顯示節點代號', () => {

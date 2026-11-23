@@ -25,7 +25,7 @@ import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { switchRowKey, switchResultOf } from './switch-result.mjs'
-import { accountCardKey, accountStatusOf, deviceAccountLines } from './device-account-lines.mjs'
+import { ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, accountCardKey, accountStatusOf, deviceAccountLines } from './device-account-lines.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, ROSTER_TEXT, SUB_LAPSED_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
@@ -41,7 +41,7 @@ import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFet
 export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close', 'quota-cancel',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'open-accounts', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
+  'voice-save', 'voice-install', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'open-accounts', 'acct-remove', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
@@ -173,6 +173,11 @@ export const SettingsPanel = {
     // 設備頁的帳號列（#2111 ⑦）：一個帳號一行＋狀態標籤；狀態判斷用帳號頁同一套（device-account-lines.mjs）。
     // 本機的 Claude 以本機帳號庫的清單為準（跟以前一樣），其餘用該設備回報的帳號。點一行＝交給樞紐開帳號頁，開好之後捲到、框起那張卡
     const linesOf = v => deviceAccountLines(curDev.value, v, props.st.myAccounts, curDev.value?.self && v.key === 'claude' ? (props.st.accounts?.list ?? []).map(a => a.email) : null)
+    // 帳號行「⋯」的刪除：只有這台自己的 Claude 帳號庫能刪；選了「刪除」就在那一行原位問，確認才送 acct-remove（帶 confirmed），取消什麼都不送
+    const canRemove = v => curDev.value?.self === true && v.key === 'claude'
+    const askDel = ref('')
+    const pickLine = (l, key) => { if (key === 'remove') askDel.value = l.account }
+    const removeYes = l => { askDel.value = ''; act('acct-remove', { email: l.account, confirmed: true }) }
     const focusKey = ref('')
     let focusWant = '', focusTimer = null
     const tryFocus = (tries = 0) => {
@@ -222,7 +227,7 @@ export const SettingsPanel = {
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
-      linesOf, goAccount, focusKey, accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
+      linesOf, goAccount, canRemove, askDel, pickLine, removeYes, ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, focusKey, accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -577,10 +582,14 @@ export const SettingsPanel = {
                     <template v-if="curDev.self && v.key === 'claude'">
                       <ul class="dv-accts asn-alines" v-if="linesOf(v).length" :aria-label="'這台的 ' + v.label + ' 帳號'">
                         <li class="asn-aline" v-for="l in linesOf(v)" :key="l.key" :data-aline="l.key" :data-status="l.status">
-                          <asn-button class="asn-aline-go" :aria-label="'查看帳號 ' + l.account + '，' + l.tag" @click="goAccount(l)">
-                            <span class="asn-aline-mail">{{ l.account }}</span>
-                            <span class="asn-aline-side"><span :class="l.tagClass">{{ l.tag }}</span><span class="asn-aline-chev" aria-hidden="true">›</span></span>
-                          </asn-button>
+                          <div class="asn-aline-row">
+                            <asn-button class="asn-aline-go" :aria-label="'查看帳號 ' + l.account + '，' + l.tag" @click="goAccount(l)">
+                              <span class="asn-aline-mail">{{ l.account }}</span>
+                              <span class="asn-aline-side"><span :class="l.tagClass">{{ l.tag }}</span><span class="asn-aline-chev" aria-hidden="true">›</span></span>
+                            </asn-button>
+                            <asn-more-menu v-if="canRemove(v)" :items="ACCOUNT_REMOVE_MENU" :disabled="st.accounts.busy" :label="'更多動作 ' + l.account" @pick="pickLine(l, $event)"></asn-more-menu>
+                          </div>
+                          <asn-confirm danger v-if="canRemove(v) && askDel === l.account" :text="ACCOUNT_REMOVE_TEXT.confirm(l.account)" :yes="ACCOUNT_REMOVE_TEXT.yes" :no="ACCOUNT_REMOVE_TEXT.no" :busy="st.accounts.busy" @yes="removeYes(l)" @no="askDel = ''"></asn-confirm>
                           <small :class="['asn-aline-note', l.status === 'lapsed' ? 'asn-note-fail' : 'asn-note-warn']" role="status" v-if="l.note">{{ l.note }}</small>
                         </li>
                       </ul>

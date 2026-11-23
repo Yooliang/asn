@@ -273,8 +273,8 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
       return run(async () => { const r = await api.switchTo(email); return `已切換到 ${r.email}。${SWITCH_NOTICE}` })
     },
     // 刪除要按兩次（第一次變成「確認刪除」），避免誤觸
-    remove: email => {
-      if (s.confirmDel !== email) { s.confirmDel = email; s.msg = ''; return }
+    remove: (email, confirmed = false) => {
+      if (!confirmed && s.confirmDel !== email) { s.confirmDel = email; s.msg = ''; return }
       return run(async () => { await api.remove(email); return `已刪除 ${email}。` })
     },
   }

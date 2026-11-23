@@ -35,8 +35,26 @@ export const dalineProbeSource = ({ daline }) => `(async () => {
   const key = line.getAttribute('data-aline');
   if (line.getAttribute('data-status') !== 'normal' || !line.textContent.includes('正常')) return { ok: false, why: '沒有問題的帳號應標「正常」：' + line.textContent.trim() };
   const page = document.querySelector(mobile ? '.m-dv' : '.dv-set');
-  if ([...page.querySelectorAll('.dv-bars, .m-dv-bars, .asn-more-btn, .dv-devbtn, .m-dv-dev, .m-dv-sw')].some(vis)) return { ok: false, why: '設備頁出現了額度條、切換或「⋯」' };
-  if ([...line.querySelectorAll('button')].length !== 1) return { ok: false, why: '帳號行應只有一顆（整行）按鈕' };
+  if ([...page.querySelectorAll('.dv-bars, .m-dv-bars, .dv-devbtn, .m-dv-dev, .m-dv-sw')].some(vis)) return { ok: false, why: '設備頁出現了額度條、切換或「⋯」' };
+  if (line.querySelectorAll('.asn-aline-go').length !== 1) return { ok: false, why: '帳號行應只有一顆（整行）跳頁按鈕' };
+  if (!mobile) {
+    // 這台自己的帳號行右邊有「⋯」：選單只有一項「刪除」；點「⋯」不跳頁，點「刪除」在那一行原位確認，取消不刪
+    const more = line.querySelector('.asn-more-btn');
+    if (!more) return { ok: false, why: '這台的帳號行右邊沒有「⋯」' };
+    await tap(more);
+    const items = [...line.querySelectorAll('.asn-more-item')].filter(vis);
+    if (items.length !== 1 || items[0].textContent.trim() !== '刪除' || !items[0].classList.contains('danger')) return { ok: false, why: '「⋯」選單應只有一項危險色的「刪除」：' + items.map(i => i.textContent.trim()).join('、') };
+    if (document.querySelector('[data-acct-card]')) return { ok: false, why: '點「⋯」不該跳到帳號頁' };
+    await tap(items[0]);
+    const box = await wait(() => [...document.querySelectorAll('.asn-confirm')].find(vis));
+    if (!box || !box.textContent.includes('只會從這台移除') || !line.contains(box)) return { ok: false, why: '沒有在那一行原位出現「只會從這台移除」的確認' };
+    const yesBtn = [...box.querySelectorAll('button')].find(b => b.textContent.trim() === '從這台移除');
+    const noBtn = [...box.querySelectorAll('button')].find(b => b.textContent.trim() === '取消');
+    if (!yesBtn || !noBtn) return { ok: false, why: '確認缺「從這台移除」或「取消」' };
+    await tap(noBtn);
+    if ([...document.querySelectorAll('.asn-confirm')].some(vis)) return { ok: false, why: '按取消後確認沒有收起' };
+    if ((globalThis.__smokeCalls || []).some(c => /claude_account_delete/.test(c[0]))) return { ok: false, why: '取消卻刪除了' };
+  }
   await tap(line.querySelector('button'));
   const card = await wait(() => [...document.querySelectorAll('[data-acct-card]')].find(c => vis(c) && c.getAttribute('data-acct-card') === key));
   if (!card) return { ok: false, why: '點了帳號行，沒有跳到帳號頁那張卡（' + key + '）' };
