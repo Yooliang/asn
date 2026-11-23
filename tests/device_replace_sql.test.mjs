@@ -393,3 +393,107 @@ test('實跑：回復檔可套用，set_node_platform 回到上一版本體，�
   assert.equal((await b.q("select count(*)::int n from pg_proc where proname in ('asn_device_replace', 'asn_device_replace_candidates', 'asn_device_replace_dismiss', 'new_device_check', 'device_replace_old_nodes')"))[0].n, 0)
   assert.equal((await b.q("select count(*)::int n from information_schema.columns where table_name = 'nodes' and column_name in ('replace_asked_at', 'new_device_noticed_at')"))[0].n, 0)
 })
+
+test('靜態：set_node_platform 熱路徑不加鎖：第一次讀舊值沒有 for update，只有舊值為空時才加鎖重讀；原有的 update 行逐字不變', () => {
+  const body = grab(MIG, 'create or replace function public.asn_relay_set_node_platform(')
+  const first = body.indexOf('select platform into v_prev')
+  const guard = body.indexOf('if v_found and v_prev is null then')
+  assert.ok(first >= 0 && guard > first)
+  assert.doesNotMatch(body.slice(first, guard), /for update/, '第一次讀取不得加鎖')
+  const second = body.indexOf('select platform into v_prev', first + 10)
+  assert.ok(second > guard)
+  assert.match(body.slice(second, body.indexOf(';', second)), /for update/, '舊值為空時才加鎖重讀')
+  const origUpdate = grab(PLAT, 'create or replace function public.asn_relay_set_node_platform(').split('\n').find(l => l.includes('update relay.nodes set platform'))
+  assert.ok(origUpdate && body.includes(origUpdate), '原本那行 update 逐字不變')
+})
+
+test('實跑：平台已有值（同值、不同值）時完全不呼叫 new_device_check；空變有值才呼叫一次（替身計數）', { skip }, async () => {
+  const b = await boot()
+  await b.db.exec(`create table relay.calls(node text);
+    create or replace function relay.new_device_check(p_node text) returns jsonb language plpgsql as $$ begin insert into relay.calls values (p_node); return '{}'::jsonb; end $$`)
+  await b.node('has', { name: '已有平台', platform: 'windows', seen: 0 })
+  await b.setPlat('has', 'windows')
+  await b.setPlat('has', 'linux')
+  await b.setPlat('has', 'linux')
+  assert.equal((await b.q('select count(*)::int n from relay.calls'))[0].n, 0, '已有值：同值、不同值都不呼叫')
+  assert.equal((await b.row('has')).platform, 'linux', '不同值照寫')
+  await b.node('fresh', { name: '新', platform: null, seen: 0 })
+  await b.setPlat('fresh', 'windows')
+  await b.setPlat('fresh', 'windows')
+  assert.deepEqual(await b.q('select node from relay.calls'), [{ node: 'fresh' }])
+})
+
+test('實跑：web_denied_notice 擋新設備通知，原本六種照擋，其他種類不擋；回復後新設備不再被擋', { skip }, async () => {
+  const denied = async (bb, k) => (await bb.q('select relay.web_denied_notice($1) r', [k]))[0].r
+  const b = await boot()
+  for (const k of ['notice:new_device', 'notice:login', 'notice:waiting', 'notice:device_key', 'notice:view', 'notice:waiting_login', 'notice:forward_stuck']) assert.equal(await denied(b, k), true, k)
+  for (const k of ['notice:quota', 'new_device', 'notice:x']) assert.equal(await denied(b, k), false, k)
+  const down = await boot({ down: true })
+  assert.equal(await denied(down, 'notice:new_device'), false, '回復後回到上一版')
+  assert.equal(await denied(down, 'notice:forward_stuck'), true)
+  assert.ok(DOWN.includes(grab(rd('migrations/20261123130000_waiting_notice_forward_stuck.sql'), 'create or replace function relay.web_denied_notice(')), '回復檔逐字等於上一版')
+})
+
+test('實跑：新設備本人已改過名（name_by_owner）時取代不覆蓋它的名字，但仍移除舊的、標已回答、寫事件（renamed=false）', { skip }, async () => {
+  const b = await boot()
+  await b.node('nw', { name: '我自己取的名字', seen: 0, byOwner: true })
+  await b.node('o1', { name: '舊的辦公室電腦', seen: 48, age: 500 })
+  assert.deepEqual(await b.replace(U1, 'nw', 'nw', 'o1'), { ok: true, already: false, renamed: false })
+  const nw = await b.row('nw')
+  assert.deepEqual([nw.name, nw.name_by_owner], ['我自己取的名字', true])
+  assert.ok(nw.replace_asked_at)
+  assert.deepEqual((await b.removed()).removed, ['o1'])
+  assert.deepEqual(await b.q('select event, detail from relay.account_events'), [{ event: 'device_replaced', detail: { old: 'o1', new: 'nw', by: 'nw', renamed: false } }])
+})
+
+test('實跑：回答過後只有真的有「新取代舊」的紀錄才回 already；先不取代、手動移除舊的、再按取代回 answered 而不是假成功', { skip }, async () => {
+  const b = await boot()
+  await basic(b)
+  await b.dismiss(U1, 'nw', 'nw')
+  await b.db.exec(`update relay.tenants set features = '{"device_prefs":{"order":[],"shown":[],"removed":["o1"],"rev":1,"at":1}}' where id = '${T1}'`)
+  assert.equal((await b.replace(U1, 'nw', 'nw', 'o1')).error, 'answered')
+  // 紀錄是別的舊設備、或別的新設備的：也不算
+  await b.db.exec(`insert into relay.account_events (user_id, event, node, detail) values ('${U1}', 'device_replaced', 'nw', '{"old":"zz"}'), ('${U1}', 'device_replaced', 'other', '{"old":"o1"}')`)
+  assert.equal((await b.replace(U1, 'nw', 'nw', 'o1')).error, 'answered')
+  await b.db.exec(`insert into relay.account_events (user_id, event, node, detail) values ('${U1}', 'device_replaced', 'nw', '{"old":"o1"}')`)
+  assert.deepEqual(await b.replace(U1, 'nw', 'nw', 'o1'), { ok: true, already: true })
+})
+
+test('實跑：從未上線的舊節點（last_seen_at 與 presence 都沒有）不列候選、不通知、取代回 not_candidate', { skip }, async () => {
+  const b = await boot()
+  await b.node('nw', { name: '新電腦', seen: 0, age: 1 })
+  await b.db.exec(`insert into relay.nodes (id, name, owner_user, tenant_id, platform, last_seen_at, created_at) values ('ghost', '註冊後沒裝成功', '${U1}', '${T1}', 'windows', null, now() - interval '500 hours')`)
+  assert.deepEqual((await b.cands(U1, 'nw')).cards, [])
+  assert.equal((await b.check('nw')).notify, 'skipped')
+  assert.deepEqual(await b.notices(), [])
+  assert.equal((await b.replace(U1, 'nw', 'nw', 'ghost')).error, 'not_candidate')
+  await b.node('o1', { name: '真的舊的', seen: 48, age: 500 })
+  assert.deepEqual((await b.cands(U1, 'nw')).cards[0].candidates.map(c => c.node), ['o1'], '有上線紀錄的照列')
+})
+
+test('整合（真實 asn_relay_send_notice）：新設備第一次回報平台真的寫進 notice:new_device 通知，限流窗不超過真實函式上限；網頁節點那列被刪', { skip }, async () => {
+  const b = await boot()
+  await b.db.exec(`alter table relay.nodes add column bell_topic text;
+    create table relay.messages(id uuid primary key default gen_random_uuid(), fanout_id uuid, from_node text, to_node text, kind text, body text, created_at timestamptz not null default now());
+    create function public.asn_person_alias(p uuid) returns text language sql as $$ select 'owner' $$;
+    create function public.asn_relay_send(p_node text, p_agent text, p_alias text, p_a text, p_body text, p_b text, p_c boolean, p_d text, p_e boolean) returns jsonb language plpgsql as $$
+      declare v uuid := gen_random_uuid(); t record; first boolean := true;
+      begin
+        for t in select id from relay.nodes where owner_user = (select owner_user from relay.nodes where id = p_node) and status = 'active' order by id loop
+          insert into relay.messages (id, fanout_id, from_node, to_node, body) values (case when first then v else gen_random_uuid() end, case when first then null else v end, p_node, t.id, p_body);
+          first := false;
+        end loop;
+        return jsonb_build_object('id', v);
+      end $$;`)
+  await b.db.exec(grab(rd('migrations/20261119200000_web_sessions.sql'), 'create or replace function public.asn_relay_send_notice('))
+  await b.node('o1', { name: '舊的辦公室電腦', seen: 48, age: 500 })
+  await b.node('webx', { name: '瀏覽器', kind: 'web', platform: null, seen: 0, age: 500 })
+  await b.node('fresh', { name: '新電腦', platform: null, seen: 0, age: 0.05 })
+  assert.equal((await b.setPlat('fresh', 'windows')).ok, true)
+  const m = await b.q('select from_node, to_node, kind, body from relay.messages order by to_node')
+  assert.ok(m.length >= 1 && m.every(r => r.kind === 'notice:new_device' && r.from_node === 'fresh'), JSON.stringify(m))
+  assert.ok(m.some(r => r.to_node === 'fresh' && r.body.startsWith('有一台新的電腦連上了：新電腦。')), '寫給本人設備的內文')
+  assert.ok(!m.some(r => r.to_node === 'webx'), '網頁節點那列被刪')
+  assert.ok((await b.row('fresh')).new_device_noticed_at, '真的寄成功才寫旗標')
+  assert.equal((await b.q("select (relay.device_replace_new_within() <= interval '7 days' and relay.device_replace_new_within() > interval '0') ok"))[0].ok, true, '視窗在真實函式上限（7 天）內')
+})

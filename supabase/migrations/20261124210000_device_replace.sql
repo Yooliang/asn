@@ -8,7 +8,8 @@
 --        new_device_noticed_at  已經寄過「新設備」通知的時間。「只通知一次」的做法選這個獨立欄位：
 --                               new_device_check 在節點上加鎖後先看它、寄成功（notify = sent）才寫入，所以同一台只會通知一次；
 --                               不拿 replace_asked_at 當旗標，因為那個欄位的意思是「使用者回答了」，通知寄出不等於使用者回答。
---                               寄失敗（回傳 failed）不寫旗標，之後若又有機會被呼叫還能再試；限流另由 asn_relay_send_notice 以節點鍵再擋一道。
+--                               只在第一次回報平台那次判斷；寄送失敗不寫旗標，但平台已非空後不會再自動重試；設定頁的候選清單仍會列出卡片。
+--                               限流另由 asn_relay_send_notice 以節點鍵再擋一道。
 --   2. relay.device_replace_new_within()：新設備建立多久之內才問，現值 7 天，單一定義，要調只改這裡。
 --   3. relay.device_replace_old_nodes(p_new)：給一台新節點，回傳它的候選舊設備（名稱用 relay.device_label、最後在線時間取
 --      greatest(nodes.last_seen_at, asn_presence 最新回報)）。候選規則只在這一處：同帳號同租戶、同平台、啟用中、不是網頁、
@@ -18,12 +19,13 @@
 --      內文用 relay.device_label，不出代號、不出 email。
 --   5. public.asn_relay_set_node_platform：只在 platform 由空變成有值的那一次呼叫 new_device_check；呼叫包在自己的 begin … exception 區塊，
 --      通知出任何狀況都不會讓回報平台失敗（原有的行逐字不變）；出狀況時除了 warning，還寫一筆 account_events（new_device_check_failed）留底。
+--   5b. relay.web_denied_notice 多加 notice:new_device（網頁節點不能做取代，通知對網頁無用）。
 --   6. 三個給 Edge 用的函式（security definer、search_path 空、只授權 service_role）：
 --        asn_device_replace_candidates(p_user, p_actor)         待回答的新設備與其候選舊設備
 --        asn_device_replace(p_user, p_actor, p_new, p_old)      取代：單一交易，只能動本人名下的兩台
 --        asn_device_replace_dismiss(p_user, p_actor, p_new)     不取代：只寫 replace_asked_at
 -- 取代做的事：舊設備鍵加進 tenants.features->'device_prefs'.removed（rev 取「現在毫秒」與「現有 rev + 1」較大者，at 同步更新；
---   清單已滿 200 個時回 removed_full，不偷丟舊的）；新設備的名字換成舊設備的名字（舊設備沒有合格的名字就不搬）並標成本人取的；
+--   清單已滿 200 個時回 removed_full，不偷丟舊的）；新設備的名字換成舊設備的名字（舊設備沒有合格的名字、或新設備本人已改過名就不搬）並標成本人取的；
 --   舊設備保留原名；寫一筆 account_events（device_replaced）。重複呼叫不會再寫紀錄。
 -- 部署順序：本 migration → relay（device_replace 三個動作）→ 用戶端（設定頁「設備處理」）。提早上不會壞：
 --   舊用戶端不認得新通知種類時照一般通知顯示；沒有人呼叫新函式；set_node_platform 的回傳形狀不變。
@@ -64,9 +66,11 @@ as $function$
      and coalesce(o.kind, '') <> 'web'
      and not coalesce(t.features -> 'device_prefs' -> 'removed' ? o.id, false)
      -- 目前不在線（在線門檻只有 relay.online_window() 一處定義）
-     and coalesce(s.last_seen, '-infinity'::timestamptz) < now() - relay.online_window()
+     -- 從未上線（last_seen 為空）的舊節點不列：多半是註冊後沒裝成功的殘留，不是「換掉的舊設備」，不可 coalesce 成 -infinity 納入
+     and s.last_seen is not null
+     and s.last_seen < now() - relay.online_window()
      -- 而且最後上線早於新設備建立：重灌時舊設備通常剛離線；剛睡著的電腦只要醒來一次（last_seen 晚於新設備建立）就自動排除
-     and coalesce(s.last_seen, '-infinity'::timestamptz) < n.created_at
+     and s.last_seen < n.created_at
    order by s.last_seen desc nulls last, o.id;
 $function$;
 
@@ -112,6 +116,14 @@ revoke all on function relay.device_replace_new_within() from public, anon, auth
 revoke all on function relay.device_replace_old_nodes(text) from public, anon, authenticated;
 revoke all on function relay.new_device_check(text) from public, anon, authenticated;
 
+-- 網頁不收的通知種類：比上一版（20261123130000_waiting_notice_forward_stuck.sql）多加新設備（網頁節點不能做取代，通知對網頁無用）
+create or replace function relay.web_denied_notice(p_kind text)
+ returns boolean language sql immutable set search_path to ''
+as $function$
+  select p_kind in ('notice:login', 'notice:waiting', 'notice:device_key', 'notice:view', 'notice:waiting_login', 'notice:forward_stuck', 'notice:new_device');
+$function$;
+revoke all on function relay.web_denied_notice(text) from public, anon, authenticated;
+
 -- 節點自己回報平台（上一版：20261102170000_node_platform_phone.sql；只多加「空變有值那次呼叫 new_device_check」，原有的行逐字不變）
 create or replace function public.asn_relay_set_node_platform(p_node text, p_platform text)
  returns jsonb
@@ -127,8 +139,13 @@ begin
   if p_platform is null or p_platform not in ('linux', 'windows', 'macos', 'android', 'ios') then
     return jsonb_build_object('error', 'bad_request');
   end if;
-  select platform into v_prev from relay.nodes where id = p_node and status = 'active' for update;
+  -- 熱路徑（平台已有值）不加鎖：先不加鎖讀舊值；只有舊值為空時才加鎖重讀確認，避免兩個同時回報的請求都當成「第一次」
+  select platform into v_prev from relay.nodes where id = p_node and status = 'active';
   v_found := found;
+  if v_found and v_prev is null then
+    select platform into v_prev from relay.nodes where id = p_node and status = 'active' for update;
+    v_found := found;
+  end if;
   update relay.nodes set platform = p_platform where id = p_node and status = 'active' and platform is distinct from p_platform;
   -- 只有「第一次回報平台」（空變有值）才問一次；通知出任何狀況都不能讓回報平台失敗
   if v_found and v_prev is null then
@@ -236,8 +253,10 @@ begin
     v_removed := '[]'::jsonb;
   end if;
   -- 已經回答過：舊的已在移除清單＝剛剛已經取代過了（重複呼叫），回 ok；否則是回答過「不取代」
+  -- 要真的有一筆「這個新設備取代這個舊設備」的紀錄才算重複呼叫；先按不取代、再手動移除舊的、再按取代不能回假成功
   if n.replace_asked_at is not null then
-    if v_removed ? p_old then
+    if exists (select 1 from relay.account_events e
+                where e.user_id = p_user and e.event = 'device_replaced' and e.node = p_new and e.detail ->> 'old' = p_old) then
       return jsonb_build_object('ok', true, 'already', true);
     end if;
     return jsonb_build_object('error', 'answered');
@@ -263,7 +282,8 @@ begin
   update relay.tenants set features = coalesce(features, '{}'::jsonb) || jsonb_build_object('device_prefs', v_new) where id = v_t.id;
 
   -- 2. 新設備接手舊設備的名字（舊的沒有合格的名字就不搬）；舊設備保留原名
-  if v_old_name <> '' and relay.device_name_ok(v_old_name) then
+  -- 新設備本人已經改過名（name_by_owner）就不覆蓋；只標回答過、移除舊的、寫事件（detail.renamed = false）
+  if v_old_name <> '' and relay.device_name_ok(v_old_name) and not n.name_by_owner then
     update relay.nodes set name = v_old_name, name_by_owner = true, replace_asked_at = now() where id = p_new;
     update relay.room_members set display_name = v_old_name where member = p_new and display_name = v_prev_name;
     v_renamed := true;

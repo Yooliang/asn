@@ -19,6 +19,14 @@ $function$;
 revoke all on function public.asn_relay_set_node_platform(text, text) from public, anon, authenticated;
 grant execute on function public.asn_relay_set_node_platform(text, text) to service_role;
 
+-- relay.web_denied_notice 換回上一版（20261123130000_waiting_notice_forward_stuck.sql，逐字）
+create or replace function relay.web_denied_notice(p_kind text)
+ returns boolean language sql immutable set search_path to ''
+as $function$
+  select p_kind in ('notice:login', 'notice:waiting', 'notice:device_key', 'notice:view', 'notice:waiting_login', 'notice:forward_stuck');
+$function$;
+revoke all on function relay.web_denied_notice(text) from public, anon, authenticated;
+
 drop function if exists public.asn_device_replace_dismiss(uuid, text, text);
 drop function if exists public.asn_device_replace(uuid, text, text, text);
 drop function if exists public.asn_device_replace_candidates(uuid, text);
