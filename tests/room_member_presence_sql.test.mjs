@@ -4,7 +4,7 @@
 //    - 視窗成員：名單回報 3 分鐘內＝online true，更久＝false；engine 取名單的 engine，沒有時取節點 kind
 //    - 真人沒有 online／engine 欄位；既有欄位（label、display_label…）不變
 //    - 外部帳號的讀者也拿得到 AI 的 online／engine，但輸出裡掃不到別人的節點代號與設備名
-// 3. 還原驗證：把 3 分鐘改成 3 小時、或讓真人也帶欄位，對應測試要變紅。
+// 3. 還原驗證：把在線門檻（relay.online_window()）改成 3 小時、或讓真人也帶欄位，對應測試要變紅。
 import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -13,7 +13,8 @@ import crypto from 'node:crypto'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261025000000_room_member_presence.sql'
-const MIG2 = '20261026300000_room_member_pi_provider.sql'   // 之後又重定義同一支函式（多帶 provider）：還原驗證要兩份都改，否則後面那份會蓋掉改動
+const MIG2 = '20261026300000_room_member_pi_provider.sql'   // 之後又重定義同一支函式（多帶 provider）
+const MIG3 = '20261123120000_online_window.sql'            // 再後面又重定義一次（在線門檻改引用 relay.online_window()）：改函式文字的還原驗證三份都要改，否則後面那份會蓋掉改動
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
@@ -39,7 +40,7 @@ const T2 = 'bbbbbbbb-0000-0000-0000-000000000002'
 const P1 = 'phn7a1', W1 = 'wrk9b2', Q2 = 'qqq3c4'
 const A = `${W1}~財務`, B = `${W1}~管理`
 
-async function boot({ mutate } = {}) {
+async function boot({ mutate, onlineWindow } = {}) {
   const db = track(new PGlite())
   await db.exec(`create role service_role; create role anon; create role authenticated; create schema auth;
     create table auth.users(id uuid primary key, email text, created_at timestamptz default now());
@@ -55,6 +56,8 @@ async function boot({ mutate } = {}) {
     if (mutate && mutate[f]) sql = mutate[f](sql)
     await db.exec(sql)
   }
+  // 在線門檻只有 relay.online_window() 一處定義（#2161）：想改門檻就覆寫它，不要去改函式文字（改文字會悄悄失效）
+  if (onlineWindow) await db.exec(`create or replace function relay.online_window() returns interval language sql immutable set search_path to '' as $$ select interval '${onlineWindow}' $$`)
   await db.exec(`
     insert into auth.users(id, email) values ('${U1}', 'a@x.y'), ('${U2}', 'b@x.y');
     insert into relay.tenants(id, owner_user, owner_name) values ('${T1}', '${U1}', '擁有者'), ('${T2}', '${U2}', '財務員');
@@ -130,13 +133,12 @@ test('實跑：外部帳號的讀者拿得到 AI 的 online／engine，但看不
 })
 
 test('還原驗證：3 分鐘改 3 小時、或讓真人也帶欄位，對應測試要變紅', { skip }, async () => {
-  const slowTime = s => s.replace("r.seen_at > now() - interval '3 minutes'", "r.seen_at > now() - interval '3 hours'")
-  const slow = await boot({ mutate: { [MIG]: slowTime, [MIG2]: slowTime } })
+  const slow = await boot({ onlineWindow: '3 hours' })
   const r1 = await room2(slow)
   await slow.exec(`update relay.roster set seen_at = now() - interval '10 minutes' where node = '${W1}' and name = '管理'`)
   assert.equal(byName((await membersAs(slow, { node: P1, room: r1, signed: U1 })).members, '管理').online, true, '門檻放寬後離線的變在線＝測試有效')
   const humFields = s => s.replace("when p_member like '~%' then '{}'::jsonb", "when p_member like '~%' then jsonb_build_object('online', true)")
-  const hum = await boot({ mutate: { [MIG]: humFields, [MIG2]: humFields } })
+  const hum = await boot({ mutate: { [MIG]: humFields, [MIG2]: humFields, [MIG3]: humFields } })
   const r2 = await room2(hum)
   const human = (await membersAs(hum, { node: P1, room: r2, signed: U1 })).members.find(m => m.member_kind === 'human')
   assert.ok('online' in human, '真人也帶欄位＝守門測試有效')
