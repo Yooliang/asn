@@ -26,6 +26,43 @@ fn is_uuid(s: &str) -> bool {
     s.len() == 36 && b.iter().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { *c == b'-' } else { c.is_ascii_hexdigit() })
 }
 
+/// 橋接指令的信件外框：開頭那一行與結尾那一行
+pub const FRAME_OPEN: &str = "<<<MAIL";
+pub const FRAME_CLOSE: &str = "MAIL>>>";
+
+/// 拿掉模型誤帶進來的信件外框：開頭單獨一行的 `<<<MAIL`、結尾單獨一行的 `MAIL>>>`（各至多一個），
+/// 前後的空白一併去掉。只拿外框，內文一個字都不動。判斷編號、比對抬頭、SENT 比對之前都先過這一關
+pub fn strip_frame(text: &str) -> &str {
+    let mut t = text.trim();
+    if let Some((h, rest)) = t.split_once('\n') {
+        if h.trim() == FRAME_OPEN {
+            t = rest.trim_start();
+        }
+    }
+    if let Some((rest, l)) = t.rsplit_once('\n') {
+        if l.trim() == FRAME_CLOSE {
+            t = rest.trim_end();
+        }
+    }
+    t
+}
+
+/// 第一行行尾沒有轉交編號時，退回給模型的理由：直接說錯在哪。raw＝模型送來的原始 message
+pub fn no_id_reason(raw: &str) -> String {
+    let stripped = strip_frame(raw);
+    let head = first_line(stripped);
+    if head.starts_with(FRAME_OPEN) {
+        return "第一行不可以是 <<<MAIL，請去掉外框：message 只放 <<<MAIL 與 MAIL>>> 這兩行中間的內容，第一行是 [RELAY 來信]…".into();
+    }
+    if head.starts_with("[BRIDGE-FORWARD") {
+        return "第一行是橋接指令的標頭 [BRIDGE-FORWARD…]，不是信件內容：message 只放 <<<MAIL 與 MAIL>>> 這兩行中間的內容，第一行是 [RELAY 來信]…".into();
+    }
+    if stripped.len() != raw.trim().len() {
+        return "已去掉 <<<MAIL／MAIL>>> 外框，但剩下的第一行行尾仍沒有轉交編號（id=…）：message 要是外框中間的內容，第一行 [RELAY 來信]… 一字不改".into();
+    }
+    "訊息第一行行尾沒有轉交編號（id=…）：message 要是 <<<MAIL 與 MAIL>>> 這兩行中間的內容，第一行是 [RELAY 來信]…，一字不改，不要在前面加任何字".into()
+}
+
 /// 第一行（不含換行符，也去掉行尾的 \r 與空白）
 pub fn first_line(text: &str) -> &str {
     text.split('\n').next().unwrap_or("").trim_end()
@@ -255,28 +292,32 @@ pub fn check(input: &Value, inflight: Option<&HashMap<String, InflightItem>>) ->
         return (Verdict::Allow, "not SendMessage".into());
     }
     let Some(call) = input.get("tool_input").and_then(parse_send_call) else {
-        return (Verdict::Deny("這次轉交缺少收件人或內容，請依橋接指令重送".into()), "deny: missing to/message".into());
+        return (Verdict::Deny("這次 SendMessage 缺少 to（收件人）或 message（內容）欄位：to 填橋接指令的 to=<session名>，message 填 <<<MAIL 與 MAIL>>> 中間的內容".into()), "deny: missing to/message".into());
     };
     if call.inconsistent {
-        return (Verdict::Deny("收件人欄位前後不一致，請依橋接指令重送".into()), "deny: inconsistent recipient".into());
+        return (Verdict::Deny("recipient 與 to 兩個收件人欄位不一致：請只填 to，值是橋接指令的 to=<session名>".into()), "deny: inconsistent recipient".into());
     }
-    let Some(id) = trailing_id(first_line(&call.message)) else {
-        return (Verdict::Deny("訊息第一行行尾沒有轉交編號，請依橋接指令原樣轉交".into()), "deny: no trailing id".into());
+    // 模型可能把信件外框（<<<MAIL／MAIL>>>）也帶進 message：先拿掉再判斷；放行時 Replace 本來就換成橋存的原文
+    let msg = strip_frame(&call.message);
+    let Some(id) = trailing_id(first_line(msg)) else {
+        let why = no_id_reason(&call.message);
+        let tag = if first_line(msg).starts_with(FRAME_OPEN) { "framed" } else { "no trailing id" };
+        return (Verdict::Deny(why), format!("deny: {tag}"));
     };
     // 讀不到 inflight 檔（暫時讀不到、檔案壞了）和「編號不在進行中」是兩回事：理由與 log 分開寫
     let Some(flight) = inflight else {
-        return (Verdict::Deny("轉交紀錄暫時讀不到，請稍後重送".into()), format!("deny id={id}: inflight file unreadable"));
+        return (Verdict::Deny("轉交紀錄檔暫時讀不到（橋正在更新紀錄），請等幾秒後再送一次同一封".into()), format!("deny id={id}: inflight file unreadable"));
     };
     let Some(item) = flight.get(&id) else {
-        return (Verdict::Deny("這個轉交編號不在進行中，請不要轉交".into()), format!("deny id={id}: not in flight"));
+        return (Verdict::Deny("這個轉交編號不在進行中（這封可能已轉交完成或已作廢），請不要再轉交它".into()), format!("deny id={id}: not in flight"));
     };
     if call.to != item.to {
-        return (Verdict::Deny(format!("收件人應為 {}", item.to)), format!("deny id={id}: expected={} actual={}", item.to, call.to));
+        return (Verdict::Deny(format!("收件人應為 {}，你填的是 {}：請把 to 改成 {} 再送", item.to, call.to, item.to)), format!("deny id={id}: expected={} actual={}", item.to, call.to));
     }
-    // 核對抬頭：第一行要和橋送出的完全一樣（只容許行尾空白與 \r 的差異）；第二行以後不比
+    // 核對抬頭：第一行要和橋送出的完全一樣（只容許前後空白與 \r 的差異）；第二行以後不比
     if let Some(h) = &item.head {
-        if &head_hash(first_line(&call.message)) != h {
-            return (Verdict::Deny("訊息抬頭與橋送出的不一致，請原樣轉交".into()), format!("deny id={id}: head mismatch"));
+        if &head_hash(first_line(msg)) != h {
+            return (Verdict::Deny("訊息抬頭（第一行）和橋接指令裡的信件第一行不一樣（多了、少了或改了字）：message 的第一行要逐字等於外框中間的第一行 [RELAY 來信]…".into()), format!("deny id={id}: head mismatch"));
         }
     }
     if item.body.is_some() {
@@ -434,7 +475,7 @@ mod tests {
         let flight_b: HashMap<String, InflightItem> = [(B.to_string(), item("T-乙", None))].into_iter().collect();
         assert!(matches!(check(&call("T-乙", &ok), Some(&flight_b)).0, Verdict::Deny(_)), "from 裡的 id 不算");
         // 行尾編號對、收件人錯：照樣擋
-        assert_eq!(check(&call("T-丙", &ok), Some(&f)).0, Verdict::Deny("收件人應為 T-甲".into()));
+        assert!(matches!(check(&call("T-丙", &ok), Some(&f)).0, Verdict::Deny(ref r) if r.starts_with("收件人應為 T-甲")));
     }
 
     #[test]
@@ -465,7 +506,7 @@ mod tests {
         let f = flight();
         assert_eq!(check(&call("T-甲", &m), Some(&f)).0, Verdict::Allow);
         let (v, log) = check(&call("T-乙", &m), Some(&f));
-        assert_eq!(v, Verdict::Deny("收件人應為 T-甲".into()));
+        assert!(matches!(v, Verdict::Deny(ref r) if r.starts_with("收件人應為 T-甲，你填的是 T-乙")));
         assert!(log.contains("expected=T-甲") && !log.contains("內文"));
         assert!(matches!(check(&call("T-甲", &format!("x id={B}")), Some(&f)).0, Verdict::Deny(_)), "編號不在進行中");
         assert!(matches!(check(&call("T-甲", &m), None).0, Verdict::Deny(_)), "沒有 inflight 檔");
@@ -510,7 +551,7 @@ mod tests {
         let (v, log) = check(&call("T-甲", &format!("{}\n內文", head.replace("#3", "#4"))), Some(&f));
         assert!(matches!(v, Verdict::Deny(ref r) if r.contains("抬頭")), "{v:?}");
         assert!(log.contains("head mismatch"));
-        assert!(matches!(check(&call("T-甲", &format!(" {head}\n內文")), Some(&f)).0, Verdict::Deny(_)), "行首空白算差異");
+        assert_eq!(check(&call("T-甲", &format!(" {head}\n內文")), Some(&f)).0, Verdict::Allow, "前後空白一併去掉");
         // 舊格式的檔（沒有指紋）：不比對
         assert_eq!(check(&call("T-甲", "x id=00000000-0000-0000-0000-00000000000a"), Some(&flight())).0, Verdict::Allow);
     }
@@ -519,10 +560,10 @@ mod tests {
     fn hook_讀不到_inflight_檔_理由與編號不在進行中分開寫() {
         let m = format!("x id={A}");
         let (v, log) = check(&call("T-甲", &m), None);
-        assert_eq!(v, Verdict::Deny("轉交紀錄暫時讀不到，請稍後重送".into()));
+        assert!(matches!(v, Verdict::Deny(ref r) if r.contains("暫時讀不到")));
         assert!(log.contains("inflight file unreadable"));
         let (v, log) = check(&call("T-甲", &format!("x id={B}")), Some(&flight()));
-        assert_eq!(v, Verdict::Deny("這個轉交編號不在進行中，請不要轉交".into()));
+        assert!(matches!(v, Verdict::Deny(ref r) if r.contains("不在進行中")));
         assert!(log.contains("not in flight"));
     }
 
@@ -533,7 +574,7 @@ mod tests {
         let input = call("T-甲", &m).to_string();
         // 一直讀不到：擋，理由是暫時讀不到
         let (out, log) = run_hook(d.path(), &input);
-        assert!(out.unwrap().contains("轉交紀錄暫時讀不到") && log.contains("unreadable"));
+        assert!(out.unwrap().contains("暫時讀不到") && log.contains("unreadable"));
         // 不是轉交就不用等
         let other = json!({ "tool_name": "Bash", "tool_input": {} }).to_string();
         let (out, _) = run_hook_with(d.path(), &other, || panic!("不是 SendMessage 不用再讀一次"));
@@ -554,6 +595,87 @@ mod tests {
     }
 
     #[test]
+    fn 外框_只拿開頭結尾的外框與前後空白_內文一字不動() {
+        assert_eq!(strip_frame("<<<MAIL\n甲\n乙\nMAIL>>>"), "甲\n乙");
+        assert_eq!(strip_frame("  \n<<<MAIL  \r\n甲\r\n乙\r\nMAIL>>>  \n"), "甲\r\n乙");
+        assert_eq!(strip_frame("<<<MAIL\n甲"), "甲", "只有開頭外框");
+        assert_eq!(strip_frame("甲\nMAIL>>>"), "甲", "只有結尾外框");
+        assert_eq!(strip_frame("沒有外框"), "沒有外框");
+        // 內文裡的字樣不是外框：中間那行與不是單獨一行的都不動
+        assert_eq!(strip_frame("甲\nMAIL>>>\n乙"), "甲\nMAIL>>>\n乙");
+        assert_eq!(strip_frame("<<<MAIL 後面還有字\n甲"), "<<<MAIL 後面還有字\n甲");
+        // 只拿一層
+        assert_eq!(strip_frame("<<<MAIL\n<<<MAIL\n甲\nMAIL>>>\nMAIL>>>"), "<<<MAIL\n甲\nMAIL>>>");
+    }
+
+    #[test]
+    fn 外框_模型把外框帶進訊息_閘門放行_換成橋存的原文() {
+        let head = format!("[RELAY 來信] trust=member from=W/甲 to=T-甲 id={A} engine=claude reply=yes");
+        let original = format!("{head}\n假資料內文\n第二行");
+        let d = tempfile::tempdir().unwrap();
+        let bodies = HashMap::from([(A.to_string(), body_hash(&original))]);
+        write_inflight_with(d.path(), &[(A.to_string(), "T-甲".to_string(), Some(head_hash(&head)))], &bodies).unwrap();
+        write_body(d.path(), A, &original).unwrap();
+        for framed in [format!("<<<MAIL\n{original}\nMAIL>>>"), format!("<<<MAIL\n{head}\n（模型改過的內文）"), format!("\n<<<MAIL\r\n{original}\r\nMAIL>>>\n\n")] {
+            let (out, log) = run_hook(d.path(), &call("T-甲", &framed).to_string());
+            let v: Value = serde_json::from_str(&out.unwrap_or_else(|| panic!("應該換上原文：{log}"))).unwrap();
+            assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow", "{log}");
+            // 放出去的是橋存的原文：沒有外框、也不是模型送來的字
+            assert_eq!(v["hookSpecificOutput"]["updatedInput"]["message"], original.as_str());
+        }
+        // 沒帶外框的老樣子照舊
+        let (out, _) = run_hook(d.path(), &call("T-甲", &original).to_string());
+        assert_eq!(serde_json::from_str::<Value>(&out.unwrap()).unwrap()["hookSpecificOutput"]["updatedInput"]["message"], original.as_str());
+    }
+
+    #[test]
+    fn 外框_不換原文的模式_帶外框也放行_抬頭照樣比對() {
+        let head = format!("[群組 專案群] trust=member from=W/政策 #3 id={A}");
+        let f: HashMap<String, InflightItem> = [(A.to_string(), item("T-甲", Some(&head)))].into_iter().collect();
+        assert_eq!(check(&call("T-甲", &format!("<<<MAIL\n{head}\n內文\nMAIL>>>")), Some(&f)).0, Verdict::Allow);
+        // 外框拿掉之後抬頭不一樣：照擋
+        let (v, _) = check(&call("T-甲", &format!("<<<MAIL\n{}\n內文\nMAIL>>>", head.replace("#3", "#4"))), Some(&f));
+        assert!(matches!(v, Verdict::Deny(ref r) if r.contains("抬頭")), "{v:?}");
+    }
+
+    #[test]
+    fn 外框_拿掉之後第一行還是沒有編號_照樣擋_理由講清楚錯在哪_不再說原樣() {
+        let f = flight();
+        let deny = |m: &str| match check(&call("T-甲", m), Some(&f)) {
+            (Verdict::Deny(r), log) => (r, log),
+            other => panic!("應該擋：{other:?}"),
+        };
+        // 拿掉外框後第一行沒有編號：理由說明已去掉外框、行尾仍沒編號
+        let (r, log) = deny("<<<MAIL\n[RELAY 來信] 沒有編號\n內文\nMAIL>>>");
+        assert!(r.contains("已去掉") && r.contains("沒有轉交編號"), "{r}");
+        assert!(log.contains("no trailing id"));
+        // 外框疊兩層：第一行還是 <<<MAIL，直接說不可以
+        let (r, log) = deny(&format!("<<<MAIL\n<<<MAIL\n[RELAY 來信] id={A}\nMAIL>>>\nMAIL>>>"));
+        assert!(r.contains("第一行不可以是 <<<MAIL，請去掉外框"), "{r}");
+        assert!(log.contains("framed"));
+        // 把橋接指令標頭也帶進來
+        let (r, _) = deny(&format!("[BRIDGE-FORWARD nonce=n id={A} to=T-甲]\n<<<MAIL\n[RELAY 來信] id={A}\nMAIL>>>"));
+        assert!(r.contains("[BRIDGE-FORWARD") && r.contains("中間的內容"), "{r}");
+        // 沒有外框也沒有編號
+        let (r, _) = deny("隨便寫的訊息");
+        assert!(r.contains("行尾沒有轉交編號") && r.contains("第一行是 [RELAY 來信]"), "{r}");
+        // 所有退回理由都不能叫模型「原樣重試」
+        for why in [r, deny("<<<MAIL\n甲\nMAIL>>>").0, deny("<<<MAIL\n<<<MAIL\n甲").0] {
+            assert!(!why.contains("原樣"), "{why}");
+        }
+        // 其他原因也各自具體
+        let m = format!("x id={A}");
+        for why in [
+            match check(&call("T-乙", &m), Some(&f)).0 { Verdict::Deny(r) => r, v => panic!("{v:?}") },
+            match check(&call("T-甲", &m), None).0 { Verdict::Deny(r) => r, v => panic!("{v:?}") },
+            match check(&call("T-甲", &format!("x id={B}")), Some(&f)).0 { Verdict::Deny(r) => r, v => panic!("{v:?}") },
+            match check(&json!({"tool_name": "SendMessage", "tool_input": {"to": "T-甲"}}), Some(&f)).0 { Verdict::Deny(r) => r, v => panic!("{v:?}") },
+        ] {
+            assert!(!why.contains("原樣") && !why.contains("依橋接指令"), "{why}");
+        }
+    }
+
+    #[test]
     fn inflight_檔_寫了讀得回來_run_hook_deny_輸出符合官方格式() {
         let d = tempfile::tempdir().unwrap();
         write_inflight(d.path(), &[(A.to_string(), "T-甲".to_string(), None)]).unwrap();
@@ -563,7 +685,7 @@ mod tests {
         let v: Value = serde_json::from_str(&out.unwrap()).unwrap();
         assert_eq!(v["hookSpecificOutput"]["hookEventName"], "PreToolUse");
         assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny");
-        assert_eq!(v["hookSpecificOutput"]["permissionDecisionReason"], "收件人應為 T-甲");
+        assert_eq!(v["hookSpecificOutput"]["permissionDecisionReason"], "收件人應為 T-甲，你填的是 T-乙：請把 to 改成 T-甲 再送");
         assert_eq!(run_hook(d.path(), &call("T-甲", &m).to_string()).0, None, "放行＝什麼都不印");
         assert_eq!(run_hook(d.path(), "不是 json").0, None);
         append_gate_log(d.path(), 5, "allow id=x");
