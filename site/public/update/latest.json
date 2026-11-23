@@ -1,15 +1,11 @@
 {
-  "version": "0.2.78",
-  "notes": "- 改善：設備頁的帳號改成一行加狀態標籤，點了就跳到帳號頁那張卡。（#2111、#1879、#2153）\n- 改善：拿掉「夥伴停在一個選單」提醒框。（#1799、#2157）",
-  "pub_date": "2026-11-23T04:51:22.220Z",
+  "version": "0.2.79",
+  "notes": "- 修正：收發室偶爾整輪卡住、信轉不進視窗的問題。（#2146、#2155）",
+  "pub_date": "2026-11-23T05:41:43.958Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnduNlVXa3pvL24xbUJ6Y3dqVkxqYW5hNkRCY1JaeHIzYndWNk84SmlKd3pWN0VheTFhZWsyYlpxb0hpaWNZREExSTN4dVhBcjVyQ0ZLTjB0eWNldHdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDA5NDgxCWZpbGU6QVNOXzAuMi43OF94NjQtc2V0dXAuZXhlCnNqczdBWU53eDk4c25KQW8vSklnQnRZZUNWNTlxcXVzU2hiOWJ4L3U4K25PY3JnN01HWFBrejhHUXZ0Sm9yZHFkTlJHRlRjV2plSGMzQW5GRm1iOEN3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.78_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdvOWJaKzdKODl5Snc5Ti9SYWxIOVVCb0VpbXdSWUd6MFhTbVBidWV5UXQwUW5LVW1JY0paQmd4QkNWY2pPL01sT0hYZHdzYUllZFFFdmUrT1JtK3dZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDEwMDY1CWZpbGU6QVNOXzAuMi43OF9hbWQ2NC5BcHBJbWFnZQozUmZ0aFBFRXZpK2ZvK2ptR3l1Yk9VaCtNWmV6MjVqWEplWnlMN241VUs3ZlNBRER2NXhJenQydGFuWjN4RlFUcVpleGMydkpQU1VRSDVqZjBPNVJDQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.78_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlpMy8xcVNsa3ZGaFVzM0tVTW5ZWnk3bFFyUGtFMEFGQnBqVll3dERyUHNaemNjTGlPbVBVbUVqRWJWcFF1eGhRTFEvaXR2a3ljTU5HZjBFbVNuTEFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDEyNTAzCWZpbGU6QVNOXzAuMi43OV94NjQtc2V0dXAuZXhlCmtHd2pDRU5FMmQ4MXFQMmVpbkNncURuaWdHbHF5ZjNscTVjWVdrbkhxVTIyd3dmdUtha2Yxc21FcW15QWNIQm1NVkxyc25TeEExNlFVSUZUOHpNMkFRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.79_x64-setup.exe"
     }
   }
 }
