@@ -8,6 +8,7 @@ import { GuideDoc } from './lib/guide-doc.mjs'
 import { SettingsPanel } from './lib/settings-panel.mjs'
 import { PANEL_KINDS, panelItem, panelTitle } from './lib/panels.mjs'
 import { selfAvatarSrc } from './lib/avatar.mjs'
+import { plainMessage } from './lib/plain-errors.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
 import { RESIZE_DIRS, ctl, emit, initFrame, listen, resizeFrom } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
@@ -42,7 +43,7 @@ const app = createApp({
     })
     const pickFile = async file => {
       localMsg.value = ''
-      try { emit('asn:set', { op: 'avatar-upload', value: await avatarFromFile(file) }) } catch (e) { localMsg.value = e.message }
+      try { emit('asn:set', { op: 'avatar-upload', value: await avatarFromFile(file) }) } catch (e) { localMsg.value = plainMessage(e) }
     }
     return {
       kind, key, title, itemTitle: computed(() => item.value?.title ?? ''), guide: computed(() => (kind === 'guide' ? item.value : null)),

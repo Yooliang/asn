@@ -2,6 +2,7 @@
 // 電腦才有的功能（內建收發室、開 Claude 視窗、密碼小幫手、用量、系統匣、多視窗）手機沒有，這個檔案也不叫它們。
 // 打開 App 才收信：前景時照電腦版的節奏輪詢，加上門鈴一響就拉；回到前景時立刻拉一次（推播留給第二期）。
 import { AsnCore } from './lib/core.mjs'
+import { plainMessage } from './lib/plain-errors.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { LineIcon, itemIcon, isDangerItem, tabIcon } from './lib/line-icons.mjs'
 import { FpMark, phoneFpMark } from './lib/fp-mark.mjs'
@@ -213,7 +214,7 @@ async function startUpdate() {
     const r = await mobileUpdateApi.download(updArgs())   // Rust 端下載並驗 sha256，不符就拒絕
     const out = installOutcome(bridge ? bridge.installApk(r.path) : 'unsupported')
     upd.phase = 'available'; upd.hint = out.hint
-  } catch (e) { Object.assign(upd, withFailure(upd, e.message)) }
+  } catch (e) { Object.assign(upd, withFailure(upd, plainMessage(e))) }
 }
 let core = null
 const roomsHook = {}   // 群組更新的入口（畫面掛上後才有；門鈴與回到前景用）
@@ -1651,7 +1652,7 @@ const app = createApp({
       if (!c.ok) { nameErr.value = c.error; nameDraft.value = myName.value; setTimeout(() => { nameErr.value = '' }, 5000); return }
       if (c.name === myName.value) { nameDraft.value = myName.value; nameErr.value = ''; return }
       try { ownerName.value = await authApi.setAccountName(c.name); nameErr.value = ''; nameDraft.value = c.name }
-      catch (e) { nameDraft.value = myName.value; nameErr.value = e.message; setTimeout(() => { nameErr.value = '' }, 5000) }
+      catch (e) { nameDraft.value = myName.value; nameErr.value = plainMessage(e); setTimeout(() => { nameErr.value = '' }, 5000) }
     }
     // 群組裡 AI 之間互相叫醒的上限（帳號層設定，預設 20）：改了存後台；不合格或失敗就還原並提示
     const wakeDraft = ref('20'), wakeErr = ref('')
@@ -1659,7 +1660,7 @@ const app = createApp({
       const c = checkAiWakeLimit(wakeDraft.value)
       if (!c.ok) { wakeErr.value = c.error; setTimeout(() => { wakeErr.value = '' }, 5000); void loadWake(); return }
       try { wakeDraft.value = String(await authApi.setAiWakeLimit(c.value)); wakeErr.value = '' }
-      catch (e) { wakeErr.value = e.message; setTimeout(() => { wakeErr.value = '' }, 5000); void loadWake() }
+      catch (e) { wakeErr.value = plainMessage(e); setTimeout(() => { wakeErr.value = '' }, 5000); void loadWake() }
     }
     const loadWake = () => authApi.getAiWakeLimit().then(n => { wakeDraft.value = String(n) }).catch(() => {})
     void loadWake()
@@ -1680,7 +1681,7 @@ const app = createApp({
     async function doLogout() {
       if (loggingOut.value) return
       loggingOut.value = true
-      try { await push?.logout(); await authApi.logout(); location.reload() } catch (e) { loggingOut.value = false; say(e.message) }
+      try { await push?.logout(); await authApi.logout(); location.reload() } catch (e) { loggingOut.value = false; say(plainMessage(e)) }
     }
 
     return {
