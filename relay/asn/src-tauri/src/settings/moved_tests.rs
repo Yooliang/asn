@@ -36,6 +36,23 @@ impl Drop for FailQuarantine {
     }
 }
 
+/// 讓寫入一律失敗（io 錯誤，系統原文是「拒絕存取 (os error 5)」）
+struct FailWrite;
+impl FailWrite {
+    fn on() -> Self {
+        FAIL_WRITE.with(|f| f.set(true));
+        FailWrite
+    }
+}
+impl Drop for FailWrite {
+    fn drop(&mut self) {
+        FAIL_WRITE.with(|f| f.set(false));
+    }
+}
+fn plain(e: &str) -> bool {
+    !e.contains("os error") && !e.contains("拒絕存取") && !e.is_empty()
+}
+
 /// 壞檔與非物件（新讀法會把它們搬成 .bad-，讀出來的值仍與舊讀法相同＝預設）
 const NON_OBJECT: &[&str] = &["", "{壞掉", "null", "5", "[1,2]", "\"字串\"", "true"];
 
@@ -140,6 +157,17 @@ fn 視窗名稱_讀不到原檔時改名回錯_原檔不動_不改現用名() {
     assert_eq!(r.window_name(), "H-ASN", "存檔失敗，視窗名不變");
     assert_eq!(std::fs::read(d.path().join("settings.json")).unwrap(), before, "原檔不准被覆蓋");
     assert_eq!(crate::read_settings_name(d.path()), None, "讀取端照舊回沒有，不 panic");
+}
+
+#[test]
+fn 視窗名稱_寫入失敗回給畫面的字串不含系統原文() {
+    let d = tempfile::tempdir().unwrap();
+    let w = tempfile::tempdir().unwrap();
+    let r = crate::relay::Relay::new("http://127.0.0.1:1/relay".into(), "k".into(), "H".into(), "H-ASN".into());
+    let _g = FailWrite::on();
+    let e = crate::names::rename(&r, d.path(), w.path(), "新名", 1).unwrap_err();
+    assert!(plain(&e), "不該把系統原文送到畫面：{e}");
+    assert_eq!(r.window_name(), "H-ASN");
 }
 
 // ================================================================ 其餘四組（電腦版才有）
@@ -274,6 +302,42 @@ mod desktop {
         assert!(set_allow_switch(d.path(), true).is_err());
         assert_eq!(std::fs::read(d.path().join("acct-prefs.json")).unwrap(), before);
         assert_eq!(new_triple(d.path()), (false, true, true), "讀取端照舊回預設");
+    }
+
+    #[test]
+    fn 帳號偏好_帶_bom_的合法_json_讀得出值_不產生_bad() {
+        let d = tempfile::tempdir().unwrap();
+        put(d.path(), "acct-prefs.json", "\u{feff}{\"remote_trust_own\":true,\"remote_trust_signed\":false,\"remote_allow_switch\":false}");
+        assert_eq!(new_triple(d.path()), (true, false, false));
+        assert!(files_with(d.path(), ".bad-").is_empty());
+    }
+
+    #[test]
+    fn 寫入失敗回給畫面的字串不含系統原文() {
+        let d = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _g = FailWrite::on();
+        let errs = [
+            set_trust_own(d.path(), true),
+            set_trust_signed(d.path(), false),
+            set_allow_switch(d.path(), true),
+            crate::agent_setup::switch::set_remote_allowed(d.path(), true),
+            crate::quota_readers::set_source(home.path(), "grok", true),
+        ];
+        for e in errs {
+            let e = e.unwrap_err();
+            assert!(plain(&e), "不該把系統原文送到畫面：{e}");
+        }
+    }
+
+    #[test]
+    fn 安裝偏好與pi自動安裝_帶_bom_的合法_json_讀得出值_不產生_bad() {
+        let d = tempfile::tempdir().unwrap();
+        put(d.path(), "agent-setup-prefs.json", "\u{feff}{\"remote_allow_install\":true}");
+        assert!(crate::agent_setup::switch::remote_allowed(d.path()));
+        put(d.path(), "pi-auto.json", "\u{feff}{\"auto\":false,\"done\":true}");
+        assert_eq!(crate::launch::pi_setup::auto_read(d.path()), (false, true));
+        assert!(files_with(d.path(), ".bad-").is_empty());
     }
 
     // ---------------------------------------------------------------- agent-setup-prefs.json

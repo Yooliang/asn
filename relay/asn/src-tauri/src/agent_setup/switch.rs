@@ -3,10 +3,10 @@
 //! 注意：設定檔是一般檔案，夥伴 AI 也寫得到——所以這個開關**不是**唯一防線，主要的防線是後台要求遠端請求一定帶本人簽章。
 
 use crate::settings::AgentSetupPrefsDoc;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[cfg(test)]
-pub fn prefs_path(data_dir: &Path) -> PathBuf {
+pub fn prefs_path(data_dir: &Path) -> std::path::PathBuf {
     data_dir.join("agent-setup-prefs.json")
 }
 

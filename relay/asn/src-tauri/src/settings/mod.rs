@@ -64,6 +64,12 @@ pub fn init_for_test(tmp: &Path) {
     TEST_ROOTS.with(|t| *t.borrow_mut() = Some(r));
 }
 
+/// 測試用：讓這個執行緒的寫入一律失敗（模擬磁碟錯誤），用來驗證回給畫面的錯誤不含系統原文
+#[cfg(test)]
+thread_local! {
+    pub static FAIL_WRITE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// 目前的三個根；還沒 `init` 就是 None（讀取會回預設、寫入會回錯，不 panic）
 pub fn roots() -> Option<&'static Roots> {
     #[cfg(test)]
@@ -248,7 +254,16 @@ fn write_locked<T: Doc>(slot: &mut Slot, path: &Path, cur: &Cached<T>, v: &T) ->
         migrate::backup_old(path, cur.file_version).map_err(|_| SettingsError("設定檔寫入前的備份存不下來，這次沒有存，稍後再試".into()))?;
     }
     let text = migrate::render(v, version)?;
-    atomic::write(path, text.as_bytes(), atomic::SETTINGS)?;
+    // 給畫面的錯誤固定成白話句，系統原文（例如「拒絕存取 (os error 5)」）只寫進 log（不含檔案內容）
+    #[cfg(test)]
+    let written = if FAIL_WRITE.with(|f| f.get()) { Err(std::io::Error::from_raw_os_error(5)) } else { atomic::write(path, text.as_bytes(), atomic::SETTINGS) };
+    #[cfg(not(test))]
+    let written = atomic::write(path, text.as_bytes(), atomic::SETTINGS);
+    written.map_err(|e| {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        elog!("[ASN] 設定檔 {name} 寫入失敗（{e}），這次沒有存");
+        SettingsError("設定檔寫入失敗，這次沒有存，稍後再試".into())
+    })?;
     let mut value = v.clone();
     value.normalize();
     slot.stamp = stamp_of(path);
