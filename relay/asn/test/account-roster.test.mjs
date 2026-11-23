@@ -543,6 +543,6 @@ test('沒有 5 小時窗的帳號（#1736）：舊 5 小時不列、不拖累標
 
 test('「只回報每週額度」說明（#1736）：電腦設備卡與「我的帳號」、手機兩處樣板都有畫', () => {
   const panel = read('ui/lib/settings-panel.mjs'), html = read('ui/m.html')
-  assert.equal(panel.match(/v-if="a\.quota\.fiveNote">\{\{ a\.quota\.fiveNote \}\}/g)?.length, 2, '電腦：設備卡一處、我的帳號一處')
-  assert.equal(html.match(/v-if="a\.quota\.fiveNote">\{\{ a\.quota\.fiveNote \}\}/g)?.length, 2, '手機：兩處帳號卡')
+  assert.equal(panel.match(/v-if="a\.quota\.fiveNote">\{\{ a\.quota\.fiveNote \}\}/g)?.length, 1, '電腦：只剩帳號頁一處（#2111 ⑦：設備頁的帳號改成一行，不畫額度）')
+  assert.equal(html.match(/v-if="a\.quota\.fiveNote">\{\{ a\.quota\.fiveNote \}\}/g)?.length, 1, '手機：只剩帳號頁一處（#2111 ⑦）')
 })

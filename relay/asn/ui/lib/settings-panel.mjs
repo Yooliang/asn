@@ -25,6 +25,7 @@ import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
 import { switchRowKey, switchResultOf } from './switch-result.mjs'
+import { ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, accountCardKey, accountStatusOf, deviceAccountLines } from './device-account-lines.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, ROSTER_TEXT, SUB_LAPSED_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, usedOnText } from './account-roster.mjs'
 import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
@@ -40,7 +41,7 @@ import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFet
 export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close', 'quota-cancel',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-switch', 'acct-remove', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'grok-switch', 'device-switch', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
+  'voice-save', 'voice-install', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'open-accounts', 'acct-remove', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
   'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
@@ -169,6 +170,27 @@ export const SettingsPanel = {
       if (!switchTargets(vendor, a).some(x => x.node === b.node)) return
       act('row-switch', { vendor, email: a.account, node: b.node, label: b.label, self: b.self })
     }
+    // 設備頁的帳號列（#2111 ⑦）：一個帳號一行＋狀態標籤；狀態判斷用帳號頁同一套（device-account-lines.mjs）。
+    // 本機的 Claude 以本機帳號庫的清單為準（跟以前一樣），其餘用該設備回報的帳號。點一行＝交給樞紐開帳號頁，開好之後捲到、框起那張卡
+    const linesOf = v => deviceAccountLines(curDev.value, v, props.st.myAccounts, curDev.value?.self && v.key === 'claude' ? (props.st.accounts?.list ?? []).map(a => a.email) : null)
+    // 帳號行「⋯」的刪除：只有這台自己的 Claude 帳號庫能刪；選了「刪除」就在那一行原位問，確認才送 acct-remove（帶 confirmed），取消什麼都不送
+    const canRemove = v => curDev.value?.self === true && v.key === 'claude'
+    const askDel = ref('')
+    const pickLine = (l, key) => { if (key === 'remove') askDel.value = l.account }
+    const removeYes = l => { askDel.value = ''; act('acct-remove', { email: l.account, confirmed: true }) }
+    const focusKey = ref('')
+    let focusWant = '', focusTimer = null
+    const tryFocus = (tries = 0) => {
+      const el = typeof document === 'undefined' ? null : [...document.querySelectorAll('[data-acct-card]')].find(e => e.getAttribute('data-acct-card') === focusWant)
+      if (el) {
+        el.scrollIntoView?.({ block: 'center' })
+        focusKey.value = focusWant; focusWant = ''
+        clearTimeout(focusTimer); focusTimer = setTimeout(() => { focusKey.value = '' }, 2500)
+      } else if (focusWant && tries < 20) setTimeout(() => tryFocus(tries + 1), 100)   // 帳號列表還在讀：等它畫出來再捲
+      else focusWant = ''
+    }
+    const goAccount = line => { focusWant = line.key; act('open-accounts'); if (cat.value === 'accounts') tryFocus() }
+    watch(cat, c => { if (c === 'accounts' && focusWant) tryFocus() })
     // MiniMax 的輸入欄只留在元件裡：送出就清空，不進設定頁快照
     // 設備改名：名字只有一個（存在後台）；輸入只在這個元件裡，存的時候才交給樞紐
     const renaming = ref(false), renameText = ref('')
@@ -205,7 +227,7 @@ export const SettingsPanel = {
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
-      QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
+      linesOf, goAccount, canRemove, askDel, pickLine, removeYes, ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, focusKey, accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
@@ -278,7 +300,7 @@ export const SettingsPanel = {
                 <!-- 沒開額度上報：指到「設備 → 這台」的開關（讀額度的開關不放在帳號頁） -->
                 <div class="dv-vq" v-if="quotaGuideFor(v.key, st.quotaReaders)"><small class="dv-guide">{{ quotaGuideFor(v.key, st.quotaReaders) }}</small></div>
                 <ul class="dv-accts">
-                  <li :class="['dv-acct', { cur: accountInUseOf(v.key, a) }]" v-for="a in v.accounts" :key="a.account">
+                  <li :class="['dv-acct', { cur: accountInUseOf(v.key, a) }]" :data-flash="focusKey === accountCardKey(v.key, a.account) ? '1' : null" :data-acct-card="accountCardKey(v.key, a.account)" :data-status="accountStatusOf({ loginLost: loginLostOf(v.key, a), subLapsed: a.subLapsed, exhausted: a.quota.exhausted })" v-for="a in v.accounts" :key="a.account">
                     <span class="dv-who"><span class="dv-mail">{{ a.account }}</span><span class="dv-age" v-if="a.quota.ageLabel">{{ a.quota.ageLabel }}</span></span>
                     <span class="dv-side">
                       <span class="asn-tag-fail" v-if="a.subLapsed">{{ SUB_LAPSED_TEXT.tag }}</span>
@@ -558,30 +580,17 @@ export const SettingsPanel = {
                   <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.iconKey || v.key)"></span><b>{{ v.label }}</b><small class="dv-via" v-if="v.via">經 {{ v.via }}</small><small :class="['dv-state', 'st-' + v.state]" v-if="v.stateText">{{ v.stateText }}</small></header>
                   <div class="dv-vb">
                     <template v-if="curDev.self && v.key === 'claude'">
-                      <ul class="dv-accts" v-if="st.accounts.list.length">
-                        <li :class="['dv-acct', { cur: a.current }]" v-for="a in st.accounts.list" :key="a.email">
-                          <span class="dv-mail">{{ a.email }}</span>
-                          <span class="dv-side">
-                            <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
-                            <span class="dv-cur" v-if="a.current">使用中</span>
-                            <span class="dv-incomplete" v-if="isIncomplete(a)">{{ INCOMPLETE_LABEL }}</span>
-                            <asn-button @click="act('acct-switch', a.email)" :disabled="st.accounts.busy || a.current || isIncomplete(a)" :title="isIncomplete(a) ? INCOMPLETE_REASON : null">切換</asn-button>
-                            <asn-button state="danger" @click="act('acct-remove', a.email)" :disabled="st.accounts.busy">{{ st.accounts.confirmDel === a.email ? '確認刪除' : '刪除' }}</asn-button>
-                          </span>
-                          <small class="dv-why acct-warn" v-if="isIncomplete(a) && !a.current">{{ INCOMPLETE_REASON }}</small>
-                          <small class="dv-why dv-usable" v-if="usableAt(a)">{{ usableAt(a) }}</small>
-                          <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }" v-if="a.quota">
-                            <span class="dv-bars" v-if="a.quota.bars && a.quota.bars.length">
-                              <span class="dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
-                                <span class="dv-bl">{{ b.label }}</span>
-                                <span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
-                                <span class="dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
-                                <span class="dv-br" v-if="b.reset">{{ b.reset }}</span>
-                              </span>
-                            </span>
-                            <span v-else>{{ a.quota.text }}</span>
-                            <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
-                          </span>
+                      <ul class="dv-accts asn-alines" v-if="linesOf(v).length" :aria-label="'這台的 ' + v.label + ' 帳號'">
+                        <li class="asn-aline" v-for="l in linesOf(v)" :key="l.key" :data-aline="l.key" :data-status="l.status">
+                          <div class="asn-aline-row">
+                            <asn-button class="asn-aline-go" :aria-label="'查看帳號 ' + l.account + '，' + l.tag" @click="goAccount(l)">
+                              <span class="asn-aline-mail">{{ l.account }}</span>
+                              <span class="asn-aline-side"><span :class="l.tagClass">{{ l.tag }}</span><span class="asn-aline-chev" aria-hidden="true">›</span></span>
+                            </asn-button>
+                            <asn-more-menu v-if="canRemove(v)" :items="ACCOUNT_REMOVE_MENU" :disabled="st.accounts.busy" :label="'更多動作 ' + l.account" @pick="pickLine(l, $event)"></asn-more-menu>
+                          </div>
+                          <asn-confirm danger v-if="canRemove(v) && askDel === l.account" :text="ACCOUNT_REMOVE_TEXT.confirm(l.account)" :yes="ACCOUNT_REMOVE_TEXT.yes" :no="ACCOUNT_REMOVE_TEXT.no" :busy="st.accounts.busy" @yes="removeYes(l)" @no="askDel = ''"></asn-confirm>
+                          <small :class="['asn-aline-note', l.status === 'lapsed' ? 'asn-note-fail' : 'asn-note-warn']" role="status" v-if="l.note">{{ l.note }}</small>
                         </li>
                       </ul>
                       <div class="dv-none" v-else>還沒有加入過帳號。</div>
@@ -622,31 +631,13 @@ export const SettingsPanel = {
                       <small v-if="AGENT_INSTALL_UI && st.install">{{ INSTALL_TEXT.allowRemoteNote }}</small>
                     </template>
                     <template v-else>
-                      <ul class="dv-accts" v-if="v.accounts.length">
-                        <li :class="['dv-acct', { cur: a.current }]" v-for="a in v.accounts" :key="a.email">
-                          <span class="dv-mail">{{ a.email }}</span>
-                          <span class="dv-side">
-                            <span class="dv-plan" v-if="a.plan">{{ planLabel(a.plan) }}</span>
-                            <span class="dv-incomplete" v-if="!a.current && a.incomplete">{{ INCOMPLETE_LABEL }}</span>
-                            <span class="dv-cur" v-if="a.current">使用中</span>
-                            <asn-button v-else-if="(v.key === 'claude' || v.key === 'grok') && !curDev.self && (v.switchable || v.switchHint)" :disabled="!v.switchable || a.incomplete" :title="a.incomplete ? INCOMPLETE_REASON : null" @click="act('device-switch', { node: curDev.key, email: a.email, vendor: v.key })">切換</asn-button>
-                            <asn-button v-else-if="v.key === 'grok' && curDev.self && v.accounts.length > 1" :disabled="st.accounts.busy" @click="act('grok-switch', a.email)">切換</asn-button>
-                          </span>
-                          <small class="dv-why acct-warn" v-if="a.incomplete && !a.current">{{ INCOMPLETE_REASON }}</small>
-                          <span class="dv-quota" :class="{ stale: a.quota.stale, out: a.quota.exhausted }" v-if="a.quota">
-                            <span class="dv-bars" v-if="a.quota.bars && a.quota.bars.length">
-                              <span class="dv-bar" v-for="b in a.quota.bars" :key="b.key" :class="{ done: b.expired }">
-                                <span class="dv-bl">{{ b.label }}</span>
-                                <span class="dv-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="b.pct" :aria-label="b.label + '剩餘額度'"><span class="dv-fill" :class="{ low: b.low }" :style="{ width: (b.expired ? 0 : b.pct) + '%' }"></span></span>
-                                <span class="dv-bp">{{ b.expired ? '' : '剩 ' + b.pct + '%' }}</span>
-                                <span class="dv-br" v-if="b.reset">{{ b.reset }}</span>
-                              </span>
-                            </span>
-                            <span v-else>{{ a.quota.text }}</span>
-                            <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
-                            <span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>
-                          </span>
-                          <span class="dv-quota stale" v-else-if="v.key === 'codex' || v.key === 'grok'">{{ NO_QUOTA_TEXT }}</span>
+                      <ul class="dv-accts asn-alines" v-if="v.accounts.length" :aria-label="'這台的 ' + v.label + ' 帳號'">
+                        <li class="asn-aline" v-for="l in linesOf(v)" :key="l.key" :data-aline="l.key" :data-status="l.status">
+                          <asn-button class="asn-aline-go" :aria-label="'查看帳號 ' + l.account + '，' + l.tag" @click="goAccount(l)">
+                            <span class="asn-aline-mail">{{ l.account }}</span>
+                            <span class="asn-aline-side"><span :class="l.tagClass">{{ l.tag }}</span><span class="asn-aline-chev" aria-hidden="true">›</span></span>
+                          </asn-button>
+                          <small :class="['asn-aline-note', l.status === 'lapsed' ? 'asn-note-fail' : 'asn-note-warn']" role="status" v-if="l.note">{{ l.note }}</small>
                         </li>
                       </ul>
                       <div class="dv-none" v-else><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4M12 16h.01"></path></svg>{{ v.note || '目前未回報任何帳號' }}</div>

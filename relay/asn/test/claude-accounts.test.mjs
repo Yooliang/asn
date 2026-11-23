@@ -307,8 +307,7 @@ test('上次確認可用（#1512 C2）：別台經後台回報的是 UTC 字串�
   assert.equal(usableAtText({ usable_at: 12345 }, 'Asia/Taipei'), '', '型別不對不顯示')
   const tree = fs.readFileSync(new URL('../ui/lib/device-tree.mjs', import.meta.url), 'utf8')
   assert.match(tree, /\.\.\.\(k === 'claude' && usableAtText\(a\) \? \{ usableAt: usableAtText\(a\) \} : \{\}\)/, '只有 Claude 的列帶')
-  const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
-  assert.match(html, /<span class="m-dv-usable" v-if="a\.usableAt">\{\{ a\.usableAt \}\}<\/span>/)
+  // #2111 ⑦：設備頁的帳號改成一行＋狀態標籤，「上次確認可用」不再畫在設備頁（設備樹仍帶出 usableAt）
 })
 
 test('#1880 讀不到目前登入的帳號：畫面寫讀不到，不當成沒登入、不沿用上次的帳號', async () => {

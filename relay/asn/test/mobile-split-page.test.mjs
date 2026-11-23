@@ -127,7 +127,7 @@ test('#930 判斷分兩層：已隱藏的電腦細部頁照樣能切；帳號頁
 
 test('#930 細部頁與送出也走同一個判斷：本機的細部頁不出現「切換」，送出前再擋一次', () => {
   const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
-  assert.match(html, /\(v\.switchable \|\| v\.switchHint\) && acctCanSwitchTo\(acctCur\.key\)/)
+  assert.doesNotMatch(html, /\(v\.switchable \|\| v\.switchHint\) && acctCanSwitchTo\(acctCur\.key\)/, '#2111 ⑦：細部頁的帳號行沒有切換鈕，更沒有本機的')
   const js = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
   assert.match(js, /const acctCanSwitchTo = node => isSwitchTarget\(/)
   assert.match(js, /acctSwitchTargetsOf\(acctDevs\.value, vendor, a, info\.node\)/)

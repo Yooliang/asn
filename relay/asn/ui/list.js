@@ -2140,7 +2140,7 @@ const app = createApp({
         case 'voice-install': await installFromSettings(); break
         case 'acct-switch': await accounts.switchTo(value); break
         case 'row-switch': await switchAccountRow(value); break
-        case 'acct-remove': await accounts.remove(value); break
+        case 'acct-remove': await (value && typeof value === 'object' ? accounts.remove(String(value.email ?? ''), value.confirmed === true) : accounts.remove(value)); break   // 設備頁帳號行「⋯」的刪除：在那一行確認過就帶 confirmed
         case 'acct-allow-switch': await accounts.setAllowSwitch(value === true); break
         case 'quota-source': await quotaReaders.setSource(value?.source, value?.on); break
         case 'quota-refresh': await quotaReaders.setRefresh(value); break
@@ -2211,6 +2211,7 @@ const app = createApp({
         case 'pi-login': try { await cliLoginApi.login('pi'); piSetup.msg = CONNECT_TEXT.piLoginNote } catch (e) { piSetup.msg = piSetupError(e) } break
         case 'open-link': if (isAboutUrl(value)) { try { await linkApi.openLink(value) } catch (e) { console.info('[ASN] 開啟連結失敗', String(e?.message ?? e)) } } break   // 只放行「關於」頁那幾個網址
         case 'open-update': await openPanel('setting', 'update'); break   // 版本紀錄在 App 內設定的「更新」
+        case 'open-accounts': await openPanel('setting', 'accounts'); break   // 設備頁的帳號列：點下去到帳號頁（#2111 ⑦）
         case 'open-guide': await openPanel('guide', ui.panel.guide || GUIDES[0]?.key); break
         case 'open-ui-log': uiLogMsg.value = ''; uiLogMsg.value = await openUiLog(invoke); break
         case 'tm-open': taskMgr.open(); break
