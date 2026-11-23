@@ -63,13 +63,8 @@ pub fn save_settings(home: &Path, s: &Settings) -> Result<(), String> {
     if let Some(p) = path.parent() {
         std::fs::create_dir_all(p).map_err(|_| "無法寫入設定")?;
     }
-    let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
     let text = serde_json::to_string_pretty(s).map_err(|_| "無法寫入設定")?;
-    std::fs::write(&tmp, text).map_err(|_| "無法寫入設定")?;
-    std::fs::rename(&tmp, &path).map_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-        "無法寫入設定".to_string()
-    })
+    crate::settings::atomic::write(&path, text.as_bytes(), crate::settings::atomic::SETTINGS).map_err(|_| "無法寫入設定".to_string())
 }
 
 /// 設定變了就加一：背景迴圈看到會把退避狀態清掉，換了 key 或重新打開不用等

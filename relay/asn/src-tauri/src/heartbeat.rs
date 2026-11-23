@@ -45,10 +45,9 @@ pub fn read_heartbeat(work_dir: &Path, name: &str) -> Option<Heartbeat> {
 pub fn write_heartbeat(work_dir: &Path, name: &str, pid: u32, now: u64) -> std::io::Result<()> {
     fs::create_dir_all(self_recv_dir(work_dir))?;
     let file = heartbeat_file(work_dir, name);
-    let tmp = PathBuf::from(format!("{}.{}.tmp", file.display(), std::process::id()));
     let body = serde_json::to_string(&Heartbeat { pid, name: name.to_string(), t: now })?;
-    fs::write(&tmp, body)?;
-    fs::rename(&tmp, &file)
+    // 每隔幾秒就重寫的存活標記，掉了馬上補：純狀態，不 fsync
+    crate::settings::atomic::write(&file, body.as_bytes(), crate::settings::atomic::STATE)
 }
 
 /// 只有心跳的 pid 是自己才刪（別人的心跳不碰）

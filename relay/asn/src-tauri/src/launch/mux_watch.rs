@@ -280,10 +280,8 @@ pub fn queue_blind(work_dir: &Path, now_ms: u64) {
     if work_dir.as_os_str().is_empty() {
         return;
     }
-    let tmp = work_dir.join(format!("{BLIND_FILE}.tmp"));
-    if std::fs::write(&tmp, serde_json::json!({ "at": now_ms }).to_string()).is_ok() {
-        let _ = std::fs::rename(&tmp, work_dir.join(BLIND_FILE));
-    }
+    // 通知（不是信件）：純狀態
+    let _ = crate::settings::atomic::write(&work_dir.join(BLIND_FILE), serde_json::json!({ "at": now_ms }).to_string().as_bytes(), crate::settings::atomic::STATE);
 }
 /// 排著的「監看看不到」通知的時間；沒有或壞掉回 None（壞檔順手刪掉）
 pub fn read_blind(work_dir: &Path) -> Option<u64> {
@@ -309,10 +307,8 @@ pub fn queue_notice(work_dir: &Path, count: usize, resumed: bool, now_ms: u64) {
         return;
     }
     let body = serde_json::json!({ "count": count.min(NOTICE_MAX_COUNT), "resumed": resumed, "at": now_ms });
-    let tmp = work_dir.join(format!("{NOTICE_FILE}.tmp"));
-    if std::fs::write(&tmp, body.to_string()).is_ok() {
-        let _ = std::fs::rename(&tmp, work_dir.join(NOTICE_FILE));
-    }
+    // 通知（不是信件）：純狀態
+    let _ = crate::settings::atomic::write(&work_dir.join(NOTICE_FILE), body.to_string().as_bytes(), crate::settings::atomic::STATE);
 }
 
 /// 讀排著的通知：（人數, 有沒有接回, 事故時間）；沒有或壞掉的檔回 None（壞檔順手刪掉）

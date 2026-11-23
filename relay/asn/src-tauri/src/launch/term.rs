@@ -3278,11 +3278,9 @@ fn write_screen_code(dir: &Path, sid: &str, code: Option<&str>, now: u64) {
         return;
     };
     let _ = std::fs::create_dir_all(dir);
-    let tmp = dir.join(format!("{sid}.{}.tmp", std::process::id()));
     let body = serde_json::json!({ "sessionId": sid, "code": code, "at": now }).to_string();
-    if std::fs::write(&tmp, body).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
-    }
+    // 畫面判斷結果，幾秒就重算：純狀態
+    let _ = crate::settings::atomic::write(&path, body.as_bytes(), crate::settings::atomic::STATE);
 }
 
 /// 權限詢問，給本機畫面確認用。`hash` 綁定顯示的文字：按下去時畫面變了就作廢

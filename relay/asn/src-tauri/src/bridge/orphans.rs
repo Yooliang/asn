@@ -67,7 +67,7 @@ pub fn cleanup_and_mark(work_dir: &Path, self_pid: u32, table: impl Fn() -> Hash
             logs.push(format!("killed orphan pid={pid} left by previous bridge pid={last}: {}", if kill(pid) { "ok" } else { "failed" }));
         }
     }
-    if let Err(e) = std::fs::write(last_file(work_dir), self_pid.to_string()) {
+    if let Err(e) = crate::settings::atomic::write(&last_file(work_dir), self_pid.to_string().as_bytes(), crate::settings::atomic::STATE) {
         logs.push(format!("bridge.last write failed: {e}"));
     }
     logs

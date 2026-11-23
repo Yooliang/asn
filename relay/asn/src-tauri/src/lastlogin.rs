@@ -52,9 +52,8 @@ pub fn view(dir: &Path) -> Option<LastLoginView> {
 fn write(dir: &Path, l: &LastLogin) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("建立資料夾失敗：{e}"))?;
     let text = serde_json::to_string(l).map_err(|e| e.to_string())?;
-    let tmp = dir.join(format!("{FILE}.tmp"));
-    std::fs::write(&tmp, text).map_err(|e| format!("寫入失敗：{e}"))?;
-    std::fs::rename(&tmp, dir.join(FILE)).map_err(|e| format!("寫入失敗：{e}"))
+    // 純狀態（掉了只是不記得上次用哪種登入）：不 fsync；暫存檔名由統一寫入決定（不再用固定名）
+    crate::settings::atomic::write(&dir.join(FILE), text.as_bytes(), crate::settings::atomic::STATE).map_err(|e| format!("寫入失敗：{e}"))
 }
 
 /// 登入成功：記下登入方式與帳號頭像；之前記的「這台大頭貼」保留
@@ -127,6 +126,18 @@ mod tests {
         assert_eq!(view(d.path()), Some(LastLoginView { provider: "google".into(), avatar: Some(PIC.into()) }));
         let text = std::fs::read_to_string(d.path().join(FILE)).unwrap();
         assert!(!text.contains("token") && !text.contains('@'), "檔案裡不放權杖或 email：{text}");
+    }
+
+    #[test]
+    fn 暫存檔名不再固定_舊的固定名被占住也寫得進去() {
+        // 舊寫法固定用「<檔>.tmp」當暫存檔：把那個名字占成資料夾，舊寫法會失敗；統一寫入的暫存檔名每次不同
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join(format!("{FILE}.tmp"))).unwrap();
+        save_login(d.path(), "google", Some(PIC.into())).unwrap();
+        save_login(d.path(), "google", None).unwrap();
+        assert_eq!(view(d.path()).unwrap().provider, "google");
+        let left: Vec<String> = std::fs::read_dir(d.path()).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.ends_with(".tmp") && n != &format!("{FILE}.tmp")).collect();
+        assert!(left.is_empty(), "不留暫存檔：{left:?}");
     }
 
     #[test]
