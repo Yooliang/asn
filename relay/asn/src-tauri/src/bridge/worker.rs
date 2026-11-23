@@ -1201,6 +1201,47 @@ mod tests {
     }
 
     #[test]
+    fn 外框_沒有外框但行首有空白_sent_比對不算轉交成功_和閘門判斷一致() {
+        use super::super::forward_gate::{check, head_hash, InflightItem, Verdict};
+        let head = format!("[RELAY 來信] trust=member from=W/甲 to=T-甲 id={A} engine=claude reply=yes");
+        let mut p = Parser::new(N);
+        p.register_head(A, "T-甲", head_hash(&head));
+        // 行首空白、沒有外框：worker 不算佐證，inflight 仍在
+        p.feed(&call("toolu_1", "T-甲", &format!(" {head}\n內文")));
+        assert!(p.feed(&done_ok("toolu_1")).events.is_empty());
+        assert_eq!(p.inflight_len(), 1);
+        // 閘門對同一份也擋
+        let f: HashMap<String, InflightItem> = [(A.to_string(), InflightItem { to: "T-甲".into(), head: Some(head_hash(&head)), body: None })].into_iter().collect();
+        let g = |m: &str| check(&serde_json::json!({"tool_name": "SendMessage", "tool_input": {"to": "T-甲", "message": m}}), Some(&f)).0;
+        assert!(matches!(g(&format!(" {head}\n內文")), Verdict::Deny(_)));
+        // 同一批訊息：worker 算轉交成功 ⇔ 閘門不擋（兩邊用同一個 strip_frame，剝法完全一樣）
+        let body = format!("{head}\n內文");
+        let cases = [
+            body.clone(),
+            format!("<<<MAIL\n{body}\nMAIL>>>"),
+            format!("\n <<<MAIL \r\n{body}\r\nMAIL>>> \n"),
+            format!("<<<MAIL\n{body}"),
+            format!("{body}\nMAIL>>>"),
+            format!(" {body}"),
+            format!("\n{body}"),
+            format!("<<<MAIL\n <<<MAIL\n{body}\nMAIL>>>"),
+            "<<<MAIL\nMAIL>>>".to_string(),
+        ];
+        for (i, m) in cases.iter().enumerate() {
+            let mut q = Parser::new(N);
+            q.register_head(A, "T-甲", head_hash(&head));
+            let tid = format!("toolu_c{i}");
+            q.feed(&call(&tid, "T-甲", m));
+            let worker_ok = q.feed(&done_ok(&tid)).events == vec![WorkerEvent::Sent(A.into())];
+            let gate_ok = !matches!(g(m), Verdict::Deny(_));
+            assert_eq!(worker_ok, gate_ok, "worker 與閘門判斷不一致：{m:?}");
+        }
+        // 以上九種裡，只有五種（沒外框、單層外框各種空白、只有開頭、只有結尾）會過
+        let ok_n = cases.iter().filter(|m| !matches!(g(m), Verdict::Deny(_))).count();
+        assert_eq!(ok_n, 5);
+    }
+
+    #[test]
     fn 外框_系統提示講清楚_message_是外框中間的內容() {
         let prompts = [system_prompt("收發室", N), forward_prompt("收發室", N, true), respond_prompt("收發室", N, "視窗", "節點")];
         // 不能出現把外框算進「全文」「原樣」的說法（#2146 的根源：模型把外框當成全文的一部分）

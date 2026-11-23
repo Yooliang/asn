@@ -31,12 +31,15 @@ pub const FRAME_OPEN: &str = "<<<MAIL";
 pub const FRAME_CLOSE: &str = "MAIL>>>";
 
 /// 拿掉模型誤帶進來的信件外框：開頭單獨一行的 `<<<MAIL`、結尾單獨一行的 `MAIL>>>`（各至多一個），
-/// 前後的空白一併去掉。只拿外框，內文一個字都不動。判斷編號、比對抬頭、SENT 比對之前都先過這一關
+/// 外框旁邊的空白一併去掉。只拿外框，內文一個字都不動。判斷編號、比對抬頭、SENT 比對之前都先過這一關。
+/// 沒有外框就原樣回傳（連前後空白都不動）：判斷用的字串和放行時實際送出的字串要一致
 pub fn strip_frame(text: &str) -> &str {
     let mut t = text.trim();
+    let mut framed = false;
     if let Some((h, rest)) = t.split_once('\n') {
         if h.trim() == FRAME_OPEN {
             t = rest.trim_start();
+            framed = true;
             if t == FRAME_CLOSE {
                 return ""; // 只有外框、中間沒有內容
             }
@@ -45,16 +48,17 @@ pub fn strip_frame(text: &str) -> &str {
     if let Some((rest, l)) = t.rsplit_once('\n') {
         if l.trim() == FRAME_CLOSE {
             t = rest.trim_end();
+            framed = true;
         }
     }
-    t
+    if framed { t } else { text }
 }
 
 /// 第一行行尾沒有轉交編號時，退回給模型的理由：直接說錯在哪。raw＝模型送來的原始 message
 pub fn no_id_reason(raw: &str) -> String {
     let stripped = strip_frame(raw);
     let head = first_line(stripped);
-    if stripped.is_empty() {
+    if stripped.trim().is_empty() {
         return "message 是空的，或只有 <<<MAIL／MAIL>>> 外框而中間沒有內容：message 要放外框中間的信件內容，第一行是 [RELAY 來信]…".into();
     }
     if head.starts_with(FRAME_OPEN) {
@@ -63,7 +67,7 @@ pub fn no_id_reason(raw: &str) -> String {
     if head.starts_with("[BRIDGE-FORWARD") {
         return "第一行是橋接指令的標頭 [BRIDGE-FORWARD…]，不是信件內容：message 只放 <<<MAIL 與 MAIL>>> 這兩行中間的內容，第一行是 [RELAY 來信]…".into();
     }
-    if stripped.len() != raw.trim().len() {
+    if stripped != raw {
         return "已去掉 <<<MAIL／MAIL>>> 外框，但剩下的第一行行尾仍沒有轉交編號（id=…）：message 要是外框中間的內容，第一行 [RELAY 來信]… 一字不改".into();
     }
     "訊息第一行行尾沒有轉交編號（id=…）：message 要是 <<<MAIL 與 MAIL>>> 這兩行中間的內容，第一行是 [RELAY 來信]…，一字不改，不要在前面加任何字".into()
@@ -332,7 +336,7 @@ pub fn check(input: &Value, inflight: Option<&HashMap<String, InflightItem>>) ->
         return (Verdict::Replace(id.clone()), format!("allow id={id} to={} exact", item.to));
     }
     // 不換原文的模式：模型帶了外框就把外框拿掉再放行；沒帶外框的訊息一個字都不動
-    if msg.len() != call.message.trim().len() {
+    if msg != call.message {
         return (Verdict::Strip(msg.to_string()), format!("allow id={id} to={} frame-stripped", item.to));
     }
     (Verdict::Allow, format!("allow id={id} to={}", item.to))
@@ -568,7 +572,7 @@ mod tests {
         let (v, log) = check(&call("T-甲", &format!("{}\n內文", head.replace("#3", "#4"))), Some(&f));
         assert!(matches!(v, Verdict::Deny(ref r) if r.contains("抬頭")), "{v:?}");
         assert!(log.contains("head mismatch"));
-        assert_eq!(check(&call("T-甲", &format!(" {head}\n內文")), Some(&f)).0, Verdict::Allow, "前後空白一併去掉");
+        assert!(matches!(check(&call("T-甲", &format!(" {head}\n內文")), Some(&f)).0, Verdict::Deny(_)), "行首空白算差異");
         // 舊格式的檔（沒有指紋）：不比對
         assert_eq!(check(&call("T-甲", "x id=00000000-0000-0000-0000-00000000000a"), Some(&flight())).0, Verdict::Allow);
     }
@@ -618,6 +622,13 @@ mod tests {
         assert_eq!(strip_frame("<<<MAIL\n甲"), "甲", "只有開頭外框");
         assert_eq!(strip_frame("甲\nMAIL>>>"), "甲", "只有結尾外框");
         assert_eq!(strip_frame("沒有外框"), "沒有外框");
+        // 沒有外框：連前後空白都不動
+        for raw in ["  沒有外框  \n", " 行首空白\n內文\n", "\n\n內文\r\n", ""] {
+            assert_eq!(strip_frame(raw), raw);
+        }
+        // 結尾疊兩層 MAIL>>> 只拿一層；只有開頭外框、MAIL>>> 在中間都不誤拿
+        assert_eq!(strip_frame("甲\nMAIL>>>\nMAIL>>>"), "甲\nMAIL>>>");
+        assert_eq!(strip_frame("<<<MAIL\n甲\nMAIL>>>\n乙"), "甲\nMAIL>>>\n乙");
         // 內文裡的字樣不是外框：中間那行與不是單獨一行的都不動
         assert_eq!(strip_frame("甲\nMAIL>>>\n乙"), "甲\nMAIL>>>\n乙");
         assert_eq!(strip_frame("<<<MAIL 後面還有字\n甲"), "<<<MAIL 後面還有字\n甲");
@@ -662,7 +673,9 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         // EXACT 關：inflight 沒有 body 欄位
         write_inflight(d.path(), &[(A.to_string(), "T-甲".to_string(), Some(head_hash(&head)))]).unwrap();
-        for framed in [format!("<<<MAIL\n{body}\nMAIL>>>"), format!("\n  <<<MAIL\r\n{body}\r\nMAIL>>>  \n")] {
+        let body2 = format!("{head}\n  縮排的第二行\n\n\n\t定位字元開頭\n    最後一行也有縮排");
+        for framed in [format!("<<<MAIL\n{body}\nMAIL>>>"), format!("\n  <<<MAIL\r\n{body}\r\nMAIL>>>  \n"), format!(" \t<<<MAIL \n{body2}\n  MAIL>>> \n\n")] {
+            let body = if framed.contains("縮排的第二行") { body2.clone() } else { body.clone() };
             let (out, log) = run_hook(d.path(), &call("T-甲", &framed).to_string());
             let v: Value = serde_json::from_str(&out.unwrap_or_else(|| panic!("帶外框要換成去外框的內容：{log}"))).unwrap();
             assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "allow", "{log}");
@@ -700,6 +713,31 @@ mod tests {
         let v = run(format!("<<<MAIL\n{}\nMAIL>>>", orig(C))).expect("C 要去外框");
         assert_eq!(msg_of(&v), orig(C));
         assert_eq!(run(orig(D)), None, "D 不帶外框：放行且不改");
+    }
+
+    #[test]
+    fn 外框_判斷用的字串和放行時實際送出的字串必須一致() {
+        let head = format!("[群組 專案群] trust=member from=W/政策 #3 id={A}");
+        let body = format!("{head}\n內文");
+        let f: HashMap<String, InflightItem> = [(A.to_string(), item("T-甲", Some(&head)))].into_iter().collect();
+        // 有外框：判斷的是拿掉外框後的內容，放行時送出的也是它
+        for framed in [format!("<<<MAIL\n{body}\nMAIL>>>"), format!("\n  <<<MAIL\r\n{body}\r\nMAIL>>>  \n"), format!("<<<MAIL\n{body}")] {
+            let (v, _) = check(&call("T-甲", &framed), Some(&f));
+            assert_eq!(v, Verdict::Strip(body.clone()), "{framed:?}");
+            assert_eq!(strip_frame(&framed), body);
+        }
+        // 沒有外框：判斷的是原文，放行時送出的也是原文（一個字不動）
+        let g: HashMap<String, InflightItem> = [(A.to_string(), item("T-甲", None))].into_iter().collect();
+        for raw in [body.clone(), format!("{body}\n"), format!(" 前面有空白 id={A}\n內文")] {
+            assert_eq!(strip_frame(&raw), raw, "判斷用的字串就是原文");
+            assert_eq!(check(&call("T-甲", &raw), Some(&g)).0, Verdict::Allow, "{raw:?}");
+        }
+        let d = tempfile::tempdir().unwrap();
+        write_inflight(d.path(), &[(A.to_string(), "T-甲".to_string(), None)]).unwrap();
+        assert_eq!(run_hook(d.path(), &call("T-甲", &format!(" 前面有空白 id={A}\n內文")).to_string()).0, None, "沒外框：不改寫");
+        // 有抬頭指紋時，行首空白（沒外框）照擋，不會因為判斷前被 trim 而放行
+        assert!(matches!(check(&call("T-甲", &format!(" {body}")), Some(&f)).0, Verdict::Deny(_)));
+        assert!(matches!(check(&call("T-甲", &format!("\n{body}")), Some(&f)).0, Verdict::Deny(_)));
     }
 
     #[test]
