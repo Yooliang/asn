@@ -87,7 +87,7 @@ test('接線：list.js 的三個動作走後端指令、失敗原文進 log 並�
 test('Rust 接線：加入與整份存檔都經過驗證函式；使用時的三道檢查沒被拿掉', () => {
   const mod = rd('src-tauri/src/launch/mod.rs')
   assert.match(mod, /cwds::add_validated\(&data_dir, &cwd\)/)
-  assert.match(mod, /cwds::check_prefs_write\(&current, &prefs\)/)
+  assert.match(mod, /cwds::check_prefs_write\(current, &prefs\)/)
   assert.match(rd('src-tauri/src/launch/config.rs'), /工作資料夾不在允許清單裡/)
   assert.match(rd('src-tauri/src/launch/term.rs'), /fn authorize_cwd/)
   assert.match(rd('src-tauri/src/bridge/launcher.rs'), /const MAX_CWD: usize = 50;/)
