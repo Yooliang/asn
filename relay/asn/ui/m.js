@@ -23,6 +23,7 @@ import { elevatedBadge } from './lib/elevated.mjs'
 import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, SCROLL_TERM_SELECTOR, inScrollableX, indicatorPos, pagerShift, PAGER_SETTLE_MS, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, sideloadLastText, buttonLabel, initialNav, opsNav, offlineNav, photoNav, tabLabel as tabLabelOf, secretNav, termReqNav, permReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchRun, launchVendors, machinesByNode, pickedRun, progressView, launchInProgress } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
+import { UI_KIT } from './lib/ui-kit.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
 import { PUSH_TEXT, createPushSync, pushSettingView } from './lib/mobile-push.mjs'
 import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
@@ -1690,6 +1691,7 @@ app.component('fp-mark', FpMark)
 app.component('device-identity', DeviceIdentity)
 app.component('ptr-zone', PtrZone)
 app.component('relogin-bar', ReloginBar)
+for (const [name, comp] of Object.entries(UI_KIT)) app.component(name, comp)
 app.mount('#app')
 // 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切
 watch(screen, s => document.getElementById('app').classList.toggle('is-login', s === 'login' || s === 'onboard'), { immediate: true })

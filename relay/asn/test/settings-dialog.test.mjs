@@ -229,7 +229,7 @@ test('守門：手機設定頁——分類列表在上、使用指引在列表�
   const detail = html.slice(b, html.indexOf('</section>', b))
   // 登出鈕在「個人」內頁（settingCat === 'me' 那一塊）最下面、自成一塊；其他分類頁沒有
   const me = detail.slice(detail.indexOf("settingCat === 'me'"), detail.indexOf("settingCat === 'notify'"))
-  const outAt = me.indexOf('@click="doLogout">登出</button>')
+  const outAt = me.indexOf('@click="doLogout">登出</asn-button>')
   assert.ok(outAt > me.indexOf('個人訊息<input') && me.slice(me.lastIndexOf('</div>', outAt) , outAt).includes('class="m-logout"'), '登出在個人內頁的最後、自成一塊')
   assert.equal((html.match(/@click="doLogout"/g) || []).length, 1, '整頁只有一顆登出鈕')
   const nameAt = detail.indexOf('我的名字<input'), acctAt = detail.indexOf('{{ accountText }}')
