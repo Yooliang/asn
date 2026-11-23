@@ -1,15 +1,11 @@
 {
-  "version": "0.2.76",
-  "notes": "- 改善：帳號卡會顯示「訂閱已失效」。（#1646、#2111、#2151）\n- 新功能：先內建寄送記錄檔時的遮罩，入口暫不開放。（#2129、#2149）",
-  "pub_date": "2026-11-23T02:32:23.772Z",
+  "version": "0.2.77",
+  "notes": "- 改善：手機設定頁的登出、雲端邀請、檢查更新改用統一的按鈕樣式。（#2105、#2154）",
+  "pub_date": "2026-11-23T03:47:14.197Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnh6WGRIeW83dUdwbmdXU3J5eGxTQzVnNzQ0SnZuTFpaVlI4ZXVCMjdaV25YUmNqOU9SbnFTZWtHVkZwZ2orRXJsOS9meGV3SWoxSXF4enhhZWY4QmdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDAxMTQzCWZpbGU6QVNOXzAuMi43Nl94NjQtc2V0dXAuZXhlCjJ2bmtWTXdXeWxzRWZlK05xdklHN2JqbE9zS0lyRUsxK1ZSU2o5UTVYMUIyejJSTVRDQzI3ZzhhdUpzL1VHaDFNemtjZkQxdkh1OG5nUUc3aCs0L0JBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.76_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVSRGpUUUxSQ2p3eWUyZGhMdUtOYmlINFRWS1F3eGw3QUg1MmNVZVkrNHU5b1VkeldablJKcFYxVWxxbFZUQnVlNS9MSWFJQW4yb1QwTGp2SllQY1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDAxNzIyCWZpbGU6QVNOXzAuMi43Nl9hbWQ2NC5BcHBJbWFnZQoyWEM1SmlydWExRmMyU1c0S2NZUU5ORmZPdjV6a2NMNUtES3JrMHFLUVpQUnNnZDlYNWprL2RWUXlQMXlHd1BWMmZ5R1k3KzRPQVZHQS9WU2tlSW1BUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.76_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9oV0dONEhvbDVHbVlKY0ZSR3hkcnBmTnpJRGRlaXE3eGVUcnNVWHFFeDZ1bStGbUN6dUVPQWNKMkhIV0hsQXZCS1FwYloxS0xnanJDWk9ra1ZlWlFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDA1NjMzCWZpbGU6QVNOXzAuMi43N194NjQtc2V0dXAuZXhlCnRuVlFIUmZsTWIxSXFCM0NuMm8zN0ZqWkl2UGZWUWtNd0ltYlRqbjZuRWVVWWtvTThaSWlWTS9rMFN3d015QisvZTI0UEhTWlBjbncwNWttNDMwZ0RRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.77_x64-setup.exe"
     }
   }
 }
