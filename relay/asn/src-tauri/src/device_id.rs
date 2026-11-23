@@ -1135,9 +1135,11 @@ mod tests {
         k.pick_record_wrong("pc", 100);
         k.pick_block("pc2");
         assert!(!k.confirm("pc2", &fingerprint("pk2"), 1), "擋住的不會被確認");
-        let text = phone_known_view(&k).to_string();
+        let full = phone_known_view(&k).to_string();
         // 擋住的那台列表只多一個 "blocked": true（#1860 C，畫面出「重新認這台」）；鎖的時間、答錯次數、選項都不進列表
-        for bad in ["options", "answer", "pick", "lock_", "locked", "wrong"] {
+        assert_eq!(full.matches("\"blocked\":true").count(), 1, "只有擋住的那台帶 blocked：{full}");
+        let text = full.replace("\"blocked\":true", "");   // 拿掉這個唯一允許的鍵，其餘照原本的禁字檢查（blocked 本身含 lock）
+        for bad in ["options", "answer", "pick", "lock", "wrong"] {
             assert!(!text.contains(bad), "列表不能有 {bad}：{text}");
         }
         for o in a.options.iter().chain(b.options.iter()) {
