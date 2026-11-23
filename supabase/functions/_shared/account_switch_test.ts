@@ -64,7 +64,7 @@ Deno.test("acct_login_alert：收件人不由用戶端指定、只轉四個固�
   assertEquals(f.calls, [{ fn: "asn_relay_login_alert", args: { p_node: "W", p_computer: "工作機", p_last_at: "2026-10-31T13:35:00.000Z", p_email: "a@x.test", p_timeouts: 3 } }]);
   assertEquals(f.rings, ["bell-A", "bell-B"]);
   const g = fakeDeps();
-  for (const bad of [{}, { computer: "", last_at: "2026-10-31T13:35:00Z" }, { computer: "x\ny", last_at: "2026-10-31T13:35:00Z" }, { computer: "x", last_at: "壞" }, { computer: "x", last_at: "2026-10-31T13:35:00Z", email: "bad" },
+  for (const bad of [{}, { computer: "x\ny", last_at: "2026-10-31T13:35:00Z" }, { computer: "x", last_at: "壞" }, { computer: "x", last_at: "2026-10-31T13:35:00Z", email: "bad" },
     { computer: "x", last_at: "2026-10-31T13:35:00Z", timeouts: -1 }, { computer: "x", last_at: "2026-10-31T13:35:00Z", timeouts: 1000 }, { computer: "x", last_at: "2026-10-31T13:35:00Z", timeouts: "3" }]) {
     assertEquals((await handleAcctAction(g.deps, { id: "W" }, "acct_login_alert", bad)).status, 400, JSON.stringify(bad));
   }
@@ -238,4 +238,11 @@ Deno.test("acct_report 訂閱失效通知：資料庫回 mail_ids 才推播、�
   assertEquals(c.r, { status: 200, body: { ok: true, count: 1 } }, "推播出錯不影響回報");
   const d = await run({ ok: true, count: 1, mail_ids: [MAIL] });
   assertEquals(d.r.status, 200, "沒給 onSubLapsed 也不壞");
+});
+
+Deno.test("#1881 acct_login_alert：新版 ASN 不帶電腦名稱也收（設備名由資料庫讀後台記的名字）", async () => {
+  const f = fakeDeps(() => ({ ok: true, bell_topics: [] }));
+  const r = await handleAcctAction(f.deps, { id: "W" }, "acct_login_alert", { last_at: "2026-10-31T13:35:00Z", email: "a@x.test", timeouts: 0 });
+  assertEquals(r.status, 200);
+  assertEquals(f.calls, [{ fn: "asn_relay_login_alert", args: { p_node: "W", p_computer: "", p_last_at: "2026-10-31T13:35:00.000Z", p_email: "a@x.test", p_timeouts: 0 } }]);
 });
