@@ -496,7 +496,7 @@ fn 啟動偏好_加白名單同時進來_不互相蓋掉_也保留別的欄位()
 fn 啟動偏好_白名單一路新增到超過上限_那一次被拒絕_檔案維持上一次的內容() {
     use crate::launch::cwds::{add_to_prefs_allow, add_validated, remove_from_prefs_allow};
     let d = tempfile::tempdir().unwrap();
-    let p3 = d.path().join("p3");
+    let p3 = d.path().join("z".repeat(200)); // 路徑要夠長，免得不同平台的暫存路徑長短影響是否超過上限
     std::fs::create_dir_all(&p3).unwrap();
     // 先寫到離上限不遠，再用很長的資料夾名一路加白名單，直到被上限擋住
     launch_prefs_set_sync(d.path(), json!({"pad": "a".repeat(198_000)})).unwrap();
