@@ -96,7 +96,7 @@ test('mobileRemoteInputApi：先看指紋確認過、再要一次性憑證、本
   await q
   assert.deepEqual(order, ['android_known_list', 'android_known_token', 'confirm', 'term_view_remote_start'])
   // 打字元件把「這一次還算不算數」交給 start
-  assert.match(read('../ui/lib/term-remote-input.mjs'), /props\.api\.start\(props\.node, props\.name, props\.machine, \{ wanted: \(\) => alive \}\)/)
+  assert.match(read('../ui/lib/term-remote-input.mjs'), /props\.api\.start\(props\.node, props\.name, props\.machine, \{ wanted: current \}\)/)   // current＝還在、沒被收掉、沒被重新發起、active 還是 true（#1760）
 })
 
 test('mobileRemoteInputApi：指紋還沒確認過的電腦，直接講怎麼做，不要憑證、不跳本人驗證；列表讀不到就交給 Rust 擋', async () => {

@@ -53,10 +53,15 @@ export const RemoteInput = {
   },
   emits: ['back', 'status', 'unsent', 'screen', 'phase', 'refused'],   // unsent：輸入框送來的那句沒送出去（多行按了取消、還沒開始就結束），交還給外層；screen：最新一幅的字與欄數（複製畫面文字、找登入網址用）
   setup(props, { emit }) {
-    const host = ref(null), phase = ref('starting'), note = ref(''), soon = ref(false), warn = ref(''), askPaste = ref(null)
+    // 掛上時 active 就是 false：不啟動，停在「已結束」的樣子（有再開一次、改回只能看），不會一直顯示等待（#1760）
+    const host = ref(null), phase = ref(props.active ? 'starting' : 'ended'), note = ref(''), soon = ref(false), warn = ref(''), askPaste = ref(null)
     const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: warn.value, main: { waiting: INPUT_TEXT.waiting, active: phase.value === 'typing' ? INPUT_TEXT.typing(props.machine || props.node, props.name) : '' }, danger: true }))
     watch(() => (bar.value ? bar.value.level + '|' + bar.value.text + '|' + phase.value : ''), () => { if (!props.barInline) emit('status', bar.value ? { ...bar.value, stoppable: phase.value === 'typing' } : null) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
+    // 收到畫面時 xterm 還沒建好：只留最新一幅（不排隊），建好立刻補畫（#1760）
+    let pendingFrame = null
+    // 每次發起編一個號；收掉、重新發起、active 變 false 後，舊的那一次回來就不再往下做（#1760）
+    let startGen = 0
     // 按鍵列（#1512 B）：還沒開始打字就先排著，開始了才依序送；那台回報拿掉幾批按鍵的數字（變大就告訴本人）
     let keyQueue = [], lastDropped = 0
     const onVisible = () => { if (id) void props.api.pause(id, document.visibilityState === 'hidden').catch(() => {}) }
@@ -103,6 +108,7 @@ export const RemoteInput = {
     const pasteNo = () => { if (!answer(false)) askPaste.value = null }
     const cleanup = () => {
       clearTimeout(warnTimer)
+      pendingFrame = null
       offFrame?.(); offEnd?.(); offFrame = offEnd = null
       document.removeEventListener('visibilitychange', onVisible)
       host.value?.removeEventListener('paste', onPaste, true)
@@ -123,8 +129,20 @@ export const RemoteInput = {
     }
     // 畫面框：連上之前有底圖（snap）就顯示（彩色底圖寫在這個框裡）；沒有底圖照舊，要到等那台回覆才顯示
     const hostShown = computed(() => phase.value === 'waiting' || phase.value === 'typing' || (props.snap !== null && phase.value === 'starting'))
+    // 把一幅畫面畫上去（有 xterm 才會呼叫）
+    const drawFrame = f => {
+      if (phase.value !== 'typing') phase.value = 'typing'
+      reached = true   // 直接記，不等 phase 的監看（那是下一輪才跑，這幅畫面後馬上結束會被當成沒進過）
+      term.write(frameToWrite(f))
+      emit('screen', { text: String(f.text ?? ''), cols: Number(f.meta?.cols) || 0 })
+      if (droppedGrew(lastDropped, f.meta?.keys_dropped)) { lastDropped = Number(f.meta.keys_dropped); warn.value = KEYS_TEXT.dropped }
+    }
     const start = async () => {
+      if (!props.active) return
       cleanup()
+      const gen = ++startGen
+      const current = () => alive && gen === startGen && props.active
+      reached = false   // 每次重新發起都重算：這次有沒有真的進過打字，不看上一次（#1760）
       phase.value = 'starting'; note.value = ''; soon.value = false; warn.value = ''; lastDropped = 0
       try {
         const Terminal = await loadXterm()
@@ -137,34 +155,47 @@ export const RemoteInput = {
           term.write(frameToWrite({ text: props.snap }))
         }
         // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）
-        offFrame = await props.api.listen(FRAME_EVENT, f => {
-          if (!f || f.id !== id || !term) return
-          if (phase.value !== 'typing') phase.value = 'typing'
-          term.write(frameToWrite(f))
-          emit('screen', { text: String(f.text ?? ''), cols: Number(f.meta?.cols) || 0 })
-          if (droppedGrew(lastDropped, f.meta?.keys_dropped)) { lastDropped = Number(f.meta.keys_dropped); warn.value = KEYS_TEXT.dropped }
+        // 註冊完時這一次已作廢（收掉、重新發起、active 變 false）：自己註冊的馬上解除，不動新一次的
+        const offF = await props.api.listen(FRAME_EVENT, f => {
+          if (!f || f.id !== id) return
+          if (!term) { pendingFrame = f; return }
+          drawFrame(f)
         })
-        offEnd = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
+        if (!current()) { offF?.(); return }
+        offFrame = offF
+        const offE = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
+        if (!current()) { offE?.(); return }
+        offEnd = offE
         // 手機的 start 先等本人確認（生物辨識）：確認回來時這個畫面已經收掉就不送（電腦版不看第四個參數）
-        const r = await props.api.start(props.node, props.name, props.machine, { wanted: () => alive })
+        const r = await props.api.start(props.node, props.name, props.machine, { wanted: current })
+        // 這次已經開始了才作廢：要結束，不然那台會一直送到到期
+        if (!current()) { if (r?.id) void props.api.stop(r.id).catch(() => {}); return }
         id = r.id
-        if (!alive) { stop(); return }
         phase.value = 'waiting'
         if (!term) {
-          term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
-          if (!term) { stop(); if (alive) finish(REMOTE_TEXT.failed); return }
+          term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, current)
+          if (!term) { stop(); if (current()) finish(REMOTE_TEXT.failed); return }
           wireTerm()
+          if (pendingFrame) { const f = pendingFrame; pendingFrame = null; drawFrame(f) }   // 建好前收到的那一幅，現在補畫
         }
         const left = Number(r.expires_s) * 1000 - Date.now() - WARN_BEFORE_MS
         warnTimer = setTimeout(() => { soon.value = true }, Math.max(0, left))
       } catch (e) {
         console.info('[ASN] 別台打字沒有開始', String(e?.message ?? e))
+        if (alive && !current()) return   // 已作廢的那一次出錯，不去動新的一次
         finish(inputStartError(e))
       }
     }
     const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
+    // active 變化（#1760）：false→true 啟動；true→false 照結束的流程收掉（字放回輸入框、不再收畫面、通知那台結束）
+    watch(() => props.active, a => {
+      if (a) { if (phase.value === 'ended') void start(); return }
+      startGen++   // 還在發起中的那一次作廢
+      if (phase.value === 'ended') return
+      stop(); finish('')
+    })
     onBeforeUnmount(() => { alive = false; stop(); cleanup(); const left = takeLeft(); if (left) emit('unsent', left); if (!props.barInline) emit('status', null) })
     return { host, hostShown, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, sendKey, pasteYes, pasteNo, pasteLines, pasteSummary, PASTE_TEXT, TEXT: INPUT_TEXT }
   },
