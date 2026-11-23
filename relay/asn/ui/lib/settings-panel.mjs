@@ -7,7 +7,7 @@ import { FpMark, deskFpMark } from './fp-mark.mjs'
 import { DeviceIdentity, IDENTITY_TEXT } from './device-identity.mjs'
 import { ACTION_TEXT } from './device-order.mjs'
 import { AsnDialog } from './dialog.mjs'
-import { NAME_MAX, deviceNameError, joinKnown, shortFp } from './device-known.mjs'
+import { NAME_MAX, deviceNameError, joinKnown, removedDevices, shortFp } from './device-known.mjs'
 import { FpQrCanvas, QR_TEXT } from './fp-qr.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
@@ -23,7 +23,7 @@ import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
-import { DEVICE_TEXT, canRemoveRow, canShowBackRow, dropAfter, moveFlags, removedRows, visibleRows } from './device-order.mjs'
+import { DEVICE_TEXT, canRemoveRow, canShowBackRow, deviceRowLine, dropAfter, visibleRows } from './device-order.mjs'
 import { switchRowKey, switchResultOf } from './switch-result.mjs'
 import { ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, accountCardKey, accountStatusOf, deviceAccountLines } from './device-account-lines.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, ROSTER_TEXT, SUB_LAPSED_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, usedOnText } from './account-roster.mjs'
@@ -41,13 +41,13 @@ import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFet
 export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close', 'quota-cancel',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'open-accounts', 'acct-remove', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove',
+  'voice-save', 'voice-install', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'open-accounts', 'acct-remove', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore',
   'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
 export const SettingsPanel = {
   components: { ...UI_KIT, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity },
-  props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'info' }, askRemove: { type: Boolean, default: false }, removedOpen: { type: Boolean, default: false } },
+  props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'info' }, askRemove: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
     const { ref, computed, watch, onMounted, onBeforeUnmount } = globalThis.Vue
@@ -59,12 +59,9 @@ export const SettingsPanel = {
     // 進來先看「全部設備的列表」；點一列進該設備的細部頁（picked＝設備鍵），返回回列表。dev 屬性＝直接開某台的細部頁
     const picked = ref(props.dev)
     const askRemove = ref(props.askRemove)   // 永久移除的二次確認（細部頁內）
-    const removedOpen = ref(props.removedOpen)   // 列表底部「已永久移除」展開
     const allDevs = computed(() => (Array.isArray(props.st.devices) ? props.st.devices : []))
-    // 列表含自動隱藏的設備（淡色、標「已隱藏」）；永久移除的不在列表，收在底部的「已永久移除」
+    // 列表含自動隱藏的設備（淡色、標「已隱藏」）；永久移除的不在列表，收在底部的「已移除的設備」
     const devs = computed(() => visibleRows(allDevs.value))
-    const removedDevs = computed(() => removedRows(allDevs.value))
-    const flags = computed(() => moveFlags(devs.value, devs.value.find(d => d.self)?.key))
     const curDev = computed(() => devs.value.find(d => d.key === picked.value) ?? null)
     const view = ref(props.devView === 'acct' ? 'acct' : 'info')   // 選了某台之後看哪一頁：info＝詳情（預設）、acct＝帳號
     const open = key => { picked.value = key; view.value = allDevs.value.find(d => d.key === key)?.phone ? 'info' : 'acct'; askRemove.value = false; renaming.value = false }
@@ -95,7 +92,18 @@ export const SettingsPanel = {
     // 滑鼠拖放：拖到某列的上半＝插在前面、下半＝插在後面；放開時交給樞紐存順序
     const dragKey = ref(''), overKey = ref(''), overAfter = ref(false)
     const clearDrag = () => { dragKey.value = ''; overKey.value = ''; overAfter.value = false }
-    const dragStart = (key, ev) => { if (devs.value.find(d => d.key === key)?.self) { ev.preventDefault(); return } dragKey.value = key; if (ev.dataTransfer) { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', key) } }
+    const dragStart = (key, ev) => {
+      if (devs.value.find(d => d.key === key)?.self) { ev.preventDefault(); return }
+      dragKey.value = key
+      if (ev.dataTransfer) {
+        ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', key)
+        const row = ev.currentTarget?.closest?.('li')
+        if (row && ev.dataTransfer.setDragImage) ev.dataTransfer.setDragImage(row, 12, 12)   // 拖的是整列，不只是把手
+      }
+    }
+    // 鍵盤：把手聚焦後按上下鍵移動一格（順序沒有上移／下移鈕，#1860）
+    const gripKey = (key, ev) => { if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') { ev.preventDefault(); act('device-move', { node: key, dir: ev.key === 'ArrowUp' ? -1 : 1 }) } }
+    const rowLine = d => deviceRowLine(d, DEVICE_TEXT.thisDevice)
     const dragOver = (key, ev) => {
       if (!dragKey.value || dragKey.value === key) return
       ev.preventDefault()
@@ -206,9 +214,10 @@ export const SettingsPanel = {
     const peers = computed(() => (props.st.known && Array.isArray(props.st.known.peers) ? props.st.known.peers : []).map(p => ({ ...p, id: p.node })))   // id＝節點（畫面不直接寫 node）
     // 只算畫面上真的畫出來的設備；已永久移除的（畫面沒有列）歸到「舊設備紀錄」，才找得到地方取消授權或忘記
     // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」（和手機版一致）
-    const joined = computed(() => { const j = joinKnown(devs.value, peers.value); return devs.value.length ? j : { ...j, old: [] } })
+    // 認得的紀錄對到設備列（指紋圖示用）；只剩紀錄的、永久移除的收進「已移除的設備」一塊（device-known.mjs 的 removedDevices，名單還沒讀到時不列）
+    const joined = computed(() => joinKnown(allDevs.value, peers.value))
+    const removed = computed(() => removedDevices(allDevs.value, peers.value))
     const curKnown = computed(() => (curDev.value ? joined.value.byNode[curDev.value.key] ?? null : null))
-    const oldPeers = computed(() => joined.value.old)
     // 「帳號」鈕：手機沒有帳號可看，不出這顆
     const hasAcct = computed(() => !!curDev.value && (curDev.value.self || !curDev.value.phone))
     // 指紋：本機看自己的、別台看認得的紀錄；都沒有就不顯示這一列（沒有可以做的事）
@@ -226,10 +235,10 @@ export const SettingsPanel = {
       mmOpen.value = false
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, curKnown, oldPeers, forgetBox, forget,
+    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
       linesOf, goAccount, canRemove, askDel, pickLine, removeYes, ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, focusKey, accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
-      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, removedDevs, flags, curDev, curVendors, askRemove, removedOpen, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
+      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, curDev, curVendors, askRemove, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, lookShows, GH_REFS_LABEL, GH_REFS_NOTE,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -374,25 +383,22 @@ export const SettingsPanel = {
           <template v-if="!curDev">
             <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
             <ul class="dv-list" aria-label="設備" v-else>
-              <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" :draggable="!d.self" @dragstart="dragStart(d.key, $event)" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)" @dragend="clearDrag">
-                <span class="dv-row-go"><span class="dv-name">{{ d.label }}</span><span class="dv-tag kind" v-if="(d.kindLabel || d.kind) !== '電腦'">{{ d.kindLabel || d.kind }}</span><span :class="['dv-tag', d.online ? 'on' : 'off']">{{ d.onlineText }}</span><span class="dv-tag me" v-if="d.self">這台</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><span class="dv-tag warn noreport" v-if="d.reportTag">{{ d.reportTag }}</span><fp-mark v-if="d.phone && !d.self" :kind="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).kind" :label="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).label"></fp-mark></span>
-                <span class="dv-row-move" v-if="!d.self" role="group" aria-label="設備順序">
-                  <asn-button :disabled="!flags[d.key].up" :aria-label="'上移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: -1 })">{{ DEVICE_TEXT.moveUp }}</asn-button>
-                  <asn-button :disabled="!flags[d.key].down" :aria-label="'下移 ' + d.label" @click.stop="act('device-move', { node: d.key, dir: 1 })">{{ DEVICE_TEXT.moveDown }}</asn-button>
-                </span>
-                <span class="dv-row-move dv-row-act" role="group" aria-label="設備內容">
-                  <asn-button :aria-label="'查看 ' + d.label + ' 的帳號'" @click.stop="open(d.key)">帳號</asn-button>
-                  <asn-button :aria-label="'查看 ' + d.label + ' 的詳情'" @click.stop="openInfo(d.key)">詳情</asn-button>
-                </span>
+              <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)">
+                <button type="button" class="dv-grip" v-if="!d.self" draggable="true" :aria-label="DEVICE_TEXT.gripLabel(d.label)" @dragstart="dragStart(d.key, $event)" @dragend="clearDrag" @keydown="gripKey(d.key, $event)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 6h.01M16 6h.01M8 12h.01M16 12h.01M8 18h.01M16 18h.01" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></svg></button>
+                <span class="dv-grip-gap" v-else aria-hidden="true"></span>
+                <span class="dv-row-go"><span class="dv-name">{{ d.label }}</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><span class="dv-tag warn noreport" v-if="d.reportTag">{{ d.reportTag }}</span><fp-mark v-if="d.phone && !d.self" :kind="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).kind" :label="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).label"></fp-mark><small class="dv-sub">{{ rowLine(d) }}</small></span>
+                <asn-button fixed :aria-label="DEVICE_TEXT.detailLabel(d.label)" @click.stop="openInfo(d.key)">{{ DEVICE_TEXT.detail }}</asn-button>
               </li>
             </ul>
-            <details class="dv-old-rec" v-if="oldPeers.length">
-              <summary>舊設備紀錄（{{ oldPeers.length }}）</summary>
-              <div class="pair-row" v-for="p in oldPeers" :key="p.id">
-                <p><b>{{ p.label }}</b> <span v-if="p.firstSeen">{{ KNOWN.firstSeen(p.firstSeen) }}</span></p>
-                <code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ groupFp(p.fingerprint) }}</code>
-                <span class="pair-btns"><asn-button state="danger" :disabled="st.known.busy" @click="forget.ask(p)">忘記</asn-button></span>
-              </div>
+            <details class="dv-removed" v-if="removed.count">
+              <summary>{{ DEVICE_TEXT.removedTitle(removed.count) }}</summary>
+              <ul class="dv-removed-list">
+                <li class="dv-removed-row" v-for="r in removed.items" :key="r.key" :data-removed="r.key">
+                  <span class="dv-row-go"><span class="dv-name">{{ r.label }}</span><small class="dv-sub" v-if="r.firstSeen">{{ DEVICE_TEXT.firstConnected(r.firstSeen) }}</small></span>
+                  <asn-button fixed v-if="r.kind === 'restore'" @click="act('device-restore', r.key)">{{ DEVICE_TEXT.restore }}</asn-button>
+                  <asn-button fixed v-else state="danger" :disabled="st.known.busy" @click="forget.ask(r.peer)">{{ DEVICE_TEXT.forget }}</asn-button>
+                </li>
+              </ul>
             </details>
           </template>
           <section class="dv-dev" v-else :aria-label="curDev.identity.title">

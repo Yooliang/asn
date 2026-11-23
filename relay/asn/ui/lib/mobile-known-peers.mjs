@@ -99,7 +99,7 @@ export function normalizeList(raw) {
       const confirmed = p.confirmed === true
       const name = cleanName(p.name)
       // name＝記的名字（可能是空的）；label＝畫面上顯示的。沒名字顯示「未命名的電腦」，指紋只有確認過的才帶（沒確認的畫面不能知道）
-      return { node: p.node, name, label: displayDeviceName(name) || unnamedLabelOf(p.node), fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms) }
+      return { node: p.node, name, label: displayDeviceName(name) || unnamedLabelOf(p.node), fpShow: confirmed ? groupFp(p.fp) : '', confirmed, firstSeen: firstSeenText(p.first_seen_ms), firstSeenMs: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? p.first_seen_ms : 0 }
     })
 }
 

@@ -145,8 +145,8 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
     }))
   }
   // 該讀的才讀（reportsDue）：沒讀過的、讀失敗且已過 retryMs 的、讀成功但距離上次超過 5 分鐘的（#2158：以前成功的永遠不重讀）。force＝剛登入：失敗的立刻重讀，不等時間
-  const retryReports = async (nodes, { force = false } = {}) => {
-    const due = reportsDue({ nodes, reports: s.reports, now: now(), retryMs, force })
+  const retryReports = async (nodes, { force = false, isOnline } = {}) => {
+    const due = reportsDue({ nodes, reports: s.reports, now: now(), retryMs, force, ...(isOnline ? { isOnline } : {}) })
     if (due.length) await loadReports(due)
     return due.length
   }

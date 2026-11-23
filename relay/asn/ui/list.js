@@ -104,7 +104,7 @@ import { splitMachines } from './lib/remote-machines.mjs'
 import { accountDeviceRows, nodeLabelOf, rosterQuotaFor, rosterView, selfClaudeQuota } from './lib/account-roster.mjs'
 import { setNodePlatforms } from './lib/node-platform.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
-import { deviceFieldsFromSaved, deviceFieldsToSave, moveDevice, pruneRemoved, removeDevice, reorderDevice, showDevice, visibleRows } from './lib/device-order.mjs'
+import { deviceFieldsFromSaved, deviceFieldsToSave, isDeviceOnline, moveDevice, pruneRemoved, removeDevice, reorderDevice, restoreDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { deviceNameError, deviceNameOf } from './lib/device-known.mjs'
 import { alignDeviceName, followSelfRename, renameDeviceFromPage, syncPendingDeviceName } from './lib/device-rename.mjs'
@@ -2061,7 +2061,9 @@ const app = createApp({
       if (missing.length) void accounts.loadReports(missing)
     }, { immediate: true })
     // 別台的帳號回報自動重讀（#2158）：設備／帳號頁開著時每分鐘檢查一次，讀失敗超過 1 分鐘的、讀成功超過 5 分鐘的再讀；頁面關掉就停。剛登入就立刻讀
-    const reportScheduler = createReportScheduler({ run: () => accounts.retryReports(otherDeviceNodes()), isOpen: devicesOpen })
+    // 離線中的設備讀過就不再重讀（讀取報錯時才不會每分鐘打一次）；App 在背景不排程，回到前景補一次（report-reload.mjs）
+    const deviceOnline = n => isDeviceOnline(n, friends.value, { selfNode: info.node, asn: asnMap.value })
+    const reportScheduler = createReportScheduler({ run: () => accounts.retryReports(otherDeviceNodes(), { isOnline: deviceOnline }), isOpen: devicesOpen })
     watch(devicesOpen, open => { if (open) reportScheduler.start(); else reportScheduler.stop() }, { immediate: true })
     onSignedIn = () => void accounts.retryReports(otherDeviceNodes(), { force: true })
     const closeDeviceAcct = () => { deviceAcct.node = '' }
@@ -2166,6 +2168,7 @@ const app = createApp({
         case 'grok-switch': await accounts.grokSwitch(String(value ?? '')); break
         case 'device-move': devPrefs.deviceOrder = moveDevice(deviceTree.value.map(d => d.key), String(value?.node ?? ''), value?.dir === -1 ? -1 : 1, { selfNode: info.node, visible: visibleRows(deviceTree.value).map(d => d.key) }); break
         case 'device-reorder': devPrefs.deviceOrder = reorderDevice(deviceTree.value.map(d => d.key), String(value?.drag ?? ''), String(value?.target ?? ''), value?.after === true, { selfNode: info.node }); break
+        case 'device-restore': devPrefs.deviceRemoved = restoreDevice(devPrefs.deviceRemoved, String(value ?? '')); break
         case 'device-remove': devPrefs.deviceRemoved = removeDevice(devPrefs.deviceRemoved, String(value ?? ''), { selfNode: info.node }); break
         case 'device-show': devPrefs.deviceShown = showDevice(devPrefs.deviceShown, String(value ?? '')); break
         case 'device-switch': await (typeof value === 'object' && value ? openDeviceAcct(String(value.node ?? ''), String(value.email ?? ''), String(value.vendor ?? 'claude')) : openDeviceAcct(String(value ?? ''))); break
