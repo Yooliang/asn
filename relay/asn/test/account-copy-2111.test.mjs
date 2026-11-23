@@ -67,7 +67,7 @@ test('#2111 (c) 帳號後面的時間只有「N 天前」之類', async () => {
   assert.equal(half.quota.ageLabel, '11 小時前')
   for (const a of accountsOf(desk)) assert.match(a.quota.ageLabel, /^\d+ (分鐘|小時|天)前$/)
   const html = await render({ devices: [], accounts: ACCT, myAccounts: desk })
-  assert.ok(html.includes('<span class="dv-age">（2 天前）</span>'))
+  assert.ok(html.includes('<span class="dv-age">2 天前</span>'))
 })
 
 test('#2111 額度條固定長度：電腦 200px、手機 130px，兩邊樣式都沒有可伸縮的軌道', () => {

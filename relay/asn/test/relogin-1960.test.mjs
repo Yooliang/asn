@@ -48,7 +48,7 @@ test('#1960 失效那台那一列是「重新登入」（可以按），其他�
 })
 
 test('#1960 別台失效：可以遠端重新登入就放鈕；現在做不到（離線、ASN 沒開）就不放鈕、寫「到那台重新登入」', () => {
-  assert.deepEqual(rows(failedThere()).map(x => [x.node, x.state, x.relogin ?? '']), [['W', 'relogin', 'remote'], ['H', 'switch', '']])
+  assert.deepEqual(rows(failedThere()).map(x => [x.node, x.state, x.relogin ?? '']), [['H', 'switch', ''], ['W', 'relogin', 'remote']])
   const none = rows(failedThere(null)).find(x => x.node === 'W')
   assert.equal(none.state, 'expired')
   assert.equal(none.reason, '登入已失效，到那台重新登入')

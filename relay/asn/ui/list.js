@@ -2150,6 +2150,7 @@ const app = createApp({
         case 'quota-unshare': await quotaReaders.unshare(value); break
         case 'quota-copy': await quotaReaders.copyCode(); break
         case 'quota-close': quotaReaders.closeCode(); break
+        case 'quota-cancel': quotaReaders.cancelConfirm(); break
         case 'install-ask': await agentInstall.ask(); break
         case 'install-yes': await agentInstall.confirm(); break
         case 'install-no': agentInstall.decline(); break

@@ -87,7 +87,7 @@ test('#2111 帳號頁的切換：對方 ASN 沒開、登入不完整、Grok 只�
   assert.equal(await work(mk({ hidden: true })), undefined, '已隱藏不畫')
   assert.equal(await work(mk({ removed: true })), undefined, '已永久移除不畫（#1858）')
   const off = [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c')], { switchable: false, switchHint: '對方電腦的 ASN 沒有在線，無法切換' })])]
-  assert.deepEqual(pick(await work(off)), { text: '不能切換', state: 'blocked', disabled: true, why: DEVICE_BLOCK_REASON.offline })
+  assert.deepEqual(pick(await work(off)), { text: '離線中', state: 'blocked', disabled: true, why: '' })   // #2111 ⑥：離線中，不再寫原因
   assert.equal(DEVICE_BLOCK_REASON.offline, 'ASN 尚未開啟')
   const incomplete = [dev('W', '工作機', false, [vend('claude', [acct('w@b.c', true), acct('z@b.c', false, { incomplete: true })], { switchable: true })])]
   assert.deepEqual(pick(await work(incomplete)), { text: '不能切換', state: 'blocked', disabled: true, why: DEVICE_BLOCK_REASON.incomplete })
@@ -168,9 +168,8 @@ test('帳號卡片：「開放查詢」是右上 tag 列（和方案、使用中
   const side = between('class="dv-side"', 'class="dv-quota"')
   assert.ok(on.includes('<span class="dv-plan dv-shared">開放查詢</span>'), 'tag 文字是「開放查詢」')
   assert.ok(side.includes('開放查詢') && side.includes('dv-cur'), 'tag 在右上 tag 列')
-  const share = between('class="dv-share"', '</li>')
-  assert.ok(share.includes('重新產生') && share.includes('撤銷代碼'), '重新產生、撤銷代碼留在下方按鈕列')
-  assert.ok(!share.includes('開放查詢'), '下方按鈕列沒有「開放查詢」')
+  assert.ok(!on.includes('class="dv-share"'), '#2111 ⑥ 卡片上沒有獨立的重新產生／撤銷鈕，收進「⋯」選單')
+  assert.ok(on.includes('class="asn-more-btn"'), '右上角有「⋯」')
   assert.ok(!on.includes('已開放查詢'))
   const off = await render('accounts', { ...state(devices, mine(false)), quotaReaders: qr })
   assert.ok(!off.includes('開放查詢') && !off.includes('dv-shared'), '沒開放就沒有 tag')

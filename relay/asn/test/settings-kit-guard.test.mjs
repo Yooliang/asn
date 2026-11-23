@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
+import { accountMenuItems } from '../ui/lib/quota-readers.mjs'
 import { withIdentity } from './helpers/with-identity.mjs'
 import { mountComponent } from './helpers/render.mjs'
 
@@ -46,7 +47,7 @@ test('#2105 設定頁專屬的按鈕尺寸覆寫都刪掉了：樣式表不再�
 test('#2105 設備列的切換鈕（第八節）：固定尺寸 fixed、狀態用 current／busy／blocked，一般可切換不加狀態', () => {
   const tag = panel.slice(panel.indexOf('<asn-button fixed'), panel.indexOf('>', panel.indexOf('<asn-button fixed') + 40))
   assert.match(tag, /class="dv-devbtn"/)
-  assert.match(tag, /:state="b\.state === 'switch' \? '' : b\.state"/)
+  assert.match(tag, /:state="b\.look === 'switch' \? '' : b\.look"/)
   assert.match(tag, /:disabled="b\.state !== 'switch' \|\| busyNow"/, '可不可以按的條件沒有改')
 })
 
@@ -124,12 +125,15 @@ test('#2105 改由 ASN 負責的確認：處理中兩顆都不能按（原本的
 })
 
 test('#2105 移除／刪除／結束／忘記／撤銷這類不可復原的動作，按鈕都是危險狀態', () => {
-  const must = ['tm-ask', 'acct-remove', 'quota-mm-remove', 'quota-unshare', 'forget.ask(p)', 'forget.ask(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
+  const must = ['tm-ask', 'acct-remove', 'quota-mm-remove', 'forget.ask(p)', 'forget.ask(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
   for (const h of must) {
     const tag = [...panel.matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes(h))
     assert.ok(tag, `找得到按鈕：${h}`)
     assert.match(tag, /state="danger"/, `${h} 要是危險鈕：${tag}`)
   }
+  // #2111 ⑥：撤銷代碼收進「⋯」選單，選單項目與原位確認的同意鈕都是危險狀態（見 account-card-2111f.test.mjs）
+  assert.equal(accountMenuItems(true).find(i => i.key === 'unshare').danger, true)
+  assert.ok(/:danger="shareConfirmOf\(/.test(panel), '撤銷的原位確認是危險確認')
   // 反向：取消、一般動作不是危險鈕
   for (const h of ["act('tm-cancel')", "act('pi-setup-remove')", "act('relogin-no')", "act('install-no')", 'renameCancel']) {
     const tag = [...panel.matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes(h))

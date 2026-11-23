@@ -8,6 +8,7 @@ import { deviceNameOf } from './device-known.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { QUOTA_LINES, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
 import { UNNAMED_DEVICE } from './text.mjs'
+import { inDevicePageOrder } from './device-order.mjs'
 import { unnamedLabelOf } from './device-known.mjs'
 
 export const ROSTER_TEXT = {
@@ -264,7 +265,13 @@ export const usedOnText = row => (row?.usedOn ?? []).map(n => (n.current ? `${n.
 export const DEVICE_BUTTON_TEXT = { group: '用在哪幾台' }
 
 /** 帳號卡設備列：按鈕上的字（電腦、手機同一份，#2111） */
-export const DEVICE_ROW_TEXT = Object.freeze({ current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', self: '這台' })
+export const DEVICE_ROW_TEXT = Object.freeze({ current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', offline: '離線中', self: '這台' })
+
+/** 設備列的鈕畫成哪種狀態：離線中沿用「不能切換」的虛線淡色（#2111 ⑥）；電腦（asn-button 的 state）與手機（m-dv-dev 的 class）共用 */
+export const rowLook = state => (state === 'offline' ? 'blocked' : state)
+
+/** 這台設備算不算離線（#2111 ⑥）：本機永遠在線；其餘看設備樹的在線狀態（isDeviceOnline），或對方 ASN 沒開（設備樹給的 switchHint）。電腦、手機共用 */
+export const deviceRowOffline = (d, v) => d?.self !== true && (d?.online === false || Boolean(v?.switchHint))
 
 /** 登入失效（#1960，電腦、手機同一份）：設備列、卡片頂端標籤、額度區、名單上方提示的字都在這裡 */
 export const LOGIN_LOST_TEXT = Object.freeze({
@@ -316,7 +323,7 @@ export function accountDeviceRows(devices, vendor, email, usedOn, opts = {}) {
   const mail = String(email ?? '').trim().toLowerCase()
   const used = new Map((Array.isArray(usedOn) ? usedOn : []).filter(u => u && typeof u.node === 'string' && u.node).map(u => [u.node, u]))
   const rows = []
-  for (const d of Array.isArray(devices) ? devices : []) {
+  for (const d of inDevicePageOrder(devices)) {
     if (!d || !d.key || d.hidden || d.removed) continue
     const v = (d.vendors ?? []).find(x => x.key === vendor)
     const has = (v?.accounts ?? []).find(x => String(x.email ?? '').trim().toLowerCase() === mail)
@@ -328,19 +335,22 @@ export function accountDeviceRows(devices, vendor, email, usedOn, opts = {}) {
     // 後台舊資料說在用也不畫（#2110：換過帳號、後台還沒更新時，不能把本機沒登入的帳號寫成「使用中」）
     const usingByBackend = u?.current === true && !v
     if (!has && !unreported && !usingByBackend) continue
-    const current = d.self && has ? has.current === true : (u?.current === true || has?.current === true)
-    const st = rowStateOf(d, v ?? { accounts: [] }, has, vendor, current, Array.isArray(opts.vendors) ? opts.vendors : ['claude', 'grok'])
-    const busy = st.state !== 'current' && opts.switchingNode === d.key
+    const offline = deviceRowOffline(d, v)
+    // 離線的設備在每張帳號卡都一律「離線中」：後台舊回報說它正在用這個帳號也一樣，不寫「使用中」（#2111 ⑥）
+    const current = !offline && (d.self && has ? has.current === true : (u?.current === true || has?.current === true))
+    const st = offline ? { state: 'offline', reason: '' } : rowStateOf(d, v ?? { accounts: [] }, has, vendor, current, Array.isArray(opts.vendors) ? opts.vendors : ['claude', 'grok'])
+    const busy = st.state !== 'current' && st.state !== 'offline' && opts.switchingNode === d.key
     const label = d.label || u?.label || unnamedLabelOf(d.key)
     // 登入失效（#1960）：沿用各台帳號回報裡的旗標（device-tree 的 loginFailed）；能不能從這裡替它重新登入看設備樹算好的 relogin 入口（本機／別台）
     if (vendor === 'claude' && has?.loginFailed === true) {
       const kind = v?.relogin?.kind === 'local' || v?.relogin?.kind === 'remote' ? v.relogin.kind : ''
-      rows.push({ node: d.key, label, self: d.self === true, current, loginFailed: true, relogin: kind, state: kind ? 'relogin' : 'expired', reason: kind ? LOGIN_LOST_TEXT.row : LOGIN_LOST_TEXT.rowElsewhere })
+      rows.push({ node: d.key, label, self: d.self === true, current, loginFailed: true, relogin: kind, state: kind ? 'relogin' : 'expired', look: kind ? 'relogin' : 'expired', reason: kind ? LOGIN_LOST_TEXT.row : LOGIN_LOST_TEXT.rowElsewhere })
       continue
     }
-    rows.push({ node: d.key, label, self: d.self === true, current, state: busy ? 'busy' : st.state, reason: busy ? '' : st.reason })
+    const state = busy ? 'busy' : st.state
+    rows.push({ node: d.key, label, self: d.self === true, current, state, look: rowLook(state), reason: busy ? '' : st.reason })
   }
-  return rows.map((r, i) => ({ r, i })).sort((x, y) => Number(!x.r.current) - Number(!y.r.current) || x.i - y.i).map(x => x.r)
+  return rows   // 順序＝「設備」頁的順序（這台第一，其餘照設備頁），每張帳號卡一致；使用中的不再排前面（#2111 ⑥）
 }
 
 /** 這個帳號有沒有哪一台登入失效（卡片頂端標籤、額度區改寫「額度暫時看不到」都看這一個） */

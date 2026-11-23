@@ -97,7 +97,13 @@ export function pruneRemoved(removed, friends, { selfNode } = {}) {
 export const canRemoveRow = d => Boolean(d && !d.self && !d.online && !d.removed)
 // 「顯示回名單」：只看「已隱藏」（和能不能移除無關；電腦、手機同一個條件，#1829）
 export const canShowBackRow = d => Boolean(d && d.hidden && !d.removed)
-export const visibleRows = rows => (Array.isArray(rows) ? rows : []).filter(d => !d.removed)
+// 設備的顯示順序只有這一個函式（#2111 ⑥）：這台第一，其餘維持設備樹給的順序（＝手動排序後的「設備」頁順序）。
+// 「設備」頁的列、帳號卡下的設備列都先過它，各張帳號卡的順序就一定一致，不看誰在用
+export const inDevicePageOrder = rows => {
+  const list = Array.isArray(rows) ? rows : []
+  return [...list.filter(d => d?.self === true), ...list.filter(d => d?.self !== true)]
+}
+export const visibleRows = rows => inDevicePageOrder(rows).filter(d => !d.removed)
 export const removedRows = rows => (Array.isArray(rows) ? rows : []).filter(d => d.removed)
 
 // ---------- 列表：排序把手／拖放／上下移（電腦版與手機共用）----------
