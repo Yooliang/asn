@@ -153,7 +153,9 @@ export function noticeRows(log, { unread = 0, opened = [], hideDev = [] } = {}) 
     }
   })
 }
-export const filterNoticeRows = (rows, cat = NOTICE_CAT_ALL) => (cat === NOTICE_CAT_ALL || !NOTICE_CAT_LABEL[cat] ? rows : rows.filter(r => r.cat === cat))
+// 帶有去處按鈕的通知（手機用）：每一則各自一列，新的在前，最多 max 則；按鈕屬於那一則通知，跟最後一則是什麼無關
+export const noticeGoRows = (log, max = 3) => noticeRows(log).filter(r => r.go).slice(0, max)
+export const filterNoticeRows =(rows, cat = NOTICE_CAT_ALL) => (cat === NOTICE_CAT_ALL || !NOTICE_CAT_LABEL[cat] ? rows : rows.filter(r => r.cat === cat))
 export const noticeUnreadCount = rows => rows.reduce((n, r) => n + (r.unread ? 1 : 0), 0)
 // 各分類的小圖示（24×24 的線條路徑，畫面上用 stroke 畫）
 export const NOTICE_CAT_ICON = {

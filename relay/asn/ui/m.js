@@ -63,7 +63,7 @@ import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArch
 import { acpSwitchChoices, createOpRunner, makeOpRun, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
-import { NOTICE_ID, isMergedAway, isNoticeFriend, noticeGoOf } from './lib/notice.mjs'
+import { NOTICE_ID, isMergedAway, isNoticeFriend, noticeGoRows } from './lib/notice.mjs'
 import { REPLACE_TEXT, createReplaceFlow, newReplaceState, syncAfterReplace } from './lib/device-replace.mjs'
 import { HOME_TAB, chatNav, isNewNotice, noticeLastAt, noticeUnread, tabDot, viewedChatId } from './lib/mobile.mjs'
 import { emo, plain } from './lib/text.mjs'
@@ -723,6 +723,7 @@ const app = createApp({
     const replaceSt = reactive(newReplaceState())
     const replaceFlow = createReplaceFlow({
       state: replaceSt, api: deviceReplaceApi, log: (...a) => console.info(...a),
+      beforeReplace: () => devSync.flush(),
       afterReplace: () => syncAfterReplace({ getPrefs: authApi.getDevicePrefs, devSync, refreshRoster: () => core.refreshRoster(), log: (...a) => console.info(...a) }),
     })
     const replaceCards = computed(() => replaceFlow.view())
@@ -730,8 +731,9 @@ const app = createApp({
     const replaceDo = (node, old) => void replaceFlow.replace(node, old)
     const replaceKeep = node => void replaceFlow.dismiss(node)
     void replaceFlow.load()
-    // 通知上的「查看設備」（#1860 H；去哪由 notice.mjs 的 noticeGoOf 決定，電腦同一份規則）：最新一則收到的通知是新設備＝按鈕帶去設定 → 設備
-    const noticeGo = computed(() => noticeGoOf([...noticeLog.value].reverse().find(m => m && m.k === 'them')?.kind))
+    // 通知上的「查看設備」（#1860 H；去哪由 notice.mjs 的 noticeGoOf 決定，電腦同一份規則）：
+    // 每一則新設備通知各自一列（標題＋按鈕），不看最後一則是什麼，也不會因為後面來了別種通知就消失
+    const noticeGos = computed(() => noticeGoRows(noticeLog.value))
     const goNotice = go => { if (go?.page === 'devices') openSetting('devices') }
     const settingRows = computed(() => mobileSettingRows({ skin: prefs.skin, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, playView: playView.value, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
@@ -1721,7 +1723,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGo, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGos, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

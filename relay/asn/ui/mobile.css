@@ -545,4 +545,6 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 .m-body .photo-viewer .pv-next{right:8px}
 :root[data-skin="modern"] .m-body .photo-viewer .pv-nav{background:rgba(15,22,32,.55)}
 .m-body .photo-viewer.pv-multi .pv-body{padding-left:10px;padding-right:10px}
-.m-notice-go{display:flex;justify-content:flex-end;padding:var(--sp-2) var(--sp-3)}
+.m-notice-go{list-style:none;margin:0;padding:var(--sp-2) var(--sp-3)}
+.m-notice-go li{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);padding:var(--sp-1) 0}
+.m-notice-go-tx{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
