@@ -127,6 +127,20 @@ test('#1760-2：start 還沒回來（還不知道 id）就收到的畫面不丟�
   assert.equal(w.st.phase.value, 'waiting', 'id 對不上的那一幅不畫')
 })
 
+test('#1760-3：舊的那一次建 xterm 失敗時，只通知它自己那台結束，不誤停新一次的', async () => {
+  const f = fakeApi()
+  const v = mount(f.api)
+  v.st.host.value = null                          // 第一次卡在建 xterm（等框）
+  await until(() => v.st.phase.value === 'waiting', '第一次連上（i1），在等框')
+  v.p.active = false; flush()                     // 收掉第一次
+  v.p.active = true; flush()                      // 馬上重新發起
+  v.st.host.value = { isConnected: true, addEventListener() {}, removeEventListener() {} }
+  await until(() => f.calls.filter(c => c === 'start').length === 2 && v.st.phase.value !== 'starting', '第二次連上（i2）')
+  await tick(20)                                  // 讓第一次的建 xterm 迴圈跑完、發現作廢
+  assert.ok(!f.calls.includes('stop:i2'), '不可以停到新一次的 i2：' + f.calls.join(','))
+  assert.ok(f.calls.includes('stop:i1'), '舊的 i1 要結束')
+})
+
 test('#1760-3：掛上時 active 是 false：不啟動、不顯示等待；變 true 才啟動', async () => {
   const f = fakeApi()
   const v = mount(f.api, { active: false })

@@ -139,6 +139,7 @@ export const RemoteInput = {
     }
     const start = async () => {
       if (!props.active) return
+      stop()            // 上一次若還在，先通知那台結束，不留兩條連線（#1760）
       cleanup()
       const gen = ++startGen
       const current = () => alive && gen === startGen && props.active
@@ -150,8 +151,8 @@ export const RemoteInput = {
         // 有最後一幅畫面（snap）：先建 xterm、把原文寫進去，等連上那台的這段保留原本的彩色畫面（#1762）。沒有就照舊，連上了才建
         if (props.snap !== null) {
           await nextTick()
-          term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, () => alive)
-          if (!term) { if (alive) finish(REMOTE_TEXT.failed); return }
+          term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, current)
+          if (!term) { if (current()) finish(REMOTE_TEXT.failed); return }
           wireTerm()
           term.write(frameToWrite({ text: props.snap }))
         }
@@ -172,12 +173,12 @@ export const RemoteInput = {
         // 手機的 start 先等本人確認（生物辨識）：確認回來時這個畫面已經收掉就不送（電腦版不看第四個參數）
         const r = await props.api.start(props.node, props.name, props.machine, { wanted: current })
         // 這次已經開始了才作廢：要結束，不然那台會一直送到到期
-        if (!current()) { if (r?.id) void props.api.stop(r.id).catch(() => {}); return }
+        if (!current()) { stopId(r?.id); return }
         id = r.id
         phase.value = 'waiting'
         if (!term) {
           term = await openTerm(Terminal, inputXtermOptions({ cols: 120, rows: 40 }), host, nextTick, current)
-          if (!term) { stop(); if (current()) finish(REMOTE_TEXT.failed); return }
+          if (!term) { stopId(r.id); if (current()) finish(REMOTE_TEXT.failed); return }   // 用這一次的 r.id：共用的 id 可能已是新一次的（#1760）
           wireTerm()
         }
         // 建好前（或 start 回來前）收到的那一幅，現在補畫；不是這一次的就丟掉
@@ -190,7 +191,9 @@ export const RemoteInput = {
         finish(inputStartError(e))
       }
     }
-    const stop = () => { if (id) void props.api.stop(id).catch(() => {}) }
+    // 通知那台結束；送不到只寫 log（那台到期也會自己停），不打擾畫面
+    const stopId = x => { if (x) void props.api.stop(x).catch(e => console.info('[ASN] 別台打字結束沒送到', x, String(e?.message ?? e))) }
+    const stop = () => stopId(id)
     const back = () => { stop(); cleanup(); emit('back') }
     onMounted(() => { if (props.active) void start() })
     // active 變化（#1760）：false→true 啟動；true→false 照結束的流程收掉（字放回輸入框、不再收畫面、通知那台結束）
