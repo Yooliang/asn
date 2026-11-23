@@ -115,10 +115,8 @@ fn read_seen(work_dir: &Path) -> Map<String, Value> {
 fn write_seen(work_dir: &Path, seen: &Map<String, Value>) {
     let f = seen_file(work_dir);
     let _ = std::fs::create_dir_all(work_dir);
-    let tmp = PathBuf::from(format!("{}.{}.tmp", f.display(), std::process::id()));
-    if std::fs::write(&tmp, serde_json::to_string(seen).unwrap_or_default()).is_ok() {
-        let _ = std::fs::rename(&tmp, &f);
-    }
+    // 看過到哪封的記號，掉了只會多看一次：純狀態
+    let _ = crate::settings::atomic::write(&f, serde_json::to_string(seen).unwrap_or_default().as_bytes(), crate::settings::atomic::STATE);
 }
 
 fn one_line(s: &str, n: usize) -> String {

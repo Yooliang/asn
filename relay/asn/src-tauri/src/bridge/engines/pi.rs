@@ -145,12 +145,8 @@ pub fn write_inbox(home: &Path, sid: &str, id: &str, to: &str, text: &str, now_m
         return Err(format!("pi 收件匣已積 {pending} 封未處理"));
     }
     let body = json!({ "v": 1, "id": id, "to": to, "text": text, "at": now_ms }).to_string();
-    let tmp = dir.join(format!("{id}.json.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, body).map_err(|e| format!("寫入收件匣失敗：{e}"))?;
-    std::fs::rename(&tmp, &target).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("寫入收件匣失敗：{e}")
-    })
+    // 還沒被 pi 取走的信：佇列類（fsync）
+    crate::settings::atomic::write(&target, body.as_bytes(), crate::settings::atomic::QUEUE).map_err(|e| format!("寫入收件匣失敗：{e}"))
 }
 
 /// 順手清理：登記檔 pid 已死且超過一天沒更新的刪掉；沒有對應登記檔、超過 7 天沒動的收件匣整個刪掉。回傳刪了幾項

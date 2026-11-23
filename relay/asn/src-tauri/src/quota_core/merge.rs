@@ -204,7 +204,8 @@ pub fn append_log(p: &Path, text: &str) {
         if let Ok(t) = std::fs::read_to_string(p) {
             let mid = t.len() / 2;
             let keep = t.as_bytes()[mid..].iter().position(|&b| b == b'\n').map(|i| &t[mid + i + 1..]).unwrap_or("");
-            let _ = std::fs::write(p, keep);
+            // 日誌截半：純狀態
+            let _ = crate::settings::atomic::write(p, keep.as_bytes(), crate::settings::atomic::STATE);
         }
     }
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(p) {

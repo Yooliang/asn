@@ -274,11 +274,9 @@ impl Files for RealFiles {
         v.get("path").and_then(Value::as_str).filter(|s| !s.is_empty() && s.len() < 1024).map(String::from)
     }
     fn write_marker(&self, path: &str) -> Result<(), String> {
-        if let Some(d) = self.marker.parent() {
-            std::fs::create_dir_all(d).map_err(|e| format!("記錄檔資料夾建不起來：{e}"))?;
-        }
         let body = json!({ "path": path, "at": crate::heartbeat::now_ms() }).to_string();
-        std::fs::write(&self.marker, body).map_err(|e| format!("記錄檔寫不進去：{e}"))
+        // 記著裝了哪一個（之後要移除靠它）：設定類（fsync）；統一寫入會建父資料夾
+        crate::settings::atomic::write(&self.marker, body.as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("記錄檔寫不進去：{e}"))
     }
     fn clear_marker(&self) {
         let _ = std::fs::remove_file(&self.marker);

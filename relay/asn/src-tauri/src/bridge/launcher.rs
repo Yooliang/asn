@@ -387,7 +387,8 @@ impl Launcher {
     fn write_history(&self, h: &[u64]) {
         let now = now_ms();
         let keep: Vec<u64> = h.iter().copied().filter(|t| now.saturating_sub(*t) < HOUR_MS).collect();
-        let _ = std::fs::write(self.history_file(), serde_json::to_string(&keep).unwrap_or_default());
+        // 一小時內的開窗次數（限流用），掉了只是重新計：純狀態
+        let _ = crate::settings::atomic::write(&self.history_file(), serde_json::to_string(&keep).unwrap_or_default().as_bytes(), crate::settings::atomic::STATE);
     }
     fn record(&self, l: &Value, status: &str, detail: &str) {
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();

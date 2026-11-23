@@ -551,10 +551,8 @@ fn write_fail(root: &Path, kind: FailKind, now_ms: u64) {
 fn write_fail_with(root: &Path, kind: FailKind, now_ms: u64, lib: Option<&str>) {
     let rec = FailRecord { kind: kind.as_str().to_string(), at_ms: now_ms, lib: lib.and_then(sanitize_lib_name) };
     let Ok(text) = serde_json::to_string(&rec) else { return };
-    let tmp = root.join(format!("{STATE_FILE}.tmp"));
-    if std::fs::create_dir_all(root).is_ok() && std::fs::write(&tmp, text).is_ok() {
-        let _ = std::fs::rename(&tmp, root.join(STATE_FILE));
-    }
+    // 下載失敗的退避紀錄：純狀態
+    let _ = crate::settings::atomic::write(&root.join(STATE_FILE), text.as_bytes(), crate::settings::atomic::STATE);
 }
 
 fn clear_fail(root: &Path) {

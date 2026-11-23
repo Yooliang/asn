@@ -57,9 +57,8 @@ fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(p) = path.parent() {
         std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
     }
-    let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
-    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+    // 帳號檔：設定類（fsync）；沿用原本的權限（不另外收緊）
+    crate::settings::atomic::write(path, bytes, crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())
 }
 
 fn saved_emails(home: &Path) -> Vec<(String, PathBuf)> {

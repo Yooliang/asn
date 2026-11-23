@@ -179,10 +179,8 @@ pub fn queue_resume_notice(work_dir: &Path, broke: usize, failed: &[String], now
     let failed: Vec<&String> = failed.iter().take(RESUME_NOTICE_MAX).collect();
     let broke = broke.clamp(failed.len(), RESUME_NOTICE_MAX);
     let body = serde_json::json!({ "count": broke, "resumed": broke - failed.len(), "failed": failed, "at": now_ms });
-    let tmp = work_dir.join(format!("{RESUME_NOTICE_FILE}.tmp"));
-    if std::fs::write(&tmp, body.to_string()).is_ok() {
-        let _ = std::fs::rename(&tmp, work_dir.join(RESUME_NOTICE_FILE));
-    }
+    // 通知（不是信件）：掉了只是少一則提示，純狀態
+    let _ = crate::settings::atomic::write(&work_dir.join(RESUME_NOTICE_FILE), body.to_string().as_bytes(), crate::settings::atomic::STATE);
 }
 
 /// 排著的接回結果：（斷了幾位, 接回幾位, 沒接回的名字, 完成時間）。沒有或壞掉的檔回 None（壞檔順手刪掉）

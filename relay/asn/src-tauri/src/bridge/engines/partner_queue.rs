@@ -168,7 +168,7 @@ pub fn forget(file: &Path, name: &str) -> Result<(), String> {
     if arr.len() == before {
         return Ok(());
     }
-    crate::write_atomic(file, &v.to_string()).map_err(|e| format!("名冊寫不進去：{e}"))
+    crate::settings::atomic::write(file, v.to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("名冊寫不進去：{e}"))
 }
 
 /// 名冊裡某一筆改名（遠端管理「改名」；舊名不分大小寫）：只換名字，profile、工作資料夾、建立時間原樣保留。名冊裡沒有＝錯誤
@@ -178,7 +178,7 @@ pub fn rename(file: &Path, from: &str, to: &str) -> Result<(), String> {
     let arr = v.get_mut("partners").and_then(Value::as_array_mut).ok_or("名冊裡沒有這一筆")?;
     let e = arr.iter_mut().find(|e| e.get("name").and_then(Value::as_str).is_some_and(|n| n.eq_ignore_ascii_case(from))).ok_or("名冊裡沒有這一筆")?;
     e["name"] = json!(to);
-    crate::write_atomic(file, &v.to_string()).map_err(|e| format!("名冊寫不進去：{e}"))
+    crate::settings::atomic::write(file, v.to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("名冊寫不進去：{e}"))
 }
 
 /// 名冊每筆的建立時間（毫秒；舊檔沒有就是 0），鍵是小寫名字

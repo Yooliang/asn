@@ -234,7 +234,7 @@ impl Core {
         }
         let file = self.cfg.work_dir.join(RETRY_FILE);
         let ok = match &want {
-            Some(t) => crate::write_atomic(&file, t).map_err(|e| self.log.line(&format!("upstream-retry state save failed: {e}"))).is_ok(),
+            Some(t) => crate::settings::atomic::write(&file, t.as_bytes(), crate::settings::atomic::QUEUE).map_err(|e| self.log.line(&format!("upstream-retry state save failed: {e}"))).is_ok(),
             None => {
                 let _ = std::fs::remove_file(&file);
                 true

@@ -27,9 +27,8 @@ pub fn drop_in_inbox(dir: &std::path::Path, code: &str) -> std::io::Result<()> {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad code"));
     }
     std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!("{INBOX_FILE}.tmp"));
-    std::fs::write(&tmp, code)?;
-    std::fs::rename(&tmp, dir.join(INBOX_FILE))
+    // 兩秒內就被取走的轉交檔：純狀態
+    crate::settings::atomic::write(&dir.join(INBOX_FILE), code.as_bytes(), crate::settings::atomic::STATE)
 }
 /// 取走信箱裡的邀請碼（檔案一律刪掉，內容壞了也刪）
 pub fn take_from_inbox(dir: &std::path::Path) -> Option<String> {

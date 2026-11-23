@@ -63,12 +63,8 @@ fn write_request(home: &Path, sid: &str, id: &str, v: &Value) -> Result<(), Stri
     let dir = control_dir(home).join(sid);
     std::fs::create_dir_all(&dir).map_err(|e| format!("建立控制資料夾失敗：{e}"))?;
     let target = dir.join(format!("{id}.json"));
-    let tmp = dir.join(format!("{id}.json.{}.tmp", std::process::id()));
-    std::fs::write(&tmp, v.to_string()).map_err(|e| format!("寫入控制請求失敗：{e}"))?;
-    std::fs::rename(&tmp, &target).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("寫入控制請求失敗：{e}")
-    })
+    // 一次性的控制請求（等不到就當逾時）：純狀態
+    crate::settings::atomic::write(&target, v.to_string().as_bytes(), crate::settings::atomic::STATE).map_err(|e| format!("寫入控制請求失敗：{e}"))
 }
 
 /// 讀擴充寫回的結果；還沒有、太大、壞掉、編號對不上都是 None（當作還沒好）

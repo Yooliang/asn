@@ -19,10 +19,8 @@ fn file(work_dir: &Path, id: &str, kind: &str) -> PathBuf {
 
 fn mark(work_dir: &Path, id: &str, kind: &str) -> Result<(), String> {
     let p = file(work_dir, id, kind);
-    if let Some(d) = p.parent() {
-        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(&p, b"1").map_err(|e| e.to_string())
+    // 處理到哪的記號（掉了只會少一句提示或多重送一次）：純狀態；統一寫入會建父資料夾
+    crate::settings::atomic::write(&p, b"1", crate::settings::atomic::STATE).map_err(|e| e.to_string())
 }
 
 pub fn mark_started(work_dir: &Path, id: &str) -> Result<(), String> {
