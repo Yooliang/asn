@@ -243,28 +243,6 @@ fn written_credentials_are_private() {
     assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
 }
 
-#[test]
-fn rename_retries_until_success() {
-    let mut calls = 0;
-    let r = retry_rename(5, std::time::Duration::ZERO, || {
-        calls += 1;
-        if calls < 3 { Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied)) } else { Ok(()) }
-    });
-    assert!(r.is_ok());
-    assert_eq!(calls, 3, "成功就不再試");
-}
-
-#[test]
-fn rename_gives_up_after_limit() {
-    let mut calls = 0;
-    let r = retry_rename(5, std::time::Duration::ZERO, || {
-        calls += 1;
-        Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
-    });
-    assert!(r.is_err());
-    assert_eq!(calls, 5);
-}
-
 #[cfg(windows)]
 #[test]
 fn write_atomic_waits_for_briefly_locked_file() {
@@ -275,7 +253,7 @@ fn write_atomic_waits_for_briefly_locked_file() {
     // 不開放刪除共用：跟防毒短暫開著檔案時一樣，改名會失敗
     let held = std::fs::OpenOptions::new().read(true).share_mode(1).open(&p).unwrap();
     let release = std::thread::spawn(move || {
-        std::thread::sleep(RENAME_WAIT);
+        std::thread::sleep(std::time::Duration::from_millis(200));
         drop(held);
     });
     write_atomic(&p, &json!({ "new": true })).unwrap();

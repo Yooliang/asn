@@ -25,9 +25,6 @@ pub const MAX_DIRS: usize = 5;
 const TOKEN_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const LOCK: &str = ".asn-refresh.lock";
-/// 改名失敗要再試：Windows 上防毒或索引程式短暫開著檔案就會失敗，而這時舊的 refresh token 已經作廢，放棄就要重新登入
-const RENAME_TRIES: u32 = 5;
-const RENAME_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
 /// 鎖檔放這麼久就當作上一個程式當掉留下的（一次換新最多幾十秒）
 const LOCK_STALE: std::time::Duration = std::time::Duration::from_secs(120);
 
@@ -154,39 +151,13 @@ pub fn merged(raw: &Value, got: &Value, now_ms: i64) -> Option<Value> {
     Some(out)
 }
 
-/// 試到成功或次數用完，回傳最後的結果。只重試改名，不會重新向對方換新。
-fn retry_rename(tries: u32, wait: std::time::Duration, mut rename: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
-    let mut left = tries.max(1);
-    loop {
-        left -= 1;
-        match rename() {
-            Err(_) if left > 0 => std::thread::sleep(wait),
-            done => return done,
-        }
-    }
-}
-
 /// 先寫同資料夾的暫存檔再改名：任何一步失敗，舊檔都還在，暫存檔也清掉。
+/// 改名失敗要再試：Windows 上防毒或索引程式短暫開著檔案就會失敗，而這時舊的 refresh token 已經作廢，放棄就要重新登入。
+/// 重試由 settings::atomic 負責，只認 Windows 的 5／32／33（存取被拒、共用違規、鎖定違規），最多 5 次、每次隔 200 毫秒。
 pub fn write_atomic(path: &Path, value: &Value) -> Result<(), ()> {
-    use std::io::Write;
-    let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
-    let done = (|| -> std::io::Result<()> {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        // 憑證只有本人能讀；Windows 繼承資料夾的權限
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-        let mut f = opts.open(&tmp)?;
-        f.write_all(value.to_string().as_bytes())?;
-        f.sync_all()?;
-        drop(f);
-        retry_rename(RENAME_TRIES, RENAME_WAIT, || std::fs::rename(&tmp, path))
-    })();
-    if done.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(());
-    }
-    Ok(())
+    // 憑證只有本人能讀（Unix 0600；Windows 繼承資料夾的權限）；要 fsync；不建父資料夾
+    let o = crate::settings::atomic::Opts { fsync: true, private: true, create_dirs: false };
+    crate::settings::atomic::write(path, value.to_string().as_bytes(), o).map_err(|_| ())
 }
 
 /// 重置時間可能帶小數秒與時區偏移：明寫了偏移就換成 UTC；沒寫時區的不猜（iso_or_none，#1195）

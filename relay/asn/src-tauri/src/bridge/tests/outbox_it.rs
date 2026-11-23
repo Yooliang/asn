@@ -481,11 +481,23 @@ async fn 寄信時讀回應中斷_重試用盡_進寄件匣_不當成已寄出()
 
 // ---- #1249（#1231 二審建議的後續）----------------------------------------------------------
 
-/// 讓下一次存檔失敗又不動到原檔：把暫存檔那個名字占成資料夾（暫存檔寫不進去，原檔留在原處）
-fn block_next_save(h: &H) -> std::path::PathBuf {
-    let tmp = std::path::PathBuf::from(format!("{}.{}.tmp", outbox_file(h).display(), std::process::id()));
-    std::fs::create_dir(&tmp).unwrap();
-    tmp
+/// 讓下一次存檔失敗：把存檔位置換成同名資料夾（改名一定失敗；原檔內容先收起來，之後原樣放回）。
+/// 統一寫入的暫存檔名每次不同，沒辦法再靠占住暫存檔名來擋。
+fn block_next_save(h: &H) -> Option<Vec<u8>> {
+    let f = outbox_file(h);
+    let saved = std::fs::read(&f).ok();
+    if saved.is_some() {
+        std::fs::remove_file(&f).unwrap();
+    }
+    std::fs::create_dir(&f).unwrap();
+    saved
+}
+fn unblock_save(h: &H, saved: Option<Vec<u8>>) {
+    let f = outbox_file(h);
+    std::fs::remove_dir(&f).unwrap();
+    if let Some(b) = saved {
+        std::fs::write(&f, b).unwrap();
+    }
 }
 
 #[tokio::test]
@@ -611,12 +623,12 @@ async fn t1249_放棄時存檔失敗_重開後不會把已放棄的舊片段又�
     reply(&mut h, SECRET, T0 + 3_000).await;
     assert_eq!(file_items(&h), 1, "存檔裡有待送的回信");
     reject_next_resend(&h);
-    let tmp = block_next_save(&h);
+    let saved = block_next_save(&h);
     h.core.tick(T0 + 18_000).await;
     assert!(h.core.log.has("give-up notice not persisted"), "放棄時存檔失敗");
-    assert_eq!(file_items(&h), 1, "存檔裡還是舊片段");
     assert!(h.fr.st.lock().unwrap().bridge_notices.is_empty(), "放棄通知沒送達");
-    std::fs::remove_dir(&tmp).unwrap();
+    unblock_save(&h, saved);
+    assert_eq!(file_items(&h), 1, "存檔裡還是舊片段");
     let sent_before = attempts(&h).len();
     let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 19_000);
     assert_eq!(c2.outbox_pending_notices(), 1, "舊片段換成待通知項");
@@ -636,10 +648,10 @@ async fn t1249_放棄時存檔失敗_但通知已送達_重開後不重複通知
     set_fail(&h, 1, 503);
     reply(&mut h, SECRET, T0 + 3_000).await;
     reject_next_resend(&h);
-    let tmp = block_next_save(&h);
+    let saved = block_next_save(&h);
     h.core.tick(T0 + 18_000).await;
     assert_eq!(h.fr.st.lock().unwrap().bridge_notices.len(), 1, "通知已送達");
-    std::fs::remove_dir(&tmp).unwrap();
+    unblock_save(&h, saved);
     let sent_before = attempts(&h).len();
     let mut c2 = new_core(&h.fr, h.work.path(), h.sessions.path(), Arc::new(FakeSink::default()), T0 + 19_000);
     c2.tick(T0 + 60_000).await;

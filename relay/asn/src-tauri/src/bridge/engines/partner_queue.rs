@@ -154,7 +154,8 @@ pub fn remember(file: &Path, name: &str, profile: &str, cwd: &str) {
             json!({ "name": n, "profile": p, "cwd": c, "at": t })
         })
         .collect();
-    let _ = crate::write_atomic(file, &json!({ "version": 1, "partners": arr }).to_string());
+    // 夥伴名冊是長期資料（不是待送佇列），當機不能弄丟：設定類，會 fsync
+    let _ = crate::settings::atomic::write(file, json!({ "version": 1, "partners": arr }).to_string().as_bytes(), crate::settings::atomic::SETTINGS);
 }
 
 /// 從名冊刪掉一筆（遠端管理「移除」；名字不分大小寫）。其餘各筆原樣保留（含建立時間）；名冊裡本來就沒有＝成功

@@ -195,14 +195,9 @@ pub fn load_state(file: &Path, now: u64, keep_ms: u64) -> Loaded {
     out
 }
 
-/// 原子寫入：先寫暫存檔再 rename
+/// 原子寫入：先寫暫存檔再 rename；pending 是還沒送達的信件，要 fsync（佇列類）
 pub fn save_atomic(file: &Path, data: &Value) -> std::io::Result<()> {
-    let tmp = format!("{}.{}.tmp", file.display(), std::process::id());
-    let r = std::fs::write(&tmp, data.to_string()).and_then(|_| std::fs::rename(&tmp, file));
-    if r.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    r
+    crate::settings::atomic::write(file, data.to_string().as_bytes(), crate::settings::atomic::QUEUE)
 }
 
 #[cfg(test)]

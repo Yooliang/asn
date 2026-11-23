@@ -71,7 +71,7 @@ pub fn login_skipped(data_dir: &Path) -> bool {
 pub fn set_login_skipped(data_dir: &Path, on: bool) -> Result<(), String> {
     let f = data_dir.join(SKIP_FILE);
     if on {
-        crate::write_atomic(&f, "1").map_err(|e| format!("存不了設定：{e}"))
+        crate::settings::atomic::write(&f, b"1", crate::settings::atomic::SETTINGS).map_err(|e| format!("存不了設定：{e}"))
     } else {
         match std::fs::remove_file(&f) {
             Ok(()) => Ok(()),
@@ -125,7 +125,7 @@ pub fn load_or_create_device_id(data_dir: &Path) -> Result<String, String> {
         }
     }
     let id = auth::new_device_id();
-    crate::write_atomic(&f, &id).map_err(|e| format!("存不了裝置識別：{e}"))?;
+    crate::settings::atomic::write(&f, id.as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("存不了裝置識別：{e}"))?;
     Ok(id)
 }
 

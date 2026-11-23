@@ -16,7 +16,6 @@ pub struct Opts {
 /// 設定類：斷電後要還在
 pub const SETTINGS: Opts = Opts { fsync: true, private: false, create_dirs: true };
 /// 裝著還沒送達信件的佇列、pending：斷電後要還在
-#[allow(dead_code)]
 pub const QUEUE: Opts = Opts { fsync: true, private: false, create_dirs: true };
 /// 快取與純狀態：掉了可以重建，不付 fsync 的錢
 pub const STATE: Opts = Opts { fsync: false, private: false, create_dirs: true };
@@ -221,7 +220,45 @@ mod tests {
         std::fs::create_dir(&p).unwrap();
         let t = std::time::Instant::now();
         assert!(write(&p, b"x", SETTINGS).is_err());
-        assert!(t.elapsed() < std::time::Duration::from_millis(150), "不該重試睡覺");
+        // 放寬給慢的 CI 機器；重點是確認沒跑滿 5×200 毫秒（約 1 秒）的重試
+        assert!(t.elapsed() < std::time::Duration::from_millis(600), "不該重試睡覺");
+    }
+
+    // 分類釘住（#2162）：這幾處的資料斷電後要還在，不准退回不 fsync 的 STATE。用原始碼掃描，
+    // 每處以「呼叫的開頭」當錨點，檢查同一行用的是哪個 Opts。
+    #[test]
+    fn 佇列與設定的寫入點用的是會fsync的類別() {
+        let sites: [(&str, &str, &str, &str); 8] = [
+            ("acct_remote.rs outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE"),
+            ("acct_remote.rs set_pref", include_str!("../acct_remote.rs"), "atomic::write(&prefs_path(", "SETTINGS"),
+            ("bridge/mod.rs write_settings", include_str!("../bridge/mod.rs"), "atomic::write(&settings_path(", "SETTINGS"),
+            ("agent_setup/switch.rs", include_str!("../agent_setup/switch.rs"), "atomic::write(&prefs_path(", "SETTINGS"),
+            ("account.rs login_skipped", include_str!("../account.rs"), "atomic::write(&f, b\"1\"", "SETTINGS"),
+            ("account.rs device_id", include_str!("../account.rs"), "atomic::write(&f, id.as_bytes()", "SETTINGS"),
+            ("bridge/engines/partner_queue.rs 名冊", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS"),
+            ("bridge/pending.rs save_atomic", include_str!("../bridge/pending.rs"), "atomic::write(file,", "QUEUE"),
+        ];
+        for (name, src, anchor, want) in sites {
+            let i = src.find(anchor).unwrap_or_else(|| panic!("{name}：找不到寫入呼叫（{anchor}）"));
+            let line = src[i..].lines().next().unwrap();
+            assert!(line.contains(&format!("atomic::{want}")), "{name}：要用 {want}，實際：{line}");
+            assert!(!line.contains("atomic::STATE"), "{name}：不准用 STATE");
+        }
+        // 這幾處不准再有舊的 STATE 包裝呼叫（同檔其他處留給 2b，所以只查這幾處的檔案路徑）
+        for (src, bad) in [
+            (include_str!("../acct_remote.rs"), "crate::write_atomic(&outbox_path("),
+            (include_str!("../acct_remote.rs"), "crate::write_atomic(&prefs_path("),
+            (include_str!("../agent_setup/switch.rs"), "crate::write_atomic("),
+            (include_str!("../account.rs"), "crate::write_atomic("),
+            (include_str!("../bridge/mod.rs"), "crate::write_atomic(&settings_path("),
+            (include_str!("../bridge/engines/partner_queue.rs"), "crate::write_atomic(file, &json!("),
+        ] {
+            assert!(!src.contains(bad), "還有走 {bad}（STATE）的呼叫");
+        }
+        // 帳號憑證 helper：claude_json 設定類；claude_extra 要 fsync 且私有
+        assert!(include_str!("../claude_json.rs").contains("atomic::SETTINGS"));
+        assert!(include_str!("../claude_extra.rs").contains("fsync: true, private: true"));
+        assert!(include_str!("../cli/send_rate.rs").contains("atomic::STATE"));
     }
 
     // 舊版 H1 寫法：直接寫 tmp 再 rename

@@ -1427,7 +1427,7 @@ mod tests {
         assert_eq!(read(cj_path(h)), j0);
         // 磁碟備份也在
         assert_eq!(read(backup_dir(h).join("credentials.json")), c0);
-        assert!(fs::read_dir(h.join(".claude")).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains("asn-tmp")), "不留暫存檔");
+        assert!(fs::read_dir(h.join(".claude")).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")), "不留暫存檔");
     }
 
     #[test]
