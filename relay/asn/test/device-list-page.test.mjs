@@ -7,7 +7,7 @@ import { renderToString as ssrRender } from 'vue/server-renderer'
 // 共用元件的插槽會在輸出裡留下片段標記（<!--[-->、<!--]-->），比對畫面文字前先拿掉
 const renderToString = async app => (await ssrRender(app)).replace(/<!--\[-->|<!--\]-->/g, '')
 import {
-  DEVICE_TEXT, canRemoveRow, deviceFieldsFromSaved, deviceFieldsToSave, dropAfter, dropSlot, isDeviceRemoved, moveDevice, moveFlags, pruneRemoved,
+  DEVICE_TEXT, canRemoveRow, deviceFieldsFromSaved, deviceFieldsToSave, dropAfter, dropSlot, isDeviceRemoved, moveDevice, pruneRemoved,
   removeDevice, removedRows, reorderDevice, restoreDevice, visibleRows,
 } from '../ui/lib/device-order.mjs'
 import { buildDeviceTree } from '../ui/lib/device-tree.mjs'
@@ -58,9 +58,11 @@ test('別台、離線的設備都能永久移除（不必先被自動隱藏）�
   assert.equal(canRemoveRow(null), false)
 })
 
-test('文字：二次確認寫明對話與帳號資料不會被刪除；已永久移除（N）', () => {
+test('文字：二次確認寫明對話與帳號資料不會被刪除；已移除的設備（N）', () => {
   assert.equal(DEVICE_TEXT.confirmRemove('舊電腦'), '確定永久移除「舊電腦」嗎？它的對話與帳號資料不會被刪除，只是不再顯示。')
-  assert.equal(DEVICE_TEXT.removedLink(3), '已永久移除（3）')
+  assert.equal(DEVICE_TEXT.removedTitle(3), '已移除的設備（3）')
+  assert.equal(DEVICE_TEXT.detail, '詳情'); assert.equal(DEVICE_TEXT.forget, '忘記')
+  assert.ok(!('moveUp' in DEVICE_TEXT) && !('moveDown' in DEVICE_TEXT), '沒有上移／下移')
   assert.equal(DEVICE_TEXT.showBack, '顯示回名單'); assert.equal(DEVICE_TEXT.remove, '永久移除'); assert.equal(DEVICE_TEXT.back, '返回')
 })
 
@@ -85,10 +87,11 @@ test('列表包含被隱藏的設備（不從列表消失），只是標記 hidd
 })
 
 // ---------- 共用邏輯：排序 ----------
-test('moveFlags：本機不算；第一台不能上移、最後一台不能下移', () => {
-  const rows = [{ key: 'H' }, { key: 'A' }, { key: 'B' }, { key: 'C' }]
-  assert.deepEqual(moveFlags(rows, 'H'), { A: { up: false, down: true }, B: { up: true, down: true }, C: { up: true, down: false } })
-  assert.deepEqual(moveFlags([], 'H'), {})
+test('順序只用拖曳（或把手上的上下鍵）：不再有上移／下移的判斷函式（#1860）', async () => {
+  const mod = await import('../ui/lib/device-order.mjs')
+  assert.equal(mod.moveFlags, undefined)
+  assert.equal(mod.deviceRowLine({ kindLabel: '手機', online: false }), '手機 · 離線中')
+  assert.equal(mod.deviceRowLine({ kindLabel: '電腦', online: true, self: true }, '這台'), '電腦 · 在線 · 這台')
 })
 test('dropAfter／dropSlot：游標在列的上半＝前、下半＝後；落在列外取最近的一端；空列表安全', () => {
   assert.equal(dropAfter(10, 0, 40), false); assert.equal(dropAfter(30, 0, 40), true)
@@ -128,15 +131,18 @@ test('頁首：設定視窗標題已是「設備與帳號」，面板裡不再�
   assert.ok(!SETTING_OPS.includes('devices-refresh') && !SettingsPanel.template.includes('devices-refresh'))
 })
 
-test('進入先看全部設備的列表：由上到下一台一列，名稱／類型／在線狀態，右邊有「›」；本機第一列；不是細部內容', async () => {
+test('進入先看全部設備的列表：由上到下一台一列，名稱＋第二行（類型 · 狀態），右邊直接一顆「詳情」；本機第一列；不是細部內容', async () => {
   const html = await render({})
   const rows = [...html.matchAll(/<li[^>]*class="dv-row[^"]*"[\s\S]*?<\/li>/g)].map(m => m[0])
   assert.equal(rows.length, 3, '列表三台（被永久移除的不在列表）')
-  assert.match(rows[0], /家用機[\s\S]*dv-tag me[^>]*>這台/)
-  assert.match(rows[1], /工作機[\s\S]*dv-tag on[^>]*>在線/); assert.ok(!rows[1].includes('>電腦<'), '電腦標籤多餘不顯示')
+  assert.match(rows[0], /家用機[\s\S]*電腦 · 在線 · 這台/)
+  assert.match(rows[1], /工作機[\s\S]*電腦 · 在線/)
+  assert.match(rows[2], /舊電腦[\s\S]*電腦 · 離線中/); assert.ok(!html.includes('離線<'), '離線一律寫「離線中」')
+  for (const r of rows) assert.equal((r.match(/<button[^>]*class="asn-btn/g) ?? []).length, 1, '每列只有一顆文字按鈕')
+  for (const r of rows) assert.match(r, /<button[^>]*class="asn-btn[^"]*"[^>]*aria-label="查看「[^」]+」的詳情"[^>]*>詳情<\/button>/)
   for (const r of rows) assert.ok(!r.includes('dv-chev') && !r.includes('dv-row-go" type="button"'), '不再整列點擊／右箭頭')
   assert.ok(!html.includes('dv-vendor') && !html.includes('w@b.c'), '列表不含廠商與帳號內容')
-  assert.ok(!html.includes('永久移除的機器'), '被永久移除的不出現在列表')
+  assert.ok(!rows.join('').includes('永久移除的機器'), '被永久移除的不出現在列表（只在「已移除的設備」）')
 })
 
 test('列表裡被隱藏的設備：淡色（hid）、標「已隱藏」；本機不可拖（沒有 draggable、沒有上移下移）', async () => {
@@ -144,19 +150,17 @@ test('列表裡被隱藏的設備：淡色（hid）、標「已隱藏」；本�
   const rows = [...html.matchAll(/<li[^>]*class="dv-row[^"]*"[\s\S]*?<\/li>/g)].map(m => m[0])
   assert.match(rows[2], /class="dv-row[^"]*\bhid\b/); assert.match(rows[2], /dv-tag hid[^>]*>已隱藏/)
   assert.doesNotMatch(rows[1], /\bhid\b/)
-  assert.ok(!/draggable="true"/.test(rows[0]) && !rows[0].includes('設備順序'))
-  assert.match(rows[1], /draggable="true"/); assert.match(rows[1], /aria-label="設備順序"/)
+  assert.ok(!/dv-grip"/.test(rows[0]) && !/draggable="true"/.test(rows[0]), '本機沒有把手')
+  assert.match(rows[1], /<button[^>]*class="dv-grip"[^>]*draggable="true"/); assert.match(rows[1], /aria-label="拖曳調整「工作機」的順序/)
 })
 
-test('鍵盤可用的上移／下移：第一台別台不能上移、最後一台不能下移；按鈕有名稱', async () => {
+test('沒有上移／下移：順序只用把手拖曳；把手聚焦後上下鍵移動一格（送 device-move）', async () => {
   const html = await render({})
-  const rows = [...html.matchAll(/<li[^>]*class="dv-row[^"]*"[\s\S]*?<\/li>/g)].map(m => m[0])
-  assert.match(rows[1], /<button[^>]*disabled[^>]*aria-label="上移 工作機"/)
-  assert.doesNotMatch(rows[1], /<button[^>]*disabled[^>]*aria-label="下移 工作機"/)
-  assert.match(rows[2], /<button[^>]*disabled[^>]*aria-label="下移 舊電腦"/)
-  assert.doesNotMatch(rows[2], /<button[^>]*disabled[^>]*aria-label="上移 舊電腦"/)
+  assert.ok(!html.includes('上移') && !html.includes('下移') && !html.includes('設備順序'))
   const t = SettingsPanel.template
-  assert.match(t, /act\('device-move', \{ node: d\.key, dir: -1 \}\)/); assert.match(t, /act\('device-move', \{ node: d\.key, dir: 1 \}\)/)
+  assert.ok(!t.includes("dir: -1 })\">") && !t.includes('DEVICE_TEXT.moveUp'))
+  assert.match(t, /@keydown="gripKey\(d\.key, \$event\)"/)
+  assert.match(read('ui/lib/settings-panel.mjs'), /act\('device-move', \{ node: key, dir: ev\.key === 'ArrowUp' \? -1 : 1 \}\)/)
 })
 
 test('滑鼠拖放與整列點擊：整列 @click 進細部頁（按鈕區不觸發）、dragstart／dragover／drop 送 device-reorder', () => {
@@ -201,29 +205,30 @@ test('永久移除要二次確認：確認區寫明對話與帳號資料不會�
   assert.ok(SETTING_OPS.includes('device-remove') && read('ui/list.js').includes("case 'device-remove'"))
 })
 
-test('電腦版設備列表不再顯示「已永久移除」區；永久移除的整個不出現', async () => {
+test('電腦版「已移除的設備」一塊：永久移除的給「恢復」（送 device-restore）；舊的「已永久移除」「舊設備紀錄」不再出現', async () => {
   const html = await render({})
-  assert.ok(!html.includes('已永久移除（') && !html.includes('dv-removed') && !html.includes('>恢復<'))
-  assert.ok(!SETTING_OPS.includes('device-restore') && !read('ui/list.js').includes("case 'device-restore'"), '電腦版沒有還原入口，也不留沒人用的指令（手機版另有自己的恢復入口）')
+  assert.match(html, /<details class="dv-removed"[^>]*>\s*<summary>已移除的設備（1）<\/summary>/)
+  assert.match(html, /data-removed="X"[\s\S]*?永久移除的機器[\s\S]*?>恢復<\/button>/)
+  assert.ok(!html.includes('已永久移除（') && !html.includes('舊設備紀錄'))
+  assert.ok(SETTING_OPS.includes('device-restore') && read('ui/list.js').includes("case 'device-restore'"))
+  assert.match(SettingsPanel.template, /act\('device-restore', r\.key\)/)
+  assert.ok(!(await render({}, { devices: [dev('H', '家用機', { self: true })], accounts: ACCT })).includes('dv-removed'), '沒有已移除的設備就不畫這一塊')
 })
 
-test('設備類型標籤：電腦不顯示（多餘），只有手機等非電腦才標', async () => {
-  const html = await render({})
-  assert.ok(!html.includes('class="dv-tag kind">電腦<'))
-  const ph = await render({}, { devices: [dev('P', '我的手機', { kind: '手機' })], accounts: ACCT })
-  assert.match(ph, /class="dv-tag kind">手機</)
+test('設備類型：第二行寫「手機 · 在線」；電腦也寫「電腦」，不再有獨立的類型標籤', async () => {
+  const ph = await render({}, { devices: [dev('P', '我的手機', { kind: '手機', kindLabel: '手機' })], accounts: ACCT })
+  assert.match(ph, /我的手機[\s\S]*手機 · 在線/)
+  assert.ok(!ph.includes('dv-tag kind'))
 })
 
-test('電腦版設備列也標「雲端」（0.2.16，和手機同一個 deviceKindLabel）：列表與細部頁都是「雲端」；不是雲端的電腦照舊不標', async () => {
+test('電腦版設備列也標「雲端」（和手機同一個 deviceKindLabel）：列表第二行與細部頁都是「雲端」；不是雲端的電腦寫「電腦」', async () => {
   const cloud = dev('C', '雲端機', { kindLabel: '雲端', cloud: true })
   const list = await render({}, { devices: [cloud, dev('D', '桌機', { kindLabel: '電腦' })], accounts: ACCT })
-  assert.match(list, /class="dv-tag kind">雲端</)
-  assert.equal((list.match(/class="dv-tag kind">/g) ?? []).length, 1, '一般電腦不標')
+  assert.match(list, /雲端機[\s\S]*雲端 · 在線/); assert.match(list, /桌機[\s\S]*電腦 · 在線/)
   const detail = await render({ dev: 'C' }, { devices: [cloud], accounts: ACCT })
   assert.match(detail, /class="dv-tag kind">雲端</)
   // 資料真的帶 kindLabel：設備樹用 deviceKindLabel 算（雲端節點判斷見 device-kind-label.test.mjs）
   assert.match(read('ui/lib/device-tree.mjs'), /kindLabel: deviceKindLabel\(/)
-  assert.match(SettingsPanel.template, /\{\{ d\.kindLabel \|\| d\.kind \}\}/)
   assert.match(SettingsPanel.template, /\{\{ curDev\.kindLabel \|\| curDev\.kind \}\}/)
 })
 
@@ -247,18 +252,15 @@ test('深色模式：新樣式只用主題變數，紅色的「永久移除」�
 })
 
 // ---------- 手機「選項」頁 ----------
-test('手機列表：整列不再一點就進細部；點一列才展開它的 4 顆按鈕（上移、下移、帳號、詳情，#1539），左邊保留排序把手（不拖時不影響捲動）', () => {
+test('手機列表：每列右邊直接一顆「詳情」（不展開、沒有上移／下移，#1860），左邊保留排序把手（不拖時不影響捲動）', () => {
   const html = read('ui/m.html'), css = read('ui/mobile.css')
   const pane = /<section class="m-pg m-fourth"[\s\S]*?<!-- \/內頁 -->/.exec(html)[0]
   assert.match(pane, /v-for="d in acctDevs"[\s\S]*?class="m-dv-row"/)
-  // 資訊區是按鈕，點了只選中這一列（展開它的按鈕），不開任何頁面（#1539）
-  const go = /<button type="button" class="m-dv-go"[^>]*>/.exec(pane)?.[0] ?? ''
-  assert.match(go, /@click="devRowTap\(d\.key, \$event\)"/, '點資訊區＝選中這一列')
-  assert.match(go, /@pointerdown="devTap\.down\(\$event\)"[^>]*@pointermove="devTap\.move\(\$event\)"[^>]*@pointercancel="devTap\.cancel\(\)"/, '分得出點擊和捲動')
-  assert.doesNotMatch(go, /openAcct/, '點資訊區不直接進細部或帳號')
-  assert.match(pane, /<div class="m-dv-btns m-dv-rowbtns" v-if="devSel === d\.key"/, '只有選中的那一列有按鈕')
-  assert.match(pane, /@click="openAcctDevice\(d\.key\)">\{\{ KNOWN_TEXT\.accounts \}\}/)
-  assert.match(pane, /@click="openAcctInfo\(d\.key\)">\{\{ KNOWN_TEXT\.detail \}\}/)
+  // 資訊區只是文字，不是按鈕；詳情是每列右邊固定的一顆（#1860）
+  assert.doesNotMatch(pane, /class="m-dv-go"|devRowTap|devSel|m-dv-rowbtns/, '不再點一列才展開按鈕')
+  assert.doesNotMatch(pane, /DEVICE_TEXT\.moveUp|KNOWN_TEXT\.moveUp|acctMove\(d\.key/, '沒有上移／下移')
+  assert.match(pane, /<asn-button fixed class="m-dv-detail" :aria-label="DEVICE_TEXT\.detailLabel\(d\.label\)" @click="openAcctInfo\(d\.key\)">\{\{ DEVICE_TEXT\.detail \}\}<\/asn-button>/)
+  assert.doesNotMatch(pane, /class="m-dv-own"|KNOWN_TEXT\.ownNameLabel/, '列表最上面沒有「這支手機的名字」改名區塊')
   assert.match(pane, /class="m-dv-grip"[^>]*v-if="!d\.self"/, '本機沒有把手＝固定第一列不可拖')
   assert.match(pane, /@pointerdown="gripDown\(d\.key, \$event\)"[^>]*@pointermove="gripMove"[^>]*@pointerup="gripUp"[^>]*@pointercancel="gripUp"/)
   assert.match(pane, /@keydown="gripKey\(d\.key, \$event\)"/, '把手聚焦後上下鍵也能移動')
@@ -297,7 +299,7 @@ test('手機被隱藏設備：細部頁兩個動作；永久移除走獨立的�
   assert.match(js, /removeDevice\(devPrefs\.deviceRemoved, acctCur\.value\.key, \{ selfNode: info\.node \}\)/)
   assert.match(js, /restoreDevice\(devPrefs\.deviceRemoved, key\)/)
   assert.match(js, /DEVICE_TEXT\.confirmRemove\(acctCur\.value\?\.identity\?\.title\)/)
-  assert.match(pane, /v-if="acctRemoved\.length"[\s\S]*?DEVICE_TEXT\.removedLink\(acctRemoved\.length\)[\s\S]*?acctRestore\(d\.key\)/)
+  assert.match(pane, /v-if="removedBlock\.count"[\s\S]*?DEVICE_TEXT\.removedTitle\(removedBlock\.count\)[\s\S]*?acctRestore\(r\.key\)[\s\S]*?forgetKnown\(r\.key\)/)
 })
 
 test('手機自動解除與存檔：活過來就解除、舊存檔相容、被移除的設備不再有「選項」入口', () => {

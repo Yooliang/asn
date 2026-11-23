@@ -29,8 +29,7 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
       if (!check) return { ok: true, why: '' };
       if (!rows) return { ok: false, why: '設備列表少於 2 列' };
       const names = rows.map(r => r.querySelector('b')?.textContent.trim());
-      const cur = document.querySelector('.m-dv-curname')?.textContent.trim();
-      if (cur !== ${JSON.stringify(NAME_M)}) return { ok: false, why: '頂部「這支手機的名字」寫的是「' + cur + '」，要寫後台的名字' };
+      if (document.querySelector('.m-dv-own')) return { ok: false, why: '列表最上面不該再有「這支手機的名字」區塊' };
       if (names[0] !== ${JSON.stringify(NAME_M)}) return { ok: false, why: '清單第一列寫的是「' + names[0] + '」：' + names.join('、') };
       if (!rows[0].textContent.includes('這支手機')) return { ok: false, why: '第一列旁邊要有「這支手機」的小標籤' };
       if (names.filter(n => n === ${JSON.stringify(NAME_M)}).length !== 1) return { ok: false, why: '同一台被列了不只一次：' + names.join('、') };
@@ -67,7 +66,12 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
         return r;
       };
       if (!await press('設備')) return { ok: false, why: '找不到設定裡的「設備」' };
-      const edit = await wait(() => { const b = [...document.querySelectorAll('.m-dv-own .m-btn')].find(x => vis(x) && x.textContent.includes('改名')); if (b) b.click(); return b });
+      // 列表最上面沒有改名區塊了（#1860）：進這支手機自己那一列的「詳情」再改名
+      const selfRow = await wait(() => [...document.querySelectorAll('.m-dv-row')].find(r => vis(r) && r.textContent.includes('這支手機')));
+      if (!selfRow) return { ok: false, why: '找不到這支手機那一列' };
+      [...selfRow.querySelectorAll('button')].find(b => b.textContent.trim() === '詳情')?.click();
+      await sleep(400);
+      const edit = await wait(() => { const b = [...document.querySelectorAll('.m-dv-actions .m-btn')].find(x => vis(x) && x.textContent.includes('改名')); if (b) b.click(); return b });
       if (!edit) return { ok: false, why: '找不到設備頁的「改名」' };
       const inp = await wait(() => [...document.querySelectorAll('.m-known-edit input')].find(vis));
       if (!inp) return { ok: false, why: '沒有打開改名框' };
@@ -75,11 +79,13 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
       await sleep(100);
       document.querySelector('.m-known-edit button[type=submit]').click();
       if (mode === 'ok') {
-        const done = await wait(() => document.querySelector('.m-dv-curname')?.textContent.trim() === ${JSON.stringify(NAME_NEW)}, 50);
+        const done = await wait(() => document.querySelector('.m-dv-name')?.textContent.includes(${JSON.stringify(NAME_NEW)}), 50);
         await sleep(300);
         if (!check) return { ok: true, why: '' };
+        if (!done) return { ok: false, why: '改名成功後，詳情頁頂部沒有立刻顯示新名字：' + document.querySelector('.m-dv-name')?.textContent.trim() };
+        [...document.querySelectorAll('.m-icon-btn[aria-label="返回"]')].find(vis)?.click();
+        await sleep(500);
         const first = [...document.querySelectorAll('.m-dv-row')].filter(vis)[0]?.querySelector('b')?.textContent.trim();
-        if (!done) return { ok: false, why: '改名成功後，設備頁頂部沒有立刻顯示新名字：' + document.querySelector('.m-dv-curname')?.textContent.trim() };
         if (first !== ${JSON.stringify(NAME_NEW)}) return { ok: false, why: '改名成功後，清單第一列沒有顯示新名字：' + first };
         if (document.querySelector('.m-known-edit')) return { ok: false, why: '改名成功後改名框還開著' };
         return { ok: true, why: '' };
@@ -89,7 +95,7 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
         await sleep(200);
         if (!check) return { ok: true, why: '' };
         if (!err) return { ok: false, why: '改名失敗，畫面沒有說原因' };
-        if (document.querySelector('.m-dv-curname')?.textContent.trim() !== ${JSON.stringify(NAME_M)}) return { ok: false, why: '改名失敗，名字不該變' };
+        if (!document.querySelector('.m-dv-name')?.textContent.includes(${JSON.stringify(NAME_M)})) return { ok: false, why: '改名失敗，名字不該變' };
         return { ok: true, why: '' };
       }
       const toast = await wait(() => { const t = document.querySelector('.m-toast'); return t && t.textContent.includes('寄信時用的名字沒有換成功') ? t : null }, 40);

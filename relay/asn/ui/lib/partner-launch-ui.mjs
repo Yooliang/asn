@@ -1,7 +1,7 @@
 // 開新夥伴：設備選單、能否在此設備開啟、顯示方式（前台／背景）。
 import { MODEL_CATALOG, isTermProfile } from './model-catalog.mjs'
 import { isAsnWindow, isDeviceLiveStatus } from './roster.mjs'
-import { applyDeviceOrder, deviceFriends, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
+import { applyDeviceOrder, deviceFriends, isDeviceOnline, isDeviceRemoved, normalizeKeys } from './device-order.mjs'
 import { deviceNameOf } from './device-known.mjs'
 
 export const DISPLAY_MODES = [

@@ -905,7 +905,7 @@ const app = createApp({
     async function reloadReports() {
       const epoch = acctEpoch
       const nodes = acctDevs.value.filter(d => acctNeedsLoad(d)).map(d => d.key)
-      const due = reportsDue({ nodes, reports: acctSw.reports, now: Date.now(), failedOf: r => Boolean(r?.msg) }).filter(n => !acctReloading.has(n))
+      const due = reportsDue({ nodes, reports: acctSw.reports, now: Date.now(), failedOf: r => Boolean(r?.msg), isOnline: n => acctDevs.value.find(d => d.key === n)?.online !== false }).filter(n => !acctReloading.has(n))
       await Promise.all(due.map(async node => {
         acctReloading.add(node)
         try {

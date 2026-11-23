@@ -24,10 +24,9 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.firstSeen('今天'), '第一次見到：今天')
   assert.equal(TEXT.neverSeen, undefined, '#1829 「還沒連線過」使用者做不了什麼，整句收掉')
   assert.equal(TEXT.forgetThis, '忘記這台')
-  assert.equal(TEXT.oldTitle(2), '舊設備紀錄（2）')
+  assert.equal(TEXT.oldTitle, undefined, '改叫「已移除的設備」（DEVICE_TEXT.removedTitle）')
   assert.equal(TEXT.renameHint, '所有設備都會顯示這個名字')
-  assert.equal(TEXT.ownNameLabel, '這支手機的名字')
-  assert.deepEqual([TEXT.moveUp, TEXT.moveDown, TEXT.accounts, TEXT.detail], ['上移', '下移', '帳號', '詳情'])
+  assert.deepEqual([TEXT.moveUp, TEXT.moveDown, TEXT.accounts], [undefined, undefined, undefined])
   assert.equal(TEXT.fp('0123 4567 89ab cdef'), '指紋 0123 4567 89ab cdef')
   assert.equal(groupFp('0123456789abcdef'), '0123 4567 89ab cdef', '核對用完整 16 碼分組')
   assert.equal(groupFp('01234567'), '')
@@ -56,7 +55,7 @@ test('peerOf：只要節點；不帶、不收指紋；沒確認、壞資料', ()
 test('normalizeList：沒確認的不顯示指紋；確認過的才顯示分組指紋；壞的丟掉、不帶公鑰', () => {
   const raw = { peers: [{ node: 'a', name: '甲\n機', confirmed: true, sign_pub: 'SECRET', fp: FP, first_seen_ms: 1700000000000 }, { node: 'b', name: '乙', confirmed: false, fp: 'abcdef0123456789', fp8: 'abcdef01' }, { name: 'x' }, { node: 'c', confirmed: true, fp: 'zz' }] }
   const l = normalizeList(raw)
-  assert.deepEqual(l, [{ node: 'a', name: '甲 機', label: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true, firstSeen: new Date(1700000000000).toLocaleString('zh-TW', { hour12: false }) }, { node: 'b', name: '乙', label: '乙', fpShow: '', confirmed: false, firstSeen: '' }, { node: 'c', name: '', label: '電腦（C）', fpShow: '', confirmed: true, firstSeen: '' }])
+  assert.deepEqual(l, [{ node: 'a', name: '甲 機', label: '甲 機', fpShow: '0123 4567 89ab cdef', confirmed: true, firstSeen: new Date(1700000000000).toLocaleString('zh-TW', { hour12: false }), firstSeenMs: 1700000000000 }, { node: 'b', name: '乙', label: '乙', fpShow: '', confirmed: false, firstSeen: '', firstSeenMs: 0 }, { node: 'c', name: '', label: '電腦（C）', fpShow: '', confirmed: true, firstSeen: '', firstSeenMs: 0 }])
   assert.equal(NAME_MAX, 40)
   assert.equal(normalizeList({ peers: [{ node: 'z', name: '長'.repeat(50) }] })[0].name.length, 40, '名字最多 40 字（和後台一致）')
   assert.doesNotMatch(JSON.stringify(l), /SECRET|abcd/)
@@ -192,8 +191,7 @@ test('出題帶本機記的名字：有欄位（可為空字串）就用它，�
 test('m.html：改名表單只用文字節點與輸入框（不走 v-html）；走新的改名流程；沒名字顯示 label；浮層標題用本機名字', () => {
   const html = read('../ui/m.html')
   const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- /詳情 -->'))
-  const own = html.slice(html.indexOf('class="m-dv-own"'), html.indexOf('<ul class="m-dv-list"'))
-  for (const part of [info, own]) {
+  for (const part of [info]) {
     assert.ok(part.length > 200)
     assert.doesNotMatch(part, /v-html/)
     assert.match(part, /v-model="dn\.text"/)
@@ -214,34 +212,29 @@ test('m.html：改名表單只用文字節點與輸入框（不走 v-html）；�
   assert.match(js, /knownPeers\.pick\(ch\.id, index, cur\.node\)/)
 })
 
-test('m.html：這支手機的名字在設備頁最上面（設備列表之前），改名用自己的節點', () => {
+test('m.html：設備頁最上面沒有「這支手機的名字」改名區塊（#1860）；改名只在那台自己的詳情', () => {
   const html = read('../ui/m.html')
   const pane = html.slice(html.indexOf("acctSw.tab === 'devices'"))
-  assert.ok(pane.indexOf('class="m-dv-own"') > 0 && pane.indexOf('class="m-dv-own"') < pane.indexOf('class="m-dv-list"'))
-  const own = pane.slice(pane.indexOf('class="m-dv-own"'), pane.indexOf('class="m-dv-list"'))
-  assert.match(own, /\{\{ KNOWN_TEXT\.ownNameLabel \}\}/)
-  assert.match(own, /\{\{ selfDev \? selfDev\.label : '' \}\}/, '顯示後台記的名字（自己那一列的名字）')
-  assert.match(own, /dn\.node !== info\.node/)
-  assert.match(own, /v-if="dn\.node === info\.node"/, '用這支手機自己的節點改名')
-  assert.match(own, /@click="devRenameStart\(selfDev\)">\{\{ KNOWN_TEXT\.rename \}\}/)
-  assert.match(read('../ui/m.js'), /const selfDev = computed\(\(\) => acctAllDevs\.value\.find\(d => d\.self\) \?\? null\)/)
+  assert.ok(!html.includes('m-dv-own') && !html.includes('ownNameLabel'))
+  assert.ok(pane.indexOf('class="m-dv-list"') > 0)
+  assert.equal(TEXT.ownNameLabel, undefined)
+  assert.doesNotMatch(read('../ui/m.js'), /selfDev/)
+  assert.match(html, /@click="devRenameStart\(acctCur\)">\{\{ ACTION_TEXT\.rename \}\}/, '自己那一列的詳情裡有改名')
 })
 
-test('m.html：設備列每列剛好 4 顆操作按鈕（上移、下移、帳號、詳情）；有認得紀錄的電腦標「已確認」或「未確認」（文字，不只靠顏色）', () => {
+test('m.html：設備列只有一顆「詳情」（沒有上移、下移、帳號）；有認得紀錄的電腦標指紋圖示', () => {
   const html = read('../ui/m.html')
   const row = html.slice(html.indexOf('<li v-for="d in acctDevs"'), html.indexOf('</li>', html.indexOf('<li v-for="d in acctDevs"')))
-  const group = row.slice(row.indexOf('class="m-dv-btns m-dv-rowbtns"'))
-  assert.equal((group.match(/<button /g) ?? []).length, 4)
-  const labels = [...group.matchAll(/\{\{ KNOWN_TEXT\.(\w+) \}\}<\/button>/g)].map(m => m[1])
-  assert.deepEqual(labels, ['moveUp', 'moveDown', 'accounts', 'detail'])
-  assert.match(row, /@click="acctMove\(d\.key, -1\)"/)
-  assert.match(row, /@click="acctMove\(d\.key, 1\)"/)
+  assert.equal((row.match(/<button /g) ?? []).length, 1, '只有排序把手一顆原生按鈕')
+  assert.equal((row.match(/<asn-button/g) ?? []).length, 1)
+  assert.match(row, /\{\{ DEVICE_TEXT\.detail \}\}<\/asn-button>/)
+  assert.doesNotMatch(row, /acctMove|moveUp|moveDown|openAcctDevice/)
   assert.match(row, /class="m-dv-grip"/, '排序把手還在')
   // #1499：「已確認／未確認」的膠囊換成指紋小圖示（彩色／灰色），說明寫在 aria-label 與滑過、長按的提示
   assert.match(row, /<fp-mark v-if="!d\.self && phoneFpMark\(joined\.byNode\[d\.key\]\)" :kind="phoneFpMark\(joined\.byNode\[d\.key\]\)\.kind" :label="phoneFpMark\(joined\.byNode\[d\.key\]\)\.label"><\/fp-mark>/)
   assert.doesNotMatch(row, /tagConfirmed|tagUnconfirmed|m-dv-line|stateLine/, '列上不放膠囊與狀態那一行')
   assert.doesNotMatch(row, /fpShow|\.fp\b/, '列上不顯示指紋')
-  assert.match(html, /v-if="joined\.old\.length"/)
+  assert.match(html, /v-if="removedBlock\.count"/)
 })
 
 test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「還沒確認」與確認按鈕；沒紀錄的電腦說還沒連線過；忘記這台；不走 v-html', () => {
@@ -264,12 +257,12 @@ test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「�
   assert.match(info, /acctCanRemove/, '隱藏與永久移除也在詳情')
   assert.ok(info.indexOf('curKnown.firstSeen') < info.indexOf('forgetKnown('), '忘記這台在最下面')
   assert.match(info, /<template v-if="!acctCur\.self && curKnown">/, '手機自己沒有可顯示的指紋命令，不顯示')
-  const old = html.slice(html.indexOf('class="m-dv-old"'), html.indexOf('<!-- /舊設備紀錄 -->'))
+  const old = html.slice(html.indexOf('class="m-dv-removed"'), html.indexOf('</details>', html.indexOf('class="m-dv-removed"')))
   assert.doesNotMatch(old, /v-html/)
-  assert.match(old, /<b>\{\{ p\.label \}\}<\/b>/)
-  assert.match(old, /v-if="p\.confirmed && p\.fpShow"/, '舊紀錄的指紋也只有確認過的才畫')
-  assert.doesNotMatch(old, /confirmKnown/, '舊紀錄只能忘記')
-  assert.match(old, /@click="forgetKnown\(p\.node\)">\{\{ KNOWN_TEXT\.forget \}\}/)
+  assert.match(old, /<b>\{\{ r\.label \}\}<\/b>/)
+  assert.doesNotMatch(old, /fpShow|fingerprint/, '已移除的設備只寫名稱和第一次連線的日期，不寫指紋')
+  assert.doesNotMatch(old, /confirmKnown/, '只剩紀錄的只能忘記')
+  assert.match(old, /@click="forgetKnown\(r\.key\)">\{\{ DEVICE_TEXT\.forget \}\}/)
   assert.doesNotMatch(html, /settingCat === 'known'/)
 })
 
@@ -492,7 +485,7 @@ test('詳情的確認：只有還沒確認的才有「確認」按鈕，按下�
   const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- /詳情 -->'))
   assert.match(info, /v-if="!curKnown\.confirmed"[^>]*@click="confirmKnown\(curKnown\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '未確認者才有確認按鈕')
   assert.equal((info.match(/confirmKnown\(curKnown\)/g) ?? []).length, 1)
-  assert.doesNotMatch(html.slice(html.indexOf('class="m-dv-old"'), html.indexOf('<!-- /舊設備紀錄 -->')), /confirmKnown/)
+  assert.doesNotMatch(html.slice(html.indexOf('class="m-dv-removed"'), html.indexOf('</details>', html.indexOf('class="m-dv-removed"'))), /confirmKnown/)
   // 提示條與詳情按鈕最後都開同一個選方法浮層（openMethodSheet）
   assert.match(html, /class="m-btn m-peer-strip-btn" type="button" @click="openMethodSheet"/)
   const js = read('../ui/m.js')
@@ -563,7 +556,7 @@ test('設定頁確認的就是正在看的那台：成功後原本對象一併�
 test('#1393 審查：改名沒拿到成功回覆要顯示失敗、名單沒讀到不全歸舊紀錄、提示字改新位置、像指紋的名字當未命名', async () => {
   const js = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
   assert.match(js, /const r = await knownPeers\.rename\(node, dn\.text\)\s*if \(!r\) \{ dn\.err = KNOWN_TEXT\.failed; return \}/)
-  assert.match(js, /return acctAllDevs\.value\.length \? j : \{ \.\.\.j, old: \[\] \}/)
+  assert.match(read('../ui/lib/device-known.mjs'), /\(!list\.length \? \[\] : Array\.isArray\(peers\) \? peers : \[\]\)/, '名單沒讀到時，「已移除的設備」不把所有紀錄暫時列進去')
   const { LOGIN_TEXT } = await import('../ui/lib/mobile-device-login.mjs')
   assert.ok(LOGIN_TEXT.confirmNeed.includes('「設定 → 設備」') && !LOGIN_TEXT.confirmNeed.includes('認得的電腦'))
   const { normalizeList } = await import('../ui/lib/mobile-known-peers.mjs')

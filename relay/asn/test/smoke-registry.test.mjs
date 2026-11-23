@@ -34,7 +34,7 @@ test('每個情境最多對到一個探測：檔名順序不影響結果', () =>
 test('分派照登記表：有登記的用該探測，沒登記的是遮罩檢查', () => {
   const s = SCENARIOS.find(x => x.probe?.devSel)
   assert.equal(probeEntry(s.probe).key, 'devSel')
-  assert.equal(probeKind(s.probe), '手機設備列點選才展開檢查')
+  assert.equal(probeKind(s.probe), '手機設備清單每列直接有詳情檢查')
   const mask = SCENARIOS.find(x => x.name === 'list-dialog-mask')
   assert.equal(probeEntry(mask.probe), undefined)
   assert.equal(probeKind(mask.probe), '遮罩檢查')
