@@ -139,7 +139,7 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-dv-danger{color:#b3261e;border-color:#b3261e}
 .m-btn.m-dv-danger{background:#b3261e;color:#fff}
 .m-dv-node{display:flex;flex-direction:column;gap:8px;min-width:0}
-.m-dv-tag{padding:2px 9px;border-radius:10px;font-size:var(--fs-1);background:var(--panel-head);color:var(--muted)}
+.m-dv-tag{flex:none;white-space:nowrap;padding:2px 9px;border-radius:10px;font-size:var(--fs-1);background:var(--panel-head);color:var(--muted)}
 .m-dv-tag.on{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
 .m-dv-tag.me{border:1px solid var(--line);background:none}
 .m-dv-body.off{filter:grayscale(.35);opacity:.8}
