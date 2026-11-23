@@ -1,6 +1,6 @@
 // 設備沒有名字時，所有通知的後備寫法統一成「電腦（X7K2）」「手機（Q9Z8）」：20261124100000_unnamed_device_label.sql
 //   和介面 unnamedClue、Rust unnamed_clue 同一種寫法；有名字就寫名字。
-// 靜態：新增 relay.device_label（stable、search_path 空、只給 service_role）；十五支通知函式簽章與權限不變；回復檔把各函式換回上一版。
+// 靜態：新增 relay.device_label（stable、search_path 空、只給 service_role）；十四支通知函式簽章與權限不變；回復檔把各函式換回上一版。
 // 實跑（pglite，沒裝就略過）：套用的是 migration 裡真正的函式本體（節點名字用後台實際會存的那種），
 //   名字空白（空字串、全空白、null）寫「電腦（末 4 碼大寫）」，手機（platform 是 android／ios，或 kind＝phone）寫「手機（…）」，有名字寫名字；
 //   主機名稱故意填 YOOLIANG-3080：不能再出現；用回復檔（舊本體）跑同一組斷言會變紅，證明守門有效。
@@ -36,6 +36,25 @@ const SIGS = {
   asn_relay_acct_report: 'text, jsonb',
 }
 const NAMES = Object.keys(SIGS)
+// 各函式在本 migration 之前的最新有效定義所在的 migration
+const NC = '20261111100000_notice_center.sql'
+const PREV = {
+  asn_relay_login_alert: '20261123220000_login_alert_device_name.sql',
+  asn_relay_inbox_watch: '20261123120000_online_window.sql',
+  asn_relay_send_bridge_notice: '20261111110000_bridge_notice.sql',
+  asn_relay_set_inbox_hold: NC,
+  asn_relay_misroute_notice: NC,
+  asn_relay_waiting_notice: '20261123130000_waiting_notice_forward_stuck.sql',
+  asn_relay_mux_down_notice: '20261112200000_mux_down_empty.sql',
+  asn_relay_mux_blind_notice: '20261112200000_mux_down_empty.sql',
+  asn_relay_node_mismatch_notice: NC,
+  asn_relay_term_view_notice: NC,
+  asn_relay_device_key_alert: NC,
+  asn_relay_mux_resume_notice: '20261120100000_mux_resume_notice.sql',
+  asn_relay_compact_notice: '20261120200000_compact_notice.sql',
+  asn_relay_acct_report: '20261122210000_acct_sub_lapsed_notice.sql',
+}
+const squash = s => s.replace(/\s+/g, ' ').trim()
 
 test('靜態：device_label 的屬性與授權；十四支通知函式簽章、權限不變、回復檔每支都有；只動後備', () => {
   const files = fs.readdirSync(new URL('../supabase/migrations/', import.meta.url)).filter(f => f.endsWith('.sql')).sort()
@@ -58,7 +77,10 @@ test('靜態：device_label 的屬性與授權；十四支通知函式簽章、�
     assert.match(b, /security definer/i, n); assert.equal(b.match(/set search_path to ''/i)?.length, 1, n)
     assert.doesNotMatch(b.replace(/^\s*--.*$/gm, ''), /未命名設備|代號末 4 碼 '/, `${n} 不再寫舊後備`)
     assert.match(b, /relay\.device_label\(/, `${n} 用共用的後備`)
-    assert.match(body(down, `public.${n}`), /./, `${n} 回復檔有舊本體`)
+    // 回復檔的本體逐字等於上一版（各自最新有效定義所在的 migration），只容許空白差異
+    const prevSql = rd(fs.readFileSync(new URL(`../supabase/migrations/${PREV[n]}`, import.meta.url), 'utf8'))
+    assert.equal(squash(body(down, `public.${n}`)), squash(body(prevSql, `public.${n}`)), `${n} 回復檔本體＝上一版（${PREV[n]}）`)
+    assert.notEqual(squash(b), squash(body(prevSql, `public.${n}`)), `${n} 新本體確實改過`)
   }
   assert.equal(NAMES.length, 14)
 })

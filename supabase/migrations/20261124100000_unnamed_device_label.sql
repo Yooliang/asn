@@ -7,7 +7,8 @@
 --      沒名字回「電腦（代號末 4 碼大寫）」或「手機（…）」，代號沒有英數字就只回「電腦」或「手機」。
 --      手機的判斷：relay.nodes.kind = 'phone'，或 platform 是 android／ios（收信卡住監控判斷手機也是這兩個條件）；其餘一律當電腦。
 --      stable、search_path 空，不是 security definer，只授權 service_role（呼叫它的通知函式都是 security definer）。
---   2. asn_relay_login_alert 的後備改用它（寫出來的字不變）。
+--   2. asn_relay_login_alert 的後備改用它：有名字時寫出來的字不變；沒名字時原本一律寫「電腦（…）」，現在手機節點寫「手機（…）」，
+--      代號沒有英數字時原本寫「電腦（）」，現在只寫「電腦」。
 --   3. 下面各支通知函式只換「沒名字時的後備那一段」，其餘一字不動，簽章與權限不變：
 --        asn_relay_inbox_watch（上一版 20261123120000_online_window.sql）：不再退回 machine
 --        asn_relay_send_bridge_notice（20261111110000_bridge_notice.sql）：不再退回 machine

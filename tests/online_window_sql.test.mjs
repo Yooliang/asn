@@ -123,8 +123,9 @@ const SETUP = `create role service_role; create role anon; create role authentic
 async function boot({ skipNew = false } = {}) {
   const db = track(new PGlite())
   await db.exec(SETUP)
-  // 只套到本 migration 為止：之後新增的 migration（例如又重定義 asn_relay_inbox_watch）不屬於「改前／改後」的比對範圍
-  for (const f of files) { if (f > MIG) break; if (skipNew && f === MIG) continue; await db.exec(read(f)) }
+  // 做「改前／改後」等價證明時（skipNew）只套到本 migration 為止：之後新增的 migration（例如又重定義 asn_relay_inbox_watch）不屬於比對範圍；
+  // 行為測試照舊套完整條 migration 鏈
+  for (const f of files) { if (skipNew && f > MIG) break; if (skipNew && f === MIG) continue; await db.exec(read(f)) }
   return db
 }
 
