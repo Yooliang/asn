@@ -55,7 +55,8 @@ import { GUIDE_TEXT, GUIDE_VENDORS, guideRows, guideVisible, guideReshowVisible,
 import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { STATE } from './lib/device-state.mjs'
 import { createSwitchTracker, switchRowKey, switchResultOf, switchBusyNode } from './lib/switch-result.mjs'
-import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport } from './lib/mobile-acct.mjs'
+import { createReportScheduler, reportsDue } from './lib/report-reload.mjs'
+import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport, acctReportEntry } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, moveFlags, pruneRemoved, removeDevice, removedRows, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, canShowBackRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
@@ -881,11 +882,11 @@ const app = createApp({
       const old = acctSw.reports[node]
       if (!force && old && (old.loading || !old.msg)) return   // 讀過或正在讀就不重讀；上次失敗的再點一次會重試
       const epoch = acctEpoch
-      acctSw.reports[node] = { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [] }
+      acctSw.reports[node] = { loading: true, asnOnline: false, reportedAt: '', msg: '', list: [], failCount: old?.failCount ?? 0 }
       try {
         const v = await acctTransport.acctList(node)
-        if (epoch === acctEpoch) acctSw.reports[node] = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: v?.accounts ?? [] }
-      } catch (e) { if (epoch === acctEpoch) acctSw.reports[node] = { loading: false, asnOnline: false, reportedAt: '', msg: acctErrorText(e), list: [] } }
+        if (epoch === acctEpoch) acctSw.reports[node] = acctReportEntry(old, { value: v })
+      } catch (e) { console.info('[ASN] 帳號回報讀取失敗', node, String(e?.message ?? e)); if (epoch === acctEpoch) acctSw.reports[node] = acctReportEntry(old, { error: acctErrorText(e) }) }
     }
     // 進設備頁時預讀各台帳號回報（#930）：為了顯示「雲端」標示，進設備頁時讀一次；一分鐘內再進就用上次讀到的，不重讀
     const acctPrefetch = createReportPrefetch({ read: node => acctTransport.acctList(node) })
@@ -895,12 +896,35 @@ const app = createApp({
       const put = (node, r) => { if (epoch === acctEpoch && (!acctSw.reports[node] || isFailedReport(acctSw.reports[node]))) acctSw.reports[node] = r }
       const nodes = acctDevs.value.filter(d => acctNeedsLoad(d)).map(d => d.key)
       await acctPrefetch(nodes, (node, v) => {
-        const r = { loading: false, asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', msg: '', list: v?.accounts ?? [] }
+        const r = acctReportEntry(null, { value: v })
         acctPrefetched[node] = r
         put(node, r)
       })
       for (const [node, r] of Object.entries(acctPrefetched)) put(node, r)   // 一分鐘內沒重讀的（或只重讀了失敗的）：先前讀到的結果補上
     }
+    // 別台帳號回報自動重讀（#2158，不加按鈕）：設備／帳號頁開著時每分鐘檢查一次，讀失敗超過 1 分鐘的、讀成功超過 5 分鐘的再讀；頁面關掉就停。
+    // 進頁面那一刻的第一次讀取由上面的 prefetchReports 做（immediate: false）；同一台正在讀就不再發
+    const acctReloading = new Set()
+    async function reloadReports() {
+      const epoch = acctEpoch
+      const nodes = acctDevs.value.filter(d => acctNeedsLoad(d)).map(d => d.key)
+      const due = reportsDue({ nodes, reports: acctSw.reports, now: Date.now(), failedOf: r => Boolean(r?.msg) }).filter(n => !acctReloading.has(n))
+      await Promise.all(due.map(async node => {
+        acctReloading.add(node)
+        try {
+          const prev = acctSw.reports[node]
+          let next
+          try { next = acctReportEntry(prev, { value: await acctTransport.acctList(node) }) } catch (e) {
+            console.info('[ASN] 帳號回報重讀失敗', node, String(e?.message ?? e))   // 原始錯誤只進 log，畫面用白話
+            next = acctReportEntry(prev, { error: acctErrorText(e) })
+          }
+          if (epoch === acctEpoch) acctSw.reports[node] = next
+        } finally { acctReloading.delete(node) }
+      }))
+      return due.length
+    }
+    const acctReportScheduler = createReportScheduler({ run: reloadReports, isOpen: () => fourthPage.value?.kind === 'acct' })
+    watch(() => fourthPage.value?.kind === 'acct', open => { if (open) acctReportScheduler.start({ immediate: false }); else acctReportScheduler.stop() }, { immediate: true })
     // 從夥伴列表設備旁的「選項」或設定列表進來；開新夥伴第 2 步還沒送出時先問一句
     const openAcct = g => askBeforeLeave(acctPage(), () => void openAcctNow(g))
     async function openAcctNow(g) {

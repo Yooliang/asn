@@ -27,7 +27,7 @@ import { activityRound, withActivity } from './lib/activity.mjs'
 import { friendMatchesQuery, normalizeSearchQuery, rosterShownGroups } from './lib/search.mjs'
 import { deviceAsn } from './lib/presence.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
-import { REPORT_RETRY_MS } from './lib/device-state.mjs'
+import { createReportScheduler } from './lib/report-reload.mjs'
 import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
@@ -2060,8 +2060,9 @@ const app = createApp({
       const missing = otherDeviceNodes().filter(k => !accounts.state.reports[k])
       if (missing.length) void accounts.loadReports(missing)
     }, { immediate: true })
-    // 讀失敗的那幾台（剛開 ASN 還沒登入、簽章拿不到）：設備分類開著時每分鐘檢查，失敗超過一分鐘的再讀；剛登入就立刻讀
-    setInterval(() => { if (devicesOpen()) void accounts.retryReports(otherDeviceNodes()) }, REPORT_RETRY_MS)
+    // 別台的帳號回報自動重讀（#2158）：設備／帳號頁開著時每分鐘檢查一次，讀失敗超過 1 分鐘的、讀成功超過 5 分鐘的再讀；頁面關掉就停。剛登入就立刻讀
+    const reportScheduler = createReportScheduler({ run: () => accounts.retryReports(otherDeviceNodes()), isOpen: devicesOpen })
+    watch(devicesOpen, open => { if (open) reportScheduler.start(); else reportScheduler.stop() }, { immediate: true })
     onSignedIn = () => void accounts.retryReports(otherDeviceNodes(), { force: true })
     const closeDeviceAcct = () => { deviceAcct.node = '' }
     // 帳號列表裡的設備名（#374）：跟設備樹同一份名單

@@ -68,20 +68,13 @@ test('接線：電腦版只有手機那幾列畫圖示；兩邊都註冊元件�
   assert.doesNotMatch(read('ui/style.css') + read('ui/mobile.css'), /\.dv-line\{|\.m-dv-line\{|\.dv-tag\.fp\{/)
 })
 
-test('沒回報（#1499 審查）：在線卻還沒收到回報，列上留「沒回報」小標記；條件跟狀態行的「還沒收到這台的回報」一樣', async () => {
-  const { deviceNoReport, deviceStateLine, STATE } = await import('../ui/lib/device-state.mjs')
-  const v = state => [{ label: 'Claude', state }]
-  for (const c of [
-    { vendors: v(STATE.NO_REPORT) },
-    { vendors: v(STATE.NO_REPORT), self: true, online: false },
-    { vendors: v(STATE.LOGGED_IN) },
-    { vendors: v(STATE.NO_REPORT), online: false },
-    { vendors: v(STATE.NO_REPORT), phone: true },
-    { vendors: v(STATE.NO_REPORT), cloud: true },
-  ]) assert.equal(deviceNoReport(c), deviceStateLine(c) === '還沒收到這台的回報', JSON.stringify(c))
-  assert.equal(deviceNoReport({ vendors: v(STATE.NO_REPORT) }), true)
+// #2158 改：#1499 的「沒回報」標籤拿掉（在線又沒回報會讓人誤會）；列上只剩連續讀不到時的「讀不到帳號資料」警告標籤（沿用 warn 樣式）
+test('列上不再有「沒回報」標籤與提示；只有連續讀不到時才有警告標籤（#2158）', async () => {
   for (const [f, cls] of [['ui/m.html', 'm-dv-tag warn noreport'], ['ui/lib/settings-panel.mjs', 'dv-tag warn noreport']]) {
-    assert.ok(read(f).includes(`<span class="${cls}" v-if="d.noReport" :title="DEVICE_TEXT.noReportTip" :aria-label="DEVICE_TEXT.noReportTip">{{ DEVICE_TEXT.noReportTag }}</span>`), f)
+    const src = read(f)
+    assert.ok(src.includes(`<span class="${cls}" v-if="d.reportTag">{{ d.reportTag }}</span>`), f)
+    assert.doesNotMatch(src, /noReportTag|noReportTip|d\.noReport\b/, f)
   }
+  assert.doesNotMatch(read('ui/lib/device-order.mjs'), /沒回報|還沒收到這台的回報/)
   assert.match(read('ui/style.css'), /\.dv-tag\.warn\{background:#fff3d6/)
 })

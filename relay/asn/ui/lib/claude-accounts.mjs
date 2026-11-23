@@ -2,7 +2,8 @@
 // 檔案操作全在 Rust（claude_accounts.rs、codex_accounts.rs、acct_remote.rs），這裡只呼叫指令並整理訊息。
 // 帳號以 email 識別；介面只會拿到 email／方案／是否使用中，權杖不經過前端。
 import { fetchRoster, normalizeQuotaState } from './account-roster.mjs'
-import { REPORT_RETRY_MS, shouldRetryReport } from './device-state.mjs'
+import { REPORT_RETRY_MS } from './device-state.mjs'
+import { nextReport, reportsDue } from './report-reload.mjs'
 import { acctErrorText, isForbidden } from './acct-error.mjs'
 import { accountsErrorText as errText } from './plain-errors.mjs'
 import { makeAccountsApi } from './tauri.mjs'
@@ -122,7 +123,7 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
     try {
       const v = await api.remoteList(r.node)
       r.list = (v?.accounts ?? []).filter(a => a.vendor === r.vendor)
-      s.reports[r.node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
+      s.reports[r.node] = nextReport(s.reports[r.node], { value: v }, now())
       r.asnOnline = v?.asn_online === true
       r.reportedAt = v?.reported_at ?? ''
       if (!r.asnOnline) r.msg = '對方電腦的 ASN 目前沒有在線，無法切換。'
@@ -130,27 +131,22 @@ export function createAccountsUi({ invoke, transport = null, reactive, devices =
     } catch (e) { r.list = []; r.msg = remoteErr(e) }
     r.loading = false
   }
-  // 設備分類：一次讀好幾台的帳號回報（讀不到就記錯誤與失敗時間 failedAt，介面顯示「未回報」；之後由 retryReports 過了時間再讀）
+  // 設備分類：一次讀好幾台的帳號回報（讀不到就記錯誤、失敗時間與連續失敗次數；畫面只在連續失敗到門檻才說「讀不到」，見 device-state.mjs 的 deviceReportStatus）
   const reading = new Set()   // 正在讀的節點：同一台不重複送
   const loadReports = async nodes => {
     await Promise.all([...new Set(nodes)].filter(n => n && !reading.has(n)).map(async node => {
       reading.add(node)
       try {
-        const v = await api.remoteList(node)
-        s.reports[node] = { error: '', asnOnline: v?.asn_online === true, reportedAt: v?.reported_at ?? '', accounts: v?.accounts ?? [] }
-      } catch (e) { s.reports[node] = { error: remoteErr(e), failedAt: now(), asnOnline: false, reportedAt: '', accounts: [] } }
-      finally { reading.delete(node) }
+        s.reports[node] = nextReport(s.reports[node], { value: await api.remoteList(node) }, now())
+      } catch (e) {
+        log('[帳號回報] 讀取失敗：', node, String(e?.message ?? e))   // 原始錯誤只進 log；畫面用白話
+        s.reports[node] = nextReport(s.reports[node], { error: remoteErr(e) }, now())
+      } finally { reading.delete(node) }
     }))
   }
-  // 沒讀過的、或讀失敗且已過 retryMs 的才讀；成功的不重讀。force＝剛登入：失敗的立刻重讀，不等時間
+  // 該讀的才讀（reportsDue）：沒讀過的、讀失敗且已過 retryMs 的、讀成功但距離上次超過 5 分鐘的（#2158：以前成功的永遠不重讀）。force＝剛登入：失敗的立刻重讀，不等時間
   const retryReports = async (nodes, { force = false } = {}) => {
-    const t = now()
-    const due = [...new Set(nodes)].filter(n => {
-      const rep = s.reports[n]
-      if (!rep) return true
-      if (!rep.error) return false
-      return force || shouldRetryReport({ read: true, failedAt: rep.failedAt ?? Number.NaN }, t, retryMs)
-    })
+    const due = reportsDue({ nodes, reports: s.reports, now: now(), retryMs, force })
     if (due.length) await loadReports(due)
     return due.length
   }

@@ -277,8 +277,11 @@ test('設備分類讀帳號回報：失敗後過了一分鐘會再讀；成功�
   assert.equal(await ui.retryReports(['good', 'bad']), 1, '滿 60 秒：只重讀失敗的那台')
   assert.deepEqual(reads(), ['good', 'bad', 'bad'])
   assert.equal(ui.state.reports.bad.error, '')
-  t += 600_000
-  assert.equal(await ui.retryReports(['good', 'bad']), 0, '成功的不重讀')
+  // #2158 改：成功的原本「永遠不重讀」，這正是開超過 15 分鐘別台全變「沒收到回報」的原因；現在 5 分鐘內不重讀、滿 5 分鐘才重讀
+  t += 200_000
+  assert.equal(await ui.retryReports(['good', 'bad']), 0, '成功的 5 分鐘內不重讀')
+  t += 100_000
+  assert.deepEqual((await ui.retryReports(['good', 'bad'])), 2, '成功的滿 5 分鐘重讀')
   // 剛登入：失敗的立刻讀，不等時間
   fail = true
   await ui.loadReports(['bad'])
@@ -290,7 +293,9 @@ test('設備分類讀帳號回報：失敗後過了一分鐘會再讀；成功�
 
 test('守門：電腦版每分鐘檢查、只在設備分類開著時重讀；登入事件接上', () => {
   const src = read('ui/list.js')
-  assert.match(src, /setInterval\(\(\) => \{ if \(devicesOpen\(\)\) void accounts\.retryReports\(otherDeviceNodes\(\)\) \}, REPORT_RETRY_MS\)/)
+  // #2158 改：排程換成共用的 createReportScheduler（每分鐘檢查、頁面關掉就停、讀成功的每 5 分鐘也重讀）
+  assert.match(src, /createReportScheduler\(\{ run: \(\) => accounts\.retryReports\(otherDeviceNodes\(\)\), isOpen: devicesOpen \}\)/)
+  assert.match(src, /watch\(devicesOpen, open => \{ if \(open\) reportScheduler\.start\(\); else reportScheduler\.stop\(\) \}, \{ immediate: true \}\)/)
   assert.match(src, /onSignedIn = \(\) => void accounts\.retryReports\(otherDeviceNodes\(\), \{ force: true \}\)/)
 })
 

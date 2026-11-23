@@ -255,7 +255,7 @@ test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「�
   const unconfirmedBranch = /v-else><fp-mark[\s\S]*?<\/p>/.exec(info)[0]
   assert.doesNotMatch(unconfirmedBranch, /fpShow|fingerprint/, '沒確認的不顯示也不碰指紋（只有灰色的指紋圖示）')
   assert.match(unconfirmedBranch, /<fp-mark kind="unconfirmed"/)
-  assert.match(info, /<device-identity :identity="acctCur\.identity" :note="acctCur\.noReport \? acctCur\.stateLine : ''"><\/device-identity>/, '「還沒收到這台的回報」那一行搬到詳情（#1499），由共用的辨認區元件顯示')
+  assert.match(info, /<device-identity :identity="acctCur\.identity" :note="acctCur\.reportNote \? acctCur\.reportNote\.text : ''" :busy="Boolean\(acctCur\.reportNote && acctCur\.reportNote\.busy\)"><\/device-identity>/, '回報狀態那一行在詳情（#2158 改：讀取中／讀不到），由共用的辨認區元件顯示')
   assert.match(unconfirmedBranch, /v-if="!curKnown\.confirmed"[^>]*@click="confirmKnown\(curKnown\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '確認按鈕只在沒確認時出現')
   assert.equal((info.match(/confirmKnown\(/g) ?? []).length, 1)
   assert.doesNotMatch(info, /neverSeen/, '#1829 沒紀錄的電腦不再寫「還沒連線過」')
