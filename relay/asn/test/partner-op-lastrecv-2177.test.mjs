@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { opLineNote } from '../ui/lib/mobile-ops.mjs'
+import * as mobileOps from '../ui/lib/mobile-ops.mjs'
 import { OP_DONE_HIDE_MS } from '../ui/lib/partner-ops.mjs'
 import { mountComponent } from './helpers/render.mjs'
 
@@ -15,6 +15,8 @@ globalThis.Vue = probe.Vue
 const { ChatPane } = await import('../ui/lib/chatpane.mjs')
 probe.unmount()
 if (hadVue) Object.defineProperty(globalThis, 'Vue', hadVue); else delete globalThis.Vue
+
+const opLineNote = run => mobileOps.opLineNote(run)   // 還原到沒有這個函式的舊版時，是各項測試自己紅，不是整檔載入失敗
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:/x'] }
