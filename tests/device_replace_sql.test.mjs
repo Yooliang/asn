@@ -306,16 +306,14 @@ test('實跑：舊的不符合候選規則（又上線了、不同平台、已�
   assert.equal((await b.row('nw')).replace_asked_at, null)
 })
 
-test('實跑：移除清單滿 200 個時取代仍成功，丟掉最舊的', { skip }, async () => {
+test('實跑：移除清單已滿 200 個時取代回 removed_full，清單與新設備都不動（不偷丟舊的）', { skip }, async () => {
   const b = await boot()
   await basic(b)
   const list = Array.from({ length: 200 }, (_, i) => `k${i}`)
   await b.db.exec(`update relay.tenants set features = '{"device_prefs":{"order":[],"shown":[],"removed":${JSON.stringify(list)},"rev":1,"at":1}}' where id = '${T1}'`)
-  assert.equal((await b.replace(U1, 'nw', 'nw', 'o1')).ok, true)
-  const r = (await b.removed()).removed
-  assert.equal(r.length, 200)
-  assert.equal(r[0], 'k1')
-  assert.equal(r[199], 'o1')
+  assert.equal((await b.replace(U1, 'nw', 'nw', 'o1')).error, 'removed_full')
+  assert.deepEqual((await b.removed()).removed, list)
+  assert.equal((await b.row('nw')).replace_asked_at, null)
 })
 
 test('實跑：不取代只寫 replace_asked_at；之後不再列候選、不再通知；別人的節點被擋；重複呼叫不改時間', { skip }, async () => {

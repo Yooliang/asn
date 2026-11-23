@@ -13,6 +13,7 @@ const ERRORS: Record<string, { status: number; message: string }> = {
   not_found: { status: 404, message: "找不到這台設備，可能已經被移除。" },
   not_candidate: { status: 409, message: "這台舊設備現在不能被取代（可能剛剛又上線了，或已經處理過）。" },
   answered: { status: 409, message: "這台新設備已經處理過了。" },
+  removed_full: { status: 409, message: "「已移除的設備」已達上限，請先恢復幾台再取代。" },
   bad_request: { status: 400, message: "請求內容不正確。" },
 };
 

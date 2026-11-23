@@ -22,7 +22,7 @@
 --        asn_device_replace(p_user, p_actor, p_new, p_old)      取代：單一交易，只能動本人名下的兩台
 --        asn_device_replace_dismiss(p_user, p_actor, p_new)     不取代：只寫 replace_asked_at
 -- 取代做的事：舊設備鍵加進 tenants.features->'device_prefs'.removed（rev 取「現在毫秒」與「現有 rev + 1」較大者，at 同步更新；
---   超過 200 個時丟掉最舊的，免得名單滿了就無法取代）；新設備的名字換成舊設備的名字（舊設備沒有合格的名字就不搬）並標成本人取的；
+--   清單已滿 200 個時回 removed_full，不偷丟舊的）；新設備的名字換成舊設備的名字（舊設備沒有合格的名字就不搬）並標成本人取的；
 --   舊設備保留原名；寫一筆 account_events（device_replaced）。重複呼叫不會再寫紀錄。
 -- 部署順序：本 migration → relay（device_replace 三個動作）→ 用戶端（設定頁「設備處理」）。提早上不會壞：
 --   舊用戶端不認得新通知種類時照一般通知顯示；沒有人呼叫新函式；set_node_platform 的回傳形狀不變。
@@ -245,12 +245,11 @@ begin
   v_prev_name := n.name;
 
   -- 1. 舊設備鍵進移除清單（rev 要比現有的大，不然用戶端會當成舊資料）
-  v_removed := v_removed || to_jsonb(p_old);
-  if jsonb_array_length(v_removed) > 200 then
-    select coalesce(jsonb_agg(e.v order by e.o), '[]'::jsonb) into v_removed
-      from jsonb_array_elements(v_removed) with ordinality as e(v, o)
-     where e.o > jsonb_array_length(v_removed) - 200;
+  -- 移除清單上限 200（同 asn_account_device_prefs 的驗證）：滿了就回錯，不偷丟舊的（丟掉＝那台默默回到清單上）
+  if jsonb_array_length(v_removed) >= 200 then
+    return jsonb_build_object('error', 'removed_full');
   end if;
+  v_removed := v_removed || to_jsonb(p_old);
   v_rev := greatest(v_now::numeric, coalesce((v_cur ->> 'rev')::numeric, 0) + 1);
   v_new := jsonb_build_object('order', coalesce(v_cur -> 'order', '[]'::jsonb), 'shown', coalesce(v_cur -> 'shown', '[]'::jsonb),
                               'removed', v_removed, 'rev', v_rev::bigint, 'at', v_now);
