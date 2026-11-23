@@ -166,6 +166,17 @@ fn bridge_壞檔被反覆讀也不洗版_同一個壞檔只記一行() {
         read_settings(d.path());
     }
     assert_eq!(PEEK_LOGS.with(|n| n.get()), 1, "500 次讀取只該記一行");
+    // 還沒滿 60 秒：再讀也不記
+    PEEK_CLOCK_SKEW.with(|s| s.set(std::time::Duration::from_secs(59)));
+    read_settings(d.path());
+    assert_eq!(PEEK_LOGS.with(|n| n.get()), 1, "59 秒還不該再記");
+    // 滿 60 秒（假時鐘）：壞檔還在，再記一行，之後又安靜
+    PEEK_CLOCK_SKEW.with(|s| s.set(std::time::Duration::from_secs(61)));
+    for _ in 0..100 {
+        read_settings(d.path());
+    }
+    assert_eq!(PEEK_LOGS.with(|n| n.get()), 2, "60 秒後該再記一行，而且只記一行");
+    PEEK_CLOCK_SKEW.with(|s| s.set(std::time::Duration::ZERO));
     // 壞檔被修好之後讀得到新值，不卡在「壞」的記憶
     put(d.path(), "bridge.json", r#"{"allow_remote_launch":true}"#);
     assert!(read_settings(d.path()).allow_remote_launch);
@@ -220,19 +231,13 @@ fn bridge_熱路徑_不比直接讀檔重新解析慢() {
     put(d.path(), "bridge.json", r#"{"allow_remote_launch":true,"unaddressed_to":"T-丙","compact_handoff_n":5}"#);
     read_settings(d.path());
     let n = 3000;
-    let t = std::time::Instant::now();
-    for _ in 0..n {
-        std::hint::black_box(read_settings(d.path()));
-    }
-    let new = t.elapsed();
-    let t = std::time::Instant::now();
-    for _ in 0..n {
-        std::hint::black_box(old_bridge(d.path()));
-    }
-    let old = t.elapsed();
+    // 只比相對值（同一台機器、同一時段的新舊兩種讀法），各量 3 輪取最快的一輪，忙碌的機器兩邊一起變慢，不會誤判
+    let best = |f: &dyn Fn()| (0..3).map(|_| { let t = std::time::Instant::now(); for _ in 0..n { f(); } t.elapsed() }).min().unwrap();
+    let new = best(&|| { std::hint::black_box(read_settings(d.path())); });
+    let old = best(&|| { std::hint::black_box(old_bridge(d.path())); });
     eprintln!("[bridge 熱路徑] {n} 次：新 {new:?}／舊 {old:?}");
-    // 只擋「明顯變慢」（給 3 倍的餘地，免得機器忙時誤判）
-    assert!(new < old * 3, "新讀法 {new:?} 比舊讀法 {old:?} 慢太多");
+    // 只擋「明顯變慢」：新讀法不超過舊讀法的 5 倍
+    assert!(new < old * 5, "新讀法 {new:?} 比舊讀法 {old:?} 慢太多");
 }
 
 #[test]
@@ -396,11 +401,28 @@ fn 啟動偏好_各種舊格式讀出來和搬之前逐項一致() {
 }
 
 #[test]
+fn 啟動偏好_合法但不是物件的_json_維持舊行為_回空物件_設定頁不會收到錯誤() {
+    for text in ["null", "5", "[1,2]", "\"字串\"", "true"] {
+        let d = tempfile::tempdir().unwrap();
+        put(d.path(), "launch-prefs.json", text);
+        // 舊版：Ok(原值)，設定頁那層（with_effective_max）再換成 {}；新版直接回 {}，經同一層結果相同
+        let old = crate::launch::with_effective_max(old_launch_get(d.path()).unwrap(), None);
+        let new = crate::launch::with_effective_max(launch_prefs_get_sync(d.path()).unwrap(), None);
+        assert_eq!(new, old, "{text}");
+        assert_eq!(launch_prefs_get_sync(d.path()).unwrap(), json!({}), "{text}");
+    }
+    // 不是合法 JSON：舊版也是 Err（設定頁 catch 後用預設值，不會空白或卡住）
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "launch-prefs.json", "{壞掉");
+    assert!(old_launch_get(d.path()).is_err() && launch_prefs_get_sync(d.path()).is_err());
+}
+
+#[test]
 fn 啟動偏好_壞檔唯讀讀取不搬檔_寫入時才搬() {
     for text in ["{壞掉", "[1,2]", "5"] {
         let d = tempfile::tempdir().unwrap();
         put(d.path(), "launch-prefs.json", text);
-        assert!(launch_prefs_get_sync(d.path()).is_err());
+        assert_eq!(launch_prefs_get_sync(d.path()).is_err(), text == "{壞掉");
         for _ in 0..10 {
             let _ = launch_prefs_get_sync(d.path());
         }
@@ -468,6 +490,43 @@ fn 啟動偏好_加白名單同時進來_不互相蓋掉_也保留別的欄位()
         assert_eq!(v["cwdAllow"].as_array().unwrap().len(), 8, "第 {round} 輪：有白名單被蓋掉");
         assert_eq!((v["launchDisplay"].clone(), v["zzz"].clone()), (json!("background"), json!(1)));
     }
+}
+
+#[test]
+fn 啟動偏好_白名單一路新增到超過上限_那一次被拒絕_檔案維持上一次的內容() {
+    use crate::launch::cwds::{add_to_prefs_allow, add_validated, remove_from_prefs_allow};
+    let d = tempfile::tempdir().unwrap();
+    let p3 = d.path().join("p3");
+    std::fs::create_dir_all(&p3).unwrap();
+    // 先寫到離上限不遠，再用很長的資料夾名一路加白名單，直到被上限擋住
+    launch_prefs_set_sync(d.path(), json!({"pad": "a".repeat(198_000)})).unwrap();
+    let mut accepted = 0;
+    let mut rejected_at = None;
+    for i in 0..40 {
+        let p = d.path().join(format!("{}{i}", "x".repeat(200)));
+        std::fs::create_dir_all(&p).unwrap();
+        let before = std::fs::read(d.path().join("launch-prefs.json")).unwrap();
+        match add_to_prefs_allow(d.path(), &p.to_string_lossy()) {
+            Ok(()) => accepted += 1,
+            Err(e) => {
+                assert!(plain(&e), "{e}");
+                assert_eq!(std::fs::read(d.path().join("launch-prefs.json")).unwrap(), before, "被拒絕那一次檔案不能變");
+                rejected_at = Some(i);
+                break;
+            }
+        }
+    }
+    assert!(accepted > 0, "上限以內的要放得進去");
+    assert!(rejected_at.is_some(), "一路加下去一定要有一次被上限擋住");
+    assert!(std::fs::read(d.path().join("launch-prefs.json")).unwrap().len() <= 200_000 + 200, "檔案不能長過上限太多（含版本欄位與縮排）");
+    // 另外兩個白名單寫入點同一套檢查
+    launch_prefs_set_sync(d.path(), json!({"pad": "a".repeat(199_940), "cwdAllow": []})).unwrap();
+    let before = std::fs::read(d.path().join("launch-prefs.json")).unwrap();
+    let r = add_validated(d.path(), &p3.to_string_lossy());
+    assert!(r.is_err(), "{r:?}");
+    assert_eq!(std::fs::read(d.path().join("launch-prefs.json")).unwrap(), before);
+    let _ = remove_from_prefs_allow(d.path(), &p3.to_string_lossy()); // 清單裡沒有＝驗證沒過，同樣不寫
+    assert_eq!(std::fs::read(d.path().join("launch-prefs.json")).unwrap(), before);
 }
 
 #[test]

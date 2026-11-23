@@ -294,6 +294,30 @@ mod tests {
         src.match_indices("#[cfg(test)]").map(|(i, m)| (i, i + m.len())).find(|(_, e)| src[*e..].trim_start().starts_with("mod tests")).map_or(src.len(), |(i, _)| i)
     }
 
+    /// 切點：行內測試模組（`#[cfg(test)]` 後接 `mod tests {`）之前才是正式碼；只有 `mod tests;`（宣告在別的檔）的檔案整份都是正式碼
+    fn prod_part(src: &str) -> &str {
+        let cut = src.match_indices("#[cfg(test)]").map(|(i, m)| (i, i + m.len())).find(|(_, e)| src[*e..].trim_start().starts_with("mod tests {")).map_or(src.len(), |(i, _)| i);
+        &src[..cut]
+    }
+
+    // #2162 ⑤：bridge.json、launch-prefs.json 的寫入只准經共用層（持鎖、搬壞檔、版本、fsync）；這三個檔的正式碼不准自己寫檔
+    #[test]
+    fn 收發室設定與啟動偏好的正式碼不准自己寫檔() {
+        for (name, src) in [
+            ("bridge/mod.rs", include_str!("../bridge/mod.rs")),
+            ("launch/prefs.rs", include_str!("../launch/prefs.rs")),
+            ("launch/cwds.rs", include_str!("../launch/cwds.rs")),
+        ] {
+            let prod = prod_part(src);
+            assert!(prod.len() > 1000, "{name}：切點切錯了，正式碼只剩 {} 位元組", prod.len());
+            for bad in ["fs::write", "write_atomic", "atomic::write"] {
+                assert!(!prod.contains(bad), "{name}：正式碼不准出現 {bad}（寫檔一律走 settings 的 update_in／try_update_in）");
+            }
+        }
+        // 切點確實會切掉測試區：cwds.rs 的測試區有 fs::write，掃描不該看到
+        assert!(include_str!("../launch/cwds.rs").contains("std::fs::write"));
+    }
+
     #[test]
     fn 內嵌寫入改走統一寫入後每處的類別() {
         let sites: [(&str, &str, &str, &str, usize); 31] = [

@@ -7,11 +7,12 @@ pub fn launch_prefs_path(data_dir: &Path) -> PathBuf {
 }
 
 /// 讀整份啟動偏好（走共用設定層，#2162）。**唯讀**：不搬檔、不寫檔（收發室橋那一側也在讀，搬檔只准在寫入時發生）。
-/// 沒有檔＝`{}`；暫時讀不到＝`{}`（照舊）；壞檔回 `Err`（固定白話句），呼叫端照舊用預設，下次畫面存檔時才把壞檔搬走
+/// 維持舊行為：沒有檔、暫時讀不到、不是合法文字編碼、合法 JSON 但不是物件，都回 `{}`；
+/// 只有「不是合法的 JSON」回 `Err`（舊版是 serde 英文原文，現在是固定白話句），呼叫端照舊用預設，下次畫面存檔時才把壞檔搬走
 pub fn launch_prefs_get_sync(data_dir: &Path) -> Result<Value, String> {
     let l = crate::settings::peek_in::<LaunchPrefsDoc>(data_dir);
     match l.status {
-        LoadStatus::Corrupt { .. } => Err("啟動設定檔損毀，這次先用預設值".into()),
+        LoadStatus::Corrupt { reason } if reason == crate::settings::migrate::NOT_JSON => Err("啟動設定檔損毀，這次先用預設值".into()),
         _ => Ok(Value::Object(l.value.extra)),
     }
 }
@@ -47,16 +48,30 @@ pub fn launch_prefs_update<R>(data_dir: &Path, f: impl FnOnce(&mut Value) -> R) 
     }
 }
 
-/// 同上，但 `f` 回 `Err`（驗證沒過）就不寫檔，原樣交回
+/// 同上，但 `f` 回 `Err`（驗證沒過）就不寫檔，原樣交回。
+/// 所有寫入點在這裡統一檢查大小：`f` 改完、寫入之前跑 [`check_prefs_shape`]，超過上限就不寫（原檔不動），回白話錯誤
 pub fn launch_prefs_try_update<R, E>(data_dir: &Path, f: impl FnOnce(&mut Value) -> Result<R, E>) -> Result<Result<R, E>, String> {
     std::fs::create_dir_all(data_dir).map_err(|_| "設定資料夾建不起來，這次沒有存".to_string())?;
-    crate::settings::try_update_in::<LaunchPrefsDoc, R, E>(data_dir, |d| {
+    enum Stop<E> {
+        Rejected(E),
+        Shape(String),
+    }
+    let r = crate::settings::try_update_in::<LaunchPrefsDoc, R, Stop<E>>(data_dir, |d| {
         let mut v = Value::Object(std::mem::take(&mut d.extra));
         let r = f(&mut v);
+        let r = match r {
+            Ok(r) => check_prefs_shape(&v).map(|_| r).map_err(Stop::Shape),
+            Err(e) => Err(Stop::Rejected(e)),
+        };
         if let Value::Object(m) = v {
             d.extra = m;
         }
         r
     })
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    match r {
+        Ok(r) => Ok(Ok(r)),
+        Err(Stop::Rejected(e)) => Ok(Err(e)),
+        Err(Stop::Shape(msg)) => Err(msg),
+    }
 }

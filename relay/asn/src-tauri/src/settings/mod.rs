@@ -314,6 +314,27 @@ pub fn try_update_in<T: Doc, R, E>(dir: &Path, f: impl FnOnce(&mut T) -> Result<
 thread_local! {
     /// 測試用：唯讀讀取實際記了幾行 log
     pub static PEEK_LOGS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// 測試用：把唯讀讀取看到的「現在」往後撥多久（假時鐘，免得測 60 秒節流要真的等）
+    pub static PEEK_CLOCK_SKEW: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::ZERO) };
+}
+
+fn peek_now() -> std::time::Instant {
+    #[cfg(test)]
+    return std::time::Instant::now() + PEEK_CLOCK_SKEW.with(|s| s.get());
+    #[cfg(not(test))]
+    std::time::Instant::now()
+}
+
+/// 唯讀讀取的 log 節流：同一個檔 60 秒最多一行；`what` 是這一行要講的事
+fn peek_log(g: &mut Slot, path: &Path, what: &str) {
+    let now = peek_now();
+    if g.last_log.is_some_and(|t| now.saturating_duration_since(t) < PEEK_LOG_EVERY) {
+        return;
+    }
+    g.last_log = Some(now);
+    #[cfg(test)]
+    PEEK_LOGS.with(|n| n.set(n.get() + 1));
+    elog!("[ASN] 設定檔 {} {what}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
 }
 
 const PEEK_LOG_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
@@ -329,7 +350,10 @@ fn peek_at<T: Doc>(path: &Path) -> Loaded<T> {
     }
     if let Some((bad_stamp, reason)) = &g.bad {
         if stamp.is_some() && *bad_stamp == stamp {
-            return Loaded { value: T::default(), status: LoadStatus::Corrupt { reason: reason.clone() } };
+            let reason = reason.clone();
+            // 不重讀；但這個壞檔還在，超過 60 秒就再提醒一行
+            peek_log(&mut g, path, &format!("仍然損毀（{reason}），這次用預設，檔案原地不動"));
+            return Loaded { value: T::default(), status: LoadStatus::Corrupt { reason } };
         }
     }
     let c = read_fresh::<T>(path, false);
@@ -347,13 +371,7 @@ fn peek_at<T: Doc>(path: &Path) -> Loaded<T> {
                 LoadStatus::Unreadable { kind } => format!("讀不到（{kind}），這次用預設"),
                 _ => String::new(),
             };
-            let due = g.last_log.is_none_or(|t| t.elapsed() >= PEEK_LOG_EVERY);
-            if due {
-                g.last_log = Some(std::time::Instant::now());
-                #[cfg(test)]
-                PEEK_LOGS.with(|n| n.set(n.get() + 1));
-                elog!("[ASN] 設定檔 {} {what}", path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            }
+            peek_log(&mut g, path, &what);
         }
         _ => {
             g.stamp = stamp_of(path);

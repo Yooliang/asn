@@ -58,7 +58,7 @@ pub(crate) mod term_view;
 pub(crate) mod term;
 
 use crate::relay::Relay;
-use prefs::{launch_prefs_get_sync, launch_prefs_set_sync};
+use prefs::launch_prefs_get_sync;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -213,7 +213,6 @@ pub fn launch_prefs_set_checked(data_dir: &std::path::Path, prefs: Value) -> Res
         *current = prefs;
         Ok::<(), String>(())
     })?
-
 }
 
 /// 遠端開新夥伴。有登入就帶本人簽章（成員角色的電腦不帶，後台回 403 forbidden；跟 [`relay_launchers`] 一樣），沒登入照舊不帶。
