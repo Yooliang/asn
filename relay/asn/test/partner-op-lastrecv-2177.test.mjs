@@ -100,8 +100,10 @@ test('#2177 手機：ChatPane 收到 opNote 就取代「上次接收訊息」，
     assert.equal(text(m), '小文：請前任寫交接中…（第 1 / 3 步）')
     assert.equal(lines(m)[0].querySelector('button'), null, '一行字、沒有按鈕')
     assert.match(lines(m)[0].className, /typing-op/)
-    await m.trigger(lines(m)[0], 'mouseenter'); await m.trigger(lines(m)[0], 'mouseleave')
+    await m.trigger(lines(m)[0], 'pointerenter'); await m.trigger(lines(m)[0], 'pointerleave')
     assert.deepEqual(m.emitted('op-hold'), [[]]); assert.deepEqual(m.emitted('op-release'), [[]])
+    await m.trigger(lines(m)[0], 'pointerdown'); await m.trigger(lines(m)[0], 'pointercancel')   // 觸控按住、被系統取消
+    assert.equal(m.emitted('op-hold').length, 2); assert.equal(m.emitted('op-release').length, 2)
     props.opNote = null
     await settle(m)
     assert.match(text(m), /^上次接收訊息是 /, '進度結束就恢復')
@@ -118,9 +120,86 @@ test('#2177 opLineNote：沒有進度回 null、有進度帶夥伴名、失敗�
 
 test('#2177 守門：手機與電腦只有一份畫面（chatpane 的 .typing）；獨立的進度列只剩終端分頁與名單頁在用', () => {
   const chat = read('ui/lib/chatpane.mjs'), html = read('ui/m.html'), css = read('ui/style.css') + read('ui/mobile.css')
-  assert.match(chat, /<template v-else-if="opLine">\{\{ opLine\.text \}\}<\/template>\s*\n\s*<template v-else-if="voiceNote">/)
+  assert.match(chat, /<template v-else-if="opLine">\{\{ opLine\.text \}\}<\/template>\s*\n\s*<template v-else-if="remoteBar">/, '進度之後才是純資訊的遠端狀態')
+  assert.ok(chat.indexOf('v-else-if="barFirst"') < chat.indexOf('v-else-if="opLine"') && chat.indexOf('v-else-if="voiceNote"') < chat.indexOf('v-else-if="opLine"'), '要動手的提示排在進度前面')
+  assert.match(chat, /@pointerenter="opHold" @pointerleave="opRelease" @pointerdown="opPressHold" @pointerup="opPressRelease" @pointercancel="opPressRelease"/, '用 pointer 事件')
+  assert.doesNotMatch(chat, /@mouseenter="opHold"|@touchstart\.passive="opHold"/)
+  assert.doesNotMatch(css.match(/\.typing\.typing-op\{[^}]*\}/)[0] + css.match(/\.typing-op\.is-failed\{[^}]*\}/)[0] + css.match(/\.typing-op\.is-done\{[^}]*\}/)[0], /#[0-9a-fA-F]{3,6}/, '亮色底色用既有的顏色變數')
   assert.ok(chat.indexOf('v-else-if="opLine"') < chat.indexOf('上次接收訊息是 {{'),'進度排在「上次接收訊息」之前')
   assert.doesNotMatch(html, /m-ops-run/); assert.doesNotMatch(css, /m-ops-run/)
   assert.match(css, /\.typing\.typing-op\{[^}]*var\(--fs-2\)/, '樣式用變數')
   assert.doesNotMatch(css.match(/\.typing\.typing-op\{[^}]*\}/)[0], /\d+px/, '不寫死 px')
+})
+
+// ---- 一審（#2187）補的：優先順序、失敗不清掉、按住暫停倒數 ----
+const NOTE = { phase: 'done', done: true, text: '小文：已喚醒，視窗開好了。' }
+// 看別台畫面時，遠端狀態列由子元件經 setRemoteBar 回報；測試用外殼元件拿到 ChatPane 的實例直接呼叫它
+let cp = null
+const Shell = { inheritAttrs: false, render() { return globalThis.Vue.h(ChatPane, { ...this.$attrs, ref: el => { cp = el } }) } }
+const mountShell = async propsFn => { const m = mountComponent(Shell, propsFn); await settle(m); return m }
+const setBar = (m, s) => cp.setRemoteBar('view', s)
+const cls = m => lines(m)[0].className
+
+test('#2177 優先順序：危險提示最優先，進度字附在後面，不整個藏起來', async () => {
+  const m = await mountShell(V => V.reactive({ friend: friend('小文'), log: [], opNote: NOTE, noBar: true }))
+  try {
+    setBar(m, { level: 'danger', text: '正在別台打字', stoppable: true }); await settle(m)
+    assert.equal(lines(m).length, 1)
+    assert.match(text(m), /^正在別台打字.*小文：已喚醒，視窗開好了。$/)
+    assert.match(cls(m), /typing-danger/); assert.doesNotMatch(cls(m), /typing-op/)
+    assert.ok(lines(m)[0].querySelector('button'), '停止鈕還在')
+  } finally { m.unmount() }
+})
+
+test('#2177 優先順序：ask／warn 與帶按鈕的遠端提示排在進度前面（按鈕還在、只掛一組 class），進度字附在後面', async () => {
+  const m = await mountShell(V => V.reactive({ friend: friend('小文'), log: [], opNote: NOTE, noBar: true }))
+  try {
+    for (const bar of [{ level: 'ask', text: '對方要你回答' }, { level: 'warn', text: '連線不穩', restartable: true }, { level: 'info', text: '看著畫面', restartable: true }]) {
+      setBar(m, bar); await settle(m)
+      assert.equal(lines(m).length, 1)
+      assert.ok(text(m).startsWith(bar.text), bar.level + '：提示在前')
+      assert.ok(text(m).endsWith(NOTE.text), bar.level + '：進度字附在後面')
+      assert.match(cls(m), new RegExp('typing-' + bar.level)); assert.doesNotMatch(cls(m), /typing-op/, '不同時掛兩組')
+      assert.equal(!!lines(m)[0].querySelector('button'), !!bar.restartable, bar.level + '：按鈕照舊')
+    }
+  } finally { m.unmount() }
+})
+
+test('#2177 優先順序：只有純資訊的遠端狀態才讓位給進度；進度結束後資訊狀態回來', async () => {
+  let props
+  const m = await mountShell(V => (props = V.reactive({ friend: friend('小文'), log: [], opNote: NOTE, noBar: true })))
+  try {
+    setBar(m, { level: 'info', text: '看著畫面' }); await settle(m)
+    assert.equal(text(m), NOTE.text); assert.match(cls(m), /typing-op/); assert.doesNotMatch(cls(m), /typing-info/)
+    props.opNote = null; await settle(m)
+    assert.equal(text(m), '看著畫面'); assert.match(cls(m), /typing-info/); assert.doesNotMatch(cls(m), /typing-op/)
+  } finally { m.unmount() }
+})
+
+test('#2177 失敗訊息不會自動清掉；成功的在按住期間不消失、放開才恢復（真的走 runner，pointer 事件）', async () => {
+  const quiet = console.info; console.info = () => {}
+  try {
+    const status = { value: 'failed' }
+    const m = await mount(V => basePane(V, friend('小文'), api(status)))
+    try {
+      await wake(m)
+      await until(m, () => /沒有成功/.test(text(m)), 8000)
+      assert.match(text(m), /沒有成功.*再按一次就會重試/)
+      await new Promise(r => setTimeout(r, OP_DONE_HIDE_MS + 500)); await settle(m)
+      assert.match(text(m), /沒有成功/, '失敗留著，等下一個操作蓋掉')
+      assert.match(cls(m), /is-failed/)
+    } finally { m.unmount() }
+    status.value = 'ok'
+    const m2 = await mount(V => basePane(V, friend('小文'), api(status)))
+    try {
+      await wake(m2)
+      await until(m2, () => /已喚醒/.test(text(m2)), 8000)
+      await m2.trigger(lines(m2)[0], 'pointerenter')   // 指標停在上面：暫停倒數
+      await new Promise(r => setTimeout(r, OP_DONE_HIDE_MS + 500)); await settle(m2)
+      assert.match(text(m2), /已喚醒/, '按住期間不消失')
+      await m2.trigger(lines(m2)[0], 'pointerleave')   // 放開：重新倒數，之後恢復原文
+      await until(m2, () => /^上次接收訊息是/.test(text(m2)), OP_DONE_HIDE_MS + 2000)
+      assert.match(text(m2), /^上次接收訊息是 /)
+    } finally { m2.unmount() }
+  } finally { console.info = quiet }
 })

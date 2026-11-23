@@ -120,7 +120,7 @@ test('#928 接線：m.js 不再有全域的單一進度；頂端進度只取目�
   assert.match(js, /retryInfo = \(\) => \{ const f = opsFriend\.value; if \(f\) void execOp\(f, 'info', \{\}\) \}/, '詳情的重試照舊')
   // #2177：按住暫停倒數改掛在 chat-pane 最下面那條狀態列（@touchstart／@touchend 在 chatpane.mjs），手機頁接 op-hold／op-release
   assert.match(read('ui', 'm.html'), /@op-hold="holdRun" @op-release="releaseRun"/)
-  assert.match(read('ui', 'lib', 'chatpane.mjs'), /@touchstart\.passive="opHold" @touchend="opRelease" @touchcancel="opRelease"/)
+  assert.match(read('ui', 'lib', 'chatpane.mjs'), /@pointerenter="opHold" @pointerleave="opRelease" @pointerdown="opPressHold" @pointerup="opPressRelease" @pointercancel="opPressRelease"/)
 })
 
 // ---------- 頁面接線 ----------
