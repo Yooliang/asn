@@ -73,16 +73,10 @@ test('手機切換畫面：登入不完整的帳號不能選', () => {
 })
 
 test('畫面接線：切換按鈕在登入不完整時反灰，並寫出標籤與原因', () => {
-  const panel = read('ui/lib/settings-panel.mjs')
-  assert.match(panel, /:disabled="st\.accounts\.busy \|\| a\.current \|\| isIncomplete\(a\)"/, '本機帳號卡')
-  assert.match(panel, /:disabled="!v\.switchable \|\| a\.incomplete"/, '別台設備帳號卡')
-  assert.ok(panel.includes('{{ INCOMPLETE_LABEL }}') && panel.includes('{{ INCOMPLETE_REASON }}'))
+  // #2111 ⑦：設備頁的帳號改成一行，切換鈕（含登入不完整時反灰）只剩帳號頁的設備列與遠端切換對話框；設備頁那兩個舊鈕與標籤的斷言拿掉
   const listHtml = read('ui/list.html')
   assert.match(listHtml, /name="device-acct"[^>]*:disabled="a\.current \|\| a\.incomplete/, '遠端切換對話框的選項')
   assert.ok(listHtml.includes('{{ a.incompleteReason }}'))
-  const m = read('ui/m.html')
-  assert.match(m, /class="m-dv-sw"[^>]*:disabled="!v\.switchable \|\| a\.incomplete"/, '手機帳號卡')
-  assert.ok(m.includes('{{ INCOMPLETE_LABEL }}') && m.includes('{{ INCOMPLETE_REASON }}'))
   const mjs = read('ui/m.js')
   assert.match(mjs, /import \{ (CURRENT_FAILED_ARIA, CURRENT_LABEL, )?INCOMPLETE_LABEL, INCOMPLETE_REASON(, LOGIN_FAILED_LABEL)? \} from '\.\/lib\/claude-accounts\.mjs'/)
   assert.match(mjs, /PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON,/)

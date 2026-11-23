@@ -114,32 +114,32 @@ test('第 2 層：設備標題（名稱、類型標籤、在線標籤）與一�
   assert.ok(!html.includes(vendorIconSvg('gemini')), '別台的廠商圖示不混進來')
 })
 
-test('第 3 層（其他設備）：Claude 每個帳號一列——信箱、方案、使用中或「切換」；沒回報的廠商是虛線框', async () => {
+// #2111 ⑦（#1879）：設備頁的帳號改成一個帳號一行＋狀態標籤、點進帳號頁；額度條、切換、刪除、「⋯」只在帳號頁。
+// 下面幾支舊測試原本守的是「設備頁的帳號列有切換／刪除鈕」，那正是 ⑦ 要拿掉的東西，所以斷言改成新設計（其餘斷言照舊）。
+test('第 3 層（其他設備）：每個帳號一行——信箱＋狀態標籤＋「›」，沒有方案、切換或任何管理鈕；沒回報的廠商是虛線框', async () => {
   const html = await render({ catKey: 'devices', dev: 'W' })
-  const rows = [...html.matchAll(/<li class="dv-acct[^"]*"[\s\S]*?<\/li>/g)].map(m => m[0])
+  const rows = [...html.matchAll(/<li class="asn-aline"[\s\S]*?<\/li>/g)].map(m => m[0])
   const w1 = rows.find(r => r.includes('w1@b.c')), w2 = rows.find(r => r.includes('w2@b.c'))
-  assert.ok(w1.includes('class="dv-plan">Pro<') && w1.includes('class="dv-cur">使用中<') && !w1.includes('切換'), '方案寫 Pro、Max（#374）')
-  assert.ok(w2.includes('class="dv-plan">Max<') && w2.includes('>切換<') && !w2.includes('使用中'))
-  assert.ok(!/<button[^>]*disabled[^>]*>切換/.test(w2), '對方 ASN 在線＝可切換')
+  assert.ok(w1.includes('>正常<') && w2.includes('>正常<'), '沒有問題的帳號寫「正常」')
+  assert.equal([...w1.matchAll(/<button/g)].length, 1, '一行就是一顆按鈕（點進帳號頁）')
+  assert.ok(!/切換|使用中|刪除|>Pro<|>Max</.test(html.slice(html.indexOf('w1@b.c') - 200, html.indexOf('pi@b.c') + 200)), '設備頁的帳號行沒有切換、使用中、方案')
   assert.match(html, /class="dv-none"[^>]*>[\s\S]*目前未回報任何帳號/)
-  // 其他廠商只顯示：沒有任何切換或刪除
-  const pi = rows.find(r => r.includes('pi@b.c'))
-  assert.ok(!pi.includes('<button') && pi.includes('使用中'))
+  assert.ok(rows.some(r => r.includes('pi@b.c')))
   assert.ok(!/<button[^>]*>(刪除|確認刪除|加入目前登入的帳號)</.test(html), '別台沒有帳號管理')
 })
 
-test('其他設備的「切換」送既有的 device-switch（帶設備與信箱），樞紐沿用右鍵切換的確認對話框', () => {
-  assert.match(SettingsPanel.template, /act\('device-switch', \{ node: curDev.key, email: a\.email, vendor: v\.key \}\)/)
+test('設備頁不再送切換：帳號行點下去送 open-accounts（到帳號頁），切換只在帳號頁的設備列（row-switch）', () => {
+  const t = SettingsPanel.template, devicesPage = t.slice(t.indexOf("cat === 'devices'"))
+  assert.ok(!devicesPage.includes("act('device-switch'"), '設備頁不再有 device-switch 的鈕')
+  assert.match(read('ui/lib/settings-panel.mjs'), /act\('open-accounts'\)/)
   const hub = read('ui/list.js')
-  assert.ok(hub.includes("case 'device-switch'") && hub.includes('openDeviceAcct('))
-  assert.match(hub, /openDeviceAcct = async \(node, email = '', vendor = 'claude'\)/, '可帶預選的信箱')
-  assert.match(hub, /deviceAcct\.selected = email/)
+  assert.ok(hub.includes("case 'open-accounts'") && hub.includes("case 'device-switch'") && hub.includes('openDeviceAcct('), '樞紐接得住；device-switch 本身留給右鍵選單等其他入口')
 })
 
-test('對方 ASN 沒在線：切換鈕停用並寫原因；離線設備整體偏灰；沒回報任何廠商顯示整塊空狀態', async () => {
+test('對方 ASN 沒在線：離線設備整體偏灰、帳號行照常列出；沒回報任何廠商顯示整塊空狀態', async () => {
   const g = await render({ catKey: 'devices', dev: 'G' })
-  assert.match(g, /<button[^>]*disabled[^>]*>切換<\/button>/)
-  assert.ok(g.includes('對方電腦的 ASN 沒有在線，無法切換'))
+  assert.ok(!/<button[^>]*>切換<\/button>/.test(g), '設備頁沒有切換鈕')
+  assert.ok(g.includes('g1@b.c') && g.includes('g2@b.c'))
   assert.match(g, /class="dv-body off"/); assert.match(g, /class="dv-tag off">離線</)
   const e = await render({ catKey: 'devices', dev: 'E' })
   assert.match(e, /class="dv-empty"[^>]*>[\s\S]*這台設備還沒有回報任何廠商/)
@@ -147,20 +147,19 @@ test('對方 ASN 沒在線：切換鈕停用並寫原因；離線設備整體偏
   assert.ok(!(await render({ catKey: 'devices', dev: 'W' })).includes('dv-empty'))
 })
 
-test('這台的頁籤：完整的帳號管理（切換、刪除、加入、自動加入、信任自己的設備）都在', async () => {
+test('這台的頁籤：帳號一行一個，管理（切換、刪除）搬到帳號頁；加入、自動加入、信任自己的設備的設定仍在', async () => {
   const html = await render({ catKey: 'devices', dev: 'H' })
-  for (const w of ['a@b.c', 'p@b.c', '使用中', '切換', '刪除', '允許切換帳號', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
+  for (const w of ['a@b.c', 'p@b.c', '允許切換帳號', 'x@openai.test', '這台']) assert.ok(html.includes(w), `少了「${w}」`)
   assert.ok(!html.includes('邀請雲端代理'), '雲端代理只放設備列表頁，細部頁沒有（asn真 在 #678 的要求）')
-  const cur = /<li class="dv-acct[^"]*"[^>]*>(?:(?!<\/li>)[\s\S])*a@b\.c[\s\S]*?<\/li>/.exec(html)[0]
-  assert.match(cur, /<button[^>]*disabled[^>]*>切換<\/button>/, '使用中的帳號不能再切換')
-  for (const op of ['acct-switch', 'acct-remove', 'acct-allow-switch']) assert.ok(SettingsPanel.template.includes(`act('${op}'`), op)
+  assert.ok(!/<button[^>]*>(切換|刪除|確認刪除)<\/button>/.test(html), '切換與刪除不在設備頁')
+  assert.ok(SettingsPanel.template.includes("act('acct-allow-switch'"))
   assert.ok(!html.includes('加入目前登入的帳號') && !html.includes('<span>自動加入</span>'), '加入按鈕與自動加入勾選已拿掉（固定自動加入）')
 })
 
-test('這台的頁籤：刪除要二次確認、忙碌時按鈕停用、警告與狀態列照實顯示；沒登入 Claude 時寫提示', async () => {
-  const a = { ...ACCT, confirmDel: 'p@b.c', busy: true, msg: '已切換', mod: { state: 'installed', version: '1.0.0' }, autoNote: '已自動加入 q@b.c', current: { email: 'z@b.c', saved: false } }
+test('這台的頁籤：警告與狀態列照實顯示；沒登入 Claude 時寫提示', async () => {
+  const a = { ...ACCT, busy: true, msg: '已切換', mod: { state: 'installed', version: '1.0.0' }, autoNote: '已自動加入 q@b.c', current: { email: 'z@b.c', saved: false } }
   const html = await render({ catKey: 'devices', dev: 'H' }, st({ accounts: a }))
-  assert.ok(html.includes('確認刪除') && html.includes('已切換') && html.includes('已安裝 v1.0.0') && html.includes('已自動加入 q@b.c'))
+  assert.ok(html.includes('已切換') && html.includes('已安裝 v1.0.0') && html.includes('已自動加入 q@b.c'))
   assert.ok(html.includes('目前登入的 z@b.c 還沒加入帳號庫'))
   const none = await render({ catKey: 'devices', dev: 'H' }, st({ accounts: { ...ACCT, list: [], current: null }, devices: [{ ...devs()[0], vendors: [] }, ...devs().slice(1)] }))
   assert.ok(none.includes('這台電腦目前沒有 Claude 登入。') && none.includes('還沒有加入過帳號。'))
@@ -185,7 +184,8 @@ test('遠端設備下拉選單已被頁籤取代：元件與樞紐不再有 acct
   assert.ok(!SETTING_OPS.includes('acct-remote-node') && !SETTING_OPS.includes('acct-remote-switch'))
   assert.ok(!read('ui/lib/settings-panel.mjs').includes('acct-remote'))
   assert.ok(!read('ui/list.js').includes("case 'acct-remote"))
-  for (const op of ['acct-switch', 'acct-remove', 'acct-allow-switch', 'device-switch', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['acct-allow-switch', 'acct-remove', 'device-reorder', 'device-remove']) assert.ok(SETTING_OPS.includes(op), op)
+  for (const op of ['acct-switch', 'grok-switch', 'device-switch']) assert.ok(!SETTING_OPS.includes(op), `#2111 ⑦：設備頁不再送 ${op}（切換只在帳號頁）；刪除（acct-remove）收進帳號行的「⋯」`)
 })
 
 test('守門：不引入 Tailwind 或外部網址；樣式只用既有的 CSS 變數；畫面不顯示節點代號', () => {

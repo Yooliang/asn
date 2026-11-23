@@ -44,6 +44,7 @@ import { headCallView } from './lib/head-call.mjs'
 import { offlineView } from './lib/group-offline.mjs'
 import { OP_LABEL, OP_PROGRESS_TEXT, PI_MODEL_PICK_ERR, PI_MODEL_REMOTE_NOTE, opFormError, dialogEngine, partnerEngine, piModelChoices, sharedWhy } from './lib/partner-ops.mjs'
 import { cleanPiModels } from './lib/pi-models.mjs'
+import { accountCardKey, accountStatusOf, deviceAccountLines } from './lib/device-account-lines.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, SUB_LAPSED_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, fetchRoster, ROSTER_POLL_MS, ROSTER_TEXT, usedOnText } from './lib/account-roster.mjs'
 import { PLAN_UNKNOWN, planLabel } from './lib/account-quota.mjs'
 import { CURRENT_FAILED_ARIA, CURRENT_LABEL, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL } from './lib/claude-accounts.mjs'
@@ -938,6 +939,26 @@ const app = createApp({
     // 帳號卡片的設備列（#2111 ②）：一台一列，列的狀態由共用的 accountDeviceRows 決定（電腦同一個函式；手機只有 Claude 能切換）；切換進行中的那台顯示「切換中…」
     const acctDevRows = (vendor, a) => accountDeviceRows(acctDevs.value, vendor, a?.account, a?.usedOn, { vendors: ['claude'], switchingNode: acctSw.phase === 'run' ? acctSw.node : switchBusyNode(acctRowSwitch, vendor, a?.account, acctDevs.value.map(d => d.key)) })
     const acctInUseOf = (vendor, a) => accountInUse(acctDevRows(vendor, a), a?.current)
+    // 設備頁的帳號列（#2111 ⑦）：和電腦同一個函式（device-account-lines.mjs）。點一行＝退回列表、切到「帳號」分頁，捲到並框起那張卡
+    const acctLines = v => deviceAccountLines(acctCur.value, v, acctMy.value)
+    const acctFocus = ref('')
+    let acctFocusTimer = null
+    const acctCardGo = async line => {
+      acctSw.tab = 'accounts'
+      acctBackToList()
+      await fourthNav.whenSettled()
+      for (let i = 0; i < 20; i++) {
+        await Vue.nextTick()
+        const el = [...document.querySelectorAll('[data-acct-card]')].find(e => e.getAttribute('data-acct-card') === line.key)
+        if (el) {
+          el.scrollIntoView?.({ block: 'center' })
+          acctFocus.value = line.key
+          clearTimeout(acctFocusTimer); acctFocusTimer = setTimeout(() => { acctFocus.value = '' }, 2500)
+          return
+        }
+        await new Promise(r => setTimeout(r, 100))   // 帳號列表還在讀：等它畫出來再捲
+      }
+    }
     // 登入失效（#1960）：和電腦同一組函式（account-roster.mjs）；「重新登入」走手機既有的 setupAsk(…, 'relogin')，確認與進度在那一列下方原位顯示
     const acctLoginLostOf = (vendor, a) => accountLoginLost(acctDevRows(vendor, a))
     const acctLoginNotices = computed(() => loginLostNotices(acctMy.value?.vendors ?? [], acctDevRows))
@@ -1669,7 +1690,7 @@ const app = createApp({
       KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, selfDev, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
-      SUB_LAPSED_TEXT, devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
+      SUB_LAPSED_TEXT, devSel, devTap, devRowTap, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, showSetupButton, showReloginButton, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, showLoginButton, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLines, acctCardGo, acctFocus, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctRemoved, acctFlags, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
