@@ -14,9 +14,6 @@
   --fs-1:12px; --fs-2:14px; --fs-3:16px; --fs-4:18px;
   --btn-h:40px; --menu-h:44px; --btn-px:14px;
 }
-@media (prefers-color-scheme:dark){
-  :root{--kit-ok:#7ad07e; --kit-fail:#ff9a90; --kit-current:#6b727c; --kit-warn:#e0b04a; --kit-warn-line:#8a6a1f}
-}
 
 /* ---- 按鈕：三級（primary／secondary／text），尺寸固定，不依所在位置覆寫 ---- */
 .asn-btn{

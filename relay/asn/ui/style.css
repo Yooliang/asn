@@ -68,7 +68,6 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .avb.xs .avb-v{width:14px;height:14px;right:-4px;bottom:-4px;border-radius:4px}
 .avb.sm .avb-v{width:16px;height:16px}
 .avb.xl .avb-v{width:30px;height:30px;padding:4px;border-radius:7px;right:-6px;bottom:-6px}
-@media (prefers-color-scheme:dark){.avb-v{box-shadow:0 0 0 1px rgba(255,255,255,.35),0 1px 2px rgba(0,0,0,.5)}}
 .avb.off .avb-v{opacity:.6;filter:grayscale(1)}
 .to-line .to-av{margin:0 10px 4px 0}   /* 對話視窗上方：名字前的頭像＋右下角廠商小圖（徽章往下凸，留空間免得被 overflow 切掉） */
 .dp.st-offline img,.dp.st-stopped img{filter:grayscale(.65) opacity(.85)}
@@ -277,12 +276,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 /* 訊息裡的編號（#1530）：長按顯示提示，不要選字、不要跳系統選單 */
 .m-body.md-on .msg-ref{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;border-radius:3px}
 .m-body.md-on .msg-ref:focus-visible{outline:2px solid currentColor;outline-offset:1px}
-@media (prefers-color-scheme:dark){.m-body.md-on a,.m-body.md-on .msg-ref{color:#7db7ff}.m-body.md-on code,.m-body.md-on pre.md-code{background:rgba(255,255,255,.1)}}
 .msg-st{margin-left:4px;font-size:11px;letter-spacing:-2px;color:var(--msg-st-muted);cursor:default}
 .msg-st.st-read,.msg-st.st-replied{color:var(--msg-st-read)}
-@media (prefers-color-scheme:dark){
-  :root{--msg-st-muted:#a8b4c4;--msg-st-read:#6eb5ff}
-}
 .older-note{flex:none;align-self:center;color:var(--muted);font-size:12px;line-height:18px;padding:2px 0}
 .sys{color:var(--muted);font-size:12px;padding:2px 0;border-top:1px dotted var(--line);border-bottom:1px dotted var(--line)}
 .sys.nudge{color:var(--busy);font-weight:600}
@@ -939,7 +934,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-hid-act{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .dv-confirm{margin:0;flex:1 0 100%;color:var(--fg)}
 .dv-danger{color:#b3261e}
-@media (prefers-color-scheme:dark){.dv-danger{color:#ff9a90}}
 .dv-removed{margin-top:var(--sp-3)}
 .dv-removed summary{padding:2px 0;cursor:pointer;color:var(--link)}
 .dv-removed-list{list-style:none;margin:var(--sp-2) 0 0;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
@@ -1027,7 +1021,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-fill{display:block;height:100%;background:var(--online)}
 .dv-fill.low{background:var(--busy)}
 .dv-bp{flex:none;min-width:4.5em;font-variant-numeric:tabular-nums}
-@media (prefers-color-scheme:dark){.dv-quota.out{color:#ff9a90}.dv-quota.stale{color:#b4c0cc}}
 .dv-cur{padding:1px 8px;border-radius:4px;font-size:11px;font-weight:600;background:var(--accent);color:#fff}
 .dv-incomplete{padding:1px 8px;border:1px solid #a86f00;border-radius:4px;font-size:11px;color:#a86f00}
 .dv-why{display:block;font-size:11px}
@@ -1152,14 +1145,8 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .typing-ask,.typing-warn{background:#fff4ce;color:#5c4400}
 .typing-danger{background:#7a0d0d;color:#fff;font-weight:700;border-top:2px solid #ffcc00}
 .typing-extra{margin-left:8px;font-weight:400}
-/* 深色模式與強制色彩（高對比）：不靠底色分辨，邊框與文字色都用系統色 */
-@media (prefers-color-scheme: dark){
-  .typing-info,.typing.typing-op{background:#1c2f52;color:#cfe0ff}
-  .typing-op.is-done{background:#16341f;color:#cdeed4}
-  .typing-op.is-failed{background:#4a3a08;color:#ffb3aa}
-  .typing-ask,.typing-warn{background:#4a3a08;color:#ffe9a6}
-  .typing-danger{background:#8f1414;color:#fff;border-top-color:#ffd84d}
-}
+/* 強制色彩（高對比）：不靠底色分辨，邊框與文字色都用系統色。
+   ASN 只有亮色外觀，這裡不寫跟著作業系統深色模式走的規則（#2189：會讓亮色視窗底部多一條暗色帶） */
 @media (forced-colors: active){
   .typing.typing-remote{border-top:2px solid CanvasText;forced-color-adjust:auto}
   .typing-danger{border:3px solid Highlight;font-weight:700}
@@ -1243,7 +1230,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .tm-hint{display:block;color:var(--muted)}
 .tm-facts{padding:8px 10px;border-radius:6px;background:var(--panel-head);margin-bottom:8px}
 .tm-facts p{margin:2px 0;font-size:12px}
-@media (prefers-color-scheme:dark){.tm-tag.native,.tm-tag.cmp-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-tag.cmp-go{background:#17283a;color:#9cc8f2;border-color:#2f5679}.tm-tag.dup{background:#3a1f1d;color:#ff9a90;border-color:#7a3b36}.tm-warn{background:#3a3115;color:#e8cf86;border-color:#6b5a1f}.tm-err,.tm-dupnote{color:#ff9a90}.tm-table tr.dup td{background:#2c2220}}
 .tm-table td:not(.tm-name):not(.tm-act){white-space:nowrap}
 /* #1461 線條圖示（lib/line-icons.mjs）只給現代外觀；復古 Aero 一律不顯示，照舊用原本的圖（版面與像素不變） */
 .lic{display:none}
@@ -1262,7 +1248,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .avb.xl .pin-dot{width:22px;height:22px;padding:4px}
 .avb-v~.pin-dot{right:auto;left:-4px}
 .m-av-wrap .pin-dot{width:17px;height:17px;right:-3px;bottom:-3px}
-@media (prefers-color-scheme:dark){.pin-dot{box-shadow:0 0 0 1.5px #1c2430}}
 .pin-note{margin:4px 10px;font-size:12px;color:#8a3b3b}
 .menu-title{padding:6px 14px;font-weight:700;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-bottom:1px solid rgba(0,0,0,.12);cursor:default}
 .room-av-wrap{position:relative;display:inline-flex;flex:none;vertical-align:middle}

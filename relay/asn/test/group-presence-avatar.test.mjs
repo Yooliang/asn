@@ -83,7 +83,7 @@ test('樣式：小圖定位在頭像欄右下角、離線灰階、深色模式�
   assert.match(base, /\.avb\.xs \.avb-v\{[^}]*right:-4px;bottom:-4px/)
   assert.match(base, /\.avb\.off \.avb-v\{[^}]*grayscale/)
   assert.match(css, /\.m-av-spk\.is-off \.dp img\{[^}]*grayscale/)
-  assert.match(base, /prefers-color-scheme:dark\)\{\.avb-v\{/)
+  assert.doesNotMatch(base, /prefers-color-scheme/, 'ASN 只有亮色外觀，不跟著系統深色走（#2189）')
 })
 
 test('pi 夥伴的群組頭像小圖：後台帶 provider 就依提供者對到廠商；對不到、沒帶、非 pi 一律維持原本的圖', () => {

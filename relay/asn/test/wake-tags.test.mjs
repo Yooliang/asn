@@ -44,7 +44,7 @@ test('畫面：ChatPane 在訊息下方畫標籤（桌面與手機共用）；�
   assert.match(css, /\.wake-tags\{[^}]*font-size:11px/)
   assert.match(css, /\.wake-tag\{[^}]*background:rgba\(107,123,140/, '每個名字都有淡底色，被略過的也有')
   assert.match(css, /\.wake-tag\.off\{color:#a9b4c0;background:rgba\(169,180,192,\.12\)\}/)
-  assert.match(css, /prefers-color-scheme:dark\)\{\s*\.wake-tags\{color:#9fb0c3\}\.wake-tag\.off\{color:#6d7e91;background:rgba\(109,126,145,\.14\)\}/)
+  assert.doesNotMatch(css, /prefers-color-scheme/, 'ASN 只有亮色外觀，不跟著系統深色走（#2189）')
   for (const h of ['chat.html', 'm.html']) assert.match(fs.readFileSync(new URL('../ui/' + h, import.meta.url), 'utf8'), /group\.css/, h + ' 要載入 group.css')
 })
 

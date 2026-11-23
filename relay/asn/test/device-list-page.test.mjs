@@ -250,7 +250,7 @@ test('深色模式：新樣式只用主題變數，紅色的「永久移除」�
   assert.ok(rows.length > 400)
   assert.ok(/var\(--panel\)/.test(rows) && /var\(--muted\)/.test(rows) && /var\(--accent\)/.test(rows))
   assert.ok(!/#fff\b|#ffffff|background:\s*white/i.test(rows), '列表底色不寫死白色')
-  assert.match(css, /@media \(prefers-color-scheme:dark\)\{\.dv-danger\{color:#ff9a90\}\}/)
+  assert.doesNotMatch(css, /prefers-color-scheme/, 'ASN 只有亮色外觀，不跟著系統深色走（#2189）')
 })
 
 // ---------- 手機「選項」頁 ----------
