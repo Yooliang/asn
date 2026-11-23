@@ -15,6 +15,8 @@ pub use names_doc::NamesDoc;
 pub use prefs::{AcctPrefsDoc, AgentSetupPrefsDoc, PiAutoDoc, QuotaReadersDoc};
 #[cfg(desktop)]
 pub use voice::VoiceDoc;
+#[cfg(desktop)]
+pub use launch_bridge::{BridgeDoc, LaunchPrefsDoc};
 
 /// settings.json（data_dir）：視窗名稱與舊名稱。手機也有，所以不掛 cfg(desktop)
 mod names_doc {
@@ -233,6 +235,113 @@ mod voice {
             if !MODEL_IDS.contains(&self.stt_model.as_str()) {
                 self.stt_model = d.stt_model;
             }
+        }
+    }
+}
+
+/// launch-prefs.json 與 bridge.json（#2162 第 5 張）。兩個檔都**只走 `*_in(dir)`**，不走 `Scope`：
+/// 無視窗橋（asn-bridge）把 `data_dir` 設成節點工作資料夾，bridge.json 的位置不固定，所以這裡的 `SCOPE` 只是填給 trait 的，沒人用。
+#[cfg(desktop)]
+mod launch_bridge {
+    use super::lenient;
+    use crate::bridge::compact::clamp_n;
+    use crate::settings::{Doc, Scope};
+    use serde::{Deserialize, Serialize};
+    use serde_json::{Map, Value};
+
+    /// launch-prefs.json：自由格式的 JSON 物件（`cwdAllow`、`recentCwd`、`launchDisplay`、`maxPerHourSet`…），
+    /// 畫面整份讀、整份存，所以每個欄位原樣放在 `extra`，不逐欄宣告（宣告了反而會把畫面新加的欄位吃掉）。
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+    pub struct LaunchPrefsDoc {
+        #[serde(flatten)]
+        pub extra: Map<String, Value>,
+    }
+
+    impl Doc for LaunchPrefsDoc {
+        const NAME: &'static str = "launch-prefs";
+        const SCOPE: Scope = Scope::Data;
+        const VERSION: u32 = 1;
+    }
+
+    /// 壓縮次數：不是整數（含小數、超出範圍、字串）一律當沒存＝預設 3；整數夾在 2～10。跟舊的 `clamp_n(v.get(..).and_then(as_i64))` 一致
+    fn lenient_n<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u32, D::Error> {
+        let v = Value::deserialize(d)?;
+        Ok(clamp_n(v.as_i64()))
+    }
+
+    fn default_n() -> u32 {
+        clamp_n(None)
+    }
+
+    /// 文字欄位：不是字串當空字串；前後空白去掉（跟舊的 `as_str().unwrap_or("").trim()` 一致）
+    fn lenient_trimmed<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+        let v = Value::deserialize(d)?;
+        Ok(v.as_str().unwrap_or("").trim().to_string())
+    }
+
+    /// bridge.json：收發室設定，13 個布林／字串／數字欄位（逐欄容錯：型別不對就是該欄預設，其餘照讀）。
+    /// `enabled` 在檔案裡照存，但讀回給呼叫端一律當 true（內建收發室固定開啟，見 `bridge::read_settings`）。
+    #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+    #[serde(default)]
+    pub struct BridgeDoc {
+        #[serde(deserialize_with = "lenient")]
+        pub enabled: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub allow_takeover: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub allow_remote_launch: bool,
+        #[serde(deserialize_with = "lenient_trimmed")]
+        pub unaddressed_to: String,
+        #[serde(deserialize_with = "lenient")]
+        pub auto_resume_off: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub term_server_off: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub term_server_on: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub screen_watch_off: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub perm_phone_off: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub mobile_view_off: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub remote_input_off: bool,
+        #[serde(deserialize_with = "lenient")]
+        pub compact_handoff_off: bool,
+        #[serde(deserialize_with = "lenient_n")]
+        pub compact_handoff_n: u32,
+        #[serde(flatten)]
+        pub extra: Map<String, Value>,
+    }
+
+    impl Default for BridgeDoc {
+        fn default() -> Self {
+            BridgeDoc {
+                enabled: false,
+                allow_takeover: false,
+                allow_remote_launch: false,
+                unaddressed_to: String::new(),
+                auto_resume_off: false,
+                term_server_off: false,
+                term_server_on: false,
+                screen_watch_off: false,
+                perm_phone_off: false,
+                mobile_view_off: false,
+                remote_input_off: false,
+                compact_handoff_off: false,
+                compact_handoff_n: default_n(),
+                extra: Map::new(),
+            }
+        }
+    }
+
+    impl Doc for BridgeDoc {
+        const NAME: &'static str = "bridge";
+        const SCOPE: Scope = Scope::Data;
+        const VERSION: u32 = 1;
+        fn normalize(&mut self) {
+            self.unaddressed_to = self.unaddressed_to.trim().to_string();
+            self.compact_handoff_n = clamp_n(Some(i64::from(self.compact_handoff_n)));
         }
     }
 }

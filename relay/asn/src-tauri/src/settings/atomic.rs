@@ -230,10 +230,9 @@ mod tests {
     // 每處以「呼叫的開頭」當錨點，檢查同一行用的是哪個 Opts。
     #[test]
     fn 佇列與設定的寫入點用的是會fsync的類別() {
-        let sites: [(&str, &str, &str, &str); 7] = [
+        let sites: [(&str, &str, &str, &str); 6] = [
             ("acct_remote.rs outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE"),
-            ("settings/mod.rs write_locked（視窗名稱、帳號偏好、安裝偏好、pi 自動安裝、讀額度都從這裡寫）", include_str!("mod.rs"), "atomic::write(path, text.as_bytes()", "SETTINGS"),
-            ("bridge/mod.rs write_settings", include_str!("../bridge/mod.rs"), "atomic::write(&settings_path(", "SETTINGS"),
+            ("settings/mod.rs write_locked（視窗名稱、帳號偏好、安裝偏好、pi 自動安裝、讀額度、收發室設定、啟動偏好都從這裡寫）", include_str!("mod.rs"), "atomic::write(path, text.as_bytes()", "SETTINGS"),
             ("account.rs login_skipped", include_str!("../account.rs"), "atomic::write(&f, b\"1\"", "SETTINGS"),
             ("account.rs device_id", include_str!("../account.rs"), "atomic::write(&f, id.as_bytes()", "SETTINGS"),
             ("bridge/engines/partner_queue.rs 名冊", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS"),

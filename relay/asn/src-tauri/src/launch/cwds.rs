@@ -3,7 +3,7 @@
 //! 本機啟動直接用這份候選。內建收發室橋（bridge/launcher.rs）在使用者於設定打開「允許我的其他設備替這台開新視窗」之後，
 //! 也把這份候選併進回報給別台設備的工作資料夾白名單；沒打開時遠端來的啟動仍只看 launcher.json。
 use super::config::{canonical_launch_cwd, LaunchConfig};
-use super::prefs::{launch_prefs_get_sync, launch_prefs_set_sync};
+use super::prefs::{launch_prefs_get_sync, launch_prefs_try_update};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -171,44 +171,41 @@ pub fn validate_cwd(existing: &[String], cwd: &str) -> Result<String, CwdReject>
 
 /// 驗證後加進本機白名單，回傳存下的路徑。已經在清單裡的回 Err(Duplicate)，由呼叫端決定要不要當成功。
 pub fn add_validated(data_dir: &Path, cwd: &str) -> Result<String, CwdReject> {
-    let mut prefs = launch_prefs_get_sync(data_dir).unwrap_or(Value::Null);
-    if !prefs.is_object() {
-        prefs = json!({});
-    }
-    let mut allow = str_list(&prefs, "cwdAllow");
-    let p = validate_cwd(&allow, cwd)?;
-    allow.push(p.clone());
-    prefs["cwdAllow"] = json!(allow);
-    launch_prefs_set_sync(data_dir, prefs).map_err(|e| {
+    // 持鎖「讀、改、寫」：兩處同時加白名單不會互相蓋掉；驗證沒過就不寫檔
+    launch_prefs_try_update(data_dir, |prefs| {
+        let mut allow = str_list(prefs, "cwdAllow");
+        let p = validate_cwd(&allow, cwd)?;
+        allow.push(p.clone());
+        prefs["cwdAllow"] = json!(allow);
+        Ok(p)
+    })
+    .map_err(|e| {
         elog!("[launch] 寫入白名單失敗：{e}");
         CwdReject::SaveFailed
-    })?;
-    Ok(p)
+    })?
 }
 
 /// 從本機白名單移除一筆（依 dedupe_key 比對，Windows 大小寫與斜線不同也算同一個），回傳移除後的清單。清單裡沒有就回錯誤。
 pub fn remove_from_prefs_allow(data_dir: &Path, cwd: &str) -> Result<Vec<String>, String> {
     let Some(p) = norm_path(cwd) else { return Err("資料夾是空的".into()) };
     let key = dedupe_key(&p);
-    let mut prefs = launch_prefs_get_sync(data_dir).unwrap_or(Value::Null);
-    if !prefs.is_object() {
-        prefs = json!({});
-    }
-    let allow = str_list(&prefs, "cwdAllow");
-    let keep: Vec<String> = allow
-        .iter()
-        .filter(|x| norm_path(x).map(|y| dedupe_key(&y) != key).unwrap_or(true))
-        .cloned()
-        .collect();
-    if keep.len() == allow.len() {
-        return Err("清單裡找不到這個資料夾".into());
-    }
-    prefs["cwdAllow"] = json!(keep);
-    launch_prefs_set_sync(data_dir, prefs).map_err(|e| {
+    launch_prefs_try_update(data_dir, |prefs| {
+        let allow = str_list(prefs, "cwdAllow");
+        let keep: Vec<String> = allow
+            .iter()
+            .filter(|x| norm_path(x).map(|y| dedupe_key(&y) != key).unwrap_or(true))
+            .cloned()
+            .collect();
+        if keep.len() == allow.len() {
+            return Err("清單裡找不到這個資料夾".to_string());
+        }
+        prefs["cwdAllow"] = json!(keep);
+        Ok(keep)
+    })
+    .map_err(|e| {
         elog!("[launch] 移除白名單項目失敗：{e}");
         CwdReject::SaveFailed.text()
-    })?;
-    Ok(keep)
+    })?
 }
 
 /// 整份存檔前的檢查：只驗「新加入」的 cwdAllow 項目，存檔裡原本就有的（含已不存在的舊資料夾）原樣保留、不驗不清；
@@ -236,17 +233,16 @@ pub fn check_prefs_write(current: &Value, incoming: &Value) -> Result<(), String
 /// 使用者同意的資料夾寫進本機白名單（去重）。
 pub fn add_to_prefs_allow(data_dir: &Path, cwd: &str) -> Result<(), String> {
     let Some(p) = norm_path(cwd) else { return Err("資料夾是空的".into()) };
-    let mut prefs = launch_prefs_get_sync(data_dir).unwrap_or(Value::Null);
-    if !prefs.is_object() {
-        prefs = json!({});
-    }
-    let mut allow = str_list(&prefs, "cwdAllow");
-    if allow.iter().any(|x| norm_path(x).map(|y| dedupe_key(&y) == dedupe_key(&p)).unwrap_or(false)) {
-        return Ok(());
-    }
-    allow.push(p);
-    prefs["cwdAllow"] = json!(allow);
-    launch_prefs_set_sync(data_dir, prefs)
+    launch_prefs_try_update(data_dir, |prefs| {
+        let mut allow = str_list(prefs, "cwdAllow");
+        if allow.iter().any(|x| norm_path(x).map(|y| dedupe_key(&y) == dedupe_key(&p)).unwrap_or(false)) {
+            return Err(());
+        }
+        allow.push(p.clone());
+        prefs["cwdAllow"] = json!(allow);
+        Ok(())
+    })
+    .map(|_| ())
 }
 
 /// 重開自動接回用（#767）：原本的資料夾若是使用者在本機同意過的（launch-prefs.json 的 cwdAllow：從畫面選過、按「瀏覽…」加過），

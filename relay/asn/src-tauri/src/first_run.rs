@@ -106,9 +106,7 @@ pub fn run_at_startup(data_dir: &Path, others: &[&Path], documents: Option<PathB
                 return Outcome::MarkerFailed(e);
             }
             let switch = {
-                let mut s = crate::bridge::read_settings(data_dir);
-                s.allow_remote_launch = true;
-                crate::bridge::write_settings(data_dir, s)
+                crate::bridge::update_settings(data_dir, |s| s.allow_remote_launch = true)
             };
             let whitelist = match documents {
                 None => Whitelist::NoDocuments,

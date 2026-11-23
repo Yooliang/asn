@@ -206,9 +206,14 @@ pub async fn launch_prefs_set(data_dir: PathBuf, prefs: Value) -> Result<(), Str
 
 /// 設定頁整份存檔：只驗「新加入」的工作資料夾（舊存檔裡的原樣保留，含已不存在的），不合格整份拒絕；詳見 [`cwds::check_prefs_write`]。
 pub fn launch_prefs_set_checked(data_dir: &std::path::Path, prefs: Value) -> Result<(), String> {
-    let current = launch_prefs_get_sync(data_dir).unwrap_or(Value::Null);
-    cwds::check_prefs_write(&current, &prefs).inspect_err(|e| elog!("[launch] 啟動設定存檔被拒：{e}"))?;
-    launch_prefs_set_sync(data_dir, prefs)
+    prefs::check_prefs_shape(&prefs)?;
+    // 檢查與存檔在同一把鎖裡：檢查看到的「目前存檔」就是被取代的那一份
+    prefs::launch_prefs_try_update(data_dir, |current| {
+        cwds::check_prefs_write(current, &prefs).inspect_err(|e| elog!("[launch] 啟動設定存檔被拒：{e}"))?;
+        *current = prefs;
+        Ok::<(), String>(())
+    })?
+
 }
 
 /// 遠端開新夥伴。有登入就帶本人簽章（成員角色的電腦不帶，後台回 403 forbidden；跟 [`relay_launchers`] 一樣），沒登入照舊不帶。
