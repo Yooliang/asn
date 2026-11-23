@@ -133,7 +133,7 @@ test('接線：list.js、tauri 指令、Rust 設定與預設（缺欄位＝開�
   assert.match(desktop, /[\s,]bridge_set_compact_handoff[\s,]/)
   assert.match(desktop, /[\s,]compact_handoff_request[\s,]/)
   assert.match(mod, /compact_handoff_off: d\.compact_handoff_off/, '記「關」：缺欄位＝開（逐欄容錯在 settings/docs.rs 的 BridgeDoc）')
-  assert.match(read('src-tauri/src/settings/docs.rs'), /pub compact_handoff_off: bool/)
+  assert.match(read('src-tauri/src/settings/docs.rs'), /deserialize_with = "lenient"\)\]\s*pub compact_handoff_off: bool/, '逐欄容錯（型別不對＝預設，缺欄位＝開）：lenient 要在這個欄位上')
   assert.match(mod, /compact_handoff_n: compact::clamp_n\(/)
   assert.match(read('src-tauri/src/launch/taskmgr.rs'), /r\["compact"\] = crate::bridge::compact::row_json/)
 })

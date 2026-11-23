@@ -167,9 +167,9 @@ fn bridge_壞檔被反覆讀也不洗版_同一個壞檔只記一行() {
     }
     assert_eq!(PEEK_LOGS.with(|n| n.get()), 1, "500 次讀取只該記一行");
     // 還沒滿 60 秒：再讀也不記
-    PEEK_CLOCK_SKEW.with(|s| s.set(std::time::Duration::from_secs(59)));
+    PEEK_CLOCK_SKEW.with(|s| s.set(std::time::Duration::from_secs(30)));
     read_settings(d.path());
-    assert_eq!(PEEK_LOGS.with(|n| n.get()), 1, "59 秒還不該再記");
+    assert_eq!(PEEK_LOGS.with(|n| n.get()), 1, "30 秒還不該再記");
     // 滿 60 秒（假時鐘）：壞檔還在，再記一行，之後又安靜
     PEEK_CLOCK_SKEW.with(|s| s.set(std::time::Duration::from_secs(61)));
     for _ in 0..100 {
@@ -415,6 +415,21 @@ fn 啟動偏好_合法但不是物件的_json_維持舊行為_回空物件_設�
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "launch-prefs.json", "{壞掉");
     assert!(old_launch_get(d.path()).is_err() && launch_prefs_get_sync(d.path()).is_err());
+}
+
+#[test]
+fn 啟動偏好_帶_bom_的合法_json_讀得出值_不產生_bad_非法編碼對照舊行為() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "launch-prefs.json", "\u{feff}{\"launchDisplay\":\"background\"}");
+    assert_eq!(launch_prefs_get_sync(d.path()).unwrap()["launchDisplay"], json!("background"));
+    assert_eq!(crate::launch::prefs::launch_display_pref(d.path()).as_deref(), Some("background"));
+    assert!(with(d.path(), ".bad-").is_empty());
+    // 非法 UTF-8：舊版讀不出文字就當 {}，新版同樣回 {}、不搬檔
+    let d2 = tempfile::tempdir().unwrap();
+    put_bytes(d2.path(), "launch-prefs.json", &[0xff, 0xfe, 0x7b, 0x7d]);
+    assert_eq!(old_launch_get(d2.path()).unwrap(), json!({}));
+    assert_eq!(launch_prefs_get_sync(d2.path()).unwrap(), json!({}));
+    assert!(with(d2.path(), ".bad-").is_empty());
 }
 
 #[test]

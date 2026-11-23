@@ -46,7 +46,7 @@ test('結束原因的白話：告訴對方去哪裡打開，名稱要跟設定�
 test('Rust：存在 bridge.json 的 remote_input_off（預設開）；指令有登記；只有設定頁的命令能改', () => {
   assert.match(bridgeRs, /remote_input: !s\.remote_input_off/)
   assert.match(bridgeRs, /remote_input_off: d\.remote_input_off/)
-  assert.match(read('../src-tauri/src/settings/docs.rs'), /pub remote_input_off: bool/, '逐欄容錯與預設（缺欄位＝開）在 BridgeDoc')
+  assert.match(read('../src-tauri/src/settings/docs.rs'), /deserialize_with = "lenient"\)\]\s*pub remote_input_off: bool/, '逐欄容錯與預設（缺欄位＝開）在 BridgeDoc')
   assert.match(lib, /fn bridge_set_remote_input\(/)
   assert.match(lib, /bridge_set_mobile_view, bridge_set_remote_input,/)
   const callers = [...lib.matchAll(/m\.set_remote_input\(/g)].length

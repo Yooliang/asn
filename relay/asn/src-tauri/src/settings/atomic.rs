@@ -310,7 +310,7 @@ mod tests {
         ] {
             let prod = prod_part(src);
             assert!(prod.len() > 1000, "{name}：切點切錯了，正式碼只剩 {} 位元組", prod.len());
-            for bad in ["fs::write", "write_atomic", "atomic::write"] {
+            for bad in ["fs::write", "write_atomic", "atomic::write", "File::create", "OpenOptions"] {
                 assert!(!prod.contains(bad), "{name}：正式碼不准出現 {bad}（寫檔一律走 settings 的 update_in／try_update_in）");
             }
         }
