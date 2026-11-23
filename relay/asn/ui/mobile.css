@@ -396,11 +396,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-ops-points{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:15px;line-height:1.45}
 .m-ops-rows{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:15px}
 .m-ops-rows dt{color:var(--muted)} .m-ops-rows dd{margin:0;overflow-wrap:anywhere;user-select:text;-webkit-user-select:text}
-/* 對話頁頂端的進度條 */
-.m-ops-run{flex:none;display:flex;flex-direction:column;gap:6px;padding:8px 14px;background:#e6f1fc;border-top:1px solid var(--line);color:var(--title-fg)}
-.m-ops-run.is-failed{background:#fde8e6;color:#7a1710}
-.m-ops-run.is-done{background:#e4f5e6}
-.m-ops-run-tx{margin:0;font-size:15px;line-height:1.45;overflow-wrap:anywhere}
 .m-logout{display:flex;flex-direction:column;align-items:stretch;margin-top:32px;padding:0 16px 24px}
 /* 通話畫面（#99）：用 teleport 放在 body 底下的全螢幕層（不在會位移的分頁排裡，才真的滿版）；按鈕都在 44px 以上 */
 body > .callview.mobile{position:fixed;inset:0;z-index:90;padding:calc(env(safe-area-inset-top,0px) + 14px) 18px calc(env(safe-area-inset-bottom,0px) + 18px);gap:12px;font-family:var(--font-ui);color:var(--fg)}

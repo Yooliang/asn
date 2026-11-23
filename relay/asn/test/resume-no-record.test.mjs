@@ -62,9 +62,10 @@ test('模板：電腦提示列與手機橫幅沒有開新夥伴鈕、沒有 laun
   assert.doesNotMatch(read('ui/list.html'), /@launch-new="launchNewFromRun"/)
   assert.doesNotMatch(read('ui/list.js'), /launchNewFromRun/)
   assert.doesNotMatch(read('ui/lib/actionbar.mjs'), /<partner-op-strip [^>]*@launch-new/)
-  const runBlock = read('ui/m.html').match(/<div class="m-ops-run"[^>]*>[\s\S]*?<\/div>/)?.[0] ?? ''
-  assert.ok(runBlock.includes('m-ops-run-tx'))
-  assert.doesNotMatch(runBlock, /launchNewFromBanner|開新夥伴|<button/)
+  // #2177：手機的進度改顯示在對話最下面那條狀態列（chat-pane 的 .typing），不再有獨立橫幅；那一行沒有按鈕
+  const typing = read('ui/lib/chatpane.mjs').match(/<div class="typing"[\s\S]*?<template v-else-if="opLine">([^<]*)<\/template>/)?.[1] ?? ''
+  assert.ok(typing.includes('opLine.text'))
+  assert.doesNotMatch(typing, /launchNewFromBanner|開新夥伴|<button/)
   assert.doesNotMatch(read('ui/m.html'), /launchNewFromBanner/)
   assert.doesNotMatch(read('ui/m.js'), /launchNewFromBanner/)
   // 對話框：原本的鈕與接線仍在

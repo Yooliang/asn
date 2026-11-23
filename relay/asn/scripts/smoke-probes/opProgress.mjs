@@ -10,7 +10,7 @@ export const opProgressProbeSource = ({ mode, want }) => `(async () => {
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden';
   const find = async (sel, text, n = 60) => { for (let i = 0; i < n; i++) { const el = [...document.querySelectorAll(sel)].find(e => vis(e) && (!text || e.textContent.includes(text))); if (el) return el; await sleep(100) } return null };
   const blocker = () => phone ? document.querySelector('.m-ops, .gs-back') : document.querySelector('.dlg-back');
-  const boxSel = phone ? '.m-ops-run' : '.op-strip-row';
+  const boxSel = '.chatpane .typing.typing-op';   // #2177：進度就是對話最下面那條狀態列（取代「上次接收訊息」），電腦與手機同一條
   // 一、打開「管理」→「關閉視窗」→ 確認
   const opener = await find(phone ? '.m-head-more, .m-plate' : '.actionbar .abtn[aria-label="管理"], .mbtn[data-slot="more"]');
   if (!opener) return { ok: false, why: '找不到管理夥伴的入口' };
@@ -26,9 +26,11 @@ export const opProgressProbeSource = ({ mode, want }) => `(async () => {
   if (blocker()) return { ok: false, why: '送出後還有擋住畫面的框（進度應該就地顯示）' };
   const box = await find(boxSel, '');
   if (!box) return { ok: false, why: '送出後畫面上沒有就地的進度' };
-  // 位置（#1907）：電腦＝對話窗最下面那一格（.op-slot，在最下面的狀態列之後）；手機＝輸入區下面、在對話內容之後
-  if (phone) { const pane = document.querySelector('.m-chat .chatpane'); if (!pane || !(pane.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING)) return { ok: false, why: '手機的狀態列要在對話與輸入區之後（最下面）' } }
-  else { const slot = box.closest('.op-slot'); const typing = slot?.parentElement?.querySelector(':scope > .typing'); if (!slot || !typing || !(typing.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING)) return { ok: false, why: '電腦的狀態列要在對話窗最下面（最下面那條狀態列之後）' } }
+  // 位置與只有一行（#2177）：進度直接顯示在最下面那條狀態列，取代「上次接收訊息」；對話窗裡不能再多一條獨立的進度列
+  const pane = box.closest('.chatpane');
+  if (!pane || pane.querySelectorAll(':scope .typing').length !== 1) return { ok: false, why: (phone ? '手機' : '電腦') + '的對話窗最下面只該有一條狀態列' };
+  if (pane.querySelector('.op-strip-row, .op-slot, .m-ops-run')) return { ok: false, why: '進度不該另外多一條獨立的進度列' };
+  if (/上次接收訊息/.test(box.textContent)) return { ok: false, why: '進度中這一行不該同時寫「上次接收訊息」' };
   const text = () => (document.querySelector(boxSel)?.textContent ?? '').replace(/\\s+/g, ' ').trim();
   if (/先關掉（照常進行）/.test(document.body.textContent)) return { ok: false, why: '畫面上不該再有「先關掉（照常進行）」' };
   const btns = () => [...document.querySelectorAll(boxSel + ' button')].map(b => b.textContent.trim());

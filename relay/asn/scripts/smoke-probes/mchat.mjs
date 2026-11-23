@@ -29,8 +29,8 @@ export const mchatProbeSource = ({ mchat }) => `(async () => {
   if (want.wake) {
     rows[0].click();
     let run = null;
-    for (let j = 0; j < 30 && !run; j++) { await sleep(100); run = document.querySelector('.m-ops-run') }
-    if (!run) return { ok: false, why: '點了喚醒沒有送出（對話頁頂端沒有進度）' };
+    for (let j = 0; j < 30 && !run; j++) { await sleep(100); run = document.querySelector('.chatpane .typing.typing-op') }
+    if (!run) return { ok: false, why: '點了喚醒沒有送出（對話最下面那一行沒有進度）' };
     if (document.querySelector('.m-ops-panel')) return { ok: false, why: '喚醒送出後「⋯」選單沒有收起' };
   }
   return { ok: true, why: '' };

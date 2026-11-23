@@ -36,7 +36,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, normalizeLastChat, opLineNote, opStep, phoneModels, renamedChatId, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
 import { buildPartnerMenu } from './lib/partner-menu.mjs'
 import { headCallView } from './lib/head-call.mjs'
@@ -1277,7 +1277,7 @@ const app = createApp({
     })
     const opsPiNote = computed(() => (partnerEngine(opsFriend.value) === 'pi' && !opsPiChoices.value.groups.length ? PI_MODEL_REMOTE_NOTE : ''))
     const opsRuns = ref({})   // 對話頁頂端的進度，依夥伴位址分開存（#928）：{ [friend.id]: { op, view } }
-    const opsBanner = computed(() => runBanner(runFor(opsRuns.value, chatFriend.value?.id)))
+    const opsBanner = computed(() => opLineNote(runFor(opsRuns.value, chatFriend.value?.id)))
     let opsToken = 0
     // 名單列長按／右鍵叫出選單：蓋在目前的分頁上（不切到對話頁），對象是被按的那一列
     // 長按放開手指時，有些環境會補一個 click，落在剛長出來的選單上（可能正好是某一項或背景）：選單剛開、手指剛放開的零點四秒內，選單裡的 click 不算數（#1479）
