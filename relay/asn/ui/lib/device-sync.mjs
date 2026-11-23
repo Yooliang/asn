@@ -93,11 +93,22 @@ export function createDeviceSync({ prefs, api, canSync = async () => true, now =
       else if (d.action === 'push') { if (d.next) apply(d.next); requestPush() }
     } catch (e) { onError(e) }
   }
+  /**
+   * 呼叫端剛從後台拿到一份設定（例如取代設備後後台自己改了「已移除」）：比本機新就當成「從後台拉到的新版」採用，
+   * 不經過本機變動監看，所以不會把它當本機改動再推上去（推上去會撞後台的冷卻）。回有沒有採用
+   */
+  function adoptRemote(remote) {
+    if (stopped || !remote) return false
+    const d = decide({ local: prefs, remote, now: now() })
+    if (d.action !== 'adopt') return false
+    apply(d.next)
+    return true
+  }
   function start() {
     stopped = false
     void pull()
     poll = schedule(function tick() { void pull(); poll = schedule(tick, everyMs) }, everyMs)
   }
   function stop() { stopped = true; if (timer) clear(timer); if (poll) clear(poll); timer = poll = null }
-  return { start, stop, pull, push, noteLocal, requestPush }
+  return { start, stop, pull, push, noteLocal, requestPush, adoptRemote }
 }

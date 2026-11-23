@@ -63,7 +63,8 @@ import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArch
 import { acpSwitchChoices, createOpRunner, makeOpRun, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
-import { NOTICE_ID, isMergedAway, isNoticeFriend } from './lib/notice.mjs'
+import { NOTICE_ID, isMergedAway, isNoticeFriend, noticeGoOf } from './lib/notice.mjs'
+import { REPLACE_TEXT, createReplaceFlow, newReplaceState, syncAfterReplace } from './lib/device-replace.mjs'
 import { HOME_TAB, chatNav, isNewNotice, noticeLastAt, noticeUnread, tabDot, viewedChatId } from './lib/mobile.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
@@ -71,7 +72,7 @@ import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './lib/msg-ref.mjs'
 import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
-import { authApi, cloudApi, invoke, listen, mobileAccountApi, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
+import { authApi, cloudApi, deviceReplaceApi, invoke, listen, mobileAccountApi, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, removedDevices, deviceNameError, deviceNameOf, unnamedLabelOf } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
@@ -718,6 +719,20 @@ const app = createApp({
     const peerSheetTitle = computed(() => (vp.cur ? KNOWN_TEXT.sheetTitle(vp.sheetName || vp.cur.name) : ''))
     const peerSheetBody = KNOWN_TEXT.sheetBody
     void loadKnown()
+    // 新設備第一次連上時「是不是取代舊的」卡片（#1860 H；電腦同一份流程 lib/device-replace.mjs）。取代後把後台回寫的「已移除」當成拉到的新版併入，不是本機改完再推
+    const replaceSt = reactive(newReplaceState())
+    const replaceFlow = createReplaceFlow({
+      state: replaceSt, api: deviceReplaceApi, log: (...a) => console.info(...a),
+      afterReplace: () => syncAfterReplace({ getPrefs: authApi.getDevicePrefs, devSync, refreshRoster: () => core.refreshRoster(), log: (...a) => console.info(...a) }),
+    })
+    const replaceCards = computed(() => replaceFlow.view())
+    const replacePick = (node, old) => replaceFlow.choose(node, old)
+    const replaceDo = (node, old) => void replaceFlow.replace(node, old)
+    const replaceKeep = node => void replaceFlow.dismiss(node)
+    void replaceFlow.load()
+    // 通知上的「查看設備」（#1860 H；去哪由 notice.mjs 的 noticeGoOf 決定，電腦同一份規則）：最新一則收到的通知是新設備＝按鈕帶去設定 → 設備
+    const noticeGo = computed(() => noticeGoOf([...noticeLog.value].reverse().find(m => m && m.k === 'them')?.kind))
+    const goNotice = go => { if (go?.page === 'devices') openSetting('devices') }
     const settingRows = computed(() => mobileSettingRows({ skin: prefs.skin, name: myName.value, hasUpload: selfHasUpload.value, vibrateNudge: prefs.vibrateNudge, vibrateMsg: prefs.vibrateMsg, updateEnabled: upd.enabled, playView: playView.value, autoUpdate: prefs.autoUpdate, version: info.version, devices: acctDevs.value, accountCount: (acctMy.value?.vendors ?? []).reduce((n, v) => n + v.accounts.length, 0) }))
     const settingCat = computed(() => (fourthPage.value?.kind === 'setting' ? fourthPage.value.cat : ''))
     const settingTitle = computed(() => mobileSettingTitle(settingCat.value))
@@ -935,7 +950,7 @@ const app = createApp({
       if (nav.sheet) return
       acctEpoch++; acctToken++   // 重新打開：之前還在跑的讀取與切換不再更新這個畫面（切換的結果改用提示說）
       Object.assign(acctSw, { phase: 'pick', page: 'list', picked: '', view: null, reports: {}, tab: acctTabOf(g?.tab) })
-      if (g?.tab === 'devices' || !g?.tab) void loadKnown()
+      if (g?.tab === 'devices' || !g?.tab) { void loadKnown(); void replaceFlow.load() }
       // 從夥伴列表某台設備旁的「選項」進來：直接開那一台的細部頁（底下墊一層列表，返回鍵回列表）；從別處進來先看列表
       if (g?.node && acctDevs.value.some(d => d.key === g.node)) { acctSw.node = g.node; acctSw.page = 'detail' } else acctSw.node = ''
       if (!fourthNav.openPage(acctPage(acctSw.node))) return
@@ -962,7 +977,7 @@ const app = createApp({
       void loadAcct(key)
     }
     // 帳號分頁的「切換到某台」：開那台的細部頁、等它的帳號讀回來，再進確認畫面（現有的選帳號→確認→送出流程，不另做一套）
-    const setAcctTab = t => { acctSw.tab = acctTabOf(t) }
+    const setAcctTab = t => { acctSw.tab = acctTabOf(t); if (acctSw.tab === 'devices') void replaceFlow.load() }
     // 能不能把帳號切到這一台：手機版的本機永遠不行（判斷只在 isSwitchTarget 一處）
     const acctCanSwitchTo = node => isSwitchTarget(acctDevs.value.find(d => d.key === node), info.node)
     const acctSwitchOn = async (node, email) => { if (!acctCanSwitchTo(node)) return; await openAcctDevice(node); startAcctSwitch(email) }
@@ -1706,7 +1721,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGo, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

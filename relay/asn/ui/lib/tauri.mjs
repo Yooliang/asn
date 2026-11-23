@@ -170,6 +170,13 @@ export const authApi = {
   setLastAvatar: avatar => invoke('last_login_set_avatar', { avatar }),   // 這台大頭貼有變 → 同步到「上次登入」的記憶
   skip: () => invoke('auth_skip_login'),                     // 「暫時不登入」（這台已有節點金鑰時才准）
 }
+// 新設備第一次連上時「是不是取代舊的」（#1860 H，電腦與手機同一組命令；要本人簽章，Rust 端沒憑證就不送）。call 可注入
+export const makeDeviceReplaceApi = (call = invoke) => ({
+  candidates: () => call('relay_device_replace_candidates'),            // → { cards: [{ node, name, platform, created_at, candidates: [{ node, name, last_seen }] }] }
+  replace: (newNode, oldNode) => call('relay_device_replace', { new: newNode, old: oldNode }),   // → { ok, already, renamed }
+  dismiss: newNode => call('relay_device_replace_dismiss', { new: newNode }),                    // → { ok }
+})
+export const deviceReplaceApi = makeDeviceReplaceApi()
 // 邀請雲端代理（設定頁）：登入憑證在 Rust 端。create 的結果裡有一次性的金鑰，只給畫面顯示一次，不存任何地方
 export const cloudApi = {
   create: name => invoke('cloud_agent_create', { name }),   // → { id, name, key, invite }

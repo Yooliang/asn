@@ -55,7 +55,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { plainMessage, termRemoteErrorText } from './lib/plain-errors.mjs'
-import { RESIZE_DIRS, authApi, autostartApi, bridgeApi, cliLoginApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, autostartApi, deviceReplaceApi, bridgeApi, cliLoginApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
@@ -104,6 +104,7 @@ import { splitMachines } from './lib/remote-machines.mjs'
 import { accountDeviceRows, nodeLabelOf, rosterQuotaFor, rosterView, selfClaudeQuota } from './lib/account-roster.mjs'
 import { setNodePlatforms } from './lib/node-platform.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
+import { createReplaceFlow, newReplaceState, syncAfterReplace } from './lib/device-replace.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, isDeviceOnline, moveDevice, pruneRemoved, removeDevice, reorderDevice, restoreDevice, showDevice, visibleRows } from './lib/device-order.mjs'
 import { dialogTitle as deviceAcctTitle, dialogView as deviceAcctViewOf, CONFIRM_NOTE as DEVICE_CONFIRM_NOTE, CLOSE_NOTE as DEVICE_CLOSE_NOTE } from './lib/device-acct-dialog.mjs'
 import { deviceNameError, deviceNameOf } from './lib/device-known.mjs'
@@ -471,6 +472,12 @@ async function setKnownLoginOk(node, on) {
   known.busy = true
   try { await knownDeviceApi.setLoginOk(node, on); known.error = ''; await refreshKnown() } catch (e) { console.info('[ASN] 允許替這台登入沒改成', String(e?.message ?? e)); known.error = knownError(e) } finally { known.busy = false }
 }
+// 新設備第一次連上時「是不是取代舊的」卡片（#1860 H；手機同一份流程 lib/device-replace.mjs）。取代後把後台回寫的「已移除」當成拉到的新版併入，不是本機改完再推
+const replaceSt = reactive(newReplaceState())
+const replaceFlow = createReplaceFlow({
+  state: replaceSt, api: deviceReplaceApi, log: (...a) => console.info(...a),
+  afterReplace: () => syncAfterReplace({ getPrefs: authApi.getDevicePrefs, devSync, refreshRoster: () => core.refreshRoster(), log: (...a) => console.info(...a) }),
+})
 // 替某台設備改名（名字只有一個、存在後台）：規則與送出都在 Rust，成功後重讀設備列表與認得的電腦
 async function renameDevice(node, name) {
   known.busy = true
@@ -1194,6 +1201,8 @@ function markNoticeOne(key) {
   if (left === 0) markAllNotices()
   else noticeView.opened = opened
 }
+// 通知上的「查看設備」等去處按鈕（#1860 H；去哪由 notice.mjs 的 noticeGoOf 決定，手機同一份規則）：新設備通知 → 設定 → 設備
+const goNotice = go => { if (go?.page === 'devices') return openPanel('setting', 'devices') }
 async function openNoticeRow(key) {
   noticeView.sel = key
   if (ui.mode === 'merged') {
@@ -1628,7 +1637,7 @@ function closeGoneNotice(item) {
   if (launchNotice.open && noticeStillFor(item, launchNotice.body)) closeLaunchNotice()
   if ((item.code === 'permission' || item.code === 'held_message') && permissionDlg.open && permissionDlg.name === item.name && !permissionDlg.busy) closePermissionDlg()
 }
-if (!info.shot) { void refreshKnown(); setInterval(() => void refreshKnown(), 60_000) }
+if (!info.shot) { void refreshKnown(); void replaceFlow.load(); setInterval(() => { void refreshKnown(); void replaceFlow.load() }, 60_000) }
 if (!info.shot) createPartnerNoticePoller({ fetch: () => transport.partnerNotices(), show: showLaunchNotice, onItem: openPermissionDlg, onGone: closeGoneNotice }).start()
 if (!info.shot && transport.autoResumeStatus) createAutoResumePoller({ fetch: () => transport.autoResumeStatus(), show: showLaunchNotice, log: line => console.info('[ASN]', line) }).start()
 // 沒有終端或舊版後端（沒有這幾個命令）時 term_list 會失敗，靜默略過；截圖模式不輪詢
@@ -2116,6 +2125,7 @@ const app = createApp({
         remote: { node: accounts.state.remote.node, devices: accounts.remoteNodes(), list: accounts.state.remote.list, loading: accounts.state.remote.loading, busy: accounts.state.remote.busy, msg: accounts.state.remote.msg },
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked }, guard: { supported: guard.supported, on: guard.on, busy: guard.busy, paused: guard.paused, blocked: guard.blocked },
+      replace: { cards: replaceFlow.view(), busy: replaceSt.busy, error: replaceSt.error, note: replaceSt.note },
       known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error, ownFp: known.ownFp, qr: known.qr } : null,
       bridge: bridge.shown ? { compactHandoff: bridge.compactHandoff, compactN: bridge.compactN, enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, remoteInput: bridge.remoteInput, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerWhy: bridge.termServerWhy, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, termFetchDetail: bridge.termFetchDetail, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
@@ -2181,6 +2191,9 @@ const app = createApp({
         case 'known-forget': if (value) await forgetKnown(value); break
         case 'device-rename': if (value?.node) await renameDevice(value.node, value.name); break
         case 'device-rename-clear': known.renameError = ''; break
+        case 'replace-pick': if (value?.node && value?.old) replaceFlow.choose(String(value.node), String(value.old)); break
+        case 'replace-do': if (value?.node && value?.old) await replaceFlow.replace(String(value.node), String(value.old)); break
+        case 'replace-keep': if (value) await replaceFlow.dismiss(String(value)); break
         case 'known-qr': await toggleOwnQr(value === true); break
         case 'known-login-ok': if (value?.node) await setKnownLoginOk(value.node, value.on); break
         case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
@@ -2256,7 +2269,7 @@ const app = createApp({
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
       termOpSlotEl,
-      version: info.version, skin, lookNow, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
+      version: info.version, skin, lookNow, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, goNotice, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText, progressPct,
       reloginBar, dismissReloginBar, goLogin, roomsNote, refreshRooms,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
