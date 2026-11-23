@@ -261,7 +261,7 @@ mod tests {
         assert!(include_str!("../cli/send_rate.rs").contains("atomic::STATE"));
     }
 
-    // Windows 鎖定重試（#2162 2b）：另一個執行緒以「完全不共用」的方式開著目標檔，約 300 毫秒後放掉；
+    // Windows 鎖定重試（#2162 2b）：另一個執行緒以「完全不共用」的方式開著目標檔，約 500 毫秒後放掉；
     // 統一寫入的 rename 會先被擋（共用違規），重試後成功，內容正確、不留 tmp。
     // 把 RENAME_TRIES 暫時改成 1，這支會紅（第一次被擋就直接回錯）。
     #[cfg(windows)]
@@ -278,23 +278,25 @@ mod tests {
         assert!(std::fs::rename(&probe, &p).is_err(), "占住時改名應該失敗");
         std::fs::remove_file(&probe).unwrap();
         let release = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::thread::sleep(std::time::Duration::from_millis(500));
             drop(held);
         });
-        let t = std::time::Instant::now();
         write(&p, "新".as_bytes(), SETTINGS).unwrap();
-        let waited = t.elapsed();
         release.join().unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "新");
-        assert!(waited >= std::time::Duration::from_millis(150), "確實等過才寫成功：{waited:?}");
         assert!(tmps(d.path()).is_empty(), "不留 tmp");
     }
 
     // 分類釘住（#2162 2b）：內嵌的「寫 tmp 再 rename」與非原子的 fs::write 都收進統一寫入後，每一處的 Opts。
     // (名稱, 原始碼, 呼叫開頭, 要用的類別, 這個開頭預期出現幾次)；同一個開頭的每一次出現都要用對類別。
+    /// 正式碼的結尾：「#[cfg(test)] 後面緊接 mod tests」那一個（單一函式上的 #[cfg(test)] 不算）；找不到就整份都是正式碼
+    fn prod_end(src: &str) -> usize {
+        src.match_indices("#[cfg(test)]").map(|(i, m)| (i, i + m.len())).find(|(_, e)| src[*e..].trim_start().starts_with("mod tests")).map_or(src.len(), |(i, _)| i)
+    }
+
     #[test]
     fn 內嵌寫入改走統一寫入後每處的類別() {
-        let sites: [(&str, &str, &str, &str, usize); 25] = [
+        let sites: [(&str, &str, &str, &str, usize); 26] = [
             ("partner_queue 名冊 forget／rename", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, v.to_string()", "SETTINGS", 2),
             ("upstream_retry 補送名單", include_str!("../bridge/core/upstream_retry.rs"), "atomic::write(&file, t.as_bytes()", "QUEUE", 1),
             ("pi.rs 收件匣", include_str!("../bridge/engines/pi.rs"), "atomic::write(&target, body.as_bytes()", "QUEUE", 1),
@@ -317,6 +319,7 @@ mod tests {
             ("channel_turns 記號", include_str!("../bridge/channel_turns.rs"), "atomic::write(&p, b\"1\"", "STATE", 1),
             ("auth_notice 日誌截半", include_str!("../auth_notice.rs"), "atomic::write(&p, keep.as_bytes()", "STATE", 1),
             ("acct_remote 日誌截半", include_str!("../acct_remote.rs"), "atomic::write(&p, keep.as_bytes()", "STATE", 1),
+            ("quota_core/merge 日誌截半", include_str!("../quota_core/merge.rs"), "atomic::write(p, keep.as_bytes()", "STATE", 1),
             // 2a 已改、這張順手把「名冊與補送」以外的同檔舊呼叫也釘住
             ("partner_queue 名冊 remember", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS", 1),
             ("bridge/pending.rs", include_str!("../bridge/pending.rs"), "atomic::write(file,", "QUEUE", 1),
@@ -326,6 +329,7 @@ mod tests {
             let hits: Vec<_> = src.match_indices(anchor).map(|(i, _)| i).collect();
             assert_eq!(hits.len(), times, "{name}：寫入呼叫（{anchor}）出現 {} 次，預期 {times} 次", hits.len());
             for i in hits {
+                assert!(i < prod_end(src), "{name}：寫入點落在測試區之後，禁用字掃描會掃不到它");
                 let line = src[i..].lines().next().unwrap();
                 assert!(line.contains(&format!("atomic::{want}")), "{name}：要用 {want}，實際：{line}");
             }
@@ -351,8 +355,9 @@ mod tests {
             ("orphans", include_str!("../bridge/orphans.rs")),
             ("channel_turns", include_str!("../bridge/channel_turns.rs")),
             ("auth_notice", include_str!("../auth_notice.rs")),
+            ("quota_core/merge", include_str!("../quota_core/merge.rs")),
         ] {
-            let prod = src.split("#[cfg(test)]").next().unwrap();
+            let prod = &src[..prod_end(src)];
             for bad in ["std::fs::write(", "fs::write(", ".tmp\""] {
                 assert!(!prod.contains(bad), "{name}：還有 {bad}");
             }

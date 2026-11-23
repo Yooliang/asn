@@ -1,6 +1,6 @@
 //! 「視窗自己收信」心跳，格式與 relay/machine/self-recv.mjs 完全相同：
 //! `<工作目錄>/self-recv/<視窗名（\/:*?"<>| 與控制字元換成 _）>.json`，內容 `{"pid":…,"name":…,"t":…}`，
-//! 先寫 `<檔>.<pid>.tmp` 再 rename（原子寫入）。機器橋看到 90 秒內、pid 還活著的心跳，就不再轉交這個視窗的信。
+//! 統一寫入（settings::atomic，STATE）：先寫同資料夾的序號暫存檔再 rename（原子寫入）。機器橋看到 90 秒內、pid 還活著的心跳，就不再轉交這個視窗的信。
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
