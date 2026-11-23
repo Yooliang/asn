@@ -165,7 +165,7 @@ async fn 橋送出前先記下編號與目標_hook_讀同一份判斷_相符放�
     let (_, text) = h.core.fwd_probe(&uid(1)).unwrap();
     let call = |to: &str| json!({"tool_name": "SendMessage", "tool_input": {"to": to, "message": text, "recipient": to, "content": text}});
     assert_eq!(forward_gate::check(&call("T-乙"), Some(&flight)).0, Verdict::Allow);
-    assert_eq!(forward_gate::check(&call("T-丙"), Some(&flight)).0, Verdict::Deny("收件人應為 T-乙".into()));
+    assert!(matches!(forward_gate::check(&call("T-丙"), Some(&flight)).0, Verdict::Deny(ref r) if r.starts_with("收件人應為 T-乙，你填的是 T-丙")));
     let (out, _) = forward_gate::run_hook(h.work.path(), &call("T-丙").to_string());
     assert!(out.unwrap().contains("收件人應為 T-乙"));
     // 轉交完成後拿掉：同編號再送一律擋
