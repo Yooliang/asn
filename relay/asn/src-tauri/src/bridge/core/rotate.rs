@@ -10,6 +10,8 @@ use super::*;
 pub const ROTATE_AFTER: u32 = 3;
 /// 連續換幾輪都沒有成功轉交過就停手（換了還是被擋，換輪救不了，要人處理）。中間有任何一次轉交成功就從頭算
 pub const ROTATE_MAX_CHAIN: u32 = 3;
+/// 「需要人工處理」通知送不出去時的重試間隔（毫秒）：第 1、2、3 次重試各隔 1、5、15 分鐘，之後固定每 15 分鐘，送出去就停
+const MANUAL_RETRY_MS: [u64; 3] = [60_000, 300_000, 900_000];
 /// 同一台、同一個視窗、同一種通知，最短隔多久才再通知一次（毫秒）
 pub const ROTATE_NOTICE_GAP_MS: u64 = 10 * 60 * 1000;
 
@@ -21,6 +23,11 @@ pub(in super::super) struct RotateState {
     chain: u32,
     /// 新的 worker 起來之後要把轉交中的信重送
     resend: bool,
+    /// 「需要人工處理」通知還沒送出去：(原因, 次數)；送出去（或轉交成功、不再卡住）就清掉
+    manual_pending: Option<(DenyKind, u32)>,
+    /// 下次重試時間與已重試次數
+    manual_retry_at: u64,
+    manual_tries: usize,
     /// 上次通知的時間：(視窗名, 是不是「需要人工處理」) → 毫秒
     notice_at: HashMap<(String, bool), u64>,
 }
@@ -37,12 +44,46 @@ impl Core {
     pub(super) fn rotate_note_ok(&mut self) {
         self.rotate.streak = None;
         self.rotate.chain = 0;
+        self.rotate.manual_pending = None; // 轉交成功了，不再卡住，不必再補發
+    }
+
+    /// 新的一輪開始：之前累積的被擋次數作廢（幾小時前的兩次加現在一次，不該觸發換輪）
+    pub(super) fn rotate_note_started(&mut self) {
+        self.rotate.streak = None;
+    }
+
+    /// 「需要人工處理」通知沒送出去的補發：到了重試時間就再送一次
+    pub async fn rotate_tick(&mut self, now: u64) {
+        self.now = now;
+        let Some((kind, n)) = self.rotate.manual_pending else { return };
+        if now < self.rotate.manual_retry_at {
+            return;
+        }
+        let window = self.cfg.mailbox_name.clone();
+        self.rotate_manual(&window, kind, n).await;
+    }
+
+    /// 送「需要人工處理」通知；沒送出去就排下一次重試（1、5、15 分鐘，之後每 15 分鐘）
+    async fn rotate_manual(&mut self, window: &str, kind: DenyKind, n: u32) {
+        if self.rotate_notice(window, kind, n, true).await {
+            self.rotate.manual_pending = None;
+            self.rotate.manual_tries = 0;
+        } else {
+            let gap = MANUAL_RETRY_MS[self.rotate.manual_tries.min(MANUAL_RETRY_MS.len() - 1)];
+            self.rotate.manual_tries += 1;
+            self.rotate.manual_retry_at = self.now + gap;
+            self.rotate.manual_pending = Some((kind, n));
+            self.log.line(&format!("forward-gate-rotate: manual-handling notice not delivered, retry in {}s", gap / 1000));
+        }
     }
 
     /// 一次被閘門擋下：同一類就累計，不同類就從 1 重數
     pub(super) async fn on_gate_denied(&mut self, kind: DenyKind) {
         if self.cfg.respond.is_some() {
             return; // 自動回信模式沒有轉交閘門
+        }
+        if kind == DenyKind::RecordUnreadable {
+            return; // 紀錄檔暫時讀不到是系統本身的問題，換一輪對話救不了，不算進連續次數
         }
         let n = match self.rotate.streak {
             Some((k, n)) if k == kind => n + 1,
@@ -56,7 +97,7 @@ impl Core {
         let window = self.cfg.mailbox_name.clone();
         if self.rotate.chain >= ROTATE_MAX_CHAIN {
             self.log.line(&format!("ERROR forward-gate-rotate-stop reason={} count={n} rotations={}: still blocked after {} fresh conversations, auto-rotate stopped, needs manual handling", kind.code(), self.rotate.chain, self.rotate.chain));
-            self.rotate_notice(&window, kind, n, true).await;
+            self.rotate_manual(&window, kind, n).await;
             return;
         }
         self.rotate.chain += 1;
@@ -67,12 +108,12 @@ impl Core {
     }
 
     /// 通知擁有者（沿用 waiting_notice：後台寫固定內文，只收視窗名、原因代號、次數）。同一個視窗同一種通知 10 分鐘內只送一次
-    async fn rotate_notice(&mut self, window: &str, kind: DenyKind, n: u32, manual: bool) {
+    async fn rotate_notice(&mut self, window: &str, kind: DenyKind, n: u32, manual: bool) -> bool {
         let key = (window.to_string(), manual);
         let now = self.now;
         if self.rotate.notice_at.get(&key).is_some_and(|t| now.saturating_sub(*t) < ROTATE_NOTICE_GAP_MS) {
             self.log.line(&format!("forward-gate-rotate notice skipped window={window} manual={manual}: sent within the last 10 minutes"));
-            return;
+            return true; // 10 分鐘內才送成功過：不重發，也不必再重試
         }
         let body = json!({ "window": window, "kind": if manual { "forward_stuck_manual" } else { "forward_stuck" }, "detail": kind.code(), "tool": n.to_string() });
         match self.relay.api("waiting_notice", Some(body)).await {
@@ -82,9 +123,14 @@ impl Core {
                 // 後台查不到擁有者（skipped）再試也寄不到，一樣算過了；沒寄到（failed、到上限）不算，下次再試
                 if matches!(notify, "sent" | "skipped") {
                     self.rotate.notice_at.insert(key, now);
+                    return true;
                 }
+                false
             }
-            Err(e) => self.log.line(&format!("forward-gate-rotate notice failed window={window} manual={manual}: {e}")),
+            Err(e) => {
+                self.log.line(&format!("forward-gate-rotate notice failed window={window} manual={manual}: {e}"));
+                false
+            }
         }
     }
 

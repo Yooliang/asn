@@ -187,3 +187,69 @@ fn 閘門的每一種退回理由都分得到類() {
     }
     assert_eq!(forward_gate::classify_deny("Permission denied: some other tool error"), None, "不是閘門的退回不算");
 }
+
+fn why_unreadable() -> String {
+    "轉交紀錄檔暫時讀不到（橋正在更新紀錄），請等幾秒後再送一次同一封".into()
+}
+
+#[tokio::test]
+async fn 人工處理通知送不出去_排程重試補發_送成功後不再重發() {
+    let mut h = rig().await;
+    for i in 0..3u64 {
+        deny_n(&mut h, 3, &why_frame(), T0 + 1_000 + i).await;
+    }
+    h.fr.st.lock().unwrap().wait_notice_status = 503; // 後台壞了：通知送不出去
+    let t = T0 + 2_000;
+    deny_n(&mut h, 3, &why_frame(), t).await;
+    assert!(stuck_notices(&h, "forward_stuck_manual").is_empty());
+    assert!(h.core.log.has("manual-handling notice not delivered, retry in 60s"));
+    // 還沒到重試時間：不送
+    h.fr.st.lock().unwrap().wait_notice_status = 0;
+    h.core.rotate_tick(t + 59_000).await;
+    assert!(stuck_notices(&h, "forward_stuck_manual").is_empty(), "不到一分鐘不重試");
+    // 到了：補發成功，沒有新的被擋事件也一樣
+    h.core.rotate_tick(t + 60_000).await;
+    assert_eq!(stuck_notices(&h, "forward_stuck_manual").len(), 1, "補發成功");
+    // 送成功後不再重發
+    for k in 1..=5u64 {
+        h.core.rotate_tick(t + 60_000 + k * 900_000).await;
+    }
+    assert_eq!(stuck_notices(&h, "forward_stuck_manual").len(), 1, "只發一次");
+    // 退避：連續失敗是 1、5、15、15 分鐘
+    let mut h = rig().await;
+    for i in 0..3u64 {
+        deny_n(&mut h, 3, &why_frame(), T0 + 1_000 + i).await;
+    }
+    h.fr.st.lock().unwrap().wait_notice_status = 503;
+    let t = T0 + 2_000;
+    deny_n(&mut h, 3, &why_frame(), t).await;
+    h.core.rotate_tick(t + 60_000).await;
+    assert!(h.core.log.has("retry in 300s"));
+    h.core.rotate_tick(t + 60_000 + 300_000).await;
+    assert!(h.core.log.has("retry in 900s"));
+    h.core.rotate_tick(t + 60_000 + 300_000 + 900_000).await;
+    assert_eq!(h.core.log.count("retry in 900s"), 2, "之後固定 15 分鐘");
+}
+
+#[tokio::test]
+async fn 新的一輪開始_被擋次數歸零() {
+    let mut h = rig().await;
+    deny_n(&mut h, 2, &why_frame(), T0 + 1).await;
+    h.core.on_worker_line(WorkerLine::Started(9), T0 + 2).await;
+    deny_n(&mut h, 1, &why_frame(), T0 + 3).await;
+    assert!(!h.sink.killed.load(Ordering::SeqCst), "Started 之後重數，一次不換");
+}
+
+#[tokio::test]
+async fn 紀錄檔暫時讀不到_不算連續被擋_不換輪() {
+    let mut h = rig().await;
+    deny_n(&mut h, 6, &why_unreadable(), T0 + 1).await;
+    assert!(!h.sink.killed.load(Ordering::SeqCst));
+    assert_eq!(rotations(&h), 0);
+    // 夾在中間也不打斷計數
+    deny_n(&mut h, 2, &why_frame(), T0 + 2).await;
+    deny_n(&mut h, 1, &why_unreadable(), T0 + 3).await;
+    assert!(!h.sink.killed.load(Ordering::SeqCst));
+    deny_n(&mut h, 1, &why_frame(), T0 + 4).await;
+    assert!(h.sink.killed.load(Ordering::SeqCst));
+}

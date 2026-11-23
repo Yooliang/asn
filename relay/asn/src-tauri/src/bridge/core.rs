@@ -2056,6 +2056,7 @@ impl Core {
                 self.parser.reset_process();
                 self.respond_open = false; // worker 重啟：舊的一輪不會再有結果了
                 self.end_fwd_turn("worker restarted");
+                self.rotate_note_started();
                 self.rotate_resend();
             }
             WorkerLine::Exited(_) => {
@@ -2897,6 +2898,7 @@ impl Core {
         self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;
         self.wait_notice_tick(now).await;
+        self.rotate_tick(now).await;
         self.login_notice_tick(now).await;
         self.mux_notice_tick(now).await;
         self.mux_resume_notice_tick(now).await;
