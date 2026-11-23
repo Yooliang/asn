@@ -141,7 +141,8 @@ export const newComputerGuidePhoneProbeSource = (open = false) => `(async () => 
   try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
-  const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
+  // 引導卡在詳情裡排在「這台是哪一台」和動作區下面（#1860：詳情沒有帳號分頁了），不一定在第一屏：點之前先捲到看得見，不然真的點擊落在別的東西上
+  const at = el => { el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
   const real = async (req, ms) => { globalThis.__smokeInput(JSON.stringify(req)); await sleep(ms || 300) };
   const waitFor = async (fn, n = 60) => { for (let i = 0; i < n; i++) { const v = fn(); if (v) return v; await sleep(100) } return null };
   const txt = e => (e ? e.textContent.replace(/\s+/g, ' ').trim() : '');
