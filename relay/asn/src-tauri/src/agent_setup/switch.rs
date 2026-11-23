@@ -19,7 +19,7 @@ pub fn remote_allowed(data_dir: &Path) -> bool {
 pub fn set_remote_allowed(data_dir: &Path, on: bool) -> Result<(), String> {
     let mut v = std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
     v[KEY] = json!(on);
-    crate::write_atomic(&prefs_path(data_dir), &v.to_string()).map_err(|e| e.to_string())
+    crate::settings::atomic::write(&prefs_path(data_dir), v.to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

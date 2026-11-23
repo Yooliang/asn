@@ -49,10 +49,8 @@ fn lock(home: &Path, tries: u32) -> Option<Lock> {
 }
 
 fn write_atomic(file: &Path, text: &str) {
-    let tmp = PathBuf::from(format!("{}.{}.tmp", file.display(), std::process::id()));
-    if std::fs::write(&tmp, text).is_ok() {
-        let _ = std::fs::rename(&tmp, file);
-    }
+    // 純狀態（掉了可重建）：不 fsync；錯誤照舊吞掉
+    let _ = crate::settings::atomic::write(file, text.as_bytes(), crate::settings::atomic::STATE);
 }
 
 /// 讀計數檔，只留一小時內的時間點

@@ -2949,7 +2949,7 @@ fn store_path(app: &App, name: &str) -> Result<PathBuf, String> {
     }
     Ok(app.data_dir.join(format!("asn-{name}.json")))
 }
-// 存檔讀寫在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）；寫入用 STORE_LOCK 排隊（同一個暫存檔名，兩支同時寫會互相蓋掉）。
+// 存檔讀寫在背景執行緒跑，不佔畫面那條執行緒（todo-next-191）；寫入用 STORE_LOCK 排隊（統一寫入的暫存檔名每次不同，不會互相蓋掉；排隊是為了讓同一個存檔「後送的後落地」）。
 // 呼叫順序由前端保證（lib/tauri.mjs 的 store().save 同一個存檔名一支寫完才送下一支）
 #[cfg(feature = "gui")]
 static STORE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

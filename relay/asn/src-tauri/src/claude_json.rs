@@ -72,25 +72,9 @@ pub fn windows_key(raw: &str) -> String {
 }
 
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    let dir = path.parent().ok_or_else(|| std::io::Error::other("no parent"))?;
-    std::fs::create_dir_all(dir)?;
-    let tmp = dir.join(format!(
-        ".asn-tmp-{}-{}",
-        std::process::id(),
-        path.file_name().and_then(|s| s.to_str()).unwrap_or("f")
-    ));
-    let res = (|| {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-        drop(f);
-        std::fs::rename(&tmp, path)
-    })();
-    if res.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    res
+    path.parent().ok_or_else(|| std::io::Error::other("no parent"))?;
+    // 帳號與憑證相關檔：設定類（fsync）；暫存檔名由統一寫入決定
+    crate::settings::atomic::write(path, bytes, crate::settings::atomic::SETTINGS)
 }
 
 fn skip_ws(b: &[u8], mut i: usize) -> usize {

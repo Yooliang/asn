@@ -268,7 +268,7 @@ fn pref_bool(data_dir: &Path, key: &str, default: bool) -> bool {
 fn set_pref(data_dir: &Path, key: &str, on: bool) -> Result<(), String> {
     let mut v = std::fs::read_to_string(prefs_path(data_dir)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(Value::is_object).unwrap_or_else(|| json!({}));
     v[key] = json!(on);
-    crate::write_atomic(&prefs_path(data_dir), &v.to_string()).map_err(|e| e.to_string())
+    crate::settings::atomic::write(&prefs_path(data_dir), v.to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())
 }
 pub fn trust_own(data_dir: &Path) -> bool {
     pref_bool(data_dir, "remote_trust_own", false)
@@ -598,7 +598,7 @@ fn outbox_write(data_dir: &Path, rows: &[Value]) {
     if rows.is_empty() {
         let _ = std::fs::remove_file(outbox_path(data_dir));
     } else {
-        let _ = crate::write_atomic(&outbox_path(data_dir), &Value::Array(rows.to_vec()).to_string());
+        let _ = crate::settings::atomic::write(&outbox_path(data_dir), Value::Array(rows.to_vec()).to_string().as_bytes(), crate::settings::atomic::QUEUE);
     }
 }
 /// 放進待補報：同編號只留最新一筆，最多 OUTBOX_MAX 筆（超過丟最舊的）
