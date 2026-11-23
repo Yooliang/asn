@@ -936,6 +936,17 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-hid-act{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .dv-confirm{margin:0;flex:1 0 100%;color:var(--fg)}
 .dv-danger{color:#b3261e}
+.dv-replace{display:flex;flex-direction:column;gap:var(--sp-2);padding:var(--sp-3);border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+.dv-replace-h{margin:0;font-size:1em}
+.dv-replace-p,.dv-replace-fine,.dv-replace-note,.dv-replace-err{margin:0}
+.dv-replace-fine{color:var(--muted,var(--fg));font-size:.92em}
+.dv-replace-err{color:var(--danger,#c0392b)}
+.dv-replace-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--sp-1)}
+.dv-replace-opt{display:flex;align-items:center;gap:var(--sp-2);cursor:pointer;padding:4px 0}
+.list.settings .dv-replace-opt{flex-direction:row;align-items:center;gap:var(--sp-2)}
+.list.settings .dv-replace-opt input[type=radio]{flex:none;width:16px;height:16px;min-width:0;margin:0;padding:0;border:0;accent-color:var(--link)}
+.dv-replace-tx{display:flex;flex-direction:column;min-width:0}
+.dv-replace-btns{display:flex;gap:var(--sp-2);justify-content:flex-end;flex-wrap:wrap}
 .dv-removed{margin-top:var(--sp-3)}
 .dv-removed summary{padding:2px 0;cursor:pointer;color:var(--link)}
 .dv-removed-list{list-style:none;margin:var(--sp-2) 0 0;padding:0;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
@@ -1182,6 +1193,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .notice-pane .nt-cat{font-weight:700;color:var(--title-fg)}
 .notice-pane .nt-h{overflow-wrap:anywhere}
 .notice-pane .nt-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+.notice-pane .nt-go{display:flex;margin-top:var(--sp-3)}
 /* ---------- 設定 → 外觀：復古 Aero／現代二選一（0.2.18，lib/skin.mjs）；兩套都看得到這一塊，小圖示意兩種樣子 ---------- */
 .skin-pick{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 10px;padding:0;border:0}
 .skin-pick legend{padding:0;margin-bottom:6px;font-weight:600}

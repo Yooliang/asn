@@ -109,6 +109,14 @@ const TOPIC_CAT = {
   quota: 'quota',
   compact: 'stuck',   // 視窗壓縮 N 次自動交接／請交接（#1852）
   view: 'security', term_view: 'security', device_key: 'security', node_mismatch: 'security',
+  new_device: 'security',   // 有一台新設備連上了（#1860 H）：和別台設備的安全事件同一類，點開能直接到設備頁看卡片
+}
+// 點了這類通知要帶使用者去哪（電腦與手機同一份規則）：目前只有「新設備」＝設定 → 設備（卡片在清單最上面）
+export const NOTICE_GO = { new_device: { page: 'devices', label: '查看設備' } }
+export function noticeGoOf(kind) {
+  if (!isNoticeKind(kind)) return null
+  const topic = kind.slice(NOTICE_KIND_PREFIX.length)
+  return Object.prototype.hasOwnProperty.call(NOTICE_GO, topic) ? NOTICE_GO[topic] : null
 }
 export function noticeCategory(kind) {
   if (!isNoticeKind(kind)) return 'other'
@@ -141,11 +149,13 @@ export function noticeRows(log, { unread = 0, opened = [], hideDev = [] } = {}) 
     const { title, summary } = noticeLines(m.text)
     return {
       key, title, summary, text: String(m.text ?? ''), rest: noticeRest(m.text), t: Number(m.t) || 0, dev: devOf(m),
-      cat: noticeCategory(m.kind), unread: pos < n && !seen.has(key),
+      cat: noticeCategory(m.kind), go: noticeGoOf(m.kind), unread: pos < n && !seen.has(key),
     }
   })
 }
-export const filterNoticeRows = (rows, cat = NOTICE_CAT_ALL) => (cat === NOTICE_CAT_ALL || !NOTICE_CAT_LABEL[cat] ? rows : rows.filter(r => r.cat === cat))
+// 帶有去處按鈕的通知（手機用）：每一則各自一列，新的在前，最多 max 則；按鈕屬於那一則通知，跟最後一則是什麼無關
+export const noticeGoRows = (log, max = 3) => noticeRows(log).filter(r => r.go).slice(0, max)
+export const filterNoticeRows =(rows, cat = NOTICE_CAT_ALL) => (cat === NOTICE_CAT_ALL || !NOTICE_CAT_LABEL[cat] ? rows : rows.filter(r => r.cat === cat))
 export const noticeUnreadCount = rows => rows.reduce((n, r) => n + (r.unread ? 1 : 0), 0)
 // 各分類的小圖示（24×24 的線條路徑，畫面上用 stroke 畫）
 export const NOTICE_CAT_ICON = {

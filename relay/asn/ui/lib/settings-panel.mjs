@@ -23,6 +23,7 @@ import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
+import { REPLACE_TEXT } from './device-replace.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, deviceRowLine, dropAfter, visibleRows } from './device-order.mjs'
 import { switchRowKey, switchResultOf } from './switch-result.mjs'
 import { accountCardKey, accountStatusOf } from './device-account-lines.mjs'
@@ -40,7 +41,7 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close', 'quota-cancel',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-allow-switch', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'replace-pick', 'replace-do', 'replace-keep', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
 export const SettingsPanel = {
@@ -174,6 +175,8 @@ export const SettingsPanel = {
       act('device-rename', { node, name: renameText.value.trim() })
       renaming.value = false; renameText.value = ''; view.value = 'info'   // 失敗的話錯誤顯示在名字下面（renameError），不在這裡清
     }
+    // 新設備「是不是取代舊的」卡片（#1860 H）：資料與流程在樞紐（lib/device-replace.mjs），這裡只畫、只回報選了誰與按了什麼
+    const rp = computed(() => props.st.replace || { cards: [], busy: '', error: '', note: '' })
     const peers = computed(() => (props.st.known && Array.isArray(props.st.known.peers) ? props.st.known.peers : []).map(p => ({ ...p, id: p.node })))   // id＝節點（畫面不直接寫 node）
     // 只算畫面上真的畫出來的設備；已永久移除的（畫面沒有列）歸到「舊設備紀錄」，才找得到地方取消授權或忘記
     // 名單還沒讀到（一台設備都沒有）時，不要把所有紀錄暫時歸到「舊設備紀錄」（和手機版一致）
@@ -202,7 +205,7 @@ export const SettingsPanel = {
     return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
       accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
-      cat, catIcon, ROSTER_TEXT, usedOnText, DESK_RELOGIN_TEXT, switchTargets, devs, curDev, askRemove, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
+      rp, REPLACE_TEXT, cat, catIcon, ROSTER_TEXT, usedOnText, DESK_RELOGIN_TEXT, switchTargets, devs, curDev, askRemove, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, lookShows, GH_REFS_LABEL, GH_REFS_NOTE,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -353,6 +356,20 @@ export const SettingsPanel = {
       <template v-if="cat === 'devices'">
         <div class="dv-set">
           <template v-if="!curDev">
+            <section class="dv-replace" v-for="c in rp.cards" :key="c.id" :data-replace="c.id" role="region" :aria-label="c.title">
+              <h3 class="dv-replace-h">{{ c.title }}</h3>
+              <p class="dv-replace-p">{{ c.intro }}</p>
+              <ul class="dv-replace-list">
+                <li v-for="o in c.candidates" :key="o.id"><label class="dv-replace-opt"><input type="radio" :name="'rp-' + c.id" :value="o.id" :checked="c.sel === o.id" :disabled="Boolean(rp.busy)" :aria-label="REPLACE_TEXT.candidateAria(o.label)" @change="act('replace-pick', { node: c.id, old: o.id })"><span class="dv-replace-tx"><b>{{ o.label }}</b><small>{{ o.line }}</small></span></label></li>
+              </ul>
+              <p class="dv-replace-fine">{{ c.explain }}</p>
+              <div class="dv-replace-btns">
+                <asn-button :disabled="Boolean(rp.busy)" @click="act('replace-keep', c.id)">{{ c.keepLabel }}</asn-button>
+                <asn-button level="primary" :disabled="Boolean(rp.busy)" @click="act('replace-do', { node: c.id, old: c.sel })">{{ rp.busy === c.id ? REPLACE_TEXT.busy : c.replaceLabel }}</asn-button>
+              </div>
+            </section>
+            <p class="dv-replace-note" role="status" v-if="rp.note">{{ rp.note }}</p>
+            <p class="dv-replace-err" role="alert" v-if="rp.error">{{ rp.error }}</p>
             <small v-if="!devs.length">{{ DEVICE_TEXT.empty }}</small>
             <ul class="dv-list" aria-label="設備" v-else>
               <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)">

@@ -161,6 +161,31 @@ pub fn device_rename_error(e: &str) -> String {
     }
 }
 
+/// 設備取代（#1860 H）沒登入時的話
+pub const DEVICE_REPLACE_LOGIN: &str = "要先登入 ASN 帳號才能處理新設備";
+/// 設備取代的錯誤（後台的狀態碼與代碼）換成給人看的話；白話與 supabase/functions/_shared/device_replace.ts 的 ERRORS 同一份，
+/// 不含節點代號與名字。原文由呼叫端寫進 ui.log
+pub fn device_replace_error(e: &str) -> String {
+    let has = |c: &str| e.contains(c);
+    if has("not_candidate") {
+        "這台舊設備現在不能被取代（可能剛剛又上線了，或已經處理過）。".into()
+    } else if has("answered") {
+        "這台新設備已經處理過了。".into()
+    } else if has("removed_full") {
+        "「已移除的設備」已達上限，請先恢復幾台再取代。".into()
+    } else if has("bad_request") {
+        "請求內容不正確。".into()
+    } else if has("HTTP 401") {
+        "登入過期了，請重新登入後再試".into()
+    } else if has("not_found") || has("HTTP 404") {
+        "找不到這台設備，可能已經被移除。".into()
+    } else if has("HTTP 429") {
+        "操作太頻繁，請過一分鐘再試".into()
+    } else {
+        "沒有成功，請稍後再試".into()
+    }
+}
+
 /// 本人簽章標頭（與 supabase/functions/_shared/owner_sign.ts 的 SIGN_HEADER 同一個）
 pub const SIGN_HEADER: &str = "x-asn-user";
 pub const MAX_BODY: usize = 20000;
@@ -1128,6 +1153,21 @@ impl Relay {
         let t = token.filter(|t| !t.is_empty()).ok_or(DEVICE_RENAME_LOGIN)?;
         self.api_signed("device_rename", Some(json!({ "node": node, "name": name })), Some(t)).await.map_err(|e| device_rename_error(&e))
     }
+    /// 新設備第一次連上時「是不是取代舊的」要問的卡片（#1860 H）：要本人簽章。回 { cards: [{ node, name, platform, created_at, candidates: [{ node, name, last_seen }] }] }
+    pub async fn device_replace_candidates(&self, token: Option<&str>) -> Result<Value, String> {
+        let t = token.filter(|t| !t.is_empty()).ok_or(DEVICE_REPLACE_LOGIN)?;
+        self.api_signed("device_replace_candidates", Some(json!({})), Some(t)).await.map_err(|e| device_replace_error(&e))
+    }
+    /// 取代：舊設備移到「已移除的設備」，新設備沿用舊名字（#1860 H）。回 { ok, already, renamed }
+    pub async fn device_replace(&self, new: &str, old: &str, token: Option<&str>) -> Result<Value, String> {
+        let t = token.filter(|t| !t.is_empty()).ok_or(DEVICE_REPLACE_LOGIN)?;
+        self.api_signed("device_replace", Some(json!({ "new": new, "old": old })), Some(t)).await.map_err(|e| device_replace_error(&e))
+    }
+    /// 不取代、兩台都留（之後不再問這台新設備）（#1860 H）。回 { ok }
+    pub async fn device_replace_dismiss(&self, new: &str, token: Option<&str>) -> Result<Value, String> {
+        let t = token.filter(|t| !t.is_empty()).ok_or(DEVICE_REPLACE_LOGIN)?;
+        self.api_signed("device_replace_dismiss", Some(json!({ "new": new })), Some(t)).await.map_err(|e| device_replace_error(&e))
+    }
     /// 可被接班的夥伴清單（#153）：同樣要登入憑證
     pub async fn partner_list(&self, token: Option<&str>) -> Result<Value, String> {
         let t = token.filter(|t| !t.is_empty()).ok_or("尚未登入，無法取得夥伴清單")?;
@@ -1652,6 +1692,21 @@ mod tests {
         for e in ["HTTP 400", "HTTP 404", "HTTP 429", "x"] {
             let t = device_rename_error(e);
             assert!(!t.contains("後台") && !t.contains("HTTP"), "{t}");
+        }
+    }
+
+    #[test]
+    fn 設備取代的錯誤_換成給人看的話_不含代號() {
+        assert!(device_replace_error("device_replace HTTP 409 not_candidate").contains("不能被取代"));
+        assert!(device_replace_error("device_replace HTTP 409 answered").contains("已經處理過"));
+        assert!(device_replace_error("device_replace HTTP 409 removed_full").contains("已達上限"));
+        assert!(device_replace_error("device_replace HTTP 401 unauthorized").contains("重新登入"));
+        assert!(device_replace_error("device_replace HTTP 404 not_found").contains("找不到"));
+        assert_eq!(device_replace_error("device_replace HTTP 400 bad_request"), "請求內容不正確。");
+        assert_eq!(device_replace_error("device_replace 連線失敗：逾時"), "沒有成功，請稍後再試");
+        for e in ["HTTP 409 not_candidate", "HTTP 404 not_found", "HTTP 400 bad_request","HTTP 500 internal", "x"] {
+            let t = device_replace_error(e);
+            assert!(!t.contains("HTTP") && !t.contains("not_") && !t.contains("後台"), "{t}");
         }
     }
 

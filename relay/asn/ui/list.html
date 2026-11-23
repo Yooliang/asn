@@ -336,6 +336,7 @@
           </div>
           <h2 class="panel-h nt-h">{{ noticeSelRow.title }}</h2>
           <div class="nt-body" v-if="noticeSelRow.rest">{{ noticeSelRow.rest }}</div>
+          <div class="nt-go" v-if="noticeSelRow.go"><asn-button level="primary" @click="goNotice(noticeSelRow.go)">{{ noticeSelRow.go.label }}</asn-button></div>
         </template>
         <p class="empty-list" v-else>{{ noticeAll.length ? '從左邊選一則通知。' : '目前沒有通知。' }}</p>
       </div>

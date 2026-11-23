@@ -244,6 +244,9 @@
             <chat-pane v-if="noticeChat" :friend="noticeChat" :me="meForChat" :log="noticeLog" :friend-av="avOf(noticeChat)" :me-av="meAv"
               :no-bar="true" dp-mode="inline" bubble="auto" toolbar="bottom" win-mode="merged" :hide-busy-warn="true" :active="false" :enter-sends="false" :photo-api="photoApi" :hint-names="friends" :load-older="loadOlder"></chat-pane>
             <div class="m-scroll" v-else><div class="empty-list">還沒有通知。</div></div>
+            <ul class="m-notice-go" v-if="noticeGos.length" aria-label="待處理的通知">
+              <li v-for="r in noticeGos" :key="r.key"><span class="m-notice-go-tx">{{ r.title }}</span><button type="button" class="m-btn" @click="goNotice(r.go)">{{ r.go.label }}</button></li>
+            </ul>
           </section>
 
           <!-- 內頁（#461）：設備與帳號、設定的某一項、使用指引、開新夥伴。暫時佔用第四格（蓋在通知上，分頁字換成內頁的標題），跟其他頁一樣滑；切走後留著（內容不卸載），切回第四格就回到內頁，3 分鐘沒回來、或這段時間有新通知進來，第四格就變回通知（#1429） -->
@@ -301,6 +304,21 @@
                 </ul>
               </section>
               <template v-if="acctSw.tab === 'devices'">
+              <!-- 新設備「是不是取代舊的」卡片（#1860 H）：清單最上面；文字與流程跟電腦版同一份（lib/device-replace.mjs） -->
+              <section class="m-dv-replace" v-for="c in replaceCards" :key="c.id" :data-replace="c.id" role="region" :aria-label="c.title">
+                <h3 class="m-dv-replace-h">{{ c.title }}</h3>
+                <p class="m-dv-replace-p">{{ c.intro }}</p>
+                <ul class="m-dv-replace-list">
+                  <li v-for="o in c.candidates" :key="o.id"><label class="m-dv-replace-opt"><input type="radio" :name="'rp-' + c.id" :value="o.id" :checked="c.sel === o.id" :disabled="Boolean(replaceSt.busy)" :aria-label="REPLACE_TEXT.candidateAria(o.label)" @change="replacePick(c.id, o.id)"><span class="m-dv-replace-tx"><b>{{ o.label }}</b><small class="m-fine">{{ o.line }}</small></span></label></li>
+                </ul>
+                <p class="m-fine m-dv-replace-fine">{{ c.explain }}</p>
+                <div class="m-dv-replace-btns">
+                  <button type="button" class="m-btn" :disabled="Boolean(replaceSt.busy)" @click="replaceKeep(c.id)">{{ c.keepLabel }}</button>
+                  <button type="button" class="m-btn" :disabled="Boolean(replaceSt.busy)" @click="replaceDo(c.id, c.sel)">{{ replaceSt.busy === c.id ? REPLACE_TEXT.busy : c.replaceLabel }}</button>
+                </div>
+              </section>
+              <p class="m-note m-dv-replace-note" role="status" v-if="replaceSt.note">{{ replaceSt.note }}</p>
+              <p class="m-err m-dv-replace-err" role="alert" v-if="replaceSt.error">{{ replaceSt.error }}</p>
               <p class="m-note" v-if="!acctDevs.length">{{ DEVICE_TEXT.empty }}</p>
               <!-- 設備清單：一列一台（把手、名稱、第二行狀態、右邊一顆「詳情」）；順序只用拖曳（把手，鍵盤上下鍵），沒有上移／下移鈕（#1860） -->
               <ul class="m-dv-list" aria-label="設備" v-else>
