@@ -354,7 +354,7 @@
                   <p class="m-err">{{ KNOWN_TEXT.reacceptNotice(acctCur.identity.title) }}</p>
                   <div class="m-dv-confirm" role="alertdialog" v-if="reaccept === curKnown.node">
                     <p>{{ KNOWN_TEXT.reacceptConfirm(acctCur.identity.title) }}</p>
-                    <div class="m-dv-sbtns"><button type="button" class="m-btn m-dv-danger" :disabled="kp.busy" @click="reacceptYes">{{ KNOWN_TEXT.reacceptYes }}</button><button type="button" class="m-btn" @click="reacceptNo">{{ KNOWN_TEXT.cancel }}</button></div>
+                    <div class="m-dv-sbtns"><button type="button" class="m-btn" @click="reacceptNo">{{ KNOWN_TEXT.cancel }}</button><button type="button" class="m-btn m-dv-danger" :disabled="kp.busy" @click="reacceptYes">{{ KNOWN_TEXT.reacceptYes }}</button></div>
                   </div>
                   <button type="button" class="m-btn m-dv-danger" v-else :disabled="kp.busy" @click="reacceptAsk(curKnown.node)">{{ KNOWN_TEXT.reaccept }}</button>
                 </div>

@@ -144,6 +144,8 @@ test('手機：被擋下才出提示與「重新認這台」（原位確認，�
   assert.ok(html.includes('KNOWN_TEXT.reacceptNotice(acctCur.identity.title)') && html.includes('KNOWN_TEXT.reacceptConfirm(acctCur.identity.title)'))
   assert.match(html, /@click="reacceptAsk\(curKnown\.node\)">\{\{ KNOWN_TEXT\.reaccept \}\}/)
   assert.match(html, /@click="reacceptYes">\{\{ KNOWN_TEXT\.reacceptYes \}\}/)
+  const box = /<div class="m-dv-sbtns">[\s\S]*?<\/div>/.exec(html.slice(html.indexOf('m-dv-block')))[0]
+  assert.ok(box.indexOf('reacceptNo') < box.indexOf('reacceptYes'), '取消在左、確認在右')
   const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- 新電腦引導卡'))
   assert.ok(!info.includes('forgetKnown(') && !html.includes('forgetThis'), '詳情沒有常駐的忘記')
   assert.match(js, /const reacceptYes = async \(\) => \{ const node = reaccept\.value; reaccept\.value = ''; if \(node\) await forgetKnown\(node\) \}/, '確認後走原本的忘記（先過本人確認）')

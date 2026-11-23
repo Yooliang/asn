@@ -183,6 +183,11 @@ pub fn verify(pub_b64: &str, msg: &[u8], sig_b64: &str) -> bool {
     UnparsedPublicKey::new(&ED25519, public).verify(msg, &sig).is_ok()
 }
 
+/// 設備公鑰的格式：合法的 base64（和 `public_b64` 同一種編法）、解碼後剛好 32 位元組
+pub fn valid_sign_pub(sign_pub: &str) -> bool {
+    B64.decode(sign_pub).is_ok_and(|b| b.len() == 32)
+}
+
 /// 指紋：公鑰的 SHA-256 前 8 位元組，16 個小寫十六進位字元（設定頁顯示、通知信裡帶，給本人比對）
 pub fn fingerprint(sign_pub: &str) -> String {
     Sha256::digest(format!("asn-device-fp-v1\n{sign_pub}").as_bytes())[..8].iter().map(|b| format!("{b:02x}")).collect()
@@ -221,11 +226,11 @@ pub struct KnownPeer {
     /// 這欄不再設、也不再讀；留著只為了讀舊檔、照原樣寫回（降版不壞）。**沒有程式會寫它**（守門測試）
     #[serde(default)]
     pub named_by_owner: bool,
-    /// 這台用了和記住的不一樣的公鑰來連、被拒絕時，記下那把新的公鑰（#1860 C）：只讓畫面標「已擋下」並出現「重新認這台」。
-    /// **記下來不代表信任它：** 信任只看 `sign_pub`，這欄不參與任何比對（`check`／`remember` 仍照 `sign_pub` 拒絕）；
-    /// 只有 `mark_blocked` 會設；同一把原本的公鑰再連上（`remember` 的 Same）或忘記（整筆刪掉）就清掉。舊檔沒有這欄＝沒被擋
+    /// 這台用了和記住的不一樣的公鑰來連、被拒絕時，記下那把公鑰的指紋（#1860 C，不存原始公鑰）：只讓畫面標「已擋下」並出現「重新認這台」。
+    /// 這欄不參與任何比對（`check`／`remember` 仍照 `sign_pub` 拒絕）；只有 `mark_blocked` 會設（寫入前驗證格式）；
+    /// 同一把原本的公鑰再連上（`remember` 的 Same）或忘記（整筆刪掉）就清掉。舊檔沒有這欄＝沒被擋
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blocked_pub: Option<String>,
+    pub blocked_fp: Option<String>,
 }
 
 /// 本人替電腦取的名字最多幾個字
@@ -357,7 +362,7 @@ pub fn phone_known_view(k: &KnownPeers) -> serde_json::Value {
             v["fp"] = serde_json::json!(fingerprint(&p.sign_pub));
         }
         // 被擋下（金鑰換了被拒絕，或四選一／掃描對不上而擋住）才帶：畫面出「重新認這台」；正常的不帶這個鍵
-        if p.blocked_pub.is_some() || p.pick_wrong >= PICK_WRONG_LIMIT {
+        if p.blocked_fp.is_some() || p.pick_wrong >= PICK_WRONG_LIMIT {
             v["blocked"] = serde_json::json!(true);
         }
         v
@@ -409,12 +414,17 @@ impl KnownPeers {
         }
     }
 
-    /// 這台用另一把公鑰來連、已被拒絕：記下那把新的公鑰，畫面才知道要標「已擋下」。回有沒有改到。
-    /// 只在「有記住這台、而且新的公鑰真的和記住的不同」時才記；不動 `sign_pub`、不動任何確認與答題紀錄，也不放行任何連線
+    /// 這台用另一把公鑰來連、已被拒絕：記下那把公鑰的指紋，畫面才知道要標「已擋下」。回有沒有改到。
+    /// 寫入前驗證格式（合法的 base64、解碼後剛好 32 位元組），不合格不記；只在「有記住這台、而且公鑰真的和記住的不同」時才記；
+    /// 不動 `sign_pub`、不動任何確認與答題紀錄，也不放行任何連線
     pub fn mark_blocked(&mut self, node: &str, new_pub: &str) -> bool {
+        if !valid_sign_pub(new_pub) {
+            return false;
+        }
+        let fp = fingerprint(new_pub);
         match self.peers.iter_mut().find(|p| p.node == node) {
-            Some(p) if p.sign_pub != new_pub && p.blocked_pub.as_deref() != Some(new_pub) => {
-                p.blocked_pub = Some(new_pub.to_string());
+            Some(p) if p.sign_pub != new_pub && p.blocked_fp.as_deref() != Some(fp.as_str()) => {
+                p.blocked_fp = Some(fp);
                 true
             }
             _ => false,
@@ -439,12 +449,12 @@ impl KnownPeers {
             Tofu::Same => {
                 if let Some(p) = self.peers.iter_mut().find(|p| p.node == node) {
                     p.name = name.to_string();
-                    p.blocked_pub = None;   // 原本那把又連上了：不再是被擋下的狀態
+                    p.blocked_fp = None;   // 原本那把又連上了：不再是被擋下的狀態
                 }
                 Ok(())
             }
             Tofu::New => {
-                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms, login_ok: false, confirmed_at: None, pick: None, pick_wrong: 0, pick_lock_set_ms: None, pick_lock_until_ms: None, named_by_owner: false, blocked_pub: None });
+                self.peers.push(KnownPeer { node: node.to_string(), name: name.to_string(), sign_pub: sign_pub.to_string(), first_seen_ms: now_ms, login_ok: false, confirmed_at: None, pick: None, pick_wrong: 0, pick_lock_set_ms: None, pick_lock_until_ms: None, named_by_owner: false, blocked_fp: None });
                 Ok(())
             }
         }
@@ -691,7 +701,7 @@ pub mod live {
         let k = known(dir)?;
         Ok(json!({ "peers": k.peers.iter().map(|p| {
             let mut v = json!({ "node": p.node, "name": p.name, "fingerprint": fingerprint(&p.sign_pub), "first_seen_ms": p.first_seen_ms, "login_ok": p.login_ok });
-            if p.blocked_pub.is_some() {
+            if p.blocked_fp.is_some() {
                 v["blocked"] = json!(true);   // 金鑰換了被拒絕：畫面標「已擋下」、出「重新認這台」；沒被擋的不帶這個鍵
             }
             v
@@ -700,6 +710,10 @@ pub mod live {
 
     /// 這台用另一把公鑰來連、已被拒絕：記一筆讓畫面標「已擋下」（不放行、不改記住的公鑰）。**只有已經拒絕連線的三處能叫**（守門測試）。回有沒有改到
     pub fn mark_blocked(dir: &Path, node: &str, new_pub: &str) -> Result<bool, String> {
+        if !valid_sign_pub(new_pub) {
+            elog!("[ASN] 公鑰格式不對，沒有記下已擋下的標記");
+            return Ok(false);
+        }
         let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let mut k = KnownPeers::load(dir)?;
         let changed = k.mark_blocked(node, new_pub);
@@ -767,42 +781,65 @@ mod tests {
 
     #[test]
     fn 被擋下_對不上就記一筆_列表帶_blocked_忘記或原本那把又連上就清掉_沒對不上不帶() {
+        let (pk1, pk2, pk3) = (real_pub(1), real_pub(2), real_pub(3));
         let mut k = KnownPeers::default();
-        k.remember("d", "工作機", "pk1", 1).unwrap();
-        k.remember("ok", "辦公室", "pk9", 1).unwrap();
+        k.remember("d", "工作機", &pk1, 1).unwrap();
+        k.remember("ok", "辦公室", &real_pub(9), 1).unwrap();
         let blocked_of = |k: &KnownPeers, n: &str| phone_known_view(k)["peers"].as_array().unwrap().iter().find(|p| p["node"] == n).unwrap().get("blocked").cloned();
         assert_eq!(blocked_of(&k, "d"), None, "沒有對不上：不帶這個鍵");
-        assert!(!k.mark_blocked("d", "pk1"), "同一把不算對不上，不記");
-        assert!(!k.mark_blocked("沒有", "pk2"), "沒記住的電腦不記");
-        assert!(k.mark_blocked("d", "pk2"), "對不上：記一筆");
-        assert!(!k.mark_blocked("d", "pk2"), "同一把新的再來不重複寫");
+        assert!(!k.mark_blocked("d", &pk1), "同一把不算對不上，不記");
+        assert!(!k.mark_blocked("沒有", &pk2), "沒記住的電腦不記");
+        assert!(k.mark_blocked("d", &pk2), "對不上：記一筆");
+        assert!(!k.mark_blocked("d", &pk2), "同一把新的再來不重複寫");
         assert_eq!(blocked_of(&k, "d"), Some(serde_json::json!(true)), "對不上：列表有 blocked");
         assert_eq!(blocked_of(&k, "ok"), None, "別台不受影響");
         // 不放寬：記錄之後照樣拒絕、記住的公鑰不變、確認與答題紀錄不動
-        assert_eq!(k.check("d", "pk2"), Tofu::Changed);
-        assert_eq!(k.remember("d", "工作機", "pk2", 5).unwrap_err(), KEY_CHANGED);
-        assert_eq!(k.peer("d").unwrap().sign_pub, "pk1");
-        // 存讀一致；沒被擋的檔案格式不多出欄位
+        assert_eq!(k.check("d", &pk2), Tofu::Changed);
+        assert_eq!(k.remember("d", "工作機", &pk2, 5).unwrap_err(), KEY_CHANGED);
+        assert_eq!(k.peer("d").unwrap().sign_pub, pk1);
+        // 存讀一致；只存指紋、不存原始公鑰；沒被擋的檔案格式不多出欄位
         let d = tempfile::tempdir().unwrap();
         k.save(d.path()).unwrap();
         let back = KnownPeers::load(d.path()).unwrap();
-        assert_eq!(back.peer("d").unwrap().blocked_pub.as_deref(), Some("pk2"));
+        assert_eq!(back.peer("d").unwrap().blocked_fp.as_deref(), Some(fingerprint(&pk2).as_str()));
         let text = std::fs::read_to_string(d.path().join(KNOWN_FILE)).unwrap();
-        assert_eq!(text.matches("blocked_pub").count(), 1, "只有被擋下的那台有這欄");
+        assert_eq!(text.matches("blocked_fp").count(), 1, "只有被擋下的那台有這欄");
+        assert!(!text.contains(&pk2), "新的公鑰原始字串不落檔");
         // 原本那把又連上（Same）：清掉
-        k.remember("d", "工作機", "pk1", 6).unwrap();
+        k.remember("d", "工作機", &pk1, 6).unwrap();
         assert_eq!(blocked_of(&k, "d"), None, "換回原本的金鑰：不再帶 blocked");
         // 忘記：整筆沒了，重新認之後也不帶
-        assert!(k.mark_blocked("d", "pk3"));
+        assert!(k.mark_blocked("d", &pk3));
         assert!(k.forget("d"));
-        k.remember("d", "工作機", "pk3", 7).unwrap();
+        k.remember("d", "工作機", &pk3, 7).unwrap();
         assert_eq!(blocked_of(&k, "d"), None, "重新認過之後不帶 blocked");
         // 手機把答錯兩次擋住的也帶 blocked（畫面同一顆「重新認這台」）
         k.pick_block("ok");
         assert_eq!(blocked_of(&k, "ok"), Some(serde_json::json!(true)));
         // 舊檔沒有這欄＝沒被擋
         let old: KnownPeers = serde_json::from_str(r#"{"peers":[{"node":"p","name":"n","sign_pub":"pk","first_seen_ms":1}]}"#).unwrap();
-        assert_eq!(old.peer("p").unwrap().blocked_pub, None);
+        assert_eq!(old.peer("p").unwrap().blocked_fp, None);
+    }
+
+    /// 合法的設備公鑰（和 `public_b64` 同一種編法：URL-safe、不補等號，32 位元組）
+    fn real_pub(n: u8) -> String {
+        B64.encode([n; 32])
+    }
+
+    #[test]
+    fn 被擋下_寫入前驗證格式_格式錯不寫_長度錯不寫_合法才寫() {
+        let (pk1, pk2) = (real_pub(1), real_pub(2));
+        let mut k = KnownPeers::default();
+        k.remember("d", "工作機", &pk1, 1).unwrap();
+        for bad in ["", "pk2", "不是 base64!!", "AAAA", &B64.encode([7u8; 31]), &B64.encode([7u8; 33]), &B64.encode([7u8; 64]), &format!("{pk2}=="), &format!("{pk2}\n")] {
+            assert!(!valid_sign_pub(bad), "{bad:?} 不合格");
+            assert!(!k.mark_blocked("d", bad), "{bad:?}：格式或長度錯，不寫");
+        }
+        assert_eq!(k.peer("d").unwrap().blocked_fp, None, "不合格的一筆都沒寫進去");
+        assert!(valid_sign_pub(&pk2));
+        assert!(k.mark_blocked("d", &pk2), "合法才寫");
+        assert_eq!(k.peer("d").unwrap().blocked_fp.as_deref(), Some(fingerprint(&pk2).as_str()));
+        assert_eq!(k.check("d", "pk2"), Tofu::Changed, "照樣拒絕");
     }
 
     #[cfg(feature = "gui")]
@@ -810,14 +847,16 @@ mod tests {
     fn 被擋下_電腦的設定頁列表也帶_blocked_只在對不上時() {
         let d = tempfile::tempdir().unwrap();
         let mut k = KnownPeers::default();
-        k.remember("a", "甲", "pk1", 1).unwrap();
-        k.remember("b", "乙", "pk2", 1).unwrap();
+        k.remember("a", "甲", &real_pub(1), 1).unwrap();
+        k.remember("b", "乙", &real_pub(2), 1).unwrap();
         k.save(d.path()).unwrap();
         let has = |n: &str| live::view(d.path()).unwrap()["peers"].as_array().unwrap().iter().find(|p| p["node"] == n).unwrap().get("blocked").is_some();
         assert!(!has("a") && !has("b"));
-        assert!(live::mark_blocked(d.path(), "a", "pkX").unwrap());
+        assert!(!live::mark_blocked(d.path(), "a", "pkX").unwrap(), "格式不對不寫");
+        assert!(!has("a"));
+        assert!(live::mark_blocked(d.path(), "a", &real_pub(5)).unwrap());
         assert!(has("a") && !has("b"));
-        assert!(!live::mark_blocked(d.path(), "a", "pk1").unwrap(), "同一把原本的不記");
+        assert!(!live::mark_blocked(d.path(), "a", &real_pub(1)).unwrap(), "同一把原本的不記");
         assert!(live::forget(d.path(), "a").unwrap());
         assert!(!has_any(d.path(), "a"));
         fn has_any(dir: &Path, n: &str) -> bool { live::view(dir).unwrap()["peers"].as_array().unwrap().iter().any(|p| p["node"] == n) }

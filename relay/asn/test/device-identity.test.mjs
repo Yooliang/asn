@@ -171,10 +171,10 @@ test('#1829 畫面檔裡不再有自己寫死的「未命名設備」（只剩�
     if (/UNNAMED_DEVICE|'未命名設備'/.test(src.replace(/\/\/.*$/gm, ''))) hits.push(f)
   }
   // 白名單每一項的理由：
-  //   account-roster.mjs：shortDevice('') 沒有節點代號可用時的最後備援（只有空字串才會走到）
   //   device-known.mjs：LEGACY_UNNAMED，舊版畫面上的「沒名字」字樣；讀回來被當成名字存著的，一律當沒名字（通知、認得的電腦共用）
-  //   text.mjs：UNNAMED_DEVICE 常數本身的定義
-  assert.deepEqual(hits.sort(), ['account-roster.mjs', 'device-known.mjs', 'text.mjs'])
+  //   text.mjs：UNNAMED_DEVICE 常數本身的定義（標 LEGACY，畫面不輸出；#1860 起 shortDevice 也改用辨認線索）
+  assert.deepEqual(hits.sort(), ['device-known.mjs', 'text.mjs'])
+  assert.match(read('../ui/lib/text.mjs'), /LEGACY（#1860）[\s\S]*export const UNNAMED_DEVICE/)
 })
 
 test('#1829 設備細部頁整頁只有一行頁首：「設定：設備」那一行（外層標題）進細部頁時收掉，列表頁照舊', async () => {

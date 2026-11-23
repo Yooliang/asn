@@ -7,7 +7,6 @@
 import { deviceNameOf } from './device-known.mjs'
 import { agoText } from './cloud-invite.mjs'
 import { QUOTA_LINES, STALE_MS, planLabel, quotaBar, resetIn } from './account-quota.mjs'
-import { UNNAMED_DEVICE } from './text.mjs'
 import { inDevicePageOrder } from './device-order.mjs'
 import { unnamedLabelOf } from './device-known.mjs'
 
@@ -58,9 +57,9 @@ const windowRank = name => (name === 'five_hour' ? 0 : name === 'weekly' ? 1 : 2
 const windowMinutes = name => { const m = /^w(\d+)$/.exec(String(name ?? '')); return m ? Number(m[1]) : 0 }
 
 /** 設備名截到 max 個字（以字元計，中文一字算一個） */
-export function shortDevice(label, max = DEVICE_MAX) {
+export function shortDevice(label, max = DEVICE_MAX, node = '') {
   const chars = Array.from(String(label ?? '').trim())
-  if (!chars.length) return UNNAMED_DEVICE
+  if (!chars.length) return unnamedLabelOf(node)   // 沒名字：寫「電腦（X7K2）」這種辨認線索（和通知同一個寫法）；連代號都沒有只寫「電腦」
   return chars.length > max ? chars.slice(0, max).join('') : chars.join('')
 }
 
@@ -114,7 +113,7 @@ function rosterQuotaInner(entry, { nodeLabel = node => unnamedLabelOf(node), now
   const stamp = (at, node) => {
     const ago = agoOf(at)
     const when = ago && gone ? `${ago}讀的` : ago
-    return [when, node ? shortDevice(nodeLabel(node)) : ''].filter(Boolean).join('・')
+    return [when, node ? shortDevice(nodeLabel(node), DEVICE_MAX, node) : ''].filter(Boolean).join('・')
   }
   if (!wins.length) {
     const text = ROSTER_TEXT[NO_WINDOW_TEXT[entry?.vendor] ?? 'noQuota']
@@ -127,7 +126,7 @@ function rosterQuotaInner(entry, { nodeLabel = node => unnamedLabelOf(node), now
     ? `${windowLabel(w.name)}${ROSTER_TEXT.resetPending}`
     : [`${windowLabel(w.name)}剩 ${w.pct}%`, stamp(w.read, '')].filter(Boolean).join('・')))
   // 「我的帳號」區括號裡只寫哪台讀的（時間已在各窗自己標了）；不同台讀的最多列兩台，免得超過 20 字
-  const devices = [...new Set(wins.filter(w => w.node).map(w => shortDevice(nodeLabel(w.node))))].slice(0, 2)
+  const devices = [...new Set(wins.filter(w => w.node).map(w => shortDevice(nodeLabel(w.node), DEVICE_MAX, w.node)))].slice(0, 2)
   const listMeta = devices.join('、')
   // 接成一行的 text 只放 5 小時、每週兩窗，才不會超過 20 字；其他窗只在「我的帳號」區逐窗列出（parts）。
   // 只有其他長度的窗時（目前不會發生），放最短的那一窗，不讓這一行變成空白
