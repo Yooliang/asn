@@ -9,6 +9,7 @@
 // 要放在所有模組之前，後面的模組才看得到這兩個巨集
 #[macro_use]
 mod elog;
+mod settings;
 // ---- 手機與電腦都有的模組 ----
 #[cfg(feature = "gui")]
 mod account;
@@ -279,12 +280,7 @@ pub fn read_settings_name(data_dir: &Path) -> Option<String> {
     v.get("window_name")?.as_str().filter(|s| valid_window_name(s)).map(String::from)
 }
 pub fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
-    if let Some(p) = path.parent() {
-        std::fs::create_dir_all(p)?;
-    }
-    let tmp = PathBuf::from(format!("{}.{}.tmp", path.display(), std::process::id()));
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)
+    settings::atomic::write(path, text.as_bytes(), settings::atomic::STATE)
 }
 
 #[cfg(feature = "gui")]
@@ -2969,7 +2965,9 @@ fn store_save(app: State<'_, App>, name: String, text: String) -> Result<(), Str
         return Err("存檔太大".into());
     }
     let _g = STORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    write_atomic(&store_path(&app, &name)?, &text).map_err(|e| e.to_string())
+    // me、onboard 是設定（fsync）；chats 是快取（不 fsync）
+    let o = if name == "chats" { settings::atomic::STATE } else { settings::atomic::SETTINGS };
+    settings::atomic::write(&store_path(&app, &name)?, text.as_bytes(), o).map_err(|e| e.to_string())
 }
 
 /// 語音設定（念出訊息的聲音與自動念、語音輸入的語言與模型）；存在資料夾的 voice.json

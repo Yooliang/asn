@@ -3181,16 +3181,8 @@ fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
             std::fs::create_dir_all(parent).map_err(|e| format!("無法建立終端對照表資料夾：{e}"))?;
         }
     }
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text).map_err(|e| format!("無法寫入終端對照表：{e}"))?;
-    match std::fs::rename(&tmp, path) {
-        Ok(()) => Ok(()),
-        Err(_) if path.exists() => {
-            std::fs::remove_file(path).map_err(|e| format!("無法更新終端對照表：{e}"))?;
-            std::fs::rename(&tmp, path).map_err(|e| format!("無法更新終端對照表：{e}"))
-        }
-        Err(e) => Err(format!("無法更新終端對照表：{e}")),
-    }
+    crate::settings::atomic::write(path, text.as_bytes(), crate::settings::atomic::STATE)
+        .map_err(|e| format!("無法更新終端對照表：{e}"))
 }
 
 // 下面這段才是 Tauri 指令要的型別與正式進入點。核心邏輯在上面，測試不經過 Tauri。
@@ -8600,5 +8592,29 @@ mod tests {
             let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
             assert!(v["terms"][0].get("mux").is_none(), "第 1 階段的列不多寫新欄位");
         }
+    }
+
+    #[test]
+    fn 對照表寫入_目標存在時舊檔被取代且不留tmp() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("terms.json");
+        std::fs::write(&p, "舊").unwrap();
+        atomic_write(&p, "新").unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "新");
+        let left = std::fs::read_dir(d.path()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
+        assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn 對照表寫入_rename失敗時不會先刪掉目標() {
+        // 目標是資料夾：rename 一定失敗。舊寫法會走「目標存在就先刪」，這裡要保證原內容還在、tmp 清掉。
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("terms.json");
+        std::fs::create_dir(&p).unwrap();
+        std::fs::write(p.join("keep.txt"), "舊").unwrap();
+        assert!(atomic_write(&p, "新").is_err());
+        assert!(p.join("keep.txt").exists(), "目標不能被刪");
+        let left = std::fs::read_dir(d.path()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
+        assert_eq!(left, 0);
     }
 }
