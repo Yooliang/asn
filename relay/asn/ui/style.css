@@ -951,23 +951,14 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-tag.me{border:1px solid var(--line);background:none}
 .dv-body{min-width:0}
 .dv-body.off{filter:grayscale(.35);opacity:.8}
-.dv-vendors{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
-.dv-vendor{border:1px solid var(--line);border-radius:6px;background:var(--panel);overflow:hidden}
 .dv-vh{display:flex;align-items:center;gap:8px;padding:7px 12px;background:var(--panel-soft);border-bottom:1px solid var(--line)}
 .dv-vicon{flex:none;display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;color:var(--fg)}
 .dv-vicon svg{width:20px;height:20px}
-.dv-via{color:var(--muted, inherit);opacity:.75;font-weight:400}
-/* 設備列的一行 AI 狀態（獨佔一行）、廠商標頭的狀態標籤、帳號頁「用在哪幾台」與「切換到…」（174 的 C） */
-.dv-state{margin-left:auto;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:400;background:var(--panel-head);color:var(--muted)}
-.dv-state.st-logged_in{background:color-mix(in srgb,var(--online) 18%,transparent);color:var(--online)}
-.dv-state.st-login_failed{background:color-mix(in srgb,var(--away) 25%,transparent);color:#8a5a00}
-.dv-install{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:8px 0}
-.dv-install .dv-confirm,.dv-prog{display:flex;flex-direction:column;align-items:flex-start;gap:6px;width:100%}
+/* 帳號頁「用在哪幾台」與「切換到…」（174 的 C） */
+.dv-prog{display:flex;flex-direction:column;align-items:flex-start;gap:6px;width:100%}
 .dv-confirm p,.dv-prog p{margin:0;line-height:1.5}
 .dv-ibtns{display:flex;flex-wrap:wrap;gap:8px}
 .dv-prog p.note{color:var(--muted)}
-.dv-ptitle{color:var(--link)}
-.dv-ptitle.failed,.dv-ptitle.terminal{color:var(--danger,#b3261e)}
 .dv-vb{display:flex;flex-direction:column;gap:8px;padding:10px 12px}
 .dv-accts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
 .dv-acct{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 10px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}
@@ -1039,7 +1030,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dv-incomplete{padding:1px 8px;border:1px solid #a86f00;border-radius:4px;font-size:11px;color:#a86f00}
 .dv-why{display:block;font-size:11px}
 .dv-none{display:flex;align-items:center;gap:6px;padding:8px 10px;border:1px dashed var(--line);border-radius:5px;color:var(--muted);font-size:12px;font-style:italic}
-.dv-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:28px 12px;border:1px dashed var(--line);border-radius:6px;background:var(--panel-soft);color:var(--muted)}
 
 /* ---------- Frutiger Aero 背景（全 App 共用一張、對話區另一張）：圖貼頂，往下漸變成白色，下半部留白 ---------- */
 .win{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff 55%),url(img/bg-app.webp) top center/max(100%,720px) auto no-repeat,#fff}
@@ -1291,7 +1281,9 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .dvid-kv{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:0;align-items:baseline}
 .dvid-kv dt{color:var(--muted,#6b7785);font-size:12px;white-space:nowrap}
 .dvid-kv dd{margin:0;min-width:0;overflow-wrap:anywhere}
-.dvid-code{font-family:ui-monospace,Consolas,monospace;letter-spacing:.08em}
+/* 被擋下的設備：詳情最上面的提示與「重新認這台」 */
+.dv-block{display:flex;flex-direction:column;gap:var(--sp-2);margin:0 0 var(--sp-3);padding:var(--sp-3);border:1px solid var(--danger,#b3261e);border-radius:var(--sp-1);background:var(--panel-soft)}
+.dv-block p{margin:0;line-height:1.5}
 .dvid-note{margin:10px 0 0;font-size:12px;color:var(--muted,#6b7785)}
 .dvid-why{display:block;margin-top:6px;color:var(--muted,#6b7785)}
 .m-dv-sech{margin:14px 0 6px;font-size:13px}

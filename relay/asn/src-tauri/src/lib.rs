@@ -1292,7 +1292,7 @@ fn device_known_list(app: State<'_, App>) -> Result<Value, String> {
     device_id::live::view(&app.data_dir)
 }
 
-/// 本人在這台的設定頁按「忘記這台」：下次那台再連就當第一次（會再通知本人）。**只有這個本機命令能忘記**（守門測試）
+/// 本人在這台的設定頁按「重新認這台」（被擋下的那台）或已移除設備的「忘記」：下次那台再連就當第一次（會再通知本人）。**只有這個本機命令能忘記**（守門測試）
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]

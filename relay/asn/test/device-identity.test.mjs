@@ -51,14 +51,14 @@ test('#1829 名字空白時，標題是「種類（代號末 4 碼）」，不�
   assert.equal(unnamedClue({ node: 'zz12' }), '電腦（ZZ12）')
 })
 
-test('#1829 辨認區四列：建立時間、平台、最後在線、代號；後台沒給建立時間就整列不放，最後在線沒有紀錄寫「沒有紀錄」', () => {
+test('#1829 辨認區三列：建立時間、平台、最後在線（#1860 起不列代號末 4 碼）；後台沒給建立時間就整列不放，最後在線沒有紀錄寫「沒有紀錄」', () => {
   const r = rowOf(tree(), 'node-old-pc-X7K2').identity
   const by = Object.fromEntries(r.rows.map(x => [x.key, x]))
-  assert.deepEqual(r.rows.map(x => x.label), [IDENTITY_TEXT.created, IDENTITY_TEXT.platform, IDENTITY_TEXT.seen, IDENTITY_TEXT.code])
+  assert.deepEqual(r.rows.map(x => x.label), [IDENTITY_TEXT.created, IDENTITY_TEXT.platform, IDENTITY_TEXT.seen])
+  assert.equal(by.code, undefined, '詳情不列代號')
   assert.match(by.created.value, /^2026\/11\/05 \d\d:\d\d$/)
   assert.equal(by.platform.value, 'Windows')
   assert.match(by.seen.value, /^2026\/11\/19 \d\d:\d\d（3 小時前）$/)
-  assert.equal(by.code.value, 'X7K2')
   const none = rowOf(tree(), 'node-fp-name-Q9Z8').identity
   assert.ok(!none.rows.some(x => x.key === 'created'), '沒有建立時間就整列不放')
   assert.equal(none.rows.find(x => x.key === 'seen').value, '沒有紀錄')
@@ -79,7 +79,9 @@ const render = async (devices, props) => {
 test('#1829 電腦版詳情頁：名字空白也認得出是哪一台，下面有「改名」和「永久移除」', async () => {
   const html = (await render(tree(), { dev: 'node-old-pc-X7K2', devView: 'info' })).replace(/<!--.*?-->/g, '')
   assert.match(html, /<h3 class="dv-name">電腦（X7K2）<\/h3>/)
-  for (const t of ['建立時間', '平台', '最後在線', '代號', 'X7K2', '2026/11/05']) assert.ok(html.includes(t), t)
+  for (const t of ['建立時間', '平台', '最後在線', '2026/11/05']) assert.ok(html.includes(t), t)
+  assert.ok(!html.includes('<dt>代號</dt>'), '詳情不列代號；名字空白時的「電腦（X7K2）」只在標題')
+  assert.ok(!html.includes('dvid-code'))
   assert.ok(!html.includes('未命名設備') && !html.includes('還沒連線過'), '不能據以行動的句子收掉')
   const acts = html.slice(html.indexOf('要處理這台設備'))
   assert.match(acts, />改名</)

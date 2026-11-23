@@ -5,12 +5,16 @@ export const clean = (s, n = 80) => String(s ?? '').replace(/[\u0000-\u001f\u007
 
 export const NAME_MAX = 40
 
+// 提示句裡的設備名：有名字寫「X」，沒有就寫「這台設備」
+const nameOf = label => { const n = String(label ?? '').trim(); return n ? `「${n}」` : '這台設備' }
+
+/** 這台是不是被擋下（同一個代號換了金鑰、指紋對不上）：只看紀錄上的 blocked 旗標，電腦手機同一個判斷 */
+export const isBlockedPeer = peer => peer?.blocked === true
+
 export const TEXT = {
   title: '認得的電腦',
   lead: '別台電腦第一次連到這台（例如看畫面）時，這台會記住它的設備金鑰並通知你。之後它的金鑰換了，這台會拒絕連線並再通知你。',
   none: '還沒有認得的電腦。',
-  forget: '忘記這台',
-  forgetNote: '只有你確定是自己重裝了那台、或不想再讓它連過來時才按。忘記之後，它下次連過來會當成第一次，並再通知你。',
   forgetTitle: '忘記這台設備？',
   forgetYes: '忘記',
   forgetCancel: '取消',
@@ -20,6 +24,16 @@ export const TEXT = {
     const g = String(fp ?? '').replace(/\s+/g, '').slice(0, 8).replace(/(.{4})(?=.)/, '$1 ')
     return `忘記${name ? `「${name}」` : '這台設備'}${g ? `（指紋 ${g}）` : ''}？之後這台再連上，要重新確認指紋。`
   },
+  // 「重新認這台」（#1860 C）：只有那台指紋對不上、被擋下時才出現；行為同「忘記」——清掉記住的指紋，下次當第一次
+  reaccept: '重新認這台',
+  reacceptTitle: '重新認這台設備？',
+  reacceptYes: '重新認',
+  reacceptNotice: label => {
+    const who = nameOf(label)
+    return `${who}的指紋和之前不一樣，已經擋下。只有你剛重灌或換掉它時才按「重新認這台」。如果你沒動過它，不要按，並告訴管理的人。`
+  },
+  reacceptConfirm: label => `重新認${nameOf(label)}？按下去會清掉記住的指紋，它下次連上來會當成第一次，並再通知你。只有你剛重灌或換掉它時才按；如果你沒動過它，不要按，並告訴管理的人。`,
+  blockedTag: '已擋下',
   firstSeen: t => `第一次見到：${t}`,
   fingerprint: '指紋',
   ownFp: fp => `這台電腦的指紋：${groupFp(fp)}`,
@@ -43,7 +57,9 @@ export function errorText(e) {
  */
 export function createForgetConfirm({ box, forget }) {
   return {
-    ask: rec => { if (rec?.id) box.value = { id: rec.id, text: TEXT.forgetConfirm(rec.label, rec.fingerprint) } },
+    ask: rec => { if (rec?.id) box.value = { id: rec.id, text: TEXT.forgetConfirm(rec.label, rec.fingerprint), title: TEXT.forgetTitle, yes: TEXT.forgetYes } },
+    // 被擋下的那台：同樣清掉記住的指紋，只是問法與按鈕字不同
+    askReaccept: rec => { if (rec?.id) box.value = { id: rec.id, text: TEXT.reacceptConfirm(rec.label), title: TEXT.reacceptTitle, yes: TEXT.reacceptYes } },
     yes: () => { const r = box.value; box.value = null; if (r) forget(r.id) },
     no: () => { box.value = null },
   }
@@ -59,6 +75,7 @@ export function normalizeView(raw) {
       label: displayDeviceName(clean(p.name, NAME_MAX)) || unnamedLabelOf(p.node),   // 畫面上顯示的：像指紋的名字、舊的「未命名的電腦」都當沒名字，改寫辨認線索（#1829）
       fingerprint: clean(p.fingerprint, 32),
       loginOk: p.login_ok === true,
+      ...(p.blocked === true ? { blocked: true } : {}),   // 指紋對不上、已被擋下（Rust 在列表裡帶 blocked 才有；沒帶就是沒被擋）
       firstSeenMs: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? p.first_seen_ms : 0,
       firstSeen: Number.isFinite(p.first_seen_ms) && p.first_seen_ms > 0 ? new Date(p.first_seen_ms).toLocaleString('zh-TW', { hour12: false }) : '',
     })),

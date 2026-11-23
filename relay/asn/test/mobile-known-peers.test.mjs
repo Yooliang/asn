@@ -16,14 +16,16 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(TEXT.cancel, '取消')
   assert.equal(TEXT.wrong, '選的和電腦上顯示的不一樣，這次沒有記住。10 分鐘後才能再確認。')
   assert.equal(TEXT.locked(7), '答錯過一次，請 7 分鐘後再確認。')
-  assert.equal(TEXT.blocked, '這台的指紋兩次對不上，可能被換過。請到設定 → 設備，開那台的「詳情」按「忘記這台」，再重新連線。')
-  assert.equal(TEXT.noneMatch, '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 設備，開那台的「詳情」按「忘記這台」，才能重新確認。')
+  assert.equal(TEXT.blocked, '這台的指紋兩次對不上，可能被換過。請到設定 → 設備，開那台的「詳情」按「重新認這台」，再重新連線。')
+  assert.equal(TEXT.noneMatch, '這台電腦的金鑰可能被換過，請不要記住，並告訴管理的人。要到設定 → 設備，開那台的「詳情」按「重新認這台」，才能重新確認。')
   assert.equal(TEXT.expired, '太久沒選，請重新按「確認指紋」。')
   assert.equal(TEXT.forget, '忘記')
   for (const k of ['confirmed', 'unconfirmed', 'tagConfirmed', 'tagUnconfirmed']) assert.equal(TEXT[k], undefined, `${k} 換成指紋圖示（#1499）後不用了`)
   assert.equal(TEXT.firstSeen('今天'), '第一次見到：今天')
   assert.equal(TEXT.neverSeen, undefined, '#1829 「還沒連線過」使用者做不了什麼，整句收掉')
-  assert.equal(TEXT.forgetThis, '忘記這台')
+  assert.equal(TEXT.forgetThis, undefined, '詳情不再常駐「忘記這台」（#1860 C）')
+  assert.equal(TEXT.reaccept, '重新認這台')
+  assert.equal(TEXT.blockedTag, '已擋下')
   assert.equal(TEXT.oldTitle, undefined, '改叫「已移除的設備」（DEVICE_TEXT.removedTitle）')
   assert.equal(TEXT.renameHint, '所有設備都會顯示這個名字')
   assert.deepEqual([TEXT.moveUp, TEXT.moveDown, TEXT.accounts], [undefined, undefined, undefined])
@@ -190,7 +192,7 @@ test('出題帶本機記的名字：有欄位（可為空字串）就用它，�
 
 test('m.html：改名表單只用文字節點與輸入框（不走 v-html）；走新的改名流程；沒名字顯示 label；浮層標題用本機名字', () => {
   const html = read('../ui/m.html')
-  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- /詳情 -->'))
+  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- 新電腦引導卡'))
   for (const part of [info]) {
     assert.ok(part.length > 200)
     assert.doesNotMatch(part, /v-html/)
@@ -237,9 +239,9 @@ test('m.html：設備列只有一顆「詳情」（沒有上移、下移、帳�
   assert.match(html, /v-if="removedBlock\.count"/)
 })
 
-test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「還沒確認」與確認按鈕；沒紀錄的電腦說還沒連線過；忘記這台；不走 v-html', () => {
+test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「還沒確認」與確認按鈕；沒紀錄的電腦說還沒連線過；沒有常駐的忘記；不走 v-html', () => {
   const html = read('../ui/m.html')
-  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- /詳情 -->'))
+  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- 新電腦引導卡'))
   assert.doesNotMatch(info, /v-html/)
   const fpRefs = [...info.matchAll(/fpShow/g)].length
   assert.equal(fpRefs, 2, '指紋只出現在「已確認」那一段（判斷＋顯示）')
@@ -253,9 +255,8 @@ test('m.html：詳情——指紋只有確認過的才畫；沒確認只有「�
   assert.equal((info.match(/confirmKnown\(/g) ?? []).length, 1)
   assert.doesNotMatch(info, /neverSeen/, '#1829 沒紀錄的電腦不再寫「還沒連線過」')
   assert.match(info, /\{\{ KNOWN_TEXT\.firstSeen\(curKnown\.firstSeen\) \}\}/)
-  assert.match(info, /@click="forgetKnown\(curKnown\.node\)">\{\{ KNOWN_TEXT\.forgetThis \}\}/)
+  assert.doesNotMatch(info, /forgetKnown\(/, '詳情裡沒有常駐的「忘記這台」（#1860 C）')
   assert.match(info, /acctCanRemove/, '隱藏與永久移除也在詳情')
-  assert.ok(info.indexOf('curKnown.firstSeen') < info.indexOf('forgetKnown('), '忘記這台在最下面')
   assert.match(info, /<template v-if="!acctCur\.self && curKnown">/, '手機自己沒有可顯示的指紋命令，不顯示')
   const old = html.slice(html.indexOf('class="m-dv-removed"'), html.indexOf('</details>', html.indexOf('class="m-dv-removed"')))
   assert.doesNotMatch(old, /v-html/)
@@ -307,7 +308,7 @@ test('m.html：確認浮層只用文字節點，不走 v-html；四個選項、�
   assert.match(html, /v-if="chatFriend && peerStrip"/)
   assert.match(html, /@click="openMethodSheet">\{\{ KNOWN_TEXT\.stripButton \}\}/)
   assert.match(html, /@remote-started="onRemoteStarted" @remote-ended="onRemoteEnded"/)
-  assert.match(html, /@click="forgetKnown\(curKnown\.node\)">\{\{ KNOWN_TEXT\.forgetThis \}\}/)
+  assert.match(html, /@click="reacceptYes">\{\{ KNOWN_TEXT\.reacceptYes \}\}/, '被擋下時的「重新認這台」走原位確認，確認才忘記')
   const js = read('../ui/m.js')
   assert.match(js, /knownPeers\.challenge\(cur\)/)
   assert.match(js, /knownPeers\.pick\(ch\.id, index, cur\.node\)/)
@@ -382,7 +383,7 @@ test('守門：四選一的答案、選項不進日誌、事件；畫面層不�
 test('掃 QR code 的文字：照規格、繁體中文', () => {
   assert.equal(TEXT.scanButton, '用相機掃電腦上的 QR code')
   assert.equal(TEXT.scanFallback, '沒辦法掃，改用選的')
-  assert.equal(TEXT.scanMismatch, '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 設備，開那台的「詳情」按「忘記這台」，再重新連線。')
+  assert.equal(TEXT.scanMismatch, '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 設備，開那台的「詳情」按「重新認這台」，再重新連線。')
   assert.equal(TEXT.scanBad, '這不是 ASN 的指紋 QR code，請掃電腦設定頁上的那個。')
   assert.equal(TEXT.scanNoCamera, '沒辦法用相機，改用選的。')
   assert.match(TEXT.methodBody, /顯示 QR code/)
@@ -482,7 +483,7 @@ test('m.html：選方法的浮層只用文字節點；掃描是主要按鈕、�
 test('詳情的確認：只有還沒確認的才有「確認」按鈕，按下去走和提示條同一個開浮層的入口', () => {
   assert.equal(TEXT.confirmButton, '確認')
   const html = read('../ui/m.html')
-  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- /詳情 -->'))
+  const info = html.slice(html.indexOf('class="m-dv-info"'), html.indexOf('<!-- 新電腦引導卡'))
   assert.match(info, /v-if="!curKnown\.confirmed"[^>]*@click="confirmKnown\(curKnown\)">\{\{ KNOWN_TEXT\.confirmButton \}\}/, '未確認者才有確認按鈕')
   assert.equal((info.match(/confirmKnown\(curKnown\)/g) ?? []).length, 1)
   assert.doesNotMatch(html.slice(html.indexOf('class="m-dv-removed"'), html.indexOf('</details>', html.indexOf('class="m-dv-removed"'))), /confirmKnown/)
@@ -529,7 +530,7 @@ test('詳情確認留下的提示：成功路徑已清；離開或重進詳情�
   assert.match(js, /openMethodSheet\(\); vp\.noteOwn = true \}/, '只有設定頁的確認標記為自己的提示')
   assert.match(js, /const openMethodSheet = \(\) => \{ if \(!vp\.cur \|\| vp\.busy\) return; vp\.noteOwn = false;/, '提示條開的確認取消標記')
   assert.match(js, /const vpReset = \(\) => \{ vpPrev = null; vp\.noteOwn = false;/, '開始／結束看電腦取消標記')
-  assert.match(js, /watch\(\(\) => acctSw\.page === 'detail' && acctSw\.sub === 'info', \(now, was\) => \{ if \(now !== was\) \{ if \(vp\.noteOwn\) \{ vp\.note = ''; vp\.noteOwn = false \}/, '離開或重進詳情才清、且只清自己的')
+  assert.match(js, /watch\(\(\) => acctSw\.page === 'detail', \(now, was\) => \{ if \(now !== was\) \{ if \(vp\.noteOwn\) \{ vp\.note = ''; vp\.noteOwn = false \}/, '離開或重進詳情才清、且只清自己的')
 })
 
 test('設定頁確認的就是正在看的那台：成功後原本對象一併標已確認（還原後提示條不再跳出）；失敗提示只在設定頁顯示', () => {

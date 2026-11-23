@@ -14,10 +14,7 @@ export const mnoselfProbeSource = () => `(async () => {
   for (let i = 0; i < n; i++) {
     const row = rows()[i];
     const name = row?.textContent ?? '';
-    [...(row?.querySelectorAll('button') ?? [])].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(300);   // 詳情 → 帳號分頁（#1860）
-    const go = document.querySelector('.m-dv-subbtn[data-sub="accounts"]');
-    if (!go) continue;
-    go.click(); await sleep(500);
+    [...(row?.querySelectorAll('button') ?? [])].find(b => b.textContent.trim() === '詳情')?.click(); await sleep(500);   // 列上的「詳情」（#1860：詳情裡沒有帳號分頁了）
     if (name.includes('運作中')) {   // 本機那一列只寫「運作中」
       sawSelf = true;
       if ([...document.querySelectorAll('.m-dv-sw')].some(vis)) return { ok: false, why: '「這支手機」的細部頁出現切換鈕' };

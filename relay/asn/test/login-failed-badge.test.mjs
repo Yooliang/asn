@@ -50,7 +50,7 @@ test('手機頁接線（#1592→#2111 ⑦）：設備頁的帳號改成一行＋
   const html = read('ui', 'm.html')
   assert.equal((html.match(/m-dv-failed/g) ?? []).length, 0, '設備頁沒有獨立的紅色「登入失效」標籤')
   assert.ok(!html.includes('m-dv-cur-b'), '設備頁沒有「使用中」交替格')
-  assert.match(html, /v-for="l in acctLines\(v\)"/, '登入失效由帳號行的狀態標籤表達（device-account-lines.mjs）')
+  assert.doesNotMatch(html, /acctLines/, '#1860：詳情沒有帳號行；登入失效只在帳號頁的卡片標籤與設備列表達')
   assert.match(read('ui', 'mobile.css'), /\.m-dv-failed\{[^}]*background:#b3261e[^}]*color:#fff/)
   assert.match(read('ui', 'm.js'), /CURRENT_LABEL, CURRENT_FAILED_ARIA/)
 })

@@ -17,7 +17,7 @@ const css = read('../ui/style.css')
 test('#2105 設定頁：舊按鈕（aero-btn）與裸 <button> 都不得再出現，全部走共用按鈕', () => {
   assert.doesNotMatch(panel, /aero-btn/, '設定頁的按鈕不能再用舊 class')
   assert.doesNotMatch(panel, /<button[\s>]/, '設定頁不再自己寫 <button>，一律 <asn-button>')
-  assert.ok((panel.match(/<asn-button[\s>]/g) ?? []).length >= 70, '原本約 75 顆按鈕都換成共用按鈕')
+  assert.ok((panel.match(/<asn-button[\s>]/g) ?? []).length >= 55, '原本約 75 顆按鈕都換成共用按鈕（#1860 拿掉設備詳情的帳號區之後剩約 59 顆）')
 })
 
 test('#2105 設定頁：樣板不寫死字級與間距（px），尺寸只來自共用按鈕與設計變數', () => {
@@ -125,7 +125,7 @@ test('#2105 改由 ASN 負責的確認：處理中兩顆都不能按（原本的
 })
 
 test('#2105 移除／刪除／結束／忘記／撤銷這類不可復原的動作，按鈕都是危險狀態', () => {
-  const must = ['tm-ask', 'quota-mm-remove', 'forget.ask(r.peer)','forget.ask(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
+  const must = ['tm-ask', 'quota-mm-remove', 'forget.ask(r.peer)', 'forget.askReaccept(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
   for (const h of must) {
     const tag = [...panel.matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes(h))
     assert.ok(tag, `找得到按鈕：${h}`)
@@ -135,13 +135,15 @@ test('#2105 移除／刪除／結束／忘記／撤銷這類不可復原的動�
   assert.equal(accountMenuItems(true).find(i => i.key === 'unshare').danger, true)
   assert.ok(/:danger="shareConfirmOf\(/.test(panel), '撤銷的原位確認是危險確認')
   // 反向：取消、一般動作不是危險鈕
-  for (const h of ["act('tm-cancel')", "act('pi-setup-remove')", "act('relogin-no')", "act('install-no')", 'renameCancel']) {
+  for (const h of ["act('tm-cancel')", "act('pi-setup-remove')", "act('relogin-no')", 'renameCancel']) {
     const tag = [...panel.matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes(h))
     assert.ok(tag && !/state="danger"/.test(tag), `${h} 不是危險鈕`)
   }
 })
 
 test('#2105 黃色只給「重新登入」：重新登入鈕是 relogin 狀態，其他按鈕不用', () => {
-  assert.match(panel, /<asn-button state="relogin" @click="act\('relogin-ask'/)
-  assert.equal((panel.match(/state="relogin"/g) ?? []).length, 1)
+  // #1860：設備詳情沒有重新登入了，只剩帳號頁設備列那一顆（狀態直接用那一列的 relogin）
+  assert.match(panel, /<asn-button fixed class="dv-devbtn dv-relogin-btn" :state="b\.state" v-else-if="b\.state === 'relogin'"/)
+  assert.equal((panel.match(/class="dv-devbtn dv-relogin-btn"/g) ?? []).length, 1)
+  assert.equal((panel.match(/state="relogin"/g) ?? []).length, 0, '不再有寫死 relogin 的第二顆')
 })

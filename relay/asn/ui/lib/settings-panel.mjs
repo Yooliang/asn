@@ -2,7 +2,7 @@
 // 元件只顯示「狀態快照」（st）並用 act 事件下指令；狀態與所有動作都在名單視窗的樞紐（list.js）——
 // 金鑰、存檔、Rust 指令都不經過這裡，分離視窗也因此不持有任何設定狀態。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
-import { TEXT as KNOWN, groupFp, createForgetConfirm } from './known-peers.mjs'
+import { TEXT as KNOWN, groupFp, createForgetConfirm, isBlockedPeer } from './known-peers.mjs'
 import { FpMark, deskFpMark } from './fp-mark.mjs'
 import { DeviceIdentity, IDENTITY_TEXT } from './device-identity.mjs'
 import { ACTION_TEXT } from './device-order.mjs'
@@ -25,12 +25,10 @@ import { aboutView } from './about-info.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, deviceRowLine, dropAfter, visibleRows } from './device-order.mjs'
 import { switchRowKey, switchResultOf } from './switch-result.mjs'
-import { ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, accountCardKey, accountStatusOf, deviceAccountLines } from './device-account-lines.mjs'
+import { accountCardKey, accountStatusOf } from './device-account-lines.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, ROSTER_TEXT, SUB_LAPSED_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, usedOnText } from './account-roster.mjs'
-import { INSTALL_TEXT } from './agent-install.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
 import { QUOTA_TEXT, accountMenuItems, quotaGuideFor, shareConfirmOf, shareKey, vendorSections } from './quota-readers.mjs'
-import { AGENT_INSTALL_UI } from './device-state.mjs'
 import { COLUMNS as TM_COLUMNS, TEXT as TM } from './task-manager.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './msg-ref.mjs'
 import { LAUNCH_MAX_NOTE } from './launch-prefs.mjs'
@@ -41,13 +39,13 @@ import { TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote, termFet
 export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close', 'quota-cancel',
   'notify', 'now-playing', 'skin', 'gh-refs', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
-  'voice-save', 'voice-install', 'acct-allow-switch', 'install-ask', 'install-yes', 'install-no', 'install-cancel', 'install-terminal', 'install-close', 'install-allow', 'relogin-ask', 'open-accounts', 'acct-remove', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore',
+  'voice-save', 'voice-install', 'acct-allow-switch', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore',
   'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view',
 ]
 
 export const SettingsPanel = {
   components: { ...UI_KIT, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity },
-  props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, devView: { type: String, default: 'info' }, askRemove: { type: Boolean, default: false } },
+  props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
     const { ref, computed, watch, onMounted, onBeforeUnmount } = globalThis.Vue
@@ -63,8 +61,7 @@ export const SettingsPanel = {
     // 列表含自動隱藏的設備（淡色、標「已隱藏」）；永久移除的不在列表，收在底部的「已移除的設備」
     const devs = computed(() => visibleRows(allDevs.value))
     const curDev = computed(() => devs.value.find(d => d.key === picked.value) ?? null)
-    const view = ref(props.devView === 'acct' ? 'acct' : 'info')   // 選了某台之後看哪一頁：info＝詳情（預設）、acct＝帳號
-    const open = key => { picked.value = key; view.value = allDevs.value.find(d => d.key === key)?.phone ? 'info' : 'acct'; askRemove.value = false; renaming.value = false }
+    const view = ref('info')   // 選了某台之後看哪一頁：info＝詳情（預設）、tasks＝工作管理員、qr＝QR Code（帳號不在設備頁，只在設定的「帳號」頁，#1860）
     const openInfo = key => { picked.value = key; view.value = 'info'; askRemove.value = false; renaming.value = false }
     // 工作管理員：只有這台電腦有；進來才開始每 5 秒更新，離開（返回、換頁、關掉設定）就停（樞紐收到 tm-close）
     const openTasks = key => { picked.value = key; view.value = 'tasks'; askRemove.value = false; renaming.value = false; act('tm-open') }
@@ -116,19 +113,6 @@ export const SettingsPanel = {
       if (dragKey.value) act('device-reorder', { drag: dragKey.value, target: key, after: overKey.value === key && overAfter.value })
       clearDrag()
     }
-    // 這台一定有 Claude 卡片（可加入帳號）；Codex 沒登入時也留著卡片寫登入說明
-    const curVendors = computed(() => {
-      const d = curDev.value
-      if (!d) return []
-      const list = Array.isArray(d.vendors) ? d.vendors.map(v => ({ ...v, accounts: v.accounts ?? [] })) : []
-      if (!d.self) return list
-      if (!list.some(v => v.key === 'claude')) list.unshift({ key: 'claude', label: 'Claude', accounts: [], switchable: false, switchHint: '' })
-      if (!list.some(v => v.key === 'codex')) {
-        const at = list.findIndex(v => v.key === 'claude') + 1
-        list.splice(at, 0, { key: 'codex', label: 'OpenAI（Codex）', accounts: [], note: props.st.accounts?.codexLine || '', switchable: false, switchHint: '' })
-      }
-      return list
-    })
     // 帳號頁：這個帳號可以切到哪幾台（本機的 Claude／Grok 帳號庫，或別台設備回報裡有這個帳號、對方 ASN 在線、可切換、而且它還沒在用的）
     const switchTargets = (vendor, a) => {
       if (vendor !== 'claude' && vendor !== 'grok') return []
@@ -178,27 +162,6 @@ export const SettingsPanel = {
       if (!switchTargets(vendor, a).some(x => x.node === b.node)) return
       act('row-switch', { vendor, email: a.account, node: b.node, label: b.label, self: b.self })
     }
-    // 設備頁的帳號列（#2111 ⑦）：一個帳號一行＋狀態標籤；狀態判斷用帳號頁同一套（device-account-lines.mjs）。
-    // 本機的 Claude 以本機帳號庫的清單為準（跟以前一樣），其餘用該設備回報的帳號。點一行＝交給樞紐開帳號頁，開好之後捲到、框起那張卡
-    const linesOf = v => deviceAccountLines(curDev.value, v, props.st.myAccounts, curDev.value?.self && v.key === 'claude' ? (props.st.accounts?.list ?? []).map(a => a.email) : null)
-    // 帳號行「⋯」的刪除：只有這台自己的 Claude 帳號庫能刪；選了「刪除」就在那一行原位問，確認才送 acct-remove（帶 confirmed），取消什麼都不送
-    const canRemove = v => curDev.value?.self === true && v.key === 'claude'
-    const askDel = ref('')
-    const pickLine = (l, key) => { if (key === 'remove') askDel.value = l.account }
-    const removeYes = l => { askDel.value = ''; act('acct-remove', { email: l.account, confirmed: true }) }
-    const focusKey = ref('')
-    let focusWant = '', focusTimer = null
-    const tryFocus = (tries = 0) => {
-      const el = typeof document === 'undefined' ? null : [...document.querySelectorAll('[data-acct-card]')].find(e => e.getAttribute('data-acct-card') === focusWant)
-      if (el) {
-        el.scrollIntoView?.({ block: 'center' })
-        focusKey.value = focusWant; focusWant = ''
-        clearTimeout(focusTimer); focusTimer = setTimeout(() => { focusKey.value = '' }, 2500)
-      } else if (focusWant && tries < 20) setTimeout(() => tryFocus(tries + 1), 100)   // 帳號列表還在讀：等它畫出來再捲
-      else focusWant = ''
-    }
-    const goAccount = line => { focusWant = line.key; act('open-accounts'); if (cat.value === 'accounts') tryFocus() }
-    watch(cat, c => { if (c === 'accounts' && focusWant) tryFocus() })
     // MiniMax 的輸入欄只留在元件裡：送出就清空，不進設定頁快照
     // 設備改名：名字只有一個（存在後台）；輸入只在這個元件裡，存的時候才交給樞紐
     const renaming = ref(false), renameText = ref('')
@@ -218,8 +181,9 @@ export const SettingsPanel = {
     const joined = computed(() => joinKnown(allDevs.value, peers.value))
     const removed = computed(() => removedDevices(allDevs.value, peers.value))
     const curKnown = computed(() => (curDev.value ? joined.value.byNode[curDev.value.key] ?? null : null))
-    // 「帳號」鈕：手機沒有帳號可看，不出這顆
-    const hasAcct = computed(() => !!curDev.value && (curDev.value.self || !curDev.value.phone))
+    // 被擋下的這台（指紋對不上）：詳情最上面出提示與「重新認這台」；正常的設備什麼都不出
+    const curBlocked = computed(() => isBlockedPeer(curKnown.value))
+    const blockedKey = key => isBlockedPeer(joined.value.byNode[key])   // 清單列上標「已擋下」
     // 指紋：本機看自己的、別台看認得的紀錄；都沒有就不顯示這一列（沒有可以做的事）
     const deviceFp = computed(() => (curDev.value?.self && props.st.known && props.st.known.ownFp ? groupFp(props.st.known.ownFp) : curKnown.value ? groupFp(curKnown.value.fingerprint) : ''))
     // 忘記前先確認：誤按會讓那台下次連線要重新確認指紋
@@ -235,10 +199,10 @@ export const SettingsPanel = {
       mmOpen.value = false
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, hasAcct, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
-      linesOf, goAccount, canRemove, askDel, pickLine, removeYes, ACCOUNT_REMOVE_MENU, ACCOUNT_REMOVE_TEXT, focusKey, accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
+    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
+      accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
-      cat, catIcon, ROSTER_TEXT, usedOnText, INSTALL_TEXT, DESK_RELOGIN_TEXT, AGENT_INSTALL_UI, switchTargets, devs, curDev, curVendors, askRemove, open, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
+      cat, catIcon, ROSTER_TEXT, usedOnText, DESK_RELOGIN_TEXT, switchTargets, devs, curDev, askRemove, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, lookShows, GH_REFS_LABEL, GH_REFS_NOTE,
       CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
@@ -309,7 +273,7 @@ export const SettingsPanel = {
                 <!-- 沒開額度上報：指到「設備 → 這台」的開關（讀額度的開關不放在帳號頁） -->
                 <div class="dv-vq" v-if="quotaGuideFor(v.key, st.quotaReaders)"><small class="dv-guide">{{ quotaGuideFor(v.key, st.quotaReaders) }}</small></div>
                 <ul class="dv-accts">
-                  <li :class="['dv-acct', { cur: accountInUseOf(v.key, a) }]" :data-flash="focusKey === accountCardKey(v.key, a.account) ? '1' : null" :data-acct-card="accountCardKey(v.key, a.account)" :data-status="accountStatusOf({ loginLost: loginLostOf(v.key, a), subLapsed: a.subLapsed, exhausted: a.quota.exhausted })" v-for="a in v.accounts" :key="a.account">
+                  <li :class="['dv-acct', { cur: accountInUseOf(v.key, a) }]" :data-acct-card="accountCardKey(v.key, a.account)" :data-status="accountStatusOf({ loginLost: loginLostOf(v.key, a), subLapsed: a.subLapsed, exhausted: a.quota.exhausted })" v-for="a in v.accounts" :key="a.account">
                     <span class="dv-who"><span class="dv-mail">{{ a.account }}</span><span class="dv-age" v-if="a.quota.ageLabel">{{ a.quota.ageLabel }}</span></span>
                     <span class="dv-side">
                       <span class="asn-tag-fail" v-if="a.subLapsed">{{ SUB_LAPSED_TEXT.tag }}</span>
@@ -386,7 +350,7 @@ export const SettingsPanel = {
               <li v-for="d in devs" :key="d.key" :data-dev="d.key" :class="['dv-row', { hid: d.hidden, off: !d.online, dragging: dragKey === d.key, 'drop-before': overKey === d.key && !overAfter, 'drop-after': overKey === d.key && overAfter }]" @dragover="dragOver(d.key, $event)" @drop="drop(d.key, $event)">
                 <asn-button level="text" class="dv-grip" v-if="!d.self" draggable="true" :aria-label="DEVICE_TEXT.gripLabel(d.label)" @dragstart="dragStart(d.key, $event)" @dragend="clearDrag" @keydown="gripKey(d.key, $event)"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 6h.01M16 6h.01M8 12h.01M16 12h.01M8 18h.01M16 18h.01" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></svg></asn-button>
                 <span class="dv-grip-gap" v-else aria-hidden="true"></span>
-                <span class="dv-row-go"><span class="dv-name">{{ d.label }}</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><span class="dv-tag warn noreport" v-if="d.reportTag">{{ d.reportTag }}</span><fp-mark v-if="d.phone && !d.self" :kind="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).kind" :label="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).label"></fp-mark><small class="dv-sub">{{ rowLine(d) }}</small></span>
+                <span class="dv-row-go"><span class="dv-name">{{ d.label }}</span><span class="dv-tag hid" v-if="d.hidden">{{ DEVICE_TEXT.hiddenTag }}</span><span class="dv-tag warn noreport" v-if="d.reportTag">{{ d.reportTag }}</span><span class="dv-tag warn blocked" v-if="blockedKey(d.key)">{{ KNOWN.blockedTag }}</span><fp-mark v-if="d.phone && !d.self" :kind="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).kind" :label="deskFpMark(joined.byNode[d.key], joined.byNode[d.key] && shortFp(joined.byNode[d.key].fingerprint)).label"></fp-mark><small class="dv-sub">{{ rowLine(d) }}</small></span>
                 <asn-button fixed :aria-label="DEVICE_TEXT.detailLabel(d.label)" @click.stop="openInfo(d.key)">{{ DEVICE_TEXT.detail }}</asn-button>
               </li>
             </ul>
@@ -410,11 +374,14 @@ export const SettingsPanel = {
               <span class="dv-tag me" v-if="curDev.self">這台</span>
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
             </div>
+            <div class="dv-block" role="alert" v-if="curBlocked && curKnown">
+              <p class="pair-warn">{{ KNOWN.reacceptNotice(curDev.identity.title) }}</p>
+              <asn-actions class="dv-card-act"><asn-button state="danger" class="dv-reaccept" :disabled="st.known.busy" @click="forget.askReaccept(curKnown)">{{ KNOWN.reaccept }}</asn-button></asn-actions>
+            </div>
             <div class="dv-tabs" role="group" aria-label="這台設備的內容">
               <asn-button class="dv-tasks" v-if="curDev.self && st.taskMgr" :aria-pressed="view === 'tasks'" @click="setView('tasks')">{{ TM.entry }}</asn-button>
               <asn-button :aria-pressed="view === 'info'" @click="setView('info')">詳情</asn-button>
               <asn-button v-if="curDev.self && st.known && st.known.ownFp" :aria-pressed="view === 'qr'" @click="setView('qr')">QR Code</asn-button>
-              <asn-button v-if="hasAcct" :aria-pressed="view === 'acct'" @click="setView('acct')">帳號</asn-button>
             </div>
             <div class="tm" v-if="view === 'tasks' && st.taskMgr">
               <div class="tm-bar">
@@ -475,7 +442,7 @@ export const SettingsPanel = {
                 <p class="pair-warn" v-if="st.known.error" role="alert">{{ st.known.error }}</p>
               </div>
             </div>
-            <div class="dv-cards" v-else-if="view === 'info'">
+            <div class="dv-cards" v-else>
               <div class="set-card">
                 <h3 class="set-h">{{ IDENTITY_TEXT.title }}</h3>
                 <small class="pair-warn" v-if="st.known && st.known.renameError" role="alert">{{ st.known.renameError }}</small>
@@ -542,13 +509,18 @@ export const SettingsPanel = {
                 </template>
                 <small role="status" v-if="st.quotaReaders.msg">{{ st.quotaReaders.msg }}</small>
               </div>
-              <div class="set-card" v-if="deviceFp">
+              <div class="set-card dv-safety" v-if="deviceFp || (curDev.self && st.accounts)">
                 <h3 class="set-h">連線安全</h3>
-                <dl class="dv-kv">
+                <dl class="dv-kv" v-if="deviceFp">
                   <dt>{{ KNOWN.fingerprint }}</dt>
                   <dd><code class="pair-fp" :aria-label="KNOWN.fingerprint">{{ deviceFp }}</code></dd>
                   <template v-if="curKnown && curKnown.firstSeen"><dt>第一次連線</dt><dd>{{ curKnown.firstSeen }}</dd></template>
                 </dl>
+                <template v-if="curDev.self && st.accounts">
+                  <label class="chk"><input type="checkbox" :checked="st.accounts.allowSwitch" @change="act('acct-allow-switch', $event.target.checked)" /><span>允許別台設備替這台切換帳號</span></label>
+                  <small>勾了之後，手機或別台設備可以替這台切換 Claude 帳號。</small>
+                  <small class="pair-warn" v-if="st.accounts.msg" role="status">{{ st.accounts.msg }}</small>
+                </template>
               </div>
               <div class="set-card" v-if="curKnown && (curDev.phone || curKnown.loginOk)">
                 <h3 class="set-h">信任</h3>
@@ -571,109 +543,11 @@ export const SettingsPanel = {
                     <asn-button v-if="canShowBackRow(curDev) && !askRemove" @click="act('device-show', curDev.key)">{{ DEVICE_TEXT.showBack }}</asn-button>
                     <asn-button state="danger" v-if="!askRemove" :disabled="!canRemoveRow(curDev)" @click="askRemove = true">{{ DEVICE_TEXT.remove }}</asn-button>
                   </template>
-                  <asn-button state="danger" v-if="curKnown" :disabled="st.known.busy" @click="forget.ask(curKnown)">{{ KNOWN.forget }}</asn-button>
                 </div>
                 <small class="dvid-why" v-if="!curDev.self && !canRemoveRow(curDev)">{{ ACTION_TEXT.removeOnline }}</small>
                 <asn-confirm v-if="askRemove" danger :text="DEVICE_TEXT.confirmRemove(curDev.identity.title)" :yes="DEVICE_TEXT.removeYes" :no="DEVICE_TEXT.cancel" @yes="removeNow" @no="askRemove = false"></asn-confirm>
-                <small v-if="curKnown">{{ KNOWN.forgetNote }}</small>
                 <p class="pair-warn" v-if="st.known && st.known.error" role="alert">{{ st.known.error }}</p>
               </div>
-            </div>
-            <div :class="['dv-body', { off: !curDev.online }]" v-else>
-              <div class="dv-empty" v-if="!curVendors.length"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h13v9H3zM1 18h17M19 8h3v11h-3z"></path></svg><span>{{ curDev.empty || '這台設備還沒有回報任何廠商' }}</span></div>
-              <ul class="dv-vendors" v-else>
-                <li :class="['dv-vendor', 'v-' + v.key]" v-for="v in curVendors" :key="v.key">
-                  <header class="dv-vh"><span class="dv-vicon" aria-hidden="true" v-html="vendorIcon(v.iconKey || v.key)"></span><b>{{ v.label }}</b><small class="dv-via" v-if="v.via">經 {{ v.via }}</small><small :class="['dv-state', 'st-' + v.state]" v-if="v.stateText">{{ v.stateText }}</small></header>
-                  <div class="dv-vb">
-                    <template v-if="curDev.self && v.key === 'claude'">
-                      <ul class="dv-accts asn-alines" v-if="linesOf(v).length" :aria-label="'這台的 ' + v.label + ' 帳號'">
-                        <li class="asn-aline" v-for="l in linesOf(v)" :key="l.key" :data-aline="l.key" :data-status="l.status">
-                          <div class="asn-aline-row">
-                            <asn-button class="asn-aline-go" :aria-label="'查看帳號 ' + l.account + '，' + l.tag" @click="goAccount(l)">
-                              <span class="asn-aline-mail">{{ l.account }}</span>
-                              <span class="asn-aline-side"><span :class="l.tagClass">{{ l.tag }}</span><span class="asn-aline-chev" aria-hidden="true">›</span></span>
-                            </asn-button>
-                            <asn-more-menu v-if="canRemove(v)" :items="ACCOUNT_REMOVE_MENU" :disabled="st.accounts.busy" :label="'更多動作 ' + l.account" @pick="pickLine(l, $event)"></asn-more-menu>
-                          </div>
-                          <asn-confirm danger v-if="canRemove(v) && askDel === l.account" :text="ACCOUNT_REMOVE_TEXT.confirm(l.account)" :yes="ACCOUNT_REMOVE_TEXT.yes" :no="ACCOUNT_REMOVE_TEXT.no" :busy="st.accounts.busy" @yes="removeYes(l)" @no="askDel = ''"></asn-confirm>
-                          <small :class="['asn-aline-note', l.status === 'lapsed' ? 'asn-note-fail' : 'asn-note-warn']" role="status" v-if="l.note">{{ l.note }}</small>
-                        </li>
-                      </ul>
-                      <div class="dv-none" v-else>還沒有加入過帳號。</div>
-                      <small v-if="st.accounts.current && !st.accounts.current.saved" class="acct-warn">目前登入的 {{ st.accounts.current.email }} 還沒加入帳號庫，ASN 會在一分鐘內自動加入，加入後才能切換到別的帳號。</small>
-                      <small v-else-if="st.accounts.currentErr" class="acct-warn" role="status">{{ st.accounts.currentErr }}。請確認 Claude 是否還登入著，或稍後再看。</small>
-                      <small v-else-if="!st.accounts.current">這台電腦目前沒有 Claude 登入。</small>
-                      <small v-if="st.accounts.autoNote" role="status">{{ st.accounts.autoNote }}</small>
-                      <small role="status">{{ st.accounts.msg }}</small>
-                      <small v-if="modLine(st.accounts.mod)" role="status">{{ modLine(st.accounts.mod) }}</small>
-                      <label class="chk"><input type="checkbox" :checked="st.accounts.allowSwitch" @change="act('acct-allow-switch', $event.target.checked)" /><span>允許切換帳號</span></label>
-                      <small>讓手機或別台設備替這台切換帳號。</small>
-                      <div class="dv-install" v-if="AGENT_INSTALL_UI && st.install && ((v.action && v.action.kind === 'local') || st.install.stage === 'running' || st.install.stage === 'done')">
-                        <template v-if="st.install.stage === 'idle'">
-                          <asn-button level="primary" :disabled="st.install.button.disabled" @click="act('install-ask')">{{ INSTALL_TEXT.button }}</asn-button>
-                          <small class="acct-warn" v-if="st.install.button.hint">{{ st.install.button.hint }}</small>
-                          <small v-if="st.install.msg" role="status">{{ st.install.msg }}</small>
-                        </template>
-                        <div class="dv-confirm" role="alertdialog" :aria-label="INSTALL_TEXT.confirmTitle" v-else-if="st.install.stage === 'confirm'">
-                          <b>{{ INSTALL_TEXT.confirmTitle }}</b>
-                          <p>{{ st.install.plan }}</p>
-                          <asn-actions class="dv-ibtns">
-                            <asn-button @click="act('install-no')">{{ INSTALL_TEXT.confirmNo }}</asn-button>
-                            <asn-button level="primary" @click="act('install-yes')">{{ INSTALL_TEXT.confirmYes }}</asn-button>
-                          </asn-actions>
-                        </div>
-                        <div class="dv-prog" role="status" aria-live="polite" v-else>
-                          <b :class="['dv-ptitle', st.install.kind]">{{ st.install.title }}</b>
-                          <p v-for="(l, i) in st.install.lines" :key="i" :class="{ note: i > 0 }">{{ l }}</p>
-                          <small v-if="st.install.stage === 'running'">{{ INSTALL_TEXT.progressNote }}</small>
-                          <span class="dv-ibtns">
-                            <asn-button v-if="st.install.stage === 'running'" :disabled="!st.install.canCancel" @click="act('install-cancel')">{{ INSTALL_TEXT.cancel }}</asn-button>
-                            <asn-button v-if="st.install.stage === 'done' && st.install.terminal" @click="act('install-terminal')">{{ INSTALL_TEXT.openTerminal }}</asn-button>
-                            <asn-button v-if="st.install.stage === 'done'" @click="act('install-close')">{{ INSTALL_TEXT.close }}</asn-button>
-                          </span>
-                        </div>
-                      </div>
-                      <label class="chk" v-if="AGENT_INSTALL_UI && st.install"><input type="checkbox" :checked="st.install.remoteAllow" @change="act('install-allow', $event.target.checked)" /><span>{{ INSTALL_TEXT.allowRemote }}</span></label>
-                      <small v-if="AGENT_INSTALL_UI && st.install">{{ INSTALL_TEXT.allowRemoteNote }}</small>
-                    </template>
-                    <template v-else>
-                      <ul class="dv-accts asn-alines" v-if="v.accounts.length" :aria-label="'這台的 ' + v.label + ' 帳號'">
-                        <li class="asn-aline" v-for="l in linesOf(v)" :key="l.key" :data-aline="l.key" :data-status="l.status">
-                          <asn-button class="asn-aline-go" :aria-label="'查看帳號 ' + l.account + '，' + l.tag" @click="goAccount(l)">
-                            <span class="asn-aline-mail">{{ l.account }}</span>
-                            <span class="asn-aline-side"><span :class="l.tagClass">{{ l.tag }}</span><span class="asn-aline-chev" aria-hidden="true">›</span></span>
-                          </asn-button>
-                          <small :class="['asn-aline-note', l.status === 'lapsed' ? 'asn-note-fail' : 'asn-note-warn']" role="status" v-if="l.note">{{ l.note }}</small>
-                        </li>
-                      </ul>
-                      <div class="dv-none" v-else><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v4M12 16h.01"></path></svg>{{ v.note || '目前未回報任何帳號' }}</div>
-                      <small v-if="v.switchHint">{{ v.switchHint }}</small>
-                    </template>
-                    <div class="dv-install dv-relogin" v-if="v.key === 'claude' && st.relogin && ((v.relogin && v.relogin.kind) || (st.relogin.target === curDev.key && st.relogin.stage !== 'idle'))">
-                      <template v-if="st.relogin.target !== curDev.key || st.relogin.stage === 'idle'">
-                        <asn-button state="relogin" @click="act('relogin-ask', { node: curDev.key, kind: v.relogin.kind })">{{ DESK_RELOGIN_TEXT.button }}</asn-button>
-                      </template>
-                      <div class="dv-confirm" role="alertdialog" :aria-label="st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localTitle : DESK_RELOGIN_TEXT.remoteTitle(curDev.label)" v-else-if="st.relogin.stage === 'confirm'">
-                        <b>{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localTitle : DESK_RELOGIN_TEXT.remoteTitle(curDev.label) }}</b>
-                        <p>{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localBody : DESK_RELOGIN_TEXT.remoteBody }}</p>
-                        <small v-if="st.relogin.kind !== 'local'">{{ DESK_RELOGIN_TEXT.remoteNeed }}</small>
-                        <asn-actions class="dv-ibtns">
-                          <asn-button @click="act('relogin-no')">{{ DESK_RELOGIN_TEXT.no }}</asn-button>
-                          <asn-button level="primary" @click="act('relogin-yes')">{{ st.relogin.kind === 'local' ? DESK_RELOGIN_TEXT.localYes : DESK_RELOGIN_TEXT.remoteYes }}</asn-button>
-                        </asn-actions>
-                      </div>
-                      <div class="dv-prog" :role="st.relogin.stage === 'done' && !st.relogin.ok ? 'alert' : 'status'" aria-live="polite" v-else>
-                        <p v-if="st.relogin.lead">{{ st.relogin.lead }}</p>
-                        <p>{{ st.relogin.text }}</p>
-                        <p class="note" v-if="st.relogin.note">{{ st.relogin.note }}</p>
-                        <span class="dv-ibtns" v-if="st.relogin.stage === 'done'">
-                          <asn-button @click="act('relogin-close')">{{ DESK_RELOGIN_TEXT.close }}</asn-button>
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              </ul>
             </div>
           </section>
         </div>
@@ -903,11 +777,11 @@ export const SettingsPanel = {
         </section>
         <small class="about-maker">{{ about.maker }}</small>
       </template>
-      <asn-dialog v-if="forgetBox" :title="KNOWN.forgetTitle" initial-focus=".forget-cancel" @close="forget.no">
+      <asn-dialog v-if="forgetBox" :title="forgetBox.title" initial-focus=".forget-cancel" @close="forget.no">
         <p class="launch-notice-body">{{ forgetBox.text }}</p>
         <asn-actions class="partner-actions">
           <asn-button class="forget-cancel" @click="forget.no">{{ KNOWN.forgetCancel }}</asn-button>
-          <asn-button state="danger" @click="forget.yes">{{ KNOWN.forgetYes }}</asn-button>
+          <asn-button state="danger" @click="forget.yes">{{ forgetBox.yes }}</asn-button>
         </asn-actions>
       </asn-dialog>
     </div>`,

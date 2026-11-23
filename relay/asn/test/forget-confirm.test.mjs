@@ -35,13 +35,33 @@ test('取消不送 known-forget；按「忘記」才送，參數是那筆的 id'
   c.ask({}); assert.equal(box.value, null, '沒有 id 不開確認框')
 })
 
-test('畫面接線：兩顆「忘記」都先問；確認框預設焦點在取消', () => {
+test('畫面接線：「忘記」與「重新認這台」都先問；確認框預設焦點在取消', () => {
   assert.doesNotMatch(panel, /@click="act\('known-forget'/, '不能繞過確認直接忘記')
-  assert.equal((panel.match(/forget\.ask\(/g) ?? []).length, 2, '詳情和已移除的設備兩顆')
+  assert.equal((panel.match(/forget\.ask\(/g) ?? []).length, 1, '只剩已移除的設備那一顆「忘記」')
+  assert.equal((panel.match(/forget\.askReaccept\(/g) ?? []).length, 1, '被擋下的「重新認這台」一顆')
   assert.match(panel, /forget\.ask\(r\.peer\)">\{\{ DEVICE_TEXT\.forget \}\}</)
   assert.match(panel, /<asn-dialog v-if="forgetBox"[^>]*initial-focus="\.forget-cancel"/)
   assert.match(panel, /<asn-button class="forget-cancel"[^>]*forget\.no[^>]*>\{\{ KNOWN\.forgetCancel \}\}/)
-  assert.match(panel, /forget\.yes[^>]*>\{\{ KNOWN\.forgetYes \}\}/)
+  assert.match(panel, /forget\.yes[^>]*>\{\{ forgetBox\.yes \}\}/, '確認鈕的字跟著問的是哪一種')
   assert.equal(TEXT.forgetYes, '忘記')
   assert.equal(TEXT.forgetCancel, '取消')
+})
+
+test('「重新認這台」：確認句寫明按下去會發生什麼；確認才送 known-forget，取消不送', () => {
+  const calls = [], box = { value: null }
+  const c = createForgetConfirm({ box, forget: id => calls.push(['known-forget', id]) })
+  c.askReaccept({ id: 'n9', label: '工作機', fingerprint: 'aaaabbbbcccc' })
+  assert.equal(box.value.title, TEXT.reacceptTitle)
+  assert.equal(box.value.yes, TEXT.reacceptYes)
+  assert.match(box.value.text, /清掉記住的指紋/)
+  assert.match(box.value.text, /下次連上來會當成第一次/)
+  assert.match(box.value.text, /剛重灌或換掉/)
+  assert.match(box.value.text, /沒動過它，不要按，並告訴管理的人/)
+  assert.ok(box.value.text.includes('「工作機」'))
+  assert.doesNotMatch(box.value.text, /aaaa|undefined|null/, '不寫指紋、不出現 undefined')
+  c.no()
+  assert.deepEqual(calls, [])
+  c.askReaccept({ id: 'n9', label: '工作機' }); c.yes()
+  assert.deepEqual(calls, [['known-forget', 'n9']], '行為同忘記：清掉釘住的指紋')
+  c.askReaccept({}); assert.equal(box.value, null)
 })

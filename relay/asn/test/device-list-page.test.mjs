@@ -123,7 +123,7 @@ const devs = () => [
 ]
 const render = async (props, state = { devices: devs(), accounts: ACCT }) => {
   globalThis.Vue = Vue
-  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', catKey: 'devices', devView: 'acct', ...props }) }))
+  return renderToString(Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st: state, meAv: '', catKey: 'devices', ...props }) }))
 }
 
 test('頁首：設定視窗標題已是「設備與帳號」，面板裡不再重複一個標題；說明文字、「重新整理」、「已隱藏的設備」展開區、橫向頁籤都拿掉了', async () => {
@@ -173,24 +173,24 @@ test('滑鼠拖放與整列點擊：整列 @click 進細部頁（按鈕區不觸
   assert.ok(SETTING_OPS.includes('device-reorder') && read('ui/list.js').includes("case 'device-reorder'"))
 })
 
-test('進入細部頁（dev 指到那台）：頂部「‹ 返回」＋原本的廠商→帳號內容；列表消失', async () => {
+test('進入細部頁（dev 指到那台）：頂部「‹ 返回」＋詳情（沒有帳號內容）；列表消失', async () => {
   const html = await render({ dev: 'W' })
   assert.match(html, /class="[^"]*dv-back[^"]*"[^>]*>‹</)
   assert.match(html, /<h3 class="dv-name">工作機<\/h3>/)
-  assert.ok(html.includes('dv-vendor') && html.includes('W@b.c'))
+  assert.ok(!html.includes('dv-vendor') && !html.includes('W@b.c'), '帳號只在設定的「帳號」頁')
   assert.ok(!html.includes('class="dv-list"'))
   assert.ok(SettingsPanel.template.includes('@click="backToList"'))
-  assert.ok(!html.includes('顯示回名單') && !html.includes('永久移除'), '沒隱藏的設備沒有這兩個動作')
+  assert.ok(!html.includes('顯示回名單'), '沒隱藏的設備沒有「顯示回名單」')
   assert.ok(!(await render({ dev: 'H' })).includes('永久移除'), '本機沒有隱藏／移除動作')
   assert.ok((await render({ dev: 'zzz' })).includes('class="dv-list"'), '認不得的鍵退回列表')
   assert.ok((await render({ dev: 'X' })).includes('class="dv-list"'), '已移除的設備進不了細部頁')
 })
 
-test('被隱藏設備的細部頁：標「已隱藏」，頂部有「顯示回名單」與「永久移除」，廠商與帳號內容仍在', async () => {
-  const html = await render({ dev: 'G', devView: 'info' })
+test('被隱藏設備的細部頁：標「已隱藏」，頂部有「顯示回名單」與「永久移除」', async () => {
+  const html = await render({ dev: 'G' })
   assert.match(html, /dv-tag off[^>]*>已隱藏/)
   assert.match(html, /class="dv-card-act"[\s\S]*>顯示回名單<[\s\S]*>永久移除</)
-  assert.ok((await render({ dev: 'G' })).includes('G@b.c'), '帳號頁仍有廠商與帳號')
+  assert.ok(!html.includes('G@b.c'), '詳情沒有帳號')
   assert.ok(SettingsPanel.template.includes("act('device-show', curDev.key)"))
   assert.ok(!html.includes('確定永久移除'), '還沒按永久移除前不顯示確認')
 })
