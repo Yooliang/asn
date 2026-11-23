@@ -15,9 +15,8 @@ const files = walk(UI).filter(f => /\.m?js$/.test(f)).filter(f => rel(f) !== 'li
 const src = f => fs.readFileSync(f, 'utf8')
 
 // 待搬清單：各檔直接呼叫 invoke( 的次數（含註解裡的字樣）。後續分組搬遷時，搬完一個檔就刪一行或改小數字。
-export const PENDING = {
-  'lib/account-roster.mjs': 2,
-}
+// #2106 已全部搬完；之後新增直接 invoke 一律會紅
+export const PENDING = {}
 
 test('除 tauri.mjs 外，不准直接呼叫 __TAURI__.core.invoke', () => {
   const bad = files.filter(f => /(__TAURI__|\bT)\??\.core\??\.invoke/.test(src(f))).map(rel)
@@ -352,4 +351,22 @@ test('⑬：m.js 與 quota-readers 不再直接 invoke、走具名出口', () =>
   for (const call of ['api.get()', 'api.set(source, on === true)', 'api.minimaxAdd(mail, k)', 'api.minimaxRemove(email)', 'api.shareCreate(vendor, account)', 'api.shareRevoke(vendor, account)']) assert.ok(qr.includes(call), call)
   const ex = src(path.join(UI, 'lib/tauri.mjs'))
   for (const c of ['android_acct_list', 'android_acct_switch', 'android_acct_status', 'android_acct_roster', 'quota_readers_get', 'quota_readers_set', 'quota_minimax_add', 'quota_minimax_remove', 'quota_share_create', 'quota_share_revoke']) assert.ok(ex.includes(`'${c}'`), c)
+})
+
+// ---- ⑭：account-roster：只剩註解裡的兩處字樣，改成指向出口；指令名與參數與以前相同 ----
+test('⑭：account-roster 不再有 invoke( 字樣，待搬清單為空，指令名在出口', async () => {
+  const s = src(path.join(UI, 'lib', 'account-roster.mjs'))
+  assert.ok(!/(?<![\w.$])invoke\(/.test(s), 'account-roster.mjs 還有 invoke(')
+  assert.ok(!s.includes("'acct_roster'") && !s.includes("'android_acct_roster'"), '指令名還寫在呼叫端')
+  assert.ok(s.includes('makeAccountsApi().roster') && s.includes('mobileAccountApi.roster'))
+  assert.deepEqual(PENDING, {})
+  const calls = []
+  const m = await load(async (cmd, args) => { calls.push([cmd, args]); return null })
+  await m.makeAccountsApi().roster(); await m.makeMobileAccountApi().roster()
+  assert.deepEqual(calls, [['acct_roster', undefined], ['android_acct_roster', undefined]])
+  const ex = src(path.join(UI, 'lib/tauri.mjs'))
+  for (const c of ['acct_roster', 'android_acct_roster']) assert.ok(ex.includes(`'${c}'`), c)
+  // 呼叫端仍走出口：電腦（claude-accounts）與手機（m.js）
+  assert.ok(src(path.join(UI, 'lib/claude-accounts.mjs')).includes('api.roster()'))
+  assert.ok(src(path.join(UI, 'm.js')).includes('mobileAccountApi.roster()'))
 })
