@@ -1,6 +1,8 @@
 // 夥伴卡在要人處理的框上太久（todo-next-162）：驗證收發室送來的內容。
 // 節點一律取自金鑰；這裡只收視窗名、種類、選擇框的問題和選項。
-const KINDS = new Set(["permission", "input", "other", "login"]);
+const KINDS = new Set(["permission", "input", "other", "login", "forward_stuck", "forward_stuck_manual"]);
+// 收發室轉交連續被擋（#2146 ③）：detail 只收固定的原因代號、tool 只收次數（1～2 位數字），不收任何自由文字
+const STUCK_REASONS = new Set(["frame", "no_id", "missing_fields", "recipient_conflict", "wrong_to", "head_mismatch", "not_in_flight", "record_unreadable"]);
 const WINDOW_MAX = 60;
 const DETAIL_MAX = 600;
 // deno-lint-ignore no-control-regex
@@ -16,6 +18,11 @@ export function parseWaitingNotice(body: unknown): WaitingNotice | null {
   if (!window || [...window].length > WINDOW_MAX) return null;
   if (b.detail !== undefined && b.detail !== null && typeof b.detail !== "string") return null;
   // 內容只有選擇框才收：權限框與 hook 框就算送來也丟掉，不讓指令內容進後台
+  if (b.kind === "forward_stuck" || b.kind === "forward_stuck_manual") {
+    const reason = typeof b.detail === "string" && STUCK_REASONS.has(b.detail) ? b.detail : null;
+    const count = typeof b.tool === "string" && /^[0-9]{1,2}$/.test(b.tool) ? b.tool : null;
+    return { window, kind: b.kind, detail: reason, tool: count };
+  }
   const raw = b.kind === "input" && typeof b.detail === "string" ? b.detail.replace(CONTROL, " ").trim() : "";
   const detail = raw ? [...raw].slice(0, DETAIL_MAX).join("") : null;
   // 工具名只有權限框才收，而且只收一般字元

@@ -29,3 +29,10 @@ Deno.test("login：只收視窗名，內容與工具名都丟掉", () => {
   assertEquals(parseWaitingNotice({ window: " asn雯 ", kind: "login", detail: "x", tool: "Bash" }), { window: "asn雯", kind: "login", detail: null, tool: null });
   assertEquals(parseWaitingNotice({ window: "", kind: "login" }), null);
 });
+
+Deno.test("forward_stuck：只收固定的原因代號與 1～2 位數字的次數，其餘丟掉", () => {
+  assertEquals(parseWaitingNotice({ window: "T-收發室", kind: "forward_stuck", detail: "frame", tool: "3" }), { window: "T-收發室", kind: "forward_stuck", detail: "frame", tool: "3" });
+  assertEquals(parseWaitingNotice({ window: "T-收發室", kind: "forward_stuck_manual", detail: "wrong_to", tool: "3" })?.kind, "forward_stuck_manual");
+  assertEquals(parseWaitingNotice({ window: "T-收發室", kind: "forward_stuck", detail: "信件內文：機密", tool: "rm -rf /" }), { window: "T-收發室", kind: "forward_stuck", detail: null, tool: null });
+  assertEquals(parseWaitingNotice({ window: "T-收發室", kind: "forward_stuck", detail: "frame", tool: "123" })?.tool, null);
+});

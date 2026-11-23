@@ -2242,6 +2242,7 @@ mod quota_it;
 mod exact_it;
 mod e2e_real;
 mod gate_it;
+mod rotate_it;
 mod mux_it;
 mod wait_it;
 mod respond_it;

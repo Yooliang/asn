@@ -29,6 +29,7 @@ mod upstream_retry;
 mod held_notice;
 mod login_notice;
 mod misroute;
+pub mod rotate;
 mod quota;
 mod dev_prefix;
 mod selftest;
@@ -473,6 +474,8 @@ pub struct Core {
     room_fail_notices: HashMap<(String, String), (u64, u32)>,
     /// 這個 worker 啟動以來回報失敗幾次
     pub(super) worker_fails: u32,
+    /// 同一種被擋原因連續幾次就換一輪新對話（#2146 ③）：計數與換輪狀態
+    pub(super) rotate: rotate::RotateState,
     /// 已經通知過送錯的編號（每個編號只通知一次）
     misroute_notified: HashSet<String>,
     /// 轉交給 worker 的來信是誰寄的（編號 → 來源）：送錯通知寄件人用；只存記憶體，數量有上限
@@ -634,7 +637,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), reject_notified: HashSet::new(), room_trig: HashMap::new(), up_retry: Default::default(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, remote_flags_sent: None, remote_flags_fails: 0, remote_flags_fail_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, login_alerts: Default::default(), login_retry_at: 0, mux_notice_retry_at: 0, mux_resume_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, just_closed: Default::default(), wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
+            wait_alerts: Default::default(), wait_retry_at: 0, login_alerts: Default::default(), login_retry_at: 0, mux_notice_retry_at: 0, mux_resume_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, just_closed: Default::default(), wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, rotate: Default::default(), late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
         };
         c.restore();
         for w in &outbox_logs {
@@ -2053,6 +2056,8 @@ impl Core {
                 self.parser.reset_process();
                 self.respond_open = false; // worker 重啟：舊的一輪不會再有結果了
                 self.end_fwd_turn("worker restarted");
+                self.rotate_note_started();
+                self.rotate_resend();
             }
             WorkerLine::Exited(_) => {
                 self.respond_open = false;
@@ -2072,6 +2077,7 @@ impl Core {
                     match ev {
                         WorkerEvent::Sent(id) => {
                             self.quota_release("worker reported sent"); // worker 真的在工作＝額度恢復
+                            self.rotate_note_ok();
                             // 原文替換的那封：要有 hook 寫的已套用紀錄、而且雜湊對得上才算送出
                             if let Some(h) = self.exact_ids.remove(&id) {
                                 let ok = super::forward_gate::read_applied(&self.cfg.work_dir, &id).as_deref() == Some(h.as_str());
@@ -2083,6 +2089,7 @@ impl Core {
                             }
                             self.on_sent(&id).await
                         }
+                        WorkerEvent::GateDenied(kind) => self.on_gate_denied(kind).await,
                         WorkerEvent::Fail(id, reason) => {
                             self.quota_release("worker reported fail");
                             self.count_worker_fail();
@@ -2891,6 +2898,7 @@ impl Core {
         self.quota_tick(now).await;
         self.flush_owner_receipts(now).await;
         self.wait_notice_tick(now).await;
+        self.rotate_tick(now).await;
         self.login_notice_tick(now).await;
         self.mux_notice_tick(now).await;
         self.mux_resume_notice_tick(now).await;

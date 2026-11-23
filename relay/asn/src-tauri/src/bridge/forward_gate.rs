@@ -75,6 +75,68 @@ pub fn no_id_reason(raw: &str) -> String {
     "訊息第一行行尾沒有轉交編號（id=…）：message 要是 <<<MAIL 與 MAIL>>> 這兩行中間的內容，第一行是 [RELAY 來信]…，一字不改，不要在前面加任何字".into()
 }
 
+/// 閘門退回的原因分類（#2146 ③）。連續被擋「同一類」才算同一種原因：退回理由的整串文字裡有編號、收件人名，每次都不一樣，不能拿來比對。
+/// 分類只看這份檔案裡各個退回理由固有的關鍵句；理由改字時，下面 classify_deny 的測試（逐一呼叫 check／no_id_reason）會變紅
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DenyKind {
+    /// 帶了 <<<MAIL／MAIL>>> 外框或橋接指令標頭，或內容只剩外框
+    Frame,
+    /// 第一行行尾沒有轉交編號
+    NoId,
+    /// 缺少 to 或 message 欄位
+    MissingFields,
+    /// recipient 與 to 兩個收件人欄位不一致
+    RecipientConflict,
+    /// 收件人填錯
+    WrongTo,
+    /// 抬頭（第一行）與橋送出的不一致
+    HeadMismatch,
+    /// 轉交編號不在進行中
+    NotInFlight,
+    /// 轉交紀錄檔暫時讀不到
+    RecordUnreadable,
+}
+
+impl DenyKind {
+    /// 固定代號：寫 bridge.log、也是通知後台時帶的原因（後台只認這幾個字）
+    pub fn code(self) -> &'static str {
+        match self {
+            DenyKind::Frame => "frame",
+            DenyKind::NoId => "no_id",
+            DenyKind::MissingFields => "missing_fields",
+            DenyKind::RecipientConflict => "recipient_conflict",
+            DenyKind::WrongTo => "wrong_to",
+            DenyKind::HeadMismatch => "head_mismatch",
+            DenyKind::NotInFlight => "not_in_flight",
+            DenyKind::RecordUnreadable => "record_unreadable",
+        }
+    }
+}
+
+/// 把閘門退回給模型的理由文字歸成一類；認不得的（不是閘門的退回）回 None，不算被擋
+pub fn classify_deny(reason: &str) -> Option<DenyKind> {
+    let has = |s: &str| reason.contains(s);
+    if has("缺少 to（收件人）") {
+        Some(DenyKind::MissingFields)
+    } else if has("兩個收件人欄位不一致") {
+        Some(DenyKind::RecipientConflict)
+    } else if has("第一行不可以是 <<<MAIL") || has("外框而中間沒有內容") || has("橋接指令的標頭") {
+        Some(DenyKind::Frame)
+    } else if has("沒有轉交編號") {
+        Some(DenyKind::NoId)
+    } else if has("收件人應為") {
+        Some(DenyKind::WrongTo)
+    } else if has("訊息抬頭") {
+        Some(DenyKind::HeadMismatch)
+    } else if has("不在進行中") {
+        Some(DenyKind::NotInFlight)
+    } else if has("轉交紀錄檔暫時讀不到") {
+        Some(DenyKind::RecordUnreadable)
+    } else {
+        None
+    }
+}
+
 /// 第一行（不含換行符，也去掉行尾的 \r 與空白）
 pub fn first_line(text: &str) -> &str {
     text.split('\n').next().unwrap_or("").trim_end()

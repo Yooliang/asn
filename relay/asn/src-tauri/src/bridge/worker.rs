@@ -114,6 +114,8 @@ pub fn forward_text(nonce: &str, id: &str, to: &str, mail_text: &str) -> String 
 pub enum WorkerEvent {
     Sent(String),
     Fail(String, String),
+    /// 收發室的 SendMessage 被轉交閘門擋下（#2146 ③）：只帶原因分類，不帶理由文字
+    GateDenied(super::forward_gate::DenyKind),
     Reply { from: String, text: String },
     /// 核對轉交對象：worker 帶著這封的編號呼叫 SendMessage 並且成功，但收件人不是橋指定的（expected）。
     /// 對方的收件匣已經收到那封信（可能已被讀取）；不算轉交成功
@@ -207,6 +209,16 @@ pub enum ToolOutcome {
 }
 
 /// 判讀 tool_result 的內容（可能是字串、物件，或文字區塊的陣列）
+/// 工具結果的文字內容（字串，或一串 {text}）接在一起
+pub fn tool_result_text(c: &serde_json::Value) -> String {
+    match c.get("content") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(a)) => a.iter().filter_map(|x| x.get("text").and_then(|t| t.as_str())).collect::<Vec<_>>().join("
+"),
+        _ => String::new(),
+    }
+}
+
 pub fn tool_result_outcome(c: &serde_json::Value) -> ToolOutcome {
     if c.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
         return ToolOutcome::Failed;
@@ -244,6 +256,8 @@ pub struct Parser {
     /// 已經算轉交成功的編號（重新登記就拿掉）：之後才說 FAIL 不算失敗
     sent_ids: std::collections::VecDeque<String>,
     send_calls: HashMap<String, PendingCall>,
+    /// 所有 SendMessage 呼叫的 tool_use id（連沒有編號、不在 send_calls 的也記）：工具結果被閘門退回時要認得出來
+    send_tids: std::collections::VecDeque<String>,
     /// 這一輪送錯的呼叫（編號, 預定, 實際）：輪結束時才通報，同一輪裡有對的呼叫就先算 Sent
     misrouted_buf: Vec<(String, String, String)>,
     /// 橋送出每一封第一行的指紋（編號 → sha256）：呼叫的訊息第一行要完全一樣才算數
@@ -339,7 +353,7 @@ pub fn has_foreign_nonce(txt: &str, nonce: &str) -> bool {
 
 impl Parser {
     pub fn new(nonce: &str) -> Parser {
-        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), sent_ids: Default::default(), send_calls: HashMap::new(), misrouted_buf: vec![], heads: HashMap::new(), bodies: HashMap::new(), originals: HashMap::new(), originals_bytes: 0, dirty: false, warned_unrecognized: false, last_cost: 0.0 }
+        Parser { nonce: nonce.into(), inflight: vec![], recent: Default::default(), sent_ids: Default::default(), send_calls: HashMap::new(), send_tids: Default::default(), misrouted_buf: vec![], heads: HashMap::new(), bodies: HashMap::new(), originals: HashMap::new(), originals_bytes: 0, dirty: false, warned_unrecognized: false, last_cost: 0.0 }
     }
     /// 轉交一封信前登記（id → 目標視窗）
     pub fn register(&mut self, id: &str, to: &str) {
@@ -426,6 +440,7 @@ impl Parser {
     /// worker 重啟：舊的追蹤全部作廢（成本計數歸零）
     pub fn reset_process(&mut self) {
         self.send_calls.clear();
+        self.send_tids.clear();
         self.last_cost = 0.0;
     }
     /// 轉交成功（有工具呼叫佐證）：只在這個編號還在進行中時通報一次
@@ -486,6 +501,10 @@ impl Parser {
                 if ty == "assistant" && ct == "tool_use" && c.get("name").and_then(|v| v.as_str()) == Some("SendMessage") {
                     // 核對轉交對象：看訊息第一行行尾的編號、收件人是不是橋指定的（to；recipient／content 有出現就必須與 to／message 一致）
                     let tid = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    if self.send_tids.len() >= 64 {
+                        self.send_tids.pop_front();
+                    }
+                    self.send_tids.push_back(tid.to_string());
                     let Some(call) = c.get("input").and_then(super::forward_gate::parse_send_call) else { continue };
                     // 和閘門同一套容錯：模型誤帶的 <<<MAIL／MAIL>>> 外框與前後空白先拿掉，再看編號、比抬頭
                     let msg = super::forward_gate::strip_frame(&call.message);
@@ -504,6 +523,15 @@ impl Parser {
                     self.send_calls.insert(tid.into(), PendingCall { id, expected, actual, correct });
                 } else if ty == "user" && ct == "tool_result" {
                     let tid = c.get("tool_use_id").and_then(|v| v.as_str()).unwrap_or("");
+                    // 被轉交閘門退回的 SendMessage（工具結果 is_error，內容是退回理由）：只回報原因分類
+                    if let Some(pos) = self.send_tids.iter().position(|t| t == tid) {
+                        self.send_tids.remove(pos);
+                        if c.get("is_error").and_then(|v| v.as_bool()) == Some(true) {
+                            if let Some(k) = super::forward_gate::classify_deny(&tool_result_text(c)) {
+                                out.events.push(WorkerEvent::GateDenied(k));
+                            }
+                        }
+                    }
                     if let Some(call) = self.send_calls.remove(tid) {
                         let outcome = tool_result_outcome(c);
                         if outcome == ToolOutcome::Unknown && !self.warned_unrecognized {
