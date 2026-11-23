@@ -170,6 +170,8 @@ pub mod guard;   // ASN 意外關閉時自動重開（工作排程每 5 分鐘�
 #[cfg(desktop)]
 mod tts;
 #[cfg(feature = "gui")]
+mod log_report;   // 電腦與手機共用（#2129 ②）：送記錄給開發者的預覽與寄出，遮罩只在這一層
+#[cfg(feature = "gui")]
 mod ui_log;   // 電腦與手機共用（#2129 ①）：手機的 ui_log 指令與其他記錄都走同一個 append
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -2436,6 +2438,30 @@ fn ui_log(app: State<'_, App>, lines: Vec<String>) -> Result<usize, String> {
     ui_log::append(&app.work_dir, &lines)
 }
 
+/// 送記錄給開發者：預覽（#2129 ②）。範圍 "1h"、"24h"、"7d"，沒給＝24 小時。回遮罩後的全文、行數、位元組數、各種遮了幾處
+#[cfg(feature = "gui")]
+#[tauri::command(async)]
+fn log_report_preview(app: State<'_, App>, range: Option<String>) -> Result<Value, String> {
+    let r = log_report::Range::parse(range.as_deref())?;
+    Ok(log_report::collect(&app.work_dir, r, auth::now_ms() as i64, &identity::home_dir().to_string_lossy()).to_json())
+}
+
+/// 送記錄給開發者：寄出（#2129 ②）。收件處（log_report::RECIPIENT_ROOM）沒設定就直接回錯、完全不碰網路；有設定才以群組附件寄出（要本人簽章）
+#[cfg(feature = "gui")]
+#[tauri::command]
+async fn log_report_send(app: State<'_, App>, auth: State<'_, auth::AuthState>, range: Option<String>) -> Result<Value, String> {
+    // 先擋收件處，再取登入憑證與連線：沒設定時不做任何網路相關的事
+    log_report::check_recipient(log_report::RECIPIENT_ROOM)?;
+    let r = relay_of(&app)?;
+    let token = account::signing_token(&auth).await;
+    let http = reqwest::Client::new();
+    let home = identity::home_dir().to_string_lossy().to_string();
+    log_report::send_with(log_report::RECIPIENT_ROOM, &app.work_dir, range.as_deref(), auth::now_ms() as i64, &home, |payload| async move {
+        attach::send_attachment_signed(&r, &http, &payload, token.as_deref()).await.map(|_| Value::Null)
+    })
+    .await
+}
+
 /// 收發橋與夥伴啟動相關紀錄的路徑（不含金鑰）。
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -3365,7 +3391,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, launch_cwd_remove, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, launch_cwd_remove, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, log_report_preview, log_report_send, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, quit_app,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_report, claude_mod::claude_mod_check, claude_quota::claude_quota_state,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
@@ -3382,7 +3408,7 @@ pub fn run() {
     #[cfg(not(desktop))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         startup_info, relay_list, relay_inbox, relay_ack, relay_rooms, relay_group, invite_pending, relay_send, relay_chat_history, relay_read_sync, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_avatar, relay_partner_avatar, relay_set_avatar,
-        set_presence, set_foreground, device_name_align, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, ui_log, open_link,
+        set_presence, set_foreground, device_name_align, store_load, store_save, quit_app, capture_ui_ready, shot_frontend_log, ui_log, log_report_preview, log_report_send, open_link,
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_chat_pins_get, account::auth_chat_pins_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
