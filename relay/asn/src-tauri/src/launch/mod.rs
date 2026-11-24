@@ -35,7 +35,7 @@ pub mod mux_round;
 #[cfg(all(feature = "gui", not(test)))]
 pub use auto_resume::{boot_ms, probe_window};
 mod subagents;
-mod tasks;
+pub(crate) mod tasks;
 pub(crate) mod switch;
 #[cfg(desktop)]
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]

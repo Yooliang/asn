@@ -14,7 +14,7 @@ export const RESULT_MAX_BYTES = 4096;
 // 模型字串：1～60 字，只允許英數與 . _ [ ] -（命令列旗標的值，不能夾空白、引號、分號）
 export const MODEL_RE = /^[A-Za-z0-9._\[\]-]{1,60}$/;
 // 階段代號：stage:handoff／closing／opening（detail 欄位只放這種固定格式，畫面依它顯示中文）
-const STAGE_RE = /^stage:[a-z]{1,20}$/;
+const STAGE_RE = /^stage:[a-z]{1,20}(:[0-9]{1,3})?$/; // #1908：可帶件數，例如 stage:agents:3
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const ERROR_TEXT: Record<string, string> = {

@@ -30,7 +30,7 @@ export const MODEL_RE = /^[A-Za-z0-9._[\]-]{1,60}$/
 export const OP_POLL_MS = 3000
 export const OP_GIVE_UP_MS = 3 * 60 * 1000   // 後台 2 分鐘沒被取走會自己標失敗；這裡多留一分鐘
 export const QUEUE_GIVE_UP_MS = 15 * 60 * 1000   // 改名、切換模型遇到視窗忙碌，外掛會排隊等閒置（電腦端最多等 10 分鐘），處理中的上限放寬
-export const HANDOVER_GIVE_UP_MS = 15 * 60 * 1000   // 換班接手要等前任寫交接（最久 10 分鐘），處理中的上限放寬
+export const HANDOVER_GIVE_UP_MS = 3 * 60 * 60 * 1000 + 10 * 60 * 1000   // 換班接手要等前任把子代理做完再寫交接（電腦端最久等 3 小時，#1908），處理中的上限要比它長
 
 // 那台電腦自己回報的「不開放遠端開新視窗」原因句（launch_closed_reason）：逐字要與 src-tauri/src/bridge/launcher.rs 的 CLOSED_NO_* 相同（test 有對照）
 export const CLOSED_REASONS = Object.freeze({
@@ -359,7 +359,16 @@ export const HANDOVER_STEPS = [
   { key: 'closing', text: '關閉前任視窗' },
   { key: 'opening', text: '開新視窗' },
 ]
-const stageOf = detail => /^stage:([a-z]+)$/.exec(String(detail ?? ''))?.[1] ?? ''
+const stageOf = detail => /^stage:([a-z]+)(?::\d{1,3})?$/.exec(String(detail ?? ''))?.[1] ?? ''
+// 階段代號後面帶的件數（stage:agents:3 → 3）；沒帶或不是 1 以上的整數就是 null（#1908：拿不到件數不猜）
+const stageCount = detail => {
+  const n = Number(/^stage:[a-z]+:(\d{1,3})$/.exec(String(detail ?? ''))?.[1])
+  return Number.isInteger(n) && n >= 1 ? n : null
+}
+// 換班接手等前任把子代理做完：寫得出件數就寫「等 N 個子代理做完」，寫不出就「等它把手上的工作做完」
+export function agentsWaitText(n) {
+  return n ? `等 ${n} 個子代理做完…（第 1／${HANDOVER_STEPS.length} 步）` : `等它把手上的工作做完…（第 1／${HANDOVER_STEPS.length} 步）`
+}
 // 喚醒找不到對話紀錄：電腦端回報的原句（與 src-tauri/src/bridge/partner_ops.rs 的 NO_RECORD 逐字相同，測試會對照）與後台的代號
 export const NO_RECORD_TEXT = '找不到原本的對話紀錄，只能開新的夥伴'
 export const NO_RECORD_CODE = 'no_session'
@@ -427,7 +436,8 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
       if (waited > limit) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }
       if (op === 'handover') {
         const stage = stageOf(row.detail)
-        const at = HANDOVER_STEPS.findIndex(s => s.key === stage)
+        if (stage === 'agents') return { phase: 'working', done: false, text: agentsWaitText(stageCount(row.detail)) }
+        const at =HANDOVER_STEPS.findIndex(s => s.key === stage)
         return { phase: 'working', done: false, text: at >= 0 ? `${HANDOVER_STEPS[at].text}中…（第 ${at + 1}／${HANDOVER_STEPS.length} 步）` : '正在處理…' }
       }
       if (stageOf(row.detail) === 'queued') return { phase: 'working', done: false, text: '排隊中，等它忙完…' }

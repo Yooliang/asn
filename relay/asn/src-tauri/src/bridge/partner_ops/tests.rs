@@ -796,7 +796,8 @@ fn 換班接手_請前任寫交接_等檔案_關前任_同名開新_不帶_resum
     assert_eq!(told.len(), 1);
     assert_eq!(told[0].0, "目標");
     let root = r.handoff.join(HANDOFF_SUBDIR).join("目標");
-    let path = told[0].1.strip_prefix("要換手了：請把交接寫到 ").and_then(|s| s.strip_suffix("，寫完回覆『交接完成』。")).unwrap().to_string();
+    let first_line = told[0].1.lines().next().unwrap();
+    let path = first_line.strip_prefix("要換手了：請把交接寫到 ").and_then(|s| s.strip_suffix("，寫完回覆『交接完成』。")).unwrap().to_string();
     assert!(Path::new(&path).starts_with(&root) && path.ends_with(".md"), "{path}");
     assert_eq!(*r.env.terminated_at_tell.lock().unwrap(), Some(0), "請前任寫交接時還沒關任何程序");
     // 2. 關前任、同名開新對話
@@ -805,7 +806,7 @@ fn 換班接手_請前任寫交接_等檔案_關前任_同名開新_不帶_resum
     assert!(!argv.iter().any(|a| a == "--resume" || a == "sid-220" || a == "--continue" || a == "--session-id"), "同名開新，不帶 --resume：{argv:?}");
     assert!(argv_has(&argv, &["-n", "目標"]) && argv_has(&argv, &["--model", "opus"]), "{argv:?}");
     // 3. 第一句話：前任對話紀錄完整路徑（從最後往前看）＋交接檔＋補充的話；有寫完就不寫「沒有寫完」
-    let want = format!("你是『目標』的下一任，前任的上下文用完了。先讀前任最後一段對話紀錄 {}（從最後往前看）和交接檔 {path}，接著把手上的工作做下去。\n前任交代：先看 PR 12。\n再跑測試。", transcript.display());
+    let want = format!("你是『目標』的下一任，前任的上下文用完了。先讀前任最後一段對話紀錄 {}（從最後往前看）和交接檔 {path}，接著把手上的工作做下去。\n交接檔裡若列有只存在前任視窗裡的排程（CronCreate 這類），第一件事先把它們排回去，再做別的。\n前任交代：先看 PR 12。\n再跑測試。", transcript.display());
     assert_eq!(&argv[argv.len() - 2..], ["--".to_string(), want]);
     let v = res.result.unwrap();
     assert_eq!((v["session_id"].as_str(), v["handoff_path"].as_str(), v["handoff_done"].as_bool()), (Some("sid-new"), Some(path.as_str()), Some(true)));
@@ -881,20 +882,131 @@ fn 對話紀錄的模型_只看助理回覆_跳過不是真模型的名字_壞�
 }
 
 #[test]
-fn 換班接手_前任沒寫完_逾時仍會換手_第一句話註明() {
+fn 換班接手守門_前任沒寫完或請求送不進去_不關舊視窗_不開新視窗() {
+    // #1908：交接寫完之前不准關。等到逾時（沒寫）與請求送不進視窗，都是失敗、舊視窗原樣留著
     for tell_fails in [false, true] {
         let r = rig(Opt::default());
         write_old_transcript(&r);
         r.env.write_on_tell.store(false, Ordering::SeqCst);
         r.env.tell_fails.store(tell_fails, Ordering::SeqCst);
         let res = r.run("handover", json!({}));
-        assert_eq!(res.status, "ok", "逾時照樣換手：{}", res.detail);
-        let argv = r.launched().remove(0).2;
-        let prompt = argv.last().unwrap();
-        assert!(prompt.contains("前任沒有寫完交接"), "{prompt}");
-        assert!(r.terminated().contains(&220));
-        assert_eq!(res.result.unwrap()["handoff_done"], false);
+        assert_eq!(res.status, "failed", "沒寫完不換班：{}", res.detail);
+        assert!(res.detail.contains("舊視窗沒有關"), "{}", res.detail);
+        // 兩種原因各說各的：請求送不進去不能被「等逾時」的結果蓋過去
+        assert!(res.detail.contains(if tell_fails { "送不進" } else { "等了很久" }), "{}", res.detail);
+        assert!(r.terminated().is_empty(), "舊視窗不能關：{:?}", r.terminated());
+        assert!(r.launched().is_empty(), "不能開新視窗");
     }
+}
+
+#[test]
+fn 換班接手_請求文字要求先等子代理做完_並把只在舊視窗裡的排程寫進交接() {
+    let r = rig(Opt::default());
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let told = r.env.told.lock().unwrap()[0].1.clone();
+    assert!(told.contains("子代理做完") && told.contains("結果收好") && told.contains("再開始寫交接"), "{told}");
+    assert!(told.contains("CronCreate") && told.contains("排回去"), "{told}");
+    // 新視窗的第一句話也要它先把排程排回去
+    let prompt = r.launched().remove(0).2.pop().unwrap();
+    assert!(prompt.contains("CronCreate") && prompt.contains("第一件事先把它們排回去"), "{prompt}");
+}
+
+fn tasks_status(subagents: usize) -> Value {
+    let items: Vec<Value> = (0..subagents).map(|i| json!({ "id": format!("a{i}"), "desc": "審查", "kind": "subagent", "st": "run" })).collect();
+    json!({ "sessionId": "sid-220", "state": "background", "detail": format!("背景工作 {subagents} 件"), "at": NOW, "turnId": "t", "plugin": "asn@1", "tasks": items })
+}
+
+#[test]
+fn 換班接手_有子代理在跑_進度寫等_n_個_做完前不關舊視窗_寫完才關() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    r.status_file("sid-220", tasks_status(2));
+    let told = r.env.told_path.clone();
+    let polls = Arc::new(AtomicUsize::new(0));
+    let early_close = Arc::new(AtomicBool::new(false));
+    let (p2, e2) = (polls.clone(), early_close.clone());
+    let terminated = r.env.os.clone();
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        let n = p2.fetch_add(1, Ordering::SeqCst) + 1;
+        if !terminated.terminated.lock().unwrap().is_empty() { e2.store(true, Ordering::SeqCst); }
+        // 子代理一直在跑，第 12 次輪詢才把交接寫出來
+        if n >= 12 {
+            if let Some(p) = told.lock().unwrap().clone() {
+                std::fs::create_dir_all(Path::new(&p).parent().unwrap()).unwrap();
+                std::fs::write(&p, "# 交接\n子代理的結果").unwrap();
+            }
+        }
+    }));
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(!early_close.load(Ordering::SeqCst), "交接檔寫完之前不能關舊視窗");
+    assert!(polls.load(Ordering::SeqCst) >= 12, "有等");
+    let prog = r.env.progress.lock().unwrap().clone();
+    assert_eq!(prog, vec!["stage:handoff", "stage:agents:2", "stage:closing", "stage:opening"], "{prog:?}");
+}
+
+#[test]
+fn 換班接手_拿不到子代理件數_回報不帶數字的等待階段() {
+    // 外掛的狀態檔看不出視窗（sessionId 對不上＝找不到這個視窗的狀態）→ 查詢不到件數，不猜
+    let v = json!({ "ok": true, "known": false, "count": 0, "idle": 0, "items": [] });
+    assert_eq!(handoff_wait::agents_from_query(&v), None);
+    assert_eq!(handoff_wait::agents_stage(None, 0, false).as_deref(), Some("agents"));
+    assert_eq!(handoff_wait::agents_stage(None, 0, true).as_deref(), Some("agents"));
+}
+
+#[test]
+fn 子代理件數與階段_只算在跑的子代理_讀到_0_要連續幾次才改口() {
+    let q = |items: Value, count: u64| json!({ "ok": true, "known": true, "count": count, "idle": 0, "items": items });
+    // 子代理與 teammate 算，在跑的才算；shell 與閒置的不算
+    let items = json!([
+        { "id": "a", "kind": "subagent", "st": "run" }, { "id": "b", "kind": "teammate", "st": "run" },
+        { "id": "c", "kind": "subagent", "st": "idle" }, { "id": "d", "kind": "shell", "st": "run" },
+    ]);
+    assert_eq!(handoff_wait::agents_from_query(&q(items, 3)), Some(2));
+    // 舊外掛沒有清單，只有總件數：用總件數
+    assert_eq!(handoff_wait::agents_from_query(&q(json!([]), 4)), Some(4));
+    assert_eq!(handoff_wait::agents_from_query(&json!({ "ok": false, "reason": "缺少名字" })), None);
+    assert_eq!(handoff_wait::agents_stage(Some(3), 0, false).as_deref(), Some("agents:3"));
+    assert_eq!(handoff_wait::agents_stage(Some(0), 0, false), None, "一開始就沒有子代理：畫面維持寫交接中");
+    assert_eq!(handoff_wait::agents_stage(Some(0), 2, true), None, "忙碌那一輪暫時讀不到清單，不立刻改口");
+    assert_eq!(handoff_wait::agents_stage(Some(0), 3, true).as_deref(), Some("handoff"));
+}
+
+#[test]
+fn 換班接手_等的時候舊視窗被關掉_失敗_不開新視窗() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    let os = r.env.os.clone();
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || { os.alive.lock().unwrap().remove(&220); }));
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "failed");
+    assert!(res.detail.contains("被關掉"), "{}", res.detail);
+    assert!(r.launched().is_empty());
+}
+
+#[test]
+fn 換班接手_等待中放行本人按關閉_換班結束後恢復一次一件() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    let ops = r.ops.clone();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let s2 = seen.clone();
+    let told = r.env.told_path.clone();
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        s2.lock().unwrap().push((ops.close_allowed_during_handoff("close", "目標"), ops.close_allowed_during_handoff("rename", "目標"), ops.close_allowed_during_handoff("close", "別人")));
+        if let Some(p) = told.lock().unwrap().clone() {
+            std::fs::create_dir_all(Path::new(&p).parent().unwrap()).unwrap();
+            std::fs::write(&p, "# 交接\nx").unwrap();
+        }
+    }));
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(seen.lock().unwrap().iter().all(|x| *x == (true, false, false)), "等待中只放行這個視窗的關閉：{:?}", seen.lock().unwrap());
+    assert!(!r.ops.close_allowed_during_handoff("close", "目標"), "換班結束後不再放行");
 }
 
 #[test]
@@ -914,8 +1026,8 @@ fn 換班接手_交接檔大小還在變_不算寫完_穩定了才算() {
         }
     }));
     let res = r.run("handover", json!({}));
-    assert_eq!(res.status, "ok");
-    assert_eq!(res.result.unwrap()["handoff_done"], false, "大小一直在變＝還沒寫完");
+    assert_eq!(res.status, "failed", "大小一直在變＝還沒寫完，不換班");
+    assert!(r.terminated().is_empty(), "沒寫完不關舊視窗");
 }
 
 #[test]

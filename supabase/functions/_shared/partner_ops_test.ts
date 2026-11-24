@@ -100,7 +100,9 @@ Deno.test("節點動作：pending／result 只帶自己的節點；result 狀態
   const stage = await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: ID, detail: "stage:handoff", node: "W" });
   assertEquals(stage, { status: 200, body: { ok: true } });
   assertEquals(calls[calls.length - 1], { fn: "asn_relay_partner_op_progress", args: { p_node: "H", p_id: ID, p_detail: "stage:handoff" } });
-  for (const bad of ["請前任寫交接", "stage:", "stage:Handoff", "stage:a b", 5, null]) assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: ID, detail: bad })).status, 400, String(bad));
+  // #1908：階段代號可帶件數
+  assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: ID, detail: "stage:agents:3" })).status, 200);
+  for (const bad of ["請前任寫交接", "stage:", "stage:Handoff", "stage:a b", "stage:agents:", "stage:agents:x", "stage:agents:1234", "stage:agents:3:4", 5, null]) assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: ID, detail: bad })).status, 400, String(bad));
   assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_progress", { id: "nope", detail: "stage:x" })).status, 400);
   assertEquals((await handleNodePartnerOpAction(deps, { id: "H" }, "partner_op_result", { id: "nope", status: "ok" })).status, 400);
   const before = calls.length;

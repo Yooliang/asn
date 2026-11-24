@@ -200,7 +200,9 @@ test('對話框文字：重開要確認、換班接手依引擎說不同的事�
   assert.ok(acp.points.some(p => /不會請前任寫交接/.test(p)))
   assert.equal(acp.title, '開新對話'); assert.equal(acp.ok, '開新對話'); assert.ok(acp.points.some(p => /往來記錄/.test(p)), '開新對話要說明會帶入往來記錄')
   const claude = opDialogText('handover', '小文', '')
-  assert.ok(claude.points.some(p => /先請它把交接寫到一個檔案/.test(p)))
+  assert.ok(claude.points.some(p => /先請它把手上的子代理做完，再把交接寫到一個檔案/.test(p)), '#1908：說明先等子代理')
+  assert.ok(claude.points.some(p => /寫完才關掉它的視窗/.test(p) && /關閉視窗/.test(p)), '#1908：說明寫完才關，以及卡住時的出口')
+  assert.ok(!claude.points.some(p => /最久等十分鐘|沒寫完也會繼續/.test(p)), '舊的「逾時照樣繼續」說法不能留著')
   for (const t of [r, acp, claude]) for (const s of [t.title, t.lead, t.ok, ...t.points]) assert.ok(!/[A-Za-z]{4,}/.test(s.replace('Gemini', '')), `純中文：${s}`)
 })
 
