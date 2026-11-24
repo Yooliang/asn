@@ -141,7 +141,7 @@ fn clean_prompt_line(line: &str) -> String {
 }
 
 /// 去掉控制字元與會改變顯示順序、藏字的字元（不處理空白）：零寬字元、方向控制、行／段分隔、軟連字號、標籤字元等
-fn strip_unsafe(s: &str) -> String {
+pub(crate) fn strip_unsafe(s: &str) -> String {
     s.chars()
         .filter(|c| {
             !c.is_control()

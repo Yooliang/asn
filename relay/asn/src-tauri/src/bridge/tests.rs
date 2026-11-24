@@ -2246,6 +2246,7 @@ mod gate_it;
 mod rotate_it;
 mod mux_it;
 mod wait_it;
+mod stuck_prompt_it;
 mod respond_it;
 mod rooms_launch;
 mod self_pull_it;
