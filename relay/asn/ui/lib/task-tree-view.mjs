@@ -62,7 +62,7 @@ export const TaskNode = {
     </div>
     <div class="tm-act" @click.stop @keydown.stop>
       <asn-button state="danger" class="tm-stop" v-if="!node.viewOnly && !node.handing" :disabled="!node.canStop || busy" :title="node.why" :aria-label="TM.stop + ' ' + node.name" @click="$emit('act', 'tm-ask', node.key)">{{ TM.stop }}</asn-button>
-      <small class="tm-viewonly" v-else-if="node.showViewOnly" :title="node.why">{{ TM.viewOnly }}</small>
+      <small class="tm-viewonly" v-else-if="node.showViewOnly && !restart" :title="node.why">{{ TM.viewOnly }}</small><!-- 有「重啟」的列（ASN、終端服務）不寫「只能看」，免得跟旁邊的重啟矛盾（#1860 F） -->
       <small class="tm-why" v-if="!node.viewOnly && !node.canStop && node.why">{{ node.why }}</small>
       <asn-button class="tm-handover" v-if="node.canHandover" :disabled="busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + node.name" @click="$emit('act', 'tm-handover', node.name)">{{ TM.handover }}</asn-button>
       <asn-button class="tm-view-btn" v-if="node.canView" :disabled="busy" :title="TM.viewTip" :aria-label="TM.view + ' ' + node.name" @click="$emit('act', 'tm-view', node.name)">{{ TM.view }}</asn-button>
