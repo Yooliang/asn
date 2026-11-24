@@ -126,6 +126,12 @@ pub fn step(s: BtnState, ev: Ev) -> Step {
     }
 }
 
+/// 視窗改大小、換螢幕／縮放（WM_SIZE、WM_DPICHANGED）：前端還沒重新量好矩形之前，滑過與按下的狀態都不可信，
+/// 一律清掉並通知網頁離開（沒有滑過、也沒按下就不通知）。
+pub fn reset_on_layout_change(s: BtnState) -> Step {
+    step(s, Ev::Leave)
+}
+
 /// 前端事件名；內容是上面的 notify 字串
 pub const EVENT: &str = "asn:snap-max";
 
@@ -262,6 +268,23 @@ mod tests {
         assert!(!step(leave.state, Ev::Up).toggle);
         // 本來就沒滑過時離開不通知
         assert_eq!(step(BtnState::default(), Ev::Leave).notify, None);
+    }
+
+    #[test]
+    fn 改大小或縮放時清掉滑過與按下並通知離開() {
+        let hover = step(BtnState::default(), Ev::Move).state;
+        let r = reset_on_layout_change(hover);
+        assert_eq!(r.notify, Some("leave"), "滑過中改大小：網頁要收到離開");
+        assert_eq!(r.state, BtnState::default());
+        assert!(!r.toggle);
+        let down = step(hover, Ev::Down).state;
+        let r = reset_on_layout_change(down);
+        assert_eq!(r.notify, Some("leave"), "按下中改大小：取消按下");
+        assert_eq!(r.state, BtnState::default());
+        // 清掉之後在新位置放開不能算點擊
+        assert!(!step(r.state, Ev::Up).toggle);
+        // 本來就閒置：不通知，避免每次改大小都發事件
+        assert_eq!(reset_on_layout_change(BtnState::default()).notify, None);
     }
 
     #[test]
