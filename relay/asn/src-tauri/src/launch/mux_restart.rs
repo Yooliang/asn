@@ -83,7 +83,17 @@ pub enum RestartError {
     NoMux,
     /// 失敗：原始原因（只寫 log）
     Failed(String),
+    /// 終端服務裡有 ASN 沒有記錄的視窗（數字是多出幾個）：重啟會把它們一起關掉又接不回，所以不重啟
+    Unmanaged(usize),
+    /// 舊服務已停、新的起不來：代理現在是斷線的（原因只寫 log）；名單已存，再按一次重啟會接回
+    Down(String),
 }
+
+/// 起新服務失敗時給畫面的白話字
+pub const DOWN_TEXT: &str = "重啟終端服務沒有完成，底下的代理目前斷線。請再按一次重啟。";
+
+/// 重啟前核對發現「終端服務裡有 ASN 沒記錄的視窗」時給畫面的白話字（使用者能做的事：先關掉那些視窗）
+pub const UNMANAGED_TEXT: &str = "終端服務裡有 ASN 沒有記錄的視窗，重啟會把它們一起關掉又接不回，所以沒有重啟。請先關掉那些視窗再試。";
 
 impl RestartError {
     /// 給畫面的白話字
@@ -91,8 +101,16 @@ impl RestartError {
         match self {
             RestartError::NoMux => NO_MUX_TEXT,
             RestartError::Failed(_) => FAIL_TEXT,
+            RestartError::Unmanaged(_) => UNMANAGED_TEXT,
+            RestartError::Down(_) => DOWN_TEXT,
         }
     }
+}
+
+/// 起新服務失敗、代理斷線時通知本人：走現有的「接回結果」通知（斷了幾位、接回 0 位、哪些沒接回；後台文字固定）。
+/// 白話說明（「重啟終端服務沒有完成，N 個代理目前斷線，請到工作管理員再按一次重啟」）寫進 mux.log，並隨回給畫面的錯誤顯示
+pub fn notify_down(work_dir: &std::path::Path, names: &[String], now_ms: u64) {
+    super::mux_round::queue_resume_notice(work_dir, names.len(), names, now_ms);
 }
 
 /// 兩份名單合併、同名只留一位（先出現的在前）
@@ -110,17 +128,24 @@ fn merge(first: Vec<String>, second: Vec<String>) -> Vec<String> {
 /// - `has_mux`：這台有沒有終端服務；沒有就什麼都不做
 /// - `stash`：上次起不來時存下的名單；本次成功起來才清掉
 /// - `snapshot`：重啟前的夥伴名單；`None`＝讀不到（不是沒有夥伴），回錯、不停服務
-/// - `stop`：停服務；失敗就回錯，**不**起新的（「沒有服務在跑」由呼叫端當成功傳回 Ok）
-/// - `ensure`：起新的；失敗就回錯、不接回，名單存進 `stash`
+/// - `verify`：停之前核對終端服務實際的窗格與 ASN 的記錄；對不上就回錯、不停服務
+/// - `stop`：停服務；失敗就回錯，**不**起新的（「沒有服務在跑」由呼叫端當成功傳回 Ok）。
+///   停止記號：`stop` 寫、失敗時由 `stop` 清；起新的失敗時**留著**（監看看到舊服務消失時不重複當事故，由 `down` 與存下的名單接手），
+///   記號綁舊服務的程序編號與時間，之後換成別的服務就不再放過（見 mux_watch 的測試）
+/// - `ensure`：起新的；失敗就回錯、不接回，名單存進 `stash`，並呼叫 `down`（通知本人代理斷了）
 /// - `resume`：把名單交給接回（原因「重啟」、不計冷卻）
+/// - `down`：起新的失敗、有夥伴斷線時呼叫（排通知、寫 log）
 /// - `note`：寫 mux.log 的一行
+#[allow(clippy::too_many_arguments)]
 pub fn run_steps(
     has_mux: bool,
     stash: &Stash,
     snapshot: impl FnOnce() -> Option<Vec<String>>,
+    verify: impl FnOnce() -> Result<(), RestartError>,
     stop: impl FnOnce() -> Result<(), String>,
     ensure: impl FnOnce() -> Result<(), String>,
     resume: impl FnOnce(Vec<String>),
+    down: impl FnOnce(&[String]),
     note: &dyn Fn(&str),
 ) -> Result<(), RestartError> {
     if !has_mux {
@@ -131,6 +156,12 @@ pub fn run_steps(
         note(&format!("工作管理員重啟終端服務：{e}"));
         return Err(RestartError::Failed(e));
     };
+    if let Err(e) = verify() {
+        if let RestartError::Unmanaged(n) = &e {
+            note(&format!("工作管理員重啟終端服務：終端服務裡有 {n} 個視窗不在 ASN 的記錄上，重啟會一起關掉它們，不重啟"));
+        }
+        return Err(e);
+    }
     let names = merge(stash.get(), now_names);
     note(&format!("工作管理員重啟終端服務：重啟前有 {} 位夥伴", names.len()));
     if let Err(e) = stop() {
@@ -138,9 +169,13 @@ pub fn run_steps(
         return Err(RestartError::Failed(e));
     }
     if let Err(e) = ensure() {
-        stash.set(names);
+        stash.set(names.clone());
         note(&format!("工作管理員重啟終端服務：新的起不來：{e}"));
-        return Err(RestartError::Failed(e));
+        if !names.is_empty() {
+            note(&format!("工作管理員重啟終端服務沒有完成，{} 個代理目前斷線，請到工作管理員再按一次重啟", names.len()));
+            down(&names);
+        }
+        return Err(RestartError::Down(e));
     }
     stash.set(Vec::new());
     note("工作管理員重啟終端服務：新的已起來，接回夥伴");
@@ -154,6 +189,10 @@ mod tests {
     use std::cell::RefCell;
 
     fn flow_with(stash: &Stash, snap: Option<Vec<String>>, stop: Result<(), String>, ensure: Result<(), String>) -> (Result<(), RestartError>, Vec<String>) {
+        flow_full(stash, snap, Ok(()), stop, ensure)
+    }
+
+    fn flow_full(stash: &Stash, snap: Option<Vec<String>>, verify: Result<(), RestartError>, stop: Result<(), String>, ensure: Result<(), String>) -> (Result<(), RestartError>, Vec<String>) {
         let calls = RefCell::new(Vec::<String>::new());
         let r = run_steps(
             true,
@@ -161,6 +200,10 @@ mod tests {
             || {
                 calls.borrow_mut().push("名單".into());
                 snap
+            },
+            || {
+                calls.borrow_mut().push("核對".into());
+                verify
             },
             || {
                 calls.borrow_mut().push("停".into());
@@ -171,6 +214,7 @@ mod tests {
                 ensure
             },
             |n| calls.borrow_mut().push(format!("接回{}", n.join("、"))),
+            |n| calls.borrow_mut().push(format!("通知{}位{}", n.len(), n.join("、"))),
             &|_| {},
         );
         (r, calls.into_inner())
@@ -182,7 +226,7 @@ mod tests {
 
     fn flow(has_mux: bool, stop: Result<(), String>, ensure: Result<(), String>) -> (Result<(), RestartError>, Vec<String>) {
         if !has_mux {
-            let r = run_steps(false, &Stash::new(), || panic!("不該抓名單"), || panic!("不該停"), || panic!("不該起"), |_| panic!("不該接回"), &|_| {});
+            let r = run_steps(false, &Stash::new(), || panic!("不該抓名單"), || panic!("不該核對"), || panic!("不該停"), || panic!("不該起"), |_| panic!("不該接回"), |_| panic!("不該通知"), &|_| {});
             return (r, Vec::new());
         }
         flow_with(&Stash::new(), two(), stop, ensure)
@@ -192,22 +236,67 @@ mod tests {
     fn _1860f_順序是抓名單_停_起_接回() {
         let (r, calls) = flow(true, Ok(()), Ok(()));
         assert!(r.is_ok());
-        assert_eq!(calls, ["名單", "停", "起", "接回甲、乙"]);
+        assert_eq!(calls, ["名單", "核對", "停", "起", "接回甲、乙"]);
     }
 
     #[test]
-    fn _1860f_停不掉就不起新的也不接回() {
+    fn _1860f_停不掉就不起新的也不接回_也不通知斷線() {
         let (r, calls) = flow(true, Err("沒有結束".into()), Ok(()));
         assert_eq!(r, Err(RestartError::Failed("沒有結束".into())));
-        assert_eq!(calls, ["名單", "停"], "停失敗不能再起（舊的還活著）");
+        assert_eq!(calls, ["名單", "核對", "停"], "停失敗不能再起（舊的還活著）；舊的還在，代理沒斷，不發斷線通知");
     }
 
     #[test]
     fn _1860f_起不來回錯_不接回() {
         let (r, calls) = flow(true, Ok(()), Err("連不上".into()));
-        assert_eq!(r.as_ref().unwrap_err().text(), FAIL_TEXT, "畫面講白話");
-        assert!(matches!(r, Err(RestartError::Failed(ref e)) if e == "連不上"), "原文留給 log");
-        assert_eq!(calls, ["名單", "停", "起"]);
+        assert_eq!(r.as_ref().unwrap_err().text(), DOWN_TEXT, "畫面講白話：沒完成、代理斷線、再按一次");
+        assert!(matches!(r, Err(RestartError::Down(ref e)) if e == "連不上"), "原文留給 log");
+        assert_eq!(calls, ["名單", "核對", "停", "起", "通知2位甲、乙"], "起不來：不接回，但要通知本人代理斷了");
+    }
+
+    /// 二審 1：起不來也要把「代理斷了」講給本人（通知）；名單是空的（沒有代理斷）就不吵
+    #[test]
+    fn _1860f_起不來_有代理斷線才通知() {
+        let (_, calls) = flow_with(&Stash::new(), Some(Vec::new()), Ok(()), Err("連不上".into()));
+        assert_eq!(calls, ["名單", "核對", "停", "起"], "沒有代理就沒有東西斷線，不發通知");
+        let stash = Stash::new();
+        stash.set(vec!["丙".into()]);
+        let (_, calls) = flow_with(&stash, Some(Vec::new()), Ok(()), Err("連不上".into()));
+        assert_eq!(calls.last().unwrap(), "通知1位丙", "重按又失敗：存下的名單照樣通知");
+    }
+
+    /// 二審 1：斷線通知走現有的接回結果通知：斷了 N 位、接回 0 位、名字是沒接回的那些
+    #[test]
+    fn _1860f_斷線通知_走接回結果通知() {
+        let d = tempfile::tempdir().unwrap();
+        notify_down(d.path(), &["甲".to_string(), "乙".to_string()], 42);
+        let n = super::super::mux_round::read_resume_notice(d.path()).expect("通知排出去了");
+        assert_eq!((n.0, n.1, n.2), (2, 0, vec!["甲".to_string(), "乙".to_string()]));
+    }
+
+    /// 二審 1：指令真的把斷線通知接上（起不來時由 run_steps 呼叫 down）
+    #[test]
+    fn _1860f_指令接上斷線通知() {
+        let lib = include_str!("../lib.rs");
+        let cmd = lib.split("async fn task_manager_restart_mux").nth(1).unwrap().split("async fn ").next().unwrap();
+        assert!(cmd.contains("notify_down("), "起不來要通知本人");
+    }
+
+    /// 二審 2：核對發現終端服務裡有 ASN 沒記錄的視窗：不停、不起、不接回、不通知；畫面是白話字
+    #[test]
+    fn _1860f_核對不過就不動服務() {
+        let (r, calls) = flow_full(&Stash::new(), two(), Err(RestartError::Unmanaged(2)), Ok(()), Ok(()));
+        assert_eq!(r, Err(RestartError::Unmanaged(2)));
+        assert_eq!(r.unwrap_err().text(), UNMANAGED_TEXT);
+        assert_eq!(calls, ["名單", "核對"]);
+    }
+
+    /// 二審 5：名單是空的（Some 空）不是讀不到：照常停、起、接回（接回空名單）
+    #[test]
+    fn _1860f_名單是空的_照常重啟() {
+        let (r, calls) = flow_with(&Stash::new(), Some(Vec::new()), Ok(()), Ok(()));
+        assert!(r.is_ok());
+        assert_eq!(calls, ["名單", "核對", "停", "起", "接回"]);
     }
 
     #[test]
@@ -228,7 +317,7 @@ mod tests {
         // 重按：服務已經不在（stop 由呼叫端當成功）、對照表已被清空
         let (r2, calls) = flow_with(&stash, Some(Vec::new()), Ok(()), Ok(()));
         assert!(r2.is_ok());
-        assert_eq!(calls, ["名單", "停", "起", "接回甲、乙"], "用存下的名單接回");
+        assert_eq!(calls, ["名單", "核對", "停", "起", "接回甲、乙"], "用存下的名單接回");
         assert!(stash.get().is_empty(), "接回之後清掉，不重複接回");
     }
 
@@ -267,6 +356,37 @@ mod tests {
         assert!(Restarting::begin().is_none(), "重啟 ASN 中不能重啟終端服務");
         drop(b);
         drop(Restarting::begin().expect("清掉後可再重啟"));
+    }
+
+    /// 二審 5：重啟終端服務的中途（停了、新的還沒起之間）重啟 ASN 被擋；流程結束（成功或失敗）後才放行
+    #[test]
+    fn _1860f_重啟終端服務中途_重啟_asn_被擋() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        for ensure_ok in [true, false] {
+            let mark = Restarting::begin().expect("拿到記號");
+            let blocked = RefCell::new(Vec::<bool>::new());
+            let r = run_steps(
+                true,
+                &Stash::new(),
+                || Some(vec!["甲".to_string()]),
+                || Ok(()),
+                || {
+                    blocked.borrow_mut().push(Restarting::begin_asn().is_none());
+                    Ok(())
+                },
+                || {
+                    blocked.borrow_mut().push(Restarting::begin_asn().is_none());
+                    if ensure_ok { Ok(()) } else { Err("連不上".into()) }
+                },
+                |_| {},
+                |_| {},
+                &|_| {},
+            );
+            assert_eq!(r.is_ok(), ensure_ok);
+            assert_eq!(*blocked.borrow(), vec![true, true], "停之後、起之間都擋住");
+            drop(mark);
+            drop(Restarting::begin_asn().expect("流程做完放掉記號後可以重啟 ASN"));
+        }
     }
 
     /// 指令真的有拿記號（防重入／互斥靠它）：兩個指令都要在動手前拿，重啟 ASN 失敗要讓記號隨函式放掉

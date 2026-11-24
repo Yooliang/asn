@@ -883,7 +883,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if !wezterm::workspace_name_ok(&workspace) {
             return Err(NotStarted("workspace 名稱不合法".into()));
         }
-        let base_env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
+        let base_env = mux_base_env();
         let m = self.mux_handle(dir, base_env.clone()).map_err(NotStarted)?;
         let paths = m.paths.clone();
         // 從確認 mux 活著到窗格開好，收空 mux 都不能動手
@@ -1285,8 +1285,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 沒有夥伴就收掉空的 mux（判斷與保險都在 `Mux::stop_if_empty`）
     fn collect_empty_mux(&self, dir: &WezTermDir, reason: &str) {
-        let base_env: BTreeMap<String, String> = super::config::child_env().into_iter().collect();
-        if let Ok(m) = self.mux_handle(dir, base_env) {
+        if let Ok(m) = self.mux_handle(dir, mux_base_env()) {
             m.stop_if_empty(reason);
         }
     }
@@ -1439,25 +1438,66 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 工作管理員的「重啟終端服務」：抓名單 → 停 → 起新的 → 名單交給 `resume`。流程與失敗處理見 `mux_restart::run_steps`。
     /// 呼叫端要放在背景執行緒（停與起各要等幾秒）
-    pub fn restart_mux(&self, resume: impl FnOnce(Vec<String>)) -> Result<(), super::mux_restart::RestartError> {
+    /// `down`：起新的失敗、有夥伴斷線時呼叫（呼叫端排通知給本人）
+    pub fn restart_mux(&self, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
         use super::mux_restart::{run_steps, RestartError, STASH, STOP_NOT_RUNNING};
-        if !self.use_mux {
-            return Err(RestartError::NoMux);
-        }
-        // 用了終端服務卻找不到程式／拿不到控制：是失敗（原文寫 log），不是「這台沒有終端服務」
-        let dir = self.dir().map_err(|e| RestartError::Failed(format!("找不到終端服務的程式（{e}）")))?;
-        let m = self.mux_handle(&dir, BTreeMap::new()).map_err(RestartError::Failed)?;
+        let m = self.restart_mux_handle()?;
         let note = |l: &str| {
             elog!("{l}");
             super::mux::note(&m.paths.dir, l);
         };
+        // 從抓名單到起好新服務，一直持著「開窗格」的鎖：中間不會有新窗格開進來而不在名單上。
+        // 起好、要交給接回之前放掉（接回要開窗格，要拿同一把鎖）。拿不到鎖（有人正在開窗格卡住）就回錯、什麼都不動
+        let guard = std::cell::RefCell::new(Some(m.open_lock().map_err(|e| RestartError::Failed(format!("有視窗正在開啟，拿不到開窗格的鎖：{e}")))?));
         let names = || self.mux_snapshot().map(|o| o.partners);
+        // 核對：服務還在時，它裡面夥伴窗格（asn-N）的數量不能比 ASN 記錄的多。多出來的是 ASN 沒記錄的視窗，
+        // 重啟會一起關掉又接不回，寧可不重啟（使用者先關掉它們）。數不出來（服務卡住）時照記錄的名單重啟並寫 log：
+        // 卡住的服務正是最需要重啟的，不能因為核對不到就擋住
+        let verify = || {
+            let live = m.live_pid();
+            if live.is_none() {
+                return Ok(());
+            }
+            match m.pane_count() {
+                Ok(panes) => {
+                    let managed = self.managed_mux_panes(live);
+                    if panes > managed { Err(RestartError::Unmanaged(panes - managed)) } else { Ok(()) }
+                }
+                Err(e) => {
+                    note(&format!("工作管理員重啟終端服務：數不出服務裡的視窗數（{e}），無法核對，照 ASN 的記錄重啟"));
+                    Ok(())
+                }
+            }
+        };
         // 「沒有服務在跑」＝已經停了（例如上次起新的失敗）：繼續起新的並接回
         let stop = || match m.stop() {
             Err(e) if e == STOP_NOT_RUNNING => Ok(()),
             other => other,
         };
-        run_steps(true, &STASH, names, stop, || m.ensure().map(|_| ()), resume, &note)
+        let resume = |names: Vec<String>| {
+            drop(guard.borrow_mut().take());
+            resume(names)
+        };
+        let r = run_steps(true, &STASH, names, verify, stop, || m.ensure().map(|_| ()), resume, down, &note);
+        drop(guard.borrow_mut().take());
+        r
+    }
+
+    /// 重啟用的終端服務控制：沒開終端服務模式是 NoMux；用了卻找不到程式／拿不到控制是失敗（原文寫 log），不是「這台沒有終端服務」。
+    /// 起新服務的環境和平常開窗時 ensure 用的一樣（[`mux_base_env`]），不用空的
+    fn restart_mux_handle(&self) -> Result<super::mux::Mux<'_>, super::mux_restart::RestartError> {
+        use super::mux_restart::RestartError;
+        if !self.use_mux {
+            return Err(RestartError::NoMux);
+        }
+        let dir = self.dir().map_err(|e| RestartError::Failed(format!("找不到終端服務的程式（{e}）")))?;
+        self.mux_handle(&dir, mux_base_env()).map_err(RestartError::Failed)
+    }
+
+    /// 屬於這個（活著的）服務、ASN 有記錄的窗格數：對照表裡開在 mux 的列（夥伴、pi、終端面板都算，不分有沒有包裝殼）
+    fn managed_mux_panes(&self, live: Option<(u32, u64)>) -> usize {
+        let g = self.inner.lock().unwrap();
+        g.sessions.iter().filter(|s| s.window.mux).filter(|s| live.map_or(true, |(p, b)| s.window.gui_pid == p && s.window.started_ms == Some(b))).count()
     }
 
     /// 同 [`Self::mux_snapshot`]，現在時刻由外面給（測試用）。其餘每輪照做，只有核對窗格清單受 [`SWEEP_MISSING_EVERY`] 限制
@@ -2654,6 +2694,11 @@ fn view_args(config: &Path, workspace: &str) -> Vec<String> {
         "--workspace".into(),
         workspace.to_string(),
     ]
+}
+
+/// 起終端服務、下 cli 時給的基礎環境（白名單）：平常開窗格（`open_mux`）、收空服務、重啟都用這一份，不各寫各的
+fn mux_base_env() -> BTreeMap<String, String> {
+    super::config::child_env().into_iter().collect()
 }
 
 /// 分頁標題 `ASN:{編號} {名字}` 裡的名字（沒有名字＝None）
@@ -6689,14 +6734,14 @@ mod tests {
             use crate::launch::mux_restart::RestartError;
             let (mut rig, _) = mux_rig();
             rig.svc.set_use_mux(false);
-            assert_eq!(rig.svc.restart_mux(|_| panic!("不該接回")), Err(RestartError::NoMux), "沒開服務模式才是沒有服務");
+            assert_eq!(rig.svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知")), Err(RestartError::NoMux), "沒開服務模式才是沒有服務");
             // 開著服務模式、但找不到終端程式（拿不到控制）
             let d = tempfile::tempdir().unwrap();
             let fs = FakeFs { files: Rc::new(RefCell::new(HashSet::new())) };
             let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
             let mut svc = TermService::without_wezterm(d.path().join("wezterm-terms.json"), "H".into(), runner.clone(), fs);
             svc.set_use_mux(true);
-            let r = svc.restart_mux(|_| panic!("不該接回"));
+            let r = svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知"));
             assert!(matches!(r, Err(RestartError::Failed(_))), "用了服務卻拿不到控制要回失敗：{r:?}");
             assert!(runner.killed().is_empty(), "什麼都不動");
         }
@@ -6707,13 +6752,44 @@ mod tests {
             let (rig, paths) = mux_rig();
             std::fs::remove_file(&paths.pid).unwrap();
             let got = std::cell::RefCell::new(None::<Vec<String>>);
-            let r = rig.svc.restart_mux(|n| *got.borrow_mut() = Some(n));
+            let r = rig.svc.restart_mux(|n| *got.borrow_mut() = Some(n), |_| {});
             if let Err(e) = &r {
                 // 假的環境起不了新服務也算走到了 ensure（不是卡在 stop）
                 assert!(!matches!(e, crate::launch::mux_restart::RestartError::Failed(w) if w == crate::launch::mux_restart::STOP_NOT_RUNNING), "不能卡在沒有服務在跑：{e:?}");
+                assert!(!matches!(e, crate::launch::mux_restart::RestartError::Unmanaged(_)), "服務已經不在，不核對窗格數：{e:?}");
             } else {
                 assert!(got.borrow().is_some(), "成功就要交出名單接回");
             }
+        }
+
+        /// 二審 2：服務裡有 ASN 沒記錄的窗格（清單上有 asn-1，ASN 的對照表是空的）：不停、不起、不接回，回白話錯誤
+        #[test]
+        fn _1860f_重啟終端服務_服務裡有_asn_沒記錄的窗格_不動手() {
+            use crate::launch::mux_restart::{RestartError, UNMANAGED_TEXT};
+            let (rig, _) = mux_rig();
+            let r = rig.svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知"));
+            assert_eq!(r, Err(RestartError::Unmanaged(1)));
+            assert_eq!(r.unwrap_err().text(), UNMANAGED_TEXT);
+            assert!(rig.runner.killed().is_empty(), "核對不過不能停服務");
+        }
+
+        /// 二審 2：整段（抓名單到起好）持著開窗格的鎖，做完放掉（接回要開窗格，要拿得到）
+        #[test]
+        fn _1860f_重啟終端服務_做完放掉開窗格的鎖() {
+            let (rig, paths) = mux_rig();
+            std::fs::remove_file(&paths.pid).unwrap();
+            let _ = rig.svc.restart_mux(|_| {}, |_| {});
+            let m = rig.svc.restart_mux_handle().unwrap();
+            assert!(m.open_lock().is_ok(), "鎖要放掉了");
+        }
+
+        /// 二審 3：起新服務的環境和平常開窗格時一樣，不用空的
+        #[test]
+        fn _1860f_重啟終端服務_起新服務用平常的環境_不是空的() {
+            let (rig, _) = mux_rig();
+            let m = rig.svc.restart_mux_handle().unwrap();
+            assert_eq!(m.base_env, mux_base_env());
+            assert!(!m.base_env.is_empty(), "白名單環境至少有 PATH 之類的變數");
         }
 
         /// #868：設定頁關掉共用的終端服務、重開 ASN 之後，服務和夥伴還在，但 ASN 這次不管它們。數出這種「背景夥伴」，設定頁才能告訴使用者

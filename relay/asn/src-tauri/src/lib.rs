@@ -1122,11 +1122,16 @@ async fn task_manager_restart_mux(app: State<'_, App>, terms: State<'_, Arc<laun
     let res = tokio::task::spawn_blocking(move || {
         let _mark = mark; // 做完（成功、失敗、當掉）一定放掉
         let (wd, dd) = (work_dir.clone(), data_dir);
-        terms.restart_mux(move |names| {
-            if !launch::mux_watch::dispatch("asn-mux-restart-resume", move || launch::auto_resume::after_mux_restart(&wd, &dd, &names)) {
-                ui_log::log_info(&work_dir, "重啟終端服務後，接回夥伴的背景工作開不了");
-            }
-        })
+        let down_dir = work_dir.clone();
+        terms.restart_mux(
+            move |names| {
+                if !launch::mux_watch::dispatch("asn-mux-restart-resume", move || launch::auto_resume::after_mux_restart(&wd, &dd, &names)) {
+                    ui_log::log_info(&work_dir, "重啟終端服務後，接回夥伴的背景工作開不了");
+                }
+            },
+            // 起不來、代理斷線：排通知給本人（走現有的接回結果通知）
+            move |names| launch::mux_restart::notify_down(&down_dir, names, heartbeat::now_ms()),
+        )
     })
     .await
     .map_err(|e| {
@@ -1134,8 +1139,11 @@ async fn task_manager_restart_mux(app: State<'_, App>, terms: State<'_, Arc<laun
         launch::mux_restart::FAIL_TEXT.to_string()
     })?;
     res.map_err(|e| {
-        if let launch::mux_restart::RestartError::Failed(why) = &e {
-            ui_log::log_info(&app.work_dir, &format!("重啟終端服務失敗：{why}"));
+        match &e {
+            launch::mux_restart::RestartError::Failed(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務失敗：{why}")),
+            launch::mux_restart::RestartError::Down(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有完成（舊的已停、新的起不來，代理斷線，名單已存）：{why}")),
+            launch::mux_restart::RestartError::Unmanaged(n) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有進行：終端服務裡有 {n} 個視窗不在 ASN 的記錄上")),
+            launch::mux_restart::RestartError::NoMux => {}
         }
         e.text().to_string()
     })

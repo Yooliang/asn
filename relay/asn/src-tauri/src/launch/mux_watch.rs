@@ -971,6 +971,30 @@ mod tests {
         assert_eq!(inc.partners, ["甲", "乙"]);
     }
 
+    /// 二審 1／5：重啟時 stop 寫了停止記號、新服務起不來（沒有服務了）：監看這一輪不當事故（有 notify_down 與存下的名單接手），
+    /// 但記號只綁舊服務：之後別的服務（M2）起來、又掛掉，要照常報事故，不能被舊記號一直放過
+    #[test]
+    fn t1860f_起新服務失敗後_舊記號只放過舊服務_之後的服務掛了照常處理() {
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["甲"]), 100_000);
+        let mut gone = obs(None, &[]);
+        gone.stopped = Some((M1.0, 110_000));
+        // 起不來：之後每一輪都看不到服務
+        assert_eq!(w.tick(&gone, 130_000), None);
+        assert_eq!(w.tick(&gone, 160_000), None, "舊服務是我們收的，不報事故");
+        assert_eq!(w.tick(&gone, 190_000), None, "一直沒有服務也不重複報");
+        // 之後使用者開了視窗（或再按重啟），M2 起來；記號檔還是 M1 的
+        let mut m2 = obs(Some(M2), &["甲"]);
+        m2.stopped = Some((M1.0, 110_000));
+        assert_eq!(w.tick(&m2, 220_000), None);
+        // M2 掛了：記號是 M1 的，不能放過
+        let mut gone2 = obs(None, &[]);
+        gone2.stopped = Some((M1.0, 110_000));
+        assert_eq!(w.tick(&gone2, 250_000), None, "第一輪只是懷疑");
+        let inc = w.tick(&gone2, 280_000).expect("M2 自己掛了，舊記號不能蓋掉它");
+        assert_eq!(inc.partners, ["甲"]);
+    }
+
     #[test]
     fn 沒有夥伴的服務不見了_也算一次事故_不接回也不佔接回額度() {
         let empty = Incident { partners: vec![], resume: false };
