@@ -416,12 +416,13 @@ test('#1909 運行位置欄：三種值各自的字、缺欄位落「不明」�
   assert.equal(COLUMNS[7], '運行位置')
 })
 
-test('#1909 運行位置：黃標籤只在那一欄，窄版名字下有小字，其餘不加料', () => {
-  const panel = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../ui/lib/settings-panel.mjs'), 'utf8')
-  const css = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../ui/style.css'), 'utf8')
-  assert.equal((panel.match(/tm-tag native" v-if="r\.native"/g) || []).length, 2, '運行位置欄一處、窄版小字一處')
-  assert.match(panel, /<small class="tm-where">/)
-  assert.doesNotMatch(panel, /tr[^>]*native/, '不標整列')
+test('#1909 運行位置：黃標籤只在「運行位置」那一行，其餘不加料（#1860 F 樹狀後每個節點一處）', () => {
+  const here = path.dirname(fileURLToPath(import.meta.url))
+  const view = fs.readFileSync(path.join(here, '../ui/lib/task-tree-view.mjs'), 'utf8')
+  const css = fs.readFileSync(path.join(here, '../ui/style.css'), 'utf8')
+  assert.equal((view.match(/tm-tag native" v-if="node\.native"/g) || []).length, 1, '每個節點只在運行位置那一行標')
+  assert.match(view, /<small class="tm-where">/)
+  assert.doesNotMatch(view, /class="tm-node"[^>]*native/, '不標整個節點')
   assert.match(css, /\.tm-tag\.native\{[^}]*#e0c36b/)
-  assert.match(css, /\.tm-where\{display:none[^}]*\}\s*@container \(max-width:480px\)\{\.tm-where\{display:block\}\}/)
+  assert.doesNotMatch(css, /\.tm-where\{display:none/, '樹裡運行位置一直顯示，不再只有窄版才補小字')
 })

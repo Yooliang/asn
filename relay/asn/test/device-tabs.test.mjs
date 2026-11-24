@@ -111,10 +111,12 @@ test('詳情的欄位：最後在線只寫在線與否；平台、ASN 版本；�
   assert.match(await render({ dev: 'W' }, mac), /<dd class="dvid-v dvid-platform">Android<\/dd>/)
 })
 
-test('指紋跟同一張表的其他值一樣大（只保留等寬字）；窄的時候工作管理員收掉次要欄位', () => {
+test('指紋跟同一張表的其他值一樣大（只保留等寬字）；工作管理員是樹，按鈕與小字窄的時候自己換行', () => {
   const css = read('../ui/style.css')
   assert.match(css, /\.dv-kv \.pair-fp\{font-size:inherit;/)
-  assert.match(css, /@container \(max-width:480px\)\{\.tm-table th:nth-child\(2\),[^}]*nth-child\(3\)[^}]*nth-child\(8\)[^}]*display:none\}\.tm-table td\.cmp\{min-width:110px\}\.settings \.tm-table th,\.settings \.tm-table td\{padding:6px 4px\}\}/)
+  assert.match(css, /\.tm-act\{[^}]*flex-wrap:wrap;[^}]*justify-content:flex-end/, '按鈕靠右、放不下換行仍靠右')
+  assert.match(css, /\.tm-meta\{[^}]*flex-wrap:wrap/, '小字欄位放不下就換行')
+  assert.doesNotMatch(css, /\.tm-table/, '#1860 F 工作管理員不再是表格')
 })
 
 test('known 的錯誤：只在動作卡出現一次（#1727）', async () => {

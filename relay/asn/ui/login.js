@@ -3,7 +3,7 @@
 // 這台已有節點金鑰時，另有小字連結「暫時不登入」照舊進名單。
 // 權杖與節點金鑰都只在 Rust 端，這裡只看得到「登入了沒」與錯誤文字。
 import { blockContextMenu } from './lib/nomenu.mjs'
-import { LAST_USED_LABEL, PROVIDERS, SKIP_LABEL, STILL_RUNNING_NOTE, canStart, errorText, phaseText, showSkip } from './lib/login.mjs'
+import { LAST_USED_LABEL, bindNext, PROVIDERS, SKIP_LABEL, STILL_RUNNING_NOTE, canStart, errorText, phaseText, showSkip } from './lib/login.mjs'
 import { RESIZE_DIRS, authApi, ctl, initFrame, resizeFrom, shellApi } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 // 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
@@ -27,7 +27,9 @@ const app = createApp({
       phase.value = 'setting'
       try {
         const out = await authApi.bind()
-        if (out?.state !== 'created' && !info.shot) location.replace('list.html')
+        const next = bindNext(out)
+        if (next.action === 'restart-needed') { error.value = next.text; phase.value = 'restart'; return }
+        if (next.action === 'enter' && !info.shot) location.replace('list.html')
       } catch (e) { error.value = errorText(e); phase.value = 'error' }
     }
     const start = async key => {

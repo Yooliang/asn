@@ -30,7 +30,8 @@ import { accountCardKey, accountStatusOf } from './device-account-lines.mjs'
 import { DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, LOGIN_LOST_TEXT, ROSTER_TEXT, SUB_LAPSED_TEXT, accountDeviceRows, accountInUse, accountLoginLost, loginLostNotices, usedOnText } from './account-roster.mjs'
 import { DESK_RELOGIN_TEXT } from './relogin-flow.mjs'
 import { QUOTA_TEXT, accountMenuItems, quotaGuideFor, shareConfirmOf, shareKey, vendorSections } from './quota-readers.mjs'
-import { COLUMNS as TM_COLUMNS, TEXT as TM } from './task-manager.mjs'
+import { TEXT as TM } from './task-manager.mjs'
+import { TaskTree } from './task-tree-view.mjs'
 import { GH_REFS_LABEL, GH_REFS_NOTE } from './msg-ref.mjs'
 import { LAUNCH_MAX_NOTE } from './launch-prefs.mjs'
 import { UI_KIT } from './ui-kit.mjs'
@@ -45,7 +46,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { ...UI_KIT, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity },
+  components: { ...UI_KIT, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity, TaskTree },
   props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -202,7 +203,7 @@ export const SettingsPanel = {
       mmOpen.value = false
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { LAUNCH_MAX_NOTE, TM, TM_COLUMNS, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
+    return { LAUNCH_MAX_NOTE, TM, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
       accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       rp, REPLACE_TEXT, cat, catIcon, ROSTER_TEXT, usedOnText, DESK_RELOGIN_TEXT, switchTargets, devs, curDev, askRemove, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
@@ -418,25 +419,7 @@ export const SettingsPanel = {
               <p class="tm-err" v-if="st.taskMgr.error" role="alert">{{ st.taskMgr.error }}</p>
               <small v-if="!st.taskMgr.loaded && !st.taskMgr.error">{{ TM.refreshing }}</small>
               <small v-if="st.taskMgr.empty">{{ TM.empty }}</small>
-              <div class="tm-scroll" v-if="st.taskMgr.rows.length">
-                <table class="tm-table">
-                  <thead><tr><th v-for="c in TM_COLUMNS" :key="c" scope="col">{{ c }}</th></tr></thead>
-                  <tbody>
-                    <tr v-for="r in st.taskMgr.rows" :key="r.key" :class="{ dup: r.dup, view: r.viewOnly }" :data-kind="r.kind">
-                      <td class="tm-name"><b>{{ r.name }}</b><span class="tm-tag dup" v-if="r.dup">{{ TM.dupTag }}</span><small class="tm-dupnote" v-if="r.dupNote">{{ r.dupNote }}</small><small class="tm-where"><span class="tm-tag native" v-if="r.native">{{ r.source }}</span><template v-else>{{ r.source }}</template></small></td>
-                      <td>{{ r.engine }}</td><td>{{ r.pid }}</td><td>{{ r.memory }}</td><td>{{ r.uptime }}</td><td>{{ r.status }}</td><td class="cmp">{{ r.cmpText }}<template v-if="r.cmpTag"> <span class="tm-tag" :class="r.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ r.cmpTag }}</span></template></td><td><span class="tm-tag native" v-if="r.native">{{ r.source }}</span><template v-else>{{ r.source }}</template></td>
-                      <td class="tm-act">
-                        <asn-button state="danger" class="tm-stop" v-if="!r.viewOnly && !r.handing" :disabled="!r.canStop || st.taskMgr.busy" :title="r.why" :aria-label="TM.stop + ' ' + r.name" @click="act('tm-ask', r.key)">{{ TM.stop }}</asn-button>
-                        <small class="tm-viewonly" v-else-if="r.showViewOnly" :title="r.why">{{ TM.viewOnly }}</small>
-                        <small class="tm-why" v-if="!r.viewOnly && !r.canStop && r.why">{{ r.why }}</small>
-                        <asn-button class="tm-handover" v-if="r.canHandover" :disabled="st.taskMgr.busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + r.name" @click="act('tm-handover', r.name)">{{ TM.handover }}</asn-button>
-                        <asn-button class="tm-view-btn" v-if="r.canView" :disabled="st.taskMgr.busy" :title="TM.viewTip" :aria-label="TM.view + ' ' + r.name" @click="act('tm-view', r.name)">{{ TM.view }}</asn-button>
-                        <asn-button class="tm-adopt" v-if="r.canAdopt" :disabled="st.taskMgr.busy" :title="TM.adoptTip" :aria-label="TM.adopt + ' ' + r.name" @click="act('tm-adopt', r.key)">{{ TM.adopt }}</asn-button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <task-tree v-if="st.taskMgr.rows.length" :tree="st.taskMgr.tree" :busy="st.taskMgr.busy" @act="act"></task-tree>
               <p class="tm-line" v-if="st.taskMgr.note" role="status">{{ st.taskMgr.note }}</p>
               <details class="tm-known" v-if="st.taskMgr.known.length">
                 <summary>認得但目前沒在跑（{{ st.taskMgr.known.length }}）</summary>

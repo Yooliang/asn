@@ -266,6 +266,7 @@ export async function savePhotoOnPhone(path, bridge) {
 // 第一次登入替這支手機建好節點後：要重新啟動才會用新身分。有外殼就請它重開；沒有就請使用者自己重開。
 export function afterBind(out, bridge) {
   if (out?.state !== 'created') return { action: 'enter' }
+  if (typeof out.restart_failed === 'string' && out.restart_failed.trim()) return { action: 'ask', text: out.restart_failed.trim() }
   if (bridge) return { action: 'relaunch' }
   return { action: 'ask', text: '登入完成，請關掉 ASN 再重新打開。' }
 }

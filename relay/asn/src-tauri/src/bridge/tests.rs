@@ -2233,6 +2233,7 @@ async fn 夥伴_id_暫時失敗_500_只記一次_下一輪再試_好了就接上
 }
 
 mod ack_it;
+mod drain_it;
 mod outbox_it;
 mod reply_fail_it;
 mod aegis_it;

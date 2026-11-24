@@ -174,10 +174,8 @@
 /* 電腦版看別台終端：黑色畫面撐滿整欄，膠囊跟它左右對齊（不套 760px 上限、外距跟畫面一樣） */
 :root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-row,:root[data-skin="line"] .chatpane-main:has(.term-view-screen) .compose-row{padding:0 var(--chat-gap) var(--chat-gap)}
 :root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-main,:root[data-skin="line"] .chatpane-main:has(.term-view-screen) .compose-main{max-width:none}
-:root[data-skin="modern"] .tm-scroll,:root[data-skin="line"] .tm-scroll{border-color:var(--line);border-radius:12px;background:var(--panel)}
-:root[data-skin="modern"] .tm-table th,:root[data-skin="line"] .tm-table th{background:var(--panel-soft);color:var(--muted);font-weight:600}
-:root[data-skin="modern"] .tm-table td,:root[data-skin="line"] .tm-table td{border-top-color:var(--line)}
-:root[data-skin="modern"] .tm-table tr.dup td,:root[data-skin="line"] .tm-table tr.dup td{background:#fdf3ef}
+:root[data-skin="modern"] .tm-node,:root[data-skin="line"] .tm-node{border-color:var(--line);border-radius:12px;background:var(--panel)}
+:root[data-skin="modern"] .tm-node.dup,:root[data-skin="line"] .tm-node.dup{background:#fdf3ef}
 :root[data-skin="modern"] .tm-tag.dup,:root[data-skin="line"] .tm-tag.dup{border:1px solid #e3b0aa;background:#fdeceb;color:#b3261e}
 :root[data-skin="modern"] .tm-facts,:root[data-skin="line"] .tm-facts{border-radius:12px;background:var(--panel-soft)}
 /* ---------- #1461 線條圖示（0.2.21）：24×24、線寬 1.75、圓頭圓角，顏色跟著字色；一般灰、選中主色、危險紅 ---------- */

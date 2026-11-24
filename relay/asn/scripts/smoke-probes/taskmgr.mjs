@@ -12,17 +12,40 @@ export const taskmgrProbeSource = () => `(async () => {
   const entry = await waitFor(() => [...document.querySelectorAll('.dv-tabs .dv-tasks')].find(vis));
   if (!entry) return { ok: false, why: '這台電腦的詳情頁沒有「工作管理員」入口' };
   entry.click();
-  const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-table tbody tr')]; return r.length >= 9 ? r : null });
-  if (!rows) return { ok: false, why: '工作管理員沒有列出 9 列程式（實際 ' + document.querySelectorAll('.tm-table tbody tr').length + ' 列）' };
-  const heads = [...document.querySelectorAll('.tm-table th')].map(h => h.textContent.trim()).join('、');
-  for (const c of ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '運行位置']) if (!heads.includes(c)) return { ok: false, why: '表頭缺「' + c + '」：' + heads };
-  const dups = [...document.querySelectorAll('.tm-table tbody tr.dup')];
+  const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-tree .tm-node')]; return r.length >= 9 ? r : null });
+  if (!rows) return { ok: false, why: '工作管理員沒有列出 9 個節點（實際 ' + document.querySelectorAll('.tm-tree .tm-node').length + ' 個）' };
+  // 小字預設收起：沒點開之前看不到程序編號等；每個節點有帶 aria-expanded 的「詳細」鈕
+  const treeText = () => document.querySelector('.tm-tree').textContent;
+  for (const c of ['程序編號', '記憶體', '開了多久', '運行位置']) if (treeText().includes(c)) return { ok: false, why: '預設應收起小字，卻看到「' + c + '」' };
+  const mores = () => [...document.querySelectorAll('.tm-tree .tm-more')];
+  if (mores().length !== document.querySelectorAll('.tm-tree .tm-node').length ||!mores().every(b => b.getAttribute('aria-expanded') === 'false')) return { ok: false, why: '每個節點都該有收著的「詳細」鈕（實際 ' + mores().length + ' 個）' };
+  if (!treeText().includes('同名的視窗有兩個時，信可能兩邊都收不到')) return { ok: false, why: '重複列的警示句收起時也要看得到' };
+  for (const b of mores()) b.click();
+  if (!(await waitFor(() => mores().every(b => b.getAttribute('aria-expanded') === 'true')))) return { ok: false, why: '按「詳細」後小字沒有展開' };
+  const labels = [...document.querySelectorAll('.tm-tree .tm-node')].map(n => n.textContent).join('|');
+  for (const c of ['引擎', '程序編號', '記憶體', '開了多久', '運行位置']) if (!labels.includes(c)) return { ok: false, why: '節點裡缺「' + c + '」欄位' };
+  // 樹狀（#1860 F）：ASN 在最外層、終端服務在它底下、開在終端服務裡的代理再下一層；原生主控台的代理與終端服務並列
+  const lvl = sel => document.querySelector('.tm-node' + sel)?.getAttribute('data-level');
+  if (lvl('[data-kind="asn"]') !== '1') return { ok: false, why: 'ASN 本體不在最外層（層級 ' + lvl('[data-kind="asn"]') + '）' };
+  if (lvl('[data-kind="mux"]') !== '2') return { ok: false, why: '終端服務不在 ASN 底下（層級 ' + lvl('[data-kind="mux"]') + '）' };
+  const nodeOfPid = pid => [...document.querySelectorAll('.tm-tree .tm-node')].find(n => n.querySelector('.tm-meta')?.textContent.includes('程序編號 ' + pid));
+  if (nodeOfPid(18420)?.getAttribute('data-level') !== '3') return { ok: false, why: '開在終端服務裡的視窗（18420）沒有排在終端服務底下' };
+  if (nodeOfPid(3001)?.getAttribute('data-level') !== '2') return { ok: false, why: '原生主控台的視窗（3001）應該和終端服務並列、掛在 ASN 底下' };
+  if (!document.querySelector('.tm-node[data-kind="mux"] .tm-state')?.textContent.includes('底下 3 個代理')) return { ok: false, why: '終端服務沒有寫「底下 3 個代理」' };
+  // 收合：按終端服務的 ▾ → 底下的視窗不見、▸；再按 → 回來
+  const muxFold = document.querySelector('.tm-node[data-kind="mux"] .tm-fold');
+  if (!muxFold) return { ok: false, why: '終端服務沒有收合鈕' };
+  muxFold.click();
+  if (!(await waitFor(() => !nodeOfPid(18420) && document.querySelector('.tm-node[data-kind="mux"]').getAttribute('aria-expanded') === 'false'))) return { ok: false, why: '按了收合，終端服務底下的視窗沒有收起來' };
+  document.querySelector('.tm-node[data-kind="mux"] .tm-fold').click();
+  if (!(await waitFor(() => nodeOfPid(18420)))) return { ok: false, why: '再按一次，終端服務底下的視窗沒有回來' };
+  const dups = [...document.querySelectorAll('.tm-tree .tm-node.dup')];
   if (dups.length !== 2) return { ok: false, why: '「重複」列應該有 2 列，實際 ' + dups.length };
   if (!dups.every(r => r.querySelector('.tm-tag.dup')?.textContent.trim() === '重複')) return { ok: false, why: '重複的列沒有「重複」標記' };
   if (!dups.every(r => r.textContent.includes('同名的視窗有兩個時，信可能兩邊都收不到'))) return { ok: false, why: '重複的列沒有寫出後果' };
   const banner = document.querySelector('.tm-warn');
   if (!banner || !banner.textContent.includes('同名的視窗有兩個時，信可能兩邊都收不到')) return { ok: false, why: '頂部提示沒有寫出後果' };
-  const kindRow = k => document.querySelector('.tm-table tbody tr[data-kind="' + k + '"]');
+  const kindRow = k => document.querySelector('.tm-tree .tm-node[data-kind="' + k + '"]');
   for (const k of ['process', 'mux', 'asn']) { const r = kindRow(k); if (!r) return { ok: false, why: '沒有 ' + k + ' 那一列' }; if (r.querySelector('.tm-stop')) return { ok: false, why: '只能看的列（' + k + '）不該有停止鈕' } }
   const text = document.querySelector('.tm').textContent;
   if (!text.includes('—')) return { ok: false, why: '拿不到的欄位沒有顯示「—」' };
@@ -66,8 +89,14 @@ export const taskmgrProbeSource = () => `(async () => {
   const others = (globalThis.__smokeCalls || []).map(c => c[0]).filter(c => /^(partner_op|term_(send|start))/.test(c));
   if (others.length) return { ok: false, why: '停止接回中的視窗不該呼叫別的動作：' + others.join('、') };
   if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '確認後確認框沒有關' };
-  // 再開一次確認框，畫面截圖停在這裡
+  // 再開一次確認框確認還開得起來，然後關掉，讓截圖看得到完整的樹；小字收回，只留終端服務那一列展開當對照
   if (!(await askResuming())) return { ok: false, why: '停止完成後再按「停止」沒有開出確認框' };
+  const cancel2 = [...document.querySelectorAll('.dlg .partner-actions button')].find(b => b.textContent.trim() === '取消');
+  if (!cancel2) return { ok: false, why: '再開的確認框沒有「取消」鈕' };
+  cancel2.click();
+  if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '截圖前確認框沒有關' };
+  for (const b of mores()) if (b.getAttribute('aria-expanded') === 'true' && !b.closest('.tm-node[data-kind="mux"]')) b.click();
+  await sleep(200);
   return { ok: true };
 })()`
 

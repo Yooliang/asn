@@ -102,8 +102,10 @@ test('#1029 開始後這一格被收掉或建不了 xterm：一定結束這次�
     const view = f.endsWith('term-remote.mjs')
     // 看畫面那支（手機也用）改成序號：收掉或重新發起就作廢，發起回來時已作廢就 stop 那一次
     if (view) assert.match(src, /if \(!wanted\(\)\) \{ if \(r\?\.id\) void props\.api\.stop\(r\.id\)\.catch\(\(\) => \{\}\); return \}\s+id = r\.id/, `${f}：開始後先看這一次還算不算數`)
-    else assert.match(src, /id = r\.id[^{}]*?if \(!alive\) \{ stop\(\); return \}/, `${f}：開始後先看這一格還在不在`)
-    assert.match(src, /if \(!term\) \{ stop\(\); if \(alive\) finish\(/, `${f}：建不了 xterm 就結束`)
+    // 打字那支（#1760）：current＝還在、沒被重新發起、active 還是 true；作廢的那一次回來就 stop 它
+    else assert.match(src, /if \(!current\(\)\) \{ stopId\(r\?\.id\); return \}\s+id = r\.id/, `${f}：開始後先看這一次還算不算數`)
+    // 打字那支建不了 xterm 時停「這一次的 r.id」，不用共用的 id（可能已是新一次的，#1760 一審）
+    assert.match(src, view ? /if \(!term\) \{ stop\(\); if \(alive\) finish\(/ : /if \(!term\) \{ stopId\(r\.id\); if \(current\(\)\) finish\(/, `${f}：建不了 xterm 就結束`)
     assert.match(src, view ? /onBeforeUnmount\(\(\) => \{ alive = false; gen\+\+; stop\(\); cleanup\(\);/ : /onBeforeUnmount\(\(\) => \{ alive = false; stop\(\); cleanup\(\);/, `${f}：收掉時記下來`)
     assert.ok(!src.includes('term.open(host.value)'), `${f}：不再直接 open（元素可能不在）`)
   }

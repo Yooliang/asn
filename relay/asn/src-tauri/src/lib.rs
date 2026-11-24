@@ -173,6 +173,9 @@ mod tts;
 #[cfg(feature = "gui")]
 mod log_report;   // 電腦與手機共用（#2129 ②）：送記錄給開發者的預覽與寄出，遮罩只在這一層
 #[cfg(feature = "gui")]
+#[cfg(desktop)]
+mod relaunch;   // 重新啟動 ASN 的共用流程（#2204）：先確認執行檔、收橋、開新程序，開不起來不結束
+#[cfg(feature = "gui")]
 mod ui_log;   // 電腦與手機共用（#2129 ①）：手機的 ui_log 指令與其他記錄都走同一個 append
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
@@ -3138,13 +3141,29 @@ async fn bridge_takeover(m: State<'_, bridge::Manager>, confirmed: bool) -> Resu
     m.takeover(confirmed).await
 }
 
+/// 這次結束的原因：一般結束要留「正常結束」記號；重新啟動不留，守護才救得回新程序沒起來的情況（#2204）
+#[cfg(feature = "gui")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ExitKind {
+    Quit,
+    Relaunch,
+}
+
 #[cfg(feature = "gui")]
 pub(crate) fn cleanup(app: &AppHandle) {
+    cleanup_with(app, ExitKind::Quit);
+}
+
+/// 結束前的收尾；`kind` 決定要不要留「正常結束」記號（重新啟動不留，#2204）
+#[cfg(feature = "gui")]
+pub(crate) fn cleanup_with(app: &AppHandle, kind: ExitKind) {
     // 正常結束（按結束、關視窗、更新安裝、登出關機都會走這裡）：留記號，守護就不會把 ASN 重開（todo-next-191 B1）
     #[cfg(desktop)]
     if let Some(gd) = guard::guard_dir() {
-        guard::note_user_quit(&gd);
+        guard::note_exit(&gd, kind == ExitKind::Relaunch);
     }
+    #[cfg(not(desktop))]
+    let _ = kind;
     // 內建橋：只關自己啟動的收發室 worker、釋放收信鎖（手機版沒有內建橋）
     #[cfg(desktop)]
     app.state::<bridge::Manager>().shutdown();
@@ -3261,7 +3280,8 @@ pub fn run() {
     // 自己重開的新程序（--after-pid <舊 pid>）：先等舊的結束再做同名檢查，不然舊的心跳還新鮮會被判成同名已在跑（#581 審）
     #[cfg(desktop)]
     if let Some(old) = ui_log::after_pid(&args) {
-        ui_log::wait_gone(old, ui_log::AFTER_PID_WAIT, heartbeat::pid_alive, heartbeat::is_asn_process);
+        // 10 秒等不到再多等 110 秒（#2204）；還是等不到就由下面的同名檢查擋下新的（舊的仍在跑，不會兩邊都沒）
+        ui_log::settle_after_pid(old, ui_log::AFTER_PID_WAIT, ui_log::AFTER_PID_EXTRA_WAIT, heartbeat::pid_alive, heartbeat::is_asn_process, |l| ui_log::log_info(&exit_log_dir, l));
     }
 
     // 同一個視窗名只留一個 ASN（另一個還活著就退出，同 recv.mjs 的 exit 3）。
