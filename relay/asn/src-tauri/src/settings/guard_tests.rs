@@ -76,8 +76,8 @@ const PENDING_JSON: &[(&str, usize)] = &[
 /// 原子寫入重複實作：目前還允許的檔與次數（`fn write_atomic`／`fn atomic_write`／`fn save_atomic`、自己拼 `.tmp"`）。
 const PENDING_ATOMIC: &[(&str, usize)] = &[
     // ---- 轉接函式：本身只是呼叫 settings::atomic::write（沒有自己寫 tmp）。#2232 C 已把 claude_extra、claude_json、cli/send_rate、launch/term 四個改成直接呼叫並刪掉；下面兩個還有呼叫端，留著 ----
-    ("lib.rs", 1),                // crate::write_atomic：轉接到 atomic::write(STATE)。仍有約 40 處呼叫（bridge/core.rs 屬 #2161 範圍，其餘分散在 bridge/、guard.rs、acct_remote.rs 等 20 多個檔），待另開單逐一改，改完才能刪
-    ("bridge/pending.rs", 1),     // save_atomic：轉接到 atomic::write(QUEUE)。只剩 bridge/core.rs（#2161 範圍）呼叫，待 #2161 一起改；outbox.rs 的三處已在 #2232 C 改成直接呼叫
+    ("lib.rs", 1),                // crate::write_atomic：轉接到 atomic::write(STATE)。仍有約 40 處呼叫（含 bridge/core.rs，其餘分散在 bridge/、guard.rs、acct_remote.rs 等 20 多個檔），之後另開小張處理（動到 bridge，要兩審），改完才能刪
+    ("bridge/pending.rs", 1),     // save_atomic：轉接到 atomic::write(QUEUE)。只剩 bridge/core.rs 在用，之後另開小張處理（動到 bridge，要兩審）；outbox.rs 的三處已在 #2232 C 改成直接呼叫
     // ---- 不是「寫設定」，只是清掃或另有用途的 .tmp ----
     ("launch/mux.rs", 1),         // 清掉舊心跳檔旁的 .tmp（只刪不寫）
     ("stt.rs", 3),                // 語音模型下載／解壓用的 .tmp 資料夾，整個資料夾換名，不是單一檔案寫入；第 3 處是下載到 `.part` 再換名（大檔下載，#2232 B 新增）
