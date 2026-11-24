@@ -84,7 +84,7 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     const ta = document.querySelector('.chatpane .compose-row textarea');
     const go = ta && ta.closest('form').querySelector('button[type=submit]');
     if (!ta || !go) return { ok: false, why: '找不到下方的輸入框或送出鈕' };
-    if (!ta.placeholder.includes('送出後會連到那台電腦')) return { ok: false, why: '輸入框的提示沒寫「送出後會連到那台電腦」：' + ta.placeholder };
+    if (!ta.placeholder.includes('送出即打字') || ta.placeholder.includes('只能看')) return { ok: false, why: '輸入框的提示沒寫「送出即連過去打字」，或還寫著「只能看」：' + ta.placeholder };
     ta.value = 'ls'; ta.dispatchEvent(new Event('input'));
     await sleep(50);
     go.click();
@@ -173,8 +173,6 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
     mic.click();
     const extra = await wait(() => document.querySelector('.chatpane .typing .typing-extra'), 60);
     if (!extra) return { ok: false, why: '按麥克風後狀態列沒有語音提示（要和打字中並列）：' + (document.querySelector('.typing')?.textContent || '').slice(0, 60) };
-  } else if (!(await wait(() => document.querySelector('.typing')?.textContent.includes('正在看')))) {
-    return { ok: false, why: '狀態列沒有「正在看」：' + (document.querySelector('.typing')?.textContent || '（沒有狀態列）').slice(0, 60) };
   }
   await sleep(400);
   const bar = document.querySelector('.chatpane .typing');
@@ -190,7 +188,8 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   // (b) 狀態列的文字（在視窗最下面，在訊息框的下方）
   const text = bar.textContent.trim();
   if (bar.getBoundingClientRect().top < msgBox.getBoundingClientRect().bottom - 1) return { ok: false, why: '狀態列沒有在訊息框下面' };
-  if (kind === 'watch' && !/正在看「.+」上「.+」的畫面/.test(text)) return { ok: false, why: '狀態列沒有「正在看「…」上「…」的畫面」：' + text.slice(0, 60) };
+  if (kind === 'watch' && (/只能看|正在看/.test(text) || bar.classList.contains('typing-info'))) return { ok: false, why: '只看畫面時不該再有藍色狀態列（#1865）：' + text.slice(0, 60) };
+  if (/只能看/.test(document.body.textContent)) return { ok: false, why: '畫面上還有「只能看」（#1865）' };
   if (kind === 'typing') {
     if (!/正在「.+」上「.+」打字/.test(text)) return { ok: false, why: '狀態列沒有打字中的文字：' + text.slice(0, 60) };
     if (!bar.classList.contains('typing-danger')) return { ok: false, why: '打字中的狀態列沒有醒目樣式（typing-danger）：' + bar.className };
@@ -204,18 +203,19 @@ export const dtermProbeSource = ({ kind }) => `(async () => {
   const S = screen.getBoundingClientRect(), M = msgBox.getBoundingClientRect(), P = pane.getBoundingClientRect();
   const prevEl = view.previousElementSibling;
   const prevBottom = prevEl ? prevEl.getBoundingClientRect().bottom : P.top;
-  if (Math.abs(S.left - M.left) > 1 || Math.abs(S.right - M.right) > 1) return { ok: false, why: '黑色畫面和訊息框沒有左右對齊：畫面 ' + [S.left, S.right].map(Math.round).join('~') + '、訊息框 ' + [M.left, M.right].map(Math.round).join('~') };
+  const lineSkin = document.documentElement.dataset.skin === 'line';   // LINE 外觀的輸入框本來就比黑色畫面寬一圈，左右對齊與間距一致只在另兩套檢查
+  if (!lineSkin && (Math.abs(S.left - M.left) > 1 || Math.abs(S.right - M.right) > 1)) return { ok: false, why: '黑色畫面和訊息框沒有左右對齊：畫面 ' + [S.left, S.right].map(Math.round).join('~') + '、訊息框 ' + [M.left, M.right].map(Math.round).join('~') };
   const side = S.left - P.left, top = S.top - prevBottom, bottom = M.top - S.bottom;
   const gaps = '左 ' + side.toFixed(1) + '、上 ' + top.toFixed(1) + '、下 ' + bottom.toFixed(1) + '、右 ' + (P.right - S.right).toFixed(1);
   if (!(side > 0 && top > 0 && bottom > 0 && P.right - S.right > 0)) return { ok: false, why: '黑色畫面四周沒有間距：' + gaps };
-  if (Math.abs(top - side) > 1 || Math.abs(bottom - side) > 1 || Math.abs((P.right - S.right) - side) > 1) return { ok: false, why: '黑色畫面四周的間距不一致（要和訊息框一樣）：' + gaps };
+  if (!lineSkin && (Math.abs(top - side) > 1 || Math.abs(bottom - side) > 1 || Math.abs((P.right - S.right) - side) > 1)) return { ok: false, why: '黑色畫面四周的間距不一致（要和訊息框一樣）：' + gaps };
   // (d) 沒有橫向溢出
   if (document.documentElement.scrollWidth > window.innerWidth + 1 || document.body.scrollWidth > window.innerWidth + 1) return { ok: false, why: '整頁橫向溢出：' + document.documentElement.scrollWidth + ' > ' + window.innerWidth };
   if (pane.scrollWidth > pane.clientWidth + 1 || view.scrollWidth > view.clientWidth + 1) return { ok: false, why: '對話區橫向溢出：對話區 ' + pane.scrollWidth + '/' + pane.clientWidth + '、終端區 ' + view.scrollWidth + '/' + view.clientWidth };
   // (e) 終端上方沒有「打字」按鈕（#1288 拿掉了）；輸入框的提示字與按鈕字換成打進終端的說法
   if (document.querySelector('.term-remote-switch')) return { ok: false, why: '終端上方的「打字」按鈕還在（應該拿掉）' };
   const ta2 = document.querySelector('.chatpane .compose-row textarea');
-  if (!ta2 || !ta2.placeholder.includes(kind === 'typing' ? '會直接打進' : '送出後會連到那台電腦') || !ta2.placeholder.includes('demo')) return { ok: false, why: '終端畫面時輸入框的提示字不對：' + (ta2 ? ta2.placeholder : '') };
+  if (!ta2 || !ta2.placeholder.includes(kind === 'typing' ? '會直接打進' : '送出即打字') || !ta2.placeholder.includes('demo')) return { ok: false, why: '終端畫面時輸入框的提示字不對：' + (ta2 ? ta2.placeholder : '') };
   const go2 = ta2.closest('form').querySelector('button[type=submit]');
   if (!go2 || go2.textContent.trim() !== '送出') return { ok: false, why: '終端畫面時按鈕不是「送出」：' + (go2 ? go2.textContent : '') };
   return { ok: true, why: '' };
@@ -292,7 +292,7 @@ export const dtermTabProbeSource = ({ kind }) => `(async () => {
   if (!(await wait(() => rowsOf().includes('測試通過')))) return { ok: false, why: '切回來後終端不見了或沒有內容：' + rowsOf().slice(0, 40) };
   const sc = vis('.term-view-screen .xterm-screen')[0];
   if (!sc || sc.clientWidth < 50) return { ok: false, why: '切回來後終端畫面寬度是 0（沒有重新排版）' };
-  if (!(await wait(() => barOf().includes('正在看')))) return { ok: false, why: '切回來後狀態列沒有「正在看」：' + barOf().slice(0, 60) };
+  if (barOf().includes('只能看')) return { ok: false, why: '切回來後狀態列還寫著「只能看」：' + barOf().slice(0, 60) };
   if (kind === 'switchback' && calls('term_view_remote_start') !== starts) return { ok: false, why: '切回來又重新請求了一次（start 次數 ' + starts + ' → ' + calls('term_view_remote_start') + '）' };
   return { ok: true, why: '' };
 })()`

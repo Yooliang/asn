@@ -17,7 +17,7 @@ export const INPUT_TEXT = {
   typing: (machine, name) => `正在「${machine}」上「${name}」打字：你打的字會直接送進那個視窗，包括回答權限框`,
   soon: '再 1 分鐘就會結束，要繼續打字請結束後再開一次。',
   stop: '結束打字',
-  back: '改回只能看',
+  back: '只看畫面',
   waitReply: '正在連到那台電腦',
   refused: reason => (reason ? `沒有開始打字：${reason}` : '沒有開始打字，字已放回輸入框'),
   again: '再開一次',

@@ -606,6 +606,11 @@ const BASE_SCENARIOS = [
   // 電腦版看別台終端：狀態列（視窗最下面）放「正在看…」或打字中的警示，黑色畫面和訊息框等寬、四周同樣間距；寬窗與窄窗各一
   { name: 'list-term-view', page: 'list.html', state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-term-view-1100.png' },
   { name: 'list-term-view-360', page: 'list.html', width: 360, state: { signedIn: true, dterm: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-term-view-360.png' },
+  // #1865：只看畫面時沒有藍色狀態列、畫面沒有「只能看」；三套外觀各一張（上面兩張是 Aero）
+  { name: 'list-term-view-modern', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'modern' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-term-view-modern.png' },
+  { name: 'list-term-view-line', page: 'list.html', width: 900, height: 640, state: { signedIn: true, dterm: true, skin: 'line' }, ready: '#app.win .chatpane .actionbar', probe: DTERM_PROBES.watch, shot: 'list-term-view-line.png' },
+  { name: 'm-term-skin-modern', page: 'm.html', state: { signedIn: true, mtermview: true, skin: 'modern' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.statusLine, shot: 'm-term-view-modern-412.png' },
+  { name: 'm-term-skin-line', page: 'm.html', state: { signedIn: true, mtermview: true, skin: 'line' }, ready: '#app.m .m-term-switch', probe: MTERMVIEW_PROBES.statusLine, shot: 'm-term-view-line-412.png' },
   // 切分頁再切回來：終端還在、有內容、不重新請求同意；離開超過 5 分鐘在到期當下結束（切回來看到「已結束＋重新看」）；打字中離開馬上結束打字
   { name: 'list-term-switchback', page: 'list.html', state: { signedIn: true, dterm: true, dtermTabs: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_TAB_PROBES.switchback, shot: 'list-term-switchback-1100.png' },
   { name: 'list-term-expired', page: 'list.html', state: { signedIn: true, dterm: true, dtermTabs: true }, ready: '#app.win .chatpane .actionbar', probe: DTERM_TAB_PROBES.expired, shot: 'list-term-expired-1100.png' },

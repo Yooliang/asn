@@ -8,7 +8,7 @@ const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThi
 
 // 第 2 格的字和本機終端一樣（#1029 前是「看畫面」）
 export const REMOTE_LABEL = '終端'
-export const REMOTE_TIP = '看這位夥伴在那台電腦上的終端（只能看；再按一次回到訊息）'
+export const REMOTE_TIP = '看這位夥伴在那台電腦上的終端（再按一次回到訊息）'
 export const FRAME_EVENT = 'term-view-remote-frame'
 export const END_EVENT = 'term-view-remote-end'
 /** 到期前多久提醒（毫秒） */
@@ -16,7 +16,6 @@ export const WARN_BEFORE_MS = 60_000
 
 export const REMOTE_TEXT = {
   waiting: '等那台電腦回應……',
-  watching: (machine, name) => `正在看「${machine}」上「${name}」的畫面（只能看）`,
   soon: '再 1 分鐘就會結束，要繼續看請結束後再按一次。',
   stop: '結束',
   again: '再看一次',
@@ -51,7 +50,8 @@ export function remoteBarState({ phase, soon, note, warn, main, danger }) {
   if (phase === 'ended') return note ? { text: note, level: 'warn' } : null
   if (warn) return { text: warn, level: 'danger' }
   const base = (phase === 'starting' || phase === 'waiting') ? { text: main.waiting, level: 'ask' } : (main.active ? { text: main.active, level: danger ? 'danger' : 'info' } : null)
-  if (!base) return null
+  // 正在看（只看畫面）不佔狀態列：看的是哪台哪位寫在輸入框的提示字（#1865）；快到期的提醒照舊出現
+  if (!base) return soon ? { text: REMOTE_TEXT.soon, level: 'warn' } : null
   return soon ? { text: `${base.text} ${REMOTE_TEXT.soon}`, level: base.level === 'danger' ? 'danger' : 'warn' } : base
 }
 
@@ -178,7 +178,7 @@ export const RemoteView = {
     const host = ref(null), phase = ref(props.endedNote ? 'ended' : 'starting'), note = ref(props.endedNote), soon = ref(false)
     const expired = ref(Boolean(props.endedNote))   // 電腦版：離開分頁而結束（狀態列要有「重新看」）
     const stateView = computed(() => remoteStateView({ phase: phase.value, note: note.value, restartInBar: !props.barInline && expired.value }))
-    const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: '', main: { waiting: REMOTE_TEXT.waiting, active: phase.value === 'watching' ? REMOTE_TEXT.watching(props.machine || props.node, props.name) : '' }, danger: false }))
+    const bar = computed(() => remoteBarState({ phase: phase.value, soon: soon.value, note: note.value, warn: '', main: { waiting: REMOTE_TEXT.waiting, active: '' }, danger: false }))
     watch(() => (bar.value ? bar.value.level + '|' + bar.value.text + '|' + expired.value : ''), () => { if (!props.barInline) emit('status', bar.value ? { ...bar.value, restartable: expired.value } : null) }, { immediate: true })
     let id = '', term = null, offFrame = null, offEnd = null, warnTimer = 0, alive = true
     // 手機：游標那一列要看得到。follow＝使用者沒自己捲離底部；程式自己設的捲動位置不算使用者捲的（createFollow 內處理）
@@ -296,9 +296,8 @@ export const RemoteView = {
   template: `
 <div class="term-view term-remote" :class="{ 'term-desk': !barInline }">
   <p class="term-view-ask" role="status" v-if="barInline && (phase === 'starting' || phase === 'waiting')">{{ TEXT.waiting }}</p>
-  <p class="term-remote-bar" role="status" v-else-if="barInline && phase === 'watching'">{{ TEXT.watching(machine || node, name) }}</p>
   <p class="term-view-lost" role="status" v-if="barInline && soon && phase !== 'ended'">{{ TEXT.soon }}</p>
-  <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（只能看）" v-show="phase === 'waiting' || phase === 'watching'"></div>
+  <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面" v-show="phase === 'waiting' || phase === 'watching'"></div>
   <div class="term-remote-state" role="status" v-if="stateView && phase !== 'ended'"><p class="term-remote-state-t">{{ stateView.title }}</p><p class="term-remote-state-h">{{ stateView.hint }}</p></div>
   <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ stateView.title }}　{{ stateView.hint }}<button class="aero-btn" type="button" v-if="barInline || !expired" @click="again">{{ TEXT.again }}</button></p>
 </div>`,

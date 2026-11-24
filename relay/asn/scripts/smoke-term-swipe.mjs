@@ -17,8 +17,11 @@ const COMMON = `
 export const mtermBarProbeSource = () => `(async () => {${COMMON}
   const bar = document.querySelector('.m-chat .typing');
   if (!bar) return { ok: false, why: '沒有最下面的狀態列' };
-  if (!bar.textContent.includes('正在看')) return { ok: false, why: '狀態列沒有「正在看」：' + bar.textContent.slice(0, 60) };
-  if (!bar.classList.contains('typing-remote')) return { ok: false, why: '狀態列沒有套用看終端的樣式（typing-remote）：' + bar.className };
+  // #1865：只看畫面時下面沒有藍色狀態列；看的是哪台哪位寫在輸入框提示字
+  if (/只能看|正在看/.test(bar.textContent) || bar.classList.contains('typing-info')) return { ok: false, why: '只看畫面時不該有藍色狀態列：' + bar.textContent.slice(0, 60) };
+  if (document.querySelector('.m-chat').textContent.includes('只能看')) return { ok: false, why: '畫面上還有「只能看」' };
+  const hintBox = document.querySelector('.m-chat .composer textarea');
+  if (!hintBox || !hintBox.placeholder.includes('送出即打字')) return { ok: false, why: '輸入框提示字不對：' + (hintBox ? hintBox.placeholder : '找不到輸入框') };
   const top = document.querySelector('.m-chat .term-remote');
   if (!top) return { ok: false, why: '沒有終端區' };
   const extra = top.querySelector('.term-remote-bar, .term-view-ask, .term-view-lost');
