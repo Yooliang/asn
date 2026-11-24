@@ -1,15 +1,11 @@
 {
-  "version": "0.2.94",
-  "notes": "- 改善：設備更新狀態的檢查改成平時每 5 分鐘一次，只有遠端更新進行中才加快，閒置時更省電、省流量\n- 改善：訊息寄出狀態的檢查改得更節省：剛寄出的勤一點、舊的慢一點，視窗看不到時不檢查",
-  "pub_date": "2026-11-24T13:59:55.670Z",
+  "version": "0.2.95",
+  "notes": "- 改善：電腦版 LINE、現代外觀拿掉標題列，最小化／放大／關閉三顆鈕移到右上角；滑到放大鈕可以選 Windows 的分割版面",
+  "pub_date": "2026-11-24T17:12:09.378Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjltSWMxZ3dXT1Z3eVlUM2pZYnliRVpVclRwWGZ0TlkvNkdESXZJRWhRblU0TmJpUmtKV1JYbm90czcvMFhyMTNKNDBIU0luZ0NXbmplNTBPZFdzTXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTI4Nzk1CWZpbGU6QVNOXzAuMi45NF94NjQtc2V0dXAuZXhlCitNenB6alF6dUhoYVR0UUFpcUdOOFR6U2N0MnFpaEtTcW9oUklXZ2lBZEZWWGczVm1ZcmJ3akUvSFgxN0ZIN1lERmxZNGVUOVdVNWdGVHV4UTloU0RnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.94_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi83ZXdQS1VHYVVZVXBmeUtxV2RSdjdMYXpWVmN4ZFpLeGlyTk0weE9FSkNzU20wYUhFakpUdE1VYnZKQXRLNW9ZRUIzQm5JT1F2RDkvNG9ENjZPVFE0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTI5Mzk2CWZpbGU6QVNOXzAuMi45NF9hbWQ2NC5BcHBJbWFnZQpUOHltL05mMjgvV3A1MjhxSFN5SUh3NS96OHlPK2ZLZU5GU1VrQlJvWUNzRklEbS8vaHVDK3lTVG5Hc0w2KzcyQXFTUzV4Zy9DSC9jK3hjSkZsY0pCZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.94_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybisrSlBmM0tEdWVta2lYdWVhZjJ0d2hzd1o4OFJsRjFXOGFxRjNRNlQ5MGd3RGZNWTlUVHBvQm85YzA5aDF5bUg4VGFUelFMLzFVb2ZBYTg4K0kvV3c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTQwMzI4CWZpbGU6QVNOXzAuMi45NV94NjQtc2V0dXAuZXhlClQ2OXF3ODlaQTdJcmYvUEg1Y3lTUWRNS0dkY2R4RXh4OVZ2NjNKUlhUeEM1M0pWeks1bllONWUxcksxVjdCOURlMEFnM0JCZXhNck45NENMeVU0ZUR3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.95_x64-setup.exe"
     }
   }
 }
