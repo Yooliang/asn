@@ -3,6 +3,8 @@
 //! 結構：最上層視窗（tao）→ 網頁容器（wry）→ WebView2 的子視窗；網頁區的滑鼠訊息都被最深的那層吃掉，
 //! 最上層視窗的 `WM_NCHITTEST` 收不到。所以在最上層視窗底下多放一個同行程的子視窗（`HWND_TOP`，蓋在網頁上），
 //! 大小就是放大鈕；它的 `WM_NCHITTEST` 回 `HTMAXBUTTON`，系統就把這一塊當成放大鈕、滑過時跳出分割版面。
+use super::snap_hit::Mode;
+use super::snap_top_win;
 use super::{clamp_to_client, step, BtnState, Ev, PxRect, EVENT};
 use std::ptr::{null, null_mut};
 use std::sync::Once;
@@ -33,10 +35,12 @@ struct Overlay {
     app: AppHandle,
     label: String,
     state: BtnState,
+    /// 做法 B：命中測試回 HTTRANSPARENT，由最上層視窗接手（見 snap_top_win.rs）
+    transparent: bool,
 }
 
-/// 照前端回報套用：Some＝建立或搬到這個位置；None＝清掉
-pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>) {
+/// 照前端回報套用：Some＝建立或搬到這個位置；None＝清掉。`mode` 決定 A（子視窗自己回放大鈕）或 B（交給最上層視窗）
+pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>, mode: Mode) {
     let parent = parent as HWND;
     unsafe {
         let existing = find(parent);
@@ -45,14 +49,21 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
                 DestroyWindow(existing);
                 RemoveWindowSubclass(parent, Some(parent_proc), SUBCLASS_ID);
             }
+            if mode == Mode::Top {
+                snap_top_win::uninstall(parent);
+            }
             return;
         };
         if existing != null_mut() {
             SetWindowPos(existing, HWND_TOP, rect.left, rect.top, rect.width(), rect.height(), SWP_NOACTIVATE);
+            if mode == Mode::Top {
+                snap_top_win::set_rect(parent, rect);
+            }
             return;
         }
         register_class();
-        let data = Box::into_raw(Box::new(Overlay { app, label, state: BtnState::default() }));
+        let top_app = (app.clone(), label.clone());
+        let data = Box::into_raw(Box::new(Overlay { app, label, state: BtnState::default(), transparent: mode == Mode::Top }));
         let hinst = GetModuleHandleW(null());
         let child = CreateWindowExW(
             0,
@@ -74,6 +85,9 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
         }
         SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         SetWindowSubclass(parent, Some(parent_proc), SUBCLASS_ID, 0);
+        if mode == Mode::Top {
+            snap_top_win::install(parent, top_app.0, top_app.1, rect);
+        }
     }
 }
 
@@ -132,7 +146,8 @@ unsafe extern "system" fn overlay_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpa
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
     match msg {
-        WM_NCHITTEST => HTMAXBUTTON as LRESULT,
+        // A：子視窗自己就是放大鈕；B：透明（HTTRANSPARENT＝-1），由最上層視窗回放大鈕
+        WM_NCHITTEST => if (*data).transparent { HTTRANSPARENT as LRESULT } else { HTMAXBUTTON as LRESULT },
         WM_NCMOUSEMOVE => {
             // 要主動要求「離開」通知，否則收不到 WM_NCMOUSELEAVE
             let mut t = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE | TME_NONCLIENT, hwndTrack: hwnd, dwHoverTime: 0 };

@@ -421,7 +421,7 @@ mod tests {
             "presence.rs", "input_consent.rs", "lib.rs", "main.rs", "rt.rs", "headless.rs", "account.rs", "ads.rs", "tray.rs", "updater.rs", "wins.rs", "shot.rs", "tts.rs", "stt.rs", "usage.rs", "cloud_invite.rs", "android.rs", "android_update.rs",
             "claude_mod.rs", "claude_accounts.rs", "codex_accounts.rs", "dialog.rs", "desktop.rs", "tests.rs",
             "relaunch.rs",   // 重新啟動 ASN 的共用流程（#2204）：lib.rs 用 cfg(feature = "gui")、cfg(desktop) 掛上，要 AppHandle 收尾與結束
-            "snap_max.rs", "snap_overlay_win.rs",   // 放大鈕分割版面（#1788）：lib.rs 用 cfg(feature = "gui")、cfg(desktop) 掛上
+            "snap_max.rs", "snap_overlay_win.rs", "snap_top_win.rs",   // 放大鈕分割版面（#1788）：lib.rs 用 cfg(feature = "gui")、cfg(desktop) 掛上
             "guard.rs",   // 意外關閉自動重開（lib.rs 用 cfg(feature = "gui")、cfg(desktop) 掛上；設定頁的三支指令用 tauri::command）
         ];
         fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {

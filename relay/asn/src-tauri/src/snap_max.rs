@@ -10,8 +10,26 @@
 //! 其他平台（Linux、macOS）：指令存在但什麼都不做，網頁的鈕照舊自己處理。
 #![allow(dead_code)]
 
+mod snap_hit;
 #[cfg(windows)]
 mod snap_overlay_win;
+#[cfg(windows)]
+mod snap_top_win;
+
+pub use snap_hit::Mode;
+
+/// 這個行程採用的做法：只讀環境變數 `ASN_SNAP_MODE`（`top`＝B，其餘＝A），讀一次就固定
+#[cfg(feature = "gui")]
+pub fn mode() -> Mode {
+    static MODE: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
+    *MODE.get_or_init(|| snap_hit::parse_mode(crate::envc::get("ASN_SNAP_MODE").as_deref()))
+}
+
+/// 啟動時把採用的做法寫進 ui.log
+#[cfg(feature = "gui")]
+pub fn log_mode() {
+    elog!("[放大鈕分割版面] 做法 {}（ASN_SNAP_MODE）", mode().name());
+}
 
 /// 前端回報的矩形：視窗內容區左上角起算、CSS 像素（`getBoundingClientRect`）
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -152,7 +170,7 @@ fn apply(window: tauri::Window, rect: Option<PxRect>) -> Result<(), String> {
     let app = window.app_handle().clone();
     let label = window.label().to_string();
     // 建立與調整子視窗一定要在建這扇視窗的執行緒上做
-    window.run_on_main_thread(move || snap_overlay_win::apply(hwnd, app, label, rect)).map_err(|e| e.to_string())
+    window.run_on_main_thread(move || snap_overlay_win::apply(hwnd, app, label, rect, mode())).map_err(|e| e.to_string())
 }
 
 #[cfg(all(feature = "gui", not(windows)))]
