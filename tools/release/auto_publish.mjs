@@ -81,6 +81,13 @@ export function checkWorktree(git) {
 export const REQUIRED_DEPS = ['relay/asn/node_modules/@tauri-apps/cli/tauri.js']
 const rootOf = (deps) => deps.repoRoot ?? REPO_ROOT
 
+// 無害雜檔（#2229）：只認「工作樹根目錄」底下、「未追蹤」（git status 的 ??）、檔名符合下列樣式的檔，準備工作樹時直接刪掉並記 log。
+// 窄清單、寫死：*.stackdump 是 bash／cygwin 當機時寫在當前目錄的紀錄（11-24 bash.exe.stackdump 讓發版停了 40 分鐘），沒有任何內容會被發版用到。
+// 選擇「刪」而不是「忽略」：local_sign_publish 開跑前自己也會查工作樹乾淨，只在這裡忽略它還是會停。
+// 已追蹤檔的改動（即使檔名符合）、子資料夾裡的同名檔、清單外的未追蹤檔，一律照舊停下、不清理。
+export const JUNK_UNTRACKED = [/^[^/\\]+\.stackdump$/]
+export const isJunkUntracked = (line) => line.startsWith('?? ') && JUNK_UNTRACKED.some((re) => re.test(line.slice(3).replace(/^"|"$/g, '')))
+
 // 跑 local_sign_publish 之前把工作樹整理乾淨；回 { ok, why, cat }
 // why 含 git 原文（可能帶 remote URL／token），只能進 log；cat 是固定的類別文案，群組只准貼這個
 // ⚠ 禁止用 git clean：專用 worktree 的 node_modules 可能是 junction，git clean 會順著刪掉主 checkout 的 node_modules
@@ -93,9 +100,15 @@ export function prepareWorktree(deps) {
   if (t.status !== 0) return fail('標籤衝突（本機可能有衝突的舊標籤），不強制覆蓋，請人工處理', `git fetch --tags 被拒絕，不強制覆蓋（${String(t.stderr).trim().slice(0, 200)}）`)
   const st = git(['status', '--porcelain'])
   if (st.status !== 0) return fail('git status 失敗')
-  const dirty = String(st.stdout).split('\n').map((l) => l.trimEnd()).filter(Boolean).map((l) => l.slice(3).replace(/^"|"$/g, ''))
+  const lines = String(st.stdout).split('\n').map((l) => l.trimEnd()).filter(Boolean)
+  const junk = lines.filter(isJunkUntracked).map((l) => l.slice(3).replace(/^"|"$/g, ''))
+  const dirty = lines.filter((l) => !isJunkUntracked(l)).map((l) => l.slice(3).replace(/^"|"$/g, ''))
   const other = dirty.filter((p) => !SITE_FILES.includes(p))
   if (other.length) return fail('工作樹有其他未提交的改動，不自動清理', `工作樹有其他未提交的改動（${other.slice(0, 5).join('、')}），不自動清理`)
+  // 清單外的改動都沒問題了才刪雜檔（有任何一項要停下時，什麼都不動）
+  for (const p of junk) {
+    try { (deps.unlink ?? ((x) => fs.unlinkSync(x)))(path.join(rootOf(deps), p)); deps.log?.(`已刪除無害雜檔 ${p}（當機紀錄，不影響發佈）`) } catch (e) { return fail('工作樹有無法刪除的雜檔，請人工處理', `無法刪除雜檔 ${p}：${e.message}`) }
+  }
   for (const p of dirty) {
     const show = git(['show', `origin/main:${p}`])
     let mine
