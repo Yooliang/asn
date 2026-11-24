@@ -60,7 +60,7 @@ test('#2111 切換中的那台：寫「切換中…」、不能按；別台不�
   ]
   assert.deepEqual(brief(rows(devices, [], { switchingNode: 'W' })), [['H', 'current', ''], ['W', 'busy', ''], ['V', 'switch', '']])
   assert.deepEqual(brief(rows(devices, [], { switchingNode: 'H' })).find(r => r[0] === 'H'), ['H', 'current', ''])
-  assert.deepEqual({ ...DEVICE_ROW_TEXT }, { current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', offline: '離線中', self: '這台' })
+  assert.deepEqual({ ...DEVICE_ROW_TEXT }, { current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', offline: '離線中', read: '額度回報' })
 })
 
 test('#1858 #2110 不列：已永久移除、已隱藏、設備代號在設備列表找不到的舊紀錄、沒登入這個帳號的設備', () => {

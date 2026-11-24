@@ -308,12 +308,12 @@ export const SettingsPanel = {
                       <span v-else>{{ a.quota.text }}</span>
                       <span class="dv-old" v-if="a.quota.fiveNote">{{ a.quota.fiveNote }}</span>
                     </span>
-                    <!-- 設備列：一台一列。左邊設備名（本機加「這台」），原因寫在設備名下方；右邊的鈕固定靠右、同一欄、同尺寸。
-                         使用中＝深灰不能按；可切換＝「切換」；切換中＝淡色不能按；不能切換＝虛線淡色不能按＋原因。讀這筆額度的那台，設備名左邊有一條藍色粗線 -->
+                    <!-- 設備列：一台一列。左邊設備名，原因寫在設備名下方；右邊的鈕固定靠右、同一欄、同尺寸。
+                         使用中＝深灰不能按；可切換＝「切換」；切換中＝淡色不能按；不能切換＝虛線淡色不能按＋原因。讀這筆額度的那台，設備名後面有一個小標籤「額度回報」 -->
                     <span class="dv-devs" v-if="devRows(v.key, a).length" role="group" :aria-label="DEVICE_BUTTON_TEXT.group + ' ' + a.account">
                       <template v-for="b in devRows(v.key, a)" :key="b.node">
-                      <span :class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]">
-                        <span class="dv-devname"><span class="dv-devn">{{ b.label }}<small class="dv-devself" v-if="b.self">{{ DEVICE_ROW_TEXT.self }}</small></span><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
+                      <span class="dv-devrow">
+                        <span class="dv-devname"><span class="dv-devn">{{ b.label }}<span class="dv-plan dv-devread" v-if="(a.quota.readNodes || []).includes(b.node)">{{ DEVICE_ROW_TEXT.read }}</span></span><small class="dv-devwhy" v-if="b.reason" :id="'dv-why-' + v.key + '-' + a.account + '-' + b.node">{{ b.reason }}</small></span>
                         <asn-button fixed class="dv-devbtn" v-if="b.state !== 'expired' && b.state !== 'relogin'" :state="b.look === 'switch' ? '' : b.look" :disabled="b.state !== 'switch' || busyNow" :aria-describedby="b.reason ? 'dv-why-' + v.key + '-' + a.account + '-' + b.node : null" @click="pressDev(v.key, a, b)">{{ DEVICE_ROW_TEXT[b.state] }}</asn-button>
                         <asn-button fixed class="dv-devbtn dv-relogin-btn" :state="b.state" v-else-if="b.state === 'relogin'" :disabled="busyNow || reloginHere(b.node)" @click="pressDev(v.key, a, b)">{{ LOGIN_LOST_TEXT.button }}</asn-button>
                       </span>
