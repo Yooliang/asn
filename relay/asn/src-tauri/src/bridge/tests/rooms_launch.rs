@@ -1298,7 +1298,20 @@ fn fake_window() {
     let cwd = std::env::current_dir().unwrap().display().to_string();
     std::fs::write(&record, json!({"name": name, "cwd": cwd, "leaked_claude_env": std::env::vars().filter(|(k, _)| k.to_uppercase().starts_with("CLAUDE")).count()}).to_string()).unwrap();
     put_session(Path::new(&sessions), std::process::id(), &name, "idle", 700);
-    std::thread::sleep(std::time::Duration::from_secs(4));
+    // 不寫死停幾秒（#2289）：開窗那端（Start-Process 後還要查 CIM 找承載視窗）在整套並行、機器吃緊時可能慢過任何固定秒數，
+    // 假視窗先結束就永遠不會出現在名單上。改成等測試放的「結束旗標」檔，輪詢加上限（上限只是防測試崩潰時殘留）
+    let stop = fake_window_stop_file(Path::new(&record));
+    let t0 = std::time::Instant::now();
+    while !stop.exists() && Path::new(&record).parent().is_some_and(|d| d.exists()) && t0.elapsed() < std::time::Duration::from_secs(180) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+/// 假視窗的結束旗標檔：記錄檔旁邊、同名加 `.stop`
+fn fake_window_stop_file(record: &Path) -> std::path::PathBuf {
+    let mut s = record.as_os_str().to_os_string();
+    s.push(".stop");
+    std::path::PathBuf::from(s)
 }
 
 /// 真的走 Start-Process／隱藏視窗那條路（Windows）：確認參數、工作資料夾都對，視窗出現在名單後回報 ok。結束時只關自己記下的那一棵程序。
@@ -1316,6 +1329,8 @@ async fn 遠端開視窗_真的開一個隱藏視窗_假視窗程式登記成_se
         fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
             let pid = crate::launch::local::start_remote_window(config, profile, name, cwd, crate::launch::local::RemoteShow::test_hidden(), pi_args)?;
             self.pids.lock().unwrap().push(pid);
+            // 模擬開窗那端慢（整套並行吃緊時 CIM 查詢會拖很久）：假視窗在這段時間內已登記完。拿掉旗標等待、改回固定短壽命就會紅
+            std::thread::sleep(std::time::Duration::from_secs(6));
             Ok(pid)
         }
     }
@@ -1349,6 +1364,8 @@ async fn 遠端開視窗_真的開一個隱藏視窗_假視窗程式登記成_se
     // 先把自己開的視窗收掉（只關記下的 PID），再檢查結果
     let pids = env.pids.lock().unwrap().clone();
     let rec = std::fs::read_to_string(&record).unwrap_or_default();
+    // 先放結束旗標讓假視窗自己收工，再關記下的那棵程序（失敗路徑也一樣會放，不留殘程序）
+    let _ = std::fs::write(fake_window_stop_file(&record), "stop");
     for p in &pids {
         super::super::orphans::kill_tree(*p);
     }
