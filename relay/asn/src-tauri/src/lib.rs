@@ -1581,7 +1581,7 @@ fn start_view_poller(app: AppHandle, relay: Arc<Relay>, terms: Arc<launch::term:
     }
     tauri::async_runtime::spawn(async move {
         loop {
-            // 門鈴一響（後台建了看畫面／打字的要求會敲這台的門鈴）就馬上查；門鈴斷了或沒響，每 10 秒照常查（#1762）
+            // 門鈴一響（後台建了看畫面／打字的要求會敲這台的門鈴）就馬上查；門鈴斷了或沒響，每 30 秒照常查（#1762、#2161 3b）
             let _ = view_wake::wait_next(std::time::Duration::from_secs(view_wake::POLL_INTERVAL_SECS), &wake).await;
             // 放行條件：本機的「允許其他設備替這台開新視窗」開著（兩台是同一個本人，由後台擋）
             let settings = bridge::read_settings(&data_dir);
