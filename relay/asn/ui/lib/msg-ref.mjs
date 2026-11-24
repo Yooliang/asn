@@ -57,7 +57,35 @@ export function refKind({ n, room = false, lo = null, hi = null, cue = false, re
 export const refTip = (kind, n, repo = '') => (kind === 'group' ? `跳到群組第 ${n} 則` : `開啟 GitHub ${repo}#${n}`)
 
 // 全名「擁有者/repo#N」或單獨「#N」。全名的擁有者與 repo 名先照字元收，再用 parseRepo 驗長度與格式
-const REF = /(?:([A-Za-z0-9][A-Za-z0-9-]*)\/([A-Za-z0-9._-]+))?#([1-9][0-9]{0,6})(?![\p{L}\p{N}_])/gu
+// 先找「#N」，再從 # 往回切出 repo 與擁有者（每個字只掃一次，長字串不會二次方回溯）
+const NUM = /#([1-9][0-9]{0,6})(?![\p{L}\p{N}_])/gu
+const REPO_CH = /[A-Za-z0-9._-]/, OWNER_CH = /[A-Za-z0-9-]/, ALNUM = /[A-Za-z0-9]/
+// 在 floor（前一個已處理的結尾）之後、hash 之前，找「擁有者/repo」；沒有回 null
+function prefixBefore(seg, hash, floor) {
+  let i = hash
+  while (i > floor && REPO_CH.test(seg[i - 1])) i--
+  if (i === hash || i - 1 < floor || seg[i - 1] !== '/') return null
+  const slash = i - 1
+  let j = slash
+  while (j > floor && OWNER_CH.test(seg[j - 1])) j--
+  while (j < slash && !ALNUM.test(seg[j])) j++
+  if (j === slash) return null
+  return { start: j, owner: seg.slice(j, slash), repoName: seg.slice(i, hash) }
+}
+// 與 seg.replace(REF, cb) 同義：cb(all, owner|undefined, repoName|undefined, num, at)
+function replaceRefs(seg, cb) {
+  let out = '', last = 0
+  NUM.lastIndex = 0
+  let m
+  while ((m = NUM.exec(seg))) {
+    const p = prefixBefore(seg, m.index, last)
+    const start = p ? p.start : m.index
+    const end = m.index + m[0].length
+    out += seg.slice(last, start) + (p ? cb(seg.slice(start, end), p.owner, p.repoName, m[1], start) : cb(m[0], undefined, undefined, m[1], start))
+    last = end
+  }
+  return out + seg.slice(last)
+}
 // 單獨 #N：前面不能是英文字母數字、底線、/、#、&（C#12、網址片段、HTML 實體、##）；中文字後面可以直接接（「見#12」）
 const BLOCKED_BEFORE = /[A-Za-z0-9_/#&]$/
 // 全名：前面還不能是 . - : @（網址、網域、帳號裡的片段，例如 x.com/foo/bar#12）
@@ -77,7 +105,7 @@ export function linkRefs(html, ctx = {}) {
       return seg
     }
     if (skip || !seg.includes('#')) return seg
-    return seg.replace(REF, (all, owner, repoName, num, at) => {
+    return replaceRefs(seg, (all, owner, repoName, num, at) => {
       const before = seg.slice(0, at)
       const n = Number(num)
       if (!seqOk(n) || n > MAX_REF) return all

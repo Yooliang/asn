@@ -192,3 +192,21 @@ test('refRange：下限＝已載入最舊那則、上限＝群組最新序號（
   assert.deepEqual(refRange([], 3931), { lo: null, hi: null })
   assert.deepEqual(refRange(null, 3931), { lo: null, hi: null })
 })
+
+test('長字串不會讓編號辨識卡住：5 萬字接 #1、5 萬字 a/b 重複、混合長字串各自在 200ms 內完成', () => {
+  const cases = {
+    '5 萬個 a 接 #1': 'a'.repeat(50000) + '#1',
+    '5 萬字 a/b 重複': 'a/b'.repeat(16700) + '#1',
+    '混合長字串': ('x-y.z/' + 'ab'.repeat(20) + ' 中文 #' + '1'.repeat(3) + ' ').repeat(900) + 'c'.repeat(20000) + '#5',
+    '5 萬個 - 接 #1': '-'.repeat(50000) + '#1',
+  }
+  for (const [name, text] of Object.entries(cases)) {
+    const t0 = performance.now()
+    const out = linkRefs(text, one)
+    const ms = performance.now() - t0
+    assert.ok(ms < 200, `${name} 花了 ${ms.toFixed(0)}ms`)
+    assert.equal(typeof out, 'string')
+  }
+  // 行為不變：長字串後面接的正常編號照樣認得
+  assert.deepEqual(refs(linkRefs('a'.repeat(50000) + ' Yooliang/asn#9', oneNoRepo)).map(r => r.repo), ['Yooliang/asn'])
+})

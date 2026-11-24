@@ -99,51 +99,109 @@ fn read_small(p: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
-/// `.git` 檔裡的 gitdir、commondir 只准指到本機路徑：網路路徑（`\\主機\…`、`//主機/…`、`\\?\UNC\…`）一律不跟，
-/// 免得只為了認出 repo 就去連別台主機。
+/// 只跟本機路徑：開頭是兩個路徑分隔符（`\\`、`//`、`\/`、`/\`，涵蓋網路與裝置寫法）或 `\??\` 的一律不跟。
+/// 純字串判斷，在碰任何檔案系統之前先擋。
 fn local_target_ok(p: &str) -> bool {
     let s = p.trim();
-    !(s.starts_with("\\\\") || s.starts_with("//") || s.to_ascii_lowercase().starts_with("\\\\?\\unc\\"))
+    let sep = |c: char| c == '\\' || c == '/';
+    let mut it = s.chars();
+    let two_seps = matches!((it.next(), it.next()), (Some(a), Some(b)) if sep(a) && sep(b));
+    !(two_seps || s.starts_with("\\??\\"))
+}
+
+/// 正規化後的路徑若是 `\\?\UNC\…` 也不要
+fn canon_local(p: &Path) -> Option<PathBuf> {
+    let c = std::fs::canonicalize(p).ok()?;
+    if c.to_string_lossy().to_ascii_lowercase().starts_with("\\\\?\\unc\\") {
+        return None;
+    }
+    Some(c)
+}
+
+/// 是一般檔案（不是資料夾、不是連結）
+fn plain_file(p: &Path) -> bool {
+    std::fs::symlink_metadata(p).map(|m| !m.file_type().is_symlink() && m.is_file()).unwrap_or(false)
+}
+
+/// 正規化後的 gitdir：必須在某個 repo 的 `.git/worktrees/<名>` 或 `.git/modules/<…>` 底下。
+/// 回 (那個 `.git` 資料夾, 是否在 modules 底下)
+fn git_dir_layout(gitdir: &Path) -> Option<(PathBuf, bool)> {
+    let comps: Vec<_> = gitdir.components().collect();
+    let idx = comps.iter().rposition(|c| c.as_os_str() == ".git")?;
+    let rest = &comps[idx + 1..];
+    let first = rest.first()?.as_os_str();
+    let modules = first == "modules" && rest.len() >= 2;
+    let worktree = first == "worktrees" && rest.len() == 2;
+    if !(modules || worktree) {
+        return None;
+    }
+    let git: PathBuf = comps[..=idx].iter().collect();
+    Some((git, modules))
+}
+
+/// worktree 的 `.git` 檔：跟著 gitdir 找到共用的設定檔路徑（只跟本機、同一個 repo 底下的路徑）
+fn worktree_config_path(d: &Path, text: &str, read: &dyn Fn(&Path) -> Option<String>) -> Option<PathBuf> {
+    let target = text.lines().next()?.trim().strip_prefix("gitdir:")?.trim().to_string();
+    if !local_target_ok(&target) {
+        return None;
+    }
+    let raw = if Path::new(&target).is_absolute() { PathBuf::from(&target) } else { d.join(&target) };
+    let gitdir = canon_local(&raw)?;
+    let (git, in_modules) = git_dir_layout(&gitdir)?;
+    let cd = gitdir.join("commondir");
+    let common = if plain_file(&cd) {
+        match read(&cd) {
+            Some(c) if !c.trim().is_empty() => {
+                let c = c.trim();
+                if !local_target_ok(c) {
+                    return None;
+                }
+                let raw = if Path::new(c).is_absolute() { PathBuf::from(c) } else { gitdir.join(c) };
+                let common = canon_local(&raw)?;
+                if common != git {
+                    return None;
+                }
+                common
+            }
+            _ => return None,
+        }
+    } else if in_modules {
+        gitdir
+    } else {
+        return None;
+    };
+    let cfg = common.join("config");
+    plain_file(&cfg).then_some(cfg)
 }
 
 /// 從資料夾往上找 .git，回要讀的 git 設定檔路徑。.git 是檔案（git worktree）時，跟著「gitdir:」找到真正的 git 資料夾，
 /// 再跟著它的 commondir 找到共用的設定檔（worktree 的 remote 設定在共用的那份）。
-fn git_config_path(start: &Path) -> Option<PathBuf> {
+fn git_config_path(start: &Path, read: &dyn Fn(&Path) -> Option<String>) -> Option<PathBuf> {
     let mut dir = Some(start);
     for _ in 0..UP_MAX {
         let d = dir?;
         let dot = d.join(".git");
         if dot.is_dir() {
-            return Some(dot.join("config"));
+            let cfg = dot.join("config");
+            return plain_file(&cfg).then_some(cfg);
         }
         if dot.is_file() {
-            let text = read_small(&dot)?;
-            let target = text.lines().next()?.trim().strip_prefix("gitdir:")?.trim().to_string();
-            if !local_target_ok(&target) {
-                return None;
-            }
-            let gitdir = if Path::new(&target).is_absolute() { PathBuf::from(&target) } else { d.join(&target) };
-            let common = match read_small(&gitdir.join("commondir")) {
-                Some(c) if !c.trim().is_empty() => {
-                    let c = c.trim();
-                    if !local_target_ok(c) {
-                        return None;
-                    }
-                    if Path::new(c).is_absolute() { PathBuf::from(c) } else { gitdir.join(c) }
-                }
-                _ => gitdir,
-            };
-            return Some(common.join("config"));
+            let text = read(&dot)?;
+            return worktree_config_path(d, &text, read);
         }
         dir = d.parent();
     }
     None
 }
 
+fn repo_of_dir_with(dir: &Path, read: &dyn Fn(&Path) -> Option<String>) -> Option<String> {
+    let text = read(&git_config_path(dir, read)?)?;
+    github_repo_from_url(&origin_url_from_config(&text)?)
+}
+
 /// 資料夾對應的 GitHub 倉庫（擁有者/倉庫）；讀不到或不是 github.com 就是 None
 pub fn repo_of_dir(dir: &Path) -> Option<String> {
-    let text = read_small(&git_config_path(dir)?)?;
-    github_repo_from_url(&origin_url_from_config(&text)?)
+    repo_of_dir_with(dir, &read_small)
 }
 
 /// 快取：資料夾 → (讀的時間, 結果)；沒讀到也記（None），同樣 5 分鐘內不重讀
@@ -296,15 +354,100 @@ mod tests {
     #[test]
     fn gitdir_或_commondir_指到網路路徑_一律不跟() {
         assert!(local_target_ok("C:/x/.git/worktrees/a") && local_target_ok("../main/.git") && local_target_ok("/home/u/.git"));
-        for bad in ["\\\\host\\share\\.git", "//host/share/.git", "\\\\?\\UNC\\host\\share\\.git", "  \\\\host\\s"] {
+        for bad in [
+            "\\\\host\\share\\.git", "//host/share/.git", "\\\\?\\UNC\\host\\share\\.git", "  \\\\host\\s",
+            "\\\\?\\C:\\x\\.git", "\\\\.\\C:\\x", "\\\\?\\unc\\h\\s", "//?/C:/x", "//./pipe/x", "\\??\\C:\\x",
+        ] {
             assert!(!local_target_ok(bad), "{bad}");
         }
         let t = tempfile::tempdir().unwrap();
-        write(&t.path().join("w1/.git"), "gitdir: \\\\host\\share\\repo\\.git\n");
-        assert_eq!(repo_of_dir(&t.path().join("w1")), None, "gitdir 是網路路徑就不讀");
+        for (i, bad) in ["\\\\host\\share\\repo\\.git", "//host/share/.git", "\\\\?\\C:\\x\\.git", "\\\\.\\C:\\x"].iter().enumerate() {
+            write(&t.path().join(format!("w{i}/.git")), &format!("gitdir: {bad}\n"));
+            let (reads, got) = recorded(&t.path().join(format!("w{i}")));
+            assert_eq!(got, None, "gitdir {bad} 不跟");
+            assert_eq!(reads, vec![t.path().join(format!("w{i}/.git"))], "只讀過那個 .git 檔，沒去讀其他東西");
+        }
         write(&t.path().join("main/.git/worktrees/wt/commondir"), "//host/share/.git\n");
-        write(&t.path().join("w2/.git"), "gitdir: ../main/.git/worktrees/wt\n");
-        assert_eq!(repo_of_dir(&t.path().join("w2")), None, "commondir 是網路路徑就不讀");
+        write(&t.path().join("w9/.git"), "gitdir: ../main/.git/worktrees/wt\n");
+        assert_eq!(repo_of_dir(&t.path().join("w9")), None, "commondir 是網路路徑就不跟");
+        write(&t.path().join("main/.git/worktrees/wt/commondir"), "\\\\?\\C:\\x\\.git\n");
+        assert_eq!(repo_of_dir(&t.path().join("w9")), None, "commondir 是裝置路徑就不跟");
+    }
+
+    /// 記錄讀過哪些檔的 repo_of_dir
+    fn recorded(dir: &Path) -> (Vec<PathBuf>, Option<String>) {
+        let log = std::cell::RefCell::new(Vec::new());
+        let got = repo_of_dir_with(dir, &|p: &Path| {
+            log.borrow_mut().push(p.to_path_buf());
+            read_small(p)
+        });
+        (log.into_inner(), got)
+    }
+
+    const CFG: &str = "[remote \"origin\"]\n\turl = git@github.com:Yooliang/asn.git\n";
+
+    #[test]
+    fn gitdir_指到_repo_外_或_commondir_指到別的_git_一律_none_且不讀它的設定() {
+        let t = tempfile::tempdir().unwrap();
+        // 別的資料夾裡任意的 config
+        write(&t.path().join("elsewhere/config"), CFG);
+        write(&t.path().join("elsewhere/commondir"), ".\n");
+        write(&t.path().join("w1/.git"), &format!("gitdir: {}\n", t.path().join("elsewhere").to_string_lossy()));
+        let (reads, got) = recorded(&t.path().join("w1"));
+        assert_eq!(got, None, "gitdir 不在 .git/worktrees 或 .git/modules 底下");
+        assert!(!reads.iter().any(|p| p.ends_with("config") || p.ends_with("commondir")), "{reads:?}");
+        // 在 .git 底下但不是 worktrees/<名>、modules
+        write(&t.path().join("main/.git/config"), CFG);
+        write(&t.path().join("main/.git/hooks/commondir"), "..\n");
+        write(&t.path().join("w2/.git"), &format!("gitdir: {}\n", t.path().join("main/.git/hooks").to_string_lossy()));
+        assert_eq!(recorded(&t.path().join("w2")).1, None, "gitdir 在 .git 底下但不是 worktrees／modules");
+        // commondir 指到別的 .git
+        write(&t.path().join("other/.git/config"), CFG);
+        write(&t.path().join("main/.git/worktrees/wt/commondir"), "../../../../other/.git\n");
+        write(&t.path().join("w3/.git"), "gitdir: ../main/.git/worktrees/wt\n");
+        let (reads, got) = recorded(&t.path().join("w3"));
+        assert_eq!(got, None, "commondir 不是這個 repo 的 .git");
+        assert!(!reads.iter().any(|p| p.ends_with("config")), "{reads:?}");
+        // 對照：commondir 正確就找得到
+        write(&t.path().join("main/.git/worktrees/wt/commondir"), "../..\n");
+        assert_eq!(recorded(&t.path().join("w3")).1.as_deref(), Some("Yooliang/asn"));
+        // commondir 沒寫、又不在 modules 底下
+        std::fs::remove_file(t.path().join("main/.git/worktrees/wt/commondir")).unwrap();
+        assert_eq!(recorded(&t.path().join("w3")).1, None);
+    }
+
+    #[test]
+    fn submodule_的_gitdir_在_modules_底下可以讀() {
+        let t = tempfile::tempdir().unwrap();
+        write(&t.path().join("super/.git/modules/sub/config"), CFG);
+        write(&t.path().join("super/sub/.git"), "gitdir: ../.git/modules/sub\n");
+        assert_eq!(repo_of_dir(&t.path().join("super/sub")).as_deref(), Some("Yooliang/asn"));
+    }
+
+    #[test]
+    fn config_是資料夾或連結_不讀() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(t.path().join("a/.git/config")).unwrap();
+        let (reads, got) = recorded(&t.path().join("a"));
+        assert_eq!(got, None, "config 是資料夾");
+        assert!(reads.is_empty(), "{reads:?}");
+        // 共用的 config 是資料夾（worktree 路線）
+        std::fs::create_dir_all(t.path().join("main/.git/config")).unwrap();
+        write(&t.path().join("main/.git/worktrees/wt/commondir"), "../..\n");
+        write(&t.path().join("w/.git"), "gitdir: ../main/.git/worktrees/wt\n");
+        assert_eq!(recorded(&t.path().join("w")).1, None);
+        // 連結：建不起來（Windows 沒權限）就略過這段斷言
+        write(&t.path().join("real-config"), CFG);
+        write(&t.path().join("b/.git/HEAD"), "x");
+        #[cfg(unix)]
+        let linked = std::os::unix::fs::symlink(t.path().join("real-config"), t.path().join("b/.git/config")).is_ok();
+        #[cfg(windows)]
+        let linked = std::os::windows::fs::symlink_file(t.path().join("real-config"), t.path().join("b/.git/config")).is_ok();
+        if linked {
+            let (reads, got) = recorded(&t.path().join("b"));
+            assert_eq!(got, None, "config 是連結");
+            assert!(reads.is_empty(), "{reads:?}");
+        }
     }
 
     #[test]
