@@ -249,13 +249,22 @@ ${deps.now()}`
   const tryCreate = () => { try { deps.createLock(f, mine); return true } catch (e) { if (e.code === 'EEXIST') return false; throw e } }
   if (tryCreate()) return { got: true, content: mine }
   let other = NaN
-  try { other = parseLock(deps.readFile(f)).pid } catch { /* 讀不到：當作殘留或剛被刪 */ }
+  let seen = null
+  try { seen = deps.readFile(f); other = parseLock(seen).pid } catch { /* 讀不到：當作殘留或剛被刪 */ }
   if (Number.isFinite(other) && other !== deps.pid && deps.pidAlive(other)) {
     const who = deps.isAutoPublish(other)
     if (who !== false) return { got: false, pid: other, unknown: who === null }
   }
   const stale = `${f}.stale-${deps.pid}`
   try { deps.rename(f, stale) } catch { return { got: false, pid: null, lost: true } }
+  // rename 之後核對搬走的就是剛才判斷為殘留的那份；不一樣代表搬到別人剛建好的有效鎖，要還回原名並放棄
+  let moved = null
+  try { moved = deps.readFile(stale) } catch { /* 讀不到就當不一樣 */ }
+  if (moved === null || moved !== seen) {
+    if (moved !== null) { try { deps.createLock(f, moved) } catch { /* 還不回去也沒關係（原名已被別人建了新的） */ } }
+    try { deps.unlink(stale) } catch { /* 刪不掉不影響 */ }
+    return { got: false, pid: null, lost: true }
+  }
   try { deps.unlink(stale) } catch { /* 刪不掉不影響 */ }
   if (!tryCreate()) return { got: false, pid: null, lost: true }
   return { got: true, content: mine, tookOver: Number.isFinite(other) ? other : null }
@@ -268,7 +277,7 @@ export function claimInstance(opts, deps) {
     const why = inst.pid ? `已經有一個自動發佈常駐程式在跑（pid ${inst.pid}），這個沒有啟動。若要重啟，請先停掉舊的、確認它結束後再啟動${inst.unknown ? '（查不到那個 pid 是什麼程式；確定它不是自動發佈的話，刪掉 auto-publish.pid 再啟動）' : ''}` : '同時有另一個常駐程式在啟動，這個沒有啟動'
     deps.log(why)
     makeAlerts(opts, deps).raise('already-running', 'already-running', why)
-  }
+  } else makeAlerts(opts, deps).resolve('already-running')
   return inst
 }
 
