@@ -265,6 +265,8 @@
 :root[data-skin="line"] .ttab > .red{top:7px;right:8px}
 :root[data-skin="line"] .ttab > .rtab-count{top:2px;right:-2px}
 :root[data-skin="line"] .ttab:focus-visible{outline:2px solid #fff;outline-offset:-2px}
+/* #1785：通知、設定一起靠下（DOM 順序已是 夥伴、對話、通知、設定；通知的 margin-top:auto 把它和後面的設定一起推到最底）。未讀紅點是 .ttab 的子元素，跟著圖示走 */
+:root[data-skin="line"] .top-tabs > .ttab-notice{margin-top:auto}
 
 /* ---------- 手機：底部導覽（圖示在上、文字在下；選中亮色；未讀紅點照舊掛在「夥伴」）。進到對話頁時整條收起來 ---------- */
 :root[data-skin="line"] .m-tabs{order:99;height:58px;border-top:1px solid var(--line);border-bottom:0;background:var(--panel)}

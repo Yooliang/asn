@@ -206,3 +206,20 @@ test('LINE 外觀：工具列位置「輸入框下方」（.tb-bottom）有作�
   const pad = rulesWith(skinCss('line'), 'padding').filter(r => /\.tb-bottom /.test(r.sel))
   assert.ok(pad.some(r => /> \.toolbar$/.test(r.sel)) && pad.some(r => /\.composer$/.test(r.sel)), '.tb-bottom 底下工具列與輸入框的內距有對調')
 })
+
+// ---- #1785：電腦版 LINE 左欄「通知、設定」靠下，其他外觀與手機不動 ----
+import { TOP_TABS, TOP_TABS_LINE } from '../ui/lib/tabs.mjs'
+
+test('#1785：LINE 左欄順序是 夥伴、對話、通知、設定（DOM 順序＝畫面順序＝焦點順序）；其他外觀仍是 夥伴、對話、設定、通知', () => {
+  assert.deepEqual(TOP_TABS_LINE.map(t => t.key), ['partners', 'chats', 'notice', 'settings'])
+  assert.deepEqual(TOP_TABS.map(t => t.key), ['partners', 'chats', 'settings', 'notice'], '其他外觀與手機的順序照舊')
+  assert.match(read('ui/list.html'), /v-for="t in \(skin === 'line' \? TOP_TABS_LINE : TOP_TABS\)"/, '只有 LINE 外觀換順序')
+})
+
+test('#1785：通知鈕用 margin-top:auto 把通知與設定一起推到欄底，規則只作用於 LINE 外觀', () => {
+  const css = read('ui/line.css')
+  const hit = css.split('\n').filter(l => /\.ttab-notice\{[^}]*margin-top:auto/.test(l))
+  assert.equal(hit.length, 1)
+  assert.ok(hit[0].startsWith(':root[data-skin="line"] '), '選擇器要掛在 LINE 外觀底下')
+  for (const f of ['ui/style.css', 'ui/modern.css', 'ui/skin-common.css']) assert.doesNotMatch(read(f), /ttab-notice\{[^}]*margin-top:auto/, `${f} 不能動到其他外觀`)
+})
