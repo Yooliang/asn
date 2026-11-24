@@ -635,6 +635,27 @@ mod tests {
         assert!(body["agents"].as_array().unwrap().iter().all(|a| a.get("used_legacy_env").is_none()), "不放在每位代理");
     }
 
+    #[test]
+    fn 名單說明與舊版逐字相同() {
+        let 對照: [(&str, &str); 10] = [
+            ("permission", "等你回答：權限"),
+            ("trust", "等你回答：信任資料夾"),
+            ("bypass_warning", "卡在略過權限警告"),
+            ("login", "需要登入"),
+            ("usage_limit", "額度用完"),
+            ("usage_menu", "額度用完：等你選"),
+            ("question", "等你回答：問題"),
+            ("question_view", "等你回答：問題"),
+            ("attention", "需要人工確認"),
+            ("held_message", "等你確認：外來訊息"),
+        ];
+        for (代號, 字) in 對照 {
+            assert_eq!(screen_label(代號), Some(字), "代號 {代號} 的說明跟舊版不同");
+        }
+        assert_eq!(screen_label(""), None);
+        assert_eq!(screen_label("unknown_code"), None);
+    }
+
     fn put(d: &Path, pid: u32, v: Value) {
         std::fs::write(d.join(format!("{pid}.json")), v.to_string()).unwrap();
     }
