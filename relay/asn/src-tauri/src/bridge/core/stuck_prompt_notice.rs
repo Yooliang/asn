@@ -78,7 +78,7 @@ impl Core {
         self.stuck_todo = todo;
     }
 
-    /// 給擁有者。送成、後台查不到擁有者、舊後台不認得這個種類（400／403／404，再試也一樣）都算做完
+    /// 給擁有者。送成、後台查不到擁有者、舊後台不認得這個種類（400／404）或拒絕（403），再試也一樣都算做完
     async fn stuck_notice_owner(&self, p: &StuckPrompt) -> bool {
         let body = json!({ "window": login_window_text(&p.name), "kind": "stuck_prompt", "detail": p.excerpt, "tool": Value::Null });
         match self.relay.api_status("waiting_notice", body).await {
@@ -87,8 +87,13 @@ impl Core {
                 self.log.line(&format!("stuck-prompt owner window={} notify={notify}", p.name));
                 matches!(notify, "sent" | "skipped" | "rate_limited")
             }
-            Ok((status @ (400 | 403 | 404), _)) => {
-                self.log.line(&format!("stuck-prompt owner window={}: 後台回 {status}，只留本機紀錄", p.name));
+            Ok((403, _)) => {
+                // 後台拒絕（不是舊後台不認得）：可能是這台電腦的金鑰失效或被擋，要查，所以和 400／404 分開寫
+                self.log.line(&format!("stuck-prompt owner window={}: 後台回 403（被拒絕，請查這台電腦的金鑰與權限），只留本機紀錄", p.name));
+                true
+            }
+            Ok((status @ (400 | 404), _)) => {
+                self.log.line(&format!("stuck-prompt owner window={}: 後台回 {status}（舊後台不認得這個種類），只留本機紀錄", p.name));
                 true
             }
             Ok((status, _)) => {

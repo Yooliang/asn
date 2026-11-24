@@ -49,3 +49,17 @@ async fn 擁有者那份失敗_隔一分鐘只重試那一份_夥伴那份不重
     assert_eq!(h.fr.wait_notices().iter().filter(|b| b["kind"] == "stuck_prompt").count(), 1, "重試送成");
     assert_eq!(to_partner(&h).len(), 1, "夥伴那份不重寄");
 }
+
+#[tokio::test]
+async fn 後台回_403_和舊後台不認得分開寫_log_都不再重試() {
+    for (status, must, must_not) in [(403u16, "被拒絕", "舊後台不認得"), (404, "舊後台不認得", "被拒絕"), (400, "舊後台不認得", "被拒絕")] {
+        let mut h = harness(&[("T-乙", "idle")]).await;
+        h.fr.st.lock().unwrap().wait_notice_status = status;
+        h.core.stuck_prompt_enqueue(T0, prompt());
+        h.core.stuck_prompt_send(T0).await;
+        let line = h.core.log.recent().into_iter().find(|l| l.contains("stuck-prompt owner") && l.contains(&format!("後台回 {status}"))).unwrap_or_else(|| panic!("{status} 要有一行 log：{:?}", h.core.log.recent()));
+        assert!(line.contains(must) && !line.contains(must_not), "{status}：{line}");
+        h.core.stuck_prompt_send(T0 + 120_000).await;
+        assert_eq!(h.core.log.count("stuck-prompt owner"), 1, "{status} 再試也一樣，不重試");
+    }
+}

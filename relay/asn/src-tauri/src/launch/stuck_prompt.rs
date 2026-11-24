@@ -189,15 +189,49 @@ struct Track {
     told: bool,
 }
 
-/// 每扇視窗的「這段畫面從何時起沒變」與通知紀錄。純邏輯
+/// 已通知紀錄的存檔名（機器資料夾底下）。只存視窗名、畫面雜湊、時間，不存畫面文字
+pub(crate) const STATE_FILE: &str = "stuck-prompt-state.json";
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SentRec {
+    window: String,
+    hash: String,
+    at: u64,
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct SentFile {
+    #[serde(default)]
+    sent: Vec<SentRec>,
+}
+
+/// 每扇視窗的「這段畫面從何時起沒變」與通知紀錄。純邏輯（存檔只在呼叫 `save_if_dirty` 時動）
 #[derive(Default)]
 pub(crate) struct StuckWatch {
     tracks: HashMap<String, Track>,
-    /// 視窗 → 上次通知的（畫面雜湊, 時間）：框消失又出現時，冷卻內同一段不重寄
+    /// 視窗 → 上次通知的（畫面雜湊, 時間）：框消失又出現時，冷卻內同一段不重寄；重啟 ASN 後也一樣（存檔）
     sent: HashMap<String, (String, u64)>,
+    file: Option<std::path::PathBuf>,
+    dirty: bool,
 }
 
 impl StuckWatch {
+    /// 讀存檔：沒有或壞了當空；超過冷卻的舊紀錄丟掉。之後有新的通知紀錄就能存回這個檔
+    pub(crate) fn load(file: &std::path::Path, now: u64) -> StuckWatch {
+        let parsed: SentFile = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let sent = parsed.sent.into_iter().filter(|r| now.saturating_sub(r.at) < COOLDOWN_MS).map(|r| (r.window, (r.hash, r.at))).collect();
+        StuckWatch { sent, file: Some(file.to_path_buf()), ..Default::default() }
+    }
+
+    /// 有新的通知紀錄才寫檔（原子寫入）；寫失敗回錯誤給呼叫端記 log，記憶體裡的紀錄照常有效
+    pub(crate) fn save_if_dirty(&mut self) -> Result<(), String> {
+        let Some(file) = self.file.as_ref().filter(|_| self.dirty) else { return Ok(()) };
+        self.dirty = false;
+        let body = SentFile { sent: self.sent.iter().map(|(w, (h, at))| SentRec { window: w.clone(), hash: h.clone(), at: *at }).collect() };
+        let text = serde_json::to_string(&body).map_err(|e| e.to_string())?;
+        crate::settings::atomic::write(file, text.as_bytes(), crate::settings::atomic::STATE).map_err(|e| e.to_string())
+    }
+
     /// `screen`＝這一輪讀到的畫面（讀到了才呼叫；讀不到就別呼叫，不算框消失）；視窗已結束給 None。
     /// 回該通知的：畫面沒變滿 5 分鐘、這一次卡住還沒通知過、冷卻內沒通知過同一段
     pub(crate) fn observe(&mut self, name: &str, screen: Option<&str>, now: u64) -> Option<StuckPrompt> {
@@ -219,14 +253,16 @@ impl StuckWatch {
         if self.sent.get(name).is_some_and(|(h, at)| *h == hash && now.saturating_sub(*at) < COOLDOWN_MS) {
             return None;
         }
+        self.sent.retain(|_, (_, at)| now.saturating_sub(*at) < COOLDOWN_MS);
         self.sent.insert(name.to_string(), (hash, now));
+        self.dirty = true;
         Some(StuckPrompt { name: name.to_string(), excerpt })
     }
 
     /// 已經不在名單上的視窗：紀錄拿掉
     pub(crate) fn retain_windows(&mut self, names: &[String]) {
         self.tracks.retain(|n, _| names.contains(n));
-        self.sent.retain(|n, _| names.contains(n));
+        // 通知紀錄不跟著名單拿掉：剛重啟時名單還沒配對好，拿掉就等於冷卻作廢；過期的在 observe 裡丟
     }
 }
 
@@ -454,10 +490,83 @@ mod tests {
                 (include_str!(concat!("../../tests/fixtures/term-screens/", $n, ".txt")).replace("\r\n", "\n"), $n)
             };
         }
-        for (text, name) in [fx!("claude-permission-bash"), fx!("claude-permission-long-bash"), fx!("claude-permission-scrolled-more-lines")] {
+        // 另一張（捲動後「↑ 10 more lines」）是真實畫面的節錄；不放進 term-screens 樣本資料夾，免得動到黃金檔
+        let scrolled = "    command: [\"sh\", \"-c\", \"while true; do sleep\n$${LOAN_WATCH_INTERVAL:-600}; done\"]\n\ngrep -n \"once\" bot/__main__.py | head -3; docker compose config -q 2>&1 | head -5\n╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌\n│ Claude Code can't be sure it read this command the way the shell will, so it can't rule out a dangerous removal.\n│ Read the command, and don't go ahead if you can't tell what it does.\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n↑ 10 more lines\nEsc to cancel · Tab to amend · ctrl+x ctrl+k twice to stop background agents\n──────────────────────── 夥伴-1 ─\n".to_string();
+        for (text, name) in [fx!("claude-permission-bash"), fx!("claude-permission-long-bash"), (scrolled, "捲動後的框（沒有縮排）")] {
             let e = excerpt_of(&text).unwrap_or_else(|| panic!("{name} 要判成確認框"));
             assert!(e.contains("Do you want to proceed?"), "{name}");
         }
+    }
+
+    /// 寄過一次並存檔，回存檔路徑與寄出的時間
+    fn sent_and_saved(dir: &std::path::Path) -> (std::path::PathBuf, u64) {
+        let file = dir.join(STATE_FILE);
+        let mut w = StuckWatch::load(&file, T);
+        watch_once(&mut w, BOX, T);
+        let at = T + STUCK_AFTER_MS;
+        assert!(watch_once(&mut w, BOX, at).is_some());
+        w.save_if_dirty().unwrap();
+        (file, at)
+    }
+
+    #[test]
+    fn 重啟後冷卻內同一段不重寄_只存雜湊與時間() {
+        let d = tempfile::tempdir().unwrap();
+        let (file, at) = sent_and_saved(d.path());
+        let saved = std::fs::read_to_string(&file).unwrap();
+        assert!(!saved.contains("Do you want") && !saved.contains("rm y"), "不存畫面文字：{saved}");
+        // 重啟（新的 StuckWatch 從檔案讀）：10 分鐘後同一段又出現，滿五分鐘也不寄
+        let t = at + 10 * 60_000;
+        let mut w = StuckWatch::load(&file, t);
+        watch_once(&mut w, BOX, t);
+        assert_eq!(watch_once(&mut w, BOX, t + STUCK_AFTER_MS), None, "冷卻內（重啟前才寄過）");
+        // 另一段畫面不受影響
+        let other = BOX.replace("rm y", "rm z");
+        watch_once(&mut w, &other, t);
+        assert!(watch_once(&mut w, &other, t + STUCK_AFTER_MS).is_some());
+    }
+
+    #[test]
+    fn 重啟時視窗名單還沒配對好_紀錄不被清掉() {
+        let d = tempfile::tempdir().unwrap();
+        let (file, at) = sent_and_saved(d.path());
+        let mut w = StuckWatch::load(&file, at + 1000);
+        w.retain_windows(&[]);
+        watch_once(&mut w, BOX, at + 2000);
+        assert_eq!(watch_once(&mut w, BOX, at + 2000 + STUCK_AFTER_MS), None);
+    }
+
+    #[test]
+    fn 重啟後超過冷卻的舊紀錄丟掉_會再寄() {
+        let d = tempfile::tempdir().unwrap();
+        let (file, at) = sent_and_saved(d.path());
+        let t = at + COOLDOWN_MS;
+        let mut w = StuckWatch::load(&file, t);
+        assert!(w.sent.is_empty(), "載入時就丟掉過期的");
+        watch_once(&mut w, BOX, t);
+        assert!(watch_once(&mut w, BOX, t + STUCK_AFTER_MS).is_some(), "冷卻過了");
+    }
+
+    #[test]
+    fn 存檔壞了或不存在_當空_寫不進去只回錯誤不中斷() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join(STATE_FILE);
+        for bad in [None, Some(""), Some("{壞"), Some("[1,2]"), Some("{\"sent\":\"x\"}")] {
+            if let Some(b) = bad {
+                std::fs::write(&file, b).unwrap();
+            }
+            let mut w = StuckWatch::load(&file, T);
+            watch_once(&mut w, BOX, T);
+            assert!(watch_once(&mut w, BOX, T + STUCK_AFTER_MS).is_some(), "壞檔當空：{bad:?}");
+        }
+        // 寫失敗（路徑的上層是個檔案）：回錯誤、記憶體裡的冷卻照常
+        let blocker = d.path().join("擋住");
+        std::fs::write(&blocker, "x").unwrap();
+        let mut w = StuckWatch::load(&blocker.join(STATE_FILE), T);
+        watch_once(&mut w, BOX, T);
+        assert!(watch_once(&mut w, BOX, T + STUCK_AFTER_MS).is_some());
+        assert!(w.save_if_dirty().is_err());
+        assert!(w.save_if_dirty().is_ok(), "同一筆只報一次");
     }
 
     #[test]

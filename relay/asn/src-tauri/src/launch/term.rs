@@ -3604,7 +3604,8 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
         // 已經寫過「認不得的選單」的視窗：同一段停留只寫一次（#1799）
         let mut attention_logged: std::collections::BTreeSet<String> = Default::default();
         // 保底通知：每扇視窗「這段畫面從何時起沒變」
-        let mut stuck = super::stuck_prompt::StuckWatch::default();
+        // 已通知的紀錄存檔：重啟 ASN 後 30 分鐘內同一段不重寄（#2264 一審 4）
+        let mut stuck = super::stuck_prompt::StuckWatch::load(&log_dir.join(super::stuck_prompt::STATE_FILE), crate::heartbeat::now_ms());
         loop {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
             // 設定頁關掉：不讀畫面，已顯示的提醒也收掉；名單上的固定字過期（2 分鐘）就不再顯示。打開就接著讀
@@ -3647,6 +3648,9 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
                     if let Some(p) = stuck.observe(name, text, now) {
                         note(now, &format!("夥伴「{}」的畫面停在確認框超過 5 分鐘，已排通知", p.name));
                         super::stuck_prompt::push_pending(p);
+                        if let Err(e) = stuck.save_if_dirty() {
+                            note(now, &format!("保底通知的已寄紀錄存不進檔案，重啟後可能重寄：{e}"));
+                        }
                     }
                 }
                 let result: Result<Option<&'static str>, String> = view.map(|v| v.and_then(|(code, _)| code));
