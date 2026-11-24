@@ -186,6 +186,38 @@ pub async fn android_perm_req_decide(app: State<'_, App>, auth: State<'_, crate:
     r.api_signed("perm_req_decide", Some(body), Some(t)).await
 }
 
+// ---------- 核對電腦指紋時請那台電腦自動跳出 QR Code（#1863；後台 fp_show_request／status／end，一定要本人簽章） ----------
+
+/// 本人選了「用相機掃電腦上的 QR code」：請 node 那台電腦跳出 QR Code。回 { id, expires_at }；後台的錯誤原樣回（rate_limited、not_found…，畫面據此換字）
+#[tauri::command]
+pub async fn android_fp_show_request(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, node: String) -> Result<serde_json::Value, String> {
+    if node.is_empty() || node.len() > 32 || !node.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-') {
+        return Err("fp_show_request bad_node".into());
+    }
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    let Some(t) = token.as_deref().filter(|t| !t.is_empty()) else { return Err("尚未登入，不能核對指紋".into()) };
+    r.api_signed("fp_show_request", Some(serde_json::json!({ "node": node })), Some(t)).await
+}
+
+/// 查那台電腦跳出來了沒：回 { status: pending｜shown｜pc_cancelled｜ended｜superseded｜expired }
+#[tauri::command]
+pub async fn android_fp_show_status(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, id: String) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    let Some(t) = token.as_deref().filter(|t| !t.is_empty()) else { return Err("尚未登入，不能核對指紋".into()) };
+    r.api_signed("fp_show_status", Some(serde_json::json!({ "id": id })), Some(t)).await
+}
+
+/// 掃完、取消、離開畫面：請那台電腦把 QR Code 視窗收掉
+#[tauri::command]
+pub async fn android_fp_show_end(app: State<'_, App>, auth: State<'_, crate::auth::AuthState>, id: String) -> Result<serde_json::Value, String> {
+    let r = relay_of(&app)?;
+    let token = crate::account::signing_token(&auth).await;
+    let Some(t) = token.as_deref().filter(|t| !t.is_empty()) else { return Err("尚未登入，不能核對指紋".into()) };
+    r.api_signed("fp_show_end", Some(serde_json::json!({ "id": id })), Some(t)).await
+}
+
 // ---------- 遠端密碼請求的確認（#26 第二期；別台電腦／雲端代理要密碼，由手機本人確認；設計見 docs/design/SECRET-REMOTE.md） ----------
 
 /// 待確認的密碼請求（哪台電腦、哪個程式、要做什麼、公鑰指紋、剩幾秒；沒有任何機密）。要本人簽章；沒登入回錯，不打後台。回 { requests: [...] }

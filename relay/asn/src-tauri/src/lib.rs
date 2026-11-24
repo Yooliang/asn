@@ -64,6 +64,9 @@ mod statusline_restore;
 mod term_remote;
 #[cfg(desktop)]
 mod perm_remote;
+// 手機要核對這台的指紋時自動跳出 QR Code 視窗（#1863）：開關視窗要 tauri，只在視窗版
+#[cfg(all(desktop, feature = "gui"))]
+mod fp_show;
 mod device_id;
 // 含睡眠的開機後時間（手機憑證、題目的到期要用它算）
 #[cfg(any(target_os = "android", test))]
@@ -3563,7 +3566,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_device_replace_candidates, relay_device_replace, relay_device_replace_dismiss, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, launch_cwd_remove, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, log_report_preview, log_report_send, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, settings_patch, report_send, report_get, quit_app, partner_repo, task_manager_restart_asn, task_manager_restart_mux,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, fp_show::fp_show_cancel, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_device_replace_candidates, relay_device_replace, relay_device_replace_dismiss, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, launch_cwd_remove, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, log_report_preview, log_report_send, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, settings_patch, report_send, report_get, quit_app, partner_repo, task_manager_restart_asn, task_manager_restart_mux,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_report, claude_mod::claude_mod_check, claude_quota::claude_quota_state,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
@@ -3584,7 +3587,7 @@ pub fn run() {
         account::auth_status, account::last_login_set_avatar, account::auth_login, account::auth_cancel, account::auth_logout, account::auth_account_info, account::auth_account_name_set, account::auth_ai_wake_limit_get, account::auth_ai_wake_limit_set, account::auth_device_prefs_get, account::auth_device_prefs_set, account::auth_chat_pins_get, account::auth_chat_pins_set, account::auth_bind,
         account::setup_remote_request, account::setup_remote_status, account::setup_device_request, account::setup_device_fetch, account::setup_device_cancel,
         cloud_invite::cloud_agent_create, cloud_invite::cloud_agent_list, cloud_invite::cloud_agent_revoke, cloud_invite::cloud_agent_rename, cloud_invite::cloud_agent_approve,
-        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_input, android::term_view_remote_set, android::term_view_remote_stop, android::android_known_list, android::android_known_challenge, android::android_known_answer, android::android_known_token, android::android_known_scan_confirm, android::android_known_confirm, android::android_known_forget, android::android_known_rename, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_secret_pending, android::android_secret_reply, android::android_login_sealed, android::android_room_read, android::android_room_post, relay_partner_list, relay_device_replace_candidates, relay_device_replace, relay_device_replace_dismiss, relay_partner_succeed,
+        site_releases::site_releases, android::relay_attachment_save, android::android_update_check, android::android_update_download, android::android_launchers, android::android_push_register, android::android_push_unregister, android::android_launch, android::android_partner_op, android::android_partner_ops, android::android_partner_archive, android::android_acct_list, android::android_acct_roster, android::android_acct_switch, android::android_acct_status, android::term_view_remote_available, android::term_view_remote_start, android::term_view_remote_input, android::term_view_remote_set, android::term_view_remote_stop, android::android_known_list, android::android_known_challenge, android::android_known_answer, android::android_known_token, android::android_known_scan_confirm, android::android_known_confirm, android::android_known_forget, android::android_known_rename, android::android_term_req_list, android::android_term_req_decide, android::android_perm_req_list, android::android_perm_req_decide, android::android_fp_show_request, android::android_fp_show_status, android::android_fp_show_end, android::android_secret_pending, android::android_secret_reply, android::android_login_sealed, android::android_room_read, android::android_room_post, relay_partner_list, relay_device_replace_candidates, relay_device_replace, relay_device_replace_dismiss, relay_partner_succeed,
     ]);
     let builder = builder
         .setup(move |app| {
@@ -3848,10 +3851,13 @@ pub fn run() {
                 #[cfg(desktop)]
                 let secret_wake = if handle.state::<App>().shot.is_none() { Some(secret_remote::desktop::start(&handle, r.clone())) } else { None };
                 #[cfg(desktop)]
-                let (term_wake, view_notify, perm_notify) = if handle.state::<App>().shot.is_none() {
+                let (term_wake, view_notify, perm_notify, fp_notify) = if handle.state::<App>().shot.is_none() {
                     let w = Arc::new(tokio::sync::Notify::new());
                     let vw = Arc::new(tokio::sync::Notify::new());
                     let pw = Arc::new(tokio::sync::Notify::new());
+                    let fw = Arc::new(tokio::sync::Notify::new());
+                    // 手機要核對這台的指紋（#1863）：門鈴叫醒才領取，領到就跳出 QR Code 視窗
+                    fp_show::start(handle.clone(), r.clone(), fw.clone());
                     start_perm_remote_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), pw.clone());
                     start_device_key_publish(r.clone(), handle.state::<App>().data_dir.clone());
                     start_view_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), handle.state::<App>().node.clone(), vw.clone());
@@ -3862,9 +3868,9 @@ pub fn run() {
                         handle.state::<App>().data_dir.clone(),
                         w.clone(),
                     );
-                    (Some(w), Some(vw), Some(pw))
+                    (Some(w), Some(vw), Some(pw), Some(fw))
                 } else {
-                    (None, None, None)
+                    (None, None, None, None)
                 };
                 // 門鈴：有 anon 金鑰才開；一響就叫前端去拉信
                 if let Some(url) = anon_url {
@@ -3875,6 +3881,8 @@ pub fn run() {
                     let view_wake_bell = view_notify.clone();
                     #[cfg(desktop)]
                     let perm_wake_bell = perm_notify.clone();
+                    #[cfg(desktop)]
+                    let fp_wake_bell = fp_notify.clone();
                     tauri::async_runtime::spawn(async move {
                         let topic = loop {
                             match r.api("whoami", None).await {
@@ -3919,6 +3927,12 @@ pub fn run() {
                                             w.notify_one();
                                         }
                                     }
+                                    #[cfg(desktop)]
+                                    bell::BellAction::WakeFpShow => {
+                                        if let Some(w) = &fp_wake_bell {
+                                            w.notify_one();
+                                        }
+                                    }
                                     #[cfg(not(desktop))]
                                     _ => {}
                                 }
@@ -3933,6 +3947,12 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .on_window_event(|w, ev| {
+            // 手機核對指紋的 QR Code 視窗被關掉（#1863）：交給領取迴圈判斷是不是本人關的（是就回報取消）
+            if w.label() == wins::FP_SHOW_LABEL {
+                if let tauri::WindowEvent::Destroyed = ev {
+                    fp_show::on_window_closed(&w.app_handle());
+                }
+            }
             // 關掉名單視窗：設定「縮到系統匣」（預設）就只藏起來，程序與收信照常；設「結束程式」才真的結束
             if w.label() == "list" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = ev {

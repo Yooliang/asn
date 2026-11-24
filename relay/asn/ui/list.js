@@ -33,7 +33,6 @@ import { mineFromStatus, nextPollMs, remoteUpdateView } from './lib/remote-updat
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
-import { QR_TEXT, normalizeQr } from './lib/fp-qr.mjs'
 import { TermView } from './lib/term-view.mjs'
 import { ActionBar } from './lib/actionbar.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
@@ -467,20 +466,10 @@ function closeLaunchNotice() { launchNotice.open = false }
 const beingViewed = ref([])
 const stopBeingViewed = id => termRemoteApi.viewedStop(id).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
 // 設定頁「認得的電腦」（#597）：判斷都在 Rust，這裡只讀本機紀錄。第一次記住和金鑰換了的通知由 Rust 寄信，不在這裡
-const known = reactive({ peers: [], busy: false, error: '', renameError: '', shown: false, ownFp: '', qr: null })
-// 這台自己的指紋（唯讀）：本人拿去和手機上顯示的比對
+const known = reactive({ peers: [], busy: false, error: '', renameError: '', shown: false, ownFp: '' })
+// 這台自己的指紋（唯讀）：本人拿去和手機上顯示的比對。QR Code 不在設定頁：手機要核對時這台自動跳出視窗（#1863，panel.js）
 async function loadOwnFp() {
   try { known.ownFp = String(await knownDeviceApi.ownFingerprint() ?? '').slice(0, 16) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
-}
-// 把這台的指紋畫成 QR code 給手機掃（唯讀）：格子由 Rust 排，這裡只驗資料、交給設定頁畫在 canvas 上；on=false 就收起來
-async function toggleOwnQr(on) {
-  if (!on) { known.qr = null; return }
-  try {
-    const qr = normalizeQr(await knownDeviceApi.ownFingerprintQr())
-    if (!qr) throw new Error('bad_qr_rows')
-    known.qr = qr
-    known.error = ''
-  } catch (e) { console.info('[ASN] 指紋 QR code 做不出來', String(e?.message ?? e)); known.qr = null; known.error = QR_TEXT.failed }
 }
 async function refreshKnown() {
   void loadOwnFp()
@@ -2150,7 +2139,7 @@ const app = createApp({
       },
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked }, guard: { supported: guard.supported, on: guard.on, busy: guard.busy, paused: guard.paused, blocked: guard.blocked },
       replace: { cards: replaceFlow.view(), busy: replaceSt.busy, error: replaceSt.error, note: replaceSt.note },
-      known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error, ownFp: known.ownFp, qr: known.qr } : null,
+      known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error, ownFp: known.ownFp } : null,
       bridge: bridge.shown ? { compactHandoff: bridge.compactHandoff, compactN: bridge.compactN, enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, remoteInput: bridge.remoteInput, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerWhy: bridge.termServerWhy, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, termFetchDetail: bridge.termFetchDetail, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
@@ -2217,7 +2206,6 @@ const app = createApp({
         case 'replace-pick': if (value?.node && value?.old) replaceFlow.choose(String(value.node), String(value.old)); break
         case 'replace-do': if (value?.node && value?.old) await replaceFlow.replace(String(value.node), String(value.old)); break
         case 'replace-keep': if (value) await replaceFlow.dismiss(String(value)); break
-        case 'known-qr': await toggleOwnQr(value === true); break
         case 'known-login-ok': if (value?.node) await setKnownLoginOk(value.node, value.on); break
         case 'bridge-auto-resume': await setBridgeAutoResume(value === true); break
         case 'bridge-compact': await setBridgeCompact(value === true, bridge.compactN); break

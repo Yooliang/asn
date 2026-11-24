@@ -215,23 +215,61 @@ pub async fn open_chat(app: AppHandle, frame: State<'_, Frame>, id: String, titl
     Ok(())
 }
 
-/// 指引、設定兩扇聊天窗（分離模式）：每種各一扇，內容由名單視窗用事件換
-const PANEL_KINDS: [&str; 2] = ["guide", "setting"];
+/// 用 panel.html 的獨立視窗：指引、設定（分離模式的聊天窗，每種各一扇，內容由名單視窗用事件換），
+/// 以及手機核對指紋時自動跳出的 QR Code 視窗（fpshow，#1863；只由背景的領取迴圈開關）
+const PANEL_KINDS: [&str; 3] = ["guide", "setting", "fpshow"];
+/// 能在整合模式變成分頁、會記進分頁的只有指引與設定；fpshow 不是分頁，也不能由畫面叫開
+const DOCKABLE_PANELS: [&str; 2] = ["guide", "setting"];
+/// 手機核對指紋時跳出的 QR Code 視窗（#1863）
+pub const FP_SHOW_LABEL: &str = "panel-fpshow";
 
-/// 指引、設定視窗的標籤；種類不認得就 None
+/// 視窗的標籤；種類不認得就 None
 pub fn panel_label(kind: &str) -> Option<String> {
     PANEL_KINDS.contains(&kind).then(|| format!("panel-{kind}"))
 }
 
-/// 視窗標籤是不是指引、設定視窗
+/// 視窗標籤是不是 panel.html 開的視窗（指引、設定、核對指紋的 QR Code）
 pub fn is_panel_label(label: &str) -> bool {
     label.strip_prefix("panel-").is_some_and(|k| PANEL_KINDS.contains(&k))
+}
+
+/// 開（或叫出）手機核對用的 QR Code 視窗（#1863）：已開著就把新的請求編號與到期時間交給它並叫到前面；沒開就置頂開在螢幕中央。
+/// 網址只帶請求編號與到期時間（毫秒），QR 的內容由視窗自己向本機要（device_own_fingerprint_qr）
+pub fn open_fp_show(app: &AppHandle, id: &str, until_ms: u64) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window(FP_SHOW_LABEL) {
+        let _ = app.emit_to(FP_SHOW_LABEL, "asn:fpshow", serde_json::json!({ "id": id, "until": until_ms }));
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+        return Ok(());
+    }
+    let native = app.try_state::<Frame>().map(|f| f.0.load(Ordering::Relaxed)).unwrap_or(false);
+    WebviewWindowBuilder::new(app, FP_SHOW_LABEL, WebviewUrl::App(format!("panel.html?kind=fpshow&id={}&until={until_ms}", q(id)).into()))
+        .title("核對這台電腦")
+        .inner_size(480.0, 540.0)
+        .min_inner_size(360.0, 460.0)
+        .decorations(native)
+        .always_on_top(true)
+        .focused(true)
+        .center()
+        .disable_drag_drop_handler()
+        .additional_browser_args(BROWSER_ARGS)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 關掉手機核對用的 QR Code 視窗（沒開著就什麼都不做）
+pub fn close_fp_show(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(FP_SHOW_LABEL) {
+        let _ = win.close();
+    }
 }
 
 /// 開（或叫出）指引／設定視窗：已開著就只換標題並叫到前面，內容由前端用 asn:panel 事件換；沒開就照記住的大小開新的
 #[tauri::command]
 pub async fn open_panel(app: AppHandle, frame: State<'_, Frame>, kind: String, title: String, w: f64, h: f64) -> Result<(), String> {
-    let label = panel_label(&kind).ok_or("不認得的視窗種類")?;
+    let label = panel_label(&kind).filter(|_| DOCKABLE_PANELS.contains(&kind.as_str())).ok_or("不認得的視窗種類")?;
     if let Some(win) = app.get_webview_window(&label) {
         let _ = win.set_title(&title);
         let _ = win.unminimize();
@@ -258,7 +296,7 @@ pub async fn open_panel(app: AppHandle, frame: State<'_, Frame>, kind: String, t
 pub fn close_panels(app: AppHandle, kind: Option<String>) -> Vec<String> {
     let mut kinds = vec![];
     for (label, w) in app.webview_windows() {
-        let Some(k) = label.strip_prefix("panel-").filter(|k| PANEL_KINDS.contains(k)) else { continue };
+        let Some(k) = label.strip_prefix("panel-").filter(|k| DOCKABLE_PANELS.contains(k)) else { continue };
         if kind.as_deref().is_some_and(|only| only != k) {
             continue;
         }
@@ -305,7 +343,7 @@ pub fn open_window_sets<'a>(labels: impl Iterator<Item = &'a str>) -> (Vec<Strin
     for label in labels {
         if let Some(id) = chat_id_of(label) {
             chats.push(id);
-        } else if let Some(k) = label.strip_prefix("panel-").filter(|k| PANEL_KINDS.contains(k)) {
+        } else if let Some(k) = label.strip_prefix("panel-").filter(|k| DOCKABLE_PANELS.contains(k)) {
             panels.push(k.to_string());
         }
     }
@@ -855,10 +893,22 @@ mod tests {
 
     #[test]
     fn 開著的視窗分成對話與面板() {
-        let labels = ["list", "chat-6162", "panel-guide", "toast-0-1", "panel-x", "chat-6161"];
+        let labels = ["list", "chat-6162", "panel-guide", "toast-0-1", "panel-x", "chat-6161", "panel-fpshow"];
         let (c, p) = open_window_sets(labels.into_iter());
         assert_eq!(c, vec!["aa".to_string(), "ab".to_string()]);
-        assert_eq!(p, vec!["guide".to_string()]);
+        assert_eq!(p, vec!["guide".to_string()], "核對指紋的 QR Code 視窗不是分頁，不記進分頁");
+    }
+
+    #[test]
+    fn 核對指紋視窗_是_panel_視窗但不能變分頁_也不能由畫面叫開() {
+        assert_eq!(panel_label("fpshow").as_deref(), Some(FP_SHOW_LABEL));
+        assert!(is_panel_label(FP_SHOW_LABEL), "外框切換、截圖都要把它當 panel 視窗");
+        assert!(!DOCKABLE_PANELS.contains(&"fpshow"));
+        let src = include_str!("wins.rs").replace("\r\n", "\n");
+        let open = src.split("pub async fn open_panel(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(open.contains("DOCKABLE_PANELS.contains(&kind.as_str())"), "open_panel 只開指引、設定");
+        let close = src.split("pub fn close_panels(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(close.contains("DOCKABLE_PANELS.contains(k)"), "整合模式收視窗時不能把 QR Code 視窗變成分頁");
     }
 
     #[test]

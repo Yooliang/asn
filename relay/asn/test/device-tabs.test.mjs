@@ -41,15 +41,15 @@ test('「返回」在頁首那一行（共用按鈕）；改名只在動作區�
 })
 
 test('四種設備各自有哪幾顆鈕', async () => {
-  assert.deepEqual(labels(await render({ dev: 'H' })), ['工作管理員', '詳情', 'QR Code'], '這台：三顆（帳號分頁 #1860 拿掉了）')
+  assert.deepEqual(labels(await render({ dev: 'H' })), ['工作管理員', '詳情'], '這台：兩顆（帳號分頁 #1860 拿掉了；QR Code 分頁 #1863 拿掉了，手機核對時自動跳出）')
   assert.deepEqual(labels(await render({ dev: 'W' })), ['詳情'], '別台電腦：沒有工作管理員、沒有 QR')
   assert.deepEqual(labels(await render({ dev: 'P' })), ['詳情'], '手機')
   assert.deepEqual(labels(await render({ dev: 'C' })), ['詳情'], '雲端節點：沒有指紋，不出 QR')
 })
 
 test('沒有指紋或沒有工作管理員資料時，對應的鈕不出', async () => {
-  const noFp = st({ known: { ownFp: '', qr: null, busy: false, peers: [], error: '', renameError: '' } })
-  assert.ok(!labels(await render({ dev: 'H' }, noFp)).includes('QR Code'))
+  const withFp = st({ known: { ownFp: 'a3f907c251de8b40', busy: false, peers: [], error: '', renameError: '' } })
+  assert.ok(!labels(await render({ dev: 'H' }, withFp)).includes('QR Code'), '有指紋也不再有 QR Code 分頁（#1863）')
   const noTm = st(); delete noTm.taskMgr
   assert.ok(!labels(await render({ dev: 'H' }, noTm)).includes('工作管理員'))
 })
