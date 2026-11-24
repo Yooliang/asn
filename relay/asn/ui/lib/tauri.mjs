@@ -27,11 +27,11 @@ export const invoke = async (cmd, args) => {
   try { return await T.core.invoke(cmd, args) } catch (e) {
     const msg = typeof e === 'string' ? e : (e?.message ?? String(e))
     logFail(cmd, msg)   // log 保留完整原文（含代號）
-    // 後端設定層的錯誤開頭有固定代號 `[settings:名稱]`（#2162 ⑦）：在這個唯一的出口拆開——message 是去掉代號的白話句（畫面直接顯示不會冒出代號），
-    // 代號放在 err.code（`settings:名稱`），要判斷的程式只認 code，不比對文字（見 lib/settings-save.mjs）
-    const m = /^\s*\[settings:([a-z_]+)\]\s*/.exec(msg)
+    // 後端的錯誤開頭有固定代號 `[前綴:名稱]`（設定層 `settings`、回報匯流排 `report`）：在這個唯一的出口拆開——message 是去掉代號的白話句（畫面直接顯示不會冒出代號），
+    // 代號放在 err.code（`前綴:名稱`），要判斷的程式只認 code，不比對文字
+    const m = /^\s*\[(settings|report):([a-z_]+)\]\s*/.exec(msg)
     const err = new Error(m ? msg.slice(m[0].length) : msg)
-    if (m) err.code = `settings:${m[1]}`
+    if (m) err.code = `${m[1]}:${m[2]}`
     throw err
   }
 }
@@ -463,6 +463,23 @@ export const makeAccountsApi = (call = invoke) => ({
 // 啟動指引與設定頁的「登入」按鈕：開官方登入終端（list.js）
 export const cliLoginApi = {
   login: toolId => invoke('ai_cli_login', { toolId }),
+}
+
+// ---------- 回報匯流排出口（#2161 2c-2）：指令名與事件名只寫在這裡 ----------
+// send：後台寫入一筆回報（kind＋data）；get：批次讀同一個 kind 的多台最新回報 → { ok, reports: [{ node, kind, payload, updated_at, changed_at }] }
+// 錯誤是固定白話字串（invoke 出口已包成 Error 並記一行，不記 args）
+// 錯誤由 invoke 出口拆成 err.code：report:unknown_kind／report:bad_request（永久）、report:rate／network／server／not_ready（暫時）；message 是白話句
+export const reportApi = {
+  send: (kind, data) => invoke('report_send', { kind, data }),
+  get: (kind, nodes) => invoke('report_get', { kind, nodes }),
+}
+// 後台寫入且內容有變時 Rust 轉出的門鈴：payload { kind, node }，不含內容（要內容再呼叫 reportApi.get）。回傳取消函式（同步回傳，不必等 listen 完成）
+export const onReport = cb => {
+  let off = null, dead = false
+  try {
+    void listen('relay-report-bell', cb).then(f => { if (dead) { try { f() } catch {} } else off = f }).catch(() => {})
+  } catch { /* 沒有 Tauri（純網頁、測試）：什麼都不聽 */ }
+  return () => { dead = true; if (off) { try { off() } catch {} off = null } }
 }
 
 // ---------- 視窗外框（自訂／Windows 原生） ----------
