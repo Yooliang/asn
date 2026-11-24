@@ -75,3 +75,9 @@
 | claude-1799-reply-list-table-no-input.synthetic.txt | 回覆含編號清單＋表格，底部看不到輸入框（被捲出） | 不是選單；回顯 `❯ 提問` 不算選單游標 |
 | claude-1799-echo-numbered-no-input.synthetic.txt | 回顯本身是 `❯ 1. …`，底部看不到輸入框 | 不是選單；游標後面接 ● 回覆 |
 | claude-1799-reply-list-table-idle.synthetic.txt | 同上，輸入框與狀態列都在 | 不是選單（舊程式本來就對，當護欄） |
+
+## #2256 加的
+
+| 檔案 | 內容 | 預期 |
+|---|---|---|
+| claude-permission-scrolled-more-lines.txt | 擁有者截圖逐字抄：長指令的權限框被捲動，標題捲出畫面；有安全提示（左邊框「│ 」）、虛線分隔、選項只有 Yes／No；選項下方有 `↑ 10 more lines`；頁尾 `Esc to cancel · Tab to amend · ctrl+x ctrl+k twice to stop background agents`；最底實線右邊帶視窗名 | 判成 Permission、不完整（手機只給拒絕）。檔案是 LF，測試用 `.replace("\r\n", "\n")` 讀，LF／CRLF 都能處理 |

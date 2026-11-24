@@ -18,6 +18,7 @@
   "fixture/claude-lookalike-tool-output.txt": null,
   "fixture/claude-permission-bash.txt": null,
   "fixture/claude-permission-long-bash.txt": null,
+  "fixture/claude-permission-scrolled-more-lines.txt": null,
   "fixture/claude-permission-webfetch.txt": null,
   "fixture/claude-permission-write.txt": null,
   "fixture/claude-plan-approval.txt": null,
