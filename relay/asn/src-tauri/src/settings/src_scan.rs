@@ -282,6 +282,13 @@ pub(crate) fn prod_source(text: impl AsRef<str>) -> String {
     })
 }
 
+/// 同 `prod_source`，但呼叫端要給被掃描的檔名（相對路徑或任何看得懂的名字），結構不完整時的 panic 訊息會直接帶出它，
+/// 不必再回頭找是哪一處呼叫（#2232 B）。新寫的守門一律用這個；舊守門的 `prod_source(…)` 呼叫端不強制改。
+pub(crate) fn prod_source_of(rel: &str, text: impl AsRef<str>) -> String {
+    let text = text.as_ref();
+    try_prod_source(text).unwrap_or_else(|line| panic!("src_scan：{rel} 第 {line} 行附近找不到結尾，守門無法判斷哪裡是測試碼（若是檔案片段，請改餵完整的檔）"))
+}
+
 /// 同 `prod_source`，但結構不完整時回傳 Err(第幾行)，讓呼叫端補上檔名再 panic
 pub(crate) fn try_prod_source(text: &str) -> Result<String, usize> {
     let mut out = String::with_capacity(text.len());
@@ -400,7 +407,7 @@ pub(crate) fn prod_files(root: &Path) -> Vec<(String, String)> {
             continue;
         }
         let text = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
-        let prod = try_prod_source(&text).unwrap_or_else(|line| panic!("{rel}：第 {line} 行附近找不到結尾，守門無法判斷哪裡是測試碼"));
+        let prod = prod_source_of(&rel, &text);
         out.push((rel, prod));
     }
     out
@@ -546,6 +553,17 @@ mod tests {
         assert_eq!(try_prod_source("fn a() {}\n\n#[cfg(test)]\nmod tests {\n"), Err(4));
         // 完整的不受影響
         assert!(try_prod_source("#[cfg(test)]\nmod tests {}\n").is_ok());
+    }
+
+    #[test]
+    fn prod_source_of的panic訊息帶出被掃的檔名() {
+        let bad = "fn a() {}\n#[cfg(test)]\nmod tests {\n    fn b() {\n";
+        let err = std::panic::catch_unwind(|| prod_source_of("some/dir/foo.rs", bad)).unwrap_err();
+        let msg = err.downcast_ref::<String>().cloned().or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+        assert!(msg.contains("some/dir/foo.rs") && msg.contains("第 3 行"), "訊息要帶檔名與行號：{msg}");
+        // 完整的原始碼行為與 prod_source 相同
+        let ok = "fn a() {}\n#[cfg(test)]\nmod tests {}\nfn z() {}\n";
+        assert_eq!(prod_source_of("x.rs", ok), prod_source(ok));
     }
 
     #[test]
