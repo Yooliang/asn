@@ -86,8 +86,72 @@ test('unreadable：等的期間又有新的存檔進來，舊的這一次不再�
   await new Promise(r => setTimeout(r, 0))
   assert.equal(await patchWithFallback(s, { skin: 'new' }, {}, clock()), true)
   release()
-  assert.equal(await first, false)
-  assert.deepEqual(s.calls.map(x => x[1].skin), ['old', 'new'], '舊的沒有重試')
+  assert.equal(await first, true, '欄位被新的呼叫蓋過了，不會丟，所以算成功')
+  assert.deepEqual(s.calls.map(x => x[1].skin), ['old', 'new'], '舊的沒有重試，舊值沒有蓋掉新值')
+})
+
+// 做法：新呼叫把舊呼叫還沒存進去的欄位「併進自己這次要送的欄位」（同一欄以新值為準）。
+// 理由：只要有更新的呼叫就讓舊的放棄，會讓「先 { done }、再 { pendingDeviceName }」這種不同欄位的連續存檔丟掉第一筆；
+// 讓舊的照樣重試則可能在新呼叫之後才送出，拿舊值蓋掉同一欄的新值。併進新呼叫兩個問題都沒有，而且少送一次。
+test('等待中又 patch 不同欄位：兩邊的欄位都要存進去（先 {a} 碰到 unreadable、等待中再 {b}）', async () => {
+  const st = memStore({ keep: 1 })
+  const realPatch = st.patch
+  let first = true
+  st.patch = async f => { if (first) { first = false; throw asErr(UNREADABLE) } return realPatch(f) }
+  let release
+  const gate = new Promise(r => { release = r })
+  const p1 = patchWithFallback(st, { a: 1 }, {}, { wait: () => gate, warn: () => {} })
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(await patchWithFallback(st, { b: 2 }, {}, clock()), true)
+  assert.deepEqual(st.data, { keep: 1, a: 1, b: 2 }, 'b 這次送出時順便把 a 帶上')
+  release()
+  assert.equal(await p1, true)
+  assert.deepEqual(st.data, { keep: 1, a: 1, b: 2 })
+  assert.deepEqual(st.patches, [{ a: 1, b: 2 }], '只多送一次：舊呼叫發現欄位已被接手就不再重試')
+})
+
+test('等待中再 patch 同一欄：新值贏，舊值不會在之後蓋回來', async () => {
+  const st = memStore({})
+  const realPatch = st.patch
+  let first = true
+  st.patch = async f => { if (first) { first = false; throw asErr(UNREADABLE) } return realPatch(f) }
+  let release
+  const gate = new Promise(r => { release = r })
+  const p1 = patchWithFallback(st, { a: 'old', x: 1 }, {}, { wait: () => gate, warn: () => {} })
+  await new Promise(r => setTimeout(r, 0))
+  await patchWithFallback(st, { a: 'new' }, {}, clock())
+  release()
+  await p1
+  assert.deepEqual(st.data, { a: 'new', x: 1 }, 'x 帶上、a 以新值為準')
+})
+
+test('等待中的舊欄位併進新呼叫後，新呼叫碰到 merge：整份存也要帶上舊欄位', async () => {
+  const st = memStore({})
+  let n = 0
+  st.patch = async () => { throw asErr(n++ === 0 ? UNREADABLE : MERGE) }
+  let release
+  const gate = new Promise(r => { release = r })
+  const p1 = patchWithFallback(st, { a: 1 }, {}, { wait: () => gate, warn: () => {} })
+  await new Promise(r => setTimeout(r, 0))
+  await patchWithFallback(st, { b: 2 }, { old: 0, b: 2 }, clock())
+  release()
+  await p1
+  assert.deepEqual(st.data, { old: 0, b: 2, a: 1 })
+})
+
+test('新呼叫碰到其他錯誤丟出去：接手的舊欄位退回欠著，下一次存檔再帶', async () => {
+  const st = memStore({})
+  const realPatch = st.patch
+  let n = 0
+  st.patch = async f => { n++; if (n === 1) throw asErr(UNREADABLE); if (n === 2) throw asErr('[settings:too_big] 存檔太大'); return realPatch(f) }
+  let release
+  const gate = new Promise(r => { release = r })
+  const p1 = patchWithFallback(st, { a: 1 }, {}, { wait: () => gate, warn: () => {} })
+  await new Promise(r => setTimeout(r, 0))
+  await assert.rejects(patchWithFallback(st, { b: 2 }, {}, clock()), e => e.code === 'settings:too_big')
+  release()
+  assert.equal(await p1, true, '舊呼叫醒來發現欄位還欠著，自己重試')
+  assert.deepEqual(st.data, { a: 1 })
 })
 
 test('其他錯誤：原樣丟出去，不整份存、不等、不重試', async () => {

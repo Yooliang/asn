@@ -156,7 +156,9 @@ impl std::fmt::Display for SettingsError {
 
 impl From<std::io::Error> for SettingsError {
     fn from(e: std::io::Error) -> Self {
-        SettingsError(e.to_string())
+        // 系統原文（例如「拒絕存取 (os error 5)」）只寫進 log，給畫面的是固定白話句加代號
+        elog!("[ASN] 設定檔讀寫失敗（{e}）");
+        SettingsError(format!("{CODE_WRITE} 設定檔讀寫失敗，這次沒有存，稍後再試"))
     }
 }
 

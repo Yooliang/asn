@@ -349,3 +349,97 @@ fn doc_list_is_complete() {
     assert!(scanned_raw, "掃不到 settings/raw.rs，掃描規則失效");
     assert_eq!(impls, all_docs().len(), "原始碼裡的 Doc 型別數與 extra_kept_by_every_doc 的名單長度不同：新增的型別要加進 all_docs()");
 }
+
+// ---------------------------------------------------------------- 錯誤代號（#2162 ⑦）：settings 模組會回給前端的錯誤，每條路徑都有 `[settings:代號]`
+
+/// 被占用（Windows 獨占開檔）或沒權限（unix）讓檔案讀不到：回傳「放開」的動作
+#[cfg(windows)]
+fn make_unreadable(path: &Path) -> impl FnOnce() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(path).unwrap();
+    move || drop(held)
+}
+#[cfg(unix)]
+fn make_unreadable(path: &Path) -> impl FnOnce() {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let p = path.to_path_buf();
+    move || std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap()
+}
+
+#[test]
+fn 修補_檔案讀不到_回_unreadable_代號_原檔不動() {
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"version":1,"keep":1}"#;
+    put(d.path(), "asn-me.json", old);
+    let p = d.path().join("asn-me.json");
+    let release = make_unreadable(&p);
+    #[cfg(unix)]
+    if std::fs::read_to_string(&p).is_ok() {
+        release(); // 用 root 跑時權限擋不住，這支測不到，略過
+        return;
+    }
+    let e = patch_json(d.path(), RawName::Me, obj(json!({"a":1}))).unwrap_err();
+    assert!(e.starts_with("[settings:unreadable] 設定檔暫時讀不到"), "{e}");
+    assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".tmp").is_empty());
+    release();
+    assert_eq!(read(d.path(), "asn-me.json"), old, "原檔一字不差");
+    // 放開之後同一份 patch 就成功（所以前端等一下再試是有用的）
+    patch_json(d.path(), RawName::Me, obj(json!({"a":1}))).unwrap();
+}
+
+/// 每一條會回給前端的錯誤路徑都有固定代號：名稱、太大（整份存與 patch）、合併不了、寫入失敗、備份失敗、讀不到、資料夾未定、讀寫（io）、轉文字
+#[test]
+fn 所有回給前端的錯誤路徑都帶代號() {
+    let has = |e: &str, code: &str| assert!(e.starts_with(&format!("[settings:{code}] ")), "要以 [settings:{code}] 開頭：{e}");
+    // name
+    has(&RawName::parse("x").unwrap_err().0, "name");
+    // too_big：整份存與 patch
+    let d = tempfile::tempdir().unwrap();
+    let big = format!(r#"{{"k":"{}"}}"#, "x".repeat(MAX_BYTES));
+    has(&save_text(d.path(), RawName::Me, &big).unwrap_err(), "too_big");
+    has(&patch_json(d.path(), RawName::Me, obj(json!({"k": "x".repeat(MAX_BYTES)}))).unwrap_err(), "too_big");
+    // merge：舊檔壞掉
+    put(d.path(), "asn-me.json", "{壞掉");
+    has(&patch_json(d.path(), RawName::Me, obj(json!({"a":1}))).unwrap_err(), "merge");
+    // write：寫入失敗（注入）。整份存與 patch 兩條都要
+    put(d.path(), "asn-onboard.json", r#"{"version":1}"#);
+    FAIL_WRITE.with(|f| f.set(true));
+    let w1 = save_text(d.path(), RawName::Onboard, r#"{"a":1}"#).unwrap_err();
+    let w2 = patch_json(d.path(), RawName::Onboard, obj(json!({"a":1}))).unwrap_err();
+    FAIL_WRITE.with(|f| f.set(false));
+    has(&w1, "write");
+    has(&w2, "write");
+    // backup：版本 0 的舊檔升版前備份失敗
+    let d2 = tempfile::tempdir().unwrap();
+    put(d2.path(), "asn-me.json", r#"{"keep":1}"#);
+    migrate::FAIL_COPY.with(|f| f.set(true));
+    let b = patch_json(d2.path(), RawName::Me, obj(json!({"a":1}))).unwrap_err();
+    migrate::FAIL_COPY.with(|f| f.set(false));
+    has(&b, "backup");
+    assert_eq!(read(d2.path(), "asn-me.json"), r#"{"keep":1}"#);
+    // dir：設定資料夾還沒決定
+    has(&no_root().0, "dir");
+    // io 錯誤轉成的 SettingsError：固定白話句加代號，系統原文不外漏
+    let io: SettingsError = std::io::Error::from_raw_os_error(5).into();
+    has(&io.0, "write");
+    assert!(!io.0.contains("os error"), "{}", io.0);
+}
+
+/// 守門：settings 模組的非測試原始碼裡，每個 `SettingsError(` 建構點都要帶代號（用 CODE_ 常數或 TOO_BIG），以後新增的錯誤路徑忘了加代號就會紅
+#[test]
+fn 原始碼裡每個_SettingsError_建構點都帶代號() {
+    for (name, src) in [("mod.rs", include_str!("mod.rs")), ("raw.rs", include_str!("raw.rs")), ("migrate.rs", include_str!("migrate.rs")), ("atomic.rs", include_str!("atomic.rs")), ("docs.rs", include_str!("docs.rs"))] {
+        let mut n = 0;
+        for (i, line) in src.lines().enumerate() {
+            if !line.contains("SettingsError(") || line.trim_start().starts_with("//") || line.contains("pub struct SettingsError") {
+                continue;
+            }
+            n += 1;
+            assert!(line.contains("CODE_") || line.contains("TOO_BIG") || line.contains("super::CODE_"), "{name}:{} 的 SettingsError 沒有代號：{}", i + 1, line.trim());
+        }
+        if name == "mod.rs" {
+            assert!(n >= 4, "mod.rs 的建構點數量不對（掃描壞了？）：{n}");
+        }
+    }
+}

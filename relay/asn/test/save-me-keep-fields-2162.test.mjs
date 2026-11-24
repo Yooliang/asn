@@ -2,7 +2,7 @@
 // 手機版才有的 mobilePrefs／lastChat／navTab，或新版才寫的欄位，過去一存檔就整個消失。
 // #2162 ⑦：saveMe 改成 settings_patch，只送自己擁有的欄位，不認得的欄位由後端保留；舊檔壞到合併不了才退回整份存（帶著啟動時讀到的 savedMe）。
 // 做法：從 list.js 原始碼取出真正的 saveMe 函式本體，用假的狀態跑，看送出去的欄位與最後的檔案內容（memStore.patch 的行為跟後端一樣：只動給的欄位）。
-import { test } from 'node:test'
+import { test, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { deviceFieldsToSave } from '../ui/lib/device-order.mjs'
@@ -103,4 +103,24 @@ test('#2162⑦ 手機版 m.js 的存檔也走 patch（只送自己的欄位）�
   assert.match(mjs, /void patchWithFallback\(meStore, f, \(\) => \(\{ \.\.\.saved, \.\.\.f \}\)\)/)
   assert.doesNotMatch(mjs, /meStore\.save\(/)
   assert.match(mjs, /import \{ patchWithFallback \} from '\.\/lib\/settings-save\.mjs'/)
+})
+
+test('#2162⑦ saveMe 碰到「暫時讀不到」：等 3 秒再 patch 一次，不改成整份存，不連續重試', async () => {
+  const file = { futureField: 1, skin: 'modern' }
+  const store = memStore(file)
+  const realPatch = store.patch
+  let n = 0
+  store.patch = async f => { if (n++ === 0) { store.patches.push(f); throw Object.assign(new Error('設定檔暫時讀不到，這次沒有存，稍後再試'), { code: 'settings:unreadable' }) } return realPatch(f) }
+  mock.timers.enable({ apis: ['setTimeout'] })
+  try {
+    runSave(file, { skin: 'line' }, store)
+    await new Promise(r => setImmediate(r))
+    assert.equal(store.patches.length, 1, '3 秒內不重試')
+    mock.timers.tick(3000)
+    await new Promise(r => setImmediate(r))
+  } finally { mock.timers.reset() }
+  assert.equal(store.patches.length, 2, '等 3 秒後只再試一次')
+  assert.equal(store.saves, 0, '不改用整份存')
+  assert.equal(store.data.skin, 'line')
+  assert.equal(store.data.futureField, 1)
 })
