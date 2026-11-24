@@ -170,9 +170,44 @@ pub struct Running {
     engines: Option<Arc<EngineSet>>,
     #[cfg_attr(not(test), allow(dead_code))]
     pub log: Arc<BridgeLog>,
+    /// 主迴圈（收信、送回信、ack 都在裡面依序處理）結束了：正常跑完、被 abort、panic 都會設（由 [`LoopDone`] 的 drop 設）
+    loop_done: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// 主迴圈任務結束時（不管怎麼結束）把旗標設起來，給 [`Running::drain`] 等
+struct LoopDone(Arc<std::sync::atomic::AtomicBool>);
+impl Drop for LoopDone {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// 等旗標變 true，最多 `timeout`（每 `step` 看一次）。回傳旗標是否在時限內變 true。
+/// 重新啟動前等「進行中的送出／ack 做完」用：主迴圈一次只處理一個動作，旗標變 true＝手上的動作做完、迴圈已離開
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) async fn wait_flag(flag: &std::sync::atomic::AtomicBool, timeout: std::time::Duration, step: std::time::Duration) -> bool {
+    let end = tokio::time::Instant::now() + timeout;
+    loop {
+        if flag.load(std::sync::atomic::Ordering::SeqCst) {
+            return true;
+        }
+        if tokio::time::Instant::now() >= end {
+            return false;
+        }
+        tokio::time::sleep(step).await;
+    }
 }
 
 impl Running {
+    /// 停止收新信並等進行中的動作做完（重新啟動用）：通知主迴圈離開，迴圈會先把手上的送出／ack 處理完才檢查離開訊號，
+    /// 所以等到迴圈結束＝進行中的送出都有結果了。回傳是否在 `timeout` 內做完；逾時的由之後的 [`Running::stop`] 照舊 abort。
+    /// 不改 `stop` 的語意：一般結束仍然直接 abort
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub async fn drain(&self, timeout: std::time::Duration) -> bool {
+        self.shutdown.notify_one();
+        wait_flag(&self.loop_done, timeout, std::time::Duration::from_millis(50)).await
+    }
+
     /// 結束：停掉迴圈與門鈴，關掉自己啟動的 worker（只關記下的 PID），刪 mailbox.pid，釋放鎖（只刪自己的 bridge.pid）
     pub fn stop(&self) {
         self.shutdown.notify_one();
@@ -308,7 +343,13 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         core.set_engines(e.clone());
     }
     let mut tasks = vec![];
-    tasks.push(crate::rt::spawn(run_loop(core, lines, launched_rx, ev_rx, wake.clone(), shutdown.clone())));
+    let loop_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let done_guard = LoopDone(loop_done.clone());
+    let (loop_wake, loop_shutdown) = (wake.clone(), shutdown.clone());
+    tasks.push(crate::rt::spawn(async move {
+        let _done = done_guard;
+        run_loop(core, lines, launched_rx, ev_rx, loop_wake, loop_shutdown).await
+    }));
     if let Some(e) = &engine_set {
         tasks.push(e.spawn_refresher(cfg.engine_refresh_ms));
     }
@@ -333,7 +374,7 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
         }
         None => log.line("no anon key: doorbell off, polling only"),
     }
-    Ok(Running { shutdown, worker: w, lock, tasks, engines: engine_set, log })
+    Ok(Running { shutdown, worker: w, lock, tasks, engines: engine_set, log, loop_done })
 }
 
 fn now() -> u64 {
@@ -670,5 +711,30 @@ impl Manager {
     /// ASN 結束時：只關自己啟動的 worker
     pub fn shutdown(&self) {
         self.stop();
+    }
+
+    /// 重新啟動前先收橋：停止收新信、等進行中的送出／ack 最多 `timeout`，逾時照舊 abort（寫進 bridge.log），再釋放收信鎖。
+    /// 回傳「收橋前橋是不是在跑」，spawn 新程序失敗時用它決定要不要 [`Manager::resume_after_failed_relaunch`]。
+    /// 不碰設定檔（`enabled` 照舊），所以新程序開起來還是會啟動橋
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub async fn drain_for_relaunch(&self, timeout: std::time::Duration) -> bool {
+        let r = self.inner.lock().unwrap().running.take();
+        if let Some(rl) = &self.relay {
+            rl.set_bridge_running(false);
+        }
+        let Some(r) = r else { return false };
+        if !r.drain(timeout).await {
+            r.log.line(&format!("relaunch: in-flight send/ack not finished within {}s, aborting", timeout.as_secs()));
+        }
+        r.stop();
+        true
+    }
+
+    /// 重新啟動失敗（新程序開不起來）後恢復收發：收橋前橋在跑才重新啟動橋（設定檔沒動過，照 `try_start` 的一般流程）
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub fn resume_after_failed_relaunch(&self, was_running: bool) {
+        if was_running {
+            self.try_start();
+        }
     }
 }
