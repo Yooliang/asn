@@ -84,7 +84,8 @@ test('交接中的列不顯示「只能看」（只顯示原因）；真正只�
   assert.equal(viewRow(row({ compact: { count: 3, state: 'remind' } }), NOW, ctx()).showViewOnly, false, '有停止鈕的列不顯示')
   // 範本只讀 showViewOnly，不能退回「沒鈕就 v-else 顯示只能看」
   const view = read('ui/lib/task-tree-view.mjs')   // #1860 F：節點畫面搬到共用的樹元件
-  assert.match(view, /<small class="tm-viewonly" v-else-if="node\.showViewOnly"/)
+  // 允許後面再加條件（#1860 F PR3：有「重啟」的列不寫只能看），但一定要以 showViewOnly 為前提
+  assert.match(view, /<small class="tm-viewonly" v-else-if="node\.showViewOnly(?: && [^"]+)?"/)
   assert.ok(!/<small class="tm-viewonly" v-else /.test(view))
 })
 

@@ -107,6 +107,18 @@ export const taskmgrProbeSource = () => `(async () => {
   cancel2.click();
   if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '截圖前確認框沒有關' };
   for (const b of mores()) if (b.getAttribute('aria-expanded') === 'true' && !b.closest('.tm-node[data-kind="mux"]')) b.click();
+  // 重啟（#1860 F）：ASN 與終端服務各有「重啟」；點終端服務的，原位展開確認框（文字逐字、取消在左、重啟在右），探針不按「重啟」，截圖留著確認框
+  const restartBtns = [...document.querySelectorAll('.tm-tree .tm-restart')];
+  if (restartBtns.length !== 2) return { ok: false, why: 'ASN 與終端服務各該有一顆「重啟」，實際 ' + restartBtns.length };
+  const muxNode = () => document.querySelector('.tm-node[data-kind="mux"]');
+  muxNode().querySelector('.tm-restart').click();
+  const box = await waitFor(() => muxNode().querySelector('.asn-confirm'));
+  if (!box) return { ok: false, why: '按了終端服務的「重啟」沒有原位展開確認框' };
+  const wantText = '重啟終端服務？底下所有代理（3 個）會暫時斷線，之後會自動連回。';
+  if (box.querySelector('.asn-confirm-text').textContent.trim() !== wantText) return { ok: false, why: '重啟確認框文字不對：' + box.textContent.slice(0, 120) };
+  const btns = [...box.querySelectorAll('button')].map(b => b.textContent.trim());
+  if (btns.join('|') !== '取消|重啟') return { ok: false, why: '確認框按鈕應是「取消」在左、「重啟」在右，實際 ' + btns.join('|') };
+  if ((globalThis.__smokeCalls || []).some(c => /^task_manager_restart/.test(c[0]))) return { ok: false, why: '還沒按「重啟」就呼叫了重啟指令' };
   await sleep(200);
   return { ok: true };
 })()`

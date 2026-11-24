@@ -38,6 +38,9 @@ const RETRY = [
   '伺服器回 429',
   '伺服器回 503',
   '連不上或逾時',
+  // relay/asn/scripts/fetch-wezterm.mjs（Windows 取得 WezTerm，#1860 F 的真 mux 整合測試用）
+  '下載失敗 502：https://github.com/Yooliang/asn/releases/download/x/y.zip',
+  '下載失敗 429：https://github.com/x',
 ]
 const NO_RETRY = [
   "> Could not GET 'https://repo.maven.apache.org/maven2/a/b/1/b-1.pom'. Received status code 404 from server: Not Found",
@@ -53,6 +56,7 @@ const NO_RETRY = [
   // 單獨一句 Too Many Requests（沒有狀態碼）不算：cargo、Gradle 的單元測試也包在這支裡，有些測試拿它當輸入，真的失敗時不該被多跑兩輪、再寫成外部服務
   'Too Many Requests',
   'assertion failed: body == "429 Too Many Requests"',
+  '下載失敗 404：https://github.com/x',
 ]
 
 test('腳本裡讀得到判斷用的 pattern（改了寫法這個測試要跟著改，不能默默通過）；只認帶狀態碼的 429，沒有單獨的 Too Many Requests', () => {

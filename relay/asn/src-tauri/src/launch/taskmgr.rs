@@ -377,9 +377,23 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
     Snapshot { rows, known, now_ms: src.now_ms }
 }
 
+/// 重啟的狀態放進清單：
+/// - `mux_restarting`：按了「重啟終端服務」、還沒做完，畫面據此顯示「正在重啟…」，底下的代理標「斷線中」
+/// - `restart_pending`：上次重啟起不來、還沒接回的代理數，重啟 ASN 的確認框據此多講一句
+/// - `restart_pending_names`：這些代理的名字，畫面重啟後等它們都接回才放掉「重啟中」
+/// - `mux_expected`：這台用終端服務、而且有代理等著接回或上次重啟失敗（見 `placeholder_wanted`）。清單上沒有終端服務那一列時，畫面列一個「沒有在運行」的佔位，讓本人有地方再按重啟；
+///   只是用終端服務、服務被正常收掉（最後一位夥伴關了）不算，沒開終端服務模式的 Linux 也不算
+#[cfg(desktop)]
+fn add_restart_state(out: &mut serde_json::Value, restarting: bool, pending: &[String], use_mux: bool, last_failed: bool) {
+    out["mux_expected"] = serde_json::Value::Bool(super::mux_restart::placeholder_wanted(use_mux, pending.len(), last_failed));
+    out["mux_restarting"] = serde_json::Value::Bool(restarting);
+    out["restart_pending"] = serde_json::json!(pending.len());
+    out["restart_pending_names"] = serde_json::json!(pending);
+}
+
 /// 讀真實環境：視窗名單、程序掃描、終端面板（呼叫端給）、認得的名字。讀不到視窗名單就回錯（畫面顯示暫時讀不到，不當成沒有程式）
 #[cfg(desktop)]
-pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, terms: Vec<TermIn>, partners: Vec<PartnerRef>) -> Result<serde_json::Value, String> {
+pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, terms: Vec<TermIn>, partners: Vec<PartnerRef>, use_mux: bool) -> Result<serde_json::Value, String> {
     use crate::bridge::{engines, known, procscan, roster};
     let home = crate::identity::home_dir();
     let now = crate::heartbeat::now_ms();
@@ -398,6 +412,7 @@ pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, 
     let all_sessions = stuck_resume::all_session_files();
     let src = Sources { claude, claude_ok, pi, procs, terms, partners, all_sessions, known: known_entries, protected, own_pid: std::process::id(), now_ms: now };
     let mut out = serde_json::to_value(build(&switch::RealOs, &src)).map_err(|e| e.to_string())?;
+    add_restart_state(&mut out, super::mux_restart::is_restarting(), &super::mux_restart::STASH.get(), use_mux, super::mux_restart::last_failed());
     // 壓縮次數（#1852）：只有 Claude 視窗有；內建收發室還沒數過的視窗是 null（畫面顯示「—」）
     if let Some(rows) = out.get_mut("rows").and_then(|r| r.as_array_mut()) {
         for r in rows.iter_mut().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("claude")) {
@@ -941,5 +956,51 @@ mod tests {
         let json = serde_json::to_value(&snap).unwrap();
         let first = json["rows"].as_array().unwrap().iter().find(|r| r["name"] == "小東").unwrap();
         assert_eq!(first["mux_pid"], 500, "序列化的欄位名是穩定字串");
+    }
+
+    /// 一審複看 1：清單帶「重啟中」與「還有幾位沒接回」，欄位名是畫面讀的穩定字串
+    #[cfg(desktop)]
+    #[test]
+    fn _1860f_清單帶重啟狀態_與沒接回的人數() {
+        let mut out = serde_json::to_value(build(&two_mux_os(), &src(vec![claude("小東", 502)]))).unwrap();
+        let names = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        add_restart_state(&mut out, false, &names(&["甲", "乙", "丙"]), true, false);
+        assert_eq!(out["restart_pending"], 3);
+        assert_eq!(out["restart_pending_names"], serde_json::json!(["甲", "乙", "丙"]), "畫面等這些名字都接回才放掉重啟中");
+        assert_eq!(out["mux_restarting"], false);
+        assert_eq!(out["mux_expected"], true, "用終端服務、有代理等著接回：列得出佔位");
+        add_restart_state(&mut out, true, &[], false, true);
+        assert_eq!((out["restart_pending"].clone(), out["mux_restarting"].clone()), (serde_json::json!(0), serde_json::json!(true)));
+        assert_eq!(out["mux_expected"], false, "沒開終端服務模式（Linux）不列佔位，即使有失敗記號");
+        assert!(out["rows"].is_array(), "原本的欄位不動");
+    }
+
+    /// 西川複看 B1：mux_expected 跟 use_mux／存下的名單／失敗記號的關聯。只是用終端服務、沒名單沒失敗（服務被正常收掉）→ 假，不能永遠掛著佔位
+    #[cfg(desktop)]
+    #[test]
+    fn _1860f_佔位旗標_看用不用服務_名單_失敗記號() {
+        let mut out = serde_json::to_value(build(&two_mux_os(), &src(vec![claude("小東", 502)]))).unwrap();
+        let one = vec!["甲".to_string()];
+        let cases: [(bool, &[String], bool, bool); 6] = [
+            (true, &[], false, false),
+            (true, &one, false, true),
+            (true, &[], true, true),
+            (true, &one, true, true),
+            (false, &one, true, false),
+            (false, &[], false, false),
+        ];
+        for (use_mux, pending, failed, want) in cases {
+            add_restart_state(&mut out, false, pending, use_mux, failed);
+            assert_eq!(out["mux_expected"], want, "use_mux={use_mux} 名單={} 失敗={failed}", pending.len());
+        }
+    }
+
+    /// 西川複看：collect 讀的是真正的存下名單與失敗記號（拿掉就永遠只靠 use_mux，佔位會永久掛著）
+    #[cfg(desktop)]
+    #[test]
+    fn _1860f_collect_用存下的名單與失敗記號() {
+        let src_text = include_str!("taskmgr.rs");
+        let c = src_text.split("pub(crate) fn collect(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(c.contains("STASH.get()") && c.contains("last_failed()"), "佔位旗標要看名單與失敗記號");
     }
 }

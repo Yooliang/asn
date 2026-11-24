@@ -1088,7 +1088,66 @@ async fn task_manager_list(app: State<'_, App>, terms: State<'_, Arc<launch::ter
     let term_rows: Vec<launch::taskmgr::TermIn> = terms.list().into_iter().map(|t| launch::taskmgr::TermIn { id: t.id, profile: t.profile, pid: t.pid, started_ms: t.started_ms, cwd: t.cwd, adopted: t.adopted }).collect();
     // 對照表裡的夥伴視窗：只用來找「卡在接回中」的（判斷全在 taskmgr::build）
     let partners = terms.partner_rows();
-    tokio::task::spawn_blocking(move || launch::taskmgr::collect(&work_dir, &node, &asn_window, term_rows, partners)).await.map_err(|e| e.to_string())?
+    let mux_expected = terms.mux_expected();
+    tokio::task::spawn_blocking(move || launch::taskmgr::collect(&work_dir, &node, &asn_window, term_rows, partners, mux_expected)).await.map_err(|e| e.to_string())?
+}
+
+/// 工作管理員的「重啟 ASN」（#1860 F）：走共用的重新啟動（#2204）。成功回 Ok（本頁隨後會斷線，ASN 回來後重新載入）；
+/// 失敗回白話字串，原始錯誤已由 relaunch_and_exit 寫進 ui.log
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn task_manager_restart_asn(app: State<'_, App>, handle: AppHandle) -> Result<(), String> {
+    // 和重啟終端服務共用一個記號：互斥，也防連點（第二次直接回「正在重啟」，不會 spawn 第二個新程序）
+    let Some(mark) = launch::mux_restart::Restarting::begin_asn() else { return Err(launch::mux_restart::BUSY_TEXT.to_string()) };
+    let res = relaunch::relaunch_and_exit(&handle, &app.work_dir, "工作管理員重啟 ASN", relaunch::EXIT_DELAY).await;
+    if res.is_ok() {
+        // 成功：程序稍後會結束。記號先扣住，到結束為止都不讓別的重啟插進來；萬一一直沒結束，過了寬限就放掉
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(launch::mux_restart::ASN_EXIT_GRACE).await;
+            drop(mark);
+        });
+    }
+    // 失敗（ASN 繼續跑）：mark 隨函式結束放掉
+    res
+}
+
+/// 工作管理員的「重啟終端服務」（#1860 F）：停、起新的、把重啟前的夥伴接回（原因「重啟」、不計冷卻）。
+/// 接回很慢，所以起好新服務就回，接回在背景做。失敗回白話字串，原文寫 ui.log 與 mux.log
+#[cfg(feature = "gui")]
+#[cfg(desktop)]
+#[tauri::command]
+async fn task_manager_restart_mux(app: State<'_, App>, terms: State<'_, Arc<launch::term::LiveTerms>>) -> Result<(), String> {
+    let Some(mark) = launch::mux_restart::Restarting::begin() else { return Err(launch::mux_restart::BUSY_TEXT.to_string()) };
+    let (work_dir, data_dir, terms) = (app.work_dir.clone(), app.data_dir.clone(), terms.inner().clone());
+    let res = tokio::task::spawn_blocking(move || {
+        let _mark = mark; // 做完（成功、失敗、當掉）一定放掉
+        let (wd, dd) = (work_dir.clone(), data_dir);
+        let down_dir = work_dir.clone();
+        terms.restart_mux(
+            move |names| {
+                if !launch::mux_watch::dispatch("asn-mux-restart-resume", move || launch::auto_resume::after_mux_restart(&wd, &dd, &names)) {
+                    ui_log::log_info(&work_dir, "重啟終端服務後，接回夥伴的背景工作開不了");
+                }
+            },
+            // 起不來、代理斷線：排通知給本人（走現有的接回結果通知）
+            move |names| launch::mux_restart::notify_down(&down_dir, names, heartbeat::now_ms()),
+        )
+    })
+    .await
+    .map_err(|e| {
+        ui_log::log_info(&app.work_dir, &format!("重啟終端服務的背景工作失敗：{e}"));
+        launch::mux_restart::FAIL_TEXT.to_string()
+    })?;
+    res.map_err(|e| {
+        match &e {
+            launch::mux_restart::RestartError::Failed(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務失敗：{why}")),
+            launch::mux_restart::RestartError::Down(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有完成（舊的已停、新的起不來，代理斷線，名單已存）：{why}")),
+            launch::mux_restart::RestartError::Unmanaged(n) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有進行：終端服務裡有 {n} 個視窗不在 ASN 的記錄上")),
+            launch::mux_restart::RestartError::NoMux => {}
+        }
+        e.text().to_string()
+    })
 }
 
 #[cfg(feature = "gui")]
@@ -3469,7 +3528,7 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder
         .invoke_handler(tauri::generate_handler![
-            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_device_replace_candidates, relay_device_replace, relay_device_replace_dismiss, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, launch_cwd_remove, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, log_report_preview, log_report_send, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, settings_patch, report_send, report_get, quit_app, partner_repo,
+            term_view_open, term_view_close, term_view_input, term_view_active, term_view_available, term_view_history, term_view_set, device_known_list, device_known_forget, device_rename, device_name_align, device_known_login_ok, device_own_fingerprint, device_own_fingerprint_qr, term_viewed_stop, term_view_remote_available, term_view_remote_start, term_view_remote_input, term_view_remote_set, term_view_remote_stop, self_windows::self_window_default, self_windows::self_window_register, bridge_set_term_server, bridge_retry_term_fetch, startup_info, relay_list, relay_inbox, relay_ack, relay_send, relay_chat_history, relay_read_sync, relay_partner_list, relay_device_replace_candidates, relay_device_replace, relay_device_replace_dismiss, relay_partner_succeed, relay_partner_op, relay_partner_ops, relay_partner_archive, relay_sent_status, relay_send_attachment, relay_attachment_fetch, relay_attachment_save, relay_attachment_reveal, relay_avatar, relay_partner_avatar, relay_set_avatar, relay_rooms, relay_group, relay_room_read, relay_room_post, invite_pending, relay_launch, relay_launchers, partner_launch_local, local_windows, task_manager_list, launch_cwd_candidates, launch_cwd_browse, launch_cwd_remove, partner_console_query, partner_console_set, model_switch_query, model_switch_run, subagents_query, tasks_query, launch_prefs_get, launch_prefs_set, pi_setup_status, pi_setup_install, pi_setup_remove, pi_models, pi_providers, term_start, term_send, term_read, term_list, auto_resume_status, partner_notices, partner_notices_active, partner_permission_prompt, partner_permission_answer, partner_permission_choose, term_env_notice, term_stop, term_status, term_rename, term_answer, term_remote_offer_send, term_remote_withdraw, term_remote_offer_answer, term_remote_pending, term_adopt_candidates, term_adopt, term_adopt_unlock, relay_log_paths, ui_log, open_machine_log_dir, open_ui_log, log_report_preview, log_report_send, shot_frontend_log, open_url, open_link, ads::ads_fetch, set_presence, set_foreground, set_now_playing, bridge_status, bridge_set_enabled, bridge_set_remote_launch, bridge_set_auto_resume, bridge_set_screen_watch, bridge_set_perm_phone, bridge_set_mobile_view, bridge_set_remote_input, bridge_set_unaddressed_to, bridge_set_compact_handoff, compact_handoff_request, bridge_takeover, cli_info, askpass::dialog::askpass_info, askpass::dialog::askpass_answer, askpass::dialog::askpass_helper_info, store_load, store_save, settings_patch, report_send, report_get, quit_app, partner_repo, task_manager_restart_asn, task_manager_restart_mux,
             shot::shot_begin, shot::shot_image, shot::shot_ready, shot::shot_focus, shot::shot_pick, shot::shot_cancel, shot::shot_supported,
             claude_accounts::claude_accounts_list, claude_accounts::claude_account_current, claude_accounts::claude_account_save, claude_accounts::claude_account_switch, claude_accounts::claude_account_delete, claude_accounts::claude_account_undo, claude_mod::claude_mod_report, claude_mod::claude_mod_check, claude_quota::claude_quota_state,
             codex_accounts::codex_account_current, grok_accounts::grok_accounts_list, grok_accounts::grok_account_current, grok_accounts::grok_account_switch, usage::usage_summary,
