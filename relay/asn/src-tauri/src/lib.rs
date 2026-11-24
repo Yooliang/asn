@@ -3755,19 +3755,37 @@ pub fn run() {
                                 Err(_) => tokio::time::sleep(std::time::Duration::from_secs(5)).await,
                             }
                         };
-                        bell::run(url, topic, move |_| {
-                            let _ = h.emit("relay-bell", ());
-                            #[cfg(desktop)]
-                            if let Some(w) = &secret_wake {
-                                w.notify_one();
-                            }
-                            #[cfg(desktop)]
-                            if let Some(w) = &term_wake_bell {
-                                w.notify_one();
-                            }
-                            #[cfg(desktop)]
-                            if let Some(w) = &view_wake_bell {
-                                w.notify_one();
+                        bell::run(url, topic, move |ring| {
+                            // 依門鈴種類分流（bell::ring_actions）：沒有 kind 的舊門鈴照舊叫醒全部，回報門鈴只通知回報
+                            for act in bell::ring_actions(ring) {
+                                match act {
+                                    bell::BellAction::EmitBell => {
+                                        let _ = h.emit("relay-bell", ());
+                                    }
+                                    bell::BellAction::EmitReport { kind, node } => {
+                                        let _ = h.emit("relay-report-bell", serde_json::json!({ "kind": kind, "node": node }));
+                                    }
+                                    #[cfg(desktop)]
+                                    bell::BellAction::WakeSecret => {
+                                        if let Some(w) = &secret_wake {
+                                            w.notify_one();
+                                        }
+                                    }
+                                    #[cfg(desktop)]
+                                    bell::BellAction::WakeTerm => {
+                                        if let Some(w) = &term_wake_bell {
+                                            w.notify_one();
+                                        }
+                                    }
+                                    #[cfg(desktop)]
+                                    bell::BellAction::WakeView => {
+                                        if let Some(w) = &view_wake_bell {
+                                            w.notify_one();
+                                        }
+                                    }
+                                    #[cfg(not(desktop))]
+                                    _ => {}
+                                }
                             }
                         })
                         .await;

@@ -369,7 +369,7 @@ pub fn start_with(cfg: Config, relay: Arc<Relay>, anon_url: Option<String>, laun
                         }
                     }
                 };
-                crate::bell::run(url, topic, move |_| w2.notify_one()).await;
+                crate::bell::run(url, topic, move |ring| if crate::bell::wakes_mail(ring) { w2.notify_one() }).await;
             }));
         }
         None => log.line("no anon key: doorbell off, polling only"),
