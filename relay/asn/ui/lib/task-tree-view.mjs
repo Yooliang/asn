@@ -44,7 +44,7 @@ export const TaskNode = {
     const state = computed(() => props.stateText || props.node.status)
     // 整列點一下切換小字（#2219）。▾ 收合與操作鈕（.tm-act）不算：點它們只做自己的事，不展開
     const onRow = e => {
-      if (e?.target?.closest?.('.tm-act, .tm-fold')) return
+      if (e?.target?.closest?.('.tm-act, .tm-fold, .tm-restart-confirm')) return   // 重啟的原位確認框在 .tm-act 外面，按它的取消／重啟也不能切換小字（#1860 F）
       emit('toggle')
     }
     return { TM, TREE_TEXT, LABEL, fields, state, onRow }
