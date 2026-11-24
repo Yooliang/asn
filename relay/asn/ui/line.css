@@ -437,6 +437,10 @@
 :root[data-skin="line"] .shell.only-chat .tabbar{padding-right:146px}
 /* 左欄頂到最上：圖示欄起點從 14px 縮成 12px，視覺上和視窗上緣對齊 */
 :root[data-skin="line"] .top-tabs{padding-top:12px}
+/* 視窗最上方整條的提醒（別台正在看這台的「結束」）：右邊讓出三顆鈕，按鈕不被蓋住 */
+:root[data-skin="line"] .viewed-bar{padding-right:146px}
+/* 右下角的綠色「＋」鈕浮在名單上：名單底下多留一段空白，卡片最後一排（例如新手引導的「先不用」）能捲到「＋」鈕上方，不被蓋住 */
+:root[data-skin="line"] .list{padding-bottom:72px}
 /* #1788 分割版面：放大鈕被 Rust 端的透明子視窗蓋住，滑過／按下由 Rust 通知，樣式與 :hover 同 */
 :root[data-skin="line"] .tb.snap-hover{background:rgba(0,0,0,.07)}
 :root[data-skin="line"] .tb.snap-down{background:rgba(0,0,0,.14)}

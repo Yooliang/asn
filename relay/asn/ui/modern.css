@@ -187,6 +187,10 @@
 :root[data-skin="modern"] .shell.only-chat .tabbar{padding-right:146px}
 /* 左欄頂到最上：圖示欄起點從 14px 縮成 12px，視覺上和視窗上緣對齊 */
 :root[data-skin="modern"] .top-tabs{padding-top:12px}
+/* 視窗最上方整條的提醒（別台正在看這台的「結束」）：右邊讓出三顆鈕，按鈕不被蓋住（LINE 同） */
+:root[data-skin="modern"] .viewed-bar{padding-right:146px}
+/* 名單最上面的更新／重新登入提醒列（「更新」「重試」鈕在右邊）：分離模式或只剩名單一欄時它頂到視窗最上緣，右邊同樣讓出三顆鈕；寬的整合模式它在左欄，不受影響 */
+:root[data-skin="modern"] .shell:not(.merged) .upd-bar,:root[data-skin="modern"] .shell.only-list .upd-bar{padding-right:146px}
 /* 分離模式的名單視窗、或整合模式窄到只剩名單一欄時，上方四個大分頁橫跨整個視窗寬：右邊讓出三顆鈕的位置，「通知」不被蓋住 */
 :root[data-skin="modern"] .shell:not(.merged) .top-tabs,:root[data-skin="modern"] .shell.only-list .top-tabs{padding-right:146px}
 /* #1788 分割版面：放大鈕被 Rust 端的透明子視窗蓋住，滑過／按下由 Rust 通知，樣式與 :hover 同 */

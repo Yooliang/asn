@@ -21,6 +21,20 @@ for (const skin of ['line', 'modern']) {
   })
 }
 
+for (const skin of ['line', 'modern']) {
+  test(`${skin}：視窗最上方的「別台正在看這台」提醒列右側讓出三顆鈕，「結束」不被蓋住`, () => {
+    assert.ok(skinCss(skin).includes(`:root[data-skin="${skin}"] .viewed-bar{padding-right:146px}`))
+  })
+}
+
+test('現代：頂到視窗最上緣的更新／重新登入提醒列右側讓出三顆鈕，「更新」鈕點得到', () => {
+  assert.match(skinCss('modern'), /\.shell:not\(\.merged\) \.upd-bar[^{]*\{padding-right:146px\}/)
+})
+
+test('LINE：名單底下留空，浮在右下的「＋」鈕不會蓋住卡片最後一排（新手引導的「先不用」）', () => {
+  assert.match(skinCss('line'), /\[data-skin="line"\] \.list\{padding-bottom:72px\}/)
+})
+
 test('現代：分離模式的名單視窗，上方大分頁右側讓出三顆鈕的位置', () => {
   assert.match(skinCss('modern'), /\.shell:not\(\.merged\) \.top-tabs[^{]*\{padding-right:146px\}/)
 })
