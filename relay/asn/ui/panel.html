@@ -18,7 +18,7 @@
     <span class="t-text">{{ title }}</span>
     <span class="t-btns">
       <button class="tb" @click="ctl('min')" aria-label="最小化" title="最小化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="8" width="8" height="2" rx=".5" fill="currentColor"/></svg></button>
-      <button class="tb" data-snap-max @click="ctl('max')" aria-label="最大化" title="最大化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="1.75" y="1.75" width="8.5" height="8.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="1.75" y="1.75" width="8.5" height="2.2" fill="currentColor"/></svg></button>
+      <button class="tb" @click="ctl('max')" aria-label="最大化" title="最大化"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="1.75" y="1.75" width="8.5" height="8.5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="1.75" y="1.75" width="8.5" height="2.2" fill="currentColor"/></svg></button>
       <button class="tb close" @click="ctl('close')" aria-label="關閉" title="關閉"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.6 2.6l6.8 6.8M9.4 2.6l-6.8 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
     </span>
   </header>

@@ -412,36 +412,3 @@
 :root[data-skin="line"] .photo-viewer .pv-nav{width:44px;height:44px;border:0;background:var(--accent);color:#fff;box-shadow:none}
 :root[data-skin="line"] .photo-viewer .pv-nav:hover:not(:disabled){background:#178a49}
 :root[data-skin="line"] .photo-viewer .pv-nav:disabled{opacity:.35}
-
-/* =====================================================================
-   #1788 無邊框（frameless）：LINE 與現代外觀共同做法（Aero 維持原樣）。
-   拿掉標題列：左欄頂到視窗最上緣，最小化／放大／關閉三顆鈕畫在右上角、和對話標題列同一列（60px 高）。三顆鈕高 36px、在標題列裡垂直置中。
-   最上緣留一條 10px 可拖曳條（titlebar 本身，data-tauri-drag-region），三顆鈕是它的子元素，不擋搜尋框與對話鈕。
-   ===================================================================== */
-:root[data-skin="line"] .win{padding:0}
-:root[data-skin="line"] .titlebar{position:absolute;z-index:45;top:0;left:0;right:0;height:10px;padding:0;gap:0;background:transparent}
-:root[data-skin="line"] .titlebar .t-icon,
-:root[data-skin="line"] .titlebar .t-text{display:none}
-:root[data-skin="line"] .t-btns{position:absolute;top:0;right:0;gap:0;height:60px;align-items:center}
-:root[data-skin="line"] .tb{width:46px;height:36px;border:0;border-radius:0;background:transparent;box-shadow:none;color:#4a4f57;filter:none}
-:root[data-skin="line"] .tb svg{display:none}
-:root[data-skin="line"] .tb::before{content:"";width:12px;height:12px;background:currentColor;
-  -webkit-mask:var(--tb-ic) center/contain no-repeat;mask:var(--tb-ic) center/contain no-repeat}
-:root[data-skin="line"] .tb{--tb-ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 6.5h10' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E")}
-:root[data-skin="line"] .tb:nth-child(2){--tb-ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Crect x='1.5' y='1.5' width='9' height='9' fill='none' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E")}
-:root[data-skin="line"] .tb.close{--tb-ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 1l10 10M11 1L1 11' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E")}
-:root[data-skin="line"] .tb:hover{background:rgba(0,0,0,.07);filter:none}
-:root[data-skin="line"] .tb.close:hover{background:#e81123;color:#fff}
-:root[data-skin="line"] .tb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
-/* 三顆鈕佔右上 138px：對話標題列、分頁列右邊讓出來，右側的通話／⋯ 鈕不被蓋住 */
-:root[data-skin="line"] .mbar,
-:root[data-skin="line"] .shell.only-chat .tabbar{padding-right:146px}
-/* 左欄頂到最上：圖示欄起點從 14px 縮成 12px，視覺上和視窗上緣對齊 */
-:root[data-skin="line"] .top-tabs{padding-top:12px}
-/* 視窗最上方整條的提醒（別台正在看這台的「結束」）：右邊讓出三顆鈕，按鈕不被蓋住 */
-:root[data-skin="line"] .viewed-bar{padding-right:146px}
-/* 右下角的綠色「＋」鈕浮在名單上：名單底下多留一段空白，卡片最後一排（例如新手引導的「先不用」）能捲到「＋」鈕上方，不被蓋住 */
-:root[data-skin="line"] .list{padding-bottom:72px}
-/* #1788 分割版面：放大鈕被 Rust 端的透明子視窗蓋住，滑過／按下由 Rust 通知，樣式與 :hover 同 */
-:root[data-skin="line"] .tb.snap-hover{background:rgba(0,0,0,.07)}
-:root[data-skin="line"] .tb.snap-down{background:rgba(0,0,0,.14)}
