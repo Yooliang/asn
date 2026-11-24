@@ -7,14 +7,13 @@ import fs from 'node:fs'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { SETTING_CATS, SETTING_KEYS, catSummary, lookOptions } from '../ui/lib/settings-cats.mjs'
 import { withTabDim } from '../ui/lib/dims.mjs'
-import { GH_REFS_LABEL } from '../ui/lib/msg-ref.mjs'
 import { mountComponent } from './helpers/render.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 // 畫面標記：每個選項在畫面上的 aria-label（外觀是單選，GitHub 是勾選）
-const MARK = { skin: '外觀', frame: '視窗外框', mode: '視窗模式', dpMode: '頭像模式', toolbar: '工具列位置', bubble: '文字底色', tabDim: '分頁依', groupDim: '分組依', ghRefs: GH_REFS_LABEL }
-// 9 個選項 × 3 種外觀（true＝顯示）。定案表，不從程式取
+const MARK = { skin: '外觀', frame: '視窗外框', mode: '視窗模式', dpMode: '頭像模式', toolbar: '工具列位置', bubble: '文字底色', tabDim: '分頁依', groupDim: '分組依' }
+// 8 個選項 × 3 種外觀（true＝顯示）。定案表，不從程式取
 const TABLE = {
   skin: { aero: true, modern: true, line: true },
   frame: { aero: true, modern: true, line: true },
@@ -24,32 +23,32 @@ const TABLE = {
   bubble: { aero: true, modern: true, line: false },
   tabDim: { aero: true, modern: true, line: false },
   groupDim: { aero: true, modern: true, line: true },
-  ghRefs: { aero: true, modern: true, line: true },
 }
-const baseState = (skin, extra = {}) => ({ skin, frame: 'custom', mode: 'merged', dpMode: 'right', toolbar: 'bottom', bubble: 'bubble', tabDim: 'engine', groupDim: 'device', ghRefs: false, ...extra })
+const baseState = (skin, extra = {}) => ({ skin, frame: 'custom', mode: 'merged', dpMode: 'right', toolbar: 'bottom', bubble: 'bubble', tabDim: 'engine', groupDim: 'device', ghRefs: true, ...extra })
 const shownOn = (m, key) => {
-  const sel = key === 'skin' ? '.skin-pick' : key === 'ghRefs' ? `input[aria-label="${MARK.ghRefs}"]` : `select[aria-label="${MARK[key]}"]`
+  const sel = key === 'skin' ? '.skin-pick' : `select[aria-label="${MARK[key]}"]`
   return m.find(sel) !== null
 }
 
-test('#1547 外觀分類顯示的選項：9 個選項 × 3 種外觀逐一對照定案表', () => {
+test('#1547 外觀分類顯示的選項：8 個選項 × 3 種外觀逐一對照定案表', () => {
   for (const skin of ['aero', 'modern', 'line']) {
     const m = mountComponent(SettingsPanel, { st: baseState(skin), catKey: 'look' })
     try {
       for (const key of Object.keys(TABLE)) assert.equal(shownOn(m, key), TABLE[key][skin], `${skin} 下「${MARK[key]}」應${TABLE[key][skin] ? '顯示' : '藏起來'}`)
       // 藏起來＝整個不在畫面上，不是變灰
       assert.equal(m.findAll('select[disabled]').length, 0, `${skin}：不再有變灰的選單`)
-      assert.equal(m.findAll('.set-note').length, 1, `${skin}：只剩 GitHub 連結那一行說明`)
+      assert.equal(m.findAll('input[type="checkbox"]').length, 0, `${skin}：外觀裡不再有「#編號連到 GitHub」勾選（#1776）`)
+      assert.doesNotMatch(m.container.textContent, /GitHub/, `${skin}：外觀裡不再提 GitHub 連結`)
     } finally { m.unmount() }
     assert.deepEqual(new Set(lookOptions(skin)), new Set(Object.keys(TABLE).filter(k => TABLE[k][skin])), `${skin}：lookOptions 跟定案表一致`)
   }
 })
 
-test('#1547 外觀分類裡選項的順序：外觀、視窗外框、視窗模式、頭像模式、工具列位置、文字底色、分頁依、分組依、#編號連結', () => {
+test('#1547 外觀分類裡選項的順序：外觀、視窗外框、視窗模式、頭像模式、工具列位置、文字底色、分頁依、分組依', () => {
   const m = mountComponent(SettingsPanel, { st: baseState('aero'), catKey: 'look' })
   try {
     const labels = m.findAll('select, input[type="checkbox"], .skin-pick').map(el => (el.getAttribute('aria-label') ?? ''))
-    assert.deepEqual(labels, [MARK.skin, MARK.frame, MARK.mode, MARK.dpMode, MARK.toolbar, MARK.bubble, MARK.tabDim, MARK.groupDim, MARK.ghRefs])
+    assert.deepEqual(labels, [MARK.skin, MARK.frame, MARK.mode, MARK.dpMode, MARK.toolbar, MARK.bubble, MARK.tabDim, MARK.groupDim])
   } finally { m.unmount() }
 })
 

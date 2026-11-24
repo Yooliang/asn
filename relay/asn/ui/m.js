@@ -71,7 +71,6 @@ import { HOME_TAB, chatNav, isNewNotice, noticeLastAt, noticeUnread, tabDot, vie
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
 import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
-import { GH_REFS_LABEL, GH_REFS_NOTE } from './lib/msg-ref.mjs'
 import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { authApi, cloudApi, deviceReplaceApi, invoke, listen, mobileAccountApi, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
@@ -1725,7 +1724,7 @@ const app = createApp({
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, GH_REFS_LABEL, GH_REFS_NOTE, settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGos, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGos, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })

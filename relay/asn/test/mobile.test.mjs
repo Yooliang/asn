@@ -68,9 +68,9 @@ test('提示：只有訊息與震動會提示；正在看的對話不跳橫幅�
 })
 
 test('設定：壞值退回預設，震動提示預設只開對方傳來的震動', () => {
-  assert.deepEqual(normalizePrefs(null), { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true, skin: 'aero', ghRefs: false, chatPins: { pins: [], unpinned: [], rev: 0 } })
-  assert.deepEqual(normalizePrefs({ vibrateMsg: true, vibrateNudge: false, autoUpdate: false }), { vibrateMsg: true, vibrateNudge: false, autoUpdate: false, push: true, skin: 'aero', ghRefs: false, chatPins: { pins: [], unpinned: [], rev: 0 } }, '自動檢查可以關')
-  assert.deepEqual(normalizePrefs({ vibrateMsg: 'yes', vibrateNudge: 0, autoUpdate: 'no' }), { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true, skin: 'aero', ghRefs: false, chatPins: { pins: [], unpinned: [], rev: 0 } }, '只認真正的布林')
+  assert.deepEqual(normalizePrefs(null), { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true, skin: 'aero', chatPins: { pins: [], unpinned: [], rev: 0 } })
+  assert.deepEqual(normalizePrefs({ vibrateMsg: true, vibrateNudge: false, autoUpdate: false }), { vibrateMsg: true, vibrateNudge: false, autoUpdate: false, push: true, skin: 'aero', chatPins: { pins: [], unpinned: [], rev: 0 } }, '自動檢查可以關')
+  assert.deepEqual(normalizePrefs({ vibrateMsg: 'yes', vibrateNudge: 0, autoUpdate: 'no' }), { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true, skin: 'aero', chatPins: { pins: [], unpinned: [], rev: 0 } }, '只認真正的布林')
   assert.equal(normalizePrefs({ skin: 'modern' }).skin, 'modern'); assert.equal(normalizePrefs({ skin: 'neon' }).skin, 'aero', '外觀壞值退回復古 Aero（舊使用者升級後樣子不變）')
 })
 

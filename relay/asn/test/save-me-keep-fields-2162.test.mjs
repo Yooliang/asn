@@ -19,7 +19,7 @@ const runSave = (file, patch = {}, store = memStore(file)) => {
     savedMe: file ?? {}, meStore: store, deviceFieldsToSave, patchWithFallback,
     me: { nick: '本機', psm: '', status: 'online', ...patch.me }, devPrefs: {},
     chatPins: ref([]), showNowPlaying: ref(true), notifyPrefs: ref({}), skin: ref(patch.skin ?? 'aero'), frame: ref('x'), closeTo: ref('x'),
-    autoAddClaude: ref(false), autoCheck: ref(true), ghRefs: ref([]),
+    autoAddClaude: ref(false), autoCheck: ref(true),
     dims: { tabDim: 'a', groupDim: 'b' }, ui: { mode: 'm', dpMode: 'd', bubble: 1, toolbar: 1, collapsed: [], pinnedChat: '', ...patch.ui },
     sizes: { split: 1, merged: 2, guide: 3, setting: 4 }, sess: { ready: false, saved: { tabs: [] }, ...patch.sess }, currentSession: () => ({}),
   }
