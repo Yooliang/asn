@@ -76,3 +76,13 @@ test('push：Rust 呼叫失敗後下次會重試（不會以為已經報過）',
   await sm.push()
   assert.equal(calls.length, 2)
 })
+
+test('分割版面只留一種做法：沒有 ASN_SNAP_MODE、沒有做法一的子視窗自己回放大鈕', async () => {
+  const fs = await import('node:fs')
+  const rd = p => fs.readFileSync(new URL(`../src-tauri/src/${p}`, import.meta.url), 'utf8')
+  for (const f of ['snap_max.rs', 'snap_max/snap_hit.rs', 'snap_max/snap_win.rs', 'snap_max/snap_cover_win.rs', 'envc.rs', 'lib.rs']) assert.ok(!rd(f).includes('ASN_SNAP_MODE'), `${f} 還留著 ASN_SNAP_MODE`)
+  assert.ok(!fs.existsSync(new URL('../src-tauri/src/snap_max/snap_overlay_win.rs', import.meta.url)))
+  assert.ok(!fs.existsSync(new URL('../src-tauri/src/snap_max/snap_top_win.rs', import.meta.url)))
+  assert.ok(rd('snap_max/snap_cover_win.rs').includes('HTTRANSPARENT'), '透明子視窗要回 HTTRANSPARENT')
+  assert.ok(rd('snap_max/snap_win.rs').includes('HT_MAXBUTTON'), '最上層視窗要回 HTMAXBUTTON')
+})

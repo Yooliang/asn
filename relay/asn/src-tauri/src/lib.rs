@@ -169,7 +169,7 @@ mod stt;
 mod tray;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
-mod snap_max;   // 自畫放大鈕要有 Windows 11 分割版面（#1788）：放大鈕上方的透明子視窗，回 HTMAXBUTTON
+mod snap_max;   // 自畫放大鈕要有 Windows 11 分割版面（#1788）：放大鈕上方的透明子視窗＋最上層視窗回 HTMAXBUTTON
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 pub mod guard;   // ASN 意外關閉時自動重開（工作排程每 5 分鐘跑 asn.exe --guard；預設關，todo-next-191 B1）
@@ -3347,7 +3347,6 @@ pub fn run() {
     if !is_shot {
         ui_log::install_panic_hook(work_dir.clone());
         ui_log::set_elog_dir(work_dir.clone());   // elog! 也寫進 ui.log（#2104）
-        snap_max::log_mode();   // 放大鈕分割版面採用哪種做法（#1788）
     }
     // 自己結束時寫原因用的資料夾（截圖模式不寫）
     #[cfg(desktop)]

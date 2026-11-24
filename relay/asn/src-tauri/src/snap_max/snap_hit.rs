@@ -1,41 +1,13 @@
-//! 放大鈕分割版面（#1788）的純邏輯：做法切換與「滑鼠點在不在鈕上、該怎麼回答 WM_NCHITTEST」。
+//! 放大鈕分割版面（#1788）的純邏輯：「滑鼠點在不在鈕上、該怎麼回答 WM_NCHITTEST」。
 //! 不依賴系統，可直接單元測試；Windows 的視窗程序只負責把訊息翻成這裡的輸入。
 use super::{Ev, PxRect};
 
 /// `WM_NCHITTEST` 的 `HTMAXBUTTON`；`WM_NC*` 滑鼠訊息的 wParam 就是命中碼
 pub const HT_MAXBUTTON: usize = 9;
 
-/// 兩種做法（只靠環境變數 `ASN_SNAP_MODE` 切換，不出現在任何設定頁）
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    /// A（預設）：透明子視窗自己回 HTMAXBUTTON，滑鼠訊息由子視窗處理
-    Child,
-    /// B：透明子視窗與網頁容器回 HTTRANSPARENT，最上層視窗在鈕的矩形內回 HTMAXBUTTON，滑鼠訊息由最上層視窗處理
-    Top,
-}
-
-impl Mode {
-    pub fn name(self) -> &'static str {
-        match self {
-            Mode::Child => "child",
-            Mode::Top => "top",
-        }
-    }
-}
-
-/// 解析環境變數：`top` 是 B；沒設、空字串、其他任何值都是 A（不認得的值不能讓程式壞掉）。忽略大小寫與前後空白
-pub fn parse_mode(v: Option<&str>) -> Mode {
-    match v.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
-        Some("top") => Mode::Top,
-        _ => Mode::Child,
-    }
-}
-
-/// 收到 WM_NCHITTEST 的是哪一層視窗（B 用）
+/// 收到 WM_NCHITTEST 的是哪一層視窗
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
-    /// 放大鈕上方的透明子視窗
-    Overlay,
     /// wry 的網頁容器（WRY_WEBVIEW）
     Container,
     /// 最上層視窗
@@ -53,14 +25,12 @@ pub enum Hit {
     Pass,
 }
 
-/// B 的命中判斷。`(x, y)` 是最上層視窗內容區座標（實體像素），`rect` 是鈕的矩形（尚未設定就是 None）。
-/// - 透明子視窗：永遠透明（它只是用來擋住另一個行程的 WebView2 子視窗，本身不回答）
+/// 命中判斷。`(x, y)` 是最上層視窗內容區座標（實體像素），`rect` 是鈕的矩形（尚未設定就是 None）。
 /// - 網頁容器：鈕的矩形內透明，其餘不處理
 /// - 最上層視窗：鈕的矩形內回放大鈕，其餘不處理
 pub fn hit_answer(role: Role, rect: Option<PxRect>, x: i32, y: i32) -> Hit {
     let inside = rect.is_some_and(|r| r.contains(x, y));
     match role {
-        Role::Overlay => Hit::Transparent,
         Role::Container if inside => Hit::Transparent,
         Role::Top if inside => Hit::MaxButton,
         _ => Hit::Pass,
@@ -92,18 +62,6 @@ mod tests {
     }
 
     #[test]
-    fn 環境變數只有_top_才是_b_其餘都是_a() {
-        assert_eq!(parse_mode(None), Mode::Child);
-        assert_eq!(parse_mode(Some("")), Mode::Child);
-        assert_eq!(parse_mode(Some("child")), Mode::Child);
-        assert_eq!(parse_mode(Some("top")), Mode::Top);
-        assert_eq!(parse_mode(Some("  TOP ")), Mode::Top);
-        assert_eq!(parse_mode(Some("topp")), Mode::Child, "不認得的值退回預設");
-        assert_eq!(Mode::Top.name(), "top");
-        assert_eq!(Mode::Child.name(), "child");
-    }
-
-    #[test]
     fn 最上層視窗只在鈕的矩形內回放大鈕() {
         assert_eq!(hit_answer(Role::Top, btn(), 900, 0), Hit::MaxButton);
         assert_eq!(hit_answer(Role::Top, btn(), 968, 53), Hit::MaxButton);
@@ -118,12 +76,6 @@ mod tests {
         assert_eq!(hit_answer(Role::Container, btn(), 920, 10), Hit::Transparent);
         assert_eq!(hit_answer(Role::Container, btn(), 500, 300), Hit::Pass, "鈕以外網頁照常收滑鼠");
         assert_eq!(hit_answer(Role::Container, None, 920, 10), Hit::Pass);
-    }
-
-    #[test]
-    fn 透明子視窗永遠透明() {
-        assert_eq!(hit_answer(Role::Overlay, btn(), 920, 10), Hit::Transparent);
-        assert_eq!(hit_answer(Role::Overlay, None, 0, 0), Hit::Transparent);
     }
 
     #[test]

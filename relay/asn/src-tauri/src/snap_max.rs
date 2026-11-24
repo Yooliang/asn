@@ -1,35 +1,19 @@
 //! 自畫的「放大」鈕要能跳出 Windows 11 的分割版面（Snap Layouts，#1788）。
 //!
-//! 為什麼要原生這一層：系統只對 `WM_NCHITTEST` 回 `HTMAXBUTTON` 的點才會在滑過時跳出分割版面，
-//! 而網頁畫的鈕在 WebView2 的子視窗裡，滑鼠訊息根本到不了最上層視窗。做法（和 tauri-runtime-wry 的
-//! 「拖邊縮放」透明子視窗同一招，見 docs 與 `snap_max/snap_overlay_win.rs`）：在最上層視窗底下、網頁上方，
-//! 蓋一扇和放大鈕同樣大小的透明子視窗，對 `WM_NCHITTEST` 回 `HTMAXBUTTON`；
-//! 滑過／按下／放開由這扇子視窗接手，通知網頁換樣式，放開時由 Rust 端直接最大化／還原。
+//! 做法是 Microsoft 文件建議的：最上層視窗的 `WM_NCHITTEST` 在放大鈕的矩形內回 `HTMAXBUTTON`，系統就把那一塊當成放大鈕，
+//! 滑過時顯示分割版面。網頁畫的鈕在 WebView2 的子視窗（另一個行程）裡，命中測試到不了最上層視窗，
+//! 所以放大鈕上方蓋一扇透明子視窗、wry 的網頁容器在矩形內也回 `HTTRANSPARENT`，讓命中測試落回最上層視窗
+//! （細節見 `snap_max/snap_win.rs`、`snap_max/snap_cover_win.rs`）。
+//! 滑過／按下／放開由最上層視窗的非客戶區滑鼠訊息接手，通知網頁換樣式，放開時由 Rust 端直接最大化／還原。
 //!
-//! 這個檔案放不依賴系統的部分（座標換算、命中判斷、滑過與按下的狀態機），Windows 專屬的視窗程序在 `snap_max/snap_overlay_win.rs`。
+//! 這個檔案放不依賴系統的部分（座標換算、狀態機），命中判斷在 `snap_max/snap_hit.rs`，Windows 專屬的視窗程序在 `snap_max/snap_win.rs`、`snap_max/snap_cover_win.rs`。
 //! 其他平台（Linux、macOS）：指令存在但什麼都不做，網頁的鈕照舊自己處理。
-#![allow(dead_code)]
 
 mod snap_hit;
 #[cfg(windows)]
-mod snap_overlay_win;
+mod snap_cover_win;
 #[cfg(windows)]
-mod snap_top_win;
-
-pub use snap_hit::Mode;
-
-/// 這個行程採用的做法：只讀環境變數 `ASN_SNAP_MODE`（`top`＝B，其餘＝A），讀一次就固定
-#[cfg(feature = "gui")]
-pub fn mode() -> Mode {
-    static MODE: std::sync::OnceLock<Mode> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| snap_hit::parse_mode(crate::envc::get("ASN_SNAP_MODE").as_deref()))
-}
-
-/// 啟動時把採用的做法寫進 ui.log
-#[cfg(feature = "gui")]
-pub fn log_mode() {
-    elog!("[放大鈕分割版面] 做法 {}（ASN_SNAP_MODE）", mode().name());
-}
+mod snap_win;
 
 /// 前端回報的矩形：視窗內容區左上角起算、CSS 像素（`getBoundingClientRect`）
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -170,7 +154,7 @@ fn apply(window: tauri::Window, rect: Option<PxRect>) -> Result<(), String> {
     let app = window.app_handle().clone();
     let label = window.label().to_string();
     // 建立與調整子視窗一定要在建這扇視窗的執行緒上做
-    window.run_on_main_thread(move || snap_overlay_win::apply(hwnd, app, label, rect, mode())).map_err(|e| e.to_string())
+    window.run_on_main_thread(move || snap_cover_win::apply(hwnd, app, label, rect)).map_err(|e| e.to_string())
 }
 
 #[cfg(all(feature = "gui", not(windows)))]

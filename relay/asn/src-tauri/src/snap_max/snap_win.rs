@@ -1,11 +1,14 @@
-//! Windows 專屬：做法 B（`ASN_SNAP_MODE=top`，#1788）。全部只在建視窗的主執行緒上跑。
+//! Windows 專屬：最上層視窗與網頁容器的 subclass（#1788）。全部只在建視窗的主執行緒上跑。
 //!
-//! 透明子視窗（見 `snap_overlay_win.rs`）仍蓋在放大鈕上，擋住另一個行程的 WebView2 子視窗，但回 HTTRANSPARENT；
-//! wry 的網頁容器（類別 WRY_WEBVIEW）在鈕的矩形內也回 HTTRANSPARENT；這樣系統的命中測試會一路落到最上層視窗，
+//! 這是 Microsoft 文件建議的做法：自繪放大鈕時，最上層視窗的 `WM_NCHITTEST` 在鈕的矩形內回 `HTMAXBUTTON`，
+//! Windows 11 就會在滑過時顯示分割版面（Snap Layouts）。
+//! 難處是網頁區的滑鼠訊息被 WebView2 的子視窗吃掉，最上層視窗收不到命中測試：
+//! 所以放大鈕上方蓋一扇透明子視窗（見 `snap_cover_win.rs`，回 HTTRANSPARENT），
+//! wry 的網頁容器（類別 WRY_WEBVIEW）在鈕的矩形內也回 HTTRANSPARENT；系統的命中測試就一路落到最上層視窗，
 //! 最上層視窗的 subclass 在矩形內回 HTMAXBUTTON，其餘交給 tao 原本的程序（邊框縮放不受影響）。
 //! HTTRANSPARENT 只會在「同一執行緒」的視窗之間往下傳：tao 的最上層視窗、wry 的容器（`CreateWindowExW` 在建 webview 的主執行緒）、
 //! 透明子視窗（`run_on_main_thread` 建立）都在事件迴圈的主執行緒，符合條件。
-//! 滑過、按下、點擊改由最上層視窗的 WM_NCMOUSEMOVE／WM_NCMOUSELEAVE／WM_NCLBUTTONDOWN／WM_NCLBUTTONUP 處理。
+//! 滑過、按下、點擊由最上層視窗的 WM_NCMOUSEMOVE／WM_NCMOUSELEAVE／WM_NCLBUTTONDOWN／WM_NCLBUTTONUP 處理。
 use super::snap_hit::{hit_answer, lparam_xy, move_event, Hit, Role, HT_MAXBUTTON};
 use super::{step, BtnState, Ev, PxRect, EVENT};
 use std::cell::RefCell;
