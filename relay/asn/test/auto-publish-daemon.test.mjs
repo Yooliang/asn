@@ -641,3 +641,93 @@ test('#2003 (c) 核心的「需要播種」訊息講的是程式真的認得的�
   assert.ok(msgs.some(m => /--seed/.test(m) && /--yes/.test(m)), '需要播種的訊息要寫出 --seed 與 --yes')
   assert.ok(!msgs.some(m => /--since/.test(m)), '不能再寫 --since')
 })
+
+// ---- #2229 告警檔 alert.json ----
+const ALERT = path.join(path.dirname(STATE), 'alert.json')
+const alertOf = (e) => JSON.parse(e.fsMap.get(ALERT))
+const dirtyGit = { 'status --porcelain': () => ({ status: 0, stdout: ' M src/foo.js\n', stderr: '' }) }
+const postFails = (e) => { e.deps.asnCli = () => ({ status: 2, stdout: '', stderr: '拒絕：找不到呼叫者所屬的 Claude 視窗' }) }
+
+test('#2229 貼群組失敗：寫告警檔（類別、一句人話、次數、時間），發版照常', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  postFails(e)
+  e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' }) // dry-run 失敗 → 會貼群組
+  await runOnce(opts, e.deps)
+  const a = alertOf(e).alerts['post-failed']
+  assert.equal(a.status, 'active')
+  assert.equal(a.count, 1)
+  assert.equal(a.firstAt, a.lastAt)
+  assert.ok(a.message.includes('通知群組失敗'))
+  assert.ok(!JSON.stringify(a).includes('Claude 視窗'), '錯誤原文不進告警檔')
+})
+
+test('#2229 同原因再發生：只更新次數與最後時間，不重寫成新告警；原因改變才算新告警', async () => {
+  let mode = 'dirty'
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  const base = e.deps.git
+  e.deps.git = (args, o) => (mode === 'dirty' && args.join(' ') === 'status --porcelain' ? dirtyGit['status --porcelain']() : mode === 'fetch' && args.join(' ') === 'fetch origin' ? { status: 1, stdout: '', stderr: 'x' } : base(args, o))
+  await runOnce(opts, e.deps)
+  const first = alertOf(e).alerts['prep-failed']
+  assert.equal(first.count, 1)
+  assert.equal(first.status, 'active')
+  e.clock.t = T0 + 120_000
+  await runOnce(opts, e.deps)
+  const second = alertOf(e).alerts['prep-failed']
+  assert.equal(second.count, 2)
+  assert.equal(second.firstAt, first.firstAt, '第一次時間不變')
+  assert.notEqual(second.lastAt, first.lastAt)
+  mode = 'fetch'
+  e.clock.t = T0 + 240_000
+  await runOnce(opts, e.deps)
+  const third = alertOf(e).alerts['prep-failed']
+  assert.equal(third.count, 1, '原因改變＝新告警重新計')
+  assert.notEqual(third.reason, first.reason)
+})
+
+test('#2229 狀況恢復：標成 resolved；之後再發生算新告警', async () => {
+  let dirty = true
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  const base = e.deps.git
+  e.deps.git = (args, o) => (dirty && args.join(' ') === 'status --porcelain' ? dirtyGit['status --porcelain']() : base(args, o))
+  await runOnce(opts, e.deps)
+  dirty = false
+  e.clock.t = T0 + 120_000
+  assert.equal((await runOnce(opts, e.deps)).outcome, 'dryRun')
+  const done = alertOf(e).alerts['prep-failed']
+  assert.equal(done.status, 'resolved')
+  assert.ok(done.resolvedAt)
+  dirty = true
+  e.fsMap.set(STATE, JSON.stringify(seededState()))
+  e.clock.t = T0 + 240_000
+  await runOnce(opts, e.deps)
+  const again = alertOf(e).alerts['prep-failed']
+  assert.equal(again.status, 'active')
+  assert.equal(again.count, 1)
+})
+
+test('#2229 貼群組之後成功：post-failed 標成 resolved', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  postFails(e)
+  e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' })
+  await runOnce(opts, e.deps)
+  e.deps.asnCli = () => ({ status: 0, stdout: '', stderr: '' })
+  e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' })
+  e.fsMap.set(STATE, JSON.stringify(seededState({ pending: {} })))
+  e.clock.t = T0 + 120_000
+  await runOnce(opts, e.deps)
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
+})
+
+test('#2229 告警檔寫不進去：只記 log，不讓這一輪失敗、不影響發版', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')], gitOver: dirtyGit })
+  const w = e.deps.writeFile
+  e.deps.writeFile = (p, s) => { if (p.includes('alert.json')) throw new Error('disk full'); w(p, s) }
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'prep-failed')
+  assert.ok(e.calls.logs.some((l) => l.includes('寫告警檔失敗')))
+  const ok = env({ desktopRows: [row('v0.2.45')] })
+  const w2 = ok.deps.writeFile
+  ok.deps.writeFile = (p, s) => { if (p.includes('alert.json')) throw new Error('disk full'); w2(p, s) }
+  postFails(ok)
+  assert.equal((await runOnce(opts, ok.deps)).outcome, 'dryRun')
+})

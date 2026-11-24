@@ -174,13 +174,52 @@ export function releaseLock(lockPath, deps, content) {
 
 const logPathOf = (opts) => path.join(path.dirname(opts.state), 'auto-publish.log')
 
+// 告警檔（#2229）：常駐程式不在 Claude 視窗底下，asn-cli 寄不了信；卡住或貼群組失敗時改寫這個檔，由 asn真／asn雯 的巡檢讀。
+// 格式：{ updatedAt, alerts: { <類別>: { cause, reason, message, ref, firstAt, lastAt, count, status: 'active'|'resolved', resolvedAt? } } }
+// 節流：同類別、同 reason 且還是 active → 只更新 lastAt／count；reason 變了、或已 resolved 後再發生 → 重新計（新告警）。
+// 恢復時標成 resolved（留著讓讀的人分得出「發生過、現在沒事」）。訊息只放固定文案與版本，不放 git／子程序原文。
+export const ALERT_FILE = 'alert.json'
+export const alertPathOf = (opts) => path.join(path.dirname(opts.state), ALERT_FILE)
+
+export function makeAlerts(opts, deps) {
+  const p = alertPathOf(opts)
+  const load = () => { try { const a = JSON.parse(deps.readFile(p)); return a && typeof a === 'object' && a.alerts && typeof a.alerts === 'object' ? a : { alerts: {} } } catch { return { alerts: {} } } }
+  const save = (alerts) => {
+    try { atomicWrite(deps, p, JSON.stringify({ updatedAt: new Date(deps.now()).toISOString(), alerts }, null, 2)) } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+  }
+  return {
+    raise(cause, reason, message, ref = null) {
+      try {
+        const now = new Date(deps.now()).toISOString()
+        const cur = load().alerts
+        const old = cur[cause]
+        const next = old && old.status === 'active' && old.reason === reason
+          ? { ...old, message, ref: ref ?? old.ref, lastAt: now, count: (old.count ?? 1) + 1 }
+          : { cause, reason, message, ref, firstAt: now, lastAt: now, count: 1, status: 'active' }
+        save({ ...cur, [cause]: next })
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
+    resolve(cause) {
+      try {
+        const cur = load().alerts
+        if (cur[cause]?.status !== 'active') return
+        save({ ...cur, [cause]: { ...cur[cause], status: 'resolved', resolvedAt: new Date(deps.now()).toISOString() } })
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
+  }
+}
+
 // 貼群組：只准傳固定文案（不可含 git／子程序原文，remote URL 可能帶 token）
-function makePost(opts, deps) {
-  return (text) => {
+// 失敗時寫告警檔 post-failed（getRef 給目前處理的版本；noAlert 給沒持鎖的分支，免得和持鎖者搶寫告警檔）
+function makePost(opts, deps, alerts, getRef = () => null) {
+  return (text, { noAlert = false } = {}) => {
     if (!opts.room) { deps.log(`（沒有 --room，未貼群組）${text}`); return }
     let r
     try { r = deps.asnCli(['send', '--room', opts.room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
-    if (r.status !== 0) deps.log(`貼群組失敗：${asnCliFail(r)}`)
+    if (r.status !== 0) {
+      deps.log(`貼群組失敗：${asnCliFail(r)}`)
+      if (!noAlert) alerts.raise('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
+    } else if (!noAlert) alerts.resolve('post-failed')
   }
 }
 
@@ -200,7 +239,9 @@ function makeNotices(opts, deps) {
 export async function runOnce(opts, deps) {
   const { gh, spawn, log } = deps
   const lockPath = `${opts.state}.lock`
-  const post = makePost(opts, deps)
+  const alerts = makeAlerts(opts, deps)
+  let ref = null
+  const post = makePost(opts, deps, alerts, () => ref)
   const notices = makeNotices(opts, deps)
   const lock = acquireLock(lockPath, deps)
   if (!lock.got) {
@@ -214,7 +255,7 @@ export async function runOnce(opts, deps) {
     if (!Number.isFinite(b.since)) atomicWrite(deps, bp, JSON.stringify({ since: now, noticed: false }))
     else if (!b.noticed && now - b.since > BLOCKED_NOTICE_MS) {
       atomicWrite(deps, bp, JSON.stringify({ ...b, noticed: true }))
-      post('自動發佈被鎖住超過 30 分鐘，請檢查')
+      post('自動發佈被鎖住超過 30 分鐘，請檢查', { noAlert: true })
     }
     return { outcome: 'locked' }
   }
@@ -238,14 +279,17 @@ export async function runOnce(opts, deps) {
     } catch (e) { badWhy = `讀不懂：${e.message}` }
     if (badWhy) {
       log(`state 檔${badWhy}，停止這一輪（不覆蓋）`)
+      alerts.raise('bad-state', 'bad-state', '自動發佈的 state 檔讀不懂或結構不對，已停止處理且不覆蓋原檔，請人工檢查或修復 state 檔')
       if (!nt.badState) { setN({ badState: true }); post('自動發佈的 state 檔讀不懂或結構不對，已停止處理且不覆蓋原檔，請檢查') }
       return { outcome: 'bad-state' }
     }
     if (nt.badState) setN({ badState: undefined })
+    alerts.resolve('bad-state')
 
     // gh 連續失敗計時（持鎖才寫 notices）：從第一次失敗起算，超過 GH_FAIL_NOTICE_MS 貼一次固定句，不放 stderr；成功後清掉
     const ghFailed = () => {
       const now = deps.now()
+      if (Number.isFinite(nt.ghFailSince) && now - nt.ghFailSince > GH_FAIL_NOTICE_MS) alerts.raise('gh-failed', 'gh-failed', '連續 30 分鐘查不到 GitHub 上的發版狀態，請檢查工作機的 gh 登入與網路')
       if (!Number.isFinite(nt.ghFailSince)) setN({ ghFailSince: now, ghFailNoticed: false })
       else if (!nt.ghFailNoticed && now - nt.ghFailSince > GH_FAIL_NOTICE_MS) {
         setN({ ghFailNoticed: true })
@@ -262,6 +306,7 @@ export async function runOnce(opts, deps) {
       runs = runs.concat(toRuns(w.platform, w.re, rows))
     }
 
+    alerts.resolve('gh-failed')
     if (nt.ghFailSince !== undefined) { log('gh 已恢復，清掉連續失敗計時'); setN({ ghFailSince: undefined, ghFailNoticed: undefined }) }
 
     const d = decide({ runs, state, now: deps.now() })
@@ -284,8 +329,10 @@ export async function runOnce(opts, deps) {
       if (r.report) post(r.report)
       return { outcome: ok ? d.action : `${d.action}-failed`, key: d.key }
     }
+    ref = `${d.key}（${d.tag}）`
     const prep = prepareWorktree(deps)
     if (!prep.ok) {
+      alerts.raise('prep-failed', prep.cat, `${ref} 還沒發佈：${prep.cat}。處理好之後會自動重試`, ref)
       // 準備階段失敗（還沒開始發佈）：不記進 done，清掉 inflight，下一輪再試；同一類別只貼一次
       log(`工作樹準備失敗：${prep.why}`)
       d.state.inflight = null
@@ -294,6 +341,7 @@ export async function runOnce(opts, deps) {
       return { outcome: 'prep-failed', key: d.key }
     }
     if (nt.prep !== undefined) setN({ prep: undefined })
+    alerts.resolve('prep-failed')
 
     const root = rootOf(deps)
     const args = [path.join(root, 'tools', 'release', 'local_sign_publish.mjs')]
