@@ -32,6 +32,11 @@ test('靜態：交易內、不刪資料、授權只給 service_role、有回復�
   assert.doesNotMatch(code, /create policy/i)
   assert.match(code, /alter table relay\.reports enable row level security;/)
   assert.match(code, /alter table relay\.report_kinds enable row level security;/)
+  assert.match(code, /alter table relay\.report_rate enable row level security;/)
+  assert.match(code, /revoke all on relay\.report_rate from public, anon, authenticated;/)
+  assert.match(code, /create table if not exists relay\.report_rate \(\s+node text not null references relay\.nodes\(id\) on delete cascade,\s+bucket bigint/)
+  assert.match(code, /min_interval_seconds int not null default 5 check \(min_interval_seconds >= 1\)/)
+  assert.match(code, /on conflict \(node, bucket\) do update set n = relay\.report_rate\.n \+ 1/)
   assert.match(code, /revoke all on relay\.reports from public, anon, authenticated;/)
   assert.match(code, /revoke all on relay\.report_kinds from public, anon, authenticated;/)
   // 每支新函式都是 security definer＋search_path 空，且都有 revoke
@@ -57,7 +62,8 @@ test('靜態：交易內、不刪資料、授權只給 service_role、有回復�
   for (const s of ['public.asn_relay_report_get(text, text, text[])', 'public.asn_relay_report(text, text, jsonb)', 'relay.report_readers(text, text)',
     'relay.report_can_read(text, text, text)', 'relay.report_validate(text, jsonb)', 'relay.report_check_spec(jsonb, jsonb)',
     'relay.report_check_value(jsonb, jsonb, text[], text, int)']) assert.ok(down.includes(`drop function if exists ${s};`), s)
-  assert.ok(down.includes('drop table if exists relay.reports;') && down.includes('drop table if exists relay.report_kinds;'))
+  assert.ok(down.includes('drop table if exists relay.report_rate;'))
+  assert.ok(down.includes('drop table if exists relay.reports;')&& down.includes('drop table if exists relay.report_kinds;'))
 })
 
 let PGlite = null
@@ -184,8 +190,9 @@ test('規格：疑似 email 被擋，只有 allow_email 明列的欄位放行；
   assert.equal(await b.spec(BIG, { name: 'a', login: 'me@example.com', note: 'you@example.com' }), 'looks_like_email', '放行只對明列的欄位')
   // 欄位層級 "allow_email": true 也放行
   assert.equal(await b.spec({ fields: { m: { type: 'string', max: 50, allow_email: true } } }, { m: 'me@example.com' }), null)
-  assert.equal(await b.spec(BIG, { name: 'a', note: 'a'.repeat(32) }), 'looks_like_secret')
-  assert.equal(await b.spec(BIG, { name: 'a', note: '0123456789abcdef0123456789abcdef' }), 'looks_like_secret')
+  assert.equal(await b.spec(BIG, { name: 'a', note: 'z'.repeat(32) }), 'looks_like_secret')
+  assert.equal(await b.spec(BIG, { name: 'a', note: '0123456789abcdef0123456789abcdeg' }), 'looks_like_secret', '32 字但不是純 hex')
+  assert.equal(await b.spec(BIG, { name: 'a', note: '0123456789abcdef0123456789abcdef0' }), 'looks_like_secret', '33 位 hex 不在豁免長度')
   assert.equal(await b.spec(BIG, { name: 'a', note: 'ab-cd_ef+gh='.repeat(3) }), 'looks_like_secret')
   assert.equal(await b.spec(BIG, { name: 'a', note: 'a'.repeat(31) }), null, '31 個不算')
   assert.equal(await b.spec(BIG, { name: 'a', note: 'word '.repeat(10) }), null, '空白切開的長句不算')
@@ -193,7 +200,7 @@ test('規格：疑似 email 被擋，只有 allow_email 明列的欄位放行；
   assert.equal(await b.spec(BIG, { name: 'a', note: 'sk-ant12345' }), 'looks_like_secret', 'sk-')
   assert.equal(await b.spec(BIG, { name: 'a', note: 'sk-short' }), null)
   // 金鑰檢查對 allow_email 欄位照樣有效
-  assert.equal(await b.spec(BIG, { name: 'a', login: 'a'.repeat(40) }), 'looks_like_secret')
+  assert.equal(await b.spec(BIG, { name: 'a', login: 'z'.repeat(40) }), 'looks_like_secret')
 })
 
 // ───────── report_validate ─────────
@@ -304,20 +311,138 @@ test('寫入：雜湊不同但在最小間隔內 → rate（帶 retry_after_seco
 test('寫入：每節點滾動 60 秒總量上限 rate_node；窗外的不算；兩節點互不影響', { skip }, async () => {
   const b = await boot()
   await b.node('n1'); await b.node('n2')
-  for (let i = 0; i < 61; i++) await b.kind(`k${i}`, { spec: { fields: { v: { type: 'int' } } }, min: 0 })
+  for (let i = 0; i < 61; i++) await b.kind(`k${i}`, { spec: { fields: { v: { type: 'int' } } }, min: 1 })
   for (let i = 0; i < 60; i++) assert.deepEqual(await b.report('n1', `k${i}`, { v: 1 }), { ok: true, changed: true }, `k${i}`)
   const cap = await b.report('n1', 'k60', { v: 1 })
   assert.equal(cap.ok, false); assert.equal(cap.rejected_reason, 'rate_node')
-  assert.ok(cap.retry_after_seconds >= 1 && cap.retry_after_seconds <= 60)
+  assert.ok(cap.retry_after_seconds >= 1 && cap.retry_after_seconds <= 70)
   assert.equal(await b.row('n1', 'k60'), undefined, '被擋的沒寫')
   // 另一個節點不受影響
   assert.deepEqual(await b.report('n2', 'k60', { v: 1 }), { ok: true, changed: true })
   assert.deepEqual(await b.report('n2', 'echo', { text: 'x' }), { ok: true, changed: true })
-  // 把其中一列推出窗外就又能寫
-  await b.ageWritten('n1', 'k0', 61)
+  // 把計數桶推出窗外就又能寫
+  await b.db.exec("update relay.report_rate set bucket = bucket - 7 where node = 'n1'")
   assert.deepEqual(await b.report('n1', 'k60', { v: 1 }), { ok: true, changed: true })
   // 內容沒變的請求不算寫入、不被總量擋
   assert.deepEqual(await b.report('n1', 'k1', { v: 1 }), { ok: true, changed: false })
+})
+
+// 把這個節點的這個 kind 的時間往回推 2 秒（過最小間隔 1 秒），不動計數
+const rewind = (b, node, kind) => b.db.query("update relay.reports set written_at = written_at - interval '2 seconds', updated_at = updated_at - interval '2 seconds' where node = $1 and kind = $2", [node, kind])
+const rateN = async (b, node) => (await b.q('select coalesce(sum(n), 0)::int s from relay.report_rate where node = $1', [node]))[0].s
+
+test('總量上限數的是寫入次數：同一個 kind 連寫 61 次，前 60 次 ok、第 61 次 rate_node；每次寫入計一次', { skip }, async () => {
+  const b = await boot()
+  await b.node('n1'); await b.node('n2')
+  await b.kind('hot', { spec: { fields: { v: { type: 'int' } } }, min: 1 })
+  for (let i = 0; i < 60; i++) {
+    if (i) await rewind(b, 'n1', 'hot')
+    assert.deepEqual(await b.report('n1', 'hot', { v: i }), { ok: true, changed: true }, `第 ${i + 1} 次`)
+  }
+  assert.equal(await rateN(b, 'n1'), 60, '前提：計了 60 次（reports 只有 1 列）')
+  assert.equal((await b.q("select count(*)::int c from relay.reports where node = 'n1'"))[0].c, 1)
+  await rewind(b, 'n1', 'hot')
+  const r = await b.report('n1', 'hot', { v: 999 })
+  assert.equal(r.ok, false); assert.equal(r.rejected_reason, 'rate_node')
+  assert.ok(r.retry_after_seconds >= 1 && r.retry_after_seconds <= 70, `retry_after=${r.retry_after_seconds}`)
+  assert.equal((await b.row('n1', 'hot')).payload.v, 59, '被擋的沒寫')
+  assert.equal(await rateN(b, 'n1'), 60, '被擋的不計')
+  // 另一個節點不受影響
+  assert.deepEqual(await b.report('n2', 'hot', { v: 1 }), { ok: true, changed: true })
+  // 窗口滾動：桶推出窗外後又能寫
+  await b.db.exec("update relay.report_rate set bucket = bucket - 7 where node = 'n1'")
+  assert.deepEqual(await b.report('n1', 'hot', { v: 1000 }), { ok: true, changed: true })
+  assert.equal((await b.row('n1', 'hot')).payload.v, 1000)
+})
+
+test('總量計數：只有真正寫入才計（新增、保活、內容變更各計一次）；rate 拒絕、內容重複不寫、驗證失敗都不計；順手清自己的過期桶', { skip }, async () => {
+  const b = await boot()
+  await b.node('n1'); await b.node('n2')
+  await b.kind('c', { spec: { fields: { v: { type: 'int' } } }, min: 1, keep: 60 })
+  assert.deepEqual(await b.report('n1', 'c', { v: 1 }), { ok: true, changed: true }); assert.equal(await rateN(b, 'n1'), 1, '新增計 1')
+  assert.equal((await b.report('n1', 'c', { v: 2 })).rejected_reason, 'rate'); assert.equal(await rateN(b, 'n1'), 1, 'rate 不計')
+  assert.deepEqual(await b.report('n1', 'c', { v: 1 }), { ok: true, changed: false }); assert.equal(await rateN(b, 'n1'), 1, '重複不寫不計')
+  assert.equal((await b.report('n1', 'c', { v: 'x' })).rejected_reason, 'type_mismatch'); assert.equal(await rateN(b, 'n1'), 1, '驗證失敗不計')
+  await rewind(b, 'n1', 'c')
+  assert.deepEqual(await b.report('n1', 'c', { v: 2 }), { ok: true, changed: true }); assert.equal(await rateN(b, 'n1'), 2, '內容變更計 1')
+  await b.age('n1', 'c', 100)
+  assert.deepEqual(await b.report('n1', 'c', { v: 2 }), { ok: true, changed: false }); assert.equal(await rateN(b, 'n1'), 3, '保活（有寫）計 1')
+  assert.equal(await rateN(b, 'n2'), 0, '別的節點不計')
+  await b.db.exec("insert into relay.report_rate (node, bucket, n) values ('n1', 1, 5), ('n2', 1, 5)")
+  await rewind(b, 'n1', 'c')
+  await b.report('n1', 'c', { v: 3 })
+  assert.equal((await b.q("select count(*)::int c from relay.report_rate where node = 'n1' and bucket = 1"))[0].c, 0, '自己的過期桶被清')
+  assert.equal((await b.q("select count(*)::int c from relay.report_rate where node = 'n2' and bucket = 1"))[0].c, 1, '別人的不動')
+})
+
+test('min_interval_seconds 下限 1：插入 0 或負數的 kind 會失敗；report_rate 節點刪除連帶清掉、RLS 開且無權限', { skip }, async () => {
+  const b = await boot()
+  await assert.rejects(b.kind('zero', { spec: { fields: {} }, min: 0 }), /check|violates/i)
+  await assert.rejects(b.kind('neg', { spec: { fields: {} }, min: -1 }), /check|violates/i)
+  await b.kind('one', { spec: { fields: {} }, min: 1 })
+  await b.node('n1'); await b.node('n2')
+  await b.report('n1', 'echo', { text: 'a' }); await b.report('n2', 'echo', { text: 'b' })
+  assert.equal(await rateN(b, 'n1'), 1, '前提：有計數列')
+  await b.db.exec("delete from relay.nodes where id = 'n1'")
+  assert.equal((await b.q("select count(*)::int c from relay.report_rate where node = 'n1'"))[0].c, 0)
+  assert.equal(await rateN(b, 'n2'), 1)
+  assert.equal((await b.q("select relrowsecurity r from pg_class where oid = 'relay.report_rate'::regclass"))[0].r, true)
+  assert.equal((await b.q("select count(*)::int c from pg_policies where tablename = 'report_rate'"))[0].c, 0)
+  assert.equal((await b.q("select has_table_privilege('anon', 'relay.report_rate', 'select') a"))[0].a, false)
+  assert.equal((await b.q("select has_table_privilege('authenticated', 'relay.report_rate', 'insert') a"))[0].a, false)
+})
+
+test('第二道防線的豁免：UUID、純 hex（32／40／64）、44 字元 base64 公鑰形狀不被擋；allow_secret 只放行該欄位；真的像金鑰的照擋', { skip }, async () => {
+  const b = await boot()
+  const SP = { fields: { id: { type: 'string', max: 100 }, other: { type: 'string', max: 200 }, tok: { type: 'string', max: 200, allow_secret: true } }, allow_secret: ['listed'] }
+  SP.fields.listed = { type: 'string', max: 200 }
+  const UUID = '123e4567-e89b-12d3-a456-426614174000'
+  const SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+  const SHA1 = 'da39a3ee5e6b4b0d3255bfef95601890afd80709'
+  const MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
+  const PUB = 'dGhpcyBpcyBhIDMyIGJ5dGUgcHVibGljIGtleSEhISE='
+  assert.equal(PUB.length, 44)
+  for (const [n, v] of Object.entries({ UUID, SHA256, SHA1, MD5, PUB })) assert.equal(await b.spec(SP, { id: v }), null, `${n} 預設放行`)
+  // 前提：同樣長度、但不是上述形狀的真的會被擋
+  const LONG = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'
+  const JWT = 'eyJhbGciOiJI.eyJzdWIiOiIx.abc123'
+  const SK = 'sk-proj-abcdef123456'
+  for (const [n, v] of Object.entries({ LONG, JWT, SK, hex33: SHA1 + 'a', b64_45: PUB + 'A', uuidplus: UUID + 'abcdef0123456789' })) {
+    assert.equal(await b.spec(SP, { id: v }), 'looks_like_secret', `${n} 仍被擋`)
+  }
+  // allow_secret：欄位內寫 true、或頂層陣列列欄位名；都只放行該欄位
+  for (const v of [LONG, JWT, SK]) {
+    assert.equal(await b.spec(SP, { tok: v }), null, `tok 放行 ${v}`)
+    assert.equal(await b.spec(SP, { listed: v }), null, `listed 放行 ${v}`)
+    assert.equal(await b.spec(SP, { tok: v, other: v }), 'looks_like_secret', 'other 沒豁免：照擋')
+    assert.equal(await b.spec(SP, { id: v, tok: v }), 'looks_like_secret', 'id 沒豁免：照擋')
+  }
+  // allow_secret 不連帶放行 email
+  assert.equal(await b.spec(SP, { tok: 'a@b.co' }), 'looks_like_email')
+})
+
+test('room 成員鍵前綴：「節點~視窗」的成員鍵讓該節點互讀；另一節點只是 id 以它為開頭（q 與 qq~win）不算同一成員', { skip }, async () => {
+  const b = await boot()
+  for (const n of ['p', 'r', 's', 'q', 'qq']) await b.node(n)
+  await b.kind('rs', { spec: { fields: { v: { type: 'int' } } }, scope: 'room', min: 1 })
+  await b.room('gp', T1, ['p~win', 'r'])            // p 只以「p~win」進群組
+  await b.room('gq', T1, ['qq~win', 's'])           // 只有節點 qq（視窗 win）與 s 在群組；節點 q 不在
+  // 前提：成員資料真的建出來，成員鍵長相如預期
+  assert.deepEqual((await b.q("select member from relay.room_members where room_id = 'gp' order by member")).map(x => x.member), ['p~win', 'r'])
+  assert.deepEqual((await b.q("select member from relay.room_members where room_id = 'gq' order by member")).map(x => x.member), ['qq~win', 's'])
+  for (const n of ['p', 'r', 's', 'q', 'qq']) assert.deepEqual(await b.report(n, 'rs', { v: 1 }), { ok: true, changed: true })
+  const all = ['p', 'r', 's', 'q', 'qq']
+  // 有效案例：p（成員鍵 p~win）與 r 互讀
+  assert.deepEqual(nodesOf(await b.get('p', 'rs', all)), ['p', 'r'])
+  assert.deepEqual(nodesOf(await b.get('r', 'rs', all)), ['p', 'r'])
+  // qq~win 與 s 互讀
+  assert.deepEqual(nodesOf(await b.get('qq', 'rs', all)), ['qq', 's'])
+  assert.deepEqual(nodesOf(await b.get('s', 'rs', all)), ['qq', 's'])
+  // 反例：q 的 id 是 qq~win 的前綴，但 q 不是成員；q 看不到 s、qq，s 與 qq 也看不到 q
+  assert.deepEqual(nodesOf(await b.get('q', 'rs', all)), ['q'])
+  assert.deepEqual(nodesOf(await b.get('s', 'rs', ['q'])), [])
+  assert.deepEqual(nodesOf(await b.get('qq', 'rs', ['q'])), [])
+  assert.deepEqual(await b.readers('s', 'rs'), ['qq', 's'])
 })
 
 test('寫入：不影響 nodes.last_seen_at；節點刪除後 reports 被 cascade 清掉；欄位型別與外鍵', { skip }, async () => {
@@ -361,9 +486,9 @@ async function scene() {
   await b.room('g1', T1, ['a', 'b~w1', 'd'])
   await b.room('g2', T1, ['a', 'c'], { archived: '2026-01-01T00:00:00Z' })
   await b.room('g3', T2, ['x', 'a'])
-  await b.kind('rs', { spec: { fields: { v: { type: 'int' } } }, scope: 'room', min: 0 })
-  await b.kind('os', { spec: { fields: { v: { type: 'int' } } }, scope: 'owner', min: 0 })
-  await b.kind('ss', { spec: { fields: { v: { type: 'int' } } }, scope: 'self', min: 0 })
+  await b.kind('rs', { spec: { fields: { v: { type: 'int' } } }, scope: 'room', min: 1 })
+  await b.kind('os', { spec: { fields: { v: { type: 'int' } } }, scope: 'owner', min: 1 })
+  await b.kind('ss', { spec: { fields: { v: { type: 'int' } } }, scope: 'self', min: 1 })
   for (const k of ['rs', 'os', 'ss']) for (const n of ['a', 'b', 'c', 'd', 'x']) await b.report(n, k, { v: n.charCodeAt(0) })
   return b
 }
@@ -401,9 +526,10 @@ test('讀取 room：同租戶、同一個未封存群組的現任成員互看（
   await b.db.exec("update relay.room_members set left_at = now() where room_id = 'g1' and member = 'd'")
   assert.deepEqual(nodesOf(await b.get('a', 'rs', ALL)), ['a', 'b'])
   assert.deepEqual(nodesOf(await b.get('d', 'rs', ALL)), ['d'])
-  // 成員鍵前綴比對不誤判：節點 a 與節點 ab
+  // 節點 a 與另一個只是 id 以 a 開頭的節點 ab（不在任何群組）：不能因前綴相同被當成同一成員
   await b.node('ab'); await b.report('ab', 'rs', { v: 1 })
   assert.deepEqual(nodesOf(await b.get('a', 'rs', ['ab'])), [])
+  assert.deepEqual(nodesOf(await b.get('ab', 'rs', ['a'])), [])
 })
 
 test('讀取：p_nodes 最多 50 筆、未知／停用的 kind、空陣列與 null', { skip }, async () => {
@@ -443,7 +569,7 @@ test('兩條驗證路徑都能走完整寫入／讀取：spec 型（echo）與 v
   const b = await boot()
   await b.node('n1')
   await b.db.exec("create function relay.report_check_probe(p jsonb) returns text language sql as $$ select case when p ? 'ok' then null else 'no_ok' end $$;")
-  await b.kind('probe', { validator: 'report_check_probe', min: 0 })
+  await b.kind('probe', { validator: 'report_check_probe', min: 1 })
   assert.deepEqual(await b.report('n1', 'echo', { text: 'via spec' }), { ok: true, changed: true })
   assert.deepEqual(await b.report('n1', 'probe', { whatever: 1 }), { ok: false, rejected_reason: 'no_ok' })
   assert.deepEqual(await b.report('n1', 'probe', { ok: 1, free: ['form'] }), { ok: true, changed: true })

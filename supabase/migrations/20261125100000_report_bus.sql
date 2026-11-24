@@ -4,7 +4,8 @@
 -- 內容：
 --   1. relay.report_kinds（登記表）、relay.reports（最新值，主鍵 (node, kind)，節點刪除時連帶清掉）。兩張表啟用 RLS、不開任何 policy、收回權限。
 --   2. 驗證：relay.report_check_value／report_check_spec（通用宣告式規格，未列欄位一律拒絕；預設擋疑似 email 與疑似金鑰）、relay.report_validate（查登記表、大小、spec、validator）。
---   3. 寫入 public.asn_relay_report：雜湊去重、保活、伺服器端頻率限制（同節點同 kind 最小間隔；每節點滾動 60 秒總量上限）。不影響 nodes.last_seen_at。
+--   （規格內欄位可用 allow_email／allow_secret 豁免第二道防線；UUID、32/40/64 位 hex、44 字元 base64 公鑰形狀預設不算金鑰。）
+--   3. 寫入 public.asn_relay_report：雜湊去重、保活、伺服器端頻率限制（同節點同 kind 最小間隔；每節點滾動約 60 秒總量上限，數的是寫入次數、存 relay.report_rate）。不影響 nodes.last_seen_at。
 --   4. 讀取 public.asn_relay_report_get ＋ relay.report_can_read／relay.report_readers（self／owner／room 三種範圍，同一份可見規則）。
 --   5. 只登記一個測試用 kind：echo。
 -- 事件型（mode='event'）只預留欄位與約定，本段不實作（事件不覆蓋最新值，之後另開單，避免各自寫各自的）。
@@ -20,7 +21,8 @@ create table if not exists relay.report_kinds (
   validator text,                   -- 可空；只有 spec 表達不了的才填，對應 relay.report_check_<kind>(jsonb) returns text（null＝通過）
   max_bytes int not null default 4096 check (max_bytes > 0),
   keepalive_seconds int not null default 300 check (keepalive_seconds >= 0),
-  min_interval_seconds int not null default 5 check (min_interval_seconds >= 0),
+  -- 下限 1 秒：最小間隔是單一 kind 的頻率限制，與每節點總量上限（relay.report_rate）互為雙保險；設 0 等於該 kind 沒有頻率限制，所以不准。
+  min_interval_seconds int not null default 5 check (min_interval_seconds >= 1),
   read_scope text not null default 'self' check (read_scope in ('self', 'owner', 'room')),
   enabled boolean not null default true
 );
@@ -41,10 +43,21 @@ create table if not exists relay.reports (
 );
 create index if not exists reports_node_written_idx on relay.reports (node, written_at);
 
+-- 每節點寫入次數（每節點總量上限用）：10 秒一個桶，bucket = floor(epoch / 10)，n＝該桶內真正寫入的次數。
+-- 不能用 reports 的列數算，因為主鍵是 (node, kind)，列數只代表「寫過幾種 kind」，不是「寫了幾次」。
+create table if not exists relay.report_rate (
+  node text not null references relay.nodes(id) on delete cascade,
+  bucket bigint not null,
+  n int not null default 0,
+  primary key (node, bucket)
+);
+
 alter table relay.report_kinds enable row level security;
 alter table relay.reports enable row level security;
+alter table relay.report_rate enable row level security;
 revoke all on relay.report_kinds from public, anon, authenticated;
 revoke all on relay.reports from public, anon, authenticated;
+revoke all on relay.report_rate from public, anon, authenticated;
 
 -- ===== 通用規格檢查 =====
 -- 回 null＝通過；否則回固定原因代碼（不回 payload 內容）：
@@ -74,13 +87,25 @@ begin
     v_s := p_val #>> '{}';
     if p_def ? 'max' and char_length(v_s) > (p_def ->> 'max')::numeric then return 'too_long'; end if;
     -- 第二道防線：疑似 email（含 @ 且像 x@y.z），只有 spec 明列 allow_email 的欄位才放行
+    -- p_allow 的元素是「email:欄位名」或「secret:欄位名」（由 report_check_spec 從頂層 allow_email／allow_secret 陣列組出）
     if v_s ~ '[^\s@]+@[^\s@]+\.[^\s@]+'
-       and not (coalesce((p_def ->> 'allow_email')::boolean, false) or p_key = any (p_allow)) then
+       and not (coalesce((p_def ->> 'allow_email')::boolean, false) or ('email:' || p_key) = any (p_allow)) then
       return 'looks_like_email';
     end if;
-    -- 疑似金鑰：長度 32 以上的連續英數／底線／減號／加號／等號片段，或 JWT、sk- 開頭
-    if v_s ~ '[A-Za-z0-9_+=-]{32,}' or v_s ~ '^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.' or v_s ~ '^sk-[A-Za-z0-9_-]{8,}' then
-      return 'looks_like_secret';
+    -- 疑似金鑰：長度 32 以上的連續英數／底線／減號／加號／等號片段，或 JWT、sk- 開頭。
+    -- 整個字串剛好是下列常見的非機密形狀時，不算長片段（避免誤擋）：標準 UUID（8-4-4-4-12）、
+    -- 純 hex 且長度恰為 32／40／64（MD5／SHA-1／SHA-256 形狀）、44 字元以 = 結尾的 base64（32 位元組公鑰形狀）。
+    -- 取捨：這三種形狀的字串也可能真的是機密（例如 32 位元組的私鑰、64 位 hex 的金鑰）；規格層無從分辨，
+    -- 所以只豁免「整串吻合」者，且金鑰欄位不該放進 payload；欄位明確要收長 token 時用 allow_secret 放行。
+    -- JWT 與 sk- 開頭不豁免（除非 allow_secret）。
+    if not (coalesce((p_def ->> 'allow_secret')::boolean, false) or ('secret:' || p_key) = any (p_allow)) then
+      if (v_s ~ '[A-Za-z0-9_+=-]{32,}'
+            and v_s !~ '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+            and v_s !~ '^([0-9A-Fa-f]{32}|[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$'
+            and v_s !~ '^[A-Za-z0-9+/]{43}=$')
+         or v_s ~ '^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.' or v_s ~ '^sk-[A-Za-z0-9_-]{8,}' then
+        return 'looks_like_secret';
+      end if;
     end if;
     return null;
   elsif v_type = 'int' or v_type = 'number' then
@@ -139,8 +164,11 @@ declare
 begin
   if jsonb_typeof(p_spec) is distinct from 'object' then return 'bad_spec'; end if;
   if jsonb_typeof(p_payload) is distinct from 'object' then return 'not_object'; end if;
-  select coalesce(array_agg(x), array[]::text[]) into v_allow
-    from jsonb_array_elements_text(case when jsonb_typeof(p_spec -> 'allow_email') = 'array' then p_spec -> 'allow_email' else '[]'::jsonb end) x;
+  select coalesce(array_agg(x), array[]::text[]) into v_allow from (
+    select 'email:' || e as x from jsonb_array_elements_text(case when jsonb_typeof(p_spec -> 'allow_email') = 'array' then p_spec -> 'allow_email' else '[]'::jsonb end) e
+    union all
+    select 'secret:' || e from jsonb_array_elements_text(case when jsonb_typeof(p_spec -> 'allow_secret') = 'array' then p_spec -> 'allow_secret' else '[]'::jsonb end) e
+  ) a;
   return relay.report_check_value(
     jsonb_build_object('type', 'object', 'fields', coalesce(p_spec -> 'fields', '{}'::jsonb), 'required', coalesce(p_spec -> 'required', '[]'::jsonb)),
     p_payload, v_allow, null, 0);
@@ -196,8 +224,9 @@ create or replace function public.asn_relay_report(p_node text, p_kind text, p_p
  set search_path to ''
 as $function$
 declare
-  c_node_cap constant int := 60;      -- 每節點滾動視窗內最多真正寫入幾列（調整要改 migration）
-  c_node_window constant int := 60;   -- 上述滾動視窗（秒）
+  c_node_cap constant int := 60;      -- 每節點滾動視窗內最多真正寫入幾次（見 relay.report_rate）（調整要改 migration）
+  c_bucket constant int := 10;        -- 計數桶寬（秒）
+  c_buckets constant int := 7;        -- 看最近 7 個桶（含目前桶）；近似：實際涵蓋 60～70 秒，邊界上最多多算 10 秒，偏保守（寧可早擋）
   k relay.report_kinds%rowtype;
   r relay.reports%rowtype;
   v_found boolean;
@@ -205,7 +234,8 @@ declare
   v_hash text;
   v_since_write numeric;
   v_cnt int;
-  v_oldest timestamptz;
+  v_bucket bigint := floor(extract(epoch from now()) / 10);
+  v_oldest bigint;
 begin
   if p_node is null or p_kind is null or not exists (select 1 from relay.nodes where id = p_node and status = 'active') then
     return jsonb_build_object('ok', false, 'rejected_reason', 'not_found');
@@ -232,13 +262,16 @@ begin
       return jsonb_build_object('ok', false, 'rejected_reason', 'rate', 'retry_after_seconds', ceil(k.min_interval_seconds - v_since_write)::int);
     end if;
   end if;
-  -- 每節點總量上限（會真的寫入時才算）
-  select count(*), min(written_at) into v_cnt, v_oldest from relay.reports
-    where node = p_node and written_at > now() - make_interval(secs => c_node_window);
+  -- 每節點總量上限：只在確定要真的寫入（新增、保活、內容變更）時才算；被拒絕或內容重複不寫的請求不計
+  select coalesce(sum(n), 0), min(bucket) into v_cnt, v_oldest from relay.report_rate
+    where node = p_node and bucket > v_bucket - c_buckets;
   if v_cnt >= c_node_cap then
     return jsonb_build_object('ok', false, 'rejected_reason', 'rate_node',
-      'retry_after_seconds', greatest(1, ceil(c_node_window - extract(epoch from now() - v_oldest))::int));
+      'retry_after_seconds', greatest(1, ceil((v_oldest + c_buckets) * c_bucket - extract(epoch from now()))::int));
   end if;
+  insert into relay.report_rate (node, bucket, n) values (p_node, v_bucket, 1)
+    on conflict (node, bucket) do update set n = relay.report_rate.n + 1;
+  delete from relay.report_rate where node = p_node and bucket <= v_bucket - c_buckets - 6;   -- 順手清自己的過期桶
   if not v_found then
     insert into relay.reports (node, kind, payload, hash, size, updated_at, changed_at, written_at)
       values (p_node, p_kind, p_payload, v_hash, octet_length(p_payload::text), now(), now(), now());

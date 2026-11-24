@@ -8,6 +8,7 @@ drop function if exists relay.report_can_read(text, text, text);
 drop function if exists relay.report_validate(text, jsonb);
 drop function if exists relay.report_check_spec(jsonb, jsonb);
 drop function if exists relay.report_check_value(jsonb, jsonb, text[], text, int);
+drop table if exists relay.report_rate;
 drop table if exists relay.reports;
 drop table if exists relay.report_kinds;
 commit;
