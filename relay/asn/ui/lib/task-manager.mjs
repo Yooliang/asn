@@ -386,6 +386,7 @@ export function createTaskManager(deps) {
     prefix: confirmPrefix(),
     error: state.restartError,
     pending: Math.max(0, Number(state.snapshot?.restart_pending) || 0),
+    muxExpected: state.snapshot?.mux_expected === true,
   })
   const liveTree = () => { const n = now(), c = ctx(); return treeView(rowsNow(), r => viewRow(r, n, c), treeUi()) }
 

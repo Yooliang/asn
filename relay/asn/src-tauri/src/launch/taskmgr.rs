@@ -381,14 +381,16 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
 /// - `mux_restarting`：按了「重啟終端服務」、還沒做完，畫面據此顯示「正在重啟…」，底下的代理標「斷線中」
 /// - `restart_pending`：上次重啟起不來、還沒接回的代理數，重啟 ASN 的確認框據此多講一句
 #[cfg(desktop)]
-fn add_restart_state(out: &mut serde_json::Value, restarting: bool, pending: usize) {
+/// - `mux_expected`：這台用終端服務（沒開終端服務模式的 Linux 是假）。用但清單上沒有終端服務那一列時，畫面仍列一個「沒有在運行」的佔位，讓本人有地方再按重啟
+fn add_restart_state(out: &mut serde_json::Value, restarting: bool, pending: usize, mux_expected: bool) {
+    out["mux_expected"] = serde_json::Value::Bool(mux_expected);
     out["mux_restarting"] = serde_json::Value::Bool(restarting);
     out["restart_pending"] = serde_json::json!(pending);
 }
 
 /// 讀真實環境：視窗名單、程序掃描、終端面板（呼叫端給）、認得的名字。讀不到視窗名單就回錯（畫面顯示暫時讀不到，不當成沒有程式）
 #[cfg(desktop)]
-pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, terms: Vec<TermIn>, partners: Vec<PartnerRef>) -> Result<serde_json::Value, String> {
+pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, terms: Vec<TermIn>, partners: Vec<PartnerRef>, mux_expected: bool) -> Result<serde_json::Value, String> {
     use crate::bridge::{engines, known, procscan, roster};
     let home = crate::identity::home_dir();
     let now = crate::heartbeat::now_ms();
@@ -407,7 +409,7 @@ pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, 
     let all_sessions = stuck_resume::all_session_files();
     let src = Sources { claude, claude_ok, pi, procs, terms, partners, all_sessions, known: known_entries, protected, own_pid: std::process::id(), now_ms: now };
     let mut out = serde_json::to_value(build(&switch::RealOs, &src)).map_err(|e| e.to_string())?;
-    add_restart_state(&mut out, super::mux_restart::is_restarting(), super::mux_restart::pending_count());
+    add_restart_state(&mut out, super::mux_restart::is_restarting(), super::mux_restart::pending_count(), mux_expected);
     // 壓縮次數（#1852）：只有 Claude 視窗有；內建收發室還沒數過的視窗是 null（畫面顯示「—」）
     if let Some(rows) = out.get_mut("rows").and_then(|r| r.as_array_mut()) {
         for r in rows.iter_mut().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("claude")) {
@@ -958,11 +960,13 @@ mod tests {
     #[test]
     fn _1860f_清單帶重啟狀態_與沒接回的人數() {
         let mut out = serde_json::to_value(build(&two_mux_os(), &src(vec![claude("小東", 502)]))).unwrap();
-        add_restart_state(&mut out, false, 3);
+        add_restart_state(&mut out, false, 3, true);
         assert_eq!(out["restart_pending"], 3);
         assert_eq!(out["mux_restarting"], false);
-        add_restart_state(&mut out, true, 0);
+        assert_eq!(out["mux_expected"], true, "用終端服務就要告訴畫面，沒有服務在跑時才列得出佔位");
+        add_restart_state(&mut out, true, 0, false);
         assert_eq!((out["restart_pending"].clone(), out["mux_restarting"].clone()), (serde_json::json!(0), serde_json::json!(true)));
+        assert_eq!(out["mux_expected"], false, "沒開終端服務模式（Linux）不列佔位");
         assert!(out["rows"].is_array(), "原本的欄位不動");
     }
 }

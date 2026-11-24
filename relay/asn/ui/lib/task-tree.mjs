@@ -17,14 +17,23 @@ export const TREE_TEXT = Object.freeze({
   disconnected: '斷線中',
   restartFail: '重啟沒有成功，請稍後再試。',
   restartAsnTimeout: '重啟沒有完成，ASN 仍在執行。',
+  // 終端服務沒有在跑（例如重啟時新的起不來）、但這台是用終端服務的：列一個空的佔位，才有地方再按「重啟」
+  muxNone: '沒有在運行',
 })
 
-/** 重啟確認框的字。prefix 是別台設備才加的主詞（例如「工作機」的），這台自己不給 */
-/** pending：上次重啟終端服務失敗、還沒接回的代理數。名單只放記憶體，ASN 重啟就沒了，所以有人沒接回時要先講 */
+/** 重啟確認框的字。prefix 是別台設備才加的主詞（例如「工作機」的），這台自己不給。
+ *  pending：上次重啟終端服務失敗、還沒接回的代理數。名單只放記憶體，重啟 ASN 就沒了，所以有人沒接回時整句換成提醒（確認鈕照樣能按，讓本人決定） */
 export const restartAsnText = (prefix = '', pending = 0) =>
-  `重啟${prefix} ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。` +
-  (pending > 0 ? `還有 ${pending} 位代理沒接回，重啟後要到這台的工作管理員重按終端服務的重啟。` : '')
+  pending > 0
+    ? `重啟${prefix} ASN？還有 ${pending} 位代理沒接回，重啟 ASN 會讓這份名單遺失。請先在這台的工作管理員重按「重啟終端服務」把他們接回，再重啟 ASN。`
+    : `重啟${prefix} ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。`
 export const restartMuxText = (n, prefix = '') => `重啟${prefix}終端服務？底下所有代理（${n} 個）會暫時斷線，之後會自動連回。`
+/** 終端服務沒有在跑時的確認字（n＝還沒接回的代理數） */
+export const restartMuxNoneText = (n, prefix = '') => (n > 0 ? `重啟${prefix}終端服務？還有 ${n} 位代理沒接回，新的起來後會自動接回。` : `重啟${prefix}終端服務？目前沒有在運行，會重新啟動。`)
+
+/** 沒有終端服務在跑時的佔位鍵與那一列（pid 0＝沒有程序） */
+export const MUX_NONE_KEY = 'mux:none'
+const muxNoneRow = () => ({ kind: 'mux', name: '終端服務', engine: '', pid: 0, memory_bytes: null, started_ms: null, status: null, detail: null, by_asn: true, cwd: '', session_id: null, term_id: null, live: false, inside: null, mux_pid: null })
 
 export const ROOT_KEY = 'asn'
 export const muxKey = pid => `mux:${pid}`
@@ -58,7 +67,7 @@ export function buildTree(rows) {
  */
 export function treeView(rows, mapRow, ui = {}) {
   const t = buildTree(rows)
-  const { ask = null, restarting = null, frozen = null, prefix = '', error = null, pending = 0 } = ui
+  const { ask = null, restarting = null, frozen = null, prefix = '', error = null, pending = 0, muxExpected = false } = ui
   // 重啟中：ASN 重啟整棵樹都斷線；終端服務重啟只有它底下的代理斷線（restarting 是節點鍵，'mux:*' 代表不知道是哪一個，全部終端服務）
   const hit = key => restarting === key || (restarting === 'mux:*' && key.startsWith('mux:'))
   const allDown = restarting === ROOT_KEY
@@ -73,11 +82,16 @@ export function treeView(rows, mapRow, ui = {}) {
     const isDown = allDown || hit(key)
     return { key, node: mapRow(g.mux), summary: TREE_TEXT.agents(g.agents.length), agents: g.agents.map(a => mapAgent(a, isDown)), restart: restartOf(key, restartMuxText(g.agents.length, prefix)) }
   })
+  const hasMux = groups.length > 0
   // 終端服務重啟的當下，舊服務已停、清單裡找不到它：用按下時記的那一組撐著，底下標「斷線中」，直到新的服務回來
   // 新服務起來後接回要幾十秒（restarting 為 'mux:*'）：新服務的那一組還沒出現時同樣撐著；出現了就用新的，底下的代理標「斷線中」直到接回
-  const waitingResume = restarting === 'mux:*' && groups.length === 0
+  const waitingResume = restarting === 'mux:*' && !hasMux
   if (frozen && (restarting === frozen.key || waitingResume) && !groups.some(g => g.key === frozen.key)) {
     groups.push({ ...frozen, agents: frozen.agents.map(down), restart: restartOf(frozen.key, '') })
+  }
+  // 這台用終端服務、但清單上沒有任何終端服務（例如重啟時新的起不來）：列一個空的佔位，才有地方再按「重啟」（會用存下的名單接回）
+  if (muxExpected && groups.length === 0) {
+    groups.push({ key: MUX_NONE_KEY, placeholder: true, node: mapRow(muxNoneRow()), summary: TREE_TEXT.muxNone, agents: [], restart: restartOf(MUX_NONE_KEY, restartMuxNoneText(pending, prefix)) })
   }
   const direct = t.direct.map(a => mapAgent(a, allDown))
   return { root, groups, direct, agentCount: t.agentCount }

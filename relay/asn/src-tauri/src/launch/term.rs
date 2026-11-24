@@ -582,6 +582,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         self.use_mux = on;
     }
 
+    /// 這台是不是用終端服務（工作管理員據此決定要不要列「終端服務」那一列，服務沒在跑也要有地方按重啟）
+    pub fn mux_expected(&self) -> bool {
+        self.use_mux
+    }
+
     /// 測試注入 mux 檔案的位置（不碰真的 %LOCALAPPDATA%）
     #[cfg(test)]
     fn set_mux_base(&mut self, base: PathBuf) {

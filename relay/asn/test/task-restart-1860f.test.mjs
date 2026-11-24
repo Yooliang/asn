@@ -51,21 +51,88 @@ test('#1860F-3 別台的框前面加那台的名字（前綴機制）', async ()
   assert.equal(restartAsnText('「工作機」的'), '重啟「工作機」的 ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。')
 })
 
-test('#1860F-3 有代理沒接回時，重啟 ASN 的確認框多一句；沒有時文字與定稿相同', async () => {
-  const base = '重啟 ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。'
-  const extra = '還有 2 位代理沒接回，重啟後要到這台的工作管理員重按終端服務的重啟。'
-  assert.equal(restartAsnText('', 2), base + extra)
-  assert.equal(restartAsnText('', 0), base)
-  assert.equal(restartAsnText(), base)
+const ASN_BASE = '重啟 ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。'
+const ASN_PENDING = '重啟 ASN？還有 2 位代理沒接回，重啟 ASN 會讓這份名單遺失。請先在這台的工作管理員重按「重啟終端服務」把他們接回，再重啟 ASN。'
+
+test('#1860F-3 有代理沒接回時，重啟 ASN 的確認框整句換成提醒、確認鈕照樣能按；沒有時是定稿', async () => {
+  assert.equal(restartAsnText('', 2), ASN_PENDING)
+  assert.equal(restartAsnText('', 0), ASN_BASE)
+  assert.equal(restartAsnText(), ASN_BASE)
   // 走完整條：電腦端清單帶 restart_pending
   const o = await opened(mk({ snapshot: { ...taskmgrSnapshot(NOW), restart_pending: 2 } }))
   o.tm.askRestart(ROOT_KEY)
-  assert.equal(o.tm.view().tree.root.restart.ask, base + extra)
+  assert.equal(o.tm.view().tree.root.restart.ask, ASN_PENDING)
   o.tm.askRestart(MUX)
-  assert.equal(o.tm.view().tree.groups[0].restart.ask, '重啟終端服務？底下所有代理（3 個）會暫時斷線，之後會自動連回。', '終端服務的確認框不加這句')
+  assert.equal(o.tm.view().tree.groups[0].restart.ask, '重啟終端服務？底下所有代理（3 個）會暫時斷線，之後會自動連回。', '終端服務的確認框不變')
   const z = await opened(mk({ snapshot: { ...taskmgrSnapshot(NOW), restart_pending: 0 } }))
   z.tm.askRestart(ROOT_KEY)
-  assert.equal(z.tm.view().tree.root.restart.ask, base)
+  assert.equal(z.tm.view().tree.root.restart.ask, ASN_BASE)
+  // 畫面：提醒的字逐字、「重啟」鈕可按、按了照樣送確認
+  o.tm.askRestart(ROOT_KEY)
+  const m = mountComponent(TaskTree, { tree: o.tm.view().tree })
+  try {
+    await settle(m)
+    const box = m.find('.tm-node[data-kind="asn"] .asn-confirm')
+    assert.equal(box.querySelector('.asn-confirm-text').textContent, ASN_PENDING)
+    const yes = [...box.querySelectorAll('button')][1]
+    assert.equal(yes.textContent.trim(), '重啟')
+    assert.equal(yes.disabled, false, '有代理沒接回也不擋，讓本人自己決定')
+    await m.trigger(yes, 'click')
+    assert.deepEqual(m.emitted('act').at(-1), ['tm-restart-confirm', ROOT_KEY])
+  } finally { m.unmount() }
+})
+
+// 新的起不來之後：沒有終端服務程序，清單上就沒有 kind:'mux' 那一列
+const noMux = (extra = {}) => {
+  const s = taskmgrSnapshot(NOW)
+  return { ...s, rows: s.rows.filter(r => r.kind !== 'mux').map(r => ({ ...r, mux_pid: null })), mux_expected: true, ...extra }
+}
+const PLACEHOLDER = muxKey('none')
+
+test('#1860F-3 終端服務沒在跑（起不來之後）但這台用終端服務：樹上仍有「終端服務　沒有在運行」和可按的重啟，送到同一個 target', async () => {
+  const o = await opened(mk({ snapshot: noMux({ restart_pending: 2 }) }))
+  const g = o.tm.view().tree.groups
+  assert.equal(g.length, 1, '佔位一組')
+  assert.equal(g[0].key, PLACEHOLDER)
+  assert.equal(g[0].summary, TREE_TEXT.muxNone)
+  assert.equal(TREE_TEXT.muxNone, '沒有在運行')
+  assert.equal(g[0].restart.busy, false)
+  assert.equal(g[0].restart.disabled, false)
+  const m = mountComponent(TaskTree, { tree: o.tm.view().tree })
+  try {
+    await settle(m)
+    const btn = m.find('.tm-node[data-kind="mux"] .tm-restart')
+    assert.ok(btn && !btn.disabled, '重啟鈕在、能按')
+    assert.ok(m.find('.tm-node[data-kind="mux"]').textContent.includes('沒有在運行'))
+    await m.trigger(btn, 'click')
+    assert.deepEqual(m.emitted('act').at(-1), ['tm-restart-ask', PLACEHOLDER])
+  } finally { m.unmount() }
+  // 按下去走同一條重啟終端服務（不是重啟 ASN），確認字講還有幾位沒接回
+  const calls = []
+  const o2 = await opened(mk({ snapshot: noMux({ restart_pending: 2 }), api: { taskManagerRestartMux: async () => { calls.push('mux') }, taskManagerRestartAsn: async () => { calls.push('asn') } } }))
+  o2.tm.askRestart(PLACEHOLDER)
+  assert.equal(o2.tm.view().tree.groups[0].restart.ask, '重啟終端服務？還有 2 位代理沒接回，新的起來後會自動接回。')
+  await o2.tm.confirmRestart()
+  assert.deepEqual(calls, ['mux'])
+  assert.equal(o2.tm.view().tree.groups[0].restart.busy, true, '重啟中顯示正在重啟')
+  // 新服務回來（清單有 mux 列）：佔位消失、換成真的那一組
+  o2.snap.current = taskmgrSnapshot(NOW)
+  await o2.tm.refresh()
+  assert.equal(o2.tm.state.restart, null)
+  assert.deepEqual(o2.tm.view().tree.groups.map(x => x.key), [MUX])
+  // 沒有名單等著（restart_pending 0）、一般沒在跑：確認字講明是重新啟動
+  const o3 = await opened(mk({ snapshot: noMux() }))
+  o3.tm.askRestart(PLACEHOLDER)
+  assert.equal(o3.tm.view().tree.groups[0].restart.ask, '重啟終端服務？目前沒有在運行，會重新啟動。')
+})
+
+test('#1860F-3 沒開終端服務模式（Linux，mux_expected 不是真）：沒有佔位；有真的終端服務時也不多列', async () => {
+  const o = await opened(mk({ snapshot: noMux({ mux_expected: false }) }))
+  assert.equal(o.tm.view().tree.groups.length, 0)
+  const legacy = noMux(); delete legacy.mux_expected   // 舊版電腦端不給欄位
+  assert.equal((await opened(mk({ snapshot: legacy }))).tm.view().tree.groups.length, 0)
+  const live = await opened(mk({ snapshot: { ...taskmgrSnapshot(NOW), mux_expected: true } }))
+  assert.deepEqual(live.tm.view().tree.groups.map(x => x.key), [MUX], '有服務就只有那一組，不再加佔位')
 })
 
 test('#1860F-3 重啟終端服務中：那一列顯示「正在重啟…」、底下代理標「斷線中」且不能停止；回來後恢復', async () => {
