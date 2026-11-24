@@ -28,9 +28,9 @@ export const invoke = async (cmd, args) => {
   try { return await T.core.invoke(cmd, args) } catch (e) {
     const msg = typeof e === 'string' ? e : (e?.message ?? String(e))
     logFail(cmd, msg)   // log 保留完整原文（含代號）
-    // 後端的錯誤開頭有固定代號 `[前綴:名稱]`（設定層 `settings`、回報匯流排 `report`）：在這個唯一的出口拆開——message 是去掉代號的白話句（畫面直接顯示不會冒出代號），
+    // 後端的錯誤開頭有固定代號 `[前綴:名稱]`（設定層 `settings`、回報匯流排 `report`、設備改名 `rename`）：在這個唯一的出口拆開——message 是去掉代號的白話句（畫面直接顯示不會冒出代號），
     // 代號放在 err.code（`前綴:名稱`），要判斷的程式只認 code，不比對文字
-    const m = /^\s*\[(settings|report):([a-z_]+)\]\s*/.exec(msg)
+    const m = /^\s*\[(settings|report|rename):([a-z_]+)\]\s*/.exec(msg)
     const err = new Error(m ? msg.slice(m[0].length) : msg)
     if (m) err.code = `${m[1]}:${m[2]}`
     throw err

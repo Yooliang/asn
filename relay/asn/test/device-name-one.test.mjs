@@ -231,7 +231,8 @@ test('#1803 首次引導連不上或沒簽章時不卡住：名字先存本機�
   assert.equal((await setDeviceNameOnboard(async () => { throw '要先登入 ASN 帳號才能改設備名稱' }, st2, { node: 'P', name: 'x' })).deferred, true)
   // 名字不合規則：丟錯讓人改（改了也不會成功，不存）
   const st3 = mkStore({})
-  await assert.rejects(setDeviceNameOnboard(async () => { throw '名字不合規則：1～40 字' }, st3, { node: 'P', name: '指紋' }), /不合規則/)
+  const coded = (code, msg) => Object.assign(new Error(msg), { code })
+  await assert.rejects(setDeviceNameOnboard(async () => { throw coded('rename:invalid_name', '名字不合規則：1～40 字') }, st3, { node: 'P', name: '指紋' }), /不合規則/)
   assert.deepEqual(st3.get(), {})
   // 後台改好、本機寄信名字被擋：不讓引導往下走
   await assert.rejects(setDeviceNameOnboard(async () => ({ ok: true, name: 'x', window_rename_failed: '保留字' }), mkStore({}), { node: 'P', name: 'x' }), /保留字/)
@@ -252,6 +253,46 @@ test('#1803 首次引導連不上或沒簽章時不卡住：名字先存本機�
   assert.match(read('ui/m.js'), /setDeviceNameOnboard\(invoke, store\(ONBOARD_STORE\)/)
   assert.match(read('ui/lib/onboard-card.mjs'), /r\.deferred === true && r\.note/)
   for (const f of ['ui/list.js', 'ui/m.js']) assert.match(read(f), /syncPendingDeviceName\(invoke, store\(ONBOARD_STORE\)/, `${f} 啟動時補送`)
+})
+
+test('#1840 改名錯誤照代號分類：每一類代號對到該有的行為，文字改了也不會分錯', async () => {
+  const { setDeviceNameOnboard, renameDevice, RENAME_CODE, RENAME_FINAL_CODES, PENDING_KEY } = await import('../ui/lib/device-rename.mjs')
+  const mkStore = init => { let v = init; return { load: async () => v, save: async x => { v = x }, patch: async f => { const d = { ...(v ?? {}) }; for (const [k, x] of Object.entries(f)) { if (x === null) delete d[k]; else d[k] = x } v = d }, get: () => v } }
+  const coded = (code, msg) => Object.assign(new Error(msg), { code })
+  // 與 Rust 的 CODE_RENAME_* 同一組（relay.rs）
+  const rs = read('src-tauri/src/relay.rs')
+  for (const c of Object.values(RENAME_CODE)) assert.ok(rs.includes(`"[${c}]"`), `relay.rs 要有 [${c}]`)
+  // 改了也不會成功的（名字不合規則、後台還不支援）：丟錯讓人處理、不存本機
+  for (const code of RENAME_FINAL_CODES) {
+    const st = mkStore({})
+    await assert.rejects(setDeviceNameOnboard(async () => { throw coded(code, '隨便一句話，和代號無關') }, st, { node: 'P', name: 'x' }), /隨便一句話/, code)
+    assert.deepEqual(st.get(), {}, `${code} 不存本機`)
+  }
+  assert.deepEqual([...RENAME_FINAL_CODES].sort(), [RENAME_CODE.invalidName, RENAME_CODE.unsupported].sort())
+  // 其餘類別（沒簽章、登入過期、太頻繁、連不上）：先存本機、說連上後套用；就算文案恰好含「不能」「保留」「不合規則」也一樣
+  for (const code of [RENAME_CODE.unsigned, RENAME_CODE.loginExpired, RENAME_CODE.rateLimited, RENAME_CODE.failed]) {
+    const st = mkStore({})
+    const r = await setDeviceNameOnboard(async () => { throw coded(code, '名字不合規則、不能、保留、1～40') }, st, { node: 'P', name: ' 好名 ' })
+    assert.equal(r.deferred, true, code)
+    assert.equal(st.get()[PENDING_KEY], '好名', code)
+  }
+  // 沒有代號（舊版後端、系統錯誤）：不靠文字猜，一律當暫時性、先存本機
+  const st = mkStore({})
+  assert.equal((await setDeviceNameOnboard(async () => { throw '名字不合規則：1～40 字' }, st, { node: 'P', name: 'x' })).deferred, true, '沒代號不比對文字')
+  // renameDevice 保留代號給呼叫端
+  await assert.rejects(renameDevice(async () => { throw coded('rename:rate_limited', '改名太頻繁') }, { node: 'P', name: 'x' }), e => e.code === 'rename:rate_limited' && /太頻繁/.test(e.message))
+  await assert.rejects(renameDevice(async () => { throw '字串錯誤' }, { node: 'P', name: 'x' }), e => e.code === undefined && e.message === '字串錯誤')
+})
+
+test('#1840 守門：改名的前端不准再用正規表示式比對錯誤的中文；invoke 出口認得 rename 代號', () => {
+  const strip = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  const src = strip(read('ui/lib/device-rename.mjs'))
+  // 正規表示式字面值（含 .test／.match／replace）裡不能有中文
+  const regexLiterals = src.match(/(?<![\w)\]'"`])\/(?![/*])(?:\\.|\[[^\]]*\]|[^/\n\\])+\/[a-z]*/g) ?? []
+  const withCjk = regexLiterals.filter(r => /[　-鿿＀-￯]/.test(r))
+  assert.deepEqual(withCjk, [], '改名的分類只能看 err.code')
+  assert.ok(!/\.(message|toString\(\))\s*\)?\s*\.?(includes|startsWith|match)\(/.test(src), '不准用 includes／match 比對 e.message')
+  assert.match(read('ui/lib/tauri.mjs'), /\\\[\(settings\|report\|rename\):/, 'invoke 出口要拆 rename 代號')
 })
 
 test('#1839 首次引導存的待送名字，不能蓋掉之後在設備頁改的新名字（兩道防線）', async () => {

@@ -33,12 +33,29 @@ export async function clearPendingDeviceName(store, log = console.info) {
   } catch (e) { log('[ASN] 清掉待送的設備名沒成功', String(e?.message ?? e ?? '')); return false }
 }
 
-/** 替任一台設備改名；成功回 Rust 的結果（{ ok, name, changed, self_renamed?, window_name?, window_rename_failed? }），失敗丟 Error（訊息是給人看的中文） */
+/**
+ * 改名失敗的類別代號（Rust 的 relay.rs `CODE_RENAME_*`；invoke 出口把錯誤開頭的 `[rename:代號]` 拆到 err.code）。
+ * 前端只認代號、不比對中文；畫面上的白話由 Rust 組好放在 err.message
+ */
+export const RENAME_CODE = Object.freeze({
+  unsigned: 'rename:unsigned',            // 沒登入（沒有本人簽章）
+  invalidName: 'rename:invalid_name',     // 名字不合規則
+  loginExpired: 'rename:login_expired',   // 登入過期
+  unsupported: 'rename:unsupported',      // 後台還不支援改名
+  rateLimited: 'rename:rate_limited',     // 改太頻繁
+  failed: 'rename:failed',                // 連不上等其他
+})
+/** 「改了也不會成功」的類別：首次引導不能先存在本機等補送，要丟錯讓人處理 */
+export const RENAME_FINAL_CODES = Object.freeze(new Set([RENAME_CODE.invalidName, RENAME_CODE.unsupported]))
+
+/** 替任一台設備改名；成功回 Rust 的結果（{ ok, name, changed, self_renamed?, window_name?, window_rename_failed? }），失敗丟 Error（訊息是給人看的中文；err.code 是類別代號，沒有代號就沒有 code） */
 export async function renameDevice(invoke, { node, name, phone = false }) {
   try {
     return await makeDeviceNameApi(invoke).rename(phone, node, String(name ?? '').trim())
   } catch (e) {
-    throw new Error(String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試')
+    const err = new Error(String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試')
+    if (typeof e?.code === 'string' && e.code) err.code = e.code
+    throw err
   }
 }
 
@@ -89,7 +106,7 @@ export async function setDeviceNameOnboard(invoke, store, { node, name, phone = 
   try {
     r = await renameDevice(invoke, { node, name, phone })
   } catch (e) {
-    if (/不合規則|不能|保留|1～40/.test(String(e.message))) throw e
+    if (RENAME_FINAL_CODES.has(e?.code)) throw e
     const saved = (await store.load().catch(() => null)) ?? {}
     const fields = { [PENDING_KEY]: String(name).trim(), ...(base ? { [PENDING_BASE_KEY]: String(base) } : {}) }
     if (!(await patchWithFallback(store, fields, { ...saved, ...fields }))) throw new Error('設定檔暫時讀不到，名字這次沒有存下來，請稍後再試')

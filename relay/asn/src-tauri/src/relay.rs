@@ -143,22 +143,31 @@ pub fn encode_component(s: &str) -> String {
     out
 }
 
-/// 設備改名沒登入時的話
-pub const DEVICE_RENAME_LOGIN: &str = "要先登入 ASN 帳號才能改設備名稱";
-/// 設備改名的錯誤（後台的狀態碼）換成給人看的話；不含金鑰、不含名字
+/// 設備改名的錯誤代號：錯誤字串開頭固定帶 `[rename:代號]`，前端（`ui/lib/device-rename.mjs`）靠代號分類、不比對中文
+/// （invoke 出口 `ui/lib/tauri.mjs` 把代號拆到 `err.code`，畫面只看到後面的白話）。比照 `report`、`settings` 的寫法
+pub const CODE_RENAME_UNSIGNED: &str = "[rename:unsigned]";
+pub const CODE_RENAME_INVALID_NAME: &str = "[rename:invalid_name]";
+pub const CODE_RENAME_LOGIN_EXPIRED: &str = "[rename:login_expired]";
+pub const CODE_RENAME_UNSUPPORTED: &str = "[rename:unsupported]";
+pub const CODE_RENAME_RATE_LIMITED: &str = "[rename:rate_limited]";
+pub const CODE_RENAME_FAILED: &str = "[rename:failed]";
+/// 設備改名沒登入（沒有本人簽章）時的話：連後台都不打
+pub const DEVICE_RENAME_LOGIN: &str = "[rename:unsigned] 要先登入 ASN 帳號才能改設備名稱";
+/// 設備改名的錯誤（後台的狀態碼）換成「代號＋給人看的話」；不含金鑰、不含名字
 pub fn device_rename_error(e: &str) -> String {
     let has = |c: &str| e.contains(&format!("HTTP {c}"));
-    if has("400") {
-        "名字不合規則：1～40 字，不能含「指紋」兩個字，也不能像指紋（8 個英數字連在一起，或 4 碼＋空白＋4 碼），也不能是系統保留的名字".into()
+    let (code, text) = if has("400") {
+        (CODE_RENAME_INVALID_NAME, "名字不合規則：1～40 字，不能含「指紋」兩個字，也不能像指紋（8 個英數字連在一起，或 4 碼＋空白＋4 碼），也不能是系統保留的名字")
     } else if has("401") {
-        "登入過期了，請重新登入後再改".into()
+        (CODE_RENAME_LOGIN_EXPIRED, "登入過期了，請重新登入後再改")
     } else if has("404") {
-        "目前不能改名，請稍後再試，或把各台 ASN 更新到最新版".into()
+        (CODE_RENAME_UNSUPPORTED, "目前不能改名，請稍後再試，或把各台 ASN 更新到最新版")
     } else if has("429") {
-        "改名太頻繁，請過一分鐘再試".into()
+        (CODE_RENAME_RATE_LIMITED, "改名太頻繁，請過一分鐘再試")
     } else {
-        "改名沒成功，請稍後再試".into()
-    }
+        (CODE_RENAME_FAILED, "改名沒成功，請稍後再試")
+    };
+    format!("{code} {text}")
 }
 
 /// 設備取代（#1860 H）沒登入時的話
@@ -1686,13 +1695,35 @@ mod tests {
     fn 設備改名的錯誤_換成給人看的話_不含名字與金鑰() {
         assert!(device_rename_error("device_rename HTTP 400 bad_request").contains("系統保留的名字"));
         assert!(device_rename_error("device_rename HTTP 401 unauthorized").contains("重新登入"));
-        assert_eq!(device_rename_error("device_rename HTTP 404 not_found"), "目前不能改名，請稍後再試，或把各台 ASN 更新到最新版");
+        assert_eq!(device_rename_error("device_rename HTTP 404 not_found"), "[rename:unsupported] 目前不能改名，請稍後再試，或把各台 ASN 更新到最新版");
         assert!(device_rename_error("device_rename HTTP 429 rate_limited").contains("一分鐘"));
-        assert_eq!(device_rename_error("device_rename 連線失敗：逾時"), "改名沒成功，請稍後再試");
+        assert_eq!(device_rename_error("device_rename 連線失敗：逾時"), "[rename:failed] 改名沒成功，請稍後再試");
         for e in ["HTTP 400", "HTTP 404", "HTTP 429", "x"] {
             let t = device_rename_error(e);
-            assert!(!t.contains("後台") && !t.contains("HTTP"), "{t}");
+            let shown = t.split_once("] ").map(|(_, s)| s).unwrap_or(&t);
+            assert!(!shown.contains("後台") && !shown.contains("HTTP"), "{t}");
         }
+    }
+
+    #[test]
+    fn 設備改名的錯誤_每一類都帶固定代號_前端靠代號分類() {
+        let cases: [(&str, &str); 6] = [
+            ("device_rename HTTP 400 bad_request", "invalid_name"),
+            ("device_rename HTTP 401 unauthorized", "login_expired"),
+            ("device_rename HTTP 404 not_found", "unsupported"),
+            ("device_rename HTTP 429 rate_limited", "rate_limited"),
+            ("device_rename 連線失敗：逾時", "failed"),
+            ("device_rename HTTP 500 internal", "failed"),
+        ];
+        for (raw, code) in cases {
+            let t = device_rename_error(raw);
+            assert!(t.starts_with(&format!("[rename:{code}] ")), "{raw} → {t}");
+        }
+        assert!(DEVICE_RENAME_LOGIN.starts_with("[rename:unsigned] "), "沒簽章（沒登入）要帶 unsigned");
+        assert!(DEVICE_RENAME_LOGIN.starts_with(CODE_RENAME_UNSIGNED));
+        let all = [CODE_RENAME_UNSIGNED, CODE_RENAME_INVALID_NAME, CODE_RENAME_LOGIN_EXPIRED, CODE_RENAME_UNSUPPORTED, CODE_RENAME_RATE_LIMITED, CODE_RENAME_FAILED];
+        let mut seen = std::collections::HashSet::new();
+        assert!(all.iter().all(|c| seen.insert(*c)), "代號不能重複");
     }
 
     #[test]
