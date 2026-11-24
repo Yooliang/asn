@@ -89,21 +89,23 @@ fn 輪詢_間隔時序_註冊後變快_過期後回慢() {
     reset_for_test();
     assert_eq!(next_poll_gap(has_pending()), Duration::from_secs(60));
     register_fake_answer("1", "11111111-1111-1111-1111-111111111111");
-    assert_eq!(next_poll_gap(has_pending()), Duration::from_secs(2));
+    assert_eq!(next_poll_gap(has_pending()), Duration::from_secs(10));
     // 該筆過期（created 回推超過 REQ_TTL）後回到慢輪詢
     reset_for_test();
     seed_expired_outgoing();
     assert_eq!(next_poll_gap(has_pending()), Duration::from_secs(60));
-    assert_eq!(next_poll_gap(true), Duration::from_secs(2));
+    assert_eq!(next_poll_gap(true), Duration::from_secs(10));
     assert_eq!(next_poll_gap(false), Duration::from_secs(60));
 }
 
 #[test]
 fn 輪詢_常數守門() {
-    assert_eq!(POLL_INTERVAL_SECS, 2);
+    assert_eq!(POLL_INTERVAL_SECS, 10);
     assert_eq!(IDLE_POLL_INTERVAL_SECS, 60);
     assert_eq!(REQ_TTL, Duration::from_secs(120));
     assert!(Duration::from_secs(POLL_INTERVAL_SECS) * 10 < REQ_TTL);
+    assert!(Duration::from_secs(POLL_INTERVAL_SECS) * 12 <= REQ_TTL, "有效期內至少輪詢 12 次");
+    assert!(Duration::from_secs(POLL_INTERVAL_SECS) < Duration::from_secs(IDLE_POLL_INTERVAL_SECS));
 }
 
 #[test]
@@ -115,7 +117,7 @@ fn 輪詢_迴圈原始碼用上閒置間隔與新請求叫醒() {
     assert!(body.contains("has_pending()"), "迴圈要依有無待處理請求決定間隔");
     assert!(body.contains("next_poll_gap("), "迴圈要用 next_poll_gap");
     assert!(body.contains("new_req_notify().notified()"), "迴圈要等新請求叫醒");
-    assert!(!body.contains("sleep(std::time::Duration::from_secs(term_remote::POLL_INTERVAL_SECS))"), "不可回到固定 2 秒");
+    assert!(!body.contains("sleep(std::time::Duration::from_secs(term_remote::POLL_INTERVAL_SECS))"), "不可回到固定間隔");
 }
 
 #[test]

@@ -581,7 +581,8 @@ pub fn pending_views() -> Vec<PendingView> {
     })
 }
 
-pub const POLL_INTERVAL_SECS: u64 = 2;
+/// 有待處理請求時的保底輪詢間隔：後台決定後會敲 term_req 門鈴叫醒（#2161 3d-2），門鈴漏了最久等這麼久（請求有效期 120 秒）。
+pub const POLL_INTERVAL_SECS: u64 = 10;
 /// 本機沒有待處理請求時的保底輪詢間隔（#2161 3c）。有請求時 `register_local` 會立刻叫醒並改走快輪詢。
 pub const IDLE_POLL_INTERVAL_SECS: u64 = 60;
 
@@ -597,7 +598,7 @@ pub fn has_pending() -> bool {
     with_out(|m| !m.is_empty())
 }
 
-/// 下一圈 `term_req_take` 輪詢前要睡多久：有請求 2 秒，閒置 60 秒。
+/// 下一圈 `term_req_take` 輪詢前要睡多久：有請求 10 秒，閒置 60 秒。
 pub fn next_poll_gap(has_pending: bool) -> Duration {
     Duration::from_secs(if has_pending { POLL_INTERVAL_SECS } else { IDLE_POLL_INTERVAL_SECS })
 }
