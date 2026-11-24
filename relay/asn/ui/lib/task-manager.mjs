@@ -21,7 +21,6 @@ export const TEXT = {
   title: '工作管理員',
   entry: '工作管理員',
   refreshing: '更新中…',
-  auto: '每 5 秒自動更新',
   loadFail: '暫時讀不到程式清單，稍後會再試',
   empty: '這台電腦上目前沒有 ASN 管的程式。',
   dupTag: '重複',
@@ -31,9 +30,6 @@ export const TEXT = {
   stopWindow: '停止這個視窗',
   stopping: '停止中…',
   viewOnly: '只能看',
-  memoryNote: '「記憶體」是整個視窗（含底下的程式）合計。',
-  archiveNote: '封存只是從名單隱藏，不會停任何程式。',
-  closeNote: '「停止」走的是現有的「關閉視窗」。',
   wake: '喚醒',
   noPlace: '還沒在名單上，稍後再試',
   wakeFail: '叫醒失敗，請稍後再試',
@@ -51,7 +47,6 @@ export const TEXT = {
   handing: '交接中',
   remind: '請交接',
   handingWhy: '交接完成前不能停止',
-  compactNote: '壓縮次數只算這次開視窗之後；交接成功重開的新視窗從 0 次算起。不是 Claude 的視窗顯示「—」。',
 }
 
 export const COLUMNS = ['名字', '引擎', '程序編號', '記憶體', '開了多久', '狀態', '壓縮次數', '運行位置', '操作']
@@ -425,12 +420,10 @@ export function createTaskManager(deps) {
     })
     return {
       open: state.open, loading: state.loading, error: state.error, loaded: state.snapshot !== null,
-      total: rows.length, rows, tree: treeView(merged, r => viewRow(r, n, c)), empty: state.snapshot !== null && !rows.length,
-      dupBanner: dupBanner(groups), dupCount: groups.length,
+      rows, tree: treeView(merged, r => viewRow(r, n, c)), empty: state.snapshot !== null && !rows.length,
+      dupBanner: dupBanner(groups),
       known, note: state.note, wakeNote: state.wakeNote, busy: state.busy,
-      confirm: state.confirm ? { ...state.confirm } : null,
-      hints: [TEXT.closeNote, TEXT.archiveNote, TEXT.memoryNote, TEXT.compactNote],
-    }
+      confirm: state.confirm ? { ...state.confirm } : null,    }
   }
 
   return { state, open, close, refresh, ask, cancel, confirm, wake, handover, openScreen, view }
