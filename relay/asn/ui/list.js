@@ -539,7 +539,7 @@ async function refreshLaunchers() {
   launchersDelay = nextLaunchersDelay(launchersDelay, err)
 }
 let launchersBellAt = 0
-function refreshLaunchersOnBell() {   // 門鈴（寄信也會敲）只在距上次刷新 5 秒以上才順便刷新
+function refreshLaunchersOnBell() {   // 門鈴（寄信也會敲）只在距上次刷新 30 秒以上才順便刷新
   const now = Date.now()
   if (!shouldRefreshOnBell(launchersBellAt, now)) return
   launchersBellAt = now
