@@ -17,7 +17,7 @@ const devices = () => [
   dev('P', '擁有者的手機', { phone: true, kind: '手機', kindLabel: '手機' }),
   dev('C', '雲端節點', { cloud: true, kindLabel: '雲端', reportedText: '帳號回報讀取失敗', vendors: [{ key: 'grok', label: 'Grok', accounts: [], account: '', reported: false, extra: '', switchable: false, switchHint: '' }] }),
 ]
-const TASKS = { total: 0, dupCount: 0, dupBanner: '', error: '', loaded: true, empty: true, rows: [], known: [], note: '', wakeNote: '', hints: [], confirm: null, busy: false }
+const TASKS = { dupBanner: '', error: '', loaded: true, empty: true, rows: [], known: [], note: '', wakeNote: '', confirm: null, busy: false }
 const st = (over = {}) => ({ version: '0.2.31', devices: devices(), accounts: { list: [], current: null, msg: '', autoNote: '', busy: false, confirmDel: '' }, known: { ownFp: 'AABBCCDDEEFF00112233', qr: null, busy: false, peers: [], error: '', renameError: '' }, taskMgr: TASKS, ...over })
 const render = async (props, state = st()) => {
   globalThis.Vue = Vue
@@ -28,7 +28,8 @@ const labels = html => [...bar(html).matchAll(/<button[^>]*>([^<]*)<\/button>/g)
 
 test('頁首收成一行：返回、名字、標籤（#1829）；沒有「設定：設備」那一層，按鈕在下面', async () => {
   const html = await render({ dev: 'H' })
-  assert.match(html, /class="dv-dev-h"[^>]*><button[^>]*dv-back[^>]*>‹<\/button><h3 class="dv-name">工作機<\/h3>[\s\S]*在線[\s\S]*這台/)
+  assert.match(html, /class="dv-dev-h"[^>]*><button[^>]*dv-back[^>]*>‹<\/button><h3 class="dv-name">工作機<\/h3>[\s\S]*在線/)
+  assert.ok(!/dv-tag me/.test(html), '#2219 標題旁不再有「這台」標籤')
   assert.ok(!html.includes('dv-pt'), '不再有第二層標題')
   assert.ok(html.indexOf('class="dv-tabs"') > html.indexOf('class="dv-name"'), '按鈕在名字那行下面')
 })

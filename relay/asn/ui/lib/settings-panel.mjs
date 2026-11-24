@@ -397,7 +397,6 @@ export const SettingsPanel = {
               <h3 class="dv-name">{{ curDev.identity.title }}</h3>
               <span class="dv-tag kind" v-if="(curDev.kindLabel || curDev.kind) !== '電腦'">{{ curDev.kindLabel || curDev.kind }}</span>
               <span :class="['dv-tag', curDev.online ? 'on' : 'off']">{{ curDev.onlineText }}</span>
-              <span class="dv-tag me" v-if="curDev.self">這台</span>
               <span class="dv-tag off" v-if="curDev.hidden">{{ DEVICE_TEXT.hiddenTag }}</span>
             </div>
             <div class="dv-block" role="alert" v-if="curBlocked && curKnown">
@@ -410,11 +409,6 @@ export const SettingsPanel = {
               <asn-button v-if="curDev.self && st.known && st.known.ownFp" :aria-pressed="view === 'qr'" @click="setView('qr')">QR Code</asn-button>
             </div>
             <div class="tm" v-if="view === 'tasks' && st.taskMgr">
-              <div class="tm-bar">
-                <b class="tm-sum">這台電腦上 ASN 管的程式共 {{ st.taskMgr.total }} 個</b>
-                <span class="tm-tag dup" v-if="st.taskMgr.dupCount">{{ st.taskMgr.dupCount }} 組名字重複</span>
-                <span class="tm-auto">{{ TM.auto }}</span>
-              </div>
               <p class="tm-warn" v-if="st.taskMgr.dupBanner" role="alert">{{ st.taskMgr.dupBanner }}</p>
               <p class="tm-err" v-if="st.taskMgr.error" role="alert">{{ st.taskMgr.error }}</p>
               <small v-if="!st.taskMgr.loaded && !st.taskMgr.error">{{ TM.refreshing }}</small>
@@ -429,7 +423,6 @@ export const SettingsPanel = {
                 <small>重開機後會自動接回的名字；要接回請按「喚醒」，不在這裡停止。</small>
               </details>
               <p class="tm-line" v-if="st.taskMgr.wakeNote" role="status">{{ st.taskMgr.wakeNote }}</p>
-              <small class="tm-hint" v-for="h in st.taskMgr.hints" :key="h">{{ h }}</small>
               <asn-dialog v-if="st.taskMgr.confirm" :title="st.taskMgr.confirm.title" @close="act('tm-cancel')">
                 <div class="tm-facts"><p v-for="l in st.taskMgr.confirm.lines" :key="l">{{ l }}</p></div>
                 <p class="launch-notice-body" v-for="n in st.taskMgr.confirm.notes" :key="n">{{ n }}</p>
