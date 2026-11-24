@@ -188,7 +188,7 @@ test('只有電腦版 job：全成功 → CI 完成，不提 Play；沒傳 jobs 
   has(x, '【CI 完成】', '未簽章安裝檔已就緒，尚未上線', '14 天內要簽')
   lacks(x, 'Play', 'Android', '發版異常', '不明的略過')
   assert.equal(x.level, 'success')
-  has(n(), 'Play internal')
+  has(n(), 'Play 內部測試')
 })
 
 test('只有電腦版 job：desktop 失敗、attest 連帶略過 → 電腦版失敗，不提 Play；site-draft 失敗；取消', () => {
@@ -218,7 +218,7 @@ const p = (patch = {}, over = {}) => notifyStatus({ guardResult: 'success', auto
 test('只有 Play job：全成功 → 講 Play internal 已就緒，不提未簽章安裝檔／14 天內要簽', () => {
   const a = p()
   assert.equal(a.level, 'success')
-  has(a, '【CI 完成】v0.2.38', 'Play internal 已就緒')
+  has(a, '【CI 完成】v0.2.38', 'Play 內部測試已就緒')
   lacks(a, '安裝檔', '要簽', '電腦版', '官網')
 })
 
@@ -235,7 +235,7 @@ test('只有 Play job：預檢、建置、上傳各自失敗只講 Play；沒傳
 test('只有 Play job：被取消仍報中止；Play job 無故略過報異常；預設（全 job）行為不變', () => {
   has(p({ 'android-build': 'cancelled', 'android-upload': 'skipped' }), '【發版中止】')
   has(p({ 'android-upload': 'skipped' }), '【發版異常】', 'Play 上傳')
-  has(r({}), '未簽章安裝檔與 Play internal 已就緒')
+  has(r({}), '未簽章安裝檔已就緒；Play 內部測試已就緒')
 })
 
 // ---- Linux 版自己的 workflow：只有 linux、attest-linux 兩個 job ----
@@ -260,9 +260,43 @@ test('只有 Linux job：建置失敗（來源證明連帶略過）、來源證�
 test('Linux：guard 失敗帶步驟名、auto=false 略過；預設（全 job）與電腦版文字不變；statusFromNeeds 認得 linux 的 needs', async () => {
   has(notifyStatus({ guardResult: 'failure', guardStep: '標籤與版本檔' }), '卡在：標籤與版本檔')
   has(l({}, { auto: 'false' }), '【發版略過】')
-  has(r({}), '未簽章安裝檔與 Play internal 已就緒')
+  has(r({}), '未簽章安裝檔已就緒；Play 內部測試已就緒')
   const { statusFromNeeds } = await import('../../../tools/release/notify_run.mjs')
   const needs = { guard: { result: 'success', outputs: { auto: 'true', version: '0.2.38' } }, linux: { result: 'success' }, 'attest-linux': { result: 'success' } }
   has(statusFromNeeds(needs, { runUrl: RUN }), 'Linux 未簽章安裝檔已就緒')
   has(statusFromNeeds({ ...needs, linux: { result: 'failure' }, 'attest-linux': { result: 'skipped' } }, { runUrl: RUN }), 'Linux 版失敗')
+})
+
+// ---- #2246：Play 兩條測試軌道各自的結果 ----
+test('Play 兩條都成功 → 通知寫「內部測試已就緒、封閉測試已就緒」', () => {
+  const a = p({}, { playAlpha: { status: 'ok' } })
+  assert.equal(a.level, 'success')
+  has(a, '【CI 完成】v0.2.38', 'Play 內部測試已就緒、封閉測試已就緒')
+  lacks(a, 'play-alpha')
+})
+
+test('封閉測試沒發成（降級）→ 部分完成、warning；寫 play-alpha、白話原因與請擁有者去 Play Console 哪裡；內部測試仍說已就緒', () => {
+  const a = p({}, { playAlpha: { status: 'failed', kind: 'permission' } })
+  assert.equal(a.level, 'warning')
+  has(a, '【CI 部分完成】', 'Play 內部測試已就緒', 'play-alpha', '封閉測試沒發成', '服務帳戶沒有封閉測試的發布權限', 'Play Console 的「使用者和權限」')
+  lacks(a, '【CI 完成】', 'HTTP', '403')
+  has(p({}, { playAlpha: { status: 'failed', kind: 'notfound' } }), '找不到封閉測試軌道', '「測試」→「封閉測試」')
+  has(p({}, { playAlpha: { status: 'failed', kind: 'other' } }), '審核中', 'Play Console')
+  has(p({}, { playAlpha: { status: 'failed', kind: '亂寫' } }), '封閉測試沒發成', '審核中')   // 不認得的分類走通用說明，不原樣印出
+  lacks(p({}, { playAlpha: { status: 'failed', kind: '亂寫' } }), '亂寫')
+})
+
+test('內部測試（上傳 job）失敗仍是整體失敗，alpha 結果不蓋掉失敗訊息', () => {
+  const a = p({ 'android-upload': 'failure' }, { playAlpha: { status: 'ok' } })
+  assert.equal(a.level, 'error')
+  has(a, '【發版失敗】', 'Play 上傳失敗'); lacks(a, '已就緒')
+})
+
+test('statusFromNeeds：android-upload 的 outputs.alpha_status／alpha_kind 對應到通知文字', async () => {
+  const { statusFromNeeds } = await import('../../../tools/release/notify_run.mjs')
+  const base = over => ({ guard: { result: 'success', outputs: { auto: 'true', version: '0.2.38' } }, ...Object.fromEntries(PLAY.map(j => [j, { result: 'success' }])), ...over })
+  has(statusFromNeeds(base({ 'android-upload': { result: 'success', outputs: { alpha_status: 'ok', alpha_kind: '' } } }), { runUrl: RUN }), '內部測試已就緒、封閉測試已就緒')
+  const f = statusFromNeeds(base({ 'android-upload': { result: 'success', outputs: { alpha_status: 'failed', alpha_kind: 'permission' } } }), { runUrl: RUN })
+  assert.equal(f.level, 'warning'); has(f, 'play-alpha', '發布權限')
+  has(statusFromNeeds(base({ 'android-upload': { result: 'success', outputs: {} } }), { runUrl: RUN }), 'Play 內部測試已就緒'); lacks(statusFromNeeds(base({ 'android-upload': { result: 'success', outputs: {} } }), { runUrl: RUN }), '封閉測試')
 })

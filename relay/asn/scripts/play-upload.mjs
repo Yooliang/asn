@@ -109,12 +109,28 @@ const maxInEdit = async (call, app, id, auth) => {
   return codes.length ? Math.max(...codes) : null
 }
 
+// 軌道名會拼進網址，只收小寫英文、數字、底線、減號（不合規在建編輯之前就擋下）
+export const TRACK_RE = /^[a-z0-9_-]+$/
+export const OPTIONAL_TRACK = 'alpha'   // 封閉測試：失敗不拖累其他軌道
+export const checkTracks = list => {
+  if (!Array.isArray(list) || !list.length) throw new Error('軌道清單不可為空')
+  for (const t of list) if (typeof t !== 'string' || !TRACK_RE.test(t)) throw new Error('軌道名稱只能用小寫英文、數字、底線或減號（例如 internal、alpha）')
+}
+// 告警分類：permission（401/403）、notfound（404）、other（其他，例如送審中）。通知文字用這個代碼對照固定說明，不放原始錯誤
+export const alphaFailKind = status => (status === 401 || status === 403 ? 'permission' : status === 404 ? 'notfound' : 'other')
+
+class TrackFailure extends Error {
+  constructor(track, status, message) { super(message); this.track = track; this.status = status; this.trackFailure = true }
+}
+
 // expectCode：這次 AAB 應該是的 versionCode（release-play.mjs 依 play-version.mjs 算的）。有給就先查 Play 上的最大值，
 // 不比它大就不上傳；上傳後 Play 回的 versionCode 也要等於它，不然就不提交（AAB 和預期的不是同一份）
+// 兩條軌道一起發（同一個編輯、只提交一次）；若失敗的是 alpha（封閉測試）且還有別的軌道，就刪掉這個編輯，
+// 另開一個編輯只發其餘軌道並提交，結果的 alpha 欄位寫明沒發成與分類。其他軌道自己失敗＝整體失敗。
 export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode = null, packageName = PACKAGE_NAME, tracks = null, track = null, apiBase = DEFAULT_BASE, tokenUri, request = makeRequester(), log = () => {} }) => {
   // tracks 優先；舊參數 track（單一軌道）仍可用；都沒給就用預設兩條
   const trackList = [...new Set(tracks ?? (track ? [track] : DEFAULT_TRACKS))]
-  if (!trackList.length || trackList.some(t => typeof t !== 'string' || !t)) throw new Error('軌道清單不可為空')
+  checkTracks(trackList)
   const token = await getAccessToken(sa, request, tokenUri || sa.token_uri)
   const auth = { authorization: `Bearer ${token}` }
   const json = { ...auth, 'content-type': 'application/json' }
@@ -124,43 +140,58 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode 
     if (r.status < 200 || r.status >= 300) throw new Error(`${what}失敗（HTTP ${r.status}，${errCode(r.text)}）`)
     return r.text ? JSON.parse(r.text) : {}
   }
-  log('建立編輯 …')
-  const edit = await call('建立編輯', 'POST', `${app}/edits`, { headers: json, body: '{}' })
-  const id = edit.id
-  if (!id) throw new Error('建立編輯失敗（回應沒有編輯代號）')
-  try {
-    if (expectCode != null) {
-      const max = await maxInEdit(call, app, id, auth)
-      const bad = checkAboveMax(expectCode, max)
-      if (bad) throw new Error(bad)
-      log(`Play 上目前最大的 versionCode：${max ?? '（沒有）'}，這次是 ${expectCode}`)
-    }
-    const data = fs.readFileSync(aabFile)
-    log(`上傳 AAB（${(data.length / 1048576).toFixed(1)} MB）…`)
-    const up = await call('上傳 AAB', 'POST', `${apiBase}/upload/androidpublisher/v3/applications/${packageName}/edits/${id}/bundles?uploadType=media`, { headers: { ...auth, 'content-type': 'application/octet-stream' }, body: data })
-    const versionCode = up.versionCode
-    if (versionCode == null) throw new Error('上傳 AAB 失敗（回應沒有 versionCode）')
-    if (expectCode != null && Number(versionCode) !== expectCode) throw new Error(`上傳的 AAB 是 versionCode ${versionCode}，不是預期的 ${expectCode}，不提交`)
-    for (const t of trackList) {
-      log(`設定 ${t} 軌道（versionCode ${versionCode}）…`)
-      const body = JSON.stringify({ track: t, releases: [{ name: version || String(versionCode), versionCodes: [String(versionCode)], status: 'completed', releaseNotes: [{ language: 'zh-TW', text: notes }] }] })
-      const r = await request('PUT', `${app}/edits/${id}/tracks/${t}`, { headers: json, body })
-      if (r.status < 200 || r.status >= 300) {
-        log(`設定 ${t} 軌道失敗：HTTP ${r.status}，${errCode(r.text)}`)   // 原始代碼只進 log
-        throw new Error(trackError(t, r.status))
+  // 一輪：建編輯 → 上傳 → 設各軌道 → 提交一次。失敗就刪編輯並丟錯（軌道設定失敗丟 TrackFailure）
+  const attempt = async list => {
+    log('建立編輯 …')
+    const edit = await call('建立編輯', 'POST', `${app}/edits`, { headers: json, body: '{}' })
+    const id = edit.id
+    if (!id) throw new Error('建立編輯失敗（回應沒有編輯代號）')
+    try {
+      if (expectCode != null) {
+        const max = await maxInEdit(call, app, id, auth)
+        const bad = checkAboveMax(expectCode, max)
+        if (bad) throw new Error(bad)
+        log(`Play 上目前最大的 versionCode：${max ?? '（沒有）'}，這次是 ${expectCode}`)
       }
+      const data = fs.readFileSync(aabFile)
+      log(`上傳 AAB（${(data.length / 1048576).toFixed(1)} MB）…`)
+      const up = await call('上傳 AAB', 'POST', `${apiBase}/upload/androidpublisher/v3/applications/${packageName}/edits/${id}/bundles?uploadType=media`, { headers: { ...auth, 'content-type': 'application/octet-stream' }, body: data })
+      const versionCode = up.versionCode
+      if (versionCode == null) throw new Error('上傳 AAB 失敗（回應沒有 versionCode）')
+      if (expectCode != null && Number(versionCode) !== expectCode) throw new Error(`上傳的 AAB 是 versionCode ${versionCode}，不是預期的 ${expectCode}，不提交`)
+      for (const t of list) {
+        log(`設定 ${t} 軌道（versionCode ${versionCode}）…`)
+        const body = JSON.stringify({ track: t, releases: [{ name: version || String(versionCode), versionCodes: [String(versionCode)], status: 'completed', releaseNotes: [{ language: 'zh-TW', text: notes }] }] })
+        const r = await request('PUT', `${app}/edits/${id}/tracks/${t}`, { headers: json, body })
+        if (r.status < 200 || r.status >= 300) {
+          log(`設定 ${t} 軌道失敗：HTTP ${r.status}，${errCode(r.text)}`)   // 原始代碼只進 log
+          throw new TrackFailure(t, r.status, trackError(t, r.status))
+        }
+      }
+      log('提交 …')
+      await call('提交編輯', 'POST', `${app}/edits/${id}:commit`, { headers: auth })
+      return { versionCode: Number(versionCode), editId: id, tracks: list }
+    } catch (e) {
+      try { await request('DELETE', `${app}/edits/${id}`, { headers: auth }) } catch { /* 清不掉就算了，編輯會自己過期 */ }
+      throw e
     }
-    log('提交 …')
-    await call('提交編輯', 'POST', `${app}/edits/${id}:commit`, { headers: auth })
-    return { versionCode: Number(versionCode), editId: id, tracks: trackList }
+  }
+  try {
+    const r = await attempt(trackList)
+    return { ...r, alpha: trackList.includes(OPTIONAL_TRACK) ? { status: 'ok' } : null }
   } catch (e) {
-    try { await request('DELETE', `${app}/edits/${id}`, { headers: auth }) } catch { /* 清不掉就算了，編輯會自己過期 */ }
-    throw e
+    const rest = trackList.filter(t => t !== OPTIONAL_TRACK)
+    if (!(e instanceof TrackFailure) || e.track !== OPTIONAL_TRACK || !rest.length) throw e
+    log(`封閉測試沒發成（${alphaFailKind(e.status)}），改只發 ${rest.join('、')} …`)
+    const r = await attempt(rest)
+    return { ...r, alpha: { status: 'failed', kind: alphaFailKind(e.status), message: e.message } }
   }
 }
 
 // 只查不傳：建一個編輯、列出現有 AAB、刪掉編輯，回最大的 versionCode（release-play.mjs 建置前先檢查用）
-export const maxPlayCode = async ({ sa, packageName = PACKAGE_NAME, apiBase = DEFAULT_BASE, tokenUri, request = makeRequester() }) => {
+// tracks 有給就順便用 edits.tracks.get 看每條軌道在不在；查不到只呼叫 warn（不算失敗，跟封閉測試降級邏輯一致）
+export const maxPlayCode = async ({ sa, packageName = PACKAGE_NAME, apiBase = DEFAULT_BASE, tokenUri, request = makeRequester(), tracks = null, warn = () => {} }) => {
+  if (tracks) checkTracks(tracks)
   const token = await getAccessToken(sa, request, tokenUri || sa.token_uri)
   const auth = { authorization: `Bearer ${token}` }
   const app = `${apiBase}/androidpublisher/v3/applications/${packageName}`
@@ -171,8 +202,32 @@ export const maxPlayCode = async ({ sa, packageName = PACKAGE_NAME, apiBase = DE
   }
   const edit = await call('建立編輯', 'POST', `${app}/edits`, { headers: { ...auth, 'content-type': 'application/json' }, body: '{}' })
   if (!edit.id) throw new Error('建立編輯失敗（回應沒有編輯代號）')
-  try { return await maxInEdit(call, app, edit.id, auth) } finally {
+  try {
+    const max = await maxInEdit(call, app, edit.id, auth)
+    for (const t of tracks || []) {
+      const r = await request('GET', `${app}/edits/${edit.id}/tracks/${t}`, { headers: auth })
+      if (r.status < 200 || r.status >= 300) warn(`查不到${trackLabel(t)}軌道（HTTP ${r.status}），發版時該軌道可能發不出去；請擁有者到 Play Console 確認軌道已建立、服務帳戶有權限。`)
+    }
+    return max
+  } finally {
     try { await request('DELETE', `${app}/edits/${edit.id}`, { headers: auth }) } catch { /* 編輯會自己過期 */ }
+  }
+}
+
+// CI 回報：alpha 結果寫進 $GITHUB_OUTPUT（給 notify 組通知）、annotation 與 step summary。只寫固定分類與白話說明，不寫原始錯誤。
+export const reportAlpha = (alpha, env = process.env, out = console.log) => {
+  if (!alpha) return
+  const line = (f, t) => { if (f) fs.appendFileSync(f, t) }
+  line(env.GITHUB_OUTPUT, `alpha_status=${alpha.status}
+alpha_kind=${alpha.kind || ''}
+`)
+  if (alpha.status === 'failed') {
+    out(`::warning title=play-alpha::${alpha.message}`)
+    line(env.GITHUB_STEP_SUMMARY, `### play-alpha 告警
+${alpha.message}
+
+內部測試已照常發出。
+`)
   }
 }
 
@@ -190,7 +245,7 @@ const main = async () => {
     if (codeArg && !Number.isInteger(expectCode)) throw new Error('--expect-code 要是整數')
     if (checkOnly) {
       if (expectCode == null) throw new Error('--check-only 要搭配 --expect-code')
-      const max = await maxPlayCode({ sa: loadServiceAccount(defaultKeyFile()) })
+      const max = await maxPlayCode({ sa: loadServiceAccount(defaultKeyFile()), tracks: tracks || DEFAULT_TRACKS, warn: m => { console.log(`::warning title=Play 軌道檢查::${m}`); console.log(m) } })
       const bad = checkAboveMax(expectCode, max)
       if (bad) throw new Error(bad)
       console.log(`Play 上目前最大的 versionCode：${max ?? '（沒有）'}，這次 ${expectCode} 可以用`)
@@ -201,6 +256,7 @@ const main = async () => {
     const notes = releaseNotes(fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), version)
     const r = await publishAab({ aabFile: aab, sa, notes, version, expectCode, tracks, log: m => console.log(m) })
     console.log(`已發布到 Play ${r.tracks.map(trackLabel).join('、')}：版本 ${version}（versionCode ${r.versionCode}）`)
+    reportAlpha(r.alpha)
   } catch (e) {
     console.error(`上傳中止：${e.message}`)
     process.exit(1)

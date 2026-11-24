@@ -8,7 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { DEFAULT_TRACKS, getAccessToken, loadServiceAccount, makeJwt, makeRequester, publishAab, releaseNotes } from '../scripts/play-upload.mjs'
+import { DEFAULT_TRACKS, getAccessToken, loadServiceAccount, makeJwt, makeRequester, maxPlayCode, publishAab, releaseNotes, reportAlpha } from '../scripts/play-upload.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
@@ -122,41 +122,113 @@ test('兩條軌道：同一個編輯、AAB 只傳一次、兩條都設同一個 
   } finally { await f.close() }
 })
 
-test('任一條軌道失敗都不提交、清掉編輯：第二條（alpha）失敗，錯誤點名封閉測試', async () => {
-  const f = await fake(c => c.url.endsWith('/tracks/alpha') ? [403, { error: { code: 403, message: `秘密 ${keyBody}`, status: 'PERMISSION_DENIED', errors: [{ reason: 'forbidden' }] } }] : happy(c))
+const putsOf = calls => calls.filter(c => c.method === 'PUT').map(c => `${c.url.split('/edits/')[1]}`)
+const alpha403 = c => (c.url.endsWith('/tracks/alpha') ? [403, { error: { code: 403, message: `秘密 ${keyBody}`, status: 'PERMISSION_DENIED', errors: [{ reason: 'forbidden' }] } }] : null)
+// 每次建編輯回不同代號，才分得出第一個與第二個編輯
+const twoEdits = over => { let n = 0; return c => over(c) || (c.url.endsWith('/edits') && c.method === 'POST' ? [200, { id: `E${++n}` }] : happy(c)) }
+
+test('alpha 失敗（403）：刪掉第一個編輯、另開第二個編輯只發 internal 並提交一次；結果標明封閉測試沒發成', async () => {
+  const f = await fake(twoEdits(alpha403))
   const logs = []
   try {
-    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: req, log: m => logs.push(m) }), e => {
-      assert.match(e.message, /封閉測試/)
-      assert.match(e.message, /Play Console/)
-      assert.match(e.message, /使用者和權限/)
-      assert.match(e.message, /沒有發布任何軌道/)
-      assert.ok(!/HTTP|403|forbidden|PERMISSION/.test(e.message), '訊息沒有英文錯誤碼')
-      assert.ok(!e.message.includes(keyBody) && !e.message.includes('秘密'))
-      return true
-    })
-    assert.equal(count(f.calls, /:commit$/), 0, '不提交')
-    assert.equal(f.calls.at(-1).method, 'DELETE')
-    assert.ok(logs.some(l => /alpha/.test(l) && /HTTP 403，forbidden/.test(l)), '原始代碼進 log')
-    assert.ok(!logs.join(' ').includes('秘密'))
+    const r = await publishAab({ aabFile: aab, sa, notes: 'n', version: '1.0', apiBase: f.base, tokenUri: `${f.base}/token`, request: req, log: m => logs.push(m) })
+    assert.deepEqual(r.tracks, ['internal'])
+    assert.equal(r.versionCode, 77)
+    assert.equal(r.editId, 'E2')
+    assert.equal(r.alpha.status, 'failed')
+    assert.equal(r.alpha.kind, 'permission')
+    assert.match(r.alpha.message, /封閉測試.*Play Console/s)
+    assert.ok(!/HTTP|403|forbidden|秘密/.test(r.alpha.message))
+    assert.deepEqual(putsOf(f.calls), ['E1/tracks/internal', 'E1/tracks/alpha', 'E2/tracks/internal'])
+    assert.equal(count(f.calls, /:commit$/), 1, '只提交一次')
+    assert.ok(f.calls.some(c => c.method === 'DELETE' && c.url.endsWith('/edits/E1')), '第一個編輯被刪')
+    assert.ok(f.calls.find(c => c.url.endsWith('E2:commit')), '提交的是第二個編輯')
+    assert.equal(count(f.calls, /^POST .*\/upload\/.*\/bundles/), 2, '新編輯要重傳 AAB')
+    assert.ok(!logs.join('\n').includes('秘密'))
   } finally { await f.close() }
-  const g = await fake(c => c.url.endsWith('/tracks/internal') ? [403, {}] : happy(c))
-  try {
-    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: g.base, tokenUri: `${g.base}/token`, request: req }), /內部測試/)
-    assert.equal(count(g.calls, /:commit$/), 0)
-    assert.equal(count(g.calls, /\/tracks\/alpha$/), 0, 'internal 失敗就不再碰 alpha')
-    assert.equal(g.calls.at(-1).method, 'DELETE')
-  } finally { await g.close() }
 })
 
-test('軌道錯誤白話：403 說權限、404 說軌道不存在、其他說稍後重發；都不含英文錯誤碼', async () => {
-  for (const [status, re] of [[403, /發布權限.*使用者和權限/s], [401, /發布權限/], [404, /找不到.*封閉測試.*已建立/s], [500, /稍後重發/]]) {
-    const f = await fake(c => c.url.endsWith('/tracks/alpha') ? [status, { error: { status: 'X_CODE' } }] : happy(c))
+test('alpha 失敗：404（軌道不存在）與其他（例如送審中 400）都走降級；分類各自正確', async () => {
+  for (const [status, kind] of [[404, 'notfound'], [400, 'other'], [401, 'permission']]) {
+    const f = await fake(twoEdits(c => (c.url.endsWith('/tracks/alpha') ? [status, {}] : null)))
     try {
-      await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: makeRequester({ retries: 0, backoffMs: 1 }) }), e => re.test(e.message) && !/HTTP|X_CODE/.test(e.message))
-      assert.equal(count(f.calls, /:commit$/), 0)
+      const r = await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: makeRequester({ retries: 0, backoffMs: 1 }) })
+      assert.deepEqual(r.tracks, ['internal'])
+      assert.equal(r.alpha.kind, kind)
+      assert.equal(count(f.calls, /:commit$/), 1)
     } finally { await f.close() }
   }
+})
+
+test('internal 失敗（403）：整體失敗、沒有 commit、不再嘗試 alpha、不開第二個編輯', async () => {
+  const f = await fake(twoEdits(c => (c.url.endsWith('/tracks/internal') ? [403, {}] : null)))
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: req }), e => /內部測試/.test(e.message) && !/HTTP|403/.test(e.message))
+    assert.equal(count(f.calls, /:commit$/), 0)
+    assert.equal(count(f.calls, /\/tracks\/alpha$/), 0)
+    assert.equal(count(f.calls, /^POST .*\/edits$/), 1, '只建一個編輯')
+    assert.equal(f.calls.at(-1).method, 'DELETE')
+  } finally { await f.close() }
+})
+
+test('降級後第二輪也失敗＝整體失敗：不提交', async () => {
+  const f = await fake(twoEdits(c => (c.url.endsWith('/tracks/alpha') ? [403, {}] : c.url.includes('/E2/tracks/internal') ? [500, {}] : null)))
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: makeRequester({ retries: 0, backoffMs: 1 }) }), /內部測試/)
+    assert.equal(count(f.calls, /:commit$/), 0)
+  } finally { await f.close() }
+})
+
+test('只指定 alpha 單軌道：alpha 失敗沒有別的軌道可發，整體失敗不降級', async () => {
+  const f = await fake(twoEdits(alpha403))
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', tracks: ['alpha'], apiBase: f.base, tokenUri: `${f.base}/token`, request: req }), /封閉測試/)
+    assert.equal(count(f.calls, /:commit$/), 0)
+    assert.equal(count(f.calls, /^POST .*\/edits$/), 1)
+  } finally { await f.close() }
+})
+
+test('兩條都成功：結果 alpha.status=ok；reportAlpha 寫 GITHUB_OUTPUT；失敗時寫 play-alpha annotation 與 summary', () => {
+  const dir = fs.mkdtempSync(path.join(tmp, 'gh-'))
+  const env = { GITHUB_OUTPUT: path.join(dir, 'o'), GITHUB_STEP_SUMMARY: path.join(dir, 's') }
+  const out = []
+  reportAlpha({ status: 'ok' }, env, m => out.push(m))
+  assert.equal(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8'), 'alpha_status=ok\nalpha_kind=\n')
+  assert.deepEqual(out, [])
+  reportAlpha({ status: 'failed', kind: 'permission', message: '封閉測試沒發成' }, env, m => out.push(m))
+  assert.match(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8'), /alpha_status=failed\nalpha_kind=permission\n/)
+  assert.match(out[0], /^::warning title=play-alpha::封閉測試沒發成$/)
+  assert.match(fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8'), /play-alpha 告警[\s\S]*內部測試已照常發出/)
+  reportAlpha(null, env, m => out.push(m))
+  assert.equal(out.length, 1)
+})
+
+test('軌道名稱只能是小寫英文、數字、底線、減號：不合規在建編輯之前就擋下（含舊 track 參數）', async () => {
+  for (const bad of ['../x', 'Alpha', 'a b', 'a/b', 'a?b', '', 'alpha;']) {
+    for (const opt of [{ tracks: ['internal', bad] }, { track: bad }]) {
+      if (!bad && opt.track !== undefined) continue   // 空字串的舊 track 參數等於沒給
+      const f = await fake(happy)
+      try {
+        await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: req, ...opt }), /軌道名稱只能用小寫英文、數字、底線或減號/)
+        assert.equal(f.calls.length, 0, `${JSON.stringify(opt)} 不該有任何請求`)
+      } finally { await f.close() }
+    }
+  }
+  await assert.rejects(maxPlayCode({ sa, tracks: ['A/B'], request: req }), /軌道名稱/)
+})
+
+test('--check-only 的軌道檢查：用 tracks.get 看每條軌道在不在；查不到只警告、不算失敗、仍回最大版號', async () => {
+  const warns = []
+  const f = await fake(c => (c.method === 'GET' && c.url.endsWith('/bundles') ? [200, { bundles: [{ versionCode: 5 }] }] : c.method === 'GET' && c.url.endsWith('/tracks/alpha') ? [404, {}] : happy(c)))
+  try {
+    const max = await maxPlayCode({ sa, apiBase: f.base, tokenUri: `${f.base}/token`, request: req, tracks: DEFAULT_TRACKS, warn: m => warns.push(m) })
+    assert.equal(max, 5)
+    assert.equal(warns.length, 1)
+    assert.match(warns[0], /封閉測試.*Play Console/s)
+    assert.ok(f.calls.some(c => c.method === 'GET' && c.url.endsWith('/tracks/internal')))
+    assert.equal(f.calls.at(-1).method, 'DELETE')
+    assert.equal(count(f.calls, /:commit$/), 0)
+  } finally { await f.close() }
 })
 
 test('單軌道舊行為：tracks 或舊參數 track 指定一條時只設那一條、只提交一次', async () => {

@@ -308,12 +308,12 @@ test('guard 的「記錄卡在哪一步」輸出的每個名字都在通知的�
   assert.ok(![...wf.replace('name="Play 版號計算"', 'name="版號"').matchAll(/name="([^"]+)"/g)].every(m => GUARD_STEPS.includes(m[1])))
 })
 
-test('notify_run：只有 Play 系列 job 的 needs → 文字只講 Play（成功講 Play internal 已就緒、不提安裝檔；失敗點名 Play 步驟）', () => {
+test('notify_run：只有 Play 系列 job 的 needs → 文字只講 Play（成功講 Play 內部測試已就緒、不提安裝檔；失敗點名 Play 步驟）', () => {
   const PLAY = ['preflight-play', 'android-build', 'android-upload']
   const RUN = 'https://github.com/Yooliang/asn/actions/runs/9'
   const needs = over => ({ guard: { result: 'success', outputs: { auto: 'true', version: '0.2.38' } }, ...Object.fromEntries(PLAY.map(j => [j, { result: 'success' }])), ...over })
   const done = statusFromNeeds(needs(), { runUrl: RUN })
-  assert.match(done.text, /【CI 完成】v0\.2\.38/); assert.match(done.text, /Play internal 已就緒/); assert.doesNotMatch(done.text, /安裝檔|要簽|異常/)
+  assert.match(done.text, /【CI 完成】v0\.2\.38/); assert.match(done.text, /Play 內部測試已就緒/); assert.doesNotMatch(done.text, /安裝檔|要簽|異常/)
   const up = statusFromNeeds(needs({ 'android-upload': { result: 'failure' } }), { runUrl: RUN })
   assert.match(up.text, /Play 上傳失敗/); assert.doesNotMatch(up.text, /電腦版|異常/)
   const pre = statusFromNeeds(needs({ 'preflight-play': { result: 'failure' }, 'android-build': { result: 'skipped' }, 'android-upload': { result: 'skipped' } }))
@@ -546,4 +546,11 @@ test('#1892 壞例子：run 內加 ${{ }}、|| true、set +e、continue-on-error
   assert.equal(runBodies(`jobs:\n  a:\n    steps:\n      - run: |2\n            echo hi\n`).length, 1, '|2 縮排指示符的 run 區塊要抓得到')
   // 不誤傷：註解裡提到不算
   assert.deepEqual(runProblems(`${W}\n# echo "\${{ github.ref_name }}" || true; set +e; continue-on-error\n`), [])
+})
+
+test('#2246 接線：android-upload 的上傳步驟有 id: upload，job outputs 帶出 alpha_status／alpha_kind 給 notify', () => {
+  const u = jobsOf(stripComments(wf))['android-upload']
+  assert.match(u, /alpha_status: \$\{\{ steps\.upload\.outputs\.alpha_status \}\}/)
+  assert.match(u, /alpha_kind: \$\{\{ steps\.upload\.outputs\.alpha_kind \}\}/)
+  assert.match(u, /id: upload\s+working-directory: relay\/asn/)
 })

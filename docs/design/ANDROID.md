@@ -242,7 +242,7 @@ Google Play 資料安全性申報要補：「音訊：語音或聲音錄音」�
 
 ## 十九、自動上傳 Play
 
-發版時把 Play 版 AAB 自動上傳到 Google Play「內部測試」與「封閉測試」兩條軌道並直接發布（同一個 AAB、同一個編輯、只提交一次；軌道可用 `--tracks=internal,alpha` 指定），不用人去 Play Console 點。實作在 `relay/asn/scripts/play-upload.mjs`，用 Google Play Developer API（androidpublisher v3），不新增相依套件。
+發版時把 Play 版 AAB 自動上傳到 Google Play「內部測試」與「封閉測試」兩條軌道並直接發布（同一個 AAB、同一個編輯、只提交一次；封閉測試失敗時降級成只發內部測試、並在通知寫 play-alpha 告警；軌道可用 `--tracks=internal,alpha` 指定），不用人去 Play Console 點。實作在 `relay/asn/scripts/play-upload.mjs`，用 Google Play Developer API（androidpublisher v3），不新增相依套件。
 
 **指令**（在 `relay/asn`）：
 
