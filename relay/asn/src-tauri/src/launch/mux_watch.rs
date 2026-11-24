@@ -82,6 +82,10 @@ pub struct Watch {
     /// 載入時因為開機時間變了（重開機）而丟掉了記著的 mux（只給啟動紀錄用，不存檔）
     #[serde(skip)]
     dropped_by_reboot: bool,
+    /// 這一輪「服務換了、卻不算事故」的白話原因（#1837）：呼叫端讀走寫進 mux.log。
+    /// 每次換服務 `seen` 就改記新的，同一個情況不會下一輪又出現，所以只會寫一次
+    #[serde(skip)]
+    swallowed: Option<String>,
 }
 
 impl Watch {
@@ -142,6 +146,11 @@ impl Watch {
         self.tick_with(o, now, true)
     }
 
+    /// 讀走這一輪「換了服務卻不算事故」的原因（沒有就 None）
+    pub fn take_swallowed(&mut self) -> Option<String> {
+        self.swallowed.take()
+    }
+
     /// 記著正在看的那個 mux 是不是這一組（程序編號, 建立時間）
     pub fn seen_mux_is(&self, mux: (u32, u64)) -> bool {
         self.seen.as_ref().is_some_and(|s| s.mux == mux)
@@ -191,11 +200,13 @@ impl Watch {
         self.seen = current;
         // 記著的那個 mux 是這次開機以前的（重開機前留下的紀錄，開機時間沒能讓 load 丟掉它）：
         // 新起的終端服務不是「這次開機的終端服務掛了」，不算事故、也不算還沒接回，重開機後該接回的交給開機接回（auto_resume）
-        if self.boot.is_some_and(|b| p.mux.1.saturating_add(crate::bridge::known::BOOT_TOLERANCE_MS) < b) {
+        if let Some(b) = self.boot.filter(|b| p.mux.1.saturating_add(crate::bridge::known::BOOT_TOLERANCE_MS) < *b) {
+            self.swallowed = Some(format!("終端服務換了但不算事故：記著的服務（程序 {}）是這次開機以前的，早了 {} 秒，夥伴 {} 位交給開機接回", p.mux.0, (b - p.mux.1) / 1000, p.partners.len()));
             return None;
         }
         // 我們自己收的（記號是這個 mux、晚於記下的時間）：不算掛掉
-        if o.stopped.is_some_and(|(pid, at)| pid == p.mux.0 && at.saturating_add(5_000) >= p.at) {
+        if let Some((_, at)) = o.stopped.filter(|(pid, at)| *pid == p.mux.0 && at.saturating_add(5_000) >= p.at) {
+            self.swallowed = Some(format!("終端服務換了但不算事故：判成我們自己停的（程序 {}，停止記號比記下的時間晚 {} 秒），夥伴 {} 位", p.mux.0, (at as i64 - p.at as i64) / 1000, p.partners.len()));
             return None;
         }
         // 沒有夥伴就沒有東西要接回，也不佔「十分鐘一次」的接回額度
