@@ -198,4 +198,38 @@ test('還原驗證：migration 拿掉 bell_topic 回傳，成功路徑不再帶 
   assert.ok(!has(await tdecide(db, t.id), 'bell_topic'), 'term 拿掉後不再回 bell_topic')
 })
 
+// 回復檔逐字還原舊版函式本體（去 CR 後逐字比對，不收斂空白；不呼叫 git，直接讀 repo 內舊 migration）。
+// perm：20261114100000（最新且早於本 migration 的定義）；term：20261026400000（僅此一版定義）。
+const fnBlock = (sql, fn) => {
+  const start = sql.indexOf(`create or replace function public.${fn}(`)
+  assert.ok(start >= 0, `找不到 ${fn} 定義`)
+  const end = sql.indexOf('$function$;', start)
+  assert.ok(end > start, `${fn} 沒有結尾`)
+  return sql.slice(start, end + '$function$;'.length)
+}
+const noCR = s => s.replaceAll(String.fromCharCode(13), '')
+const rawRead = f => noCR(fs.readFileSync(new URL(f, DIR), 'utf8'))
+const OLD = {
+  asn_relay_perm_req_decide: rawRead('20261114100000_perm_requests_full_options.sql'),
+  asn_relay_term_req_decide: rawRead('20261026400000_term_requests.sql'),
+}
+const restoreDiffs = downText => Object.entries(OLD).filter(([fn, src]) => fnBlock(noCR(downText), fn) !== fnBlock(src, fn)).map(([fn]) => fn)
+
+test('回復檔逐字還原舊版函式本體（perm 取 20261114100000、term 取 20261026400000）', () => {
+  assert.ok(fnBlock(OLD.asn_relay_perm_req_decide, 'asn_relay_perm_req_decide').length > 500)
+  assert.ok(fnBlock(OLD.asn_relay_term_req_decide, 'asn_relay_term_req_decide').length > 500)
+  assert.deepEqual(restoreDiffs(fs.readFileSync(DOWN_URL, 'utf8')), [])
+})
+
+test('還原驗證：回復檔函式本體改動一個字元，逐字還原比對會紅', () => {
+  const down = fs.readFileSync(DOWN_URL, 'utf8')
+  for (const fn of Object.keys(OLD)) {
+    const b = fnBlock(noCR(down), fn)
+    const at = noCR(down).indexOf(b) + Math.floor(b.length / 2)
+    const t = noCR(down)
+    const mutated = t.slice(0, at) + (t[at] === 'x' ? 'y' : 'x') + t.slice(at + 1)
+    assert.deepEqual(restoreDiffs(mutated), [fn], `${fn} 改一字後應被抓到`)
+  }
+})
+
 closeAtEnd()
