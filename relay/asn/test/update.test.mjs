@@ -154,11 +154,15 @@ test('官網首頁下載按鈕（0.1.111）：連到 latest.json 現在這版的
   const html = fs.readFileSync(new URL('../../../site/public/index.html', import.meta.url), 'utf8')
   const latest = JSON.parse(fs.readFileSync(new URL('../../../site/public/update/latest.json', import.meta.url), 'utf8'))
   const url = latest.platforms[PLATFORM].url
-  const links = [...html.matchAll(/class="btn" href="([^"]*)"/g)].map(m => m[1])
+  const links = [...html.matchAll(/class="btn" href="([^"]*\/ASN_[^"/]*_x64-setup\.exe)"/g)].map(m => m[1])
   assert.deepEqual(links, [url, url], '首頁頂部與下載區兩顆按鈕都連到 latest.json 的安裝檔（發版時 release.mjs 會自動換）')
   assert.ok(!/尚未開放|即將開放下載|aria-disabled="true"/.test(html))
   const next = installerUrl('0.2.0')
   const out = patchDownloadLink(html, next)
-  assert.deepEqual([...out.matchAll(/class="btn" href="([^"]*)"/g)].map(m => m[1]), [next, next])
+  assert.deepEqual([...out.matchAll(/class="btn" href="([^"]*\/ASN_[^"/]*_x64-setup\.exe)"/g)].map(m => m[1]), [next, next])
+  // #2203：首頁另有 Google Play 的 class="btn" 按鈕，上面只比對 Windows 安裝檔那兩顆；Play 連結要在、發版改寫後也要在
+  const PLAY = 'https://play.google.com/store/apps/details?id=tw.yooliang.asn'
+  assert.ok(html.includes('href="' + PLAY + '"'), '首頁有 Google Play 連結')
+  assert.ok(out.includes('href="' + PLAY + '"'), 'patchDownloadLink 之後 Play 連結仍在')
   assert.equal(patchDownloadLink('<a href="#download">x</a>', next), '<a href="#download">x</a>', '沒有安裝檔連結就不動')
 })
