@@ -36,6 +36,7 @@ import { ACCT_ACTIONS, handleAcctAction, requireSignedFlag } from "../_shared/ac
 import { handleQuotaRead, handleQuotaShare, QUOTA_READ_ACTION, QUOTA_SHARE_ACTIONS } from "../_shared/quota_read.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
+import { handleReport, handleReportGet } from "../_shared/report.ts";
 import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
 import { handleTermViewAction, TERM_VIEW_ACTIONS, TERM_VIEW_SIGNED_ACTIONS } from "../_shared/term_view_ctl.ts";
 import { handlePushAction, notifyPush, PUSH_ACTIONS } from "../_shared/push_ctl.ts";
@@ -86,6 +87,21 @@ async function ring(topic: string) {
     if (!r.ok) console.error("bell failed", r.status, await r.text());
   } catch (e) {
     console.error("bell error", String(e));
+  }
+  signal.background(signal.putBell(topic));
+}
+
+// 回報匯流排的門鈴（#2161 2b）：與 ring 同一套頻道與 RTDB 指標，差別只在廣播 payload 帶 { kind, node }（不含內容）。舊客戶端只看 event=bell，不看 payload；失敗只記 log。
+async function ringReport(topic: string, payload: Record<string, unknown>) {
+  try {
+    const r = await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
+      method: "POST",
+      headers: { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
+      body: JSON.stringify({ messages: [{ topic, event: "bell", payload, private: false }] }),
+    });
+    if (!r.ok) console.error("report bell failed", r.status, await r.text());
+  } catch (e) {
+    console.error("report bell error", String(e));
   }
   signal.background(signal.putBell(topic));
 }
@@ -624,6 +640,15 @@ async function handle(req: Request): Promise<Response> {
   // 設備改名（#1388）：本人簽章（x-asn-user）＋節點金鑰；送請求的節點一律是金鑰所屬的 me.id，要改的那台由資料庫核對是同一個人的
   if (action === "device_rename" && req.method === "POST") {
     const r = await handleDeviceRename({ rpc, verifyJwt: accountDeps.verifyJwt }, me, req.headers.get(SIGN_HEADER), await req.json().catch(() => null));
+    return json(r.status, r.body);
+  }
+  // 回報匯流排（#2161 2b，見 _shared/report.ts）：節點一律是金鑰所屬的 me.id（body 不收節點）；節點層動作，不需本人簽章；網頁節點禁止（WEB_DENIED_ACTIONS）
+  if (action === "report" && req.method === "POST") {
+    const r = await handleReport({ rpc, ringReport }, me, await req.json().catch(() => null));
+    return json(r.status, r.body);
+  }
+  if (action === "report_get" && req.method === "POST") {
+    const r = await handleReportGet({ rpc }, me, await req.json().catch(() => null));
     return json(r.status, r.body);
   }
   // 換新設備處理舊設備（#1860 H）：候選、取代、不取代；同樣要本人簽章＋節點金鑰，要動的兩台由資料庫核對是同一個人的
