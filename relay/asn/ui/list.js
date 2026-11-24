@@ -70,7 +70,7 @@ import { BUDDY_CONSOLE_LABEL, CONSOLE_QUERY_TIMEOUT_MS, DISPLAY_MODES, consoleRe
 import { placeMenu, placeSubmenu, submenuNext } from './lib/menu-place.mjs'
 import { PartnerOpDialog, PartnerOpStrip, createOpRunner, loadOpsContext } from './lib/partner-ops-ui.mjs'
 import { createTaskManager, initialState as initialTaskState } from './lib/task-manager.mjs'
-import { LAUNCHERS_POLL_MS, isAuthDenied, nextLaunchersDelay } from './lib/launcher-poll.mjs'
+import { ACCT_INCOMING_POLL_MS, LAUNCHERS_LIST_POLL_MS, LAUNCH_TRACK_POLL_MS, isAuthDenied, nextLaunchersDelay, shouldRefreshOnBell } from './lib/launcher-poll.mjs'
 import { initialOpsCtx, sharedWhy } from './lib/partner-ops.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { elevatedBadge } from './lib/elevated.mjs'
@@ -522,8 +522,8 @@ const refreshCliTools = singleFlight(async () => {
     stateLog.aiCliDetect(r?.tools)
   } catch (e) { console.info('[ASN] cli detect failed', e.message) }
 })
-// #380：被後台擋（401／403）就拉長下次查詢的間隔（最長 5 分鐘），查到恢復 15 秒；記錄只在狀態改變時寫一次
-let launchersDelay = LAUNCHERS_POLL_MS
+// #380：被後台擋（401／403）就拉長下次查詢的間隔（最長 5 分鐘），查到恢復 60 秒；記錄只在狀態改變時寫一次
+let launchersDelay = LAUNCHERS_LIST_POLL_MS
 let launchersDenied = false
 async function refreshLaunchers() {
   let err = null
@@ -537,6 +537,13 @@ async function refreshLaunchers() {
   if (denied !== launchersDenied) console.info('[ASN] 查各電腦啟動設定', denied ? `被後台擋下，改成較長間隔重查：${err.message}` : '恢復正常')
   launchersDenied = denied
   launchersDelay = nextLaunchersDelay(launchersDelay, err)
+}
+let launchersBellAt = 0
+function refreshLaunchersOnBell() {   // 門鈴（寄信也會敲）只在距上次刷新 30 秒以上才順便刷新
+  const now = Date.now()
+  if (!shouldRefreshOnBell(launchersBellAt, now)) return
+  launchersBellAt = now
+  void refreshLaunchers()
 }
 async function launchersLoop() {
   await refreshLaunchers()
@@ -1115,7 +1122,7 @@ void refreshCliTools()
 void launchersLoop()
 void loadLaunchPrefs()
 void loadPiSetup()
-setInterval(() => void pollLaunchResults(), LAUNCHERS_POLL_MS)   // 只在有剛開的夥伴要追進度時才查
+setInterval(() => void pollLaunchResults(), LAUNCH_TRACK_POLL_MS)   // 只在有剛開的夥伴要追進度時才查
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
 const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
 const callTick = ref(0)                 // 通話狀態變動時加一，讓「關閉閒置」的可用判斷重算
@@ -1344,7 +1351,7 @@ window.addEventListener('resize', () => {
 if (ui.mode === 'merged') await windowApi.mainLayout(true, sizes.merged.w, sizes.merged.h, true)
 
 await listen('term-being-viewed', list => { beingViewed.value = Array.isArray(list) ? list : [] })
-await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
+await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms(); refreshLaunchersOnBell() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
@@ -2024,7 +2031,7 @@ const app = createApp({
     void listen('claude-account-auto', p => void accounts.onAuto(p))
     void listen('grok-account-auto', p => void accounts.onAuto(p))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
     if (!info.shot) {
-      setInterval(() => void accounts.pollIncoming(), 15_000)
+      setInterval(() => void accounts.pollIncoming(), ACCT_INCOMING_POLL_MS)
       void listen('relay-bell', () => void accounts.pollIncoming())
     }
     // 有人要求切換這台的帳號：把視窗叫到前面，讓使用者看得到確認框
