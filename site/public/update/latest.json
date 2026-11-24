@@ -1,15 +1,11 @@
 {
-  "version": "0.2.88",
-  "notes": "- 改善：電腦版工作管理員改成樹狀顯示，依「ASN ＞ 終端服務 ＞ 代理」分層，看得出每個代理跑在哪個終端服務底下\n- 修正：重新啟動 ASN 時，不會再整個消失或重複回信\n- 修正：遠端打字重新發起時會正確重設，第一個畫面也不會遺失",
-  "pub_date": "2026-11-24T02:14:09.914Z",
+  "version": "0.2.89",
+  "notes": "- 改善：工作管理員畫面精簡，拿掉多餘的標籤、總數和說明，整列點一下就能展開或收起細項\n- 改善：個人設定和引導進度存檔時只送出這個畫面改的欄位，不會蓋掉其他地方改過的設定\n- 改善：設定檔正被其他程式使用時會稍等再存，檔案壞掉時會改存整份，不會存不進去\n- 改善：回報類的通知只會叫醒需要的畫面，不再連帶叫醒收信和名單",
+  "pub_date": "2026-11-24T05:00:11.144Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9uUHRWMGxRTDlYcEp0Qm4zOGd5bFFpYTdrSXZHVjk2MEsyNERZM1o4b2VSVURzNWpVWllJeXVRWk5lRklTV212TTBkNUh1Y2FnbXBkUmVKREFJNmc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDg2NDQ5CWZpbGU6QVNOXzAuMi44OF94NjQtc2V0dXAuZXhlCjRsaHVhS3lTWm8wTk1IR1NKa2U5TFVnc2VjTE1lenpYM1lPdkNyQ2pSeE10TmcvQTg5SmhSajh3SHhWYVVTVDlGWlBkR28zSkVaQjBqcCtqMG12WkJ3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.88_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRXb3p3enVpRTlWd3NVKzl2L3cxNFlZb2VrODVSY1BWRTJOdzJCdnV5K24rR0JxQmtkb0IySlhaT1huL1pwbmVXZlBiRUhZaEtJbzRSWE9SMWxROEE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDg3MDU2CWZpbGU6QVNOXzAuMi44OF9hbWQ2NC5BcHBJbWFnZQpvUW5Gclp6ajh3QXd2MjZiMU93MlA2N0k0ckV4ZXFKVjYwSFRlSFE5dnBtUEUxbEV3d0I5c3J1OWhpS1JMb2k0UjgrV1lseXhhdmtnR3I0bzJ5S2ZEUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.88_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlITGxHT3pFN0FucXZ5RDR1TWRPQmYzWU9QMmhQc2tVWnJHd3lsM0JsM0dacWViM2F6dHkwWTBOcmJBcW1tK1AxTE5OeHlLT2xudDVaNTA0NUgrMXc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDk2NDEwCWZpbGU6QVNOXzAuMi44OV94NjQtc2V0dXAuZXhlCnkzenN4R01hSC8vR2VJZzRtL01OZUNadVVxbjVmdVBCQ1plL2RyTVlmWDRiTEhKenlkOUdocFlaaTdTSVBtRGlnaFkzUnRJdjNBblBXUTBkL1kveERBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.89_x64-setup.exe"
     }
   }
 }
