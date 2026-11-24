@@ -69,7 +69,7 @@ dependencies = [
 
 [[package]]
 name = "asn"
-version = "0.2.95"
+version = "0.2.96"
 dependencies = [
  "base64 0.22.1",
  "flate2",
