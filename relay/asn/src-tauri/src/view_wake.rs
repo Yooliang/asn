@@ -2,10 +2,13 @@
 //!
 //! 以前只有每 10 秒醒一次，按下去要等 0～10 秒。現在後台建了看畫面／打字的要求會敲這台的門鈴，
 //! 門鈴一響就叫醒輪詢馬上查；門鈴斷了或沒響，到了 [`POLL_INTERVAL_SECS`] 秒照常查（備援）。
+//!
+//! 保底間隔 30 秒（#2161 3b，原 10 秒）：門鈴叫醒＋30 秒保底；半開連線時最壞多等 30 秒。
+//! 不放到 60：看畫面方等被接受時有 1 秒回報節奏，漏鈴時畫面最多多等 30 秒；請求有效期 600 秒，比值 20。
 use std::time::Duration;
 use tokio::sync::Notify;
 
-pub const POLL_INTERVAL_SECS: u64 = 10;
+pub const POLL_INTERVAL_SECS: u64 = 30;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Woke {
@@ -58,6 +61,19 @@ mod tests {
         let t = Instant::now();
         assert_eq!(wait_next(Duration::from_secs(POLL_INTERVAL_SECS), &n).await, Woke::Bell);
         assert!(t.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn 守門_備援間隔鎖在30秒() {
+        assert_eq!(POLL_INTERVAL_SECS, 30, "#2161 3b：不要退回 10，也不要放到 60");
+    }
+
+    #[test]
+    fn 守門_ctl串流中的查詢不用輪詢常數() {
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let f = lib.split("fn ctl(&mut self)").nth(1).expect("有 ctl").split("\n    }\n").next().unwrap();
+        assert!(f.contains("term_view_pending"), "ctl 串流中仍要查 term_view_pending");
+        assert!(!f.contains("POLL_INTERVAL_SECS") && !f.contains("wait_next"), "ctl 不受門鈴與輪詢常數影響");
     }
 
     #[test]
