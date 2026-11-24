@@ -20,11 +20,11 @@ export const tmAdoptProbeSource = () => `(async () => {
   const entry = await waitFor(() => [...document.querySelectorAll('.dv-tabs .dv-tasks')].find(vis));
   if (!entry) return { ok: false, why: '這台電腦的詳情頁沒有「工作管理員」入口' };
   await click(entry);
-  const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-table tbody tr')]; return r.length >= 9 ? r : null });
+  const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-tree .tm-node')]; return r.length >= 9 ? r : null });
   if (!rows) return { ok: false, why: '工作管理員沒有列出程式' };
   const btnOf = r => [...r.querySelectorAll('button.tm-adopt')].find(vis) || null;
   const withBtn = rows.filter(btnOf);
-  const src = r => r.children[7]?.textContent.trim() ?? '';
+  const src = r => r.querySelector('.tm-src')?.textContent.trim() ?? '';
   if (withBtn.length !== 2) return { ok: false, why: '應該只有 2 列有「納入管理」，實際 ' + withBtn.length + ' 列' };
   if (!withBtn.every(r => src(r).startsWith('自己開的'))) return { ok: false, why: '「納入管理」出現在不是自己開的那一列：' + withBtn.map(src).join('、') };
   if (rows.some(r => src(r).startsWith('ASN') && btnOf(r))) return { ok: false, why: 'ASN 開的那一列不該有「納入管理」' };

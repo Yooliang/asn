@@ -83,9 +83,9 @@ test('交接中的列不顯示「只能看」（只顯示原因）；真正只�
   assert.equal(own.showViewOnly, true, '真正只能看的列照舊顯示')
   assert.equal(viewRow(row({ compact: { count: 3, state: 'remind' } }), NOW, ctx()).showViewOnly, false, '有停止鈕的列不顯示')
   // 範本只讀 showViewOnly，不能退回「沒鈕就 v-else 顯示只能看」
-  const panel = read('ui/lib/settings-panel.mjs')
-  assert.match(panel, /<small class="tm-viewonly" v-else-if="r\.showViewOnly"/)
-  assert.ok(!/<small class="tm-viewonly" v-else /.test(panel))
+  const view = read('ui/lib/task-tree-view.mjs')   // #1860 F：節點畫面搬到共用的樹元件
+  assert.match(view, /<small class="tm-viewonly" v-else-if="node\.showViewOnly"/)
+  assert.ok(!/<small class="tm-viewonly" v-else /.test(view))
 })
 
 test('控制器：交接中的列按停止不會開確認框；按「交接」只送視窗名', async () => {
@@ -147,5 +147,6 @@ test('三種外觀都有樣式：標籤、窄版欄位、次數輸入', () => {
   assert.match(css, /\.tm-tag\.cmp-warn\{/)
   assert.match(css, /\.tm-tag\.cmp-go\{/)
   assert.match(css, /\.chk-num\{/)
-  assert.match(css, /\.tm-table th:nth-child\(8\),\.tm-table td:nth-child\(8\)\{display:none\}\.tm-table td\.cmp\{min-width:110px\}/, '窄版收掉引擎、程序編號、記憶體、開了多久與運行位置')
+  assert.match(css, /\.tm-meta\{display:flex;flex-wrap:wrap;/, '#1860 F 樹狀：引擎、編號、記憶體等小字排成會換行的一列，窄版不用再收欄位')
+  assert.doesNotMatch(css, /\.tm-table/, '工作管理員不再是表格')
 })

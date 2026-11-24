@@ -12,6 +12,7 @@
 import { menuItems, partnerEngine, isProcessEntry } from './partner-ops.mjs'
 import { runPartnerOp } from './partner-ops-ui.mjs'
 import { dupCloseText } from './dup-windows.mjs'
+import { treeView } from './task-tree.mjs'
 
 export const REFRESH_MS = 5000
 export const DASH = '—'
@@ -251,8 +252,16 @@ export function viewRow(r, now, ctx) {
   }
 }
 
-/** 停止確認框的內容（照設計稿：誰、哪一個、不受影響的是誰、會留下什麼） */
-export function confirmView(r, rows, now) {
+/**
+ * 停止確認框的內容（照設計稿：誰、哪一個、不受影響的是誰、會留下什麼）。
+ * prefix：標題最前面加的主詞（看別台設備時寫那一台的名字，例如「工作機」的）；這台自己不用給
+ */
+export function confirmView(r, rows, now, prefix = '') {
+  const c = confirmBody(r, rows, now)
+  return prefix ? { ...c, title: `${prefix}${c.title}` } : c
+}
+
+function confirmBody(r, rows, now) {
   const base = { key: '', title: '', lines: [], notes: [], ok: TEXT.stopWindow }
   const name = r.name
   const facts = [r.pid > 0 ? `程序編號 ${r.pid}` : '', openedAgo(r.started_ms, now), statusText(r.status) === DASH ? '' : statusText(r.status)].filter(Boolean).join(' · ')
@@ -273,13 +282,15 @@ export function confirmView(r, rows, now) {
 
 export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '' })
 
+// 控制器的 view() 另外帶 tree（ASN ＞ 終端服務 ＞ 代理，見 task-tree.mjs）；rows 還是平的一份，找列、停止與測試都用它
+
 /**
  * 控制器（狀態都在 state，畫面只讀 view()）。deps：
  *   api（taskManagerList、termStop、partnerOp、partnerOps）、getFriends()、getSelfNode()、getOpsCtx()（登入與電腦設定）、
  *   refreshOps()（重查登入與電腦設定）、sendMail(friendId, text)（以本人身分寄信）、now()、setTimer／clearTimer、runOp（測試可換）
  */
 export function createTaskManager(deps) {
-  const { api, getFriends, getSelfNode, getOpsCtx, refreshOps = async () => {}, openChat = () => {}, sendMail, now = Date.now, setTimer = (f, ms) => setInterval(f, ms), clearTimer = t => clearInterval(t), runOp = runPartnerOp, state = initialState(), log = m => console.info('[ASN]', m) } = deps
+  const { api, getFriends, getSelfNode, getOpsCtx, refreshOps = async () => {}, openChat = () => {}, confirmPrefix = () => '', sendMail, now = Date.now, setTimer = (f, ms) => setInterval(f, ms), clearTimer = t => clearInterval(t), runOp = runPartnerOp, state = initialState(), log = m => console.info('[ASN]', m) } = deps
   let timer = null
   let inflight = false
   const ctx = () => ({ friends: getFriends(), selfNode: getSelfNode(), ops: getOpsCtx(), asn: getOpsCtx()?.asn })
@@ -323,7 +334,7 @@ export function createTaskManager(deps) {
     const r = findRow(key)
     if (!r || !stopPlan(r, ctx()).ok) return
     state.note = ''
-    state.confirm = { ...confirmView(r, rowsNow(), now()), key, busy: false, result: '' }
+    state.confirm = { ...confirmView(r, rowsNow(), now(), confirmPrefix()), key, busy: false, result: '' }
   }
 
   function cancel() { if (!state.busy) state.confirm = null }
@@ -414,7 +425,7 @@ export function createTaskManager(deps) {
     })
     return {
       open: state.open, loading: state.loading, error: state.error, loaded: state.snapshot !== null,
-      total: rows.length, rows, empty: state.snapshot !== null && !rows.length,
+      total: rows.length, rows, tree: treeView(merged, r => viewRow(r, n, c)), empty: state.snapshot !== null && !rows.length,
       dupBanner: dupBanner(groups), dupCount: groups.length,
       known, note: state.note, wakeNote: state.wakeNote, busy: state.busy,
       confirm: state.confirm ? { ...state.confirm } : null,

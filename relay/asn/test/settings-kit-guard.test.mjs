@@ -125,7 +125,10 @@ test('#2105 改由 ASN 負責的確認：處理中兩顆都不能按（原本的
 })
 
 test('#2105 移除／刪除／結束／忘記／撤銷這類不可復原的動作，按鈕都是危險狀態', () => {
-  const must = ['tm-ask', 'quota-mm-remove', 'forget.ask(r.peer)', 'forget.askReaccept(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
+  // 工作管理員的「停止」鈕搬到共用的樹元件（#1860 F），在那個檔裡也要是危險鈕
+  const treeTag = [...read('../ui/lib/task-tree-view.mjs').matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes("'tm-ask'"))
+  assert.match(treeTag ?? '', /state="danger"/, '停止鈕要是危險鈕')
+  const must = ['quota-mm-remove', 'forget.ask(r.peer)', 'forget.askReaccept(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
   for (const h of must) {
     const tag = [...panel.matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes(h))
     assert.ok(tag, `找得到按鈕：${h}`)
