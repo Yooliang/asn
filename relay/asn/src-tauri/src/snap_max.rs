@@ -153,6 +153,14 @@ pub fn snap_max_clear(window: tauri::Window) -> Result<(), String> {
     apply(window, None)
 }
 
+/// 切到原生外框時由 `wins::set_frame` 同步呼叫：不等前端清，免得那 50ms 把原生標題區誤判成放大鈕
+#[cfg(feature = "gui")]
+pub fn clear_now(w: &tauri::WebviewWindow) {
+    if let Err(e) = apply(w.as_ref().window(), None) {
+        elog!("[snap] 切到原生外框時清不掉放大鈕分割版面：{e}");
+    }
+}
+
 #[cfg(all(feature = "gui", windows))]
 fn apply(window: tauri::Window, rect: Option<PxRect>) -> Result<(), String> {
     use tauri::Manager;
