@@ -19,7 +19,7 @@
 :root[data-skin="modern"] body.m-body{font-size:15px}
 
 /* ---------- 電腦版：視窗外框、標題列 ---------- */
-:root[data-skin="modern"] .tb:hover{background:var(--modern-hover);border-color:transparent}
+:root[data-skin="modern"] .tb:hover,:root[data-skin="modern"] .tb.snap-hover{background:var(--modern-hover);border-color:transparent}
 
 /* 下載中（#1526）：拿掉圓角卡片，只留一條直角進度條；左右內距 8px 跟分頁列一樣 */
 :root[data-skin="modern"] .upd-fill{background:var(--modern-soft)}

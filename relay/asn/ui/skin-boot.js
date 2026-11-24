@@ -9,4 +9,6 @@
   set(s)
   window.addEventListener('storage', function (e) { if (e.key === 'asnSkin') set(e.newValue) })
   try { var ev = window.__TAURI__ && window.__TAURI__.event; if (ev && ev.listen) ev.listen('asn:skin', function (e) { set(e && e.payload) }) } catch (e) {}
+  // #1788 原型：網址 ?frameless=1 讓現代外觀比照無邊框（只為對照截圖，正式版不留）
+  try { if (/[?&]frameless=1/.test(location.search)) document.documentElement.setAttribute('data-frameless', '') } catch (e) {}
 })()
