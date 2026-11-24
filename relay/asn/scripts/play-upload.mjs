@@ -20,7 +20,7 @@ const DEFAULT_BASE = 'https://androidpublisher.googleapis.com'
 // 為什麼預設兩條：測試人員改用 Google 群組管理，群組只能加在封閉測試；內部測試仍保留給開發者自己快速驗證。
 export const DEFAULT_TRACKS = ['internal', 'alpha']
 const TRACK_NAMES = { internal: '內部測試', alpha: '封閉測試' }
-const trackLabel = t => TRACK_NAMES[t] ? `${TRACK_NAMES[t]}（${t}）` : t
+const trackLabel = t => Object.hasOwn(TRACK_NAMES, t) ? `${TRACK_NAMES[t]}（${t}）` : t
 const NOTES_LIMIT = 500   // Play 每種語言的更新說明上限
 
 export const defaultKeyFile = () => process.env.ASN_PLAY_SA_FILE || path.join(os.homedir(), '.asn', 'play', 'play-service-account.json')
@@ -52,6 +52,17 @@ export const trackError = (track, status) => {
   if (status === 401 || status === 403) return `服務帳戶沒有「${label}」軌道的發布權限，這次沒有發布任何軌道。請擁有者到 Play Console 的「使用者和權限」，替服務帳戶打開「發布到測試軌道」的權限後再重發。`
   if (status === 404) return `Play 找不到「${label}」軌道，這次沒有發布任何軌道。請擁有者到 Play Console 的「測試」頁面確認該測試軌道已建立（封閉測試要先建立一個軌道），再重發。`
   return `設定「${label}」軌道失敗，這次沒有發布任何軌道，請稍後重發；若持續失敗請查看上傳記錄。`
+}
+
+// 降級用的白話訊息（封閉測試沒發成、但內部測試已發出）：不能沿用 trackError 的「沒有發布任何軌道」「稍後重發」
+const DEGRADE_WHY = {
+  permission: ['服務帳戶沒有封閉測試的發布權限', 'Play Console 的「使用者和權限」，替服務帳戶打開「發布到測試軌道」'],
+  notfound: ['Play 上找不到封閉測試軌道', 'Play Console 的「測試」→「封閉測試」，確認軌道已建立'],
+  other: ['封閉測試軌道設定沒成功（可能還在審核中、設定未完成或連線不穩）', 'Play Console 的「測試」→「封閉測試」確認狀態'],
+}
+export const degradedMessage = kind => {
+  const [why, where] = Object.hasOwn(DEGRADE_WHY, kind) ? DEGRADE_WHY[kind] : DEGRADE_WHY.other
+  return `封閉測試這次沒發成，原因是${why}。內部測試已發出。補救：請擁有者到${where}處理後，把內部測試這一版推廣到封閉測試，或下次升版號重發（同一個版本碼不能重傳，單純重跑不會補上封閉測試）。`
 }
 
 // Google 錯誤回應只取代碼（error.status／errors[0].reason，或 OAuth 的 error 欄位），不帶訊息全文。
@@ -162,7 +173,13 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode 
       for (const t of list) {
         log(`設定 ${t} 軌道（versionCode ${versionCode}）…`)
         const body = JSON.stringify({ track: t, releases: [{ name: version || String(versionCode), versionCodes: [String(versionCode)], status: 'completed', releaseNotes: [{ language: 'zh-TW', text: notes }] }] })
-        const r = await request('PUT', `${app}/edits/${id}/tracks/${t}`, { headers: json, body })
+        let r
+      try { r = await request('PUT', `${app}/edits/${id}/tracks/${t}`, { headers: json, body }) } catch (err) {
+        // 封閉測試的網路錯誤／逾時（重試用盡）也降級：internal 不該被它拖累；其他軌道的網路錯誤照舊整體失敗
+        if (t !== OPTIONAL_TRACK) throw err
+        log(`設定 ${t} 軌道失敗：${err.message}`)
+        throw new TrackFailure(t, 0, trackError(t, 0))
+      }
         if (r.status < 200 || r.status >= 300) {
           log(`設定 ${t} 軌道失敗：HTTP ${r.status}，${errCode(r.text)}`)   // 原始代碼只進 log
           throw new TrackFailure(t, r.status, trackError(t, r.status))
@@ -184,7 +201,7 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode 
     if (!(e instanceof TrackFailure) || e.track !== OPTIONAL_TRACK || !rest.length) throw e
     log(`封閉測試沒發成（${alphaFailKind(e.status)}），改只發 ${rest.join('、')} …`)
     const r = await attempt(rest)
-    return { ...r, alpha: { status: 'failed', kind: alphaFailKind(e.status), message: e.message } }
+    return { ...r, alpha: { status: 'failed', kind: alphaFailKind(e.status), message: degradedMessage(alphaFailKind(e.status)) } }
   }
 }
 
@@ -225,8 +242,6 @@ alpha_kind=${alpha.kind || ''}
     out(`::warning title=play-alpha::${alpha.message}`)
     line(env.GITHUB_STEP_SUMMARY, `### play-alpha 告警
 ${alpha.message}
-
-內部測試已照常發出。
 `)
   }
 }
@@ -256,7 +271,7 @@ const main = async () => {
     const notes = releaseNotes(fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), version)
     const r = await publishAab({ aabFile: aab, sa, notes, version, expectCode, tracks, log: m => console.log(m) })
     console.log(`已發布到 Play ${r.tracks.map(trackLabel).join('、')}：版本 ${version}（versionCode ${r.versionCode}）`)
-    reportAlpha(r.alpha)
+    try { reportAlpha(r.alpha) } catch (err) { console.log(`告警寫入失敗（不影響發版結果）：${err.message}`) }
   } catch (e) {
     console.error(`上傳中止：${e.message}`)
     process.exit(1)

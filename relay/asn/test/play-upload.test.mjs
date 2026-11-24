@@ -8,7 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { DEFAULT_TRACKS, getAccessToken, loadServiceAccount, makeJwt, makeRequester, maxPlayCode, publishAab, releaseNotes, reportAlpha } from '../scripts/play-upload.mjs'
+import { DEFAULT_TRACKS, degradedMessage, getAccessToken, loadServiceAccount, makeJwt, makeRequester, maxPlayCode, publishAab, releaseNotes, reportAlpha } from '../scripts/play-upload.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
@@ -138,6 +138,9 @@ test('alpha 失敗（403）：刪掉第一個編輯、另開第二個編輯只�
     assert.equal(r.alpha.status, 'failed')
     assert.equal(r.alpha.kind, 'permission')
     assert.match(r.alpha.message, /封閉測試.*Play Console/s)
+    assert.doesNotMatch(r.alpha.message, /沒有發布任何軌道|請稍後重發/)
+    assert.match(r.alpha.message, /內部測試已發出/)
+    assert.match(r.alpha.message, /推廣到封閉測試.*升版號重發/)
     assert.ok(!/HTTP|403|forbidden|秘密/.test(r.alpha.message))
     assert.deepEqual(putsOf(f.calls), ['E1/tracks/internal', 'E1/tracks/alpha', 'E2/tracks/internal'])
     assert.equal(count(f.calls, /:commit$/), 1, '只提交一次')
@@ -158,6 +161,35 @@ test('alpha 失敗：404（軌道不存在）與其他（例如送審中 400）�
       assert.equal(count(f.calls, /:commit$/), 1)
     } finally { await f.close() }
   }
+})
+
+test('降級用的白話訊息：warning／summary 都用同一段，不含「沒有發布任何軌道」「請稍後重發」，含內部測試已發出與補救方法；未知分類走通用說明', () => {
+  for (const kind of ['permission', 'notfound', 'other', 'constructor', undefined]) {
+    const m = degradedMessage(kind)
+    assert.doesNotMatch(m, /沒有發布任何軌道|請稍後重發|HTTP/)
+    assert.match(m, /內部測試已發出/); assert.match(m, /Play Console/); assert.match(m, /推廣到封閉測試.*升版號重發/)
+  }
+  const dir = fs.mkdtempSync(path.join(tmp, 'gh2-'))
+  const env = { GITHUB_OUTPUT: path.join(dir, 'o'), GITHUB_STEP_SUMMARY: path.join(dir, 's') }
+  const out = []
+  reportAlpha({ status: 'failed', kind: 'permission', message: degradedMessage('permission') }, env, m => out.push(m))
+  for (const t of [out[0], fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8')]) { assert.doesNotMatch(t, /沒有發布任何軌道|請稍後重發/); assert.match(t, /內部測試已發出/) }
+})
+
+test('alpha 的 5xx 與網路錯誤也降級（internal 不受影響）；internal 的網路錯誤仍整體失敗', async () => {
+  const f = await fake(twoEdits(c => (c.url.endsWith('/tracks/alpha') ? [503, {}] : null)))
+  try {
+    const r = await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: makeRequester({ retries: 0, backoffMs: 1 }) })
+    assert.deepEqual(r.tracks, ['internal']); assert.equal(r.alpha.kind, 'other'); assert.equal(count(f.calls, /:commit$/), 1)
+  } finally { await f.close() }
+  const real = makeRequester({ retries: 0, backoffMs: 1 })
+  const netFail = which => async (m, u, o) => { if (m === 'PUT' && u.endsWith(`/tracks/${which}`)) throw new Error('連線失敗（網路錯誤）'); return real(m, u, o) }
+  const g = await fake(twoEdits(() => null))
+  try {
+    const r = await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: g.base, tokenUri: `${g.base}/token`, request: netFail('alpha') })
+    assert.deepEqual(r.tracks, ['internal']); assert.equal(r.alpha.status, 'failed'); assert.equal(count(g.calls, /:commit$/), 1)
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: g.base, tokenUri: `${g.base}/token`, request: netFail('internal') }), /連線失敗/)
+  } finally { await g.close() }
 })
 
 test('internal 失敗（403）：整體失敗、沒有 commit、不再嘗試 alpha、不開第二個編輯', async () => {
@@ -198,7 +230,7 @@ test('兩條都成功：結果 alpha.status=ok；reportAlpha 寫 GITHUB_OUTPUT�
   reportAlpha({ status: 'failed', kind: 'permission', message: '封閉測試沒發成' }, env, m => out.push(m))
   assert.match(fs.readFileSync(env.GITHUB_OUTPUT, 'utf8'), /alpha_status=failed\nalpha_kind=permission\n/)
   assert.match(out[0], /^::warning title=play-alpha::封閉測試沒發成$/)
-  assert.match(fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8'), /play-alpha 告警[\s\S]*內部測試已照常發出/)
+  assert.match(fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8'), /play-alpha 告警\s封閉測試沒發成/)
   reportAlpha(null, env, m => out.push(m))
   assert.equal(out.length, 1)
 })

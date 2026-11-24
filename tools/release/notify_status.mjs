@@ -43,8 +43,8 @@ const ALPHA_WHY = {
 export const alphaFailed = a => !!a && a.status === 'failed'
 export const playReady = a => {
   if (alphaFailed(a)) {
-    const [why, where] = ALPHA_WHY[a.kind] || ALPHA_WHY.other
-    return `Play 內部測試已就緒；play-alpha 告警：封閉測試沒發成，原因是${why}，請擁有者到${where}處理`
+    const [why, where] = Object.hasOwn(ALPHA_WHY, a.kind) ? ALPHA_WHY[a.kind] : ALPHA_WHY.other
+    return `Play 內部測試已就緒；play-alpha 告警：封閉測試沒發成（內部測試已發出），原因是${why}，請擁有者到${where}處理後，把內部測試這一版推廣到封閉測試，或下次升版號重發`
   }
   return a && a.status === 'ok' ? 'Play 內部測試已就緒、封閉測試已就緒' : 'Play 內部測試已就緒'
 }

@@ -278,11 +278,12 @@ test('Play 兩條都成功 → 通知寫「內部測試已就緒、封閉測試�
 test('封閉測試沒發成（降級）→ 部分完成、warning；寫 play-alpha、白話原因與請擁有者去 Play Console 哪裡；內部測試仍說已就緒', () => {
   const a = p({}, { playAlpha: { status: 'failed', kind: 'permission' } })
   assert.equal(a.level, 'warning')
-  has(a, '【CI 部分完成】', 'Play 內部測試已就緒', 'play-alpha', '封閉測試沒發成', '服務帳戶沒有封閉測試的發布權限', 'Play Console 的「使用者和權限」')
-  lacks(a, '【CI 完成】', 'HTTP', '403')
+  has(a, '【CI 部分完成】', 'Play 內部測試已就緒', 'play-alpha', '封閉測試沒發成', '內部測試已發出', '服務帳戶沒有封閉測試的發布權限', 'Play Console 的「使用者和權限」', '推廣到封閉測試', '升版號重發')
+  lacks(a, '【CI 完成】', 'HTTP', '403', '沒有發布任何軌道', '請稍後重發')
   has(p({}, { playAlpha: { status: 'failed', kind: 'notfound' } }), '找不到封閉測試軌道', '「測試」→「封閉測試」')
   has(p({}, { playAlpha: { status: 'failed', kind: 'other' } }), '審核中', 'Play Console')
-  has(p({}, { playAlpha: { status: 'failed', kind: '亂寫' } }), '封閉測試沒發成', '審核中')   // 不認得的分類走通用說明，不原樣印出
+  has(p({}, { playAlpha: { status: 'failed', kind: '亂寫' } }), '封閉測試沒發成', '審核中')
+  has(p({}, { playAlpha: { status: 'failed', kind: 'constructor' } }), '審核中')   // 不認得的分類走通用說明，不原樣印出
   lacks(p({}, { playAlpha: { status: 'failed', kind: '亂寫' } }), '亂寫')
 })
 
