@@ -130,6 +130,79 @@ test('#1860F 小字欄位：壓縮次數只有 Claude 視窗有；其他列只�
   assert.deepEqual(fields(base({ compact: { count: 2, state: 'remind' } })), ['引擎', '程序編號', '記憶體', '開了多久', '壓縮次數'])
 })
 
+// 把還收著的小字全點開（預設收起）
+const openAll = async m => {
+  for (const b of m.findAll('.tm-more')) if (b.getAttribute('aria-expanded') === 'false') await m.trigger(b, 'click')
+  await settle(m)
+}
+
+test('#1860F 小字預設收起：只剩名稱、狀態、標籤、重複警示與操作鈕；點「詳細」才出現，再點收回', async () => {
+  const ctx = { friends: [], selfNode: SELF, ops: {}, asn: {} }
+  const tree = treeView(mergeRows(snap(), [], SELF), r => viewRow(r, NOW, ctx))
+  const m = mountComponent(TaskTree, { tree })
+  try {
+    await settle(m)
+    const text = () => m.container.textContent
+    for (const w of ['程序編號', '記憶體', '開了多久', '運行位置', '18420']) assert.ok(!text().includes(w), `預設收起，看不到「${w}」`)
+    assert.equal(m.findAll('.tm-meta').length, 0)
+    assert.equal(m.findAll('.tm-more').length, m.findAll('.tm-node').length, '每個節點都有展開控制')
+    assert.ok(m.findAll('.tm-more').every(b => b.getAttribute('aria-expanded') === 'false'))
+    assert.ok(m.findAll('.tm-dupnote').length >= 1 && text().includes('同名的視窗有兩個時'), '重複的警示句屬於使用者能據以行動的，收起時仍顯示')
+    assert.equal(m.findAll('.tm-tag.dup').length, 2, '重複標籤留在主行')
+    const first = m.findAll('.tm-more')[2]
+    await m.trigger(first, 'click'); await settle(m)
+    assert.equal(m.findAll('.tm-meta').length, 1, '只開被點的那一列')
+    assert.equal(m.findAll('.tm-more')[2].getAttribute('aria-expanded'), 'true')
+    assert.ok(text().includes('程序編號'))
+    await m.trigger(m.findAll('.tm-more')[2], 'click'); await settle(m)
+    assert.equal(m.findAll('.tm-meta').length, 0, '再點一次收回')
+  } finally { m.unmount() }
+})
+
+test('#1860F 「請交接／交接中」標籤是要人處理的，收起時仍在主行；展開後小字只寫次數', async () => {
+  const ctx = { friends: [], selfNode: SELF, ops: {}, asn: {} }
+  const rows = [base({ name: 'h', pid: 11, compact: { count: 3, state: 'remind' } })]
+  const tree = treeView(rows, r => viewRow(r, NOW, ctx))
+  const m = mountComponent(TaskTree, { tree })
+  try {
+    await settle(m)
+    assert.equal(m.findAll('.tm-title .tm-tag.cmp-warn').length, 1)
+    assert.equal(m.findAll('.tm-meta').length, 0)
+    await openAll(m)
+    assert.equal(m.findAll('.tm-meta .tm-tag').length, 0, '標籤不在小字裡重複')
+    assert.match(m.find('.tm-meta').textContent, /壓縮次數 3 次/)
+  } finally { m.unmount() }
+})
+
+test('#1860F 展開狀態記在元件裡：5 秒更新（重新給 tree）不重設；與 ▾ 收合子樹互不影響', async () => {
+  const ctx = { friends: [], selfNode: SELF, ops: {}, asn: {} }
+  const mk = () => treeView(mergeRows(snap(), [], SELF), r => viewRow(r, NOW, ctx))
+  let P
+  const m = mountComponent(TaskTree, V => (P = V.reactive({ tree: mk() })))
+  try {
+    await settle(m)
+    const muxMore = () => m.find('.tm-node[data-kind="mux"] .tm-more')
+    await m.trigger(muxMore(), 'click'); await settle(m)
+    assert.equal(muxMore().getAttribute('aria-expanded'), 'true')
+    // 5 秒更新：整棵換成新物件（同樣的列、同樣的鍵）
+    P.tree = mk(); await settle(m)
+    assert.equal(muxMore().getAttribute('aria-expanded'), 'true', '更新後展開狀態還在')
+    assert.equal(m.findAll('.tm-meta').length, 1)
+    // 收合子樹不影響展開細節
+    await m.trigger(m.find('.tm-node[data-kind="mux"] .tm-fold'), 'click'); await settle(m)
+    assert.equal(m.find('.tm-node[data-kind="mux"]').getAttribute('aria-expanded'), 'false')
+    assert.equal(muxMore().getAttribute('aria-expanded'), 'true', '收合子樹不會把自己的小字收掉')
+    await m.trigger(m.find('.tm-node[data-kind="mux"] .tm-fold'), 'click'); await settle(m)
+    // 展開細節不影響收合子樹
+    await m.trigger(muxMore(), 'click'); await settle(m)
+    assert.equal(m.find('.tm-node[data-kind="mux"]').getAttribute('aria-expanded'), 'true', '收小字不會收掉底下的節點')
+    assert.equal(m.findAll('.tm-node').length, 9)
+    // 展開控制是真按鈕、不是收合鈕
+    assert.equal(muxMore().tagName, 'BUTTON')
+    assert.notEqual(muxMore(), m.find('.tm-node[data-kind="mux"] .tm-fold'))
+  } finally { m.unmount() }
+})
+
 test('#1860F 畫面：樹的層級與收合（真的掛載）', async () => {
   const ctx = { friends: [], selfNode: SELF, ops: {}, asn: {} }
   const rows = mergeRows(snap(), [], SELF)
@@ -137,6 +210,7 @@ test('#1860F 畫面：樹的層級與收合（真的掛載）', async () => {
   const m = mountComponent(TaskTree, { tree })
   try {
     await settle(m)
+    await openAll(m)
     const level = pid => [...m.container.querySelectorAll('.tm-node')].find(n => n.querySelector('.tm-meta').textContent.includes(`程序編號 ${pid}`))?.getAttribute('data-level')
     assert.equal(m.find('.tm-node[data-kind="asn"]').getAttribute('data-level'), '1')
     assert.equal(m.find('.tm-node[data-kind="mux"]').getAttribute('data-level'), '2')

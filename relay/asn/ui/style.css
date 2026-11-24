@@ -1235,6 +1235,8 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .tm-main{flex:1 1 auto;display:flex;flex-direction:column;gap:var(--sp-1);min-width:0}
 .tm-title{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2)}
 .tm-state{color:var(--muted);font-size:var(--fs-1)}
+.tm-more{padding:0;font-size:var(--fs-1)}
+.tm-detail{display:flex;flex-direction:column;gap:var(--sp-1)}
 .tm-meta{display:flex;flex-wrap:wrap;gap:0 var(--sp-3);color:var(--muted);font-size:var(--fs-1)}
 .tm-where{color:var(--muted);font-size:var(--fs-1)}
 .tm-dupnote{color:#b3261e;font-size:var(--fs-1)}

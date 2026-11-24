@@ -14,6 +14,14 @@ export const taskmgrProbeSource = () => `(async () => {
   entry.click();
   const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-tree .tm-node')]; return r.length >= 9 ? r : null });
   if (!rows) return { ok: false, why: '工作管理員沒有列出 9 個節點（實際 ' + document.querySelectorAll('.tm-tree .tm-node').length + ' 個）' };
+  // 小字預設收起：沒點開之前看不到程序編號等；每個節點有帶 aria-expanded 的「詳細」鈕
+  const treeText = () => document.querySelector('.tm-tree').textContent;
+  for (const c of ['程序編號', '記憶體', '開了多久', '運行位置']) if (treeText().includes(c)) return { ok: false, why: '預設應收起小字，卻看到「' + c + '」' };
+  const mores = () => [...document.querySelectorAll('.tm-tree .tm-more')];
+  if (mores().length !== document.querySelectorAll('.tm-tree .tm-node').length ||!mores().every(b => b.getAttribute('aria-expanded') === 'false')) return { ok: false, why: '每個節點都該有收著的「詳細」鈕（實際 ' + mores().length + ' 個）' };
+  if (!treeText().includes('同名的視窗有兩個時，信可能兩邊都收不到')) return { ok: false, why: '重複列的警示句收起時也要看得到' };
+  for (const b of mores()) b.click();
+  if (!(await waitFor(() => mores().every(b => b.getAttribute('aria-expanded') === 'true')))) return { ok: false, why: '按「詳細」後小字沒有展開' };
   const labels = [...document.querySelectorAll('.tm-tree .tm-node')].map(n => n.textContent).join('|');
   for (const c of ['引擎', '程序編號', '記憶體', '開了多久', '運行位置']) if (!labels.includes(c)) return { ok: false, why: '節點裡缺「' + c + '」欄位' };
   // 樹狀（#1860 F）：ASN 在最外層、終端服務在它底下、開在終端服務裡的代理再下一層；原生主控台的代理與終端服務並列
@@ -81,8 +89,14 @@ export const taskmgrProbeSource = () => `(async () => {
   const others = (globalThis.__smokeCalls || []).map(c => c[0]).filter(c => /^(partner_op|term_(send|start))/.test(c));
   if (others.length) return { ok: false, why: '停止接回中的視窗不該呼叫別的動作：' + others.join('、') };
   if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '確認後確認框沒有關' };
-  // 再開一次確認框，畫面截圖停在這裡
+  // 再開一次確認框確認還開得起來，然後關掉，讓截圖看得到完整的樹；小字收回，只留終端服務那一列展開當對照
   if (!(await askResuming())) return { ok: false, why: '停止完成後再按「停止」沒有開出確認框' };
+  const cancel2 = [...document.querySelectorAll('.dlg .partner-actions button')].find(b => b.textContent.trim() === '取消');
+  if (!cancel2) return { ok: false, why: '再開的確認框沒有「取消」鈕' };
+  cancel2.click();
+  if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '截圖前確認框沒有關' };
+  for (const b of mores()) if (b.getAttribute('aria-expanded') === 'true' && !b.closest('.tm-node[data-kind="mux"]')) b.click();
+  await sleep(200);
   return { ok: true };
 })()`
 

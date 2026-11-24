@@ -1,7 +1,7 @@
 // 工作管理員的樹狀畫面（#1860 F）：ASN ＞ 終端服務 ＞ 各代理。電腦、手機、別台設備共用這一份元件，樣式 .tm-* 在 style.css。
 // 元件只吃整理好的資料（controller.view().tree，見 task-tree.mjs）：不讀名單、不呼叫後端；按鈕按下去只往外送 act（操作名, 值），
 // 操作名沿用 tm-ask／tm-handover／tm-view／tm-adopt，由外面接到既有的停止、交接、看畫面、納入管理。
-// 收合狀態（▾）由元件自己記，5 秒更新資料時不會被打回展開。
+// 收合狀態（▾）與小字展開（「詳細」）都由元件自己記，5 秒更新資料時不會被重設。小字預設收起，主行只留名稱、狀態、標籤、重複警示與操作鈕。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { AsnButton } from './ui-kit.mjs'
 import { COLUMNS, DASH, TEXT as TM } from './task-manager.mjs'
@@ -10,7 +10,11 @@ import { TREE_TEXT, ROOT_KEY, isCollapsed, toggleCollapsed } from './task-tree.m
 // 欄位名只有 COLUMNS 一個來源（原本表格的表頭）
 const LABEL = Object.freeze({ engine: COLUMNS[1], pid: COLUMNS[2], memory: COLUMNS[3], uptime: COLUMNS[4], cmp: COLUMNS[6], where: COLUMNS[7] })
 
-/** 一個節點的小字欄位（引擎、程序編號、記憶體、開了多久、壓縮次數）：{ k, v, tag, tagState }；整理成純函式，畫面與測試共用 */
+// 展開控制的字（跟 ▾ 收合子樹分開：那個收的是底下的節點，這個開的是這一列自己的小字）
+const DETAIL_TEXT = Object.freeze({ show: '詳細', hide: '收起詳細' })
+
+/** 一個節點的小字欄位（引擎、程序編號、記憶體、開了多久、壓縮次數）：{ k, v }；整理成純函式，畫面與測試共用。預設收起，點「詳細」才看得到。
+ * 「請交接／交接中」的標籤要讓人據以行動，留在主行，不在這裡 */
 export function nodeFields(n) {
   const out = [
     { k: LABEL.engine, v: n.engine },
@@ -19,7 +23,7 @@ export function nodeFields(n) {
     { k: LABEL.uptime, v: n.uptime },
   ]
   // 壓縮次數只有 Claude 視窗有；其他列不放（原本表格每列都寫「—」，樹裡不再逐列重複）
-  if (n.cmpText !== DASH || n.cmpTag) out.push({ k: LABEL.cmp, v: n.cmpText, tag: n.cmpTag, tagState: n.cmpState })
+  if (n.cmpText !== DASH || n.cmpTag) out.push({ k: LABEL.cmp, v: n.cmpText })
   return out
 }
 
@@ -33,22 +37,25 @@ export const TaskNode = {
     folded: { type: Boolean, default: false },
     stateText: { type: String, default: '' },   // 狀態那一格要寫的字（ASN 寫「運作中」、終端服務寫「底下 N 個代理」）；空白就用這一列自己的狀態
     busy: { type: Boolean, default: false },
+    open: { type: Boolean, default: false },   // 小字展開了沒（狀態由 TaskTree 記，這裡只畫）
   },
-  emits: ['fold', 'act'],
+  emits: ['fold', 'act', 'toggle'],
   setup(props) {
     const { computed } = globalThis.Vue
     const fields = computed(() => nodeFields(props.node))
     const state = computed(() => props.stateText || props.node.status)
-    return { TM, TREE_TEXT, LABEL, fields, state }
+    return { TM, TREE_TEXT, DETAIL_TEXT, LABEL, fields, state }
   },
   template: `<div class="tm-node" :class="{ dup: node.dup, view: node.viewOnly }" :data-kind="node.kind" :data-level="level" role="treeitem" :aria-level="level" :aria-expanded="foldable ? String(!folded) : null">
     <asn-button v-if="foldable" level="text" class="tm-fold" :aria-label="(folded ? TREE_TEXT.unfold : TREE_TEXT.fold) + ' ' + node.name" @click="$emit('fold')">{{ folded ? '▸' : '▾' }}</asn-button>
     <span v-else class="tm-fold-gap" aria-hidden="true"></span>
     <div class="tm-main">
-      <div class="tm-title"><b class="tm-name">{{ node.name }}</b><span class="tm-tag dup" v-if="node.dup">{{ TM.dupTag }}</span><span class="tm-state">{{ state }}</span></div>
+      <div class="tm-title"><b class="tm-name">{{ node.name }}</b><span class="tm-tag dup" v-if="node.dup">{{ TM.dupTag }}</span><span class="tm-state">{{ state }}</span><span class="tm-tag" v-if="node.cmpTag" :class="node.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ node.cmpTag }}</span><asn-button level="text" class="tm-more" :aria-expanded="String(open)" :aria-label="(open ? DETAIL_TEXT.hide : DETAIL_TEXT.show) + ' ' + node.name" @click="$emit('toggle')">{{ open ? DETAIL_TEXT.hide : DETAIL_TEXT.show }}</asn-button></div>
       <small class="tm-dupnote" v-if="node.dupNote">{{ node.dupNote }}</small>
-      <small class="tm-meta"><span class="tm-f" v-for="f in fields" :key="f.k">{{ f.k }} {{ f.v }}<template v-if="f.tag"> <span class="tm-tag" :class="f.tagState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ f.tag }}</span></template></span></small>
-      <small class="tm-where">{{ LABEL.where }} <span class="tm-src"><span class="tm-tag native" v-if="node.native">{{ node.source }}</span><template v-else>{{ node.source }}</template></span></small>
+      <div class="tm-detail" v-if="open">
+        <small class="tm-meta"><span class="tm-f" v-for="f in fields" :key="f.k">{{ f.k }} {{ f.v }}</span></small>
+        <small class="tm-where">{{ LABEL.where }} <span class="tm-src"><span class="tm-tag native" v-if="node.native">{{ node.source }}</span><template v-else>{{ node.source }}</template></span></small>
+      </div>
     </div>
     <div class="tm-act">
       <asn-button state="danger" class="tm-stop" v-if="!node.viewOnly && !node.handing" :disabled="!node.canStop || busy" :title="node.why" :aria-label="TM.stop + ' ' + node.name" @click="$emit('act', 'tm-ask', node.key)">{{ TM.stop }}</asn-button>
@@ -77,18 +84,22 @@ export const TaskTree = {
     // 沒有 ASN 本體那一列時，終端服務與直接掛的列就是最外層（層級少一層）
     const base = () => (props.tree.root ? 2 : 1)
     const act = (op, value) => emit('act', op, value)
-    return { ROOT_KEY, folded, fold, base, act }
+    // 小字展開：和收合子樹分開記，以列的穩定鍵（node.key）為準，5 秒更新換了 tree 也不會重設
+    const opened = ref([])
+    const isOpen = node => isCollapsed(opened.value, node.key)
+    const toggle = node => { opened.value = toggleCollapsed(opened.value, node.key) }
+    return { ROOT_KEY, folded, fold, base, act, isOpen, toggle }
   },
   template: `<div class="tm-tree" role="tree">
-    <task-node v-if="tree.root" :node="tree.root.node" :level="1" foldable :folded="folded(ROOT_KEY)" :state-text="tree.root.statusText" :busy="busy" @fold="fold(ROOT_KEY)" @act="act"></task-node>
+    <task-node v-if="tree.root" :node="tree.root.node" :level="1" foldable :folded="folded(ROOT_KEY)" :state-text="tree.root.statusText" :busy="busy" :open="isOpen(tree.root.node)" @fold="fold(ROOT_KEY)" @toggle="toggle(tree.root.node)" @act="act"></task-node>
     <div class="tm-kids" :class="{ top: !tree.root }" role="group" v-if="!tree.root || !folded(ROOT_KEY)">
       <template v-for="g in tree.groups" :key="g.key">
-        <task-node :node="g.node" :level="base()" foldable :folded="folded(g.key)" :state-text="g.summary" :busy="busy" @fold="fold(g.key)" @act="act"></task-node>
+        <task-node :node="g.node" :level="base()" foldable :folded="folded(g.key)" :state-text="g.summary" :busy="busy" :open="isOpen(g.node)" @fold="fold(g.key)" @toggle="toggle(g.node)" @act="act"></task-node>
         <div class="tm-kids" role="group" v-if="!folded(g.key)">
-          <task-node v-for="a in g.agents" :key="a.key" :node="a" :level="base() + 1" :busy="busy" @act="act"></task-node>
+          <task-node v-for="a in g.agents" :key="a.key" :node="a" :level="base() + 1" :busy="busy" :open="isOpen(a)" @toggle="toggle(a)" @act="act"></task-node>
         </div>
       </template>
-      <task-node v-for="d in tree.direct" :key="d.key" :node="d" :level="base()" :busy="busy" @act="act"></task-node>
+      <task-node v-for="d in tree.direct" :key="d.key" :node="d" :level="base()" :busy="busy" :open="isOpen(d)" @toggle="toggle(d)" @act="act"></task-node>
     </div>
   </div>`,
 }

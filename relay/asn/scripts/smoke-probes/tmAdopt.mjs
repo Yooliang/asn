@@ -22,6 +22,8 @@ export const tmAdoptProbeSource = () => `(async () => {
   await click(entry);
   const rows = await waitFor(() => { const r = [...document.querySelectorAll('.tm-tree .tm-node')]; return r.length >= 9 ? r : null });
   if (!rows) return { ok: false, why: '工作管理員沒有列出程式' };
+  for (const m of document.querySelectorAll('.tm-tree .tm-more')) if (m.getAttribute('aria-expanded') === 'false') await click(m);   // 運行位置在小字裡，預設收起，先點開
+  await waitFor(() => document.querySelectorAll('.tm-tree .tm-src').length >= 9);
   const btnOf = r => [...r.querySelectorAll('button.tm-adopt')].find(vis) || null;
   const withBtn = rows.filter(btnOf);
   const src = r => r.querySelector('.tm-src')?.textContent.trim() ?? '';
