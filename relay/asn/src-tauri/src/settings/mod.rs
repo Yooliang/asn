@@ -538,3 +538,5 @@ mod me_flags_tests;
 mod moved_tests;
 #[cfg(all(test, desktop))]
 mod bridge_prefs_tests;
+#[cfg(test)]
+mod guard_tests;
