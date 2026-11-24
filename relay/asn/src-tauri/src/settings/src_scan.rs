@@ -273,9 +273,13 @@ fn test_ranges(text: &str) -> Result<Vec<(usize, usize, Option<String>)>, usize>
 }
 
 /// 去掉 `#[cfg(test)]` 標著的項目後的正式碼。被拿掉的部分換成同樣數量的換行（行號不變），其餘原樣保留。
+#[track_caller]
 pub(crate) fn prod_source(text: impl AsRef<str>) -> String {
     let text = text.as_ref();
-    try_prod_source(text).unwrap_or_else(|line| panic!("src_scan：原始碼結構不完整，第 {line} 行附近找不到結尾，守門無法判斷哪裡是測試碼"))
+    let who = std::panic::Location::caller();
+    try_prod_source(text).unwrap_or_else(|line| {
+        panic!("src_scan：{who} 餵進來的原始碼結構不完整（第 {line} 行附近找不到結尾）；若是檔案片段，請改餵完整的檔再自己切，不能餵片段")
+    })
 }
 
 /// 同 `prod_source`，但結構不完整時回傳 Err(第幾行)，讓呼叫端補上檔名再 panic
