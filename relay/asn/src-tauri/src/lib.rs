@@ -2431,6 +2431,7 @@ fn start_perm_remote_poller(
         let mut tracker = perm_remote::Tracker::default();
         // 掃描與建立／撤回維持每 TICK_SECS 一輪；領取手機決定（perm_req_take）有進行中的請求才發：
         // 保底每 TAKE_FALLBACK_SECS 一次，後台敲門鈴（perm_wake）就立刻發一次。叫醒只領取，不多跑掃描（寬限以輪計）
+        // 注意：保底是在每 TICK_SECS（3 秒）一輪的 tick 上檢查，所以門鈴漏接時最壞約 12 秒（保底 10 秒，落在 3 秒一輪的下一個檢查點）才領到
         let tick_every = std::time::Duration::from_secs(perm_remote::TICK_SECS);
         let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + tick_every, tick_every);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -2447,8 +2448,10 @@ fn start_perm_remote_poller(
                 }
                 _ = perm_wake.notified() => {
                     if app.state::<auth::AuthState>().status().signed_in && perm_remote::should_take(tracker.has_active(), last_take.elapsed().as_secs(), true) {
-                        perm_remote::take_step(relay.as_ref(), &terms, &data_dir, &mut tracker).await;
-                        last_take = std::time::Instant::now();
+                        // 成功才更新 last_take（失敗就不把保底往後推；和上面一般輪的做法一致）
+                        if perm_remote::take_step(relay.as_ref(), &terms, &data_dir, &mut tracker).await {
+                            last_take = std::time::Instant::now();
+                        }
                     }
                 }
             }
