@@ -68,7 +68,7 @@ mod tests {
         assert!(f.contains("view_wake::POLL_INTERVAL_SECS"), "備援輪詢還在");
         assert!(!f.contains("tokio::time::sleep(std::time::Duration::from_secs(10)).await;\n            // 放行條件"), "不能退回純 sleep");
         // 門鈴的回呼要叫醒這個輪詢
-        let bell = lib.split("bell::run(url, topic, move |_| {").nth(1).expect("有門鈴回呼").split(".await;").next().unwrap();
+        let bell = lib.split("bell::run(url, topic, move |ring| {").nth(1).expect("有門鈴回呼").split(".await;").next().unwrap();
         assert!(bell.contains("view_notify_bell") || bell.contains("view_wake_bell"), "門鈴要叫醒看畫面的輪詢");
         assert!(bell.contains("w.notify_one()"));
     }

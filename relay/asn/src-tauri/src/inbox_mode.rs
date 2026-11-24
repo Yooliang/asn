@@ -329,7 +329,7 @@ pub fn spawn_bell(relay: Arc<Relay>, url: String, wake: Arc<Notify>, log: Arc<Br
                 }
             }
         };
-        crate::bell::run(url, topic, move |_| wake.notify_one()).await;
+        crate::bell::run(url, topic, move |ring| if crate::bell::wakes_mail(ring) { wake.notify_one() }).await;
     })
 }
 
