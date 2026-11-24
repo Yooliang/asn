@@ -53,7 +53,7 @@ export const inlinePicsProbeSource = ({ scene, phone }) => `(async () => {
       const f = frame(n); if (!f) return { ok: false, why: '找不到 ' + n };
       if (!within(f, MAXW, MAXH)) return { ok: false, why: n + ' 超過最大尺寸：' + f.getBoundingClientRect().width + '×' + f.getBoundingClientRect().height };
       const a = acts(f); if (!a) return { ok: false, why: n + ' 下方沒有動作列' };
-      const want = PHONE ? '儲存|另存新檔|分享' : '儲存|另存新檔';
+      const want = PHONE ? '儲存|分享' : '另存新檔';   // 同一種存法不放兩顆鈕（#2299 審查）
       if (labels(a).join('|') !== want) return { ok: false, why: n + ' 的動作列是「' + labels(a).join('|') + '」，應該是「' + want + '」' };
       if (a.classList.contains('off')) return { ok: false, why: n + ' 大圖已經在了，動作列不該反灰' };
     }
@@ -81,7 +81,7 @@ export const inlinePicsProbeSource = ({ scene, phone }) => `(async () => {
     if (!ld || ld.dataset.state !== 'loading') return { ok: false, why: '下載中的圖狀態不對：' + (ld && ld.dataset.state) };
     if (!ld.querySelector('.att-spin')) return { ok: false, why: '下載中要有轉圈' };
     if (!ld.querySelector('img')) return { ok: false, why: '下載中要有模糊的縮圖' };
-    const la = acts(ld); if (!la || !la.classList.contains('off')) return { ok: false, why: '下載中動作列要有、而且反灰' };
+    if (acts(ld)) return { ok: false, why: '下載中不該有動作列（載入完成才出現）' };
     const bg = frame('太大.webp');
     if (!bg || bg.dataset.state !== 'big') return { ok: false, why: '太大的圖狀態不對：' + (bg && bg.dataset.state) };
     const pill = bg.querySelector('.att-pill');

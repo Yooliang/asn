@@ -48,15 +48,14 @@ test('門檻：電腦 3 MB、手機 1.5 MB；剛好等於不算太大；大小�
 
 test('動作列：只有大圖到了才能按；下載中反灰；失敗、太大、過期不放', () => {
   assert.equal(actsMode('ready'), 'on')
-  assert.equal(actsMode('loading'), 'off')
-  assert.equal(actsMode('wait'), 'off')
-  for (const s of ['failed', 'big', 'expired']) assert.equal(actsMode(s), 'none', s)
+  for (const s of ['loading', 'wait', 'failed', 'big', 'expired']) assert.equal(actsMode(s), 'none', s + '：載入完成前不畫動作列')
 })
 
 test('動作列項目：電腦「儲存｜另存新檔」沒有分享；手機多「分享」', () => {
-  assert.deepEqual(actionItems({ phone: false }).map(i => i.label), ['儲存', '另存新檔'])
-  assert.deepEqual(actionItems({ phone: true }).map(i => i.label), ['儲存', '另存新檔', '分享'])
-  assert.deepEqual(actionItems().map(i => i.key), ['save', 'saveas'])
+  // 同一種存法不放兩顆鈕：電腦只有另存新檔，手機儲存＋分享（#1912 做出直接存才把「儲存」加回電腦）
+  assert.deepEqual(actionItems({ phone: false }).map(i => i.label), ['另存新檔'])
+  assert.deepEqual(actionItems({ phone: true }).map(i => i.label), ['儲存', '分享'])
+  assert.deepEqual(actionItems().map(i => i.key), ['saveas'])
 })
 
 test('框大小：電腦最大 280×320、手機 250×300，保持比例、不放大；不知道長寬用固定比例', () => {

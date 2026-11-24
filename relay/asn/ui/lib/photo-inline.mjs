@@ -51,9 +51,8 @@ export function inlineState(p, ctx = {}) {
 
 /** 這個狀態下動作列怎麼放：none 不放｜off 放但反灰｜on 可按 */
 export function actsMode(state) {
-  if (state === 'ready') return 'on'
-  if (state === 'loading' || state === 'wait') return 'off'
-  return 'none'
+  // 載入完成才出現；下載中、排隊、失敗、太大、過期一律不畫（領隊 #2299：灰掉但留著會讓人以為能按）
+  return state === 'ready' ? 'on' : 'none'
 }
 
 /** 保持比例縮進 max 框內（只縮不放大）。不知道長寬就用固定比例的框 */
@@ -95,11 +94,15 @@ export function bigButtonText(p, fmt) {
   return s ? `${TEXT.bigBtn}　${s}` : TEXT.bigBtn
 }
 
-/** 動作列的項目：電腦「儲存｜另存新檔」，手機多一個「分享」。#1912 的檔案卡沿用同一份 */
+/**
+ * 動作列的項目。#1912 的檔案卡沿用同一份。
+ * 現在只有一種存法（電腦跳另存對話框、手機存進「下載/ASN」），兩顆行為一樣的鈕同時放會讓人以為有差別（領隊 #2299）：
+ * 電腦只放「另存新檔」，手機放「儲存」「分享」。#1912 做出「直接存進預設資料夾」之後，再把「儲存」加回電腦。
+ */
 export function actionItems({ phone = false } = {}) {
-  const items = [{ key: 'save', label: '儲存' }, { key: 'saveas', label: '另存新檔' }]
-  if (phone) items.push({ key: 'share', label: '分享' })
-  return items
+  return phone
+    ? [{ key: 'save', label: '儲存' }, { key: 'share', label: '分享' }]
+    : [{ key: 'saveas', label: '另存新檔' }]
 }
 
 export const SHARE_NO_SUPPORT = '這支手機不能直接分享照片，請改按「儲存」。'
