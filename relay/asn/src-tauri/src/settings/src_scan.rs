@@ -110,8 +110,8 @@ fn skip_string(b: &[u8], from: usize) -> usize {
     b.len()
 }
 
-/// `i` 是 `open` 字元的位置，回傳對應的結尾字元之後的位置（跳過字串與註解）；找不到回傳檔尾
-fn match_close(text: &str, i: usize, open: u8, close: u8) -> usize {
+/// `i` 是 `open` 字元的位置，回傳對應的結尾字元之後的位置（跳過字串與註解）；找不到回傳 None
+fn match_close(text: &str, i: usize, open: u8, close: u8) -> Option<usize> {
     let b = text.as_bytes();
     let (mut depth, mut j) = (0usize, i);
     while j < b.len() {
@@ -124,12 +124,12 @@ fn match_close(text: &str, i: usize, open: u8, close: u8) -> usize {
         } else if b[j] == close {
             depth -= 1;
             if depth == 0 {
-                return j + 1;
+                return Some(j + 1);
             }
         }
         j += 1;
     }
-    b.len()
+    None // 找不到結尾：由呼叫端 panic，不能悄悄當成到檔尾
 }
 
 /// 屬性內容（`#[` 與 `]` 之間）是不是「只有測試編譯才存在」：`cfg(test)`、`cfg(all(test, …))`。
@@ -166,12 +166,12 @@ fn first_word(s: &str) -> &str {
 }
 
 /// 項目結束位置：`from` 是（可能還有後續屬性的）項目開頭。回傳結束後的位置，以及中途讀到的 `#[path = "…"]`。
-fn item_end(text: &str, from: usize) -> (usize, Option<String>) {
+fn item_end(text: &str, from: usize) -> Result<(usize, Option<String>), usize> {
     let b = text.as_bytes();
     let mut i = skip_blank(text, from);
     let mut path_attr = None;
     while b.get(i) == Some(&b'#') && b.get(i + 1) == Some(&b'[') {
-        let close = match_close(text, i + 1, b'[', b']');
+        let close = match_close(text, i + 1, b'[', b']').ok_or(i)?;
         let inner = &text[i + 2..close - 1];
         if let Some(rest) = inner.trim_start().strip_prefix("path") {
             if let Some(q) = rest.trim_start().strip_prefix('=') {
@@ -186,7 +186,7 @@ fn item_end(text: &str, from: usize) -> (usize, Option<String>) {
     if first_word(head) == "pub" {
         head = head[3..].trim_start();
         if head.starts_with('(') {
-            let e = match_close(head, 0, b'(', b')');
+            let e = match_close(head, 0, b'(', b')').ok_or(i)?;
             head = head[e..].trim_start();
         }
     }
@@ -204,34 +204,42 @@ fn item_end(text: &str, from: usize) -> (usize, Option<String>) {
         match b[j] {
             b'(' => paren += 1,
             b'[' => brack += 1,
-            b')' | b']' if paren == 0 && brack == 0 => return (j, path_attr), // 外層的結尾，項目在這之前就結束了
+            b')' | b']' if paren == 0 && brack == 0 => return Ok((j, path_attr)), // 外層的結尾，項目在這之前就結束了
             b')' => paren -= 1,
             b']' => brack -= 1,
-            b'}' if paren == 0 && brack == 0 => return (j, path_attr),
+            b'}' if paren == 0 && brack == 0 => return Ok((j, path_attr)),
             b'{' if paren == 0 && brack == 0 => {
-                let e = match_close(text, j, b'{', b'}');
+                let e = match_close(text, j, b'{', b'}').ok_or(j)?;
                 if is_item && !only_semicolon {
-                    return (e, path_attr);
+                    return Ok((e, path_attr));
                 }
                 if !is_item {
                     // 區塊敘述、列舉變體、match 分支：後面緊跟 `;`、`,` 就一起收走
                     let k = skip_blank(text, e);
-                    return (if matches!(b.get(k), Some(b';') | Some(b',')) { k + 1 } else { e }, path_attr);
+                    return Ok((if matches!(b.get(k), Some(b';') | Some(b',')) { k + 1 } else { e }, path_attr));
                 }
                 j = e;
                 continue;
             }
-            b';' if paren == 0 && brack == 0 => return (j + 1, path_attr),
-            b',' if paren == 0 && brack == 0 && !is_item => return (j + 1, path_attr),
+            b';' if paren == 0 && brack == 0 => return Ok((j + 1, path_attr)),
+            b',' if paren == 0 && brack == 0 && !is_item => return Ok((j + 1, path_attr)),
             _ => {}
         }
         j += 1;
     }
-    (b.len(), path_attr)
+    Err(i) // 項目沒有結尾（沒有 `;`、也沒有對應的 `}`）：不能悄悄當成到檔尾
 }
 
 /// 每個測試項目：(屬性開頭, 項目結束, `#[path]` 的值)
-fn test_ranges(text: &str) -> Vec<(usize, usize, Option<String>)> {
+fn line_of(text: &str, pos: usize) -> usize {
+    text.as_bytes()[..pos.min(text.len())].iter().filter(|&&c| c == LF).count() + 1
+}
+
+const LF: u8 = 10;
+
+/// 找不到結尾（括號、屬性、項目沒收尾）時回傳 Err(出問題的位置)，絕不悄悄當成到檔尾：
+/// 否則一個詞法判讀出錯的檔會被當成「整段都是測試碼」吞掉，那個檔就沒有任何守門保護
+fn test_ranges(text: &str) -> Result<Vec<(usize, usize, Option<String>)>, usize> {
     let b = text.as_bytes();
     let mut out = Vec::new();
     let mut i = 0;
@@ -244,13 +252,13 @@ fn test_ranges(text: &str) -> Vec<(usize, usize, Option<String>)> {
             let inner = b.get(i + 1) == Some(&b'!');
             let lb = i + 1 + inner as usize;
             if b.get(lb) == Some(&b'[') {
-                let close = match_close(text, lb, b'[', b']');
+                let close = match_close(text, lb, b'[', b']').ok_or(i)?;
                 if is_test_cfg(&text[lb + 1..close - 1]) {
                     if inner {
                         out.push((i, b.len(), None)); // #![cfg(test)]：整個檔都是測試
-                        return out;
+                        return Ok(out);
                     }
-                    let (end, path) = item_end(text, close);
+                    let (end, path) = item_end(text, close)?;
                     out.push((i, end, path));
                     i = end.max(close);
                     continue;
@@ -261,21 +269,26 @@ fn test_ranges(text: &str) -> Vec<(usize, usize, Option<String>)> {
         }
         i += 1;
     }
-    out
+    Ok(out)
 }
 
 /// 去掉 `#[cfg(test)]` 標著的項目後的正式碼。被拿掉的部分換成同樣數量的換行（行號不變），其餘原樣保留。
 pub(crate) fn prod_source(text: impl AsRef<str>) -> String {
     let text = text.as_ref();
+    try_prod_source(text).unwrap_or_else(|line| panic!("src_scan：原始碼結構不完整，第 {line} 行附近找不到結尾，守門無法判斷哪裡是測試碼"))
+}
+
+/// 同 `prod_source`，但結構不完整時回傳 Err(第幾行)，讓呼叫端補上檔名再 panic
+pub(crate) fn try_prod_source(text: &str) -> Result<String, usize> {
     let mut out = String::with_capacity(text.len());
     let mut keep = 0;
-    for (start, end, _) in test_ranges(text) {
+    for (start, end, _) in test_ranges(text).map_err(|p| line_of(text, p))? {
         out.push_str(&text[keep..start]);
         out.extend(text[start..end].chars().filter(|&c| c == '\n'));
         keep = end;
     }
     out.push_str(&text[keep..]);
-    out
+    Ok(out)
 }
 
 /// 把 `//`、`/* */` 註解拿掉（換行保留，行號不變）；字串與字元字面值原樣保留。
@@ -332,15 +345,16 @@ pub(crate) fn external_test_files(root: &Path) -> BTreeSet<String> {
     let mut out: BTreeSet<PathBuf> = BTreeSet::new();
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap().replace("\r\n", "\n");
-        for (start, end, path_attr) in test_ranges(&text) {
+        let ranges = test_ranges(&text).unwrap_or_else(|p| panic!("{}：第 {} 行附近找不到結尾，守門無法判斷哪裡是測試碼", rel_of(root, f), line_of(&text, p)));
+        for (start, end, path_attr) in ranges {
             let mut body = text[start..end].trim();
             while body.starts_with("#[") {
-                body = body[match_close(body, 1, b'[', b']')..].trim_start();
+                body = body[match_close(body, 1, b'[', b']').expect("屬性沒有結尾")..].trim_start();
             }
             if body.starts_with("pub") {
                 body = body[3..].trim_start();
                 if body.starts_with('(') {
-                    body = body[match_close(body, 0, b'(', b')')..].trim_start();
+                    body = body[match_close(body, 0, b'(', b')').expect("括號沒有結尾")..].trim_start();
                 }
             }
             if let Some(name) = body.strip_prefix("mod ").and_then(|r| r.trim().strip_suffix(';')) {
@@ -382,7 +396,8 @@ pub(crate) fn prod_files(root: &Path) -> Vec<(String, String)> {
             continue;
         }
         let text = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
-        out.push((rel, prod_source(&text)));
+        let prod = try_prod_source(&text).unwrap_or_else(|line| panic!("{rel}：第 {line} 行附近找不到結尾，守門無法判斷哪裡是測試碼"));
+        out.push((rel, prod));
     }
     out
 }
@@ -514,6 +529,28 @@ mod tests {
         // 檔名叫 tests.rs 但沒有任何 #[cfg(test)] 宣告它：不靠檔名慣例，所以不排除
         assert!(!got.contains("real.rs") && !got.contains("notest.rs"));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn 結構不完整的原始碼會panic() {
+        // 測試模組沒有收尾、屬性沒有收尾、項目沒有收尾：都不能悄悄當成到檔尾
+        for bad in ["fn a() {}\n#[cfg(test)]\nmod tests {\n    fn b() {\n", "#[cfg(test)\nfn a() {}\n", "#[cfg(test)]\nfn a()\n", "#[cfg(test)]\nconst X: [u8; 2] = [1, 2\n"] {
+            assert!(try_prod_source(bad).is_err(), "應該判成結構不完整：{bad}");
+            assert!(std::panic::catch_unwind(|| prod_source(bad)).is_err(), "prod_source 應該 panic：{bad}");
+        }
+        // 訊息要講第幾行
+        assert_eq!(try_prod_source("fn a() {}\n\n#[cfg(test)]\nmod tests {\n"), Err(4));
+        // 完整的不受影響
+        assert!(try_prod_source("#[cfg(test)]\nmod tests {}\n").is_ok());
+    }
+
+    #[test]
+    fn crlf原始碼行數與行號不變() {
+        let s = "fn a() {}\r\n#[cfg(test)]\r\nmod tests {\r\n    fn b() { let s = \"}\"; }\r\n}\r\nfn after() {}\r\n";
+        let p = prod_source(s);
+        assert_eq!(p.lines().count(), s.lines().count(), "{p:?}");
+        assert_eq!(p.lines().position(|l| l.contains("fn after()")), s.lines().position(|l| l.contains("fn after()")), "行號要一樣");
+        assert!(p.contains("fn a()") && !p.contains("fn b()"));
     }
 
     #[test]

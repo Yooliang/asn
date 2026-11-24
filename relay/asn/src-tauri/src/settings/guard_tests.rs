@@ -13,6 +13,8 @@
 //!    自己取別的函式名都繞得過。
 //! 4. 只掃 `src-tauri/src`，不含 `build.rs` 與其他 crate。
 //! 5. 巨集展開出來的程式、`cfg_attr`、`#[cfg(any(test, …))]` 都當正式碼，不特別處理。
+//!    例：procscan.rs 的 fake_proc_tests，因為 cfg 裡含 `not(`／`any(`，被當成正式碼掃（不影響結果，只是多掃）。
+//! 6. 切割時結構不完整（找不到結尾）會直接 panic 並指出檔名與行號，不會悄悄當成整檔都是測試碼。
 //!
 //! 兩份待搬／例外清單的規則比照 `test/invoke-exit.test.mjs`：次數只准變少、不准變多；
 //! 變少時清單也要同步改，否則一樣紅（讓清單只會縮、不會留著過期的空白支票）。
@@ -209,7 +211,8 @@ let q = \"b.json\";"), 2);
     assert!(all.iter().all(|(r, _)| r != "settings/guard_tests.rs" && r != "settings/src_scan.rs"));
     let account = &all.iter().find(|(r, _)| r == "account.rs").expect("account.rs 要被掃到").1;
     assert!(!account.contains("fn 帳號名稱驗證"), "account.rs 的測試碼要切掉");
-    assert!(account.lines().count() > 828, "account.rs 測試模組後面的正式碼（約 828 行之後）要掃得到");
+    // 測試模組（約 597 行起）之後的已知正式碼字樣（約 839 行）要在切完的結果裡；尾巴被吞掉就會紅。切法本身的同類前提在 src_scan.rs 的同名結構測試
+    assert!(account.contains("pub async fn setup_remote_status("), "account.rs 測試模組後面的正式碼要掃得到");
     let probe = format!("{account}
 fn probe() {{ std::fs::write(\"x.json\", \"\"); }}
 ");
