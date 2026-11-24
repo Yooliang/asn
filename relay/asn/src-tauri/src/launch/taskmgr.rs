@@ -50,6 +50,9 @@ pub(crate) struct TaskRow {
     /// 只對夥伴視窗（claude／pi／resuming／awaiting 與 ASN 自己的視窗）判斷；其他列一律 `unknown`（不套用，畫面也不讀）。
     /// `native` 一定要有正面證據（見 `term_of`），找不到絕不當成原生
     pub term: &'static str,
+    /// 這一列開在哪個終端服務底下（終端服務的程序編號）；不在任何終端服務底下、或這一列本身是終端服務／ASN／自己開的前景程式，就是 None。
+    /// 畫面排成樹時只看這個欄位，不自己猜歸屬；`inside` 就是「mux_pid 等於它、而且不是 process」的列數
+    pub mux_pid: Option<u32>,
 }
 
 /// `TaskRow.term` 的三個值（序列化後的穩定字串）
@@ -223,6 +226,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             live: true,
             inside: None,
             term: term_of(os, &table, w.pid),
+            mux_pid: None,
         };
         listed.push((row, mux_of(w.pid)));
     }
@@ -244,6 +248,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             live: true,
             inside: None,
             term: term_of(os, &table, s.root_pid),
+            mux_pid: None,
         };
         listed.push((row, mux_of(s.root_pid)));
     }
@@ -265,6 +270,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             live: true,
             inside: None,
             term: term_of(os, &table, a.root_pid),
+            mux_pid: None,
         };
         listed.push((row, mux_of(a.root_pid)));
     }
@@ -288,6 +294,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             live: true,
             inside: None,
             term: TERM_UNKNOWN,
+            mux_pid: None,
         };
         listed.push((row, if is_mux { Some(t.pid) } else { mux_of(t.pid) }));
     }
@@ -309,11 +316,13 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             live: true,
             inside: None,
             term: TERM_UNKNOWN,
+            mux_pid: None,
         };
         listed.push((row, None));
     }
 
-    let mut rows: Vec<TaskRow> = listed.iter().map(|(r, _)| r.clone()).collect();
+    // 歸屬只在這裡算一次：把「在哪個終端服務底下」寫進每一列，畫面不再自己猜
+    let mut rows: Vec<TaskRow> = listed.iter().map(|(r, m)| TaskRow { mux_pid: *m, ..r.clone() }).collect();
     for mux in &mux_pids {
         let inside = listed.iter().filter(|(r, m)| *m == Some(*mux) && r.kind != "process").count();
         rows.push(TaskRow {
@@ -332,6 +341,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             live: true,
             inside: Some(inside),
             term: TERM_UNKNOWN,
+            mux_pid: None,
         });
     }
     if src.own_pid != 0 {
@@ -351,6 +361,7 @@ pub(crate) fn build(os: &dyn Os, src: &Sources) -> Snapshot {
             live: true,
             inside: None,
             term: TERM_UNKNOWN,
+            mux_pid: None,
         });
     }
     rows.truncate(ROWS_MAX);
@@ -849,5 +860,86 @@ mod tests {
         assert_eq!(snap.rows.iter().find(|r| r.kind == "asn").unwrap().term, TERM_UNKNOWN, "非夥伴列不套用");
         let json = serde_json::to_value(&snap).unwrap();
         assert_eq!(json["rows"][0]["term"], "native", "序列化的欄位名與值是穩定字串");
+    }
+
+    // ---- #1860 mux_pid：每一列在哪個終端服務底下（畫面排樹只看它）
+
+    fn mux_pid_of(snap: &Snapshot, name: &str) -> Option<u32> {
+        snap.rows.iter().find(|r| r.name == name).unwrap_or_else(|| panic!("找不到 {name}")).mux_pid
+    }
+
+    /// 兩個終端服務：500 底下 502（小東）、512（西川）；600 底下 602（雯）；原生主控台 42（小乙）不在任何服務底下
+    fn two_mux_os() -> FakeOs {
+        os(
+            vec![
+                p(40, 999, "explorer.exe"),
+                p(41, 40, "cmd.exe"),
+                p(42, 41, "claude.exe"),
+                p(500, 40, switch::MUX_SERVER),
+                p(501, 500, "powershell.exe"),
+                p(502, 501, "claude.exe"),
+                p(511, 500, "powershell.exe"),
+                p(512, 511, "claude.exe"),
+                p(600, 40, switch::MUX_SERVER),
+                p(601, 600, "powershell.exe"),
+                p(602, 601, "claude.exe"),
+                p(70, 40, "asn.exe"),
+            ],
+            &[],
+            &[],
+        )
+    }
+
+    #[test]
+    fn mux_pid_夥伴視窗帶它所在終端服務的編號_原生的是空() {
+        let o = two_mux_os();
+        let mut s = src(vec![claude("小東", 502), claude("西川", 512), claude("雯", 602), claude("小乙", 42)]);
+        s.own_pid = 70;
+        let snap = build(&o, &s);
+        assert_eq!(mux_pid_of(&snap, "小東"), Some(500));
+        assert_eq!(mux_pid_of(&snap, "西川"), Some(500));
+        assert_eq!(mux_pid_of(&snap, "雯"), Some(600), "多個終端服務：各歸各的");
+        assert_eq!(mux_pid_of(&snap, "小乙"), None, "原生主控台不在任何終端服務底下");
+        assert_eq!(mux_pid_of(&snap, "ASN"), None, "ASN 本體不歸任何終端服務");
+    }
+
+    #[test]
+    fn mux_pid_終端服務本身是空_終端面板開在服務裡就帶服務編號() {
+        let o = two_mux_os();
+        let mut s = src(vec![claude("小東", 502)]);
+        s.terms = vec![TermIn { id: "t1".into(), profile: "agy".into(), pid: 600, started_ms: Some(1), cwd: "G:/w".into(), adopted: false }];
+        let snap = build(&o, &s);
+        for r in snap.rows.iter().filter(|r| r.kind == "mux") {
+            assert_eq!(r.mux_pid, None, "終端服務自己不算在誰底下");
+        }
+        let term = snap.rows.iter().find(|r| r.kind == "terminal").unwrap();
+        assert_eq!(term.mux_pid, Some(600), "終端面板的編號就是服務本身");
+    }
+
+    #[test]
+    fn mux_pid_自己開的前景程式不歸屬任何終端服務() {
+        let o = two_mux_os();
+        let mut s = src(vec![]);
+        s.procs = vec![ProcAgent { pid: 502, engine: "claude".into(), model: None, label: None, background: false, hidden: None, detail: None, place_unknown: false }];
+        let snap = build(&o, &s);
+        let proc_row = snap.rows.iter().find(|r| r.kind == "process").unwrap();
+        assert_eq!(proc_row.mux_pid, None);
+    }
+
+    #[test]
+    fn mux_pid_與inside一致_終端服務的視窗數就是同編號的非process列數() {
+        let o = two_mux_os();
+        let mut s = src(vec![claude("小東", 502), claude("西川", 512), claude("雯", 602), claude("小乙", 42)]);
+        s.terms = vec![TermIn { id: "t1".into(), profile: "agy".into(), pid: 600, started_ms: Some(1), cwd: "G:/w".into(), adopted: false }];
+        let snap = build(&o, &s);
+        let muxes: Vec<&TaskRow> = snap.rows.iter().filter(|r| r.kind == "mux").collect();
+        assert_eq!(muxes.len(), 2);
+        for m in muxes {
+            let members = snap.rows.iter().filter(|r| r.mux_pid == Some(m.pid) && r.kind != "process").count();
+            assert_eq!(m.inside, Some(members), "終端服務 {} 的 inside 要等於 mux_pid 歸給它的列數", m.pid);
+        }
+        let json = serde_json::to_value(&snap).unwrap();
+        let first = json["rows"].as_array().unwrap().iter().find(|r| r["name"] == "小東").unwrap();
+        assert_eq!(first["mux_pid"], 500, "序列化的欄位名是穩定字串");
     }
 }
