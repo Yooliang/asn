@@ -296,7 +296,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
   // 回到前景：立刻拉一次信、更新名單、補正在看的那位的往來記錄
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
-    void core.pull('resume'); core.refreshRosterSoon(); void core.syncReads(); void roomsHook.refresh?.(); push?.sync(); refreshPushSt()
+    void core.pull('resume'); void core.resumeSentStatus(); core.refreshRosterSoon(); void core.syncReads(); void roomsHook.refresh?.(); push?.sync(); refreshPushSt()
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
     else if (viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: '' }) === NOTICE_ID) { core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
   })

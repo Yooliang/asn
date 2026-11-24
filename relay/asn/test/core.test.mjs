@@ -269,10 +269,10 @@ test('寄信狀態：sent_status 更新已送達／已讀；收到 reply_to 標�
   assert.ok(mine?.id, '寄信後對話要記 message id')
   const row = relay.outbox.find(m => m.id === mine.id)
   row.delivered_at = '2026-10-20T08:01:00Z'
-  await core.refreshSentStatus('test')
+  await core.refreshSentStatus('force')
   assert.equal(mine.deliveredAt, '2026-10-20T08:01:00Z')
   row.acked_at = '2026-10-20T08:02:00Z'
-  await core.refreshSentStatus('test')
+  await core.refreshSentStatus('force')
   assert.equal(mine.ackedAt, '2026-10-20T08:02:00Z')
   relay.mail(9, { body: '回你', reply_to: mine.id })
   await core.pull('test')

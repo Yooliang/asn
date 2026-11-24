@@ -48,10 +48,25 @@ export function needsPoll(msg, now = Date.now(), maxAgeMs = 7 * 24 * 3600_000) {
   return true
 }
 
-export function collectPollIds(logs, now = Date.now()) {
+/** 依訊息年齡決定多久查一次：1 小時內 15 秒、1～24 小時 3 分鐘、更久 30 分鐘 */
+export function pollEveryMs(ageMs) {
+  if (ageMs < 3600_000) return 15_000
+  if (ageMs < 24 * 3600_000) return 180_000
+  return 1_800_000
+}
+
+const msgTime = (m) => (typeof m.t === 'number' ? m.t : Date.parse(m.t))
+
+/** 收這輪要查的 id：needsPoll 為真，且距該 id 上次被查已超過它的間隔（沒記錄的一律收） */
+export function collectPollIds(logs, now = Date.now(), lastPolledById = new Map()) {
   const ids = []
   for (const lg of logs.values()) {
-    for (const m of lg) if (needsPoll(m, now)) ids.push(m.id)
+    for (const m of lg) {
+      if (!needsPoll(m, now)) continue
+      const last = lastPolledById.get(m.id)
+      if (last !== undefined && now - last < pollEveryMs(now - msgTime(m))) continue
+      ids.push(m.id)
+    }
   }
   return ids
 }
