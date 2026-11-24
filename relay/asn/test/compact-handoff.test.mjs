@@ -74,19 +74,15 @@ test('「交接」鈕只在「請交接」的列；交接中的列不能停止�
   assert.equal(stopPlan(row({ compact: { count: 0, state: 'count' } }), ctx()).ok, true, '交接結束後新視窗照舊可以停止')
 })
 
-test('交接中的列不顯示「只能看」（只顯示原因）；真正只能看的列才顯示', () => {
+test('交接中的列只顯示原因；整個工作管理員的範本裡沒有「只能看」（#2242）', () => {
   const going = viewRow(row({ compact: { count: 3, state: 'handing' } }), NOW, ctx())
-  assert.equal(going.showViewOnly, false, '交接中：沒有停止鈕，也不能寫「只能看」')
+  assert.equal(going.handing, true)
   assert.equal(going.why, '交接完成前不能停止')
   const own = viewRow(row({ by_asn: false }), NOW, ctx())
   assert.equal(own.viewOnly, true)
-  assert.equal(own.showViewOnly, true, '真正只能看的列照舊顯示')
-  assert.equal(viewRow(row({ compact: { count: 3, state: 'remind' } }), NOW, ctx()).showViewOnly, false, '有停止鈕的列不顯示')
-  // 範本只讀 showViewOnly，不能退回「沒鈕就 v-else 顯示只能看」
+  assert.ok(!own.why.includes('只能看'), '原因用白話寫、不再寫「只能看」')
   const view = read('ui/lib/task-tree-view.mjs')   // #1860 F：節點畫面搬到共用的樹元件
-  // 允許後面再加條件（#1860 F PR3：有「重啟」的列不寫只能看），但一定要以 showViewOnly 為前提
-  assert.match(view, /<small class="tm-viewonly" v-else-if="node\.showViewOnly(?: && [^"]+)?"/)
-  assert.ok(!/<small class="tm-viewonly" v-else /.test(view))
+  assert.ok(!view.includes('只能看') && !view.includes('tm-viewonly') && !view.includes('showViewOnly'), '範本裡不再有「只能看」')
 })
 
 test('控制器：交接中的列按停止不會開確認框；按「交接」只送視窗名', async () => {

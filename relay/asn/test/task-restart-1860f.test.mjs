@@ -286,7 +286,7 @@ test('#1860F-3 畫面：重啟鈕送 act、確認框原位展開（取消在左�
     const btns = m.findAll('.tm-restart')
     assert.equal(btns.length, 2, 'ASN 與終端服務各一顆')
     for (const k of ['asn', 'mux']) {
-      assert.equal(m.findAll(`.tm-node[data-kind="${k}"] > * .tm-viewonly, .tm-node[data-kind="${k}"] > .tm-viewonly`).length, 0, `${k} 有「重啟」就不寫「只能看」，免得矛盾`)
+      assert.ok(!m.find(`.tm-node[data-kind="${k}"]`).textContent.includes('只能看'), `${k} 不寫「只能看」`)
     }
     await m.trigger(m.find('.tm-node[data-kind="mux"] .tm-restart'), 'click')
     assert.deepEqual(m.emitted('act').at(-1), ['tm-restart-ask', MUX])
