@@ -403,6 +403,7 @@
 :root[data-skin="line"] .avb.xl .pin-dot{right:4px;bottom:4px;width:26px;height:26px;padding:5px;border-width:3px}
 
 /* ---------- 看大圖的另存、關閉與左右切換（#1728）：LINE 風格＝實心綠圓鈕＋白色線條圖示；關閉是白底圓鈕＋深灰 ×；到頭的那一顆透明度 .35。只用顏色和形狀，不放任何商標字樣 ---------- */
+:root[data-skin="line"]{--att-r:14px}
 :root[data-skin="line"] .photo-viewer .pv-btn{border:0;border-radius:50%;background:var(--accent);color:#fff;box-shadow:none}
 :root[data-skin="line"] .photo-viewer .pv-btn:hover:not(:disabled){background:#178a49}
 :root[data-skin="line"] .photo-viewer .pv-btn.pv-close{background:#fff;color:#3a3f47}

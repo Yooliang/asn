@@ -24,6 +24,7 @@ import { PROVIDERS, canStart, errorText, phaseText } from './lib/login.mjs'
 import { contextLabel } from './lib/context-usage.mjs'
 import { elevatedBadge } from './lib/elevated.mjs'
 import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, SCROLL_TERM_SELECTOR, inScrollableX, indicatorPos, pagerShift, PAGER_SETTLE_MS, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, sideloadLastText, buttonLabel, initialNav, opsNav, offlineNav, photoNav, tabLabel as tabLabelOf, secretNav, termReqNav, permReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
+import { sharePhoto } from './lib/photo-inline.mjs'
 import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchRun, launchVendors, machinesByNode, pickedRun, progressView, launchInProgress } from './lib/mobile-launch.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { UI_KIT } from './lib/ui-kit.mjs'
@@ -134,6 +135,7 @@ const photoApi = {
   fetch: (id, expiresAt = null) => mobilePhotoApi.fetch(id, expiresAt),
   save: async (id, name) => savePhotoOnPhone(await mobilePhotoApi.save(id, name), bridge),
   reveal: async () => bridge?.openDownloads(),
+  share: (id, name) => sharePhoto({ fetchFull: i => mobilePhotoApi.fetch(i, null), id, name }),   // 「分享」：交給系統的分享面板（#1911）
 }
 
 const info = reactive(await shellApi.startupInfo())   // 響應式：改設備名後就地更新，不重載頁面
