@@ -188,9 +188,29 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode 
       }
       log('提交 …')
       // 兩條一起提交時，若是封閉測試在提交那步被擋（設定未完成、審核中…），也當成 alpha 失敗走降級；只有 internal 的提交失敗就是整體失敗
-      try { await call('提交編輯', 'POST', `${app}/edits/${id}:commit`, { headers: auth }) } catch (err) {
-        if (!(list.includes(OPTIONAL_TRACK) && list.length > 1)) throw err
-        log(`提交失敗，視為封閉測試被擋：${err.message}`)   // 原始代碼只進 log
+      let cr = null
+      let cerr = null
+      try { cr = await request('POST', `${app}/edits/${id}:commit`, { headers: auth }) } catch (err) { cerr = err }
+      const uncertain = cerr !== null || cr.status >= 500   // 網路錯誤、逾時、5xx：Play 可能其實已經提交了
+      const failed = cerr !== null || cr.status < 200 || cr.status >= 300
+      if (failed) {
+        const msg = cerr ? cerr.message : `提交編輯失敗（HTTP ${cr.status}，${errCode(cr.text)}）`
+        if (uncertain) {
+          // 結果不確定：先查 Play 上最大的 versionCode，不能直接當失敗去刪編輯重傳（同一個版本碼會被拒絕，還會誤報整體失敗）
+          log(`提交回應不確定：${msg}；查 Play 上最大的 versionCode …`)
+          let max
+          try { max = await maxPlayCode({ sa, packageName, apiBase, tokenUri, request }) } catch (qerr) {
+            log(`查詢最大 versionCode 也失敗：${qerr.message}`)
+            throw new Error('提交結果不確定：Play 沒有回應提交是否成功，也查不到目前的版本。請到 Play Console 確認這一版是否已發布，確認前不要重跑發版。')
+          }
+          if (max != null && max === Number(versionCode)) {
+            log('commit 回應不確定，經查已發布')
+            return { versionCode: Number(versionCode), editId: id, tracks: list, confirmedByQuery: true }
+          }
+          log(`經查 Play 上最大是 ${max ?? '（沒有）'}，不是這次的 ${versionCode}，確定沒提交成功`)
+        } else log(`提交失敗：${msg}`)   // 原始代碼只進 log
+        // 兩條一起提交時，若是封閉測試在提交那步被擋（設定未完成、審核中…），也當成 alpha 失敗走降級；只有 internal 的提交失敗就是整體失敗
+        if (!(list.includes(OPTIONAL_TRACK) && list.length > 1)) throw new Error(msg)
         throw new TrackFailure(OPTIONAL_TRACK, 0, '封閉測試在提交時被擋', 'commit')
       }
       return { versionCode: Number(versionCode), editId: id, tracks: list }
