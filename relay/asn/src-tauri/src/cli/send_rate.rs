@@ -21,10 +21,76 @@ const LOCK_POLL_MS: u64 = 5;
 /// 剩這麼多封（含）以下，寄信後提醒
 pub const WARN_LEFT: usize = 5;
 
-struct Lock(PathBuf);
+/// 持鎖者：鎖檔內容是自己的辨識碼（程序號－時間－流水號），放鎖時內容對得上才刪，
+/// 免得清理競態把自己的鎖搬走後，放鎖時又刪到別人的新鎖（#2294）
+struct Lock(PathBuf, String);
 impl Drop for Lock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        if std::fs::read_to_string(&self.0).map(|c| c == self.1).unwrap_or(false) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+}
+
+fn new_token() -> String {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    format!("{}-{}-{}", std::process::id(), nanos, SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
+/// 建鎖檔並寫入辨識碼。建檔與寫內容之間別的程序會讀到空檔：清理端以修改時間判遺留，空檔但剛建立不算遺留
+fn create_lock(p: &Path) -> std::io::Result<Lock> {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(p)?;
+    let token = new_token();
+    if let Err(e) = f.write_all(token.as_bytes()) {
+        drop(f);
+        let _ = std::fs::remove_file(p);
+        return Err(e);
+    }
+    Ok(Lock(p.to_path_buf(), token))
+}
+
+fn is_stale_mtime(p: &Path) -> bool {
+    std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_millis() > LOCK_STALE_MS).unwrap_or(false)
+}
+
+/// 清理遺留鎖（#2294）。不能直接刪：判斷遺留後、刪之前，別人可能已刪掉舊鎖並建好新鎖，直接刪會刪到人家的新鎖。
+/// 做法：記下判斷時讀到的內容 → rename 到專屬暫存名（這一步之後路徑上就沒有這把鎖，別人看不到）→
+/// 暫存檔內容仍等於記下的內容、且修改時間仍是遺留，才刪；否則搬到的是別人的新鎖，原樣還回。
+/// 還回用 hard_link（目標已存在就失敗、不會蓋掉別人）：失敗代表這段空窗裡又有人建了鎖，保留他的、丟掉暫存檔。
+/// 殘留風險：搬走到還回之間是微秒級空窗，若恰有第三人在此時建鎖，會有兩人同時持鎖；
+/// 這把鎖只護一個小計數檔，最壞結果是少算一次（與拿不到鎖照寫的後備相同），放鎖時也只刪自己的內容，不會連鎖刪錯。
+fn reap_stale(p: &Path, before_rename: impl FnOnce()) {
+    if !is_stale_mtime(p) {
+        return;
+    }
+    let seen = std::fs::read_to_string(p).ok();
+    before_rename(); // 測試掛鉤：判斷遺留之後、rename 之前
+    let Some(seen) = seen else { return };
+    let tmp = p.with_file_name(format!("{LOCK}.reap-{}", new_token()));
+    // 搬不動（已被別人刪掉、或 Windows 上被開著）就算了，下一圈再判斷
+    if std::fs::rename(p, &tmp).is_err() {
+        return;
+    }
+    let same = std::fs::read_to_string(&tmp).map(|c| c == seen).unwrap_or(false) && is_stale_mtime(&tmp);
+    if same {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    match std::fs::hard_link(&tmp, p) {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        // 檔案系統不支援硬連結：退而求其次用 rename（目標已存在時在 Windows 會失敗，失敗就留著暫存檔不刪，不丟別人的鎖）
+        Err(_) => {
+            if std::fs::rename(&tmp, p).is_err() && p.exists() {
+                let _ = std::fs::remove_file(&tmp);
+            }
+        }
     }
 }
 
@@ -36,14 +102,13 @@ fn lock(home: &Path, wait: std::time::Duration) -> Option<Lock> {
     let mut n: u64 = 0;
     while n == 0 || start.elapsed() < wait {
         n += 1;
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
-            Ok(_) => return Some(Lock(p)),
+        match create_lock(&p) {
+            Ok(l) => return Some(l),
             // Windows：鎖檔剛被刪、還在刪除中時，建檔回「拒絕存取」不是「已存在」。當成別人拿著，等一下再試；
             // 回 None 的話 take 會不拿鎖照樣寫，互相蓋掉就少算（#752，平行測試約 10% 會紅）
             Err(e) if matches!(e.kind(), std::io::ErrorKind::AlreadyExists | std::io::ErrorKind::PermissionDenied) => {
-                let stale = std::fs::metadata(&p).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_millis() > LOCK_STALE_MS).unwrap_or(false);
-                if stale {
-                    let _ = std::fs::remove_file(&p);
+                if is_stale_mtime(&p) {
+                    reap_stale(&p, || {});
                 } else {
                     // 加上程序號與次數造成的小抖動（0～4 毫秒）
                     std::thread::sleep(std::time::Duration::from_millis(LOCK_POLL_MS + (u64::from(std::process::id()) + n) % 5));
@@ -225,6 +290,62 @@ mod tests {
         assert_eq!(r, Ok(4));
         assert!(waited >= std::time::Duration::from_millis(2400), "要等到鎖放掉：{waited:?}");
         assert_eq!(count(&h, "甲", 1000), 1);
+    }
+
+    fn make_old_lock(p: &Path, content: &str) {
+        std::fs::write(p, content).unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options().write(true).open(p).unwrap().set_modified(old).unwrap();
+    }
+
+    #[test]
+    fn 清遺留鎖時別人剛換上新鎖_新鎖不會被刪_也不會兩人同時持鎖() {
+        // #2294：A 判斷舊鎖遺留 → （B 刪掉舊鎖、建好新鎖）→ A 才 rename。舊程式這裡直接 remove，刪到 B 的新鎖
+        let d = home();
+        let p = d.path().join(LOCK);
+        make_old_lock(&p, "old-holder");
+        let mut b: Option<Lock> = None;
+        reap_stale(&p, || {
+            std::fs::remove_file(&p).unwrap();
+            b = Some(create_lock(&p).unwrap());
+        });
+        let b = b.unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), b.1, "B 的新鎖還在原位、內容沒變");
+        assert!(lock(d.path(), std::time::Duration::from_millis(50)).is_none(), "B 還持鎖，別人拿不到");
+        assert!(std::fs::read_dir(d.path()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().contains(".reap-")), "暫存檔不留");
+        drop(b);
+        assert!(!p.exists(), "B 放鎖後才消失");
+    }
+
+    #[test]
+    fn 舊鎖是空檔_別人換上剛建好還沒寫內容的新鎖_也不能刪() {
+        let d = home();
+        let p = d.path().join(LOCK);
+        make_old_lock(&p, "");
+        reap_stale(&p, || {
+            std::fs::remove_file(&p).unwrap();
+            std::fs::OpenOptions::new().write(true).create_new(true).open(&p).unwrap(); // 剛建、內容還是空的
+        });
+        assert!(p.exists(), "內容同為空，但修改時間是新的，不是遺留");
+    }
+
+    #[test]
+    fn 真的遺留的鎖照樣被清掉() {
+        let d = home();
+        let p = d.path().join(LOCK);
+        make_old_lock(&p, "dead-holder");
+        reap_stale(&p, || {});
+        assert!(!p.exists());
+    }
+
+    #[test]
+    fn 放鎖只刪自己的內容() {
+        let d = home();
+        let p = d.path().join(LOCK);
+        let a = create_lock(&p).unwrap();
+        std::fs::write(&p, "someone-else").unwrap(); // 鎖被別人換掉
+        drop(a);
+        assert!(p.exists(), "不是自己的鎖就不刪");
     }
 
     #[test]
