@@ -51,7 +51,7 @@ test('#2162⑦ 送出去的只有自己的欄位，不含檔案裡不認得的�
 test('#2162⑦ 舊檔壞到合併不了：退回整份存一次，帶著啟動時讀到的欄位', async () => {
   const file = { futureField: 1, ownerName: '甲', skin: 'modern' }
   const store = memStore(file)
-  store.patch = async () => { throw new Error('[settings:merge] 設定檔內容無法合併，這次沒有存') }
+  store.patch = async () => { throw Object.assign(new Error('設定檔內容無法合併，這次沒有存'), { code: 'settings:merge' }) }   // invoke 出口丟出的樣子：代號在 code
   runSave(file, { skin: 'line' }, store)
   await settle()
   assert.equal(store.saves, 1)

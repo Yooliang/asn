@@ -26,8 +26,13 @@ const logFail = (cmd, msg) => {
 export const invoke = async (cmd, args) => {
   try { return await T.core.invoke(cmd, args) } catch (e) {
     const msg = typeof e === 'string' ? e : (e?.message ?? String(e))
-    logFail(cmd, msg)
-    throw new Error(msg)
+    logFail(cmd, msg)   // log 保留完整原文（含代號）
+    // 後端設定層的錯誤開頭有固定代號 `[settings:名稱]`（#2162 ⑦）：在這個唯一的出口拆開——message 是去掉代號的白話句（畫面直接顯示不會冒出代號），
+    // 代號放在 err.code（`settings:名稱`），要判斷的程式只認 code，不比對文字（見 lib/settings-save.mjs）
+    const m = /^\s*\[settings:([a-z_]+)\]\s*/.exec(msg)
+    const err = new Error(m ? msg.slice(m[0].length) : msg)
+    if (m) err.code = `settings:${m[1]}`
+    throw err
   }
 }
 // 開外部連結：沒有 Tauri（純網頁、測試）就什麼都不做，回 undefined（維持 chatpane 以前的 ?. 行為）

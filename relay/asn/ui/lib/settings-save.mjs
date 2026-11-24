@@ -1,15 +1,16 @@
 // 設定存檔的共用做法（#2162 ⑦）：個人設定、引導旗標改成「只送自己擁有的欄位」（settings_patch），
 // 不認得的欄位由後端原樣保留。電腦版（list.js）、手機版（m.js）、引導（onboard.mjs）、設備改名（device-rename.mjs）共用。
-// 判斷靠後端錯誤開頭固定的代號 `[settings:代號]`，不比對中文白話句。純函式，不碰 DOM、不碰 Tauri。
+// 判斷靠 invoke 出口從後端錯誤開頭 `[settings:代號]` 拆出來的 `e.code`，不比對文字。純函式，不碰 DOM、不碰 Tauri。
 
-export const CODE_MERGE = '[settings:merge]'
-export const CODE_UNREADABLE = '[settings:unreadable]'
+export const CODE_MERGE = 'settings:merge'
+export const CODE_UNREADABLE = 'settings:unreadable'
 /** 被其他程式占用時，等這麼久再試一次（只試一次） */
 export const UNREADABLE_WAIT_MS = 3000
 
-/** 錯誤原文（字串、Error、帶 message 的物件都行）；取不到就是空字串 */
+/** 錯誤訊息（字串、Error、帶 message 的物件都行）；取不到就是空字串。invoke 出口已把代號拆到 `e.code`，這裡的 message 沒有代號 */
 const rawOf = e => (typeof e === 'string' ? e : typeof e?.message === 'string' ? e.message : '')
-export const hasCode = (e, code) => rawOf(e).trimStart().startsWith(code)
+/** 只認 `e.code`（由 lib/tauri.mjs 的 invoke 出口設定），不比對文字 */
+export const hasCode = (e, code) => e?.code === code
 
 const sleepMs = ms => new Promise(r => setTimeout(r, ms))
 // 同一個存檔物件上，後來的呼叫會讓還在等的舊呼叫放棄重試（舊的內容已經過時，不能蓋掉新的）
@@ -45,7 +46,7 @@ export async function patchWithFallback(store, fields, full, { wait = sleepMs, w
     await store.patch(fields)
     return true
   } catch (e) {
-    warn('[ASN] 設定檔暫時讀不到，這次沒存成，下次存檔會再試', rawOf(e).replace(/^\s*\[settings:[a-z_]+\]\s*/, ''))
+    warn('[ASN] 設定檔暫時讀不到，這次沒存成，下次存檔會再試', rawOf(e))
     return false
   }
 }

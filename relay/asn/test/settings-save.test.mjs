@@ -11,14 +11,19 @@ const MERGE = '[settings:merge] 設定檔內容無法合併，這次沒有存'
 const UNREADABLE = '[settings:unreadable] 設定檔暫時讀不到（可能被其他程式占用），這次沒有存，稍後再試'
 const FIELDS = { skin: 'line', me: { psm: '好' } }
 
+// 模擬 invoke 出口丟出的錯誤：代號拆到 e.code，message 只剩白話句（真正的拆法由下面「invoke 出口」那支釘住）
+const asErr = msg => {
+  const m = /^\[(settings:[a-z_]+)\]\s*/.exec(msg)
+  return Object.assign(new Error(m ? msg.slice(m[0].length) : msg), m ? { code: m[1] } : {})
+}
 // 假的存檔：patchErrs 是 patch 依序要丟的錯誤（用完就成功）；記下每次呼叫
 const fake = (patchErrs = [], saveErr = null) => {
   const calls = []
   const errs = [...patchErrs]
   return {
     calls,
-    patch: async f => { calls.push(['patch', f]); const e = errs.shift(); if (e) throw new Error(e) },
-    save: async d => { calls.push(['save', d]); if (saveErr) throw new Error(saveErr) },
+    patch: async f => { calls.push(['patch', f]); const e = errs.shift(); if (e) throw asErr(e) },
+    save: async d => { calls.push(['save', d]); if (saveErr) throw asErr(saveErr) },
   }
 }
 const clock = () => { const waits = []; return { waits, wait: async ms => { waits.push(ms) } } }
@@ -46,7 +51,7 @@ test('merge：退回整份存一次，內容是 full（物件或函式都行）�
 
 test('merge：整份存也失敗就把那個錯誤丟出去（不吞掉、不重試）', async () => {
   const s = fake([MERGE], '[settings:write] 設定檔寫入失敗')
-  await assert.rejects(patchWithFallback(s, FIELDS, {}, clock()), /settings:write/)
+  await assert.rejects(patchWithFallback(s, FIELDS, {}, clock()), e => e.code === 'settings:write' && e.message === '設定檔寫入失敗')
   assert.equal(s.calls.filter(x => x[0] === 'save').length, 1)
 })
 
@@ -88,7 +93,7 @@ test('unreadable：等的期間又有新的存檔進來，舊的這一次不再�
 test('其他錯誤：原樣丟出去，不整份存、不等、不重試', async () => {
   for (const msg of ['[settings:too_big] 存檔太大', '[settings:backup] 備份存不下來', '連不上', '[settings:name] 存檔名稱不合格']) {
     const s = fake([msg]), c = clock()
-    await assert.rejects(patchWithFallback(s, FIELDS, {}, c), e => e.message === msg)
+    await assert.rejects(patchWithFallback(s, FIELDS, {}, c), e => e.message === asErr(msg).message && e.code === asErr(msg).code)
     assert.deepEqual(s.calls.map(x => x[0]), ['patch'])
     assert.deepEqual(c.waits, [])
   }
@@ -97,12 +102,12 @@ test('其他錯誤：原樣丟出去，不整份存、不等、不重試', async
   await assert.rejects(patchWithFallback({ patch: async () => { throw raw }, save: async () => {} }, FIELDS, {}, clock()), e => e === raw)
 })
 
-test('代號靠前綴判斷，不比對中文；字串、Error 都認得', () => {
-  assert.equal(hasCode('[settings:merge] 任何字', '[settings:merge]'), true)
-  assert.equal(hasCode(new Error('[settings:merge] 任何字'), '[settings:merge]'), true)
-  assert.equal(hasCode('設定檔內容無法合併，這次沒有存', '[settings:merge]'), false, '只有中文句、沒有代號：不算')
-  assert.equal(hasCode('前面有字 [settings:merge]', '[settings:merge]'), false, '代號一定在最前面')
-  assert.equal(hasCode(null, '[settings:merge]'), false)
+test('只認 e.code，不比對 message 文字', () => {
+  assert.equal(hasCode(asErr('[settings:merge] 任何字'), 'settings:merge'), true)
+  assert.equal(hasCode(new Error('設定檔內容無法合併，這次沒有存'), 'settings:merge'), false, '只有中文句、沒有 code：不算')
+  assert.equal(hasCode(new Error('[settings:merge] 就算 message 長這樣'), 'settings:merge'), false, 'message 不算數，只看 code')
+  assert.equal(hasCode('[settings:merge] 字串', 'settings:merge'), false)
+  assert.equal(hasCode(null, 'settings:merge'), false)
 })
 
 test('stripCode：畫面上顯示時拿掉代號；沒有代號的原樣；plainMessage、onboardErrorText 都經過它', () => {
