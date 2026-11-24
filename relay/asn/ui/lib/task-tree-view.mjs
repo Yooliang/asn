@@ -1,7 +1,7 @@
 // 工作管理員的樹狀畫面（#1860 F）：ASN ＞ 終端服務 ＞ 各代理。電腦、手機、別台設備共用這一份元件，樣式 .tm-* 在 style.css。
 // 元件只吃整理好的資料（controller.view().tree，見 task-tree.mjs）：不讀名單、不呼叫後端；按鈕按下去只往外送 act（操作名, 值），
 // 操作名沿用 tm-ask／tm-handover／tm-view／tm-adopt，由外面接到既有的停止、交接、看畫面、納入管理。
-// 收合狀態（▾）與小字展開（「詳細」）都由元件自己記，5 秒更新資料時不會被重設。小字預設收起，主行只留名稱、狀態、標籤、重複警示與操作鈕。
+// 收合狀態（▾）與小字展開（點整列）都由元件自己記，5 秒更新資料時不會被重設。小字預設收起，主行只留名稱、狀態、標籤、重複警示與操作鈕。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
 import { AsnButton } from './ui-kit.mjs'
 import { COLUMNS, DASH, TEXT as TM } from './task-manager.mjs'
@@ -10,10 +10,7 @@ import { TREE_TEXT, ROOT_KEY, isCollapsed, toggleCollapsed } from './task-tree.m
 // 欄位名只有 COLUMNS 一個來源（原本表格的表頭）
 const LABEL = Object.freeze({ engine: COLUMNS[1], pid: COLUMNS[2], memory: COLUMNS[3], uptime: COLUMNS[4], cmp: COLUMNS[6], where: COLUMNS[7] })
 
-// 展開控制的字（跟 ▾ 收合子樹分開：那個收的是底下的節點，這個開的是這一列自己的小字）
-const DETAIL_TEXT = Object.freeze({ show: '詳細', hide: '收起詳細' })
-
-/** 一個節點的小字欄位（引擎、程序編號、記憶體、開了多久、壓縮次數）：{ k, v }；整理成純函式，畫面與測試共用。預設收起，點「詳細」才看得到。
+/** 一個節點的小字欄位（引擎、程序編號、記憶體、開了多久、壓縮次數）：{ k, v }；整理成純函式，畫面與測試共用。預設收起，點那一列才看得到。
  * 「請交接／交接中」的標籤要讓人據以行動，留在主行，不在這裡 */
 export function nodeFields(n) {
   const out = [
@@ -40,24 +37,29 @@ export const TaskNode = {
     open: { type: Boolean, default: false },   // 小字展開了沒（狀態由 TaskTree 記，這裡只畫）
   },
   emits: ['fold', 'act', 'toggle'],
-  setup(props) {
+  setup(props, { emit }) {
     const { computed } = globalThis.Vue
     const fields = computed(() => nodeFields(props.node))
     const state = computed(() => props.stateText || props.node.status)
-    return { TM, TREE_TEXT, DETAIL_TEXT, LABEL, fields, state }
+    // 整列點一下切換小字（#2219）。▾ 收合與操作鈕（.tm-act）不算：點它們只做自己的事，不展開
+    const onRow = e => {
+      if (e?.target?.closest?.('.tm-act, .tm-fold')) return
+      emit('toggle')
+    }
+    return { TM, TREE_TEXT, LABEL, fields, state, onRow }
   },
-  template: `<div class="tm-node" :class="{ dup: node.dup, view: node.viewOnly }" :data-kind="node.kind" :data-level="level" role="treeitem" :aria-level="level" :aria-expanded="foldable ? String(!folded) : null">
+  template: `<div class="tm-node" :class="{ dup: node.dup, view: node.viewOnly }" :data-kind="node.kind" :data-level="level" role="treeitem" :aria-level="level" :aria-expanded="foldable ? String(!folded) : null" @click="onRow">
     <asn-button v-if="foldable" level="text" class="tm-fold" :aria-label="(folded ? TREE_TEXT.unfold : TREE_TEXT.fold) + ' ' + node.name" @click="$emit('fold')">{{ folded ? '▸' : '▾' }}</asn-button>
     <span v-else class="tm-fold-gap" aria-hidden="true"></span>
     <div class="tm-main">
-      <div class="tm-title"><b class="tm-name">{{ node.name }}</b><span class="tm-tag dup" v-if="node.dup">{{ TM.dupTag }}</span><span class="tm-state">{{ state }}</span><span class="tm-tag" v-if="node.cmpTag" :class="node.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ node.cmpTag }}</span><asn-button level="text" class="tm-more" :aria-expanded="String(open)" :aria-label="(open ? DETAIL_TEXT.hide : DETAIL_TEXT.show) + ' ' + node.name" @click="$emit('toggle')">{{ open ? DETAIL_TEXT.hide : DETAIL_TEXT.show }}</asn-button></div>
+      <div class="tm-title" role="button" tabindex="0" :aria-expanded="String(open)" @keydown.enter.prevent="$emit('toggle')" @keydown.space.prevent="$emit('toggle')"><b class="tm-name">{{ node.name }}</b><span class="tm-tag dup" v-if="node.dup">{{ TM.dupTag }}</span><span class="tm-state">{{ state }}</span><span class="tm-tag" v-if="node.cmpTag" :class="node.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ node.cmpTag }}</span></div>
       <small class="tm-dupnote" v-if="node.dupNote">{{ node.dupNote }}</small>
       <div class="tm-detail" v-if="open">
         <small class="tm-meta"><span class="tm-f" v-for="f in fields" :key="f.k">{{ f.k }} {{ f.v }}</span></small>
         <small class="tm-where">{{ LABEL.where }} <span class="tm-src"><span class="tm-tag native" v-if="node.native">{{ node.source }}</span><template v-else>{{ node.source }}</template></span></small>
       </div>
     </div>
-    <div class="tm-act">
+    <div class="tm-act" @click.stop @keydown.stop>
       <asn-button state="danger" class="tm-stop" v-if="!node.viewOnly && !node.handing" :disabled="!node.canStop || busy" :title="node.why" :aria-label="TM.stop + ' ' + node.name" @click="$emit('act', 'tm-ask', node.key)">{{ TM.stop }}</asn-button>
       <small class="tm-viewonly" v-else-if="node.showViewOnly" :title="node.why">{{ TM.viewOnly }}</small>
       <small class="tm-why" v-if="!node.viewOnly && !node.canStop && node.why">{{ node.why }}</small>

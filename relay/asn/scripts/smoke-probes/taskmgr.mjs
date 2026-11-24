@@ -17,11 +17,22 @@ export const taskmgrProbeSource = () => `(async () => {
   // 小字預設收起：沒點開之前看不到程序編號等；每個節點有帶 aria-expanded 的「詳細」鈕
   const treeText = () => document.querySelector('.tm-tree').textContent;
   for (const c of ['程序編號', '記憶體', '開了多久', '運行位置']) if (treeText().includes(c)) return { ok: false, why: '預設應收起小字，卻看到「' + c + '」' };
-  const mores = () => [...document.querySelectorAll('.tm-tree .tm-more')];
-  if (mores().length !== document.querySelectorAll('.tm-tree .tm-node').length ||!mores().every(b => b.getAttribute('aria-expanded') === 'false')) return { ok: false, why: '每個節點都該有收著的「詳細」鈕（實際 ' + mores().length + ' 個）' };
+  const mores = () => [...document.querySelectorAll('.tm-tree .tm-title')];
+  if (document.querySelector('.tm-tree .tm-more') || [...document.querySelectorAll('.tm-tree button')].some(b => b.textContent.trim() === '詳細')) return { ok: false, why: '#2219 不該再有「詳細」鈕' };
+  const panelText = document.querySelector('.tm').textContent;
+  for (const c of ['ASN 管的程式共', '每 5 秒自動更新', '是整個視窗（含底下的程式）合計', '封存只是從名單隱藏', '壓縮次數只算']) if (panelText.includes(c)) return { ok: false, why: '#2219 該拿掉的字還在：「' + c + '」' };
+  if (document.querySelector('.dv-dev-h .dv-tag.me')) return { ok: false, why: '#2219 設備細部頁標題旁不該有「這台」標籤' };
+  if (mores().length !== document.querySelectorAll('.tm-tree .tm-node').length ||!mores().every(b => b.getAttribute('aria-expanded') === 'false' && b.getAttribute('role') === 'button' && b.tabIndex === 0)) return { ok: false, why: '每個節點的主行都該是收著、可聚焦的展開控制（實際 ' + mores().length + ' 個）' };
   if (!treeText().includes('同名的視窗有兩個時，信可能兩邊都收不到')) return { ok: false, why: '重複列的警示句收起時也要看得到' };
+  // 點整列（節點本身）展開：先試一列，再全部展開；按列上的操作鈕不該展開
+  const firstNode = document.querySelector('.tm-tree .tm-node[data-kind="mux"]');
+  firstNode.click();
+  if (!(await waitFor(() => firstNode.querySelector('.tm-title').getAttribute('aria-expanded') === 'true'))) return { ok: false, why: '點整列後那一列沒有展開' };
+  firstNode.click();
+  if (!(await waitFor(() => firstNode.querySelector('.tm-title').getAttribute('aria-expanded') === 'false'))) return { ok: false, why: '再點整列沒有收回' };
+  // 列上的操作鈕不展開那一列：由單元測試 task-tree-1860f 守著
   for (const b of mores()) b.click();
-  if (!(await waitFor(() => mores().every(b => b.getAttribute('aria-expanded') === 'true')))) return { ok: false, why: '按「詳細」後小字沒有展開' };
+  if (!(await waitFor(() => mores().every(b => b.getAttribute('aria-expanded') === 'true')))) return { ok: false, why: '點主行後小字沒有展開' };
   const labels = [...document.querySelectorAll('.tm-tree .tm-node')].map(n => n.textContent).join('|');
   for (const c of ['引擎', '程序編號', '記憶體', '開了多久', '運行位置']) if (!labels.includes(c)) return { ok: false, why: '節點裡缺「' + c + '」欄位' };
   // 樹狀（#1860 F）：ASN 在最外層、終端服務在它底下、開在終端服務裡的代理再下一層；原生主控台的代理與終端服務並列

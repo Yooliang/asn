@@ -175,6 +175,7 @@
 :root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-row,:root[data-skin="line"] .chatpane-main:has(.term-view-screen) .compose-row{padding:0 var(--chat-gap) var(--chat-gap)}
 :root[data-skin="modern"] .chatpane-main:has(.term-view-screen) .compose-main,:root[data-skin="line"] .chatpane-main:has(.term-view-screen) .compose-main{max-width:none}
 :root[data-skin="modern"] .tm-node,:root[data-skin="line"] .tm-node{border-color:var(--line);border-radius:12px;background:var(--panel)}
+:root[data-skin="modern"] .tm-node:hover,:root[data-skin="line"] .tm-node:hover{background:var(--panel-head)}
 :root[data-skin="modern"] .tm-node.dup,:root[data-skin="line"] .tm-node.dup{background:#fdf3ef}
 :root[data-skin="modern"] .tm-tag.dup,:root[data-skin="line"] .tm-tag.dup{border:1px solid #e3b0aa;background:#fdeceb;color:#b3261e}
 :root[data-skin="modern"] .tm-facts,:root[data-skin="line"] .tm-facts{border-radius:12px;background:var(--panel-soft)}

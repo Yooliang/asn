@@ -27,11 +27,11 @@ test('#2105 設定頁：樣板不寫死字級與間距（px），尺寸只來自
 })
 
 test('#2105 設定頁專屬的按鈕尺寸覆寫都刪掉了：樣式表不再替設定頁的按鈕改尺寸／內距／字級', () => {
-  for (const sel of ['.launch-set .aero-btn', '.launch-set .sec-head .aero-btn', '.dv-vb .aero-btn', '.dv-tabs .aero-btn', '.launch-cwd-list .aero-btn', '.tm-node .aero-btn', '.tm-act .aero-btn', '.tm-more .aero-btn', '.dv-devbtn']) {
+  for (const sel of ['.launch-set .aero-btn', '.launch-set .sec-head .aero-btn', '.dv-vb .aero-btn', '.dv-tabs .aero-btn', '.launch-cwd-list .aero-btn', '.tm-node .aero-btn', '.tm-act .aero-btn', '.dv-devbtn']) {
     assert.ok(!css.includes(sel), `樣式表不該再有「${sel}」`)
   }
   // 工作管理員改成樹（#1860 F）後舊的 .tm-table 已不存在；守門改掃樹的 .tm-node／.tm-act／.tm-more，並確認真的掃到樹的規則（不是空集合恆真）
-  for (const sel of ['.tm-node{', '.tm-act{', '.tm-more{']) assert.ok(css.includes(sel), `樣式表要有樹的規則「${sel}」，守門才有東西可掃`)
+  for (const sel of ['.tm-node{', '.tm-act{']) assert.ok(css.includes(sel), `樣式表要有樹的規則「${sel}」，守門才有東西可掃`)
   assert.ok(!css.includes('.tm-table'), '舊表格的樣式不該留著')
   const treeBtnRules = [...css.matchAll(/\.tm-(?:node|act|more|tree)[^{}]*\{[^}]*\}/g)].map(m => m[0]).filter(r => /(?:^|[\s>])\.(?:aero|asn)-btn/.test(r.split('{')[0]))
   for (const r of treeBtnRules) assert.doesNotMatch(r, /(?:font-size|padding|min-height|height|line-height)\s*:/, `樹裡的按鈕不准在樣式表改尺寸／內距／字級：${r}`)

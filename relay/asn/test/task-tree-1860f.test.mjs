@@ -130,13 +130,15 @@ test('#1860F 小字欄位：壓縮次數只有 Claude 視窗有；其他列只�
   assert.deepEqual(fields(base({ compact: { count: 2, state: 'remind' } })), ['引擎', '程序編號', '記憶體', '開了多久', '壓縮次數'])
 })
 
+// 每一列的展開控制：主行（#2219 起整列點一下切換，鍵盤焦點在 .tm-title）
+const heads = m => m.findAll('.tm-title')
 // 把還收著的小字全點開（預設收起）
 const openAll = async m => {
-  for (const b of m.findAll('.tm-more')) if (b.getAttribute('aria-expanded') === 'false') await m.trigger(b, 'click')
+  for (const b of heads(m)) if (b.getAttribute('aria-expanded') === 'false') await m.trigger(b, 'click')
   await settle(m)
 }
 
-test('#1860F 小字預設收起：只剩名稱、狀態、標籤、重複警示與操作鈕；點「詳細」才出現，再點收回', async () => {
+test('#1860F 小字預設收起：只剩名稱、狀態、標籤、重複警示與操作鈕；點整列才出現，再點收回', async () => {
   const ctx = { friends: [], selfNode: SELF, ops: {}, asn: {} }
   const tree = treeView(mergeRows(snap(), [], SELF), r => viewRow(r, NOW, ctx))
   const m = mountComponent(TaskTree, { tree })
@@ -145,16 +147,16 @@ test('#1860F 小字預設收起：只剩名稱、狀態、標籤、重複警示�
     const text = () => m.container.textContent
     for (const w of ['程序編號', '記憶體', '開了多久', '運行位置', '18420']) assert.ok(!text().includes(w), `預設收起，看不到「${w}」`)
     assert.equal(m.findAll('.tm-meta').length, 0)
-    assert.equal(m.findAll('.tm-more').length, m.findAll('.tm-node').length, '每個節點都有展開控制')
-    assert.ok(m.findAll('.tm-more').every(b => b.getAttribute('aria-expanded') === 'false'))
+    assert.equal(heads(m).length, m.findAll('.tm-node').length, '每個節點都有展開控制')
+    assert.ok(heads(m).every(b => b.getAttribute('aria-expanded') === 'false'))
     assert.ok(m.findAll('.tm-dupnote').length >= 1 && text().includes('同名的視窗有兩個時'), '重複的警示句屬於使用者能據以行動的，收起時仍顯示')
     assert.equal(m.findAll('.tm-tag.dup').length, 2, '重複標籤留在主行')
-    const first = m.findAll('.tm-more')[2]
-    await m.trigger(first, 'click'); await settle(m)
+    // 點整列（節點本身、不是標題）就切換
+    await m.trigger(m.findAll('.tm-node')[2], 'click'); await settle(m)
     assert.equal(m.findAll('.tm-meta').length, 1, '只開被點的那一列')
-    assert.equal(m.findAll('.tm-more')[2].getAttribute('aria-expanded'), 'true')
+    assert.equal(heads(m)[2].getAttribute('aria-expanded'), 'true')
     assert.ok(text().includes('程序編號'))
-    await m.trigger(m.findAll('.tm-more')[2], 'click'); await settle(m)
+    await m.trigger(m.findAll('.tm-node')[2], 'click'); await settle(m)
     assert.equal(m.findAll('.tm-meta').length, 0, '再點一次收回')
   } finally { m.unmount() }
 })
@@ -181,7 +183,7 @@ test('#1860F 展開狀態記在元件裡：5 秒更新（重新給 tree）不重
   const m = mountComponent(TaskTree, V => (P = V.reactive({ tree: mk() })))
   try {
     await settle(m)
-    const muxMore = () => m.find('.tm-node[data-kind="mux"] .tm-more')
+    const muxMore = () => m.find('.tm-node[data-kind="mux"] .tm-title')
     await m.trigger(muxMore(), 'click'); await settle(m)
     assert.equal(muxMore().getAttribute('aria-expanded'), 'true')
     // 5 秒更新：整棵換成新物件（同樣的列、同樣的鍵）
@@ -197,8 +199,8 @@ test('#1860F 展開狀態記在元件裡：5 秒更新（重新給 tree）不重
     await m.trigger(muxMore(), 'click'); await settle(m)
     assert.equal(m.find('.tm-node[data-kind="mux"]').getAttribute('aria-expanded'), 'true', '收小字不會收掉底下的節點')
     assert.equal(m.findAll('.tm-node').length, 9)
-    // 展開控制是真按鈕、不是收合鈕
-    assert.equal(muxMore().tagName, 'BUTTON')
+    // 展開控制是主行（可聚焦的按鈕角色），不是收合鈕
+    assert.equal(muxMore().getAttribute('role'), 'button')
     assert.notEqual(muxMore(), m.find('.tm-node[data-kind="mux"] .tm-fold'))
   } finally { m.unmount() }
 })
@@ -256,4 +258,81 @@ test('#1860F 設定頁用樹、不再有表格；元件不直接呼叫後端', (
   assert.doesNotMatch(panel, /tm-table/)
   const view = read('../ui/lib/task-tree-view.mjs')
   assert.doesNotMatch(view, /invoke\(|fetch\(|taskManagerList|partnerOp/, '元件只吃資料、只送 act')
+})
+
+// ── #2219 整列點一下切換細項；拿掉多餘的東西 ──
+const mkTree = () => treeView(mergeRows(snap(), [], SELF), r => viewRow(r, NOW, { friends: [], selfNode: SELF, ops: {}, asn: {} }))
+const openCount = m => m.findAll('.tm-meta').length
+
+test('#2219 點操作按鈕（停止、納入管理）只送出操作，不會展開那一列；點 ▾ 也不展開細項', async () => {
+  const m = mountComponent(TaskTree, { tree: mkTree() })
+  try {
+    await settle(m)
+    const stop = m.findAll('.tm-stop').find(b => !b.disabled)
+    assert.ok(stop, '要有能按的停止鈕')
+    await m.trigger(stop, 'click'); await settle(m)
+    assert.equal(m.emitted('act').at(-1)[0], 'tm-ask')
+    assert.equal(openCount(m), 0, '按停止不該展開')
+    const adopt = m.find('.tm-adopt')
+    await m.trigger(adopt, 'click'); await settle(m)
+    assert.equal(m.emitted('act').at(-1)[0], 'tm-adopt')
+    assert.equal(openCount(m), 0, '按納入管理不該展開')
+    // 鍵盤在操作鈕上按 Enter／Space 也不展開（鍵盤事件到不了列）
+    for (const key of ['Enter', ' ']) await m.trigger(adopt, 'keydown', { key })
+    assert.equal(openCount(m), 0, '操作鈕上的鍵盤操作不該展開')
+    await m.trigger(m.find('.tm-node[data-kind="mux"] .tm-fold'), 'click'); await settle(m)
+    assert.equal(openCount(m), 0, '按 ▾ 只收合子樹，不展開細項')
+    assert.equal(m.find('.tm-node[data-kind="mux"]').getAttribute('aria-expanded'), 'false')
+  } finally { m.unmount() }
+})
+
+test('#2219 Enter／Space 切換細項，aria-expanded 跟著變；主行可用鍵盤聚焦', async () => {
+  const m = mountComponent(TaskTree, { tree: mkTree() })
+  try {
+    await settle(m)
+    const head = () => heads(m)[2]
+    assert.equal(head().getAttribute('tabindex'), '0')
+    assert.equal(head().getAttribute('role'), 'button')
+    assert.equal(head().getAttribute('aria-expanded'), 'false')
+    await m.trigger(head(), 'keydown', { key: 'Enter' }); await settle(m)
+    assert.equal(head().getAttribute('aria-expanded'), 'true')
+    assert.equal(openCount(m), 1)
+    await m.trigger(head(), 'keydown', { key: ' ' }); await settle(m)
+    assert.equal(head().getAttribute('aria-expanded'), 'false')
+    assert.equal(openCount(m), 0)
+    await m.trigger(head(), 'keydown', { key: ' ' }); await settle(m)
+    assert.equal(head().getAttribute('aria-expanded'), 'true')
+  } finally { m.unmount() }
+})
+
+test('#2219 整列點開後，5 秒更新（換一份新的 tree）展開狀態還在', async () => {
+  let P
+  const m = mountComponent(TaskTree, V => (P = V.reactive({ tree: mkTree() })))
+  try {
+    await settle(m)
+    await m.trigger(m.find('.tm-node[data-kind="mux"]'), 'click'); await settle(m)
+    assert.equal(openCount(m), 1)
+    P.tree = mkTree(); await settle(m)
+    assert.equal(openCount(m), 1, '更新後仍展開')
+    assert.equal(m.find('.tm-node[data-kind="mux"] .tm-title').getAttribute('aria-expanded'), 'true')
+  } finally { m.unmount() }
+})
+
+test('#2219 拿掉的東西不存在：「詳細」鈕、共 N 個那一行、這台標籤、底部說明', async () => {
+  const m = mountComponent(TaskTree, { tree: mkTree() })
+  try {
+    await settle(m)
+    assert.equal(m.findAll('.tm-more').length, 0, '不再有「詳細」鈕')
+    assert.ok(![...m.container.querySelectorAll('button')].some(b => /詳細/.test(b.textContent)))
+  } finally { m.unmount() }
+  const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8')
+  const panel = read('../ui/lib/settings-panel.mjs')
+  assert.doesNotMatch(panel, /ASN 管的程式共/, '總數那一行拿掉了')
+  assert.doesNotMatch(panel, /組名字重複|TM\.auto|tm-auto|tm-sum|tm-bar/)
+  assert.doesNotMatch(panel, /class="dv-tag me"/, '設備細部頁標題旁沒有「這台」標籤')
+  assert.doesNotMatch(panel, /tm-hint|taskMgr\.hints/, '底部說明拿掉了')
+  const tm = read('../ui/lib/task-manager.mjs')
+  for (const w of ['關閉視窗」。', '封存只是從名單隱藏', '整個視窗（含底下的程式）合計', '壓縮次數只算']) assert.ok(!tm.includes(w), `說明「${w}」的文字常數不留`)
+  // 重複的警示仍在：黃色提示與列上標籤
+  assert.match(panel, /tm-warn/)
 })
