@@ -1019,8 +1019,8 @@ mod tests {
 
     fn prod_src() -> String {
         let src = include_str!("report.rs").replace("\r\n", "\n");
-        let end = src.find("#[cfg(test)]\nmod tests").expect("找得到測試區");
-        src[..end].to_string()
+
+        crate::settings::src_scan::prod_source(&src)
     }
 
     #[test]

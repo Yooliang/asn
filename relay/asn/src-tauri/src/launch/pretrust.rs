@@ -219,7 +219,7 @@ mod tests {
     /// 守門：每一條開 Claude 的路都要在開之前呼叫統一入口（舊程式：喚醒／交接／改名／換模型的重開沒有呼叫）
     #[test]
     fn 守門_所有開_claude_的路都先信任() {
-        let local = include_str!("local.rs").split("#[cfg(test)]").next().unwrap();
+        let local = &crate::settings::src_scan::prod_source(include_str!("local.rs"));
         let switch = include_str!("switch.rs");
         let body = |from: &str, to: &str| local.split(from).nth(1).unwrap().split(to).next().unwrap().to_string();
         let new_local = body("pub fn partner_launch_local", "pub(crate) enum ModelPlan");

@@ -1136,7 +1136,7 @@ mod tests {
 
     #[test]
     fn 錯誤代碼_靜態守門_登入類清單不變且記錄不寫別的欄位() {
-        let src = include_str!("login_watch.rs").split("#[cfg(test)]").next().unwrap();
+        let src = &crate::settings::src_scan::prod_source(include_str!("login_watch.rs"));
         assert!(src.contains(r#"pub const LOGIN_ERRORS: [&str; 2] = ["authentication_failed", "oauth_org_not_allowed"];"#));
         assert!(src.contains(r#"format!("Claude 回報錯誤代碼 {key}（累計 {n} 次）")"#));
     }

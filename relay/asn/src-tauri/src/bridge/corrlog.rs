@@ -529,7 +529,7 @@ mod tests {
     fn 守門_讀了再寫回的地方都走_read_existing_讀不到不能當成沒有() {
         // 只有唯讀的 history_tail 可以直接 read_to_string：讀不到頂多少一段前情，不會寫回去蓋掉檔案（#994）
         let src = include_str!("corrlog.rs");
-        let prod = src.split("\nmod tests {").next().unwrap();
+        let prod = &crate::settings::src_scan::prod_source(&src);
         let direct: Vec<&str> = prod.lines().filter(|l| l.contains("std::fs::read_to_string(")).collect();
         assert_eq!(direct.len(), 1, "{direct:?}");
         assert!(direct[0].contains("let text = std::fs::read_to_string(&file).unwrap_or_default();"), "{direct:?}");

@@ -603,7 +603,7 @@ mod tests {
     #[test]
     fn 守門_開關預設關_開窗與關閉的分岔點都看同一個開關() {
         assert!(!wezterm_windows(), "沒人設定時預設關");
-        let wt = include_str!("win_term.rs").split("#[cfg(test)]").next().unwrap();
+        let wt = &crate::settings::src_scan::prod_source(include_str!("win_term.rs"));
         assert!(wt.contains("open_window_gated(wezterm_windows(),"), "open_window_real 用開關決定");
         let term = include_str!("term.rs");
         let live = term.split("fn live_with(").nth(1).unwrap().split("#[cfg(feature = \"gui\")]").next().unwrap();
@@ -647,7 +647,7 @@ mod tests {
         assert!(win.contains("win_term::open_window_real("), "Windows 開窗走 WezTerm");
         assert!(win.contains("start_console_window_windows("), "退路才用原生主控台");
         // 除了開窗點的退路與 pi 的退路入口，local.rs 沒有別的地方直接開原生主控台（測試不算）
-        let body = local.split("#[cfg(test)]").next().unwrap();
+        let body = &crate::settings::src_scan::prod_source(&local);
         assert_eq!(body.matches("start_console_window_windows(").count(), 3, "定義、開窗點的退路、pi 的退路入口；不能有其他人直接開主控台");
     }
 

@@ -420,7 +420,7 @@ mod tests {
     fn 這個模組只比對文字_不碰檔案或程序() {
         // asn真 審查非必修：原始碼守門把這個檔列為只比對文字的例外，所以這裡自己守住
         let src = include_str!("perm_risk.rs");
-        let body = src.split("#[cfg(test)]").next().unwrap();
+        let body = &crate::settings::src_scan::prod_source(&src);
         for banned in ["std::fs", "std::process", "Command", "std::net", "File::", "OpenOptions", "std::{", "tokio", "fs::", "process::", "crate::", "use "] {
             assert!(!body.contains(banned), "perm_risk.rs 不能用 {banned}");
         }

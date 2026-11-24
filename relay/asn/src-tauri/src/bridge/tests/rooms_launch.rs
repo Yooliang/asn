@@ -904,7 +904,7 @@ async fn 遠端開終端_終端開不起來回報_failed_並留紀錄() {
 
 #[test]
 fn 守門_遠端終端路徑不碰本機授權與本機開窗入口_start_term_只收工具_名稱_資料夾() {
-    let launcher_src = include_str!("../launcher.rs").split("#[cfg(test)]").next().unwrap();
+    let launcher_src = &crate::settings::src_scan::prod_source(include_str!("../launcher.rs"));
     assert!(!launcher_src.contains("grant_local_cwd") && !launcher_src.contains("start_live"), "遠端不能替資料夾補授權，也不走本機點按的入口");
     assert!(launcher_src.contains("fn start_term(&self, _config: &LaunchConfig, _tool: &str, _name: &str, _cwd: &str) -> Result<String, String>"), "start_term 只收 config、tool、name、cwd");
     assert!(launcher_src.contains("fn start_term(&self, config: &LaunchConfig, tool: &str, name: &str, cwd: &str) -> Result<String, String>"));
@@ -1103,7 +1103,7 @@ async fn 遠端開視窗_背景夥伴不在這裡查同名活視窗_交給引擎
 
 #[test]
 fn 守門_遠端開窗先即時查同名活視窗_用本機開窗同一套查法_在記開窗次數之前() {
-    let src = include_str!("../launcher.rs").split("#[cfg(test)]").next().unwrap();
+    let src = &crate::settings::src_scan::prod_source(include_str!("../launcher.rs"));
     assert!(src.contains("crate::launch::console::live_partner_pid(engine, name).is_some()"), "要用 #653 本機開窗同一套 live_partner_pid（含程序編號重用核對）");
     let begin = src.find("async fn begin(").unwrap();
     let check = src[begin..].find("env1.live_window(").expect("遠端開窗前要查同名活視窗");
@@ -1267,7 +1267,7 @@ fn 守門_遠端啟動的_pi_走_plan() {
     let src = include_str!("../../launch/local.rs");
     let f = src.split("pub fn start_remote_window").nth(1).unwrap().split("pub fn start_pi_session").next().unwrap();
     assert!(f.contains("prof.engine == \"pi\"") && f.contains("super::pi::plan("), "start_remote_window 要有 pi 分支");
-    let l = include_str!("../launcher.rs").split("#[cfg(test)]").next().unwrap().to_string();
+    let l = crate::settings::src_scan::prod_source(include_str!("../launcher.rs")).to_string();
     assert!(l.contains("queue_background") && l.contains("pq::build_cfg(env, &req, work_dir)"), "背景夥伴要先用消化端同一套規則驗");
 }
 
@@ -1275,7 +1275,7 @@ fn 守門_遠端啟動的_pi_走_plan() {
 #[test]
 fn 守門_啟動請求的處理程式不讀任何指令類欄位() {
     let src = include_str!("../launcher.rs");
-    let body = src.split("#[cfg(test)]").next().unwrap();
+    let body = &crate::settings::src_scan::prod_source(&src);
     for field in ["\"command\"", "\"args\"", "\"env\"", "\"cmd\"", "\"script\"", "\"shell\""] {
         for line in body.lines().filter(|l| l.contains(".get(") && !l.trim_start().starts_with("//")) {
             assert!(!line.contains(field), "launcher.rs 不應該從請求讀 {field}：{line}");

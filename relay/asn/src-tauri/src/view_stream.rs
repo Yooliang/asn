@@ -649,16 +649,16 @@ mod tests {
         }
         assert!(g.logs.iter().any(|l| l.contains("frames=") && l.contains("bytes=")));
         let src = include_str!("view_stream.rs");
-        let code = &src[..src.find("mod tests").unwrap()];
+        let code = &crate::settings::src_scan::prod_source(src);
         assert!(!code.contains("elog!") && !code.contains("println!") && !code.contains("eprintln!"), "紀錄只走 port.log");
     }
 
     #[test]
     fn 守門_沒有反向通道_傳輸只有一個方向() {
         let src = include_str!("view_stream.rs");
-        let code = &src[..src.find("mod tests").unwrap()];
+        let code = &crate::settings::src_scan::prod_source(src);
         let frame_src = include_str!("view_frame.rs");
-        assert!(frame_src[..frame_src.find("mod tests").unwrap()].contains("|t2d|"));
+        assert!(crate::settings::src_scan::prod_source(frame_src).contains("|t2d|"));
         assert!(!code.contains("d2t"), "不留反向");
         assert!(!code.contains("send_text") && !code.contains("send_bytes") && !code.contains("view_input"), "這裡碰不到打字（本機看畫面的打字走 view_input，別台看畫面不能呼叫）");
     }

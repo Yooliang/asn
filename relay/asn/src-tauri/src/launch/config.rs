@@ -371,7 +371,8 @@ mod child_env_tests {
         let local = include_str!("local.rs");
         let switch = include_str!("switch.rs");
         let wez = include_str!("wezterm.rs");
-        let body = local.split("#[cfg(test)]").next().unwrap();
+        // 下面的小工具要 'static；測試裡洩漏一份字串無所謂
+        let body: &'static str = Box::leak(crate::settings::src_scan::prod_source(local).into_boxed_str());
         // Windows 取出的檔案可能是 CRLF：起點字串裡的換行兩種都試
         let fn_body = |src: &'static str, start: &str, end: &str| -> &'static str {
             let crlf = start.replace('\n', "\r\n");
@@ -428,7 +429,7 @@ mod child_env_tests {
         assert!(out.keys().all(|k| !k.to_ascii_uppercase().starts_with("WEZTERM_")), "{out:?}");
         assert_eq!(out.get("PATH").map(String::as_str), Some("C:\\bin"));
         // 程式（不含測試）裡設 socket 位置的只有兩處：mux::cli_env（共用 mux）與第 1 階段每個 GUI 的 cli()（B2c 收掉）
-        let prod = |src: &str| src.replace("\r\n", "\n").split("#[cfg(test)]\nmod ").next().unwrap().to_string();
+        let prod = |src: &str| crate::settings::src_scan::prod_source(&src.replace("\r\n", "\n"));
         let files = [
             ("config.rs", prod(include_str!("config.rs"))),
             ("local.rs", prod(include_str!("local.rs"))),

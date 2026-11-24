@@ -311,7 +311,7 @@ fn 假權杖跑完整條路_log_畫面狀態_回報內容都不含權杖_標頭_
 // ---------- 靜態斷言：沒有任何 refresh 的路徑 ----------
 fn prod(src: &str) -> String {
     let s = src.replace("\r\n", "\n");
-    s[..s.find("#[cfg(test)]\nmod tests").unwrap()].to_string()
+    crate::settings::src_scan::prod_source(&s)
 }
 
 #[test]

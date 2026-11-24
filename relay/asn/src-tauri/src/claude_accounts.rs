@@ -1840,7 +1840,7 @@ mod tests {
         assert!(PROFILE_URL.starts_with("https://api.anthropic.com/"));
         assert_eq!(PROFILE_TIMEOUT, std::time::Duration::from_secs(5));
         let src = include_str!("claude_accounts.rs").replace("\r\n", "\n");
-        let prod = &src[..src.find("#[cfg(test)]\nmod tests").unwrap()];
+        let prod = &crate::settings::src_scan::prod_source(src);
         assert_eq!(prod.matches("fetch_profile(").count(), 2, "只有定義與 profile_lookup 這一個呼叫");
         assert!(prod.contains("fetch_profile(PROFILE_URL, cred, PROFILE_TIMEOUT)"));
         let def = &prod[prod.find("const PROFILE_URL").unwrap()..prod.find("pub fn switch_to(").unwrap()];

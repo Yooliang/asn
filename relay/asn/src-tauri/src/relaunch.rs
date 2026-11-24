@@ -172,8 +172,9 @@ mod tests {
         let with = lib.split("pub(crate) fn cleanup_with").nth(1).unwrap().split("\n}").next().unwrap();
         assert!(with.contains("guard::note_exit(&gd, kind == ExitKind::Relaunch)"), "cleanup_with 要依種類決定寫不寫記號");
         let src = include_str!("relaunch.rs");
-        let body = src.split("pub async fn relaunch_and_exit").nth(1).unwrap();
-        let body = body.split("#[cfg(test)]").next().unwrap();
+        // 先對整個檔去掉測試碼，再取函式之後的部分（不能先切片段再餵：片段的大括號不成對）
+        let prod = crate::settings::src_scan::prod_source(src);
+        let body = prod.split("pub async fn relaunch_and_exit").nth(1).unwrap();
         assert!(body.contains("cleanup_with(&h, crate::ExitKind::Relaunch)") && !body.contains("note_user_quit"), "重新啟動路徑不能寫 user-quit");
     }
 

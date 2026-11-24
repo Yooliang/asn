@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn 不跑_agy_install_也不動_path() {
         let src = include_str!("agy_install.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         let code: String = body.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
         assert!(!code.contains("run_installer"), "不執行任何安裝程式");
         assert!(!code.contains("set_var") && !code.contains("Environment") && !code.contains("HKEY"), "不改環境變數或登錄檔");

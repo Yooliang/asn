@@ -663,7 +663,7 @@ mod tests {
     #[test]
     fn 守門_這裡只收不送_不確認本人() {
         let src = include_str!("view_d.rs");
-        let code = src.split("\n#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         for bad in ["send_via", "presence::", "sign_b64", "live::forget", "live::confirm"] {
             assert!(!code.contains(bad), "看的那台的背景流程不能有：{bad}");
         }

@@ -3922,7 +3922,7 @@ mod tests {
     #[test]
     fn 守門_紀錄只寫機器資料夾的_ui_log_不寫_data_dir() {
         let src = include_str!("lib.rs");
-        let code = src.split("\nmod tests {").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         for bad in ["ui_log::append(&self.data_dir", "ui_log::append(&data_dir", "ui_log::append(&app.data_dir"] {
             assert!(!code.contains(bad), "紀錄要寫到 work_dir 的 ui.log：{bad}");
         }
@@ -3930,7 +3930,7 @@ mod tests {
 
     #[test]
     fn 守門_截圖模式不登記_asn_協定_不改使用者的登錄檔() {
-        let src = include_str!("lib.rs").split("mod tests {").next().unwrap();
+        let src = &crate::settings::src_scan::prod_source(include_str!("lib.rs"));
         let at = src.find("dl.register(\"asn\")").expect("有登記 asn:// 的地方");
         let before = &src[at.saturating_sub(120)..at];
         assert!(before.contains("if !is_shot"), "登記 asn:// 前要擋掉截圖模式：{before}");

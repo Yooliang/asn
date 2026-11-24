@@ -968,7 +968,7 @@ mod tests {
     fn 守門_手機確認與忘記只有兩個命令能叫_橋_收發室不碰() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let rs = std::fs::read_to_string(root.join("android.rs")).unwrap().replace("\r\n", "\n");
-        let code = rs.split("\n#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&rs);
         let owners = |pat: &str| -> Vec<String> { code.match_indices(pat).map(|(i, _)| owner_at(code, i)).collect() };
         let confirm = owners("live::confirm(");
         assert!(!confirm.is_empty() && confirm.iter().all(|f| f == "android_known_confirm" || f == "android_known_scan_confirm"), "{confirm:?}");
@@ -976,12 +976,12 @@ mod tests {
         assert!(!forget.is_empty() && forget.iter().all(|f| f == "android_known_forget"), "{forget:?}");
         for f in ["bridge/mod.rs", "bridge/launcher.rs", "cli/mod.rs", "headless.rs", "view_d.rs", "view_remote.rs", "relay.rs"] {
             if let Ok(s) = std::fs::read_to_string(root.join(f)) {
-                let s = s.split("\n#[cfg(test)]").next().unwrap().to_string();
+                let s = crate::settings::src_scan::prod_source(&s).to_string();
                 assert!(!s.contains("live::confirm(") && !s.contains("known.confirm("), "{f} 不能確認指紋");
             }
         }
         let lib = std::fs::read_to_string(root.join("lib.rs")).unwrap();
-        let lib = lib.split("\nmod tests {").next().unwrap();
+        let lib = &crate::settings::src_scan::prod_source(&lib);
         assert!(!lib.contains("live::confirm("), "lib.rs 不能確認指紋");
     }
 
@@ -999,7 +999,7 @@ mod tests {
     fn 守門_忘記只有本機設定頁能叫_記住只有收到請求時() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let lib = std::fs::read_to_string(root.join("lib.rs")).unwrap();
-        let lib = lib.split("\nmod tests {").next().unwrap();
+        let lib = &crate::settings::src_scan::prod_source(&lib);
         let fns = |pat: &str| -> Vec<String> {
             lib.match_indices(pat)
                 .map(|(i, _)| {
@@ -1211,7 +1211,7 @@ mod tests {
     #[test]
     fn 守門_答錯次數與鎖只有答題_確認_忘記三條路能寫_別的檔案碰不到() {
         let src = include_str!("device_id.rs").replace("\r\n", "\n");
-        let code = src.split("\n#[cfg(test)]\nmod tests {").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         let mut n = 0;
         for field in [".pick_wrong = ", ".pick_lock_set_ms = ", ".pick_lock_until_ms = "] {
             for (i, _) in code.match_indices(field) {
@@ -1230,7 +1230,7 @@ mod tests {
                 continue;
             }
             let s = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
-            let s = s.split("\n#[cfg(test)]").next().unwrap();
+            let s = &crate::settings::src_scan::prod_source(&s);
             assert!(!s.contains(".pick_wrong") && !s.contains(".pick_lock") && !s.contains("pick_wrong:"), "{name} 不能碰答錯次數與鎖");
             if name != "android.rs" {
                 assert!(!s.contains("pick_record_wrong(") && !s.contains("pick_block(") && !s.contains("pick_prepare("), "{name} 不能叫四選一的紀錄");
@@ -1417,7 +1417,7 @@ mod tests {
         }
         // 手機只有「認得的電腦」三個命令碰得到（列表、確認、忘記），其他地方一律不行；那三個命令不碰設備私鑰
         let rs = include_str!("android.rs").replace("\r\n", "\n");
-        let code = rs.split("\n#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&rs);
         for (i, _) in code.match_indices("device_id::") {
             let f = owner_at(code, i);
             assert!(["android_known_list", "android_known_challenge", "android_known_answer", "android_known_token", "android_known_confirm", "android_known_forget", "android_known_rename", "android_known_scan_confirm"].contains(&f.as_str()), "不能從這裡碰設備金鑰：{f}");
@@ -1434,7 +1434,7 @@ mod tests {
     #[test]
     fn 守門_四選一_先取走過關的題目才確認_回答不記住_答案不進日誌與事件() {
         let rs = include_str!("android.rs").replace("\r\n", "\n");
-        let code = rs.split("\n#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&rs);
         let confirm = body_of(code, "android_known_confirm");
         let (t, c) = (confirm.find("take_passed(").expect("要先取走過關的題目"), confirm.find("live::confirm(").expect("要確認"));
         assert!(t < c, "take_passed 在 live::confirm 之前");
@@ -1470,7 +1470,7 @@ mod tests {
         assert!(chal.contains("\"options\": prep.options") && chal.contains("\"minutes\": minutes"));
         // 四選一的模組：不寫日誌、不發事件，而且 known_pick 只被這幾個命令叫
         let kp = include_str!("known_pick.rs").replace("\r\n", "\n");
-        let kp = kp.split("\n#[cfg(test)]").next().unwrap();
+        let kp = &crate::settings::src_scan::prod_source(&kp);
         for bad in ["elog!", "olog!", concat!("print", "ln!"), concat!("db", "g!"), "log::", "tracing::", "emit", "ui_log"] {
             assert!(!kp.contains(bad), "known_pick.rs 不能有：{bad}");
         }
@@ -1557,7 +1557,7 @@ mod tests {
     #[test]
     fn 守門_改名只有電腦版設定頁的命令和手機的改名命令能叫_名字欄位只有改名與記住會寫() {
         let src = include_str!("device_id.rs").replace("\r\n", "\n");
-        let code = src.split("\n#[cfg(test)]\nmod tests {").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         assert_eq!(code.matches(".named_by_owner = ").count(), 0, "舊的本機小名旗標不再有程式寫它");
         assert_eq!(code.matches("named_by_owner: false").count(), 1, "只有記住新的一台時給預設值");
         for (i, _) in code.match_indices("p.name = ") {
@@ -1574,7 +1574,7 @@ mod tests {
             }
             let s = std::fs::read_to_string(&f).unwrap().replace("\r\n", "\n");
             // 切到測試模組為止（lib.rs 前面就有零星的 #[cfg(test)] 項目，不能從那裡切）
-            let s = s.split("\nmod tests {").next().unwrap().to_string();
+            let s = crate::settings::src_scan::prod_source(&s).to_string();
             assert!(!s.contains("named_by_owner"), "{name} 不能碰名字旗標");
             for (i, _) in s.match_indices("rename_peer(") {
                 callers.push((name.clone(), owner_at(&s, i)));
