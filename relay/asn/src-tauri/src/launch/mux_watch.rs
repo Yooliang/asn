@@ -79,6 +79,9 @@ pub struct Watch {
     /// 上一輪就看不到 mux（還沒下結論）
     #[serde(skip)]
     suspect: bool,
+    /// 載入時因為開機時間變了（重開機）而丟掉了記著的 mux（只給啟動紀錄用，不存檔）
+    #[serde(skip)]
+    dropped_by_reboot: bool,
 }
 
 impl Watch {
@@ -87,12 +90,25 @@ impl Watch {
         let mut w: Watch = std::fs::read_to_string(file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         if let (Some(a), Some(b)) = (w.boot, boot_now) {
             if !crate::bridge::known::same_boot(a, b) {
+                w.dropped_by_reboot = w.seen.is_some() || !w.lost.is_empty();
                 w.seen = None;
                 w.lost.clear();
             }
         }
         w.boot = boot_now;
         w
+    }
+
+    /// 啟動時讀到的上次狀態（#1837）：寫進 mux.log，下次「新 ASN 沒接上舊狀態」才有依據。
+    /// 只記程序編號與數量、存檔離現在多久，不記夥伴名字。`file_age_secs`＝狀態檔最後寫入距今幾秒（沒有檔案是 None）
+    pub fn startup_line(&self, file_age_secs: Option<u64>) -> String {
+        let age = file_age_secs.map_or("沒有狀態檔".to_string(), |s| format!("狀態檔 {s} 秒前寫入"));
+        let seen = match &self.seen {
+            Some(s) => format!("記著的終端服務=程序 {}（夥伴 {} 位）", s.mux.0, s.partners.len()),
+            None if self.dropped_by_reboot => "記著的終端服務=無（開機時間變了，已丟掉，交給開機接回）".to_string(),
+            None => "記著的終端服務=無".to_string(),
+        };
+        format!("ASN 啟動，讀到上次監看狀態：{seen}，還沒接回 {} 位，已結束 {} 位，{age}", self.lost.len(), self.exited.len())
     }
 
     pub fn save(&self, file: &Path) {
@@ -752,6 +768,16 @@ impl super::mux_round::Sink for RealSink {
     }
 }
 
+/// 把啟動時讀到的上次狀態寫進程式紀錄與 mux.log
+#[cfg(feature = "gui")]
+fn log_startup_state(w: &Watch, file_age_secs: Option<u64>) {
+    let line = w.startup_line(file_age_secs);
+    elog!("{line}");
+    if let Some(base) = super::mux::default_base() {
+        super::mux::note(&base.join("ASN").join("m"), &line);
+    }
+}
+
 /// 背景執行緒：ASN 啟動後一直跑。沒開 mux 模式時 `mux_snapshot` 回 None，什麼都不做
 #[cfg(feature = "gui")]
 pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, data_dir: &Path) {
@@ -762,7 +788,10 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
     let (work_dir, data_dir) = (work_dir.to_path_buf(), data_dir.to_path_buf());
     let spawned = std::thread::Builder::new().name("asn-mux-watch".into()).spawn(move || {
         let file = work_dir.join(STATE_FILE);
+        let age = std::fs::metadata(&file).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_secs());
         let mut w = Watch::load(&file, super::auto_resume::boot_ms(crate::heartbeat::now_ms()));
+        // 啟動時讀到的上次狀態留一行（#1837）：之後查「新 ASN 有沒有接上舊狀態」有依據
+        log_startup_state(&w, age);
         let mut first = true;
         let started = std::time::Instant::now();
         let mut tracker = Tracker::new(cfg!(windows));
@@ -906,6 +935,35 @@ mod tests {
         assert_eq!(w2.tick(&obs(None, &[]), new_start), None);
         assert_eq!(w2.tick(&obs(Some(M2), &["asn西川"]), new_start + TICK_MS), None, "同一次崩潰不報第二次");
         assert_eq!(w2.tick(&obs(Some(M2), &["asn西川"]), new_start + 2 * TICK_MS), None);
+    }
+
+    /// #1837：新 ASN 啟動時讀到的上次狀態要留一行（只有程序編號與數量，不含夥伴名字）
+    #[test]
+    fn t1837_啟動時讀到的上次狀態_寫成一行_不含夥伴名字() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(STATE_FILE);
+        let mut w = Watch::default();
+        w.tick(&obs(Some(M1), &["機密夥伴名", "乙"]), 0);
+        w.save(&f);
+        let line = Watch::load(&f, None).startup_line(Some(42));
+        assert!(line.contains(&format!("程序 {}", M1.0)), "{line}");
+        assert!(line.contains("夥伴 2 位") && line.contains("42 秒前"), "{line}");
+        assert!(!line.contains("機密夥伴名"), "不記名字：{line}");
+        assert!(Watch::default().startup_line(None).contains("無") && Watch::default().startup_line(None).contains("沒有狀態檔"));
+    }
+
+    /// #1837：重開機丟掉狀態的情況，紀錄要講得出來
+    #[test]
+    fn t1837_開機時間變了丟掉記著的_啟動紀錄寫明() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(STATE_FILE);
+        let mut w = Watch::load(&f, Some(5_000_000));
+        w.tick(&obs(Some(M1), &["甲"]), 0);
+        w.save(&f);
+        let line = Watch::load(&f, Some(9_999_999)).startup_line(Some(1));
+        assert!(line.contains("開機時間變了"), "{line}");
+        let same = Watch::load(&f, Some(5_000_100)).startup_line(Some(1));
+        assert!(same.contains(&format!("程序 {}", M1.0)) && !same.contains("開機時間變了"), "{same}");
     }
 
     #[test]
