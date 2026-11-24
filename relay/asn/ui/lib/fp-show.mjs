@@ -18,7 +18,7 @@ export const FP_SHOW_RATE_LIMIT_MS = 10_000
 /** 手機每隔多久查一次狀態 */
 export const FP_SHOW_POLL_MS = 1000
 /** 會自動跳出 QR Code 的最舊版本：比這個舊的電腦只能到它的設定頁手動顯示 */
-export const FP_SHOW_MIN_VERSION = '0.2.97'
+export const FP_SHOW_MIN_VERSION = '0.2.98'
 
 export const FP_SHOW_TEXT = {
   // 電腦跳出的視窗
