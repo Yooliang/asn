@@ -641,3 +641,60 @@ test('#2003 (c) 核心的「需要播種」訊息講的是程式真的認得的�
   assert.ok(msgs.some(m => /--seed/.test(m) && /--yes/.test(m)), '需要播種的訊息要寫出 --seed 與 --yes')
   assert.ok(!msgs.some(m => /--since/.test(m)), '不能再寫 --since')
 })
+
+// ---- #2229 無害雜檔（*.stackdump）不卡工作樹 ----
+const statusOut = (out) => ({ 'status --porcelain': () => ({ status: 0, stdout: out, stderr: '' }) })
+
+test('#2229 根目錄的未追蹤 *.stackdump：刪掉、記 log，照常往下跑', async () => {
+  const e = env({
+    desktopRows: [row('v0.2.45')],
+    files: { 'bash.exe.stackdump': 'crash' },
+    gitOver: statusOut('?? bash.exe.stackdump\n'),
+  })
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'dryRun')
+  assert.deepEqual(e.calls.unlinks.filter((p) => p.endsWith('.stackdump')), [inRepo('bash.exe.stackdump')])
+  assert.ok(e.calls.logs.some((l) => l.includes('bash.exe.stackdump') && l.includes('雜檔')))
+  assert.equal(e.calls.spawn.length, 1)
+})
+
+test('#2229 清單外的未追蹤檔仍然卡住，且連 stackdump 也不刪', async () => {
+  const e = env({
+    desktopRows: [row('v0.2.45')],
+    files: { 'bash.exe.stackdump': 'crash' },
+    gitOver: statusOut('?? bash.exe.stackdump\n?? notes.txt\n'),
+  })
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'prep-failed')
+  assert.equal(e.calls.spawn.length, 0)
+  assert.deepEqual(e.calls.unlinks.filter((p) => !p.includes(".lock")), [])
+  assert.ok(e.calls.logs.some((l) => l.includes('notes.txt')))
+})
+
+test('#2229 已追蹤檔被改動（即使檔名像雜檔）仍然卡住', async () => {
+  const e = env({
+    desktopRows: [row('v0.2.45')],
+    gitOver: statusOut(' M src/foo.js\n M tracked.stackdump\n'),
+  })
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'prep-failed')
+  assert.equal(e.calls.spawn.length, 0)
+  assert.deepEqual(e.calls.unlinks.filter((p) => !p.includes(".lock")), [])
+})
+
+test('#2229 子資料夾裡的 *.stackdump 與資料夾整包未追蹤不算雜檔，照舊卡住', async () => {
+  for (const line of ['?? relay/asn/x.stackdump\n', '?? tmpdir/\n', '?? x.stackdump.bak\n']) {
+    const e = env({ desktopRows: [row('v0.2.45')], gitOver: statusOut(line) })
+    const r = await runOnce(opts, e.deps)
+    assert.equal(r.outcome, 'prep-failed', line)
+    assert.deepEqual(e.calls.unlinks.filter((p) => !p.includes(".lock")), [], line)
+  }
+})
+
+test('#2229 雜檔刪不掉：停下回報，不跑發佈', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')], gitOver: statusOut('?? bash.exe.stackdump\n') })
+  e.deps.unlink = () => { throw new Error('EBUSY') }
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'prep-failed')
+  assert.equal(e.calls.spawn.length, 0)
+})
