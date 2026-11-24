@@ -40,13 +40,25 @@ export function makeSnapMax({ call, listen, doc, win, raf = f => win.requestAnim
     } catch { last = null /* 失敗下次再試；Rust 端已記 log */ }
   }
   const schedule = () => { if (!queued) { queued = true; raf(push) } }
+  // 切回原生外框（Aero）：鈕還沒被藏起來之前就同步清掉，免得原生標題區被誤判成放大鈕
+  const clearNow = async () => {
+    const was = last
+    last = null
+    paint('leave')
+    if (!was) return
+    try { await call('snap_max_clear') } catch { last = was /* 失敗下次再試 */ }
+  }
+  const onFrame = native => {
+    if (native === true) clearNow()
+    win.setTimeout(watch, 50)
+  }
   const watch = () => {
     const b = btn()
     if (b && b !== observed && win.ResizeObserver) { observed = b; new win.ResizeObserver(schedule).observe(b) }
     schedule()
   }
   return {
-    push, schedule, paint,
+    push, schedule, paint, onFrame, clearNow,
     async start() {
       watch()
       // 畫面是 Vue 掛上去的，鈕晚幾拍才出現；之後靠視窗大小、外觀、外框、縮放變動重新量
@@ -56,7 +68,7 @@ export function makeSnapMax({ call, listen, doc, win, raf = f => win.requestAnim
       const dprWatch = () => { win.matchMedia?.(`(resolution: ${win.devicePixelRatio}dppx)`)?.addEventListener?.('change', () => { schedule(); dprWatch() }, { once: true }) }
       dprWatch()
       await listen(SNAP_EVENT, paint)
-      await listen('asn:frame', () => win.setTimeout(watch, 50))
+      await listen('asn:frame', onFrame)
       await listen('asn:skin', () => win.setTimeout(watch, 50))
     },
   }

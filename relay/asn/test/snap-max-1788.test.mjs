@@ -77,12 +77,79 @@ test('push：Rust 呼叫失敗後下次會重試（不會以為已經報過）',
   assert.equal(calls.length, 2)
 })
 
-test('分割版面只留一種做法：沒有 ASN_SNAP_MODE、沒有做法一的子視窗自己回放大鈕', async () => {
+function walk(fs, dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name === 'target') continue
+    const p = new URL(e.name + (e.isDirectory() ? '/' : ''), dir)
+    if (e.isDirectory()) walk(fs, p, out)
+    else out.push(p)
+  }
+  return out
+}
+const codeOnly = s => s.split('\n').filter(l => !/^\s*\/\/|^\s*\/\*|^\s*\*/.test(l)).map(l => l.replace(/\/\/[^]*$/, '')).join('\n')
+
+test('分割版面只留一種做法：整個 src-tauri/src 與 ui 都沒有 ASN_SNAP_MODE 與做法一的殘留', async () => {
   const fs = await import('node:fs')
+  const roots = [new URL('../src-tauri/src/', import.meta.url), new URL('../ui/', import.meta.url)]
+  const files = roots.flatMap(r => walk(fs, r)).filter(u => /\.(rs|mjs|js|html|css|json|toml)$/.test(u.pathname))
+  assert.ok(files.length > 50, '掃描範圍太小，路徑可能不對')
+  for (const u of files) assert.ok(!fs.readFileSync(u, 'utf8').includes('ASN_SNAP_MODE'), `${u.pathname} 還留著 ASN_SNAP_MODE`)
+  // 做法一的子視窗檔不能回來；snap_max 資料夾只留這三個檔
+  const dir = new URL('../src-tauri/src/snap_max/', import.meta.url)
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['snap_cover_win.rs', 'snap_hit.rs', 'snap_win.rs'])
+  // 回 HTMAXBUTTON 的程式碼（不含註解）只能出現在 snap_hit.rs（判斷）與 snap_win.rs（最上層視窗程序）
+  const hits = files.filter(u => u.pathname.endsWith('.rs') && /HT_?MAXBUTTON/.test(codeOnly(fs.readFileSync(u, 'utf8'))))
+  assert.deepEqual(hits.map(u => u.pathname.split('/').pop()).sort(), ['snap_hit.rs', 'snap_win.rs'])
   const rd = p => fs.readFileSync(new URL(`../src-tauri/src/${p}`, import.meta.url), 'utf8')
-  for (const f of ['snap_max.rs', 'snap_max/snap_hit.rs', 'snap_max/snap_win.rs', 'snap_max/snap_cover_win.rs', 'envc.rs', 'lib.rs']) assert.ok(!rd(f).includes('ASN_SNAP_MODE'), `${f} 還留著 ASN_SNAP_MODE`)
-  assert.ok(!fs.existsSync(new URL('../src-tauri/src/snap_max/snap_overlay_win.rs', import.meta.url)))
-  assert.ok(!fs.existsSync(new URL('../src-tauri/src/snap_max/snap_top_win.rs', import.meta.url)))
-  assert.ok(rd('snap_max/snap_cover_win.rs').includes('HTTRANSPARENT'), '透明子視窗要回 HTTRANSPARENT')
-  assert.ok(rd('snap_max/snap_win.rs').includes('HT_MAXBUTTON'), '最上層視窗要回 HTMAXBUTTON')
+  assert.ok(codeOnly(rd('snap_max/snap_cover_win.rs')).includes('HTTRANSPARENT'), '透明子視窗要回 HTTRANSPARENT')
+  assert.ok(!/HT_?MAXBUTTON/.test(codeOnly(rd('snap_max/snap_cover_win.rs'))), '透明子視窗不能自己回放大鈕')
+})
+
+test('每個 unsafe 區塊都有 SAFETY 說明', async () => {
+  const fs = await import('node:fs')
+  const dir = new URL('../src-tauri/src/snap_max/', import.meta.url)
+  let seen = 0
+  for (const f of fs.readdirSync(dir)) {
+    const lines = fs.readFileSync(new URL(f, dir), 'utf8').split('\n')
+    lines.forEach((l, i) => {
+      if (/^\s*\/\//.test(l) || !/\bunsafe\b/.test(l)) return
+      seen++
+      if (/unsafe\s+(extern|fn)/.test(l)) {
+        // 函式本身：上方文件註解有 # Safety，或函式內有 SAFETY
+        const near = lines.slice(Math.max(0, i - 8), i + 4).join('\n')
+        assert.ok(/# Safety|SAFETY:/.test(near), `${f}:${i + 1} unsafe fn 缺 Safety 說明`)
+      } else {
+        const near = lines.slice(Math.max(0, i - 3), i + 1).join('\n')
+        assert.ok(/SAFETY:/.test(near), `${f}:${i + 1} unsafe 區塊缺 // SAFETY:`)
+      }
+    })
+  }
+  assert.ok(seen > 20, 'unsafe 數量不對，掃描可能壞了')
+})
+
+test('切回原生外框：收到 asn:frame(true) 當下就同步清掉，之後仍照舊 50ms 重量', async () => {
+  const calls = [], timers = []
+  const btn = { classList: { add() {}, remove() {} }, getBoundingClientRect: () => rect }
+  const win = { devicePixelRatio: 1.25, setTimeout: (f, ms) => timers.push([f, ms]) }
+  const sm = makeSnapMax({ call: async (c, a) => { calls.push([c, a]) }, listen: async () => {}, doc: { querySelector: () => btn }, win, raf: f => f() })
+  await sm.push()
+  calls.length = 0
+  await sm.onFrame(true)
+  assert.deepEqual(calls.map(c => c[0]), ['snap_max_clear'], '同步送出清除')
+  assert.deepEqual(timers.map(t => t[1]), [50])
+  calls.length = 0
+  await sm.onFrame(false)
+  assert.equal(calls.length, 0, '切成無框不清除（由重量決定）')
+})
+
+test('切回原生外框清除失敗：之後鈕消失時會再清一次，不會以為已清掉', async () => {
+  const calls = []
+  let fail = true, present = true
+  const btn = { classList: { add() {}, remove() {} }, getBoundingClientRect: () => present ? rect : { x: 0, y: 0, width: 0, height: 0 } }
+  const sm = makeSnapMax({ call: async c => { calls.push(c); if (c === 'snap_max_clear' && fail) throw new Error('x') }, listen: async () => {}, doc: { querySelector: () => btn }, win: { devicePixelRatio: 1, setTimeout() {} }, raf: f => f() })
+  await sm.push()
+  await sm.onFrame(true)
+  fail = false; present = false
+  await sm.push()
+  assert.equal(calls.filter(c => c === 'snap_max_clear').length, 2)
 })
