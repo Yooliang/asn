@@ -408,7 +408,7 @@ impl Mux<'_> {
 
     /// 停 mux：只停 pid 檔記的那一個、建立時間對得上才動。底下所有夥伴窗格會一起結束；呼叫前要先用 `pane_count` 講清楚
     pub fn stop(&self) -> Result<(), String> {
-        let Some(pid) = self.recorded_alive() else { return Err("沒有 ASN 起的終端服務在跑".into()) };
+        let Some(pid) = self.recorded_alive() else { return Err(super::mux_restart::STOP_NOT_RUNNING.into()) };
         // 先留記號再結束：監看在結束之後的下一輪看到 mux 不見，要查得到這是我們收的
         let _ = std::fs::write(self.paths.dir.join(STOPPED_FILE), format!("{pid} {}", crate::heartbeat::now_ms()));
         let at = read_pid(&self.paths.pid).map(|(_, at)| at);
@@ -425,6 +425,8 @@ impl Mux<'_> {
             }
             self.runner.sleep(POLL);
         }
+        // 沒停成：這個 mux 還活著，之後它真的掛了要照常接回，所以清掉剛寫的「我們自己收的」記號
+        let _ = std::fs::remove_file(self.paths.dir.join(STOPPED_FILE));
         Err(format!("終端服務（程序 {pid}）沒有結束，保留記錄，之後可以再試"))
     }
 }

@@ -1440,16 +1440,24 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 工作管理員的「重啟終端服務」：抓名單 → 停 → 起新的 → 名單交給 `resume`。流程與失敗處理見 `mux_restart::run_steps`。
     /// 呼叫端要放在背景執行緒（停與起各要等幾秒）
     pub fn restart_mux(&self, resume: impl FnOnce(Vec<String>)) -> Result<(), super::mux_restart::RestartError> {
-        use super::mux_restart::run_steps;
-        let dir = if self.use_mux { self.dir().ok() } else { None };
-        let handle = dir.as_ref().and_then(|d| self.mux_handle(d, BTreeMap::new()).ok());
-        let Some(m) = handle else { return run_steps(false, Vec::new, || Ok(()), || Ok(()), |_| {}, &|_| {}) };
+        use super::mux_restart::{run_steps, RestartError, STASH, STOP_NOT_RUNNING};
+        if !self.use_mux {
+            return Err(RestartError::NoMux);
+        }
+        // 用了終端服務卻找不到程式／拿不到控制：是失敗（原文寫 log），不是「這台沒有終端服務」
+        let dir = self.dir().map_err(|e| RestartError::Failed(format!("找不到終端服務的程式（{e}）")))?;
+        let m = self.mux_handle(&dir, BTreeMap::new()).map_err(RestartError::Failed)?;
         let note = |l: &str| {
             elog!("{l}");
             super::mux::note(&m.paths.dir, l);
         };
-        let names = || self.mux_snapshot().map(|o| o.partners).unwrap_or_default();
-        run_steps(true, names, || m.stop(), || m.ensure().map(|_| ()), resume, &note)
+        let names = || self.mux_snapshot().map(|o| o.partners);
+        // 「沒有服務在跑」＝已經停了（例如上次起新的失敗）：繼續起新的並接回
+        let stop = || match m.stop() {
+            Err(e) if e == STOP_NOT_RUNNING => Ok(()),
+            other => other,
+        };
+        run_steps(true, &STASH, names, stop, || m.ensure().map(|_| ()), resume, &note)
     }
 
     /// 同 [`Self::mux_snapshot`]，現在時刻由外面給（測試用）。其餘每輪照做，只有核對窗格清單受 [`SWEEP_MISSING_EVERY`] 限制
@@ -6672,6 +6680,40 @@ mod tests {
             *rig.runner.inner.spawn_out.borrow_mut() = "9\n".into();
             *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1", 9, 0);
             (rig, paths)
+        }
+
+        /// 審查 #2222：用了終端服務、卻拿不到控制（找不到程式／資料夾）是「失敗」，不能被歸成「這台沒有終端服務」；
+        /// 沒開終端服務模式才是 NoMux。兩種都不動服務
+        #[test]
+        fn _1860f_重啟終端服務_用了服務卻拿不到控制是失敗_不是沒有服務() {
+            use crate::launch::mux_restart::RestartError;
+            let (mut rig, _) = mux_rig();
+            rig.svc.set_use_mux(false);
+            assert_eq!(rig.svc.restart_mux(|_| panic!("不該接回")), Err(RestartError::NoMux), "沒開服務模式才是沒有服務");
+            // 開著服務模式、但找不到終端程式（拿不到控制）
+            let d = tempfile::tempdir().unwrap();
+            let fs = FakeFs { files: Rc::new(RefCell::new(HashSet::new())) };
+            let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
+            let mut svc = TermService::without_wezterm(d.path().join("wezterm-terms.json"), "H".into(), runner.clone(), fs);
+            svc.set_use_mux(true);
+            let r = svc.restart_mux(|_| panic!("不該接回"));
+            assert!(matches!(r, Err(RestartError::Failed(_))), "用了服務卻拿不到控制要回失敗：{r:?}");
+            assert!(runner.killed().is_empty(), "什麼都不動");
+        }
+
+        /// 審查 #2222 必修 1(b)：服務已經沒了（上次起新的失敗、pid 檔也清了）時，重按不能卡在「沒有服務在跑」，要走到起新的並接回
+        #[test]
+        fn _1860f_重啟終端服務_沒有服務在跑也能繼續_起新的並接回() {
+            let (rig, paths) = mux_rig();
+            std::fs::remove_file(&paths.pid).unwrap();
+            let got = std::cell::RefCell::new(None::<Vec<String>>);
+            let r = rig.svc.restart_mux(|n| *got.borrow_mut() = Some(n));
+            if let Err(e) = &r {
+                // 假的環境起不了新服務也算走到了 ensure（不是卡在 stop）
+                assert!(!matches!(e, crate::launch::mux_restart::RestartError::Failed(w) if w == crate::launch::mux_restart::STOP_NOT_RUNNING), "不能卡在沒有服務在跑：{e:?}");
+            } else {
+                assert!(got.borrow().is_some(), "成功就要交出名單接回");
+            }
         }
 
         /// #868：設定頁關掉共用的終端服務、重開 ASN 之後，服務和夥伴還在，但 ASN 這次不管它們。數出這種「背景夥伴」，設定頁才能告訴使用者

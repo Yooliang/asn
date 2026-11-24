@@ -1097,7 +1097,18 @@ async fn task_manager_list(app: State<'_, App>, terms: State<'_, Arc<launch::ter
 #[cfg(desktop)]
 #[tauri::command]
 async fn task_manager_restart_asn(app: State<'_, App>, handle: AppHandle) -> Result<(), String> {
-    relaunch::relaunch_and_exit(&handle, &app.work_dir, "工作管理員重啟 ASN", relaunch::EXIT_DELAY).await
+    // 和重啟終端服務共用一個記號：互斥，也防連點（第二次直接回「正在重啟」，不會 spawn 第二個新程序）
+    let Some(mark) = launch::mux_restart::Restarting::begin_asn() else { return Err(launch::mux_restart::BUSY_TEXT.to_string()) };
+    let res = relaunch::relaunch_and_exit(&handle, &app.work_dir, "工作管理員重啟 ASN", relaunch::EXIT_DELAY).await;
+    if res.is_ok() {
+        // 成功：程序稍後會結束。記號先扣住，到結束為止都不讓別的重啟插進來；萬一一直沒結束，過了寬限就放掉
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(launch::mux_restart::ASN_EXIT_GRACE).await;
+            drop(mark);
+        });
+    }
+    // 失敗（ASN 繼續跑）：mark 隨函式結束放掉
+    res
 }
 
 /// 工作管理員的「重啟終端服務」（#1860 F）：停、起新的、把重啟前的夥伴接回（原因「重啟」、不計冷卻）。

@@ -604,8 +604,8 @@ mod tests {
     fn _1860f_重啟的接回_不經監看_不計十分鐘冷卻() {
         let src = include_str!("auto_resume.rs");
         let f = src.split("pub fn after_mux_restart").nth(1).unwrap().split("pub fn ").next().unwrap();
-        assert!(f.contains("after_mux(") && f.contains("true"), "重啟一律接回");
-        assert!(!f.contains("Watch") && !f.contains("last_resume_at") && !f.contains("COOLDOWN"), "不碰監看的冷卻紀錄");
+        assert!(f.contains("after_mux(") && f.contains("WHY_RESTART"), "重啟一律接回、原因寫重啟");
+        // 「不計冷卻」的行為證明在 mux_watch 的 t1860f_帶停止記號的換服務 測試（Watch::tick）
         let lib = include_str!("../lib.rs");
         let cmd = lib.split("async fn task_manager_restart_mux").nth(1).unwrap().split("async fn ").next().unwrap();
         assert!(cmd.contains("after_mux_restart") && !cmd.contains("after_mux_crash") && !cmd.contains("last_resume_at"), "重啟指令走重啟的接回");

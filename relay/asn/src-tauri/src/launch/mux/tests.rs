@@ -284,8 +284,9 @@ fn 停之前數得出有幾個窗格_停只停_pid_檔記的那一個() {
     r.alive_after.set(Some(0));
     let m = mux(&r, d.path());
     assert_eq!(m.pane_count(), Ok(2));
-    assert!(m.stop().is_err(), "沒有 pid 檔：不是 ASN 起的就不停");
+    assert_eq!(m.stop(), Err(super::super::mux_restart::STOP_NOT_RUNNING.to_string()), "沒有 pid 檔：不是 ASN 起的就不停；字樣固定，重啟靠它分辨「已經沒有服務」");
     assert!(r.killed.borrow().is_empty());
+    assert!(stopped_mark(&m.paths.dir).is_none(), "根本沒停就不留記號");
 }
 
 #[test]
@@ -747,11 +748,13 @@ fn 停_結束失敗不當成功_保留_pid_檔_回錯_之後還找得到可以�
     assert_eq!(*r.killed.borrow(), vec![MUX_PID], "有試著結束");
     assert!(m.paths.pid.exists(), "沒結束就不能刪 pid 檔");
     assert!(m.recorded_alive().is_some(), "之後還找得到它");
-    assert!(stopped_mark(&m.paths.dir).is_some(), "我們確實要收它：記號照寫，監看才不把它當成當機");
-    // 重試：這次結束成功
+    // 審查 #2222：沒停成＝它還活著，之後它真的掛了要照常接回，所以不能留著「我們自己收的」記號
+    assert!(stopped_mark(&m.paths.dir).is_none(), "停失敗要把已寫的停止記號清掉");
+    // 重試：這次結束成功，記號要在
     r.survive_kill.set(false);
     m.stop().unwrap();
     assert!(!m.paths.pid.exists());
+    assert!(stopped_mark(&m.paths.dir).is_some(), "停成功才留記號，監看才不把它當成當機");
 }
 
 #[test]

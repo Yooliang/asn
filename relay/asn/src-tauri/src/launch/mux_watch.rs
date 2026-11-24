@@ -950,6 +950,27 @@ mod tests {
         assert!(w3.tick(&old, 160_000).is_some(), "記號早於記下的時間，是更早收掉的上一個 mux");
     }
 
+    /// #1860 F：工作管理員重啟（停了、馬上換成新服務）帶著停止記號，監看不下結論、不動十分鐘冷卻的紀錄；
+    /// 沒有記號的同樣換服務才算事故（拿掉記號就會紅，證明測的是記號）
+    #[test]
+    fn t1860f_帶停止記號的換服務_不算事故_不動冷卻紀錄() {
+        // 記下 M1 的時間 100_000；使用者重啟：記號是 M1、時間 110_000；下一輪看到的已是 M2（舊夥伴還沒接回，名單是空的）
+        let mut stopped = obs(Some(M2), &[]);
+        stopped.stopped = Some((M1.0, 110_000));
+        let mut w = Watch::default();
+        w.last_resume_at = Some(7);
+        w.tick(&obs(Some(M1), &["甲", "乙"]), 100_000);
+        assert_eq!(w.tick(&stopped, 130_000), None, "有記號的換服務不算事故");
+        assert_eq!(w.last_resume_at, Some(7), "不動冷卻紀錄：使用者重啟不占十分鐘一次的自動接回額度");
+        assert!(w.resume_quota_ok(7 + RESUME_GAP_MS), "冷卻照原本的時間算");
+        // 對照：同樣的換服務、沒有記號，就是事故，而且會佔額度
+        let mut w2 = Watch::default();
+        w2.last_resume_at = Some(7);
+        w2.tick(&obs(Some(M1), &["甲", "乙"]), 100_000);
+        let inc = w2.tick(&obs(Some(M2), &[]), 130_000).expect("沒有記號就是事故");
+        assert_eq!(inc.partners, ["甲", "乙"]);
+    }
+
     #[test]
     fn 沒有夥伴的服務不見了_也算一次事故_不接回也不佔接回額度() {
         let empty = Incident { partners: vec![], resume: false };
