@@ -15,8 +15,67 @@ use tokio_tungstenite::tungstenite::Message;
 #[derive(Debug, PartialEq)]
 pub enum Ring {
     Joined,
-    Bell,
+    Bell(BellKind),
     Down,
+}
+
+/// 門鈴的種類：由 broadcast payload 的 kind 判斷。看不懂的一律當 Legacy（照舊叫醒全部，保守）
+#[derive(Debug, Clone, PartialEq)]
+pub enum BellKind {
+    /// 寄信、看畫面要求等舊門鈴（payload 是 {} 或沒有 kind）
+    Legacy,
+    /// 回報匯流排更新了（只告知哪台哪種，不帶內容）
+    Report { kind: String, node: Option<String> },
+    /// 看畫面要求專屬（kind=='view_req'）：只叫醒看畫面與終端輪詢
+    View,
+}
+
+/// 門鈴響了要做的事（純資料，方便測；實際動作在 lib.rs）
+#[derive(Debug, Clone, PartialEq)]
+pub enum BellAction {
+    /// emit 'relay-bell'（前端收信、重拉名單等）
+    EmitBell,
+    /// emit 'relay-report-bell'，payload {kind, node}
+    EmitReport { kind: String, node: Option<String> },
+    WakeSecret,
+    WakeTerm,
+    WakeView,
+}
+
+fn valid_kind(s: &str) -> bool {
+    let b = s.as_bytes();
+    (1..=32).contains(&b.len()) && b[0].is_ascii_lowercase() && b[1..].iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'_')
+}
+
+fn valid_node(s: &str) -> bool {
+    (1..=32).contains(&s.len()) && s.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+}
+
+/// 依 broadcast 的 payload 判斷門鈴種類。payload 不是物件、kind 不是字串、格式不合都當 Legacy
+pub fn bell_kind(payload: &Value) -> BellKind {
+    let Some(kind) = payload.get("kind").and_then(Value::as_str) else { return BellKind::Legacy };
+    if !valid_kind(kind) {
+        return BellKind::Legacy;
+    }
+    if kind == "view_req" {
+        return BellKind::View;
+    }
+    let node = match payload.get("node") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(n)) if valid_node(n) => Some(n.clone()),
+        _ => return BellKind::Legacy, // node 格式不對：保守照舊叫醒全部
+    };
+    BellKind::Report { kind: kind.to_string(), node }
+}
+
+/// 門鈴響了要做哪些事。Legacy＝以前的全部；Report 只通知回報；View 只叫醒看畫面與終端
+pub fn ring_actions(ring: &Ring) -> Vec<BellAction> {
+    match ring {
+        Ring::Joined | Ring::Bell(BellKind::Legacy) => vec![BellAction::EmitBell, BellAction::WakeSecret, BellAction::WakeTerm, BellAction::WakeView],
+        Ring::Bell(BellKind::Report { kind, node }) => vec![BellAction::EmitReport { kind: kind.clone(), node: node.clone() }],
+        Ring::Bell(BellKind::View) => vec![BellAction::WakeView, BellAction::WakeTerm],
+        Ring::Down => vec![],
+    }
 }
 
 /// 頻道收到的事：加入成功、或一則 broadcast（只會是這個 topic 的）
@@ -74,7 +133,7 @@ pub fn classify(text: &str, topic: &str) -> Option<Ring> {
     let full = format!("realtime:{topic}");
     match ev {
         "phx_reply" if m["topic"] == full.as_str() && m["payload"]["status"] == "ok" => Some(Ring::Joined),
-        "broadcast" if m["payload"]["event"] == "bell" => Some(Ring::Bell),
+        "broadcast" if m["payload"]["event"] == "bell" => Some(Ring::Bell(bell_kind(&m["payload"]["payload"]))),
         "phx_error" | "phx_close" => Some(Ring::Down),
         _ => None,
     }
@@ -110,7 +169,7 @@ pub fn parse_incoming(text: &str, topic: &str) -> Incoming {
 pub async fn run(url: String, topic: String, on_ring: impl Fn(&Ring) + Send + 'static) {
     run_channel(url, topic, false, None, std::future::pending(), move |e| match e {
         Event::Joined => on_ring(&Ring::Joined),
-        Event::Broadcast { event: "bell", .. } => on_ring(&Ring::Bell),
+        Event::Broadcast { event: "bell", payload } => on_ring(&Ring::Bell(bell_kind(payload))),
         Event::Broadcast { .. } => {}
     })
     .await
@@ -256,10 +315,56 @@ mod tests {
         assert_eq!(classify(r#"{"event":"phx_reply","topic":"realtime:relay-bell-abc","payload":{"status":"ok"}}"#, t), Some(Ring::Joined));
         assert_eq!(classify(r#"{"event":"phx_reply","topic":"realtime:other","payload":{"status":"ok"}}"#, t), None);
         assert_eq!(classify(r#"{"event":"phx_reply","topic":"realtime:relay-bell-abc","payload":{"status":"error"}}"#, t), None);
-        assert_eq!(classify(r#"{"event":"broadcast","payload":{"event":"bell"}}"#, t), Some(Ring::Bell));
+        assert_eq!(classify(r#"{"event":"broadcast","payload":{"event":"bell"}}"#, t), Some(Ring::Bell(BellKind::Legacy)));
         assert_eq!(classify(r#"{"event":"broadcast","payload":{"event":"other"}}"#, t), None);
         assert_eq!(classify(r#"{"event":"phx_error"}"#, t), Some(Ring::Down));
         assert_eq!(classify("not json", t), None);
+    }
+
+    #[test]
+    fn 門鈴種類_看不懂的一律當舊門鈴() {
+        let rep = |k: &str, n: Option<&str>| BellKind::Report { kind: k.into(), node: n.map(String::from) };
+        assert_eq!(bell_kind(&json!({})), BellKind::Legacy);
+        assert_eq!(bell_kind(&Value::Null), BellKind::Legacy, "沒有 payload");
+        assert_eq!(bell_kind(&json!("echo")), BellKind::Legacy, "payload 不是物件");
+        assert_eq!(bell_kind(&json!({"kind": "echo", "node": "n1"})), rep("echo", Some("n1")));
+        assert_eq!(bell_kind(&json!({"kind": "echo"})), rep("echo", None));
+        assert_eq!(bell_kind(&json!({"kind": "Echo!"})), BellKind::Legacy, "kind 格式錯");
+        assert_eq!(bell_kind(&json!({"kind": "1echo"})), BellKind::Legacy);
+        assert_eq!(bell_kind(&json!({"kind": "a".repeat(33)})), BellKind::Legacy, "kind 太長");
+        assert_eq!(bell_kind(&json!({"kind": 5})), BellKind::Legacy, "kind 不是字串");
+        assert_eq!(bell_kind(&json!({"kind": "echo", "node": "bad node!"})), BellKind::Legacy, "node 格式錯");
+        assert_eq!(bell_kind(&json!({"kind": "echo", "node": 7})), BellKind::Legacy, "node 不是字串");
+        assert_eq!(bell_kind(&json!({"kind": "view_req"})), BellKind::View);
+    }
+
+    #[test]
+    fn 門鈴分流_回報不叫醒收信_舊門鈴叫醒全部() {
+        use BellAction::*;
+        assert_eq!(ring_actions(&Ring::Bell(BellKind::Legacy)), vec![EmitBell, WakeSecret, WakeTerm, WakeView]);
+        assert_eq!(ring_actions(&Ring::Joined), vec![EmitBell, WakeSecret, WakeTerm, WakeView], "入群成功照舊");
+        let r = ring_actions(&Ring::Bell(BellKind::Report { kind: "echo".into(), node: Some("n1".into()) }));
+        assert_eq!(r, vec![EmitReport { kind: "echo".into(), node: Some("n1".into()) }]);
+        assert!(!r.contains(&EmitBell) && !r.contains(&WakeSecret) && !r.contains(&WakeView));
+        assert_eq!(ring_actions(&Ring::Bell(BellKind::View)), vec![WakeView, WakeTerm]);
+        assert!(ring_actions(&Ring::Down).is_empty());
+    }
+
+    #[test]
+    fn 守門_主程式的門鈴回呼走分流_不能退回一響就全叫醒() {
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        let cb = lib.split("bell::run(url, topic, move |ring| {").nth(1).expect("有門鈴回呼").split(".await;").next().unwrap();
+        assert!(cb.contains("bell::ring_actions(ring)"), "回呼要依門鈴種類分流");
+        assert!(cb.contains("\"relay-report-bell\""), "回報門鈴走自己的事件");
+        assert!(cb.contains("BellAction::EmitBell =>"), "舊門鈴的 relay-bell 只在 EmitBell 裡 emit");
+        assert_eq!(cb.matches("emit(\"relay-bell\"").count(), 1, "relay-bell 不能在回呼裡無條件 emit");
+    }
+
+    #[test]
+    fn 實際收到的廣播_有_kind_分成回報_沒有的是舊門鈴() {
+        let t = "relay-bell-abc";
+        assert_eq!(classify(r#"{"event":"broadcast","payload":{"event":"bell","payload":{"kind":"echo","node":"n1"}}}"#, t), Some(Ring::Bell(BellKind::Report { kind: "echo".into(), node: Some("n1".into()) })));
+        assert_eq!(classify(r#"{"event":"broadcast","payload":{"event":"bell","payload":{}}}"#, t), Some(Ring::Bell(BellKind::Legacy)));
     }
 
     #[test]
@@ -326,7 +431,7 @@ mod tests {
         assert_eq!(next(&mut rings).await, "Joined");
         let first = seen.recv().await.unwrap();
         assert_eq!(first, serde_json::from_str::<Value>(&join_msg("relay-bell-abc", 1)).unwrap(), "門鈴的入群訊息不變");
-        assert_eq!(next(&mut rings).await, "Bell");
+        assert_eq!(next(&mut rings).await, "Bell(Legacy)");
         // 伺服器關掉 → 1 秒後重連、再加入
         assert_eq!(next(&mut rings).await, "Joined");
         assert_eq!(seen.recv().await.unwrap()["event"], "phx_join");
