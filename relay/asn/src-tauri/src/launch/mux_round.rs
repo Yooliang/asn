@@ -110,6 +110,9 @@ fn round(w: &mut Watch, tracker: &mut Tracker, o: &Observed, exited: &[String], 
     w.note_exited(exited, now);
     let incident = w.tick(o, now);
     w.save(ctx.state_file);
+    if let Some(why) = w.take_swallowed() {
+        sink.record(&why);
+    }
     // 事故的原因與最後活著的時間要先讀（observe 會換掉控制代碼、更新時間）
     let info = incident.as_ref().map(|_| {
         let pid = tracker.held_pid();
@@ -122,6 +125,7 @@ fn round(w: &mut Watch, tracker: &mut Tracker, o: &Observed, exited: &[String], 
     let (reason, last_alive, event) = info.unwrap_or_default();
     // 裡面沒有夥伴、而且是正常結束（結束碼 0）：不是事故，不寫紀錄、不通知
     if empty_normal_exit(&inc, &reason) {
+        sink.record(&format!("終端服務結束了但不算事故：裡面沒有夥伴、結束碼正常（{reason}）"));
         return None;
     }
     report(&inc, &reason, last_alive, event.as_deref(), now, ctx, sink);
@@ -153,6 +157,9 @@ fn after_stuck_done(w: &mut Watch, tracker: &mut Tracker, o: &Observed, mux: (u3
     let gone = Observed { live: None, record: None, stopped: None, ..o.clone() };
     let incident = w.tick_gone(&gone, now);
     w.save(ctx.state_file);
+    if let Some(why) = w.take_swallowed() {
+        sink.record(&why);
+    }
     let Some(inc) = incident else {
         // 結束了卻沒有事故（例如記著的是這次開機以前的服務）：留一行，不能靜默
         sink.record(&format!("終端服務卡住（心跳停了超過 {secs} 秒），已結束；這次不算事故、沒有接回"));
@@ -239,10 +246,18 @@ mod tests {
         resumes: RefCell<Vec<(Vec<String>, bool)>>,
         /// 最後一次處置收到的（心跳所屬的 mux, seq）
         args: Cell<Option<((u32, u64), u64)>>,
+        /// 開得到控制代碼時，讀出來的結束碼（None＝開不到控制代碼）
+        exit: Cell<Option<u32>>,
+    }
+    struct Code(u32);
+    impl ProcHandle for Code {
+        fn exit_code(&self) -> Option<u32> {
+            Some(self.0)
+        }
     }
     impl Rig {
         fn new(d: Disposal) -> Rig {
-            Rig { dispose: RefCell::new(d), disposed: Cell::new(0), records: RefCell::new(vec![]), resumes: RefCell::new(vec![]), args: Cell::new(None) }
+            Rig { dispose: RefCell::new(d), disposed: Cell::new(0), records: RefCell::new(vec![]), resumes: RefCell::new(vec![]), args: Cell::new(None), exit: Cell::new(None) }
         }
         fn log(&self) -> String {
             self.records.borrow().join("\n")
@@ -250,7 +265,7 @@ mod tests {
     }
     impl Sink for Rig {
         fn open(&self, _pid: u32) -> Option<Box<dyn ProcHandle>> {
-            None
+            self.exit.get().map(|c| Box::new(Code(c)) as Box<dyn ProcHandle>)
         }
         fn event_text(&self, _pid: Option<u32>) -> Option<String> {
             None
@@ -446,5 +461,55 @@ mod tests {
         assert_eq!(rig.resumes.borrow().len(), 0);
         let line = rig.log();
         assert!(line.contains("已結束") && !line.contains("已結束並接回"), "沒有接回就不能寫並接回：{line}");
+    }
+
+    /// #1837：正常結束的空服務不算事故，但要在 mux.log 留一行（拿掉那行就紅）
+    #[test]
+    fn t1837_空服務正常結束_不算事故_但留一行_不含夥伴名字() {
+        let rig = Rig::new(Disposal::Done);
+        rig.exit.set(Some(0));
+        let mut e = Env { tr: Tracker::new(true), ..Env::new() };
+        let empty_live = Observed { live: Some(M1), ..Default::default() };
+        assert_eq!(e.round(&empty_live, 0, &rig), None);
+        assert_eq!(e.round(&obs(None, Hb::NotSupported), TICK_MS, &rig), None, "第一輪只是懷疑");
+        assert_eq!(e.round(&obs(None, Hb::NotSupported), 2 * TICK_MS, &rig), None, "正常結束的空服務不算事故");
+        let log = rig.log();
+        assert!(log.contains("不算事故") && log.contains("沒有夥伴"), "{log}");
+        assert_eq!(rig.records.borrow().len(), 1, "只寫一次：{log}");
+        e.round(&obs(None, Hb::NotSupported), 3 * TICK_MS, &rig);
+        assert_eq!(rig.records.borrow().len(), 1, "下一輪不重複寫");
+    }
+
+    /// #1837：記著的服務早於這次開機，換服務不算事故，mux.log 要寫出是這一條，且只寫一次
+    #[test]
+    fn t1837_記著的服務早於開機_換服務不算事故_留一行_只寫一次() {
+        let rig = Rig::new(Disposal::Done);
+        let mut e = Env::new();
+        e.w = Watch::load(&e.dir.path().join("none.json"), Some(1_000_000));
+        e.round(&Observed { live: Some((10, 500_000)), partners: vec!["機密夥伴名".into()], ..Default::default() }, 600_000, &rig);
+        let fresh = Observed { live: Some((20, 1_100_000)), ..Default::default() };
+        assert_eq!(e.round(&fresh, 1_200_000, &rig), None);
+        let log = rig.log();
+        assert!(log.contains("是這次開機以前的") && log.contains("程序 10") && log.contains("500 秒") && log.contains("夥伴 1 位"), "{log}");
+        assert!(!log.contains("機密夥伴名"), "不記名字：{log}");
+        e.round(&fresh, 1_300_000, &rig);
+        assert_eq!(rig.records.borrow().len(), 1, "同一個情況只寫一次");
+    }
+
+    /// #1837：判成我們自己停的，換服務不算事故，要寫出是這一條
+    #[test]
+    fn t1837_判成我們自己停的_不算事故_留一行() {
+        let rig = Rig::new(Disposal::Done);
+        let mut e = Env::new();
+        e.round(&obs(Some(M1), Hb::NotSupported), 10_000, &rig);
+        let mut gone = obs(None, Hb::NotSupported);
+        gone.stopped = Some((M1.0, 20_000));
+        e.round(&gone, 40_000, &rig);
+        assert_eq!(e.round(&gone, 70_000, &rig), None);
+        let log = rig.log();
+        assert!(log.contains("判成我們自己停的") && log.contains(&format!("程序 {}", M1.0)) && log.contains("夥伴 2 位"), "{log}");
+        assert!(!log.contains('甲'), "不記名字：{log}");
+        e.round(&gone, 100_000, &rig);
+        assert_eq!(rig.records.borrow().len(), 1, "只寫一次");
     }
 }
