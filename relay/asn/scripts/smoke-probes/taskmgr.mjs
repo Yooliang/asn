@@ -107,6 +107,15 @@ export const taskmgrProbeSource = () => `(async () => {
   cancel2.click();
   if (!(await waitFor(() => !dlgOpen()))) return { ok: false, why: '截圖前確認框沒有關' };
   for (const b of mores()) if (b.getAttribute('aria-expanded') === 'true' && !b.closest('.tm-node[data-kind="mux"]')) b.click();
+  // #2242：整個畫面不寫「只能看」；沒有鈕的列留白，原因放在展開後的細項（截圖展開自己開的前景程式那一列當對照）
+  const procTitle = kindRow('process').querySelector('.tm-title');
+  if (procTitle.getAttribute('aria-expanded') !== 'true') procTitle.click();
+  const reason = await waitFor(() => kindRow('process').querySelector('.tm-detail .tm-reason'));
+  if (!reason || !reason.textContent.includes('不能從這裡停止')) return { ok: false, why: '自己開的程式展開後，細項裡沒有寫為什麼不能停止' };
+  if (document.querySelector('.tm').textContent.includes('只能看')) return { ok: false, why: '工作管理員畫面不該出現「只能看」' };
+  const lastBtn = k => { const kids = [...kindRow(k).querySelectorAll('.tm-act > *')].filter(e => e.tagName === 'BUTTON'); return kids.length ? kids[kids.length - 1] : null };
+  if (!lastBtn('process') || !lastBtn('process').classList.contains('tm-adopt')) return { ok: false, why: '沒有停止的列，「納入管理」應該在最右' };
+  if (!lastBtn('asn') || !lastBtn('asn').classList.contains('tm-restart')) return { ok: false, why: 'ASN 那一列的「重啟」應該在最右' };
   // 重啟（#1860 F）：ASN 與終端服務各有「重啟」；點終端服務的，原位展開確認框（文字逐字、取消在左、重啟在右），探針不按「重啟」，截圖留著確認框
   const restartBtns = [...document.querySelectorAll('.tm-tree .tm-restart')];
   if (restartBtns.length !== 2) return { ok: false, why: 'ASN 與終端服務各該有一顆「重啟」，實際 ' + restartBtns.length };
