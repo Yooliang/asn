@@ -36,6 +36,7 @@ import { ACCT_ACTIONS, handleAcctAction, requireSignedFlag } from "../_shared/ac
 import { handleQuotaRead, handleQuotaShare, QUOTA_READ_ACTION, QUOTA_SHARE_ACTIONS } from "../_shared/quota_read.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
+import { handleReport, handleReportGet } from "../_shared/report.ts";
 import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
 import { handleTermViewAction, TERM_VIEW_ACTIONS, TERM_VIEW_SIGNED_ACTIONS } from "../_shared/term_view_ctl.ts";
 import { handlePushAction, notifyPush, PUSH_ACTIONS } from "../_shared/push_ctl.ts";
@@ -73,15 +74,15 @@ async function sha256Hex(s: string): Promise<string> {
 // 手機推播（#797）：沒設秘密 FCM_SERVICE_ACCOUNT 就是 null，一律安靜不送（也不影響寄信）。見 _shared/push_ctl.ts
 const fcm = createFcm({ get: (k) => Deno.env.get(k) });
 
-// Doorbell: broadcast carries no mail content.
+// Doorbell: broadcast carries no mail content. payload 預設 {}（既有呼叫端不變）；回報匯流排（#2161）帶 { kind, node }，同樣不含內容。舊客戶端只看 event=bell。
 // Also write the Firebase RTDB bell node b/<hash> = { at } (pointer only, see docs/relay/SIGNAL.md): devices that listen to it
 // pull /updates only when it changes. No-op when IRORI_FIREBASE_DB_URL / IRORI_FIREBASE_SA are not both set; failures only log.
-async function ring(topic: string) {
+async function ring(topic: string, payload: Record<string, unknown> = {}) {
   try {
     const r = await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
       method: "POST",
       headers: { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ messages: [{ topic, event: "bell", payload: {}, private: false }] }),
+      body: JSON.stringify({ messages: [{ topic, event: "bell", payload, private: false }] }),
     });
     if (!r.ok) console.error("bell failed", r.status, await r.text());
   } catch (e) {
@@ -624,6 +625,15 @@ async function handle(req: Request): Promise<Response> {
   // 設備改名（#1388）：本人簽章（x-asn-user）＋節點金鑰；送請求的節點一律是金鑰所屬的 me.id，要改的那台由資料庫核對是同一個人的
   if (action === "device_rename" && req.method === "POST") {
     const r = await handleDeviceRename({ rpc, verifyJwt: accountDeps.verifyJwt }, me, req.headers.get(SIGN_HEADER), await req.json().catch(() => null));
+    return json(r.status, r.body);
+  }
+  // 回報匯流排（#2161 2b，見 _shared/report.ts）：節點一律是金鑰所屬的 me.id（body 不收節點）；節點層動作，不需本人簽章；網頁節點禁止（WEB_DENIED_ACTIONS）
+  if (action === "report" && req.method === "POST") {
+    const r = await handleReport({ rpc, ring, background: signal.background }, me, await req.json().catch(() => null));
+    return json(r.status, r.body);
+  }
+  if (action === "report_get" && req.method === "POST") {
+    const r = await handleReportGet({ rpc }, me, await req.json().catch(() => null));
     return json(r.status, r.body);
   }
   // 換新設備處理舊設備（#1860 H）：候選、取代、不取代；同樣要本人簽章＋節點金鑰，要動的兩台由資料庫核對是同一個人的

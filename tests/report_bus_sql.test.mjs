@@ -20,7 +20,7 @@ const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
 test('靜態：交易內、不刪資料、授權只給 service_role、有回復說明、寫入函式有 advisory lock、沒有 policy', () => {
   assert.ok(files.includes(MIG))
-  assert.equal(files[files.length - 1], MIG, '本檔是目前最新的 migration')
+  assert.ok(files[files.length - 1] >= MIG, '本檔不會排在最新 migration 之後（2b 的包裝函式 migration 會排在它後面，所以不再要求它是最後一支）')
   const sql = read(MIG)
   assert.match(sql, /^begin;$/m); assert.match(sql, /^commit;$/m)
   assert.match(sql, /^-- 回復：supabase\/sql\/rollback\/20261125100000_report_bus_down\.sql/m)

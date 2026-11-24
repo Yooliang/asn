@@ -60,6 +60,8 @@ export const WEB_DENIED_ACTIONS: ReadonlySet<string> = new Set([
   // 運維與通知回報（電腦端用節點金鑰打的）
   "roster", "bridge_notice", "misroute_notice", "waiting_notice", "node_mismatch_notice", "mux_blind_notice", "mux_down_notice", "mux_resume_notice", "compact_notice", "outbox_bad_notice",
   "asn_presence", "set_name", "window_rename", "set_avatar", "set_partner_avatar", "tts", "tts_voices",
+  // 回報匯流排（#2161 2b）：預設不開放網頁，之後要開再說
+  "report", "report_get",
   // 寄信、附件、群組：第 2、3 階段再開放
   "send", "sent_status", "inbox_peek", "attach_init", "attach_commit", "attach_url", "attach_sweep",
   "group_ai_add", "group_ai_remove", "group_allow_others", "group_create", "group_invite_accept", "group_invite_create", "group_invite_preview", "group_invite_revoke", "group_leave", "group_upgrade",
