@@ -19,7 +19,7 @@
 :root[data-skin="modern"] body.m-body{font-size:15px}
 
 /* ---------- 電腦版：視窗外框、標題列 ---------- */
-:root[data-skin="modern"] .tb:hover{background:var(--modern-hover);border-color:transparent}
+:root[data-skin="modern"] .tb:hover,:root[data-skin="modern"] .tb.snap-hover{background:var(--modern-hover);border-color:transparent}
 
 /* 下載中（#1526）：拿掉圓角卡片，只留一條直角進度條；左右內距 8px 跟分頁列一樣 */
 :root[data-skin="modern"] .upd-fill{background:var(--modern-soft)}
@@ -161,3 +161,38 @@
 :root[data-skin="modern"] .photo-viewer .pv-nav{width:44px;height:44px;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.18);color:#fff;box-shadow:none}
 :root[data-skin="modern"] .photo-viewer .pv-nav:hover:not(:disabled){background:#2f7a70;border-color:#2f7a70}
 :root[data-skin="modern"] .photo-viewer .pv-nav:disabled{opacity:.35}
+
+/* =====================================================================
+   #1788 無邊框（frameless）：現代外觀比照 LINE 拿掉標題列（Aero 維持原樣）。與 line.css 檔尾同一段，兩邊各自維護。
+   拿掉標題列：左欄頂到視窗最上緣，最小化／放大／關閉三顆鈕畫在右上角、和對話標題列同一列（60px 高）。三顆鈕高 36px、在標題列裡垂直置中。
+   最上緣留一條 10px 可拖曳條（titlebar 本身，data-tauri-drag-region），三顆鈕是它的子元素，不擋搜尋框與對話鈕。
+   ===================================================================== */
+:root[data-skin="modern"] .win{padding:0}
+:root[data-skin="modern"] .titlebar{position:absolute;z-index:45;top:0;left:0;right:0;height:10px;padding:0;gap:0;background:transparent}
+:root[data-skin="modern"] .titlebar .t-icon,
+:root[data-skin="modern"] .titlebar .t-text{display:none}
+:root[data-skin="modern"] .t-btns{position:absolute;top:0;right:0;gap:0;height:60px;align-items:center}
+:root[data-skin="modern"] .tb{width:46px;height:36px;border:0;border-radius:0;background:transparent;box-shadow:none;color:#4a4f57;filter:none}
+:root[data-skin="modern"] .tb svg{display:none}
+:root[data-skin="modern"] .tb::before{content:"";width:12px;height:12px;background:currentColor;
+  -webkit-mask:var(--tb-ic) center/contain no-repeat;mask:var(--tb-ic) center/contain no-repeat}
+:root[data-skin="modern"] .tb{--tb-ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 6.5h10' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E")}
+:root[data-skin="modern"] .tb:nth-child(2){--tb-ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Crect x='1.5' y='1.5' width='9' height='9' fill='none' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E")}
+:root[data-skin="modern"] .tb.close{--tb-ic:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M1 1l10 10M11 1L1 11' stroke='%23000' stroke-width='1'/%3E%3C/svg%3E")}
+:root[data-skin="modern"] .tb:hover{background:rgba(0,0,0,.07);filter:none}
+:root[data-skin="modern"] .tb.close:hover{background:#e81123;color:#fff}
+:root[data-skin="modern"] .tb:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* 三顆鈕佔右上 138px：對話標題列、分頁列右邊讓出來，右側的通話／⋯ 鈕不被蓋住 */
+:root[data-skin="modern"] .mbar,
+:root[data-skin="modern"] .shell.only-chat .tabbar{padding-right:146px}
+/* 左欄頂到最上：圖示欄起點從 14px 縮成 12px，視覺上和視窗上緣對齊 */
+:root[data-skin="modern"] .top-tabs{padding-top:12px}
+/* 視窗最上方整條的提醒（別台正在看這台的「結束」）：右邊讓出三顆鈕，按鈕不被蓋住（LINE 同） */
+:root[data-skin="modern"] .viewed-bar{padding-right:146px}
+/* 名單最上面的更新／重新登入提醒列（「更新」「重試」鈕在右邊）：分離模式或只剩名單一欄時它頂到視窗最上緣，右邊同樣讓出三顆鈕；寬的整合模式它在左欄，不受影響 */
+:root[data-skin="modern"] .shell:not(.merged) .upd-bar,:root[data-skin="modern"] .shell.only-list .upd-bar{padding-right:146px}
+/* 分離模式的名單視窗、或整合模式窄到只剩名單一欄時，上方四個大分頁橫跨整個視窗寬：右邊讓出三顆鈕的位置，「通知」不被蓋住 */
+:root[data-skin="modern"] .shell:not(.merged) .top-tabs,:root[data-skin="modern"] .shell.only-list .top-tabs{padding-right:146px}
+/* #1788 分割版面：放大鈕被 Rust 端的透明子視窗蓋住，滑過／按下由 Rust 通知，樣式與 :hover 同 */
+:root[data-skin="modern"] .tb.snap-hover{background:rgba(0,0,0,.07)}
+:root[data-skin="modern"] .tb.snap-down{background:rgba(0,0,0,.14)}
