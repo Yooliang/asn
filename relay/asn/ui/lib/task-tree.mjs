@@ -10,7 +10,17 @@ export const TREE_TEXT = Object.freeze({
   fold: '收合',
   unfold: '展開',
   viewOnly: '只能看',
+  // 重啟（#1860 F PR3）：確認文字、按鈕與狀態都只有這一份，電腦、手機、別台設備共用
+  restart: '重啟',
+  cancel: '取消',
+  restarting: '正在重啟…',
+  disconnected: '斷線中',
+  restartFail: '重啟沒有成功，請稍後再試。',
 })
+
+/** 重啟確認框的字。prefix 是別台設備才加的主詞（例如「工作機」的），這台自己不給 */
+export const restartAsnText = (prefix = '') => `重啟${prefix}ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。`
+export const restartMuxText = (n, prefix = '') => `重啟${prefix}終端服務？底下所有代理（${n} 個）會暫時斷線，之後會自動連回。`
 
 export const ROOT_KEY = 'asn'
 export const muxKey = pid => `mux:${pid}`
@@ -42,11 +52,27 @@ export function buildTree(rows) {
  * 畫面要的樹：節點都用 mapRow 轉成畫面的列（task-manager 的 viewRow）。
  * root 沒有 ASN 本體時是 null，這時終端服務與直接掛的列就是最外層
  */
-export function treeView(rows, mapRow) {
+export function treeView(rows, mapRow, ui = {}) {
   const t = buildTree(rows)
-  const root = t.asn ? { key: ROOT_KEY, node: mapRow(t.asn), statusText: TREE_TEXT.running } : null
-  const groups = t.groups.map(g => ({ key: muxKey(g.mux.pid), node: mapRow(g.mux), summary: TREE_TEXT.agents(g.agents.length), agents: g.agents.map(mapRow) }))
-  return { root, groups, direct: t.direct.map(mapRow), agentCount: t.agentCount }
+  const { ask = null, restarting = null, frozen = null, prefix = '', error = null } = ui
+  // 重啟中：ASN 重啟整棵樹都斷線；終端服務重啟只有它底下的代理斷線（restarting 是節點鍵，'mux:*' 代表不知道是哪一個，全部終端服務）
+  const hit = key => restarting === key || (restarting === 'mux:*' && key.startsWith('mux:'))
+  const allDown = restarting === ROOT_KEY
+  const down = a => ({ ...a, status: TREE_TEXT.disconnected, canStop: false, why: '', canHandover: false, canView: false, canAdopt: false })
+  const restartOf = (key, text) => ({ target: key, ask: ask === key ? text : '', busy: hit(key) || (key === ROOT_KEY && allDown), disabled: restarting !== null, error: error?.key === key ? error.text : '' })
+  const root = t.asn ? { key: ROOT_KEY, node: mapRow(t.asn), statusText: TREE_TEXT.running, restart: restartOf(ROOT_KEY, restartAsnText(prefix)) } : null
+  const mapAgent = (a, isDown) => (isDown ? down(mapRow(a)) : mapRow(a))
+  const groups = t.groups.map(g => {
+    const key = muxKey(g.mux.pid)
+    const isDown = allDown || hit(key)
+    return { key, node: mapRow(g.mux), summary: TREE_TEXT.agents(g.agents.length), agents: g.agents.map(a => mapAgent(a, isDown)), restart: restartOf(key, restartMuxText(g.agents.length, prefix)) }
+  })
+  // 終端服務重啟的當下，舊服務已停、清單裡找不到它：用按下時記的那一組撐著，底下標「斷線中」，直到新的服務回來
+  if (frozen && restarting === frozen.key && !groups.some(g => g.key === frozen.key)) {
+    groups.push({ ...frozen, agents: frozen.agents.map(down), restart: restartOf(frozen.key, '') })
+  }
+  const direct = t.direct.map(a => mapAgent(a, allDown))
+  return { root, groups, direct, agentCount: t.agentCount }
 }
 
 /** 收合：只記被收起的節點鍵；回新的清單，不改原本的 */

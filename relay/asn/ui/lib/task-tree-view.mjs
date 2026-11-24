@@ -3,7 +3,7 @@
 // 操作名沿用 tm-ask／tm-handover／tm-view／tm-adopt，由外面接到既有的停止、交接、看畫面、納入管理。
 // 收合狀態（▾）與小字展開（點整列）都由元件自己記，5 秒更新資料時不會被重設。小字預設收起，主行只留名稱、狀態、標籤、重複警示與操作鈕。
 // 這個檔在 node 也要能載入（測試），所以 Vue 只在元件 setup 裡才取用。
-import { AsnButton } from './ui-kit.mjs'
+import { AsnButton, AsnConfirm, AsnStatus } from './ui-kit.mjs'
 import { COLUMNS, DASH, TEXT as TM } from './task-manager.mjs'
 import { TREE_TEXT, ROOT_KEY, isCollapsed, toggleCollapsed } from './task-tree.mjs'
 
@@ -26,9 +26,10 @@ export function nodeFields(n) {
 
 export const TaskNode = {
   name: 'TaskNode',
-  components: { AsnButton },
+  components: { AsnButton, AsnConfirm, AsnStatus },
   props: {
     node: { type: Object, required: true },
+    restart: { type: Object, default: null },   // ASN、終端服務才有：{ target, ask（確認文字，空白＝沒在確認）, busy, disabled, error }
     level: { type: Number, default: 1 },
     foldable: { type: Boolean, default: false },
     folded: { type: Boolean, default: false },
@@ -66,7 +67,13 @@ export const TaskNode = {
       <asn-button class="tm-handover" v-if="node.canHandover" :disabled="busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + node.name" @click="$emit('act', 'tm-handover', node.name)">{{ TM.handover }}</asn-button>
       <asn-button class="tm-view-btn" v-if="node.canView" :disabled="busy" :title="TM.viewTip" :aria-label="TM.view + ' ' + node.name" @click="$emit('act', 'tm-view', node.name)">{{ TM.view }}</asn-button>
       <asn-button class="tm-adopt" v-if="node.canAdopt" :disabled="busy" :title="TM.adoptTip" :aria-label="TM.adopt + ' ' + node.name" @click="$emit('act', 'tm-adopt', node.key)">{{ TM.adopt }}</asn-button>
+      <template v-if="restart">
+        <asn-status v-if="restart.busy" class="tm-restarting" kind="busy" :text="TREE_TEXT.restarting"></asn-status>
+        <asn-button v-else-if="!restart.ask" class="tm-restart" :disabled="busy || restart.disabled" :aria-label="TREE_TEXT.restart + ' ' + node.name" @click="$emit('act', 'tm-restart-ask', restart.target)">{{ TREE_TEXT.restart }}</asn-button>
+      </template>
     </div>
+    <small class="tm-why tm-restart-err" v-if="restart && restart.error" role="alert">{{ restart.error }}</small>
+    <asn-confirm class="tm-restart-confirm" v-if="restart && restart.ask" danger :text="restart.ask" :yes="TREE_TEXT.restart" :no="TREE_TEXT.cancel" @yes="$emit('act', 'tm-restart-confirm', restart.target)" @no="$emit('act', 'tm-restart-cancel')"></asn-confirm>
   </div>`,
 }
 
@@ -93,10 +100,10 @@ export const TaskTree = {
     return { ROOT_KEY, folded, fold, base, act, isOpen, toggle }
   },
   template: `<div class="tm-tree" role="tree">
-    <task-node v-if="tree.root" :node="tree.root.node" :level="1" foldable :folded="folded(ROOT_KEY)" :state-text="tree.root.statusText" :busy="busy" :open="isOpen(tree.root.node)" @fold="fold(ROOT_KEY)" @toggle="toggle(tree.root.node)" @act="act"></task-node>
+    <task-node v-if="tree.root" :node="tree.root.node" :level="1" foldable :folded="folded(ROOT_KEY)" :state-text="tree.root.statusText" :restart="tree.root.restart" :busy="busy" :open="isOpen(tree.root.node)" @fold="fold(ROOT_KEY)" @toggle="toggle(tree.root.node)" @act="act"></task-node>
     <div class="tm-kids" :class="{ top: !tree.root }" role="group" v-if="!tree.root || !folded(ROOT_KEY)">
       <template v-for="g in tree.groups" :key="g.key">
-        <task-node :node="g.node" :level="base()" foldable :folded="folded(g.key)" :state-text="g.summary" :busy="busy" :open="isOpen(g.node)" @fold="fold(g.key)" @toggle="toggle(g.node)" @act="act"></task-node>
+        <task-node :node="g.node" :level="base()" foldable :folded="folded(g.key)" :state-text="g.summary" :restart="g.restart" :busy="busy" :open="isOpen(g.node)" @fold="fold(g.key)" @toggle="toggle(g.node)" @act="act"></task-node>
         <div class="tm-kids" role="group" v-if="!folded(g.key)">
           <task-node v-for="a in g.agents" :key="a.key" :node="a" :level="base() + 1" :busy="busy" :open="isOpen(a)" @toggle="toggle(a)" @act="act"></task-node>
         </div>

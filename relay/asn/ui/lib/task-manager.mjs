@@ -12,7 +12,7 @@
 import { menuItems, partnerEngine, isProcessEntry } from './partner-ops.mjs'
 import { runPartnerOp } from './partner-ops-ui.mjs'
 import { dupCloseText } from './dup-windows.mjs'
-import { treeView } from './task-tree.mjs'
+import { treeView, ROOT_KEY, TREE_TEXT } from './task-tree.mjs'
 
 export const REFRESH_MS = 5000
 export const DASH = '—'
@@ -275,7 +275,8 @@ function confirmBody(r, rows, now) {
 
 // ---------- 控制器：頁面開著時才每 5 秒更新 ----------
 
-export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '' })
+// restartAsk：正在原位確認重啟的節點鍵；restart：正在重啟的節點鍵；restartFrozen：重啟終端服務當下記的那一組（舊服務停了、清單找不到它時撐著畫面）；restartError：{ key, text }
+export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '', restartAsk: null, restart: null, restartFrozen: null, restartError: null })
 
 // 控制器的 view() 另外帶 tree（ASN ＞ 終端服務 ＞ 代理，見 task-tree.mjs）；rows 還是平的一份，找列、停止與測試都用它
 
@@ -319,6 +320,7 @@ export function createTaskManager(deps) {
   function close() {
     state.open = false
     state.confirm = null
+    state.restartAsk = null
     if (timer !== null) { clearTimer(timer); timer = null }
   }
 
@@ -329,6 +331,7 @@ export function createTaskManager(deps) {
     const r = findRow(key)
     if (!r || !stopPlan(r, ctx()).ok) return
     state.note = ''
+    state.restartAsk = null
     state.confirm = { ...confirmView(r, rowsNow(), now(), confirmPrefix()), key, busy: false, result: '' }
   }
 
@@ -365,6 +368,54 @@ export function createTaskManager(deps) {
     }
     setTimeout(() => { void refresh() }, 2500)
     void refresh()
+  }
+
+  // ---------- 重啟（ASN、終端服務）：原位確認，按下後那一列顯示「正在重啟…」 ----------
+
+  const treeUi = () => ({
+    ask: state.restartAsk,
+    // 沒有本頁自己記的（例如頁面重新載入）就看電腦端回報：不知道是哪一個，所有終端服務都當作在重啟
+    restarting: state.restart ?? (state.snapshot?.mux_restarting === true ? 'mux:*' : null),
+    frozen: state.restartFrozen,
+    prefix: confirmPrefix(),
+    error: state.restartError,
+  })
+  const liveTree = () => { const n = now(), c = ctx(); return treeView(rowsNow(), r => viewRow(r, n, c), treeUi()) }
+
+  function askRestart(key) {
+    if (state.restart || state.busy) return
+    state.confirm = null
+    state.restartError = null
+    state.restartAsk = String(key ?? '') || null
+  }
+
+  function cancelRestart() { state.restartAsk = null }
+
+  async function confirmRestart() {
+    const key = state.restartAsk
+    if (!key || state.restart) return
+    const isAsn = key === ROOT_KEY
+    state.restartAsk = null
+    state.restartError = null
+    state.restart = key
+    state.restartFrozen = isAsn ? null : liveTree().groups.find(g => g.key === key) ?? null
+    try {
+      if (isAsn) await api.taskManagerRestartAsn()
+      else await api.taskManagerRestartMux()
+    } catch (e) {
+      // 電腦端回的是白話字串（原文已寫進它的 log）；其他錯誤用統一的白話字，原文寫 console
+      log(`[工作管理員] 重啟失敗（${key}）：${e?.message ?? e}`)
+      state.restartError = { key, text: typeof e === 'string' && e ? e : TREE_TEXT.restartFail }
+      state.restart = null
+      state.restartFrozen = null
+      return
+    }
+    // 重啟 ASN 成功：本頁隨後會斷線，ASN 回來後重新載入，這裡維持「正在重啟…」
+    if (isAsn) return
+    await refresh()
+    state.restart = null
+    state.restartFrozen = null
+    setTimeout(() => { void refresh() }, 2500)
   }
 
   /** 「看畫面」：打開這位夥伴的對話頁（名單上那一筆「等你在那台電腦按確認」），終端在那裡看；名單上還沒有就請稍後再試 */
@@ -420,11 +471,11 @@ export function createTaskManager(deps) {
     })
     return {
       open: state.open, loading: state.loading, error: state.error, loaded: state.snapshot !== null,
-      rows, tree: treeView(merged, r => viewRow(r, n, c)), empty: state.snapshot !== null && !rows.length,
+      rows, tree: treeView(merged, r => viewRow(r, n, c), treeUi()), empty: state.snapshot !== null && !rows.length,
       dupBanner: dupBanner(groups),
       known, note: state.note, wakeNote: state.wakeNote, busy: state.busy,
       confirm: state.confirm ? { ...state.confirm } : null,    }
   }
 
-  return { state, open, close, refresh, ask, cancel, confirm, wake, handover, openScreen, view }
+  return { state, open, close, refresh, ask, cancel, confirm, wake, handover, openScreen, askRestart, cancelRestart, confirmRestart, view }
 }

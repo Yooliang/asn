@@ -2245,6 +2245,9 @@ const app = createApp({
         case 'tm-confirm': await taskMgr.confirm(); break
         case 'tm-view': taskMgr.openScreen(String(value ?? '')); break   // 視窗開著、在等你按確認的夥伴（#1635）：打開它的對話頁看終端
         case 'tm-wake': await taskMgr.wake(String(value ?? '')); break
+        case 'tm-restart-ask': taskMgr.askRestart(String(value ?? '')); break   // 「重啟」：原位確認（#1860 F）
+        case 'tm-restart-cancel': taskMgr.cancelRestart(); break
+        case 'tm-restart-confirm': await taskMgr.confirmRestart(); break
         case 'tm-handover': await taskMgr.handover(String(value ?? '')); break   // 「請交接」列的「交接」鈕（#1852）
         case 'tm-adopt': void adoptLoad(); break   // 工作管理員「納入管理」（#1557）：打開跟以前同一個接手清單，安全檢查照舊
         case 'avatar-remove': await removeAvatar(); break
