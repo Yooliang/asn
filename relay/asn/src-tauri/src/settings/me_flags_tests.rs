@@ -109,7 +109,7 @@ fn 升級後再降級_新版改過的檔舊讀法讀得到一樣的值() {
     assert_eq!(v["future"], json!({"x":[1]}));
     assert_eq!(v["chatPins"], json!(["a", "b"]));
     assert_eq!(v["closeTo"], json!("quit"));
-    assert!(v.get("version").is_none(), "這一張不加 version，舊版看到的檔案長相與以前一樣");
+    assert_eq!(v["version"], json!(1), "新版 patch 之後補上 version:1；舊版前端整份存時展開 savedMe 會保留它");
     // 新版改三個旗標本身：舊讀法立刻看得到
     patch_json(d.path(), RawName::Me, json!({"frame":"native","closeTo":"tray"}).as_object().unwrap().clone()).unwrap();
     assert_eq!(old_flags(d.path()), (true, true, true));

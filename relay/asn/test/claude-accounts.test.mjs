@@ -198,7 +198,7 @@ test('登入檔被其他程式換過：顯示實際帳號一行小字並回報',
 test('自動加入接線守門：開關預設開、存進 asn-me.json、設定頁有開關、Rust 背景工作已啟動', () => {
   const panel = read('ui/lib/settings-panel.mjs'), js = read('ui/list.js'), rs = read('src-tauri/src/lib.rs')
   assert.match(js, /autoAddClaude = ref\(true\)/, '固定開啟，不看舊存檔')
-  assert.match(js, /meStore\.save\(\{[^]*?autoAddClaude: autoAddClaude\.value/, '開關要寫進 asn-me.json')
+  assert.match(js, /const f = \{[^]*?autoAddClaude: autoAddClaude\.value[^]*?patchWithFallback\(meStore, f, /, '開關要寫進 asn-me.json（走 patch，只送自己的欄位）')
   assert.ok(!js.includes("case 'acct-auto'"), '設定頁沒有開關了')
   assert.match(js, /listen\('claude-account-auto'/)
   assert.ok(!panel.includes("act('acct-auto'") && !panel.includes('<span>自動加入</span>'), '設定頁沒有自動加入勾選')

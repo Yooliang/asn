@@ -18,7 +18,9 @@ export function httpTransport(url, windowName, key = FAKE_KEY) {
   }
 }
 export const memStore = (init = null) => {
-  const s = { data: init, saves: 0, load: async () => s.data, save: async d => { s.data = JSON.parse(JSON.stringify(d)); s.saves++ } }
+  // patch：跟後端 settings_patch 一樣——只動給的頂層欄位，null＝刪除，其餘原樣保留（#2162 ⑦）；patches 記下每次送來的欄位
+  const s = { data: init, saves: 0, patches: [], load: async () => s.data, save: async d => { s.data = JSON.parse(JSON.stringify(d)); s.saves++ },
+    patch: async f => { const p = JSON.parse(JSON.stringify(f)); s.patches.push(p); const d = { ...(s.data ?? {}) }; for (const [k, v] of Object.entries(p)) { if (v === null) delete d[k]; else d[k] = v } s.data = d } }
   return s
 }
 export const sleep = ms => new Promise(r => setTimeout(r, ms))

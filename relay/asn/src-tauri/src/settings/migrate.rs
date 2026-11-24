@@ -39,10 +39,16 @@ fn take_version(obj: &mut Map<String, Value>) -> u32 {
     obj.remove("version").and_then(|v| v.as_u64()).map(|n| n.min(u32::MAX as u64) as u32).unwrap_or(0)
 }
 
+/// 序列化失敗：系統原文只寫進 log，給畫面的是固定白話句加代號
+fn render_failed(e: &serde_json::Error) -> SettingsError {
+    elog!("[ASN] 設定內容無法轉成文字（{e}）");
+    SettingsError(format!("{} 設定內容無法轉成文字，這次沒有存", super::CODE_SHAPE))
+}
+
 /// 把 Doc 序列化成要寫的文字：`version` 放第一個欄位，其餘照序列化順序
 pub fn render<T: Doc>(v: &T, version: u32) -> Result<String, SettingsError> {
-    let Value::Object(body) = serde_json::to_value(v).map_err(|e| SettingsError(e.to_string()))? else {
-        return Err(SettingsError("設定的最上層必須是物件".into()));
+    let Value::Object(body) = serde_json::to_value(v).map_err(|e| render_failed(&e))? else {
+        return Err(SettingsError(format!("{} 設定的最上層必須是物件", super::CODE_SHAPE)));
     };
     let mut out = Map::new();
     // 版本 0＝沒有版本欄位的格式（畫面整份存的三個存檔，版本留給之後的前端 patch）：不補 `version`，檔案長相與以前一樣
@@ -55,7 +61,7 @@ pub fn render<T: Doc>(v: &T, version: u32) -> Result<String, SettingsError> {
         }
     }
     let r = if T::COMPACT { serde_json::to_string(&Value::Object(out)) } else { serde_json::to_string_pretty(&Value::Object(out)) };
-    r.map_err(|e| SettingsError(e.to_string()))
+    r.map_err(|e| render_failed(&e))
 }
 
 fn suffixed(path: &Path, suffix: &str) -> PathBuf {

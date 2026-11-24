@@ -55,6 +55,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.mjs'
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { plainMessage, termRemoteErrorText } from './lib/plain-errors.mjs'
+import { patchWithFallback } from './lib/settings-save.mjs'
 import { RESIZE_DIRS, authApi, autostartApi, deviceReplaceApi, bridgeApi, cliLoginApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
@@ -1349,7 +1350,7 @@ await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
 watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddClaude, autoCheck, ghRefs, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
 // #2162⓪：先展開讀進來的舊內容，這版不認得的欄位（手機版 mobilePrefs／lastChat／navTab、新版新增的欄位）原樣保留；下面列的欄位每次都明確帶值，會蓋過舊值
-const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; void meStore.save({ ...savedMe, ...deviceFieldsToSave(devPrefs), chatPins: chatPins.value, me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, ghRefs: ghRefs.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }) }, 600)
+const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; const f = { ...deviceFieldsToSave(devPrefs), chatPins: chatPins.value, me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, ghRefs: ghRefs.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }; void patchWithFallback(meStore, f, () => ({ ...savedMe, ...f })) }, 600)
 addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void trayApi.setUnread(n).catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ }) }, { immediate: true })

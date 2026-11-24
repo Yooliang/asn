@@ -275,7 +275,7 @@ fn 暫時讀不到時的斷言(dir: &Path, release: impl FnOnce()) {
     assert!(matches!(l.status, LoadStatus::Unreadable { .. }), "{:?}", l.status);
     assert_eq!(l.value, TA::default());
     let e = update_in::<TA, _>(dir, |t| t.a = 99).unwrap_err();
-    assert!(e.0.contains("暫時讀不到"), "{e}");
+    assert!(e.0.starts_with("[settings:unreadable] 設定檔暫時讀不到"), "{e}");
     assert!(save_in::<TA>(dir, &TA::default()).is_err());
     // 不快取：還是讀不到時每次都是 Unreadable
     assert!(matches!(load_in::<TA>(dir).status, LoadStatus::Unreadable { .. }));
@@ -418,7 +418,7 @@ fn 升版前備份失敗_存檔回錯_原檔一字不差() {
     put(d.path(), "t-a.json", old);
     let _g = Inject::copy();
     let e = update_in::<TA, _>(d.path(), |t| t.a = 9).unwrap_err();
-    assert!(e.0.contains("備份存不下來"), "{e}");
+    assert!(e.0.starts_with("[settings:backup] 設定檔寫入前的備份存不下來"), "{e}");
     assert!(save_in::<TA>(d.path(), &TA::default()).is_err());
     assert_eq!(std::fs::read_to_string(d.path().join("t-a.json")).unwrap(), old);
     assert!(names(d.path(), "t-a.json.").is_empty());

@@ -26,8 +26,13 @@ const logFail = (cmd, msg) => {
 export const invoke = async (cmd, args) => {
   try { return await T.core.invoke(cmd, args) } catch (e) {
     const msg = typeof e === 'string' ? e : (e?.message ?? String(e))
-    logFail(cmd, msg)
-    throw new Error(msg)
+    logFail(cmd, msg)   // log 保留完整原文（含代號）
+    // 後端設定層的錯誤開頭有固定代號 `[settings:名稱]`（#2162 ⑦）：在這個唯一的出口拆開——message 是去掉代號的白話句（畫面直接顯示不會冒出代號），
+    // 代號放在 err.code（`settings:名稱`），要判斷的程式只認 code，不比對文字（見 lib/settings-save.mjs）
+    const m = /^\s*\[settings:([a-z_]+)\]\s*/.exec(msg)
+    const err = new Error(m ? msg.slice(m[0].length) : msg)
+    if (m) err.code = `settings:${m[1]}`
+    throw err
   }
 }
 // 開外部連結：沒有 Tauri（純網頁、測試）就什麼都不做，回 undefined（維持 chatpane 以前的 ?. 行為）
@@ -188,15 +193,26 @@ export const cloudApi = {
 // 存檔寫入改在背景執行緒跑之後（todo-next-191），兩支同時送出時後端不保證照順序寫完：同一個存檔名一支寫完才送下一支，
 // 內容在呼叫當下就轉成文字（之後改了資料不影響這一次）。前一支失敗不擋後一支
 const saveChain = new Map()
-export const store = name => ({
-  load: async () => { const s = await invoke('store_load', { name }); try { return s ? JSON.parse(s) : null } catch { return null } },
-  save: data => {
-    const text = JSON.stringify(data)
-    const next = (saveChain.get(name) ?? Promise.resolve()).catch(() => {}).then(() => invoke('store_save', { name, text }))
-    saveChain.set(name, next)
-    return next
-  },
+// 存檔的具名出口（#2162 ⑦）：load／save 沿用 store_load／store_save（整份文字），patch 走 settings_patch（只送變動的頂層欄位，
+// 值是 null 代表刪掉該欄，沒提到的欄位後端原樣保留，version 由後端管）。參數 call 預設就是 invoke；測試可以換成假的
+export const makeSettingsApi = (call = invoke) => ({
+  load: name => call('store_load', { name }),   // → 原文字串或 null（store(name).load 會再 parse）
+  save: (name, text) => call('store_save', { name, text }),
+  patch: (name, patch) => call('settings_patch', { name, patch }),
 })
+const settingsStoreApi = makeSettingsApi()
+// 同一個存檔名的 save、patch 共用一條排隊（兩支同時送出時後端不保證照順序寫完）；前一支失敗不擋後一支
+const queued = (name, run) => {
+  const next = (saveChain.get(name) ?? Promise.resolve()).catch(() => {}).then(run)
+  saveChain.set(name, next)
+  return next
+}
+export const makeStore = (name, api = settingsStoreApi) => ({
+  load: async () => { const s = await api.load(name); try { return s ? JSON.parse(s) : null } catch { return null } },
+  save: data => { const text = JSON.stringify(data); return queued(name, () => api.save(name, text)) },
+  patch: fields => { const patch = JSON.parse(JSON.stringify(fields)); return queued(name, () => api.patch(name, patch)) },   // 內容在呼叫當下就複製（之後改了資料不影響這一次）；undefined 的欄位不送
+})
+export const store = name => makeStore(name)
 
 // ---------- 具名出口（#2106 ②）：電腦版與手機版都經這裡呼叫後端 ----------
 // 參數 call 預設就是上面的 invoke；測試可以換成假的。方法名＝指令的駝峰寫法，參數形狀與以前直接 invoke 時完全相同。
@@ -386,6 +402,7 @@ export const makeUiLogApi = (call = invoke) => ({
 // ---------- 設定頁的出口（#2106 ⑦）：參數形狀與以前直接 invoke 時完全相同 ----------
 // 外框、關閉視窗時、托盤、意外關閉自動重開（guard）、密碼小幫手資訊
 export const settingsApi = {
+  ...makeSettingsApi(),   // load(name)／save(name, text)／patch(name, fields)：個人設定與引導存檔（#2162 ⑦）
   setFrame: native => invoke('set_frame', { native }),
   setCloseToTray: tray => invoke('set_close_to_tray', { tray }),
   trayAvailable: () => invoke('tray_available'),

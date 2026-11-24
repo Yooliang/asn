@@ -31,7 +31,7 @@ fn 存檔超過上限整筆拒絕_原檔不動() {
     assert!(save_text(d.path(), RawName::Me, &at).is_ok());
     put(d.path(), "asn-me.json", r#"{"keep":1}"#);
     let over = pad(MAX_BYTES + 1);
-    assert_eq!(save_text(d.path(), RawName::Me, &over).unwrap_err(), "存檔太大");
+    assert_eq!(save_text(d.path(), RawName::Me, &over).unwrap_err(), "[settings:too_big] 存檔太大");
     assert_eq!(read(d.path(), "asn-me.json"), r#"{"keep":1}"#, "原檔不動");
     assert!(files_with(d.path(), ".tmp").is_empty() && files_with(d.path(), ".bad-").is_empty());
 }
@@ -39,7 +39,7 @@ fn 存檔超過上限整筆拒絕_原檔不動() {
 #[test]
 fn 白名單外的名稱被拒() {
     for bad in ["", "foo", "ME", "Me", "me.json", "asn-me", "../me", "me/", "settings", "voice", "chats2", " me"] {
-        assert_eq!(RawName::parse(bad).unwrap_err(), SettingsError("存檔名稱不合格".into()), "{bad:?}");
+        assert_eq!(RawName::parse(bad).unwrap_err(), SettingsError("[settings:name] 存檔名稱不合格".into()), "{bad:?}");
     }
     assert_eq!(RawName::parse("me"), Ok(RawName::Me));
     assert_eq!(RawName::parse("onboard"), Ok(RawName::Onboard));
@@ -77,7 +77,7 @@ fn 修補_舊檔含孤立_surrogate_回白話錯誤_原檔不動_也不搬成壞
     for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json"), (RawName::Chats, "asn-chats.json")] {
         put(d.path(), file, old);
         let e = patch_json(d.path(), name, obj(json!({"a":1}))).unwrap_err();
-        assert_eq!(e, "設定檔內容無法合併，這次沒有存", "{file}");
+        assert_eq!(e, "[settings:merge] 設定檔內容無法合併，這次沒有存", "{file}");
         assert_eq!(read(d.path(), file), old, "{file} 原檔不動");
     }
     assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".tmp").is_empty());
@@ -107,15 +107,52 @@ fn 修補_不認得的欄位保留_null_刪欄() {
     put(d.path(), "asn-me.json", r#"{"frame":"custom","future":{"x":[1,2]},"closeTo":"quit","drop":1}"#);
     patch_json(d.path(), RawName::Me, obj(json!({"frame":"native","drop":null,"added":true}))).unwrap();
     let now: Value = serde_json::from_str(&read(d.path(), "asn-me.json")).unwrap();
-    assert_eq!(now, json!({"frame":"native","future":{"x":[1,2]},"closeTo":"quit","added":true}));
+    assert_eq!(now, json!({"version":1,"frame":"native","future":{"x":[1,2]},"closeTo":"quit","added":true}));
     // 刪掉一個本來就沒有的欄位不出錯
     patch_json(d.path(), RawName::Me, obj(json!({"nothing":null}))).unwrap();
     // 想用 patch 改版本號沒有用
     patch_json(d.path(), RawName::Me, obj(json!({"version":99}))).unwrap();
-    assert!(!read(d.path(), "asn-me.json").contains("version"));
+    let after: Value = serde_json::from_str(&read(d.path(), "asn-me.json")).unwrap();
+    assert_eq!(after["version"], json!(1), "patch 改不了版本號：還是 1，不是 99");
     // 檔案不存在也能 patch（等於建檔）
     patch_json(d.path(), RawName::Onboard, obj(json!({"done":true}))).unwrap();
-    assert_eq!(read(d.path(), "asn-onboard.json"), r#"{"done":true}"#);
+    assert_eq!(read(d.path(), "asn-onboard.json"), r#"{"version":1,"done":true}"#);
+}
+
+/// #2162 ⑦ 版本：me、onboard 是 1（chats 維持 0）；讀版本 0 的舊檔不改寫，第一次 patch 才補上 `version:1`（並留一份 .v0.bak）；patch 與整份存都不洗掉別人寫的 version
+#[test]
+fn 版本_舊檔讀不改寫_第一次patch才補_patch不能改_chats不加() {
+    assert_eq!((MeDoc::VERSION, OnboardDoc::VERSION, ChatsDoc::VERSION), (1, 1, 0));
+    for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json")] {
+        let d = tempfile::tempdir().unwrap();
+        let old = r#"{"keep":1,"z":{"a":[1]}}"#;
+        put(d.path(), file, old);
+        // 讀（文字與 Rust 端讀法）不動檔案、不產生備份
+        assert_eq!(load_text(d.path(), name).unwrap(), old);
+        let _ = me_flags(d.path());
+        assert_eq!(read(d.path(), file), old, "{file} 讀完原樣");
+        assert!(files_with(d.path(), ".bak").is_empty() && files_with(d.path(), ".bad-").is_empty());
+        // 第一次 patch：補上 version:1，其餘欄位原樣；舊內容留一份 v0 備份
+        patch_json(d.path(), name, obj(json!({"new":true, "version": 99}))).unwrap();
+        let v: Value = serde_json::from_str(&read(d.path(), file)).unwrap();
+        assert_eq!(v, json!({"version":1,"keep":1,"z":{"a":[1]},"new":true}), "{file}");
+        assert_eq!(files_with(d.path(), ".v0.bak").len(), 1, "{file} 升版前留一份舊檔");
+        // 第二次 patch 不再備份、版本不變
+        patch_json(d.path(), name, obj(json!({"new":false}))).unwrap();
+        assert_eq!(files_with(d.path(), ".bak").len(), 1);
+        assert_eq!(serde_json::from_str::<Value>(&read(d.path(), file)).unwrap()["version"], json!(1));
+    }
+    // 較新版寫的檔（version 更大）：patch 不降版
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "asn-me.json", r#"{"version":7,"k":1}"#);
+    patch_json(d.path(), RawName::Me, obj(json!({"version":1,"k":2}))).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&read(d.path(), "asn-me.json")).unwrap(), json!({"version":7,"k":2}));
+    // 整份存（舊版前端的路徑）原文照寫：帶著 version 就留著（舊版前端展開 savedMe 會保留它）
+    save_text(d.path(), RawName::Me, r#"{"version":7,"k":3,"skin":"x"}"#).unwrap();
+    assert_eq!(read(d.path(), "asn-me.json"), r#"{"version":7,"k":3,"skin":"x"}"#);
+    // chats 不加 version
+    patch_json(d.path(), RawName::Chats, obj(json!({"a":1}))).unwrap();
+    assert_eq!(read(d.path(), "asn-chats.json"), r#"{"a":1}"#);
 }
 
 #[test]
@@ -136,7 +173,7 @@ fn 修補_兩條執行緒同時改不同欄位都不會丟() {
         h.join().unwrap();
     }
     let now: Value = serde_json::from_str(&read(d.path(), "asn-me.json")).unwrap();
-    assert_eq!(now, json!({"base":1,"t0":39,"t1":39}));
+    assert_eq!(now, json!({"version":1,"base":1,"t0":39,"t1":39}));
 }
 
 #[test]
@@ -144,7 +181,7 @@ fn 修補_過大的內容整筆拒絕() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "asn-me.json", r#"{"keep":1}"#);
     let big = obj(json!({"k": "x".repeat(MAX_BYTES)}));
-    assert_eq!(patch_json(d.path(), RawName::Me, big).unwrap_err(), "存檔太大");
+    assert_eq!(patch_json(d.path(), RawName::Me, big).unwrap_err(), "[settings:too_big] 存檔太大");
     assert_eq!(read(d.path(), "asn-me.json"), r#"{"keep":1}"#);
 }
 
@@ -215,7 +252,7 @@ fn 修補_合併後超過上限就不寫_原檔不動() {
     let old = format!(r#"{{"a":"{}"}}"#, "x".repeat(5_000_000));
     put(d.path(), "asn-chats.json", &old);
     let e = patch_json(d.path(), RawName::Chats, obj(json!({"b": "y".repeat(5_000_000)}))).unwrap_err();
-    assert_eq!(e, "存檔太大");
+    assert_eq!(e, "[settings:too_big] 存檔太大");
     assert_eq!(read(d.path(), "asn-chats.json"), old);
     // 蓋掉同一欄、合併後沒變大：照常寫
     patch_json(d.path(), RawName::Chats, obj(json!({"a": "z"}))).unwrap();
@@ -311,4 +348,98 @@ fn doc_list_is_complete() {
     }
     assert!(scanned_raw, "掃不到 settings/raw.rs，掃描規則失效");
     assert_eq!(impls, all_docs().len(), "原始碼裡的 Doc 型別數與 extra_kept_by_every_doc 的名單長度不同：新增的型別要加進 all_docs()");
+}
+
+// ---------------------------------------------------------------- 錯誤代號（#2162 ⑦）：settings 模組會回給前端的錯誤，每條路徑都有 `[settings:代號]`
+
+/// 被占用（Windows 獨占開檔）或沒權限（unix）讓檔案讀不到：回傳「放開」的動作
+#[cfg(windows)]
+fn make_unreadable(path: &Path) -> impl FnOnce() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(path).unwrap();
+    move || drop(held)
+}
+#[cfg(unix)]
+fn make_unreadable(path: &Path) -> impl FnOnce() {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let p = path.to_path_buf();
+    move || std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap()
+}
+
+#[test]
+fn 修補_檔案讀不到_回_unreadable_代號_原檔不動() {
+    let d = tempfile::tempdir().unwrap();
+    let old = r#"{"version":1,"keep":1}"#;
+    put(d.path(), "asn-me.json", old);
+    let p = d.path().join("asn-me.json");
+    let release = make_unreadable(&p);
+    #[cfg(unix)]
+    if std::fs::read_to_string(&p).is_ok() {
+        release(); // 用 root 跑時權限擋不住，這支測不到，略過
+        return;
+    }
+    let e = patch_json(d.path(), RawName::Me, obj(json!({"a":1}))).unwrap_err();
+    assert!(e.starts_with("[settings:unreadable] 設定檔暫時讀不到"), "{e}");
+    assert!(files_with(d.path(), ".bad-").is_empty() && files_with(d.path(), ".tmp").is_empty());
+    release();
+    assert_eq!(read(d.path(), "asn-me.json"), old, "原檔一字不差");
+    // 放開之後同一份 patch 就成功（所以前端等一下再試是有用的）
+    patch_json(d.path(), RawName::Me, obj(json!({"a":1}))).unwrap();
+}
+
+/// 每一條會回給前端的錯誤路徑都有固定代號：名稱、太大（整份存與 patch）、合併不了、寫入失敗、備份失敗、讀不到、資料夾未定、讀寫（io）、轉文字
+#[test]
+fn 所有回給前端的錯誤路徑都帶代號() {
+    let has = |e: &str, code: &str| assert!(e.starts_with(&format!("[settings:{code}] ")), "要以 [settings:{code}] 開頭：{e}");
+    // name
+    has(&RawName::parse("x").unwrap_err().0, "name");
+    // too_big：整份存與 patch
+    let d = tempfile::tempdir().unwrap();
+    let big = format!(r#"{{"k":"{}"}}"#, "x".repeat(MAX_BYTES));
+    has(&save_text(d.path(), RawName::Me, &big).unwrap_err(), "too_big");
+    has(&patch_json(d.path(), RawName::Me, obj(json!({"k": "x".repeat(MAX_BYTES)}))).unwrap_err(), "too_big");
+    // merge：舊檔壞掉
+    put(d.path(), "asn-me.json", "{壞掉");
+    has(&patch_json(d.path(), RawName::Me, obj(json!({"a":1}))).unwrap_err(), "merge");
+    // write：寫入失敗（注入）。整份存與 patch 兩條都要
+    put(d.path(), "asn-onboard.json", r#"{"version":1}"#);
+    FAIL_WRITE.with(|f| f.set(true));
+    let w1 = save_text(d.path(), RawName::Onboard, r#"{"a":1}"#).unwrap_err();
+    let w2 = patch_json(d.path(), RawName::Onboard, obj(json!({"a":1}))).unwrap_err();
+    FAIL_WRITE.with(|f| f.set(false));
+    has(&w1, "write");
+    has(&w2, "write");
+    // backup：版本 0 的舊檔升版前備份失敗
+    let d2 = tempfile::tempdir().unwrap();
+    put(d2.path(), "asn-me.json", r#"{"keep":1}"#);
+    migrate::FAIL_COPY.with(|f| f.set(true));
+    let b = patch_json(d2.path(), RawName::Me, obj(json!({"a":1}))).unwrap_err();
+    migrate::FAIL_COPY.with(|f| f.set(false));
+    has(&b, "backup");
+    assert_eq!(read(d2.path(), "asn-me.json"), r#"{"keep":1}"#);
+    // dir：設定資料夾還沒決定
+    has(&no_root().0, "dir");
+    // io 錯誤轉成的 SettingsError：固定白話句加代號，系統原文不外漏
+    let io: SettingsError = std::io::Error::from_raw_os_error(5).into();
+    has(&io.0, "write");
+    assert!(!io.0.contains("os error"), "{}", io.0);
+}
+
+/// 守門：settings 模組的非測試原始碼裡，每個 `SettingsError(` 建構點都要帶代號（用 CODE_ 常數或 TOO_BIG），以後新增的錯誤路徑忘了加代號就會紅
+#[test]
+fn 原始碼裡每個_SettingsError_建構點都帶代號() {
+    for (name, src) in [("mod.rs", include_str!("mod.rs")), ("raw.rs", include_str!("raw.rs")), ("migrate.rs", include_str!("migrate.rs")), ("atomic.rs", include_str!("atomic.rs")), ("docs.rs", include_str!("docs.rs"))] {
+        let mut n = 0;
+        for (i, line) in src.lines().enumerate() {
+            if !line.contains("SettingsError(") || line.trim_start().starts_with("//") || line.contains("pub struct SettingsError") {
+                continue;
+            }
+            n += 1;
+            assert!(line.contains("CODE_") || line.contains("TOO_BIG") || line.contains("super::CODE_"), "{name}:{} 的 SettingsError 沒有代號：{}", i + 1, line.trim());
+        }
+        if name == "mod.rs" {
+            assert!(n >= 4, "mod.rs 的建構點數量不對（掃描壞了？）：{n}");
+        }
+    }
 }

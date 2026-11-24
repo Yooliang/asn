@@ -4,6 +4,7 @@
 import { applyRename } from './rename.mjs'
 import { displayDeviceName } from './device-known.mjs'
 import { makeDeviceNameApi, renameCommandOf } from './tauri.mjs'
+import { patchWithFallback } from './settings-save.mjs'
 export { renameCommandOf }   // 命令名的對照放在出口（tauri.mjs），這裡照舊匯出
 
 /** 啟動對齊後要對使用者說的話（本機名字被換成後台那一份時） */
@@ -28,8 +29,7 @@ export async function clearPendingDeviceName(store, log = console.info) {
     const saved = (await store.load()) ?? {}
     if (!(PENDING_KEY in saved) && !(PENDING_BASE_KEY in saved)) return false
     const { [PENDING_KEY]: _a, [PENDING_BASE_KEY]: _b, ...rest } = saved
-    await store.save(rest)
-    return true
+    return await patchWithFallback(store, { [PENDING_KEY]: null, [PENDING_BASE_KEY]: null }, rest)   // 只送這兩欄（null＝刪除）；#2162 ⑦
   } catch (e) { log('[ASN] 清掉待送的設備名沒成功', String(e?.message ?? e ?? '')); return false }
 }
 
@@ -91,7 +91,8 @@ export async function setDeviceNameOnboard(invoke, store, { node, name, phone = 
   } catch (e) {
     if (/不合規則|不能|保留|1～40/.test(String(e.message))) throw e
     const saved = (await store.load().catch(() => null)) ?? {}
-    await store.save({ ...saved, [PENDING_KEY]: String(name).trim(), ...(base ? { [PENDING_BASE_KEY]: String(base) } : {}) })
+    const fields = { [PENDING_KEY]: String(name).trim(), ...(base ? { [PENDING_BASE_KEY]: String(base) } : {}) }
+    if (!(await patchWithFallback(store, fields, { ...saved, ...fields }))) throw new Error('設定檔暫時讀不到，名字這次沒有存下來，請稍後再試')
     return { deferred: true, note: PENDING_NOTE }
   }
   // 後台改好了、本機寄信名字被規則擋下：不讓引導往下走，說原因請本人換個名字（再送一次就會一起換）
@@ -112,12 +113,12 @@ export async function syncPendingDeviceName(invoke, store, ctx, { node, phone = 
   const backend = displayDeviceName(ctx?.core?.nodeNames?.[node])
   if (backend && base && backend !== base && backend !== name) {
     log('[ASN] 不補送首次引導的設備名：後台的名字已被改過', `後台「${backend}」、當初「${base}」、待送「${name}」`)
-    await store.save(rest).catch(() => { /* 待送名字清不掉：下次啟動會再比對一次（後台名字還是被改過就還是不送） */ })
+    await patchWithFallback(store, { [PENDING_KEY]: null, [PENDING_BASE_KEY]: null }, rest).catch(() => { /* 待送名字清不掉：下次啟動會再比對一次（後台名字還是被改過就還是不送） */ })
     return null
   }
   try {
     const r = await renameDevice(invoke, { node, name, phone })
-    await store.save(rest).catch(() => { /* 名字已送出；清不掉待送的，下次補送時會因後台名字相同而略過 */ })
+    await patchWithFallback(store, { [PENDING_KEY]: null, [PENDING_BASE_KEY]: null }, rest).catch(() => { /* 名字已送出；清不掉待送的，下次補送時會因後台名字相同而略過 */ })
     followSelfRename(ctx, r, notify, log)
     return r
   } catch (e) {
