@@ -465,6 +465,22 @@ export const cliLoginApi = {
   login: toolId => invoke('ai_cli_login', { toolId }),
 }
 
+// ---------- 回報匯流排出口（#2161 2c-2）：指令名與事件名只寫在這裡 ----------
+// send：後台寫入一筆回報（kind＋data）；get：批次讀同一個 kind 的多台最新回報 → { ok, reports: [{ node, kind, payload, updated_at, changed_at }] }
+// 錯誤是固定白話字串（invoke 出口已包成 Error 並記一行，不記 args）
+export const reportApi = {
+  send: (kind, data) => invoke('report_send', { kind, data }),
+  get: (kind, nodes) => invoke('report_get', { kind, nodes }),
+}
+// 後台寫入且內容有變時 Rust 轉出的門鈴：payload { kind, node }，不含內容（要內容再呼叫 reportApi.get）。回傳取消函式（同步回傳，不必等 listen 完成）
+export const onReport = cb => {
+  let off = null, dead = false
+  try {
+    void listen('relay-report', cb).then(f => { if (dead) { try { f() } catch {} } else off = f }).catch(() => {})
+  } catch { /* 沒有 Tauri（純網頁、測試）：什麼都不聽 */ }
+  return () => { dead = true; if (off) { try { off() } catch {} off = null } }
+}
+
 // ---------- 視窗外框（自訂／Windows 原生） ----------
 // 原生外框：html 加 frame-native，樣式把自畫的標題列、邊框與拖邊緣的把手藏起來
 export const applyFrame = native => document.documentElement.classList.toggle('frame-native', native === true)
