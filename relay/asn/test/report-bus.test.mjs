@@ -42,7 +42,7 @@ function setup(opts = {}) {
     get: async (kind, nodes) => {
       calls.push({ kind, nodes: [...nodes] }); times.push(clock.now())
       if (gate) await gate.promise
-      if (fail) { const e = new Error('讀不到'); if (fail === 'permanent') e.permanent = true; throw e }
+      if (fail) { const e = new Error('讀不到'); if (typeof fail === 'string') e.code = fail; throw e }
       return { ok: true, reports: nodes.map(n => store.get(`${kind}\n${n}`)).filter(Boolean) }
     },
   }
@@ -230,7 +230,7 @@ test('看不見時不重試：回到前景才恢復；新的門鈴也會讀', qu
 
 test('永久錯誤：該 kind 暫停，只在下一次門鈴、回前景、後援才再試一次', quietWarn(async () => {
   const s = setup(); s.put('k', 'a', 1); s.bus.subscribe('k', 'a', () => {})
-  s.setFail('permanent'); await s.clock.advance(300); assert.equal(s.calls.length, 1)
+  s.setFail('report:unknown_kind'); await s.clock.advance(300); assert.equal(s.calls.length, 1)
   await s.clock.advance(POLL_MS - 1000); assert.equal(s.calls.length, 1, '不自動重試（連 5 秒退避也沒有）')
   s.bus.subscribe('k', 'b', () => {}); await s.clock.advance(600); assert.equal(s.calls.length, 1, '新訂閱不算觸發')
   await s.clock.advance(1000); assert.equal(s.calls.length, 2, '後援（5 分鐘）再試一次')
@@ -317,20 +317,31 @@ test('reportApi／onReport：指令名與參數形狀、門鈴取消', async () 
   } finally { globalThis.__TAURI__ = saved }
 })
 
-test('reportApi.get：固定白話句對照成 err.permanent，暫時性錯誤不標', async () => {
+test('permanent 判斷看 err.code：unknown_kind／bad_request 永久，rate／network／server／not_ready／無 code 走退避', quietWarn(async () => {
+  for (const [code, perm] of [['report:unknown_kind', true], ['report:bad_request', true], ['report:rate', false], ['report:network', false], ['report:server', false], ['report:not_ready', false], [true, false]]) {
+    const s = setup(); s.put('k', 'a', 1); s.bus.subscribe('k', 'a', () => {})
+    s.setFail(code); await s.clock.advance(300); assert.equal(s.calls.length, 1)
+    await s.clock.advance(5000)
+    assert.equal(s.calls.length, perm ? 1 : 2, `${code}：${perm ? '永久不自動重試' : '5 秒退避後重試'}`)
+  }
+}))
+
+test('invoke 出口：[report:代號] 拆成 err.code、message 只留白話句；log 留原文；沒有代號的不加 code', async () => {
   const saved = globalThis.__TAURI__
   let msg = ''
   globalThis.__TAURI__ = { core: { invoke: async () => { throw msg } }, event: { listen: async () => () => {}, emit: async () => {} } }
+  const logs = []; const w = console.warn; console.warn = (...a) => logs.push(a.join(' '))
   try {
-    const m = await import(`../ui/lib/tauri.mjs?t=perm-${Date.now()}`)
-    const w = console.warn; console.warn = () => {}
-    try {
-      for (const t of ['不認得這種回報', '查詢內容不正確', '回報種類的格式不正確', '設備代號的格式不正確', '請至少指定一台設備', '一次最多查詢 50 台設備']) {
-        msg = t; const e = await m.reportApi.get('k', ['n']).catch(x => x); assert.equal(e.permanent, true, t)
-      }
-      for (const t of ['查詢太頻繁，請稍後再試', '暫時讀不到回報，請稍後再試', '連不上收發室，請稍後再試']) {
-        msg = t; const e = await m.reportApi.get('k', ['n']).catch(x => x); assert.notEqual(e.permanent, true, t); assert.equal(e.message, t)
-      }
-    } finally { console.warn = w }
-  } finally { globalThis.__TAURI__ = saved }
+    const m = await import(`../ui/lib/tauri.mjs?t=code-${Date.now()}`)
+    for (const c of ['unknown_kind', 'bad_request', 'rate', 'network', 'server', 'not_ready']) {
+      msg = `[report:${c}] 白話句 ${c}`; const e = await m.reportApi.get('k', ['n']).catch(x => x)
+      assert.equal(e.code, `report:${c}`); assert.equal(e.message, `白話句 ${c}`)
+    }
+    msg = '[settings:x_y] 設定句'; const s2 = await m.reportApi.send('k', {}).catch(x => x)
+    assert.equal(s2.code, 'settings:x_y'); assert.equal(s2.message, '設定句')
+    msg = '沒有代號的句子'; const e3 = await m.reportApi.get('k', ['n']).catch(x => x)
+    assert.equal(e3.code, undefined); assert.equal(e3.message, '沒有代號的句子')
+    assert.ok(logs.some(l => l.includes('[report:unknown_kind]')), 'log 保留原文')
+  } finally { console.warn = w; globalThis.__TAURI__ = saved }
 })
+

@@ -8,7 +8,7 @@
 //  - 讀失敗不丟給訂閱者，只記 console.warn（kind 與連續次數，不含內容；第 1、5、20 次才記）
 //  - 失敗後指數退避：同一 kind 連續失敗後下次允許讀的間隔 5、10、20…秒，上限 5 分鐘，成功歸零；退避期間來的門鈴、訂閱、後援只記待讀，到期才用計時器讀
 //  - 失敗後的重試到期時若看不見（背景）就不讀，等回到前景或下一次門鈴
-//  - 永久錯誤（e.permanent＝true，例如不認得的 kind、格式錯誤）：該 kind 暫停讀取，只在下一次門鈴、回前景、後援才再試一次，不自動重試
+//  - 永久錯誤（err.code 是 report:unknown_kind 或 report:bad_request；其餘含沒有 code 的都算暫時，走退避）：該 kind 暫停讀取，只在下一次門鈴、回前景、後援才再試一次，不自動重試
 //  - 沒有訂閱者的 kind 不讀；取消訂閱到零就停該 kind；全部取消就停後援
 export const DEBOUNCE_MS = 300
 export const MAXWAIT_MS = 1000
@@ -16,6 +16,8 @@ export const BATCH_MAX = 50
 export const POLL_MS = 5 * 60 * 1000
 export const FAIL_WAIT_MS = 5000   // 退避起點
 export const BACKOFF_MAX_MS = 5 * 60 * 1000
+// 永久錯誤的代號（由 tauri.mjs 的 invoke 出口從後端錯誤開頭的固定代號拆到 err.code）
+export const PERMANENT_CODES = new Set(['report:unknown_kind', 'report:bad_request'])
 export const backoffMs = fails => Math.min(FAIL_WAIT_MS * 2 ** Math.max(0, Math.min(fails, 30) - 1), BACKOFF_MAX_MS)
 export const WARN_AT = new Set([1, 5, 20])   // 同一 kind 連續失敗，只在這幾次記一行 warn
 
@@ -105,7 +107,7 @@ export function createReportBus({
     } catch (e) {
       if (disposed || stateOf(kind) !== st) return
       st.fails++
-      if (e?.permanent === true) { st.hold = true; st.failUntil = 0 }   // 永久錯誤：不退避、不自動重試
+      if (PERMANENT_CODES.has(e?.code)) { st.hold = true; st.failUntil = 0 }   // 永久錯誤：不退避、不自動重試
       else { st.failUntil = now() + backoffMs(st.fails); st.retryOnly = !st.fresh }
       if (WARN_AT.has(st.fails)) console.warn('[ASN]', `回報讀取失敗：${kind}（連續第 ${st.fails} 次），稍後再試`)   // 只在第 1、5、20 次記，避免洗 console
       for (const n of nodes.slice(i)) st.pending.add(n)   // 沒讀到的下一輪再讀

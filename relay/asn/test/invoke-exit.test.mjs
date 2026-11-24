@@ -398,8 +398,8 @@ test('invoke 出口：Error 物件也一樣拆；代號不在開頭、或不是 
   }
 })
 
-test('守門：除了 tauri.mjs（拆代號）和 settings-save.mjs（說明），ui/ 不准有程式出現 [settings: 字樣——判斷一律用 e.code，不繞過出口去比對文字', () => {
+test('守門：除了 tauri.mjs（拆代號）和 settings-save.mjs（說明），ui/ 不准有程式出現 [settings: 或 [report: 字樣——判斷一律用 e.code，不繞過出口去比對文字', () => {
   const all = walk(UI).filter(f => /\.(m?js|html)$/.test(f)).filter(f => !['lib/tauri.mjs', 'lib/settings-save.mjs'].includes(rel(f)))
-  const bad = all.filter(f => src(f).includes('[settings:')).map(rel)
+  const bad = all.filter(f => /\[(settings|report):/.test(src(f))).map(rel)
   assert.deepEqual(bad, [], `這些檔案自己比對設定層的代號字樣：${bad.join(', ')}（改用 e.code）`)
 })
