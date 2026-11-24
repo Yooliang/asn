@@ -111,7 +111,7 @@ test('#1860F-3 終端服務沒在跑（起不來之後）但這台用終端服�
   const calls = []
   const o2 = await opened(mk({ snapshot: noMux({ restart_pending: 2 }), api: { taskManagerRestartMux: async () => { calls.push('mux') }, taskManagerRestartAsn: async () => { calls.push('asn') } } }))
   o2.tm.askRestart(PLACEHOLDER)
-  assert.equal(o2.tm.view().tree.groups[0].restart.ask, '重啟終端服務？還有 2 位代理沒接回，新的起來後會自動接回。')
+  assert.equal(o2.tm.view().tree.groups[0].restart.ask, '重啟終端服務？還有 2 位代理沒接回，重啟後會自動連回。')
   await o2.tm.confirmRestart()
   assert.deepEqual(calls, ['mux'])
   assert.equal(o2.tm.view().tree.groups[0].restart.busy, true, '重啟中顯示正在重啟')
@@ -123,7 +123,7 @@ test('#1860F-3 終端服務沒在跑（起不來之後）但這台用終端服�
   // 沒有名單等著（restart_pending 0）、一般沒在跑：確認字講明是重新啟動
   const o3 = await opened(mk({ snapshot: noMux() }))
   o3.tm.askRestart(PLACEHOLDER)
-  assert.equal(o3.tm.view().tree.groups[0].restart.ask, '重啟終端服務？目前沒有在運行，會重新啟動。')
+  assert.equal(o3.tm.view().tree.groups[0].restart.ask, '重啟終端服務？目前沒有在運行，按下後會重新啟動。')
 })
 
 test('#1860F-3 沒開終端服務模式（Linux，mux_expected 不是真）：沒有佔位；有真的終端服務時也不多列', async () => {

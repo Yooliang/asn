@@ -29,7 +29,7 @@ export const restartAsnText = (prefix = '', pending = 0) =>
     : `重啟${prefix} ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。`
 export const restartMuxText = (n, prefix = '') => `重啟${prefix}終端服務？底下所有代理（${n} 個）會暫時斷線，之後會自動連回。`
 /** 終端服務沒有在跑時的確認字（n＝還沒接回的代理數） */
-export const restartMuxNoneText = (n, prefix = '') => (n > 0 ? `重啟${prefix}終端服務？還有 ${n} 位代理沒接回，新的起來後會自動接回。` : `重啟${prefix}終端服務？目前沒有在運行，會重新啟動。`)
+export const restartMuxNoneText = (n, prefix = '') => (n > 0 ? `重啟${prefix}終端服務？還有 ${n} 位代理沒接回，重啟後會自動連回。` : `重啟${prefix}終端服務？目前沒有在運行，按下後會重新啟動。`)
 
 /** 沒有終端服務在跑時的佔位鍵與那一列（pid 0＝沒有程序） */
 export const MUX_NONE_KEY = 'mux:none'
