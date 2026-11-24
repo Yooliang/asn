@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn 守門_這裡不碰窗格_不碰網路_不確認本人() {
         let src = include_str!("view_input.rs");
-        let code = src.split("\nmod tests {").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         for bad in ["send_text", "send_input", "terms.", "Outbound", "send_via", "relay", "presence::", "live::"] {
             assert!(!code.contains(bad), "反向通道的判斷不能有：{bad}");
         }

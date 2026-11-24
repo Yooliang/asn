@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn 守門_確認與忘記都先用憑證才動手_只有主畫面視窗_憑證只被這幾個命令碰() {
         let rs = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("android.rs")).unwrap().replace("\r\n", "\n");
-        let code = rs.split("\n#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&rs);
         let confirm = body_of(code, "android_known_confirm");
         let (t, r, c) = (confirm.find("take_passed(").unwrap(), confirm.find("consent::redeem(").expect("確認要先用憑證"), confirm.find("live::confirm(").unwrap());
         assert!(t < r && r < c, "先取走過關的題目、再用憑證、最後才記住");
@@ -646,7 +646,7 @@ mod tests {
     #[test]
     fn 守門_這裡不寫日誌_不發事件_不寫憑證檔_正式程式不當掉() {
         let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("consent.rs")).unwrap().replace("\r\n", "\n");
-        let code = src.split("\n#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         for bad in ["elog!", "olog!", concat!("print", "ln!"), concat!("db", "g!"), "log::", "tracing::", "emit(", "ui_log", "File::create", "OpenOptions", ".unwrap()", ".expect("] {
             assert!(!code.contains(bad), "consent.rs 不能有：{bad}");
         }

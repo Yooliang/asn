@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn 守門_這裡只收不送_也不確認本人不簽章() {
         let src = include_str!("view_remote.rs");
-        let code = src.split("\nmod tests {").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         for bad in ["Outbound", "send_via", "broadcast_msg", "presence::", "sign_b64", "live::see", "live::forget"] {
             assert!(!code.contains(bad), "看的那台的背景流程不能有：{bad}");
         }

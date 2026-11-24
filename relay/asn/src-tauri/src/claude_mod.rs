@@ -746,7 +746,7 @@ mod tests {
     #[test]
     fn 守門_子程序一律不開視窗_乾淨環境_stdin接空() {
         let src = include_str!("claude_mod.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         for needle in [".no_window()", ".env_clear()", "Stdio::null()", "child_env()"] {
             assert!(body.contains(needle), "claude_mod.rs 少了 {needle}");
         }
@@ -757,7 +757,7 @@ mod tests {
     #[test]
     fn 守門_程式裡沒有任何enable或disable指令() {
         let src = include_str!("claude_mod.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         let calls: Vec<&str> = body.lines().filter(|l| l.contains("runner.run(")).collect();
         assert!(calls.len() >= 7, "少看到呼叫：{}", calls.len());
         assert!(calls.iter().all(|l| !l.contains("\"enable\"") && !l.contains("\"disable\"")), "不可自動啟用或停用外掛");
@@ -821,7 +821,7 @@ mod tests {
     fn 清舊版_快取路徑與守門() {
         assert_eq!(plugin_cache_root(Path::new("H")), Path::new("H").join(".claude").join("plugins").join("cache").join("asn").join("asn"));
         let src = include_str!("claude_mod.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         assert!(body.contains("prune_plugin_cache(&plugin_cache_root(&home), v)"), "run_real 要在新版裝好後清舊版");
     }
     fn days(n: u64) -> Duration {

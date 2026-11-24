@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(eng(&fc).args(), vec!["auth", "login", "--claudeai"]);
         // 禁用清單：會印出或接收長效權杖的做法不能出現在這支引擎的正式程式碼
         let src = include_str!("claude_login.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         for banned in [["setup", "-token"].concat(), ["CLAUDE_CODE_", "OAUTH_TOKEN"].concat(), ["ANTHROPIC_", "API_KEY"].concat()] {
             assert!(!body.contains(&banned), "不能用 {banned}");
         }

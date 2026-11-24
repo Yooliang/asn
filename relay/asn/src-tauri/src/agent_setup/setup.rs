@@ -778,7 +778,7 @@ mod tests {
     #[test]
     fn 守門_重新登入的流程不呼叫安裝() {
         let src = include_str!("setup.rs").replace("\r\n", "\n");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         let run = &body[body.find("pub fn run_relogin_with").unwrap()..];
         let run = &run[..run.find("\n}\n").unwrap()];
         let start = &body[body.find("pub fn start_claude_relogin").unwrap()..];
@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn 守門_入口在獨立執行緒裡跑_鎖在開執行緒之前() {
         let src = include_str!("setup.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         let at = body.find("pub fn start_claude").unwrap();
         let (take, spawn) = (body[at..].find("Busy::take(&BUSY)?").unwrap(), body[at..].find("std::thread::Builder::new()").unwrap());
         assert!(take < spawn, "要先取鎖、再開執行緒，第二次按才不會送出假的結束事件");

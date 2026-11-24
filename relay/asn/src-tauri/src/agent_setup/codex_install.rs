@@ -582,7 +582,7 @@ mod tests {
         assert_eq!(EXCEPTIONS, [("codex-path/rg.exe", Exception::Unsigned), ("codex-resources/voice/bin/vcruntime140.dll", Exception::Signer("Microsoft Windows"))]);
         // 例外只來自常數：程式裡沒有從清單、設定檔或環境變數讀例外的寫法
         let src = include_str!("codex_install.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         let code: Vec<&str> = body.lines().filter(|l| !l.trim_start().starts_with("//")).filter(|l| l.contains("EXCEPTIONS")).collect();
         assert_eq!(code.len(), 2, "只有宣告與 verify_package 各用一次：{code:?}");
         assert!(code[0].trim_start().starts_with("pub const EXCEPTIONS: [(&str, Exception); 2] = "), "宣告是常數：{}", code[0]);

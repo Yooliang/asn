@@ -580,7 +580,7 @@ mod inspect_tests {
     #[test]
     fn 守門_鎖在_install_here_裡() {
         let src = include_str!("claude_install.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         let at = body.find("pub fn install_here()").unwrap();
         assert!(body[at..].contains("InstallBusy::take()?"), "install_here 一開始就要取鎖");
     }
@@ -589,7 +589,7 @@ mod inspect_tests {
     #[test]
     fn 守門_install_here_每次都寫安裝記錄() {
         let src = include_str!("claude_install.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         let at = body.find("pub fn install_here()").unwrap();
         let f = &body[at..at + body[at..].find("\n}\n").or_else(|| body[at..].find("\n}\r\n")).unwrap()];
         let rec = f.find("install_with_record(").expect("要用 install_with_record");

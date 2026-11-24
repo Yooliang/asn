@@ -133,74 +133,10 @@ mod tests {
             || parts[..parts.len() - 1].contains(&"tests")
     }
 
-    /// 這一行的大括號淨增減（跳過字串、字元常值與行尾註解），以及有沒有出現左大括號
-    fn brace_delta(line: &str) -> (i32, bool) {
-        let b = line.as_bytes();
-        let (mut d, mut opened, mut in_str, mut i) = (0i32, false, false, 0usize);
-        while i < b.len() {
-            let c = b[i];
-            if in_str {
-                if c == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if c == b'"' {
-                    in_str = false;
-                }
-            } else if c == b'/' && b.get(i + 1) == Some(&b'/') {
-                break;
-            } else if c == b'"' {
-                in_str = true;
-            } else if c == b'\'' {
-                if b.get(i + 1) == Some(&b'\\') {
-                    if let Some(j) = line[i + 2..].find('\'') {
-                        i += j + 3;
-                        continue;
-                    }
-                } else if b.get(i + 2) == Some(&b'\'') {
-                    i += 3;
-                    continue;
-                }
-            } else if c == b'{' {
-                d += 1;
-                opened = true;
-            } else if c == b'}' {
-                d -= 1;
-            }
-            i += 1;
-        }
-        (d, opened)
-    }
-
-    /// 去掉 `#[cfg(test)]` 標著的項目（整個 mod／fn／區塊），留下（行號, 內容）
+    /// 去掉 `#[cfg(test)]` 標著的項目（整個 mod／fn／區塊），留下（行號, 內容）。
+    /// 切法用共用的 `settings::src_scan::prod_source`（真的數大括號；被拿掉的部分換成空行，行號不變）
     fn prod_lines(text: &str) -> Vec<(usize, String)> {
-        const ATTR: &str = "#[cfg(test)]";
-        let mut out = vec![];
-        let (mut skip, mut depth, mut opened) = (false, 0i32, false);
-        for (i, raw) in text.lines().enumerate() {
-            let mut line = raw.to_string();
-            let t = raw.trim();
-            if !skip && t.starts_with(ATTR) {
-                skip = true;
-                depth = 0;
-                opened = false;
-                line = t[ATTR.len()..].trim().to_string();
-                if line.is_empty() {
-                    continue;
-                }
-            }
-            if skip {
-                let (d, o) = brace_delta(&line);
-                depth += d;
-                opened |= o;
-                if (opened && depth <= 0) || (!opened && line.trim_end().ends_with(';')) {
-                    skip = false;
-                }
-                continue;
-            }
-            out.push((i + 1, line));
-        }
-        out
+        crate::settings::src_scan::prod_source(text).lines().enumerate().map(|(i, l)| (i + 1, l.to_string())).collect()
     }
 
     fn uses_banned(line: &str, banned: &[String]) -> bool {
@@ -223,12 +159,13 @@ mod tests {
 
     fn offenders(src: &Path) -> (Vec<String>, Vec<String>) {
         let banned = banned();
+        let external = crate::settings::src_scan::external_test_files(src);
         let mut files = vec![];
         walk(src, &mut files);
         let (mut scanned, mut bad) = (vec![], vec![]);
         for p in files {
             let rel = p.strip_prefix(src).unwrap().to_string_lossy().replace('\\', "/");
-            if exempt(&rel) {
+            if exempt(&rel) || external.contains(&rel) {
                 continue;
             }
             let text = std::fs::read_to_string(&p).unwrap();

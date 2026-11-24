@@ -540,3 +540,5 @@ mod moved_tests;
 mod bridge_prefs_tests;
 #[cfg(test)]
 mod guard_tests;
+#[cfg(test)]
+pub(crate) mod src_scan;

@@ -214,7 +214,7 @@ mod tests {
         // 其他地方不能登記
         for (name, src) in [("android.rs", include_str!("android.rs")), ("view_d_input.rs", include_str!("view_d_input.rs"))] {
             let code = src.replace("\r\n", "\n");
-            let code = code.split("\nmod tests {").next().unwrap();
+            let code = &crate::settings::src_scan::prod_source(&code);
             assert!(!code.contains("inputs.add("), "{name} 不能登記打字");
         }
     }

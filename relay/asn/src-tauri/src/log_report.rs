@@ -643,7 +643,7 @@ mod tests {
         assert!(!t.contains("a@b.example.com") && t.contains("<email>"));
         // 原始碼：ui_log.rs 的正式程式不引用送出出口的遮罩
         let ui = include_str!("ui_log.rs");
-        let prod = ui.split("#[cfg(test)]").next().unwrap();
+        let prod = &crate::settings::src_scan::prod_source(&ui);
         for bad in ["log_report", "redact_line", "home_regex"] {
             assert!(!prod.contains(bad), "ui_log 的正式程式不可以用送出出口的遮罩：{bad}");
         }

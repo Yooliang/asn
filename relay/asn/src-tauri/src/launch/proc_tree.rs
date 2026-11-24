@@ -166,7 +166,7 @@ mod tests {
         assert_eq!(kill_program(|_| false), None);
         assert!(KILL_PATHS.iter().all(|p| p.starts_with('/')), "不走 PATH");
         let src = include_str!("proc_tree.rs");
-        let code = src.split("\nmod tests {").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         // 用 concat! 拆開，免得「每個子程序都要 no_window」的守門把這個字串當成一個子程序
         assert!(!code.contains(concat!("Command::", "new(\"kill\")")), "不能用 PATH 上的 kill");
     }
