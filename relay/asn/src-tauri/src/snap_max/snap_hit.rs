@@ -37,16 +37,6 @@ pub fn hit_answer(role: Role, rect: Option<PxRect>, x: i32, y: i32) -> Hit {
     }
 }
 
-/// 扣掉上緣調整大小的那一條：放大鈕貼著視窗上緣，整條上緣都要能拖邊縮放，所以命中矩形上方要讓出 `border` 像素。
-/// - 視窗最大化時沒有調整大小的邊框，不扣
-/// - 矩形本來就在邊框以下（top >= border）不動；只拿掉和邊框重疊的那一段（top 抬到 border）
-/// - `border` 為 0 或負數當成不用扣；扣完沒有面積（鈕整個落在邊框裡）回 None
-pub fn exclude_resize_border(r: PxRect, maximized: bool, border: i32) -> Option<PxRect> {
-    let top = if maximized || border <= 0 { r.top } else { r.top.max(border) };
-    let out = PxRect { top, ..r };
-    (out.width() > 0 && out.height() > 0).then_some(out)
-}
-
 /// 從 lParam 取出有號的 x、y（螢幕座標可能是負的，多螢幕在主螢幕左邊時）
 pub fn lparam_xy(lparam: isize) -> (i32, i32) {
     let x = (lparam & 0xFFFF) as u16 as i16 as i32;
@@ -86,54 +76,6 @@ mod tests {
         assert_eq!(hit_answer(Role::Container, btn(), 920, 10), Hit::Transparent);
         assert_eq!(hit_answer(Role::Container, btn(), 500, 300), Hit::Pass, "鈕以外網頁照常收滑鼠");
         assert_eq!(hit_answer(Role::Container, None, 920, 10), Hit::Pass);
-    }
-
-    fn top_btn() -> PxRect {
-        PxRect { left: 900, top: 0, right: 969, bottom: 54 }
-    }
-
-    #[test]
-    fn 沒最大化時上緣讓出調整大小的邊框() {
-        // 100% DPI：SM_CYSIZEFRAME 4 + SM_CXPADDEDBORDER 4 = 8
-        let e = exclude_resize_border(top_btn(), false, 8).unwrap();
-        assert_eq!(e, PxRect { left: 900, top: 8, right: 969, bottom: 54 });
-        assert!(!e.contains(920, 7), "上緣那條不在命中範圍內");
-        assert!(e.contains(920, 8));
-    }
-
-    #[test]
-    fn 最大化時不扣() {
-        assert_eq!(exclude_resize_border(top_btn(), true, 8), Some(top_btn()));
-        assert_eq!(exclude_resize_border(top_btn(), true, 9999), Some(top_btn()), "最大化連極端值也不看");
-    }
-
-    #[test]
-    fn 邊框高度跟著_dpi_走() {
-        // 100%=8、125%=10、150%=12、200%=16、300%=24
-        for border in [8, 10, 12, 16, 24] {
-            let r = exclude_resize_border(PxRect { left: 0, top: 0, right: 50, bottom: 60 }, false, border).unwrap();
-            assert_eq!((r.top, r.bottom, r.left, r.right), (border, 60, 0, 50));
-        }
-    }
-
-    #[test]
-    fn 鈕本來就在邊框以下不動() {
-        let r = PxRect { left: 10, top: 20, right: 60, bottom: 50 };
-        assert_eq!(exclude_resize_border(r, false, 8), Some(r));
-        // 部分重疊：只拿掉重疊的那段
-        let r2 = PxRect { left: 10, top: 5, right: 60, bottom: 50 };
-        assert_eq!(exclude_resize_border(r2, false, 8), Some(PxRect { top: 8, ..r2 }));
-    }
-
-    #[test]
-    fn 極端值防呆() {
-        assert_eq!(exclude_resize_border(top_btn(), false, 54), None, "邊框剛好吃光整顆鈕");
-        assert_eq!(exclude_resize_border(top_btn(), false, 100), None, "邊框比鈕高");
-        assert_eq!(exclude_resize_border(top_btn(), false, 53).map(|r| r.height()), Some(1), "只剩 1 像素");
-        assert_eq!(exclude_resize_border(top_btn(), false, 0), Some(top_btn()), "邊框 0 不扣");
-        assert_eq!(exclude_resize_border(top_btn(), false, -5), Some(top_btn()), "負值當 0");
-        assert_eq!(exclude_resize_border(top_btn(), false, i32::MAX), None);
-        assert_eq!(exclude_resize_border(PxRect { left: 5, top: 0, right: 5, bottom: 30 }, false, 0), None, "本來就沒面積");
     }
 
     #[test]

@@ -27,9 +27,6 @@ const CONTAINER_CLASS: &str = "WRY_WEBVIEW";
 struct TopState {
     app: AppHandle,
     label: String,
-    /// 前端回報的原矩形（已限制在內容區、尚未扣上緣邊框）；最大化／還原時用它重算命中矩形
-    raw: PxRect,
-    /// 實際的命中矩形（已扣掉上緣調整大小的那一條）
     rect: PxRect,
     btn: BtnState,
 }
@@ -40,8 +37,8 @@ thread_local! {
 }
 
 /// 第一次回報矩形時：掛上最上層視窗與網頁容器的 subclass，記下矩形
-pub fn install(top: HWND, app: AppHandle, label: String, raw: PxRect, rect: PxRect) {
-    STATES.with(|s| s.borrow_mut().insert(top as isize, TopState { app, label, raw, rect, btn: BtnState::default() }));
+pub fn install(top: HWND, app: AppHandle, label: String, rect: PxRect) {
+    STATES.with(|s| s.borrow_mut().insert(top as isize, TopState { app, label, rect, btn: BtnState::default() }));
     unsafe {
         SetWindowSubclass(top, Some(top_proc), TOP_ID, 0);
         for c in containers(top) {
@@ -51,10 +48,9 @@ pub fn install(top: HWND, app: AppHandle, label: String, raw: PxRect, rect: PxRe
 }
 
 /// 鈕搬了位置或改了大小
-pub fn set_rect(top: HWND, raw: PxRect, rect: PxRect) {
+pub fn set_rect(top: HWND, rect: PxRect) {
     STATES.with(|s| {
         if let Some(st) = s.borrow_mut().get_mut(&(top as isize)) {
-            st.raw = raw;
             st.rect = rect;
         }
     });
@@ -84,11 +80,6 @@ unsafe fn containers(top: HWND) -> Vec<HWND> {
     let mut v: Vec<HWND> = Vec::new();
     EnumChildWindows(top, Some(each), &mut v as *mut Vec<HWND> as LPARAM);
     v
-}
-
-/// 前端回報的原矩形（沒有就是還沒掛上）
-pub fn raw_of(top: HWND) -> Option<PxRect> {
-    STATES.with(|s| s.borrow().get(&(top as isize)).map(|st| st.raw))
 }
 
 fn rect_of(top: HWND) -> Option<PxRect> {
