@@ -13,6 +13,7 @@ const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261105130000_perm_requests.sql'
 // #1445 的 migration 重寫了決定函式：還原驗證要兩支一起拿掉保護，才量得到
 const MIG2 = '20261114100000_perm_requests_full_options.sql'
+const MIG3 = '20261125310000_perm_req_decide_bell.sql' // #2161 3d-1 再重寫一次決定函式（成功多回 bell_topic），也要一起拿掉保護
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
@@ -189,17 +190,18 @@ test('權限：anon、authenticated 不能呼叫函式或讀表', { skip }, asyn
 
 test('還原驗證：拿掉保護，對應測試要變紅', { skip }, async () => {
   const unHash = s => s.replace('if p_hash is distinct from r.body_hash then', 'if false then')
-  const noHash = await boot({ mutate: { [MIG]: unHash, [MIG2]: unHash } })
+  const noHash = await boot({ mutate: { [MIG]: unHash, [MIG2]: unHash, [MIG3]: unHash } })
   const c1 = await create(noHash)
   assert.equal((await decide(noHash, c1.id, { p_hash: H2 })).status, 'decided')
   const noChoice = await boot({ mutate: {
     [MIG]: s => s.replace(`if not exists (select 1 from jsonb_array_elements(r.options) o where (o->>'n')::int = p_choice_n) then`, 'if false then'),
+    [MIG3]: s => s.replace(/if not exists \(select 1 from jsonb_array_elements\(r\.options\) o where \(o->>'n'\)::int = p_choice_n\)\n\s+and not exists[^\n]*then/, 'if false then'),
     [MIG2]: s => s.replace(/if not exists \(select 1 from jsonb_array_elements\(r\.options\) o where \(o->>'n'\)::int = p_choice_n\)\n\s+and not exists[^\n]*then/, 'if false then'),
   } })
   const c2 = await create(noChoice)
   assert.equal((await decide(noChoice, c2.id, { p_choice_n: 2 })).status, 'decided')
   const unOnce = s => s.replace(`if not found or r.status <> 'pending' or r.expires_at <= now() then`, 'if not found then')
-  const noOnce = await boot({ mutate: { [MIG]: unOnce, [MIG2]: unOnce } })
+  const noOnce = await boot({ mutate: { [MIG]: unOnce, [MIG2]: unOnce, [MIG3]: unOnce } })
   const c3 = await create(noOnce)
   await decide(noOnce, c3.id)
   // 第一個決定已清掉選項：第二個決定會因為選項空掉而不成功，但已經不是 not_found

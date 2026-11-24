@@ -10,6 +10,7 @@ import fs from 'node:fs'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261114100000_perm_requests_full_options.sql'
+const BELL = '20261125310000_perm_req_decide_bell.sql' // #2161 3d-1 另外重新定義了決定函式（成功多回 bell_topic），還原驗證與回復比對要把它排除
 const WEB = '20261119200000_web_sessions.sql' // 之後重新定義了同一支建立函式（只多排除網頁的門鈴），要一起看
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
@@ -172,7 +173,7 @@ test('回復檔：靜態——交易內、只動 perm_requests 與這幾支函�
 })
 
 test('回復檔：套上之後，函式、欄位、約束、權限都和沒有 #1445 的資料庫一樣；pending 的先取消；舊的建立與決定照常', { skip }, async () => {
-  const before = await boot({ skip: [MIG, WEB] })   // 從來沒套過 #1445 的資料庫（網頁版那支只重新定義 #1445 的函式，一起略過）
+  const before = await boot({ skip: [MIG, WEB, BELL] })   // 從來沒套過 #1445 的資料庫（網頁版那支只重新定義 #1445 的函式，一起略過）
   const db = await boot()
   const pend = await create9(db)
   const done = await create9(db, { p_window_name: '小丙' })
