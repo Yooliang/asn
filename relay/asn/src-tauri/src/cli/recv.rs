@@ -257,7 +257,7 @@ pub async fn main(argv: &[String], env: &Env, io: &mut Io<'_>) -> R<i32> {
                         }
                     }
                 };
-                crate::bell::run(url, topic, move |_| w2.notify_one()).await;
+                crate::bell::run(url, topic, move |ring| if crate::bell::wakes_mail(ring) { w2.notify_one() }).await;
             }))
         }
         None => None,

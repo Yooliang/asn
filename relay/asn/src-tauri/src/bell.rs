@@ -67,6 +67,12 @@ pub fn ring_actions(ring: &Ring) -> Vec<BellAction> {
     }
 }
 
+/// 只管收信的門鈴聽眾（桌面內建橋、`asn recv --watch`、inbox 模式）用：這一響要不要叫醒收信。
+/// 回報門鈴不叫醒（回報不是信）；其他照舊一律叫醒（含 Joined／Down，與改版前的 `move |_|` 相同）
+pub fn wakes_mail(ring: &Ring) -> bool {
+    !matches!(ring, Ring::Bell(BellKind::Report { .. }))
+}
+
 /// 頻道收到的事：加入成功、或一則 broadcast（只會是這個 topic 的）
 #[derive(Debug, PartialEq)]
 pub enum Event<'a> {
@@ -350,6 +356,35 @@ mod tests {
         assert!(cb.contains("\"relay-report-bell\""), "回報門鈴走自己的事件");
         assert!(cb.contains("BellAction::EmitBell =>"), "舊門鈴的 relay-bell 只在 EmitBell 裡 emit");
         assert_eq!(cb.matches("emit(\"relay-bell\"").count(), 1, "relay-bell 不能在回呼裡無條件 emit");
+    }
+
+    #[test]
+    fn 收信聽眾_回報門鈴不叫醒_其他照舊叫醒() {
+        assert!(!wakes_mail(&Ring::Bell(BellKind::Report { kind: "echo".into(), node: "n1".into() })), "回報門鈴不是信，不叫醒收信");
+        assert!(wakes_mail(&Ring::Bell(BellKind::Legacy)), "舊門鈴照舊叫醒");
+        assert!(wakes_mail(&Ring::Joined), "連上（含重連）照舊叫醒，補收斷線期間的信");
+        assert!(wakes_mail(&Ring::Down), "與改版前 move |_| 相同");
+    }
+
+    #[test]
+    fn 守門_每個門鈴聽眾都走分流_沒有無條件叫醒的() {
+        // 主程式（lib.rs）走 ring_actions；只管收信的三處走 wakes_mail。新增 bell::run 呼叫者要在這裡登記
+        let src = |s: &str| s.replace("\r\n", "\n");
+        let files = [
+            ("bridge/mod.rs", src(include_str!("bridge/mod.rs"))),
+            ("cli/recv.rs", src(include_str!("cli/recv.rs"))),
+            ("inbox_mode.rs", src(include_str!("inbox_mode.rs"))),
+        ];
+        for (name, text) in &files {
+            let calls: Vec<&str> = text.split("bell::run(url, topic, ").skip(1).collect();
+            assert!(!calls.is_empty(), "{name} 應該有門鈴聽眾（掃不到代表路徑或寫法變了）");
+            for c in calls {
+                let head = c.split(".await").next().unwrap();
+                assert!(head.contains("wakes_mail(ring)"), "{name} 的門鈴回呼要先問 wakes_mail，不能無條件叫醒：{head}");
+            }
+        }
+        let lib = src(include_str!("lib.rs"));
+        assert_eq!(lib.matches("bell::run(url, topic, ").count(), 1, "lib.rs 只有主程式一個門鈴聽眾（多了要登記並走分流）");
     }
 
     #[test]
