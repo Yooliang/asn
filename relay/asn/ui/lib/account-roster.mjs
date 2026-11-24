@@ -282,7 +282,7 @@ export const usedOnText = row => (row?.usedOn ?? []).map(n => (n.current ? `${n.
 export const DEVICE_BUTTON_TEXT = { group: '用在哪幾台' }
 
 /** 帳號卡設備列：按鈕上的字（電腦、手機同一份，#2111） */
-export const DEVICE_ROW_TEXT = Object.freeze({ current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', offline: '離線中', self: '這台' })
+export const DEVICE_ROW_TEXT = Object.freeze({ current: '使用中', switch: '切換', busy: '切換中…', blocked: '不能切換', offline: '離線中', read: '額度回報' })
 
 /** 設備列的鈕畫成哪種狀態：離線中沿用「不能切換」的虛線淡色（#2111 ⑥）；電腦（asn-button 的 state）與手機（m-dv-dev 的 class）共用 */
 export const rowLook = state => (state === 'offline' ? 'blocked' : state)
