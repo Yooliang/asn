@@ -154,7 +154,10 @@ test('設定表單：認不得的類別不顯示任何表單項目', async () =>
 
 test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住；元件裡 act 的每個 op 都在清單裡', () => {
   const comp = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
-  const used = new Set([...comp.matchAll(/act\('([a-zA-Z-]+)'/g)].map(m => m[1]))
+  // 工作管理員的樹（#1860 F）是設定頁的子元件，它往外送的 op 也經 settings-panel 的 act 交給樞紐
+  const tree = fs.readFileSync(new URL('../ui/lib/task-tree-view.mjs', import.meta.url), 'utf8')
+  assert.match(comp, /<task-tree[^>]*@act="act"/, '設定頁把樹的 act 接到同一個 act')
+  const used = new Set([...comp.matchAll(/act\('([a-zA-Z-]+)'/g), ...tree.matchAll(/emit\('act', *'([a-zA-Z-]+)'/g)].map(m => m[1]))
   assert.deepEqual([...used].sort(), [...SETTING_OPS].sort(), '元件實際送出的 op 與 SETTING_OPS 一致')
   const hub = read('list.js')
   const fn = hub.slice(hub.indexOf('const applySetting'), hub.indexOf('const pushSettings'))

@@ -27,9 +27,14 @@ test('#2105 設定頁：樣板不寫死字級與間距（px），尺寸只來自
 })
 
 test('#2105 設定頁專屬的按鈕尺寸覆寫都刪掉了：樣式表不再替設定頁的按鈕改尺寸／內距／字級', () => {
-  for (const sel of ['.launch-set .aero-btn', '.launch-set .sec-head .aero-btn', '.dv-vb .aero-btn', '.dv-tabs .aero-btn', '.launch-cwd-list .aero-btn', '.tm-table .aero-btn', '.dv-devbtn']) {
+  for (const sel of ['.launch-set .aero-btn', '.launch-set .sec-head .aero-btn', '.dv-vb .aero-btn', '.dv-tabs .aero-btn', '.launch-cwd-list .aero-btn', '.tm-node .aero-btn', '.tm-act .aero-btn', '.tm-more .aero-btn', '.dv-devbtn']) {
     assert.ok(!css.includes(sel), `樣式表不該再有「${sel}」`)
   }
+  // 工作管理員改成樹（#1860 F）後舊的 .tm-table 已不存在；守門改掃樹的 .tm-node／.tm-act／.tm-more，並確認真的掃到樹的規則（不是空集合恆真）
+  for (const sel of ['.tm-node{', '.tm-act{', '.tm-more{']) assert.ok(css.includes(sel), `樣式表要有樹的規則「${sel}」，守門才有東西可掃`)
+  assert.ok(!css.includes('.tm-table'), '舊表格的樣式不該留著')
+  const treeBtnRules = [...css.matchAll(/\.tm-(?:node|act|more|tree)[^{}]*\{[^}]*\}/g)].map(m => m[0]).filter(r => /(?:^|[\s>])\.(?:aero|asn)-btn/.test(r.split('{')[0]))
+  for (const r of treeBtnRules) assert.doesNotMatch(r, /(?:font-size|padding|min-height|height|line-height)\s*:/, `樹裡的按鈕不准在樣式表改尺寸／內距／字級：${r}`)
   // 留下的（排版用）規則只准動位置，不准動尺寸、內距、字級
   const kept = ['.launch-set .sec-head>.asn-btn', '.launch-set .set-card>.asn-btn', '.launch-cwd-list .asn-btn', '.dv-tabs .asn-btn']
   for (const sel of kept) {
@@ -125,7 +130,10 @@ test('#2105 改由 ASN 負責的確認：處理中兩顆都不能按（原本的
 })
 
 test('#2105 移除／刪除／結束／忘記／撤銷這類不可復原的動作，按鈕都是危險狀態', () => {
-  const must = ['tm-ask', 'quota-mm-remove', 'forget.ask(r.peer)', 'forget.askReaccept(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
+  // 工作管理員的「停止」鈕搬到共用的樹元件（#1860 F），在那個檔裡也要是危險鈕
+  const treeTag = [...read('../ui/lib/task-tree-view.mjs').matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes("'tm-ask'"))
+  assert.match(treeTag ?? '', /state="danger"/, '停止鈕要是危險鈕')
+  const must = ['quota-mm-remove', 'forget.ask(r.peer)', 'forget.askReaccept(curKnown)', 'askRemove = true', 'tm-confirm', 'forget.yes']
   for (const h of must) {
     const tag = [...panel.matchAll(/<asn-button\b[^>]*>/g)].map(m => m[0]).find(t => t.includes(h))
     assert.ok(tag, `找得到按鈕：${h}`)
