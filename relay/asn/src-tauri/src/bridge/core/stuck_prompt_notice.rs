@@ -85,7 +85,12 @@ impl Core {
             Ok((200, v)) => {
                 let notify = v.get("notify").and_then(Value::as_str).unwrap_or("");
                 self.log.line(&format!("stuck-prompt owner window={} notify={notify}", p.name));
-                matches!(notify, "sent" | "skipped" | "rate_limited")
+                if notify == "rate_limited" {
+                    // 每節點每小時的共用名額用完：不算寄過，下一輪再試，直到放棄期限
+                    self.log.line(&format!("stuck-prompt owner window={}: 被限頻（這個節點每小時的通知名額用完），稍後再試", p.name));
+                    return false;
+                }
+                matches!(notify, "sent" | "skipped")
             }
             Ok((403, _)) => {
                 // 後台拒絕（不是舊後台不認得）：可能是這台電腦的金鑰失效或被擋，要查，所以和 400／404 分開寫

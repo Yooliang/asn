@@ -51,6 +51,48 @@ async fn 擁有者那份失敗_隔一分鐘只重試那一份_夥伴那份不重
 }
 
 #[tokio::test]
+async fn 被限頻不算寄過_log_寫明_下一輪再試_夥伴那份不重寄() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.st.lock().unwrap().wait_notice_notify = "rate_limited".into();
+    h.core.stuck_prompt_enqueue(T0, prompt());
+    h.core.stuck_prompt_tick(T0).await;
+    assert!(h.core.log.has("被限頻"), "要寫明被限頻：{:?}", h.core.log.recent());
+    assert_eq!(to_partner(&h).len(), 1, "夥伴那份照送");
+    h.fr.st.lock().unwrap().wait_notice_notify = "sent".into();
+    h.core.stuck_prompt_tick(T0 + 30_000).await;
+    assert_eq!(h.core.log.count("stuck-prompt owner window"), 2, "還沒到重試時間（只有第一次的兩行 log）");
+    h.core.stuck_prompt_tick(T0 + 60_000).await;
+    assert!(h.core.log.has("notify=sent"), "第二次寄成：{:?}", h.core.log.recent());
+    assert_eq!(to_partner(&h).len(), 1, "夥伴那份不重寄");
+    h.core.stuck_prompt_tick(T0 + 180_000).await;
+    assert_eq!(h.core.log.count("notify=sent"), 1, "寄成就不再寄");
+}
+
+#[tokio::test]
+async fn 一直被限頻_過一小時放棄並寫_log() {
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    h.fr.st.lock().unwrap().wait_notice_notify = "rate_limited".into();
+    h.core.stuck_prompt_enqueue(T0, prompt());
+    let mut t = T0;
+    while t <= T0 + 3_700_000 {
+        h.core.stuck_prompt_tick(t).await;
+        t += 60_000;
+    }
+    assert!(h.core.log.has("過了一小時還沒送成"), "{:?}", h.core.log.recent());
+}
+
+/// 給夥伴本人的那份只能寄信（relay send），不能經過任何會把字送進終端的函式：
+/// 夥伴這時正停在確認框上，打進去的字和 Enter 可能被當成選了某個選項（#2264 一審 1）
+#[test]
+fn 夥伴那份只寄信_原始碼不出現任何送鍵函式() {
+    let src = crate::settings::src_scan::prod_source(include_str!("../core/stuck_prompt_notice.rs"));
+    for f in ["confirm_send", "send_line_and_enter", "send_input", "send_bytes", "send_text", "send_line", "send_enter", "term_send", ".answer("] {
+        assert!(!src.contains(f), "stuck_prompt_notice 不得出現送鍵函式 {f}");
+    }
+    assert!(src.contains(r#"self.relay.api("send""#), "夥伴那份經由寄信（relay send）送出");
+}
+
+#[tokio::test]
 async fn 後台回_403_和舊後台不認得分開寫_log_都不再重試() {
     for (status, must, must_not) in [(403u16, "被拒絕", "舊後台不認得"), (404, "舊後台不認得", "被拒絕"), (400, "舊後台不認得", "被拒絕")] {
         let mut h = harness(&[("T-乙", "idle")]).await;
