@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import test from 'node:test'
-import { LAUNCHERS_POLL_MAX_MS, LAUNCHERS_POLL_MS, isAuthDenied, launchersErrorText, nextLaunchersDelay } from '../ui/lib/launcher-poll.mjs'
+import { LAUNCHERS_LIST_POLL_MS, LAUNCHERS_POLL_MAX_MS, isAuthDenied, launchersErrorText, nextLaunchersDelay } from '../ui/lib/launcher-poll.mjs'
 import { loadOpsContext } from '../ui/lib/partner-ops-ui.mjs'
 
 const denied = new Error('launchers HTTP 403 forbidden')
@@ -11,17 +11,17 @@ test('被後台擋（401／403）才算沒有權限；連線失敗、尚未登�
   for (const m of ['launchers 連線失敗：timeout', 'HTTP 500 internal', '尚未登入，無法查詢電腦的啟動設定', '4030 筆']) assert.ok(!isAuthDenied(new Error(m)), m)
 })
 
-test('#380：連續被擋就把間隔加倍、最長 5 分鐘；查到一次或其他失敗都回到 15 秒', () => {
-  let d = LAUNCHERS_POLL_MS
+test('#380：連續被擋就把間隔加倍、最長 5 分鐘；查到一次或其他失敗都回到 60 秒（#2161 3a 起基準 60 秒）', () => {
+  let d = LAUNCHERS_LIST_POLL_MS
   const seen = []
   for (let i = 0; i < 8; i++) { d = nextLaunchersDelay(d, denied); seen.push(d) }
-  assert.deepEqual(seen.slice(0, 4), [30_000, 60_000, 120_000, 240_000])
+  assert.deepEqual(seen.slice(0, 4), [120_000, 240_000, 300_000, 300_000])
   assert.ok(seen.slice(4).every(x => x === LAUNCHERS_POLL_MAX_MS), '最長 5 分鐘')
-  assert.equal(nextLaunchersDelay(LAUNCHERS_POLL_MAX_MS, null), LAUNCHERS_POLL_MS, '查到就恢復')
-  assert.equal(nextLaunchersDelay(LAUNCHERS_POLL_MAX_MS, new Error('連線失敗')), LAUNCHERS_POLL_MS, '暫時連不上不拉長')
-  assert.equal(nextLaunchersDelay(undefined, denied), 30_000)
-  // 以一天計：舊的每 15 秒一次是 5760 次；被擋時拉到 5 分鐘只剩 288 次左右
-  let t = 0, n = 0; d = LAUNCHERS_POLL_MS
+  assert.equal(nextLaunchersDelay(LAUNCHERS_POLL_MAX_MS, null), LAUNCHERS_LIST_POLL_MS, '查到就恢復')
+  assert.equal(nextLaunchersDelay(LAUNCHERS_POLL_MAX_MS, new Error('連線失敗')), LAUNCHERS_LIST_POLL_MS, '暫時連不上不拉長')
+  assert.equal(nextLaunchersDelay(undefined, denied), 120_000)
+  // 以一天計：舊的每 15 秒一次是 5760 次（現在基準 60 秒）；被擋時拉到 5 分鐘只剩 288 次左右
+  let t = 0, n = 0; d = LAUNCHERS_LIST_POLL_MS
   while (t < 86_400_000) { n++; d = nextLaunchersDelay(d, denied); t += d }
   assert.ok(n < 300, `一天被擋最多約 300 次，實際 ${n}`)
 })
