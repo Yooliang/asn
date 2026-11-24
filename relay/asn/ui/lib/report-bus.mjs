@@ -12,6 +12,7 @@ export const MAXWAIT_MS = 1000
 export const BATCH_MAX = 50
 export const POLL_MS = 5 * 60 * 1000
 export const FAIL_WAIT_MS = 5000
+export const WARN_AT = new Set([1, 5, 20])   // 同一 kind 連續失敗，只在這幾次記一行 warn
 
 // changed_at 是否比 prev 新：兩邊都是數字就比數字，否則比時間，再不行比字串
 export function isNewer(cur, prev) {
@@ -95,7 +96,7 @@ export function createReportBus({
       if (disposed || stateOf(kind) !== st) return
       st.fails++
       st.failUntil = now() + FAIL_WAIT_MS
-      console.warn('[ASN]', `回報讀取失敗：${kind}（連續第 ${st.fails} 次），稍後再試`)
+      if (WARN_AT.has(st.fails)) console.warn('[ASN]', `回報讀取失敗：${kind}（連續第 ${st.fails} 次），稍後再試`)   // 只在第 1、5、20 次記，避免洗 console
       for (const n of nodes.slice(i)) st.pending.add(n)   // 沒讀到的下一輪再讀
     } finally {
       if (stateOf(kind) === st) { st.inflight = false; if (!disposed) schedule(kind) }

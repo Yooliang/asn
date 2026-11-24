@@ -476,7 +476,7 @@ export const reportApi = {
 export const onReport = cb => {
   let off = null, dead = false
   try {
-    void listen('relay-report', cb).then(f => { if (dead) { try { f() } catch {} } else off = f }).catch(() => {})
+    void listen('relay-report-bell', cb).then(f => { if (dead) { try { f() } catch {} } else off = f }).catch(() => {})
   } catch { /* 沒有 Tauri（純網頁、測試）：什麼都不聽 */ }
   return () => { dead = true; if (off) { try { off() } catch {} off = null } }
 }

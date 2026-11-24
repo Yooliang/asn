@@ -177,6 +177,19 @@ test('讀失敗：不拋、只記一次 warn（無內容）、至少隔 5 秒才
   assert.equal(s.calls.length, 2); assert.deepEqual(got, [1])
 }))
 
+test('連續失敗只在第 1、5、20 次記 warn，恢復後計數歸零', quietWarn(async logs => {
+  const s = setup(); s.put('k', 'a', 1); s.bus.subscribe('k', 'a', () => {})
+  s.setFail(true)
+  await s.clock.advance(300)
+  for (let i = 0; i < 24; i++) await s.clock.advance(FAIL_WAIT_MS)
+  assert.ok(s.calls.length >= 25, `共 ${s.calls.length} 次讀取`)
+  assert.equal(logs.length, 3)
+  assert.deepEqual(logs.map(l => l.match(/第 (\d+) 次/)[1]), ['1', '5', '20'])
+  s.setFail(false); await s.clock.advance(FAIL_WAIT_MS)
+  s.setFail(true); s.ring('k', 'a'); await s.clock.advance(FAIL_WAIT_MS)
+  assert.equal(logs.length, 4, '恢復後重新從第 1 次算')
+}))
+
 test('取消訂閱：到零就停該 kind 與後援；別人還在訂閱就繼續', async () => {
   const s = setup()
   const u1 = s.bus.subscribe('k', 'a', () => {}); const u2 = s.bus.subscribe('k', 'b', () => {})
@@ -222,7 +235,7 @@ test('守門：ui/ 底下除 tauri.mjs 外沒有 report_send／report_get／rela
     .filter(f => /report_send|report_get|relay-report/.test(fs.readFileSync(f, 'utf8'))).map(rel)
   assert.deepEqual(bad, [])
   const ex = fs.readFileSync(path.join(UI, 'lib/tauri.mjs'), 'utf8')
-  for (const c of ["'report_send'", "'report_get'", "'relay-report'"]) assert.ok(ex.includes(c), c)
+  for (const c of ["'report_send'", "'report_get'", "'relay-report-bell'"]) assert.ok(ex.includes(c), c)
 })
 
 test('守門：report-bus.mjs 沒有任何 import（依賴全部注入）、不碰 __TAURI__', () => {
@@ -242,7 +255,7 @@ test('reportApi／onReport：指令名與參數形狀、門鈴取消', async () 
   const saved = globalThis.__TAURI__
   globalThis.__TAURI__ = {
     core: { invoke: async (c, a) => { calls.push([c, a]); return { ok: true, reports: [] } } },
-    event: { listen: async (evt, fn) => { assert.equal(evt, 'relay-report'); handler = fn; return () => { unlistened++ } }, emit: async () => {} },
+    event: { listen: async (evt, fn) => { assert.equal(evt, 'relay-report-bell'); handler = fn; return () => { unlistened++ } }, emit: async () => {} },
   }
   try {
     const m = await import(`../ui/lib/tauri.mjs?t=report-${Date.now()}`)
