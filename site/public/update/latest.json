@@ -1,15 +1,11 @@
 {
-  "version": "0.2.92",
-  "notes": "- 新功能：夥伴卡在確認框超過 5 分鐘沒人處理時，會通知擁有者和夥伴本人\n- 改善：手機上只能選「拒絕」時，會說明為什麼不能允許\n- 修正：Claude 權限框的選項下方出現「↑ N more lines」或頁尾折行時，也能正確認出來\n- 修正：下載附件時若程式當掉，下次不會讀到只存一半的檔案\n- 改善：Android 版除了內部測試，也會同時發佈到 Google Play 的封閉測試",
-  "pub_date": "2026-11-24T12:06:23.343Z",
+  "version": "0.2.93",
+  "notes": "- 改善：在手機上允許或拒絕權限確認、或確認終端請求後，電腦會馬上收到，不用再等下一次檢查",
+  "pub_date": "2026-11-24T13:01:29.586Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZUcHc3aHJZRWlJdmViNHQxVFBTZlRFaERldXQzS3FqUkQ3eWxFOUhSZSt5MkQwcWJQVXpuNGtIcnRpMGJrK1crdlQxT1UrMWdXUnYrZVJTU3ZmbXdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTIxOTgyCWZpbGU6QVNOXzAuMi45Ml94NjQtc2V0dXAuZXhlCm9LY2xycnFpa3FPeDk4Q0UybFA5SjBRWEtNQ3JYKzM1UFRYNnB0TnU1Ukd6d0ZnSDVVZzJzZDFhRXpqM1lRUk4xVzZlczNaMXA4TWRwOFVYdG1qL0FnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.92_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJDWngzTVArcjlhUlhrd1VZY2ZMY1ExRml5TENZZDVoV3JwSmR0ZHBOazdjYUl4WVVvZ0RzWWY2UTd5OEhrOGt2OGVQTkEwVmo2bmJWOGJPTmU1VmdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTIyNjIwCWZpbGU6QVNOXzAuMi45Ml9hbWQ2NC5BcHBJbWFnZQo0dzFlbG1TMDBQOTZBTmsrd21QQXVUd3hQZlpHN3RsK25ralpOS3ZWZkFjNjZiSlNXSTNjNVpsNFVXZjl2M0t3MFZqWDdOT1JwV2NzTVF6azhtUkJCZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.92_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9nTW1tSkhWOU0zdnlLK0tUOVFoNWtkTXRuY1Y2d2pRL3VQRE9xSWVPMUVoQzhiajhFQWxPN2Q3NlNBWTgzdHZlanUyQzJXUVA4Z0UvSTFoSU9jbHc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTI1Mjg5CWZpbGU6QVNOXzAuMi45M194NjQtc2V0dXAuZXhlClBWNkhVNTVXb0YyMTl2S0xYK3dDT0xmR2Q2L05oLzQwZ3UrU3ZNdEtwQlRwYzZUaWhTWGxCeGFUZHJsQUFaZDJyNXdqQysxakFEejRuY0ExbUZkakJnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.93_x64-setup.exe"
     }
   }
 }
