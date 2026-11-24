@@ -240,10 +240,8 @@ test('#1860F 畫面：按鈕只往外送 act，納入管理帶那一列的鍵；
   try {
     await settle(m)
     for (const k of ['asn', 'mux', 'process']) assert.equal(m.find(`.tm-node[data-kind="${k}"] .tm-stop`), null, `${k} 只能看`)
-    // ASN、終端服務有「重啟」（#1860 F PR3），就不寫「只能看」；自己開的前景程式照舊只能看
-    assert.equal(m.find('.tm-node[data-kind="asn"] .tm-viewonly'), null)
+    // 整個畫面不寫「只能看」（#2242）；ASN 有「重啟」，自己開的前景程式沒有鈕就留白、原因放在細項
     assert.ok(m.find('.tm-node[data-kind="asn"] .tm-restart'))
-    assert.ok(m.find('.tm-node[data-kind="process"] .tm-viewonly'))
     const adopt = m.findAll('.tm-adopt')
     assert.equal(adopt.length, 2, '自己開的視窗與前景程式各一顆')
     await m.trigger(adopt[0], 'click')

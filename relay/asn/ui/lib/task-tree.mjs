@@ -9,7 +9,6 @@ export const TREE_TEXT = Object.freeze({
   agents: n => `底下 ${n} 個代理`,
   fold: '收合',
   unfold: '展開',
-  viewOnly: '只能看',
   // 重啟（#1860 F PR3）：確認文字、按鈕與狀態都只有這一份，電腦、手機、別台設備共用
   restart: '重啟',
   cancel: '取消',
