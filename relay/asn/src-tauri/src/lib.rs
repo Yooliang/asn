@@ -2449,8 +2449,11 @@ fn start_perm_remote_poller(
                 _ = perm_wake.notified() => {
                     if app.state::<auth::AuthState>().status().signed_in && perm_remote::should_take(tracker.has_active(), last_take.elapsed().as_secs(), true) {
                         // 成功才更新 last_take（失敗就不把保底往後推；和上面一般輪的做法一致）
+                        elog!("權限框：門鈴叫醒，立刻領取手機的決定");
                         if perm_remote::take_step(relay.as_ref(), &terms, &data_dir, &mut tracker).await {
                             last_take = std::time::Instant::now();
+                        } else {
+                            elog!("權限框：領取手機的決定失敗，等保底再試");
                         }
                     }
                 }
