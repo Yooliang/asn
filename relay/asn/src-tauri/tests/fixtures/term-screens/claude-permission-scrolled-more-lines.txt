@@ -1,0 +1,26 @@
+      dockerfile: Dockerfile.bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - LOAN_WATCH_STATE_PATH=/app/data/loan_watch_state.json
+      - LOAN_WATCH_OUTBOX_DIR=/app/data/outbox
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    command: ["sh", "-c", "while true; do python -m bot loan-watch --once || echo \\"loan-watch 失敗 $$?\\"; sleep
+$${LOAN_WATCH_INTERVAL:-600}; done"]
+
+  frontend:''',1)
+open(p,'w',encoding='utf-8').write(s)
+PYEOF
+grep -n "once" bot/__main__.py | head -3; docker --version 2>&1 | head -1; docker compose config -q 2>&1 | head -5
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+│ Claude Code can't be sure it read this command the way the shell will, so it can't rule out a dangerous removal.
+│ Read the command, and don't go ahead if you can't tell what it does.
+
+Do you want to proceed?
+❯ 1. Yes
+  2. No
+↑ 10 more lines
+Esc to cancel · Tab to amend · ctrl+x ctrl+k twice to stop background agents
+──────────────────────────────────────────────────────────────────────────────────────────── 夥伴-1 ─

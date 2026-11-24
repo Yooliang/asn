@@ -183,7 +183,7 @@ fn is_elision_line(line: &str) -> bool {
         digits > 0 && a[digits..].trim_start().starts_with("line")
     });
     let lc = t.to_ascii_lowercase();
-    plus_lines || lc.contains("to expand)") || lc.contains("ctrl+o to expand") || lc.contains("ctrl+r to expand")
+    plus_lines || is_more_lines_marker(t) || lc.contains("to expand)") || lc.contains("ctrl+o to expand") || lc.contains("ctrl+r to expand")
 }
 
 /// 權限框傳到手機時給哪些選項（#853）。**只有這裡決定，** 要改就改這裡。
@@ -684,6 +684,33 @@ fn usage_menu_bind(text: &str) -> Option<String> {
     Some(lines[top..end].iter().map(|l| clean_prompt_line(l).trim_start().trim_start_matches(CURSOR).trim_start().to_string()).collect::<Vec<_>>().join("\n"))
 }
 
+/// Claude Code 在選項下方標「還有幾行沒顯示」：`↑ 10 more lines`、`↓ 1 more line`（#2256）。不是選項，也不是對話內容
+fn is_more_lines_marker(line: &str) -> bool {
+    let Some(rest) = line.trim().strip_prefix(['↑', '↓']) else { return false };
+    let rest = rest.trim_start();
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    digits > 0 && matches!(rest[digits..].trim(), "more line" | "more lines")
+}
+
+/// 頁尾太長在窄視窗折成好幾行：第一行是 `Esc to cancel` 這類開頭，後面緊接的延續行也算頁尾（#2256）。
+/// 往上最多看 MAX_FOOTER_LINES 行，中間只能是不像選項的行；碰到空行、分隔線或選項就不是延續
+fn is_footer_continuation(lines: &[&str], idx: usize) -> bool {
+    let like_option = |t: &str| t.starts_with(CURSOR) || numbered(t).is_some();
+    if like_option(lines[idx].trim()) {
+        return false;
+    }
+    for j in (idx.saturating_sub(MAX_FOOTER_LINES)..idx).rev() {
+        let t = lines[j].trim();
+        if t.is_empty() || is_rule(t) || like_option(t) {
+            return false;
+        }
+        if FOOTER_PREFIXES.iter().any(|f| t.starts_with(f)) {
+            return true;
+        }
+    }
+    false
+}
+
 fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
     // 用來判斷的是最底下的區塊：往上跳過頁尾與分隔線，碰到別的內容就算不是選單
     let mut last = lines.len();
@@ -691,11 +718,14 @@ fn menu_at_bottom(lines: &[&str]) -> Option<ClaudeScreen> {
     let mut confirm_footer = false;
     while last > 0 {
         let t = lines[last - 1].trim();
-        if t.is_empty() || is_rule(t) {
+        if t.is_empty() || is_rule(t) || is_more_lines_marker(t) {
             last -= 1;
         } else if FOOTER_PREFIXES.iter().any(|f| t.starts_with(f)) {
             footers += 1;
             confirm_footer |= t.starts_with(USAGE_MENU_FOOTER);
+            last -= 1;
+        } else if is_footer_continuation(lines, last - 1) {
+            footers += 1;
             last -= 1;
         } else {
             break;
@@ -1529,6 +1559,7 @@ mod phone_option_tests {
 #[cfg(test)]
 mod question_box_tests {
     use super::*;
+    use ClaudeScreenKind as K;
 
     const RULE: &str = "────────────────────────────────────────────────────────────";
     const FOOT: &str = "Enter to select · ↑/↓ to navigate · Esc to cancel";
@@ -1671,6 +1702,64 @@ mod question_box_tests {
     fn 內容太長不給按鈕() {
         let s = classify(&single()).unwrap();
         assert!(phone_options(&s, false).is_empty());
+    }
+
+    const SCROLLED_MORE: &str = include_str!("../../tests/fixtures/term-screens/claude-permission-scrolled-more-lines.txt");
+
+    #[test]
+    fn 捲動過的長指令權限框_選項下方有更多行的提示_仍判成權限框_不完整_只給拒絕() {
+        // #2256：擁有者截圖。標題捲出畫面、安全提示帶左邊框、選項只有 Yes／No、選項下方 `↑ 10 more lines`、頁尾很長
+        let text = SCROLLED_MORE.replace("\r\n", "\n");
+        let s = classify(&text).expect("認得出權限框");
+        assert_eq!(s.kind, K::Permission);
+        assert_eq!(s.question, "Do you want to proceed?");
+        let opts: Vec<(u32, &str)> = s.options.iter().map(|o| (o.n, o.label.as_str())).collect();
+        assert_eq!(opts, vec![(1, "Yes"), (2, "No")], "「↑ 10 more lines」不能併進最後一個選項");
+        assert_eq!(s.deny, Some(2));
+        let p = permission_text(&text).unwrap();
+        assert!(!p.complete, "標題捲出、還有更多行：不完整");
+        let old: Vec<u32> = phone_options(&s, p.complete).iter().map(|o| o.n).collect();
+        assert_eq!(old, vec![2], "舊手機只給拒絕");
+    }
+
+    #[test]
+    fn 有_more_lines_提示的畫面算不完整_沒有的照舊() {
+        for ok in ["↑ 10 more lines", "  ↓ 1 more line", "↑ 3 more lines  "] {
+            assert!(is_elision_line(ok), "{ok:?}");
+        }
+        for no in ["echo '↑ 3 more lines' > x", "more lines", "↑ more lines"] {
+            assert!(!is_elision_line(no), "{no:?}");
+        }
+    }
+
+    #[test]
+    fn 框頂端看得到_但選項下方還有更多行_一樣不完整() {
+        let rule = "─".repeat(60);
+        let page = |tail: &str| format!("{rule}\n Bash command\n mkdir x\n\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n{tail}Esc to cancel · Tab to amend\n");
+        assert!(permission_text(&page("")).unwrap().complete, "對照：沒有提示就是完整");
+        assert!(!permission_text(&page("↑ 3 more lines\n")).unwrap().complete);
+    }
+
+    #[test]
+    fn 一般對話裡有_proceed_和_yes_但沒有頁尾_不判成權限框() {
+        let text = "● 我想問你：\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No\n\n● 等你回答\n";
+        assert!(classify(text).is_none_or(|s| s.kind != K::Permission));
+        let text2 = "Do you want to proceed?\n  1. Yes\n  2. No\n↑ 3 more lines\n";
+        assert!(classify(text2).is_none_or(|s| s.kind != K::Permission));
+    }
+
+    #[test]
+    fn 只有_more_lines_沒有選項_不判成權限框() {
+        let text = "● 輸出：\n  ⎿  ↑ 3 more lines\n↑ 3 more lines\nEsc to cancel · Tab to amend\n";
+        assert!(classify(text).is_none_or(|s| s.kind != K::Permission));
+    }
+
+    #[test]
+    fn 頁尾折成兩行也認得() {
+        let text = SCROLLED_MORE.replace("\r\n", "\n").replace("Tab to amend · ctrl+x", "Tab to amend ·\nctrl+x");
+        let s = classify(&text).expect("認得出權限框");
+        assert_eq!(s.kind, K::Permission);
+        assert_eq!(s.options.len(), 2);
     }
 
     #[test]

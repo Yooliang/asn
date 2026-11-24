@@ -40,6 +40,7 @@ const FIXTURES: &[(&str, &str)] = fixtures![
     "claude-lookalike-tool-output.txt",
     "claude-permission-bash.txt",
     "claude-permission-long-bash.txt",
+    "claude-permission-scrolled-more-lines.txt",
     "claude-permission-webfetch.txt",
     "claude-permission-write.txt",
     "claude-plan-approval.txt",

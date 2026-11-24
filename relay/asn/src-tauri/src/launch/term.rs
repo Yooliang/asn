@@ -8471,6 +8471,20 @@ mod tests {
         }
 
         #[test]
+        fn 捲動過的權限框_選項下方有更多行_手機與電腦都標看不出全貌_手機只給拒絕() {
+            // #2256：擁有者截圖。標題捲出畫面，看不到的指令段沒法分析，只能靠 uncertain
+            let rig = permission_rig();
+            *rig.runner.inner.screen.borrow_mut() = include_str!("../../tests/fixtures/term-screens/claude-permission-scrolled-more-lines.txt").replace("\r\n", "\n");
+            let o = rig.svc.phone_offer_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(!o.complete);
+            assert!(o.risk.uncertain, "手機：看不到的部分要標看不出全貌");
+            assert_eq!(o.options.iter().map(|x| x.n).collect::<Vec<_>>(), vec![2], "舊手機只給拒絕");
+            let d = rig.svc.permission_prompt_with("小乙", Some(SESSION_PID)).unwrap();
+            assert!(!d.complete, "電腦：不完整");
+            assert!(d.risk.uncertain, "電腦：標看不出全貌");
+        }
+
+        #[test]
         fn 手機_完整的權限框_平常的指令_舊手機兩顆_有危險時舊手機只能拒絕_雜湊綁住新欄位() {
             let rig = permission_rig();
             let rule = "─".repeat(60);
