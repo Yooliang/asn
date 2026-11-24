@@ -96,6 +96,7 @@ export const fakeTable = ({ signedIn = true, needsLogin = false } = {}) => ({
   auth_account_info: signedIn ? { email: 'me@example.com', created: '2026-01-01', node_count: 1, this_node_mine: true, name: '測試者' } : null,
   store_load: { by: 'name', values: { onboard: JSON.stringify({ done: true }), chats: JSON.stringify({ friends: [], logs: {} }), me: JSON.stringify({}) }, fallback: null },
   store_save: null,
+  settings_patch: null,   // 個人設定與引導改走欄位級 patch（#2162 ⑦）
   relay_list: { members: [] },
   relay_inbox: { mails: [] },
   relay_rooms: { rooms: [] },
