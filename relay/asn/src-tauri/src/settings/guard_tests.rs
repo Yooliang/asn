@@ -4,13 +4,16 @@
 //! 不保證抓得到所有私有讀寫，漏網的靠審查補。切掉測試碼用的是 `settings/src_scan.rs`（真的數大括號、
 //! 由 `#[cfg(test)] mod x;` 反推外部測試檔）；計數按「出現次數」算，同一行兩處就是兩次。
 //!
-//! 已知的限制（#2232 B 要處理）：
-//! 1. 讀寫動作只認 `read_to_string`／`fs::write`／`File::create`／`OpenOptions`；`File::open`、`fs::read(`、
-//!    `from_reader`／`to_writer`、`fs::copy`、`fs::rename`、`use std::fs::write;` 之後的 `write(` 不在內。
-//! 2. 錯誤訊息文字裡提到檔名也會被當成一處（寧可多算）；`with_extension("json")` 數不到。檔名放在 const（例如 `KNOWN_FILE = "device_known.json"`）、用 `with_extension("json")` 或 `format!` 組出來時，
-//!    只靠「`.json` 與動作在前後一行內」抓不到。
-//! 3. 原子寫入只認三個函式名與 `.tmp"`；暫存檔改 `.part`／`.new`／`.bak`、`NamedTempFile`／`persist`、
-//!    自己取別的函式名都繞得過。
+//! 已知的限制：
+//! 1. 讀寫動作認 `read_to_string`／`fs::write`／`File::create`／`OpenOptions`／`File::open`／`fs::read(`／
+//!    `from_reader`／`to_writer`／`fs::copy`／`fs::rename`（#2232 B）；`use std::fs::write;` 之後的 `write(`、
+//!    自己包一層的函式名不在內。
+//! 2. 檔名：`.json` 字樣，加上「檔內 `const`／`static` 宣告的 `.json` 檔名常數，在動作前後一行內被用到」（#2232 B，
+//!    例：`KNOWN_FILE`、`MARKER`）。追不到的寫法：常數放在別的檔再 `use` 進來（只追同一個檔）、`with_extension("json")`、
+//!    `format!("{x}.json")`、字串相接、把檔名放進結構欄位再傳來傳去。錯誤訊息文字裡提到檔名也會被當成一處（寧可多算）。
+//! 3. 原子寫入認 `fn write_atomic`／`fn atomic_write`／`fn save_atomic`、`.tmp"`、`.part"`、`.new"`、`.tmp.{`、
+//!    `with_extension("tmp")`、`NamedTempFile`、`.persist_noclobber(`（#2232 B）。單獨的 `.persist(` 不收：專案裡
+//!    `self.persist()` 到處都是（存檔方法），收了全是誤報；暫存檔取別的副檔名（`.bak`、`.swp`）、自己取別的函式名仍繞得過。
 //! 4. 只掃 `src-tauri/src`，不含 `build.rs` 與其他 crate。
 //! 5. 巨集展開出來的程式、`cfg_attr`、`#[cfg(any(test, …))]` 都當正式碼，不特別處理。
 //!    例：procscan.rs 的 fake_proc_tests，因為 cfg 裡含 `not(`／`any(`，被當成正式碼掃（不影響結果，只是多掃）。
@@ -35,7 +38,7 @@ const PENDING_JSON: &[(&str, usize)] = &[
     ("bridge/engines/grok_adopt.rs", 2),  // 讀 Grok 的 ~/.grok/active_sessions.json（唯讀）；第 2 處是同一行錯誤訊息文字裡提到檔名（#2232 A 改按出現次數後多算，不是第二次讀寫）
     ("bridge/partner_ops.rs", 2),         // 讀 Claude 的 sessions/<pid>.json 與外掛狀態檔、寫外掛要讀的 control 檔（外部程式要讀的檔）
     ("bridge/roster.rs", 1),              // 讀 Claude 的 sessions/<pid>.json 與外掛狀態檔（唯讀）
-    ("claude_mod.rs", 1),                 // 讀自家外掛包的 plugin.json（隨安裝包、唯讀）
+    ("claude_mod.rs", 2),                 // 讀自家外掛包的 plugin.json（隨安裝包、唯讀）；第 2 處是 MARKER_FILE claude-mod.json：外掛安裝標記（#2232 B 常數追蹤新增，狀態）
     ("cli/caller.rs", 1),                 // 讀 Claude 的 sessions/<pid>.json 找呼叫者（唯讀）
     ("codex_accounts.rs", 1),             // 讀 Codex 的 auth.json（外部程式的憑證，唯讀）
     ("launch/cwds.rs", 1),                // 讀 ~/.claude.json 的 projects 當候選（唯讀；launch-prefs.json 本身走共用層，計數仍是 0）
@@ -45,8 +48,26 @@ const PENDING_JSON: &[(&str, usize)] = &[
     ("statusline_restore.rs", 2),         // 讀寫使用者的 ~/.claude/settings.json 還原狀態列（外部程式的設定，帶備份）
     // ---- 丙組：狀態、佇列、游標、產生檔（程式自己產生，不是使用者選的設定）----
     ("bridge/engines/pi_control.rs", 1),  // pi-control 請求／結果佇列（給 pi 擴充讀；R 丙）
-    ("bridge/forward_selftest.rs", 2),    // 自我測試產生的 sender-settings.json、recv-settings.json 兩個檔（給 claude --settings 讀的產生檔，R54；同一行兩處，以前只算一次）
+    ("bridge/forward_selftest.rs", 3),    // 自我測試產生的 sender-settings.json、recv-settings.json 兩個檔（給 claude --settings 讀的產生檔，R54；同一行兩處，以前只算一次）；第 3 處是 SELFTEST_FILE 常數的讀寫（#2232 B 常數追蹤新增，自我測試結果＝狀態）
     ("bridge/rooms.rs", 2),                // rooms-held.json（佇列）、rooms-cursor.json（游標，Node 橋共用格式）
+    // ---- #2232 B 擴大規則（檔名常數、File::open／fs::read／rename 等）新掃出的命中；逐一看過都是狀態／佇列／憑證／標記檔，沒有「設定類該走共用層卻沒走」的，所以沒有「待搬」項 ----
+    ("bridge/core/outbox.rs", 1),         // OUTBOX_FILE reply-outbox.json：待重送的回信佇列（丙組）
+    ("bridge/core/upstream_retry.rs", 1), // RETRY_FILE retry-pending.json：上游重試佇列（丙組）
+    ("bridge/engines/partner_queue.rs", 1), // PARTNERS_FILE acp-partners.json：ACP 夥伴的登記狀態（丙組）
+    ("bridge/forward_gate.rs", 1),        // INFLIGHT_FILE forward-inflight.json：轉交進行中的標記（狀態）
+    ("claude_accounts.rs", 9),            // 讀寫 Claude 的 .credentials.json／.claude.json（外部程式的檔）與帳號庫的 account.json／憑證備份（憑證類，明確不搬進設定層；以前檔名在常數裡掃不到）
+    ("claude_extra.rs", 1),               // CREDENTIALS／STOPS：額外帳號的憑證檔與停用狀態（憑證／狀態類）
+    ("cli/send_rate.rs", 2),              // FILE send-rate.json、REFUNDED send-refunded.json：送信頻率計數（計數類，丙組）
+    ("datadir.rs", 1),                    // MARKER：資料夾搬遷完成的標記檔（一次性標記，不是設定）
+    ("device_id.rs", 1),                  // KNOWN_FILE device_known.json：已知設備清單（狀態；與金鑰同一支，刻意維持自己的寫法）
+    ("grok_accounts.rs", 2),              // 讀寫 Grok 的 auth.json 與帳號庫副本（外部程式的憑證檔，憑證類）
+    ("home.rs", 1),                       // MARKER：舊資料夾搬遷完成的標記檔（一次性標記）
+    ("lastlogin.rs", 1),                  // last-login.json：上次登入的記憶（狀態；寫入已走 atomic::write(STATE)，讀取是直接讀）
+    ("launch/auto_resume.rs", 1),         // STATUS_FILE auto-resume.json：自動接回的狀態（狀態）
+    ("launch/mux_round.rs", 1),           // RESUME_NOTICE_FILE mux-resume-notice.json：接回通知（狀態）
+    ("launch/mux_watch.rs", 2),           // STATE_FILE／NOTICE_FILE／BLIND_FILE：mux 監看的狀態、通知、盲區紀錄（狀態）
+    ("launch/wezterm_fetch.rs", 2),       // STATE_FILE fetch-state.json：wezterm 下載進度（狀態）＋隨包的 wezterm-pins.json（唯讀）
+    ("relay.rs", 2),                      // SPOOL_FILE window-spool.json：視窗訊息暫存佇列（佇列，丙組）
 ];
 
 /// 原子寫入重複實作：目前還允許的檔與次數（`fn write_atomic`／`fn atomic_write`／`fn save_atomic`、自己拼 `.tmp"`）。
@@ -60,17 +81,55 @@ const PENDING_ATOMIC: &[(&str, usize)] = &[
     ("launch/term.rs", 1),        // atomic_write：先建資料夾再轉接到 atomic::write(STATE)，並把錯誤改成白話
     // ---- 不是「寫設定」，只是清掃或另有用途的 .tmp ----
     ("launch/mux.rs", 1),         // 清掉舊心跳檔旁的 .tmp（只刪不寫）
-    ("stt.rs", 2),                // 語音模型下載／解壓用的 .tmp 資料夾，整個資料夾換名，不是單一檔案寫入
+    ("stt.rs", 3),                // 語音模型下載／解壓用的 .tmp 資料夾，整個資料夾換名，不是單一檔案寫入；第 3 處是下載到 `.part` 再換名（大檔下載，#2232 B 新增）
+    // ---- #2232 B 新掃出的 .part／.new 暫存：都是下載或安裝可執行檔／金鑰輪換，不是寫設定 ----
+    ("agent_setup/agy_install.rs", 1),      // agy.exe.new：安裝時先放新版執行檔再換名
+    ("agent_setup/verified_install.rs", 2), // 下載到 .part 驗證後換名，與清掃殘留的 .part
+    ("android.rs", 1),                      // 下載 apk 到 .part 再換名
     // ---- 金鑰類：刻意不併，維持自己的寫法（建檔就是 0600、檔名帶 pid 與序號，不能經過預設權限）----
-    ("device_id.rs", 1),          // 設備金鑰 write_private
+    ("device_id.rs", 2),          // 設備金鑰 write_private；第 2 處是同函式的 `.new` 暫存（#2232 B 新增，同一支金鑰寫入）
+    ("node_rotate.rs", 1),        // 節點金鑰輪換的 <node>.key.new（金鑰類，同上）
     ("secret_file.rs", 2),         // 節點金鑰／login.bin 的暫存檔命名與殘留清掃
 ];
 
 /// 只有 settings/atomic.rs 可以實作原子寫入。本檔與 src_scan.rs 是 `#[cfg(test)] mod` 宣告的測試檔，已由反推排除，不用列在這裡
 const SELF_FILES: &[&str] = &["settings/atomic.rs"];
 
-const JSON_OPS: &[&str] = &["read_to_string", "fs::write", "File::create", "OpenOptions"];
-const ATOMIC_PATS: &[&str] = &["fn write_atomic", "fn atomic_write", "fn save_atomic", ".tmp\""];
+const JSON_OPS: &[&str] = &["read_to_string", "fs::write", "File::create", "OpenOptions", "File::open", "fs::read(", "from_reader", "to_writer", "fs::copy", "fs::rename"];
+const ATOMIC_PATS: &[&str] = &["fn write_atomic", "fn atomic_write", "fn save_atomic", ".tmp\"", ".part\"", ".new\"", "NamedTempFile", ".persist_noclobber(", "with_extension(\"tmp\")", ".tmp.{"];
+
+/// 找出檔內宣告的「檔名常數」：`const`／`static` 的值裡有 `.json"`（`const NAME: &str = "x.json";`、陣列也算）。
+/// 回傳 (常數名, 宣告所在行號 0 起算)。傳入的文字要已去掉註解
+fn json_consts(prod: &str) -> Vec<(String, usize)> {
+    let b = prod.as_bytes();
+    let mut out = Vec::new();
+    for kw in ["const ", "static "] {
+        for (at, _) in prod.match_indices(kw) {
+            if at > 0 && (b[at - 1].is_ascii_alphanumeric() || b[at - 1] == b'_') {
+                continue; // 例如 `xconst `
+            }
+            let rest = &prod[at + kw.len()..];
+            let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            if name.is_empty() || !rest[name.len()..].trim_start().starts_with(':') {
+                continue; // `const fn`、`static mut` 之類
+            }
+            // 值從 `=` 之後算到 `;`（型別裡的 `[&str; 2]` 也有分號，所以要先越過 `=`）
+            let value = rest.find('=').map_or("", |e| &rest[e..]);
+            let stmt = &value[..value.find(';').unwrap_or(value.len())];
+            if stmt.contains(".json\"") {
+                out.push((name, prod[..at].matches('\n').count()));
+            }
+        }
+    }
+    out
+}
+
+/// `name` 在 `line` 裡以完整識別字出現幾次
+fn word_count(line: &str, name: &str) -> usize {
+    let b = line.as_bytes();
+    let id = |c: u8| c.is_ascii_alphanumeric() || c == b'_';
+    line.match_indices(name).filter(|(at, _)| (*at == 0 || !id(b[at - 1])) && !b.get(at + name.len()).copied().is_some_and(id)).count()
+}
 
 fn src_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
@@ -90,7 +149,11 @@ fn near_ops(lines: &[&str], i: usize) -> bool {
 /// 每一處 `.json`（含訊息文字裡提到的檔名，會多算，由清單註解說明），只要同行或前後一行有讀寫檔動作就算一次（同一行兩處算兩次）。傳入的文字要已去掉註解
 fn count_json(prod: &str) -> usize {
     let lines: Vec<&str> = prod.lines().collect();
-    lines.iter().enumerate().filter(|(i, _)| near_ops(&lines, *i)).map(|(_, l)| l.matches(".json").count()).sum()
+    let direct: usize = lines.iter().enumerate().filter(|(i, _)| near_ops(&lines, *i)).map(|(_, l)| l.matches(".json").count()).sum();
+    // 檔名放在常數（`const NAME: &str = "x.json"`）時，常數在同檔被讀寫動作相鄰的行用到，也算一處（宣告那一行不算）
+    let consts = json_consts(prod);
+    let via_const: usize = lines.iter().enumerate().filter(|(i, _)| near_ops(&lines, *i)).map(|(i, l)| consts.iter().filter(|(_, decl)| *decl != i).map(|(name, _)| word_count(l, name)).sum::<usize>()).sum();
+    direct + via_const
 }
 
 /// 每一處原子寫入字樣算一次。傳入的文字要已去掉註解
@@ -181,7 +244,7 @@ mod tests {
 }
 fn after() {}
 ";
-    let p = super::src_scan::prod_source(s);
+    let p = super::src_scan::prod_source_of("守門前提的範例文字", s);
     assert!(p.contains("fn a()") && p.contains("fn after()") && !p.contains("fn b()"), "{p}");
     // 計數：同行、相鄰行算；相隔兩行以上不算；註解不算
     assert_eq!(count_json("let a = std::fs::read_to_string(dir.join(\"x.json\"));"), 1);
@@ -197,6 +260,22 @@ let s = std::fs::read_to_string(&p);"), 0);
     assert_eq!(count_json("let p = \"a.json\";
 let s = std::fs::read_to_string(p);
 let q = \"b.json\";"), 2);
+    // #2232 B：更多讀寫動作（每個動作字單獨成立）
+    for op in ["File::open(&p)", "std::fs::read(&p)", "serde_json::from_reader(f)", "serde_json::to_writer(f, &v)", "std::fs::copy(&p, &q)", "std::fs::rename(&p, &q)"] {
+        assert_eq!(count_json(&format!("let p = dir.join(\"x.json\");\nlet r = {op};")), 1, "{op} 要算讀寫動作");
+    }
+    // 檔名放常數：宣告本身不算、同檔在動作相鄰行的使用才算；沒有動作相鄰就不算；不是 .json 的常數不算
+    let c = "const MODELS_FILE: &str = \"models.json\";\nfn f() {\n    let p = dir.join(MODELS_FILE);\n    let s = std::fs::read_to_string(&p);\n}";
+    assert_eq!(count_json(c), 1);
+    assert_eq!(count_json("const F: &str = \"y.json\";\nfn f() {\n    let a = 1;\n    let b = 2;\n    let s = std::fs::read_to_string(F);\n}"), 1);
+    assert_eq!(count_json("const F: &str = \"y.json\";\nfn f() {\n    let a = F;\n    let b = 2;\n    let c = 3;\n}"), 0);
+    assert_eq!(count_json("const N: &str = \"y.txt\";\nfn f() { let s = std::fs::read_to_string(N); }"), 0);
+    assert_eq!(json_consts("pub(crate) const A: &str = \"a.json\";\nstatic B: [&str; 1] = [\"b.json\"];\nconst C: u8 = 1;\nconst fn d() {}"), vec![("A".to_string(), 0), ("B".to_string(), 1)]);
+    assert_eq!(word_count("FILE.join(MY_FILE) + FILE", "FILE"), 2);
+    // #2232 B：其他暫存／原子寫入的寫法
+    for pat in ["let t = p.with_extension(\"x.part\");", "let t = format!(\"{}.part\", p);", "let f = tempfile::NamedTempFile::new_in(d)?;", "f.persist_noclobber(&p)?;", "let t = p.with_extension(\"tmp\");", "let t = format!(\"{}.new\", p);", "let t = format!(\"{}.tmp.{}\", p, n);"] {
+        assert!(count_atomic(pat) >= 1, "{pat} 要算原子寫入字樣");
+    }
     assert_eq!(count_atomic("fn write_atomic(p: &Path) {}"), 1);
     assert_eq!(count_atomic("let t = format!(\"{}.tmp\", p); let u = format!(\"{}.tmp\", q);"), 2);
     // 清單比對：變多、變少都要紅
