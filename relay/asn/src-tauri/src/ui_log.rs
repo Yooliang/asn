@@ -199,6 +199,14 @@ pub fn log_exit(dir: &Path, reason: &str) {
     let _ = append(dir, &[exit_line(crate::heartbeat::now_ms() as i64, reason)]);
 }
 
+/// 寫一行一般記錄；資料夾是空的（截圖模式）不寫
+pub fn log_info(dir: &Path, text: &str) {
+    if dir.as_os_str().is_empty() {
+        return;
+    }
+    let _ = append(dir, &[format!("{} info [ASN] {text}", crate::auth_notice::iso_secs(crate::heartbeat::now_ms() as i64))]);
+}
+
 /// 因更新憑證被拒絕而清掉登入時寫一行（detail 只有狀態碼與錯誤代碼）；資料夾是空的（截圖模式）不寫
 pub fn signout_logger(dir: PathBuf) -> Box<dyn Fn(&str) + Send + Sync> {
     Box::new(move |detail| {
@@ -279,6 +287,34 @@ pub fn wait_gone(pid: u32, timeout: std::time::Duration, alive: impl Fn(u32) -> 
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     true
+}
+
+/// 舊程序 10 秒還沒結束時，新程序再多等的時間（共 2 分鐘）。
+/// 舊程序已經開好新程序、正在收尾（回報離線、清心跳）準備結束，等不到只會是它卡住；
+/// 這時新程序若直接往下走，會因為舊心跳還新鮮判成「同名已在跑」自己退出，之後舊程序一結束就兩邊都沒了（#2204）
+pub const AFTER_PID_EXTRA_WAIT: std::time::Duration = std::time::Duration::from_secs(110);
+
+/// 等舊程序結束的結果
+#[derive(Debug, PartialEq, Eq)]
+pub enum AfterPid {
+    /// 舊程序已經不在（或本來就不是 asn）：可以往下走
+    Gone,
+    /// 等到上限舊程序還活著：新程序往下走時會被同名檢查擋下（舊的還在跑，所以不會兩邊都沒、也不會兩個同時跑）
+    StillAlive,
+}
+
+/// 新程序等舊程序結束：先等 `first`，等不到就寫 log 再多等 `extra`。不管結果都不讓新程序和舊程序同時往下走：
+/// 還活著時由同名檢查（舊心跳新鮮）擋下新程序，舊的那個仍在跑
+pub fn settle_after_pid(pid: u32, first: std::time::Duration, extra: std::time::Duration, alive: impl Fn(u32) -> bool, is_asn: impl Fn(u32) -> Option<bool>, mut log: impl FnMut(&str)) -> AfterPid {
+    if wait_gone(pid, first, &alive, &is_asn) {
+        return AfterPid::Gone;
+    }
+    log(&format!("重新啟動：舊程序（pid {pid}）{} 秒後還沒結束，再多等 {} 秒", first.as_secs(), extra.as_secs()));
+    if wait_gone(pid, extra, &alive, &is_asn) {
+        return AfterPid::Gone;
+    }
+    log(&format!("重新啟動：舊程序（pid {pid}）一共等了 {} 秒還沒結束，這個新的不接手（舊的仍在跑）", (first + extra).as_secs()));
+    AfterPid::StillAlive
 }
 
 /// 開一個新的自己（參數照舊，再帶 `--after-pid <本程序>`），成功回 Ok；呼叫端接著結束本程式。
@@ -374,7 +410,8 @@ mod tests {
             assert!(f.contains(k), "缺 {k}");
         }
         let acct = include_str!("account.rs");
-        assert!(!acct.contains("handle.restart()") && acct.contains("crate::ui_log::relaunch_self()"), "account.rs 的重開要走 relaunch_self");
+        let re = include_str!("relaunch.rs");
+        assert!(!acct.contains("handle.restart()") && re.contains("crate::ui_log::relaunch_self,"), "重開要走 relaunch_self（由 relaunch.rs 統一呼叫）");
     }
 
     #[test]
@@ -393,6 +430,46 @@ mod tests {
         let a: Vec<std::ffi::OsString> = ["--background", "--after-pid", "11", "asn://invite/x"].iter().map(|s| s.into()).collect();
         let out: Vec<String> = relaunch_args(&a, 42).into_iter().map(|s| s.into_string().unwrap()).collect();
         assert_eq!(out, ["--background", "asn://invite/x", "--after-pid", "42"]);
+    }
+
+    #[test]
+    fn _2204_舊程序超過第一段等待才結束_新程序繼續等而不是放棄() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        // 舊程序活到 300 毫秒；第一段只等 50 毫秒、再多等 3 秒
+        let alive = move |_| t0.elapsed() < Duration::from_millis(300);
+        let mut logs = vec![];
+        let r = settle_after_pid(7, Duration::from_millis(50), Duration::from_secs(3), alive, |_| Some(true), |l| logs.push(l.to_string()));
+        assert_eq!(r, AfterPid::Gone, "多等一段就等到了，不該直接當成等不到");
+        assert!(logs.len() == 1 && logs[0].contains("再多等"), "第一段等不到要寫 log：{logs:?}");
+    }
+
+    #[test]
+    fn _2204_舊程序一直不結束_回_still_alive_並寫_log_不當成已結束() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let mut logs = vec![];
+        let r = settle_after_pid(7, Duration::from_millis(30), Duration::from_millis(60), |_| true, |_| Some(true), |l| logs.push(l.to_string()));
+        assert_eq!(r, AfterPid::StillAlive);
+        assert!(t0.elapsed() >= Duration::from_millis(90), "兩段都要等滿");
+        assert_eq!(logs.len(), 2, "{logs:?}");
+    }
+
+    #[test]
+    fn _2204_舊程序本來就不在或不是_asn_馬上往下走() {
+        use std::time::Duration;
+        let mut logs = vec![];
+        let r = settle_after_pid(7, Duration::from_secs(30), Duration::from_secs(30), |_| true, |_| Some(false), |l| logs.push(l.to_string()));
+        assert_eq!(r, AfterPid::Gone);
+        assert!(logs.is_empty());
+    }
+
+    #[test]
+    fn _2204_等待上限_第一段_10_秒維持不變_合計_2_分鐘() {
+        assert_eq!(AFTER_PID_WAIT, std::time::Duration::from_secs(10));
+        assert_eq!((AFTER_PID_WAIT + AFTER_PID_EXTRA_WAIT).as_secs(), 120);
+        let lib = include_str!("lib.rs");
+        assert!(lib.contains("ui_log::settle_after_pid(old, ui_log::AFTER_PID_WAIT, ui_log::AFTER_PID_EXTRA_WAIT"), "lib.rs 要走 settle_after_pid，不能把 wait_gone 的結果丟掉");
     }
 
     #[test]
@@ -425,7 +502,7 @@ mod tests {
     #[test]
     fn 啟動時同名檢查之前先等_after_pid() {
         let src = include_str!("lib.rs");
-        let wait = src.find("ui_log::wait_gone(").expect("run() 要等 --after-pid");
+        let wait = src.find("ui_log::settle_after_pid(").expect("run() 要等 --after-pid");
         let check = src.find("heartbeat::other_instance(&work_dir").unwrap();
         assert!(wait < check, "要在同名檢查之前等");
     }
