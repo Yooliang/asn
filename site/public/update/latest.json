@@ -1,15 +1,11 @@
 {
-  "version": "0.2.87",
-  "notes": "- 新功能：重灌電腦或換新手機後，設備頁會問「是不是取代舊的那台」；確認後新設備沿用舊設備的名稱，舊設備移到「已移除」\n- 改善：重灌後出現新設備時，擁有者會收到一則通知\n- 改善：個人設定、引導進度和對話快取改用統一的存檔方式，新版程式加的設定不會被舊版蓋掉",
-  "pub_date": "2026-11-24T00:17:07.274Z",
+  "version": "0.2.88",
+  "notes": "- 改善：電腦版工作管理員改成樹狀顯示，依「ASN ＞ 終端服務 ＞ 代理」分層，看得出每個代理跑在哪個終端服務底下\n- 修正：重新啟動 ASN 時，不會再整個消失或重複回信\n- 修正：遠端打字重新發起時會正確重設，第一個畫面也不會遺失",
+  "pub_date": "2026-11-24T02:14:09.914Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZQZ2FDOGk5NmRNcFdVWXBiQ0Q3bW9FdloyV0prWHNKcUQ2S2tNeHU5MFJaaUxsdTN4bC83OUxBYVFDQTNWS2k5ZDhML3VOdytVdVY2ckcwZ1VBSkFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDc5NDI2CWZpbGU6QVNOXzAuMi44N194NjQtc2V0dXAuZXhlClJxOVR1VUhEVE85U2gvdSt3a3pyQlh3T1NOZ2tSNElvSVFEbE1FemZvZUtIZHNGbUl4OVlFZkwzU2J2THVHbnN0cHlaYWtVajVLRVNXY3gyTVdseEJnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.87_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdDSjU3WnlubENTNHozVnZKR1BBTjRBNVhGZ2V2djB4Y1haSWhIM2FaL2YzckEyZjFqMHMyaUpFcGNnYmNQaDZrQTRidjNRcFE2NUkxTGswTUNuRmdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDgwMDAzCWZpbGU6QVNOXzAuMi44N19hbWQ2NC5BcHBJbWFnZQp3N3c2anhNQjBJL3N5bk9ScU1OZ3VtQU81ek4rbzZyQmgweWVwVzVQdFExWDMyQjlqUlFoTXcxNno5T2hZcU1TbnFJWUhRS1c2U0JXZ1NIWGZzd2tBQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.87_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9uUHRWMGxRTDlYcEp0Qm4zOGd5bFFpYTdrSXZHVjk2MEsyNERZM1o4b2VSVURzNWpVWllJeXVRWk5lRklTV212TTBkNUh1Y2FnbXBkUmVKREFJNmc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDg2NDQ5CWZpbGU6QVNOXzAuMi44OF94NjQtc2V0dXAuZXhlCjRsaHVhS3lTWm8wTk1IR1NKa2U5TFVnc2VjTE1lenpYM1lPdkNyQ2pSeE10TmcvQTg5SmhSajh3SHhWYVVTVDlGWlBkR28zSkVaQjBqcCtqMG12WkJ3PT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.88_x64-setup.exe"
     }
   }
 }
