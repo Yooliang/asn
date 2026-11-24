@@ -16,6 +16,7 @@ export const TREE_TEXT = Object.freeze({
   restarting: '正在重啟…',
   disconnected: '斷線中',
   restartFail: '重啟沒有成功，請稍後再試。',
+  restartAsnTimeout: '重啟沒有完成，ASN 仍在執行。',
 })
 
 /** 重啟確認框的字。prefix 是別台設備才加的主詞（例如「工作機」的），這台自己不給 */
@@ -59,7 +60,9 @@ export function treeView(rows, mapRow, ui = {}) {
   const hit = key => restarting === key || (restarting === 'mux:*' && key.startsWith('mux:'))
   const allDown = restarting === ROOT_KEY
   const down = a => ({ ...a, status: TREE_TEXT.disconnected, canStop: false, why: '', canHandover: false, canView: false, canAdopt: false })
-  const restartOf = (key, text) => ({ target: key, ask: ask === key ? text : '', busy: hit(key) || (key === ROOT_KEY && allDown), disabled: restarting !== null, error: error?.key === key ? error.text : '' })
+  // 錯誤掛在一定存在的那一列：有 ASN 本體就掛在 ASN 列（終端服務那一列重啟後可能換了編號、下一輪就消失）；沒有 ASN 列才掛在原本那個節點
+  const errorFor = key => (error ? (t.asn ? (key === ROOT_KEY ? error.text : '') : (error.key === key ? error.text : '')) : '')
+  const restartOf = (key, text) => ({ target: key, ask: ask === key ? text : '', busy: hit(key) || (key === ROOT_KEY && allDown), disabled: restarting !== null, error: errorFor(key) })
   const root = t.asn ? { key: ROOT_KEY, node: mapRow(t.asn), statusText: TREE_TEXT.running, restart: restartOf(ROOT_KEY, restartAsnText(prefix)) } : null
   const mapAgent = (a, isDown) => (isDown ? down(mapRow(a)) : mapRow(a))
   const groups = t.groups.map(g => {
@@ -68,7 +71,9 @@ export function treeView(rows, mapRow, ui = {}) {
     return { key, node: mapRow(g.mux), summary: TREE_TEXT.agents(g.agents.length), agents: g.agents.map(a => mapAgent(a, isDown)), restart: restartOf(key, restartMuxText(g.agents.length, prefix)) }
   })
   // 終端服務重啟的當下，舊服務已停、清單裡找不到它：用按下時記的那一組撐著，底下標「斷線中」，直到新的服務回來
-  if (frozen && restarting === frozen.key && !groups.some(g => g.key === frozen.key)) {
+  // 新服務起來後接回要幾十秒（restarting 為 'mux:*'）：新服務的那一組還沒出現時同樣撐著；出現了就用新的，底下的代理標「斷線中」直到接回
+  const waitingResume = restarting === 'mux:*' && groups.length === 0
+  if (frozen && (restarting === frozen.key || waitingResume) && !groups.some(g => g.key === frozen.key)) {
     groups.push({ ...frozen, agents: frozen.agents.map(down), restart: restartOf(frozen.key, '') })
   }
   const direct = t.direct.map(a => mapAgent(a, allDown))

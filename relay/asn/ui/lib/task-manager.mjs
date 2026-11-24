@@ -15,6 +15,11 @@ import { dupCloseText } from './dup-windows.mjs'
 import { treeView, ROOT_KEY, TREE_TEXT } from './task-tree.mjs'
 
 export const REFRESH_MS = 5000
+// 重啟之後最多等多久（登記在 docs/設定值清單.md 的 tm-restart-confirm 那一列）：
+// 終端服務：新服務起好後接回要幾十秒，底下代理一直標「斷線中」，接回完成或超過這個時間就放掉；
+// ASN：按下後本頁應該隨後斷線；超過這個時間頁面還在、ASN 沒回來，就回報「沒有完成」並恢復按鈕
+export const RESUME_WAIT_MS = 90_000
+export const ASN_RESTART_WAIT_MS = 60_000
 export const DASH = '—'
 
 export const TEXT = {
@@ -276,7 +281,7 @@ function confirmBody(r, rows, now) {
 // ---------- 控制器：頁面開著時才每 5 秒更新 ----------
 
 // restartAsk：正在原位確認重啟的節點鍵；restart：正在重啟的節點鍵；restartFrozen：重啟終端服務當下記的那一組（舊服務停了、清單找不到它時撐著畫面）；restartError：{ key, text }
-export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '', restartAsk: null, restart: null, restartFrozen: null, restartError: null })
+export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '', restartAsk: null, restart: null, restartFrozen: null, restartError: null, restartUntil: null })
 
 // 控制器的 view() 另外帶 tree（ASN ＞ 終端服務 ＞ 代理，見 task-tree.mjs）；rows 還是平的一份，找列、停止與測試都用它
 
@@ -304,6 +309,7 @@ export function createTaskManager(deps) {
     } finally {
       state.loading = false
       inflight = false
+      settleRestart()
     }
   }
 
@@ -397,6 +403,7 @@ export function createTaskManager(deps) {
     const isAsn = key === ROOT_KEY
     state.restartAsk = null
     state.restartError = null
+    state.restartUntil = null
     state.restart = key
     state.restartFrozen = isAsn ? null : liveTree().groups.find(g => g.key === key) ?? null
     try {
@@ -408,14 +415,42 @@ export function createTaskManager(deps) {
       state.restartError = { key, text: typeof e === 'string' && e ? e : TREE_TEXT.restartFail }
       state.restart = null
       state.restartFrozen = null
+      state.restartUntil = null
+      // 失敗後馬上重讀清單：服務可能已經停了、名單變了；錯誤掛在一定存在的 ASN 列（見 task-tree 的 errorFor）
+      await refresh()
       return
     }
-    // 重啟 ASN 成功：本頁隨後會斷線，ASN 回來後重新載入，這裡維持「正在重啟…」
-    if (isAsn) return
+    // 重啟 ASN 成功：本頁隨後會斷線，ASN 回來後重新載入，這裡維持「正在重啟…」；
+    // 逾時（頁面還在、ASN 沒回來）由 settleRestart 回報並恢復按鈕
+    if (isAsn) { state.restartUntil = now() + ASN_RESTART_WAIT_MS; return }
+    // 終端服務：新的已起來，但接回要幾十秒。底下代理維持「斷線中」（'mux:*'＝所有終端服務），直到名單回齊或逾時
+    state.restart = 'mux:*'
+    state.restartUntil = now() + RESUME_WAIT_MS
     await refresh()
+    settleRestart()
+    setTimeout(() => { void refresh() }, 2500)
+  }
+
+  /** 重啟的收尾判斷（每次重讀清單後呼叫）：ASN 逾時＝回報沒完成並恢復；終端服務＝代理回齊或逾時就放掉「斷線中」 */
+  function settleRestart() {
+    if (!state.restart || state.restartUntil === null) return
+    const t = now()
+    const expired = t >= state.restartUntil
+    if (state.restart === ROOT_KEY) {
+      if (!expired) return
+      log('[工作管理員] 重啟 ASN：逾時，頁面還在，ASN 沒有回來重新載入')
+      state.restartError = { key: ROOT_KEY, text: TREE_TEXT.restartAsnTimeout }
+    } else {
+      const rows = rowsNow()
+      const have = new Set(rows.map(r => viewRow(r, t, ctx()).name))
+      const want = (state.restartFrozen?.agents ?? []).filter(a => a.kind !== 'process').map(a => a.name)
+      const back = rows.some(r => r.kind === 'mux') && want.every(n => have.has(n))
+      if (!back && !expired) return
+      if (!back) log('[工作管理員] 重啟終端服務：逾時，部分代理還沒接回')
+    }
     state.restart = null
     state.restartFrozen = null
-    setTimeout(() => { void refresh() }, 2500)
+    state.restartUntil = null
   }
 
   /** 「看畫面」：打開這位夥伴的對話頁（名單上那一筆「等你在那台電腦按確認」），終端在那裡看；名單上還沒有就請稍後再試 */

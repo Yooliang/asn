@@ -4,7 +4,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { treeView, restartAsnText, restartMuxText, TREE_TEXT, ROOT_KEY, muxKey } from '../ui/lib/task-tree.mjs'
-import { createTaskManager, initialState, mergeRows, viewRow } from '../ui/lib/task-manager.mjs'
+import { createTaskManager, initialState, mergeRows, viewRow, RESUME_WAIT_MS, ASN_RESTART_WAIT_MS } from '../ui/lib/task-manager.mjs'
 import { TaskTree } from '../ui/lib/task-tree-view.mjs'
 import { SETTING_OPS } from '../ui/lib/settings-panel.mjs'
 import { taskmgrSnapshot } from '../scripts/smoke-lib.mjs'
@@ -20,12 +20,13 @@ const MUX = muxKey(6000)
 
 function mk({ snapshot = taskmgrSnapshot(NOW), api = {}, prefix, logs = [] } = {}) {
   const snap = { current: snapshot }
+  const clock = { t: NOW }
   const tm = createTaskManager({
     api: { taskManagerList: async () => snap.current, taskManagerRestartAsn: async () => {}, taskManagerRestartMux: async () => {}, ...api },
-    getFriends: () => [], getSelfNode: () => SELF, getOpsCtx: () => OPS, now: () => NOW,
+    getFriends: () => [], getSelfNode: () => SELF, getOpsCtx: () => OPS, now: () => clock.t,
     setTimer: () => 1, clearTimer: () => {}, state: initialState(), confirmPrefix: prefix, log: m => logs.push(m),
   })
-  return { tm, snap, logs }
+  return { tm, snap, logs, clock }
 }
 const opened = async o => { o.tm.open(); await tick(); return o }
 
@@ -71,8 +72,74 @@ test('#1860F-3 重啟終端服務中：那一列顯示「正在重啟…」、�
   assert.ok(g[0].agents.length === 3 && g[0].agents.every(a => a.status === '斷線中'))
   release()
   await p
-  assert.equal(tm.view().tree.groups.length, 0, '重啟完成後以新的清單為準，自動恢復')
+  // 新服務起好了，但接回要幾十秒：清單裡還沒有它與代理時，畫面繼續標「斷線中」，不能馬上消失（審查 #3 建議）
+  assert.equal(tm.state.restart, 'mux:*', '新服務起好後，等接回完成或逾時才放掉')
+  const waiting = tm.view().tree.groups
+  assert.equal(waiting.length, 1)
+  assert.ok(waiting[0].restart.busy && waiting[0].agents.length === 3 && waiting[0].agents.every(a => a.status === '斷線中'))
+  // 接回完成：三位代理都回到清單
+  snap.current = taskmgrSnapshot(NOW)
+  await tm.refresh()
+  assert.equal(tm.state.restart, null, '代理回齊就恢復')
+  assert.ok(tm.view().tree.groups[0].agents.every(a => a.status !== '斷線中'))
+})
+
+test('#1860F-3 接回只回來一部分：繼續標斷線中；超過 90 秒放掉，不永遠卡住', async () => {
+  const logs = []
+  let release
+  const o = await opened(mk({ logs, api: { taskManagerRestartMux: () => new Promise(r => { release = r }) } }))
+  const { tm, snap, clock } = o
+  tm.askRestart(MUX)
+  const p = tm.confirmRestart()
+  // 新服務起來時，清單上只回來一位代理
+  const full = taskmgrSnapshot(NOW)
+  const agents = full.rows.filter(r => r.kind !== 'mux' && r.mux_pid === 6000)
+  snap.current = { ...full, rows: full.rows.filter(r => r.kind === 'asn' || r.kind === 'mux' || r === agents[0]) }
+  release()
+  await p
+  assert.equal(tm.state.restart, 'mux:*')
+  assert.equal(RESUME_WAIT_MS, 90_000)
+  clock.t = NOW + RESUME_WAIT_MS - 1000
+  await tm.refresh()
+  assert.equal(tm.state.restart, 'mux:*', '還沒逾時、還有人沒回來，繼續標斷線中')
+  clock.t = NOW + RESUME_WAIT_MS
+  await tm.refresh()
+  assert.equal(tm.state.restart, null, '逾時就放掉')
+  assert.ok(logs.some(l => l.includes('逾時')), '原因進 log')
+})
+
+test('#1860F-3 重啟 ASN 逾時：頁面還在、ASN 沒回來，回報白話字並恢復按鈕', async () => {
+  const logs = []
+  const o = await opened(mk({ logs }))
+  const { tm, clock } = o
+  tm.askRestart(ROOT_KEY)
+  await tm.confirmRestart()
+  assert.equal(tm.state.restart, ROOT_KEY)
+  assert.equal(ASN_RESTART_WAIT_MS, 60_000)
+  clock.t = NOW + ASN_RESTART_WAIT_MS - 1000
+  await tm.refresh()
+  assert.equal(tm.state.restart, ROOT_KEY, '還沒到時間，維持正在重啟')
+  clock.t = NOW + ASN_RESTART_WAIT_MS
+  await tm.refresh()
+  const r = tm.view().tree.root.restart
   assert.equal(tm.state.restart, null)
+  assert.equal(r.busy, false, '恢復按鈕')
+  assert.equal(r.disabled, false)
+  assert.equal(r.error, '重啟沒有完成，ASN 仍在執行。')
+  assert.ok(logs.some(l => l.includes('逾時')))
+})
+
+test('#1860F-3 失敗後馬上重讀清單；錯誤掛在 ASN 列（終端服務那一列重啟後可能換了編號就不見）', async () => {
+  let lists = 0
+  const o = await opened(mk({ api: { taskManagerList: async () => { lists++; return o.snap.current }, taskManagerRestartMux: async () => { throw '重啟沒有成功，請稍後再試。' } } }))
+  const before = lists
+  o.tm.askRestart(MUX); await o.tm.confirmRestart()
+  assert.ok(lists > before, '失敗後要重讀清單')
+  // 終端服務那一列消失（換了編號）後，錯誤還看得到
+  o.snap.current = { ...o.snap.current, rows: o.snap.current.rows.filter(r => r.kind !== 'mux' && r.mux_pid !== 6000) }
+  await o.tm.refresh()
+  assert.equal(o.tm.view().tree.groups.length, 0)
+  assert.equal(o.tm.view().tree.root.restart.error, '重啟沒有成功，請稍後再試。')
 })
 
 test('#1860F-3 重啟 ASN：按下後先顯示「正在重啟…」，整棵樹斷線中', async () => {
@@ -100,7 +167,8 @@ test('#1860F-3 失敗：畫面白話、原文進 log、可再試；電腦端回�
   assert.equal(r.busy, false, '失敗後恢復按鈕')
   assert.equal(o.tm.state.restart, null)
   o.tm.askRestart(MUX); await o.tm.confirmRestart()
-  assert.equal(o.tm.view().tree.groups[0].restart.error, '這台沒有終端服務。')
+  assert.equal(o.tm.view().tree.root.restart.error, '這台沒有終端服務。', '錯誤掛在一定存在的 ASN 列')
+  assert.equal(o.tm.view().tree.groups[0].restart.error, '', '不重複掛在終端服務那一列')
   assert.ok(o.tm.view().tree.groups[0].agents.every(a => a.status !== '斷線中'), '失敗後代理不再標斷線')
 })
 
