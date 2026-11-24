@@ -8,9 +8,11 @@ import { INPUT_TEXT } from '../ui/lib/term-remote-input.mjs'
 const read = p => fs.readFileSync(new URL(`../${p}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const pane = read('ui/lib/chatpane.mjs'), input = read('ui/lib/term-remote-input.mjs'), css = read('ui/style.css')
 
-test('提示字：還沒開始打字寫「送出後會連到那台電腦」（不再說要權限，0.2.33）；沒給名字用通用說法；已在打字的提示不變', () => {
-  assert.equal(composeRemoteHint('小乙'), '送出後會連到那台電腦，打進 小乙 的終端')
-  assert.match(composeRemoteHint(''), /^送出後會連到那台電腦，打進 這位夥伴 /)
+test('提示字：還沒開始打字寫「看…，送出即打字」並帶上哪台哪位（不再說要權限，0.2.33；原藍條併進來，#1865）；沒給名字用通用說法；已在打字的提示不變', () => {
+  assert.equal(composeRemoteHint('小乙', '辦公室'), '看辦公室「小乙」，送出即打字')
+  assert.equal(composeRemoteHint('小乙'), '看「小乙」，送出即打字')
+  assert.match(composeRemoteHint(''), /^看「這位夥伴」/)
+  assert.ok(composeRemoteHint('小乙', '辦公室').length <= 16, '提示字要短，360 寬的手機看得完整')
   assert.equal(composeTermHint('小乙'), '輸入的字會直接打進 小乙 的終端')
 })
 

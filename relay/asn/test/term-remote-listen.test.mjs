@@ -117,9 +117,9 @@ test('電腦版（barInline false）：狀態事件跟著等待→正在看走�
   const v = mount(f.api, { barInline: false }, (name, payload) => { if (name === 'status') seen.push(payload) })
   assert.equal(seen[0]?.level, 'ask', '一開始就是等待')
   await watching(f, v)
-  const last = seen.at(-1)
-  assert.equal(last.level, 'info')
-  assert.match(last.text, /^正在看「家用機」上「小乙」的畫面/)
+  // #1865：正在看（可以送出打字）不再佔狀態列；看的是哪台哪位寫在輸入框提示字
+  assert.equal(seen.at(-1), null, '正在看時狀態列沒有東西（沒有藍條）')
+  assert.ok(!seen.some(s => s && /只能看|正在看/.test(s.text)), '任何時候都不出現「只能看」「正在看」')
   v.unmount()
   assert.equal(seen.at(-1), null, '卸載後發 null')
 })

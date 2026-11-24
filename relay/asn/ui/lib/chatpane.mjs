@@ -250,7 +250,7 @@ export const ChatPane = {
     const tvEl = ref(null)
     const localCompose = computed(() => termShown.value && Boolean(props.termViewApi?.input) && !displayOnly.value)
     const termCompose = computed(() => remoteCompose.value || localCompose.value)
-    const composeHint = computed(() => (composeLocked.value ? displayOnlyHint(props.friend) : termCompose.value ? (remoteCompose.value && inputPhase.value !== 'typing' ? composeRemoteHint(termViewName.value) : composeTermHint(termViewName.value)) : composePlaceholder(props.winMode)))
+    const composeHint = computed(() => (composeLocked.value ? displayOnlyHint(props.friend) : termCompose.value ? (remoteCompose.value && inputPhase.value !== 'typing' ? composeRemoteHint(termViewName.value, props.friend?.device || props.friend?.machine || props.friend?.nodeName || '') : composeTermHint(termViewName.value)) : composePlaceholder(props.winMode)))
     const composeTitle = computed(() => (composeLocked.value ? displayOnlyHint(props.friend) : termCompose.value ? '' : composeHintTitle(props.winMode)))
     const sendLabel = computed(() => (termCompose.value ? SEND_LABEL_TERM : SEND_LABEL))
     // 終端模式（#1642）：輸入列只留輸入框、送出和麥克風，「＋」與表情、震動、傳照片、傳檔案、截圖都不顯示；切進終端時把已展開的選單收起來，切回對話照舊

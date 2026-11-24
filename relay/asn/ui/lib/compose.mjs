@@ -18,6 +18,7 @@ export function composeHintTitle(winMode) {
 export const SEND_LABEL = '傳送'
 export const SEND_LABEL_TERM = '送出'
 /** 看別台電腦的終端、還沒開始打字：送出才會連到那台電腦（#1647；0.2.33 起那台不再跳確認框）；已經在打字就用下面那句 */
-export const composeRemoteHint = name => `送出後會連到那台電腦，打進 ${name || '這位夥伴'} 的終端`
+// 原本藍色狀態列上的「看的是哪台、哪位」併進這句（#1865）；寫短一點，360 寬的手機也看得完整
+export const composeRemoteHint = (name, machine = '') => `看${machine || ''}「${name || '這位夥伴'}」，送出即打字`
 /** 終端畫面時輸入框的提示字 */
 export const composeTermHint = name => `輸入的字會直接打進 ${name || '這位夥伴'} 的終端`

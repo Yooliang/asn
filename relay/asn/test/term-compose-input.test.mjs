@@ -19,7 +19,7 @@ test('按鈕字跟著模式：對話寫「傳送」、終端寫「送出」；�
   assert.equal(composeTermHint('小乙'), '輸入的字會直接打進 小乙 的終端')
   assert.equal(composeTermHint(''), '輸入的字會直接打進 這位夥伴 的終端')
   assert.match(pane, /type="submit"[^>]*>\{\{ sendLabel \}\}<\/button>/, '送出鈕的字看 sendLabel')
-  assert.match(pane, /termCompose\.value \? \(remoteCompose\.value && inputPhase\.value !== 'typing' \? composeRemoteHint\(termViewName\.value\) : composeTermHint\(termViewName\.value\)\)/, '終端畫面時換提示字')
+  assert.match(pane, /termCompose\.value \? \(remoteCompose\.value && inputPhase\.value !== 'typing' \? composeRemoteHint\(termViewName\.value, props\.friend\?\.device \|\| props\.friend\?\.machine \|\| props\.friend\?\.nodeName \|\| ''\) : composeTermHint\(termViewName\.value\)\)/, '終端畫面時換提示字')
 })
 
 test('終端上方的「打字」按鈕拿掉了', () => {

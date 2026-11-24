@@ -50,7 +50,7 @@ test('文字：按下去直接開始，不再說會確認本人（11-08 拿掉 H
     for (const bad of ['確認是本人', 'Hello', 'PIN']) assert.ok(!src.includes(bad), `${f} 不能再寫「${bad}」`)
   }
   assert.match(read('../ui/lib/term-remote.mjs'), /v-if="barInline && \(phase === 'starting' \|\| phase === 'waiting'\)">\{\{ TEXT\.waiting \}\}/, '發起到收到第一幅之間只說「等那台電腦回應」')
-  assert.match(REMOTE_TEXT.watching('家用機', '小乙'), /只能看/)
+  assert.equal(REMOTE_TEXT.watching, undefined, '#1865：沒有「正在看…（只能看）」那一條藍色狀態文字')
   assert.equal(startError(new Error('已取消，沒有完成')), '已取消，沒有完成')
   assert.equal(startError(''), REMOTE_TEXT.failed)
 })
@@ -150,6 +150,10 @@ test('電腦版狀態列：等待、正在看、打字（醒目）、快到期�
   const soon = remoteBarState({ phase: 'watching', soon: true, note: '', warn: '', main, danger: false })
   assert.equal(soon.level, 'warn')
   assert.ok(soon.text.startsWith('正在看 ') && soon.text.includes(REMOTE_TEXT.soon))
+  // #1865：只看畫面時沒有狀態文字（active 空）→ 沒有藍條；快到期的提醒仍要出現
+  const none = { waiting: '等', active: '' }
+  assert.equal(remoteBarState({ phase: 'watching', soon: false, note: '', warn: '', main: none, danger: false }), null)
+  assert.deepEqual(remoteBarState({ phase: 'watching', soon: true, note: '', warn: '', main: none, danger: false }), { text: REMOTE_TEXT.soon, level: 'warn' })
   assert.equal(remoteBarState({ phase: 'typing', soon: true, note: '', warn: '', main, danger: true }).level, 'danger')
   assert.deepEqual(remoteBarState({ phase: 'ended', soon: true, note: '被拒絕了', warn: '', main, danger: false }), { text: '被拒絕了', level: 'warn' })
   assert.equal(remoteBarState({ phase: 'ended', soon: false, note: '', warn: '', main, danger: false }), null)

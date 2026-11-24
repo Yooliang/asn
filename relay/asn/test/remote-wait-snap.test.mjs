@@ -82,7 +82,7 @@ test('守門：ui 裡不能再出現「要打字權限」「可能要按允許�
 test('新說法：等待、輸入框提示、INPUT_TIP 都是白話；「那台需要先設免問」的提醒已移除', () => {
   assert.equal(INPUT_TEXT.waiting, '正在連到那台電腦……')
   assert.equal(INPUT_TEXT.waitReply, '正在連到那台電腦')
-  assert.equal(composeRemoteHint('小乙'), '送出後會連到那台電腦，打進 小乙 的終端')
+  assert.equal(composeRemoteHint('小乙', '辦公室'), '看辦公室「小乙」，送出即打字')
   assert.match(INPUT_TIP, /允許遠端在這台打字/)
   assert.equal(CK.AWAITING_CONSENT_HINT, undefined)
   const pane = read('ui/lib/chatpane.mjs')

@@ -111,9 +111,10 @@ export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb
   const conv = () => document.querySelector('.m-chat .conv');
   if (!vis(conv())) return { ok: false, why: '一開始應該先顯示訊息列表' };
   sw.click();
-  let bar = null;
-  for (let i = 0; i < 80 && !(bar && bar.textContent.includes('正在看')); i++) { await sleep(100); bar = document.querySelector('.m-chat .typing') }   // 0.2.17：提示在最下面的狀態列
-  if (!bar || !bar.textContent.includes('正在看')) return { ok: false, why: '點「終端」後沒出現「正在看」：' + (document.querySelector('.term-remote')?.textContent || '').slice(0, 80) };
+  // #1865：只看畫面時沒有狀態列的字，看到終端畫面就算開始看
+  let shown = '';
+  for (let i = 0; i < 80 && !shown.includes('測試通過'); i++) { await sleep(100); shown = document.querySelector('.m-chat .term-view-screen .xterm-rows')?.textContent || '' }
+  if (!shown.includes('測試通過')) return { ok: false, why: '點「終端」後沒看到終端畫面：' + (document.querySelector('.term-remote')?.textContent || '').slice(0, 80) };
   let rows = '';
   for (let i = 0; i < 60 && !rows.includes('測試通過'); i++) { await sleep(100); rows = document.querySelector('.term-view-screen .xterm-rows')?.textContent || '' }
   if (!rows.includes('測試通過')) return { ok: false, why: '終端畫面沒有出現假畫面的字：' + rows.slice(0, 60) };
@@ -130,6 +131,10 @@ export const mtermviewProbeSource = ({ big, gate, stayChat, cursor, composer, kb
   const sh = document.querySelector('.m-chat .term-view-screen').getBoundingClientRect().height;
   if (!(sh > 0)) return { ok: false, why: '終端畫面高度是 0' };
   if (document.querySelector('.m-chat .term-remote .term-remote-bar')) return { ok: false, why: '終端上方不該再有提示條（已移到最下面的狀態列）' };
+  if (document.querySelector('.m-chat .typing.typing-info')) return { ok: false, why: '只看畫面時不該有藍色狀態列（#1865）' };
+  if (document.querySelector('.m-chat').textContent.includes('只能看')) return { ok: false, why: '畫面上還有「只能看」（#1865）' };
+  const hintBox = document.querySelector('.m-chat .composer textarea');
+  if (!hintBox || !hintBox.placeholder.includes('送出即打字')) return { ok: false, why: '輸入框提示字沒寫看的是哪台哪位、送出即連過去打字：' + (hintBox ? hintBox.placeholder : '找不到輸入框') };
   if (!vis(document.querySelector('.m-chat .composer'))) return { ok: false, why: '看終端時輸入框應該還在（擁有者 11-10）' };
   if (!inView()) return { ok: false, why: '看終端時切換圖示跑出畫面' };
   // 切回「對話」：訊息列表回來、終端收掉、有通知那台停止；再切回「終端」讓截圖停在終端畫面
