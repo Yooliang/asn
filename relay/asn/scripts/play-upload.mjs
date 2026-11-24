@@ -58,6 +58,7 @@ export const trackError = (track, status) => {
 const DEGRADE_WHY = {
   permission: ['服務帳戶沒有封閉測試的發布權限', 'Play Console 的「使用者和權限」，替服務帳戶打開「發布到測試軌道」'],
   notfound: ['Play 上找不到封閉測試軌道', 'Play Console 的「測試」→「封閉測試」，確認軌道已建立'],
+  commit: ['封閉測試在提交時被擋（例如設定未完成或審核中）', 'Play Console 的「測試」→「封閉測試」確認狀態'],
   other: ['封閉測試軌道設定沒成功（可能還在審核中、設定未完成或連線不穩）', 'Play Console 的「測試」→「封閉測試」確認狀態'],
 }
 export const degradedMessage = kind => {
@@ -131,7 +132,7 @@ export const checkTracks = list => {
 export const alphaFailKind = status => (status === 401 || status === 403 ? 'permission' : status === 404 ? 'notfound' : 'other')
 
 class TrackFailure extends Error {
-  constructor(track, status, message) { super(message); this.track = track; this.status = status; this.trackFailure = true }
+  constructor(track, status, message, kind = null) { super(message); this.track = track; this.status = status; this.kind = kind; this.trackFailure = true }
 }
 
 // expectCode：這次 AAB 應該是的 versionCode（release-play.mjs 依 play-version.mjs 算的）。有給就先查 Play 上的最大值，
@@ -186,7 +187,12 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode 
         }
       }
       log('提交 …')
-      await call('提交編輯', 'POST', `${app}/edits/${id}:commit`, { headers: auth })
+      // 兩條一起提交時，若是封閉測試在提交那步被擋（設定未完成、審核中…），也當成 alpha 失敗走降級；只有 internal 的提交失敗就是整體失敗
+      try { await call('提交編輯', 'POST', `${app}/edits/${id}:commit`, { headers: auth }) } catch (err) {
+        if (!(list.includes(OPTIONAL_TRACK) && list.length > 1)) throw err
+        log(`提交失敗，視為封閉測試被擋：${err.message}`)   // 原始代碼只進 log
+        throw new TrackFailure(OPTIONAL_TRACK, 0, '封閉測試在提交時被擋', 'commit')
+      }
       return { versionCode: Number(versionCode), editId: id, tracks: list }
     } catch (e) {
       try { await request('DELETE', `${app}/edits/${id}`, { headers: auth }) } catch { /* 清不掉就算了，編輯會自己過期 */ }
@@ -199,9 +205,10 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode 
   } catch (e) {
     const rest = trackList.filter(t => t !== OPTIONAL_TRACK)
     if (!(e instanceof TrackFailure) || e.track !== OPTIONAL_TRACK || !rest.length) throw e
-    log(`封閉測試沒發成（${alphaFailKind(e.status)}），改只發 ${rest.join('、')} …`)
+    const kind = e.kind || alphaFailKind(e.status)
+    log(`封閉測試沒發成（${kind}），改只發 ${rest.join('、')} …`)
     const r = await attempt(rest)
-    return { ...r, alpha: { status: 'failed', kind: alphaFailKind(e.status), message: degradedMessage(alphaFailKind(e.status)) } }
+    return { ...r, alpha: { status: 'failed', kind, message: degradedMessage(kind) } }
   }
 }
 

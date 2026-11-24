@@ -38,6 +38,7 @@ export const RUN_URL_RE = /^https:\/\/github\.com\/Yooliang\/asn\/actions\/runs\
 const ALPHA_WHY = {
   permission: ['服務帳戶沒有封閉測試的發布權限', 'Play Console 的「使用者和權限」，替服務帳戶打開「發布到測試軌道」'],
   notfound: ['Play 上找不到封閉測試軌道', 'Play Console 的「測試」→「封閉測試」，確認軌道已建立'],
+  commit: ['封閉測試在提交時被擋（例如設定未完成或審核中）', 'Play Console 的「測試」→「封閉測試」確認狀態'],
   other: ['封閉測試軌道設定沒成功（可能還在審核中或設定未完成）', 'Play Console 的「測試」→「封閉測試」確認狀態'],
 }
 export const alphaFailed = a => !!a && a.status === 'failed'

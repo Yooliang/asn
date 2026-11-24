@@ -192,6 +192,44 @@ test('alpha 的 5xx 與網路錯誤也降級（internal 不受影響）；intern
   } finally { await g.close() }
 })
 
+test('兩條一起提交被擋（4xx／網路錯誤）：走降級，第二個編輯只含 internal 並提交成功；原因寫提交時被擋', async () => {
+  for (const [name, mode] of [['403', 403], ['400', 400], ['網路錯誤', 'net']]) {
+    const real = makeRequester({ retries: 0, backoffMs: 1 })
+    let commits = 0
+    const request = async (m, u, o) => {
+      if (m === 'POST' && u.endsWith(':commit') && ++commits === 1) { if (mode === 'net') throw new Error('連線失敗（網路錯誤）'); return { status: mode, text: JSON.stringify({ error: { errors: [{ reason: 'x' }] } }) } }
+      return real(m, u, o)
+    }
+    const f = await fake(twoEdits(() => null))
+    try {
+      const r = await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request })
+      assert.deepEqual(r.tracks, ['internal'], name)
+      assert.equal(r.editId, 'E2')
+      assert.equal(r.alpha.status, 'failed'); assert.equal(r.alpha.kind, 'commit')
+      assert.match(r.alpha.message, /封閉測試在提交時被擋（例如設定未完成或審核中）/)
+      assert.doesNotMatch(r.alpha.message, /沒有發布任何軌道|請稍後重發/); assert.match(r.alpha.message, /內部測試已發出/)
+      assert.deepEqual(putsOf(f.calls), ['E1/tracks/internal', 'E1/tracks/alpha', 'E2/tracks/internal'])
+      assert.ok(f.calls.some(c => c.method === 'DELETE' && c.url.endsWith('/edits/E1')), '第一個編輯被刪')
+      assert.equal(count(f.calls, /E2:commit$/), 1)
+    } finally { await f.close() }
+  }
+})
+
+test('降級後 internal 的提交也失敗＝整體失敗；只有 internal 單軌道時提交失敗＝整體失敗（不降級）', async () => {
+  const f = await fake(twoEdits(c => (c.url.endsWith(':commit') ? [403, {}] : null)))
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: req }), /提交編輯失敗/)
+    assert.equal(count(f.calls, /:commit$/), 2, '兩條一次、降級一次，都被擋')
+    assert.equal(f.calls.at(-1).method, 'DELETE')
+  } finally { await f.close() }
+  const g = await fake(twoEdits(c => (c.url.endsWith(':commit') ? [403, {}] : null)))
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', tracks: ['internal'], apiBase: g.base, tokenUri: `${g.base}/token`, request: req }), /提交編輯失敗/)
+    assert.equal(count(g.calls, /:commit$/), 1, '單軌道不降級')
+    assert.equal(count(g.calls, /^POST .*\/edits$/), 1)
+  } finally { await g.close() }
+})
+
 test('internal 失敗（403）：整體失敗、沒有 commit、不再嘗試 alpha、不開第二個編輯', async () => {
   const f = await fake(twoEdits(c => (c.url.endsWith('/tracks/internal') ? [403, {}] : null)))
   try {
