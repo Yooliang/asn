@@ -196,7 +196,7 @@ if (!info.shot) pinsSync.start()
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
 const nickErr = ref('')   // 左上角設備名的提示（改名失敗、啟動對齊後說明）
 const notifyPrefs = ref(notifyFromSaved(savedMe))   // 通知四開關（舊存檔的 sound 在這裡轉過來）
-const skin = ref(applySkin(savedMe.skin))   // 外觀（lib/skin.mjs）：復古 Aero／現代，存在 me 存檔；套用時也記到 localStorage，其他視窗跟著換
+const skin = ref(applySkin(savedMe.skin))   // 外觀（lib/skin.mjs）：復古 Aero／現代，存在 me 存檔；套用時也記到本機偏好，其他視窗跟著換
 watch(skin, v => { applySkin(v); void emit('asn:skin', normalizeSkin(v)) })   // 其他視窗：storage 事件之外再送一次 Tauri 事件（skin-boot.js 兩條都聽）
 const frame = ref(normalizeFrame(savedMe.frame))   // 視窗外框：自訂（預設，含舊存檔）／Windows 原生；Rust 端開視窗時讀同一份存檔
 await initFrame()

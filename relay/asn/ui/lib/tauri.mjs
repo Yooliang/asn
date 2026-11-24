@@ -210,6 +210,7 @@ const queued = (name, run) => {
 export const makeStore = (name, api = settingsStoreApi) => ({
   load: async () => { const s = await api.load(name); try { return s ? JSON.parse(s) : null } catch { return null } },
   save: data => { const text = JSON.stringify(data); return queued(name, () => api.save(name, text)) },
+  // 注意：目前所有呼叫都經過 settings-save.mjs 的 patchWithFallback（它先把頂層 undefined 轉成 null）；直接呼叫 patch 的話，頂層 undefined 會被 JSON 拿掉、後端不會刪欄
   patch: fields => { const patch = JSON.parse(JSON.stringify(fields)); return queued(name, () => api.patch(name, patch)) },   // 內容在呼叫當下就複製（之後改了資料不影響這一次）；undefined 的欄位不送
 })
 export const store = name => makeStore(name)
