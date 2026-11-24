@@ -1,15 +1,11 @@
 {
-  "version": "0.2.89",
-  "notes": "- 改善：工作管理員畫面精簡，拿掉多餘的標籤、總數和說明，整列點一下就能展開或收起細項\n- 改善：個人設定和引導進度存檔時只送出這個畫面改的欄位，不會蓋掉其他地方改過的設定\n- 改善：設定檔正被其他程式使用時會稍等再存，檔案壞掉時會改存整份，不會存不進去\n- 改善：回報類的通知只會叫醒需要的畫面，不再連帶叫醒收信和名單",
-  "pub_date": "2026-11-24T05:00:11.144Z",
+  "version": "0.2.90",
+  "notes": "- 新功能：訊息裡寫「擁有者/repo#編號」會變成 GitHub 連結；一對一對話裡單獨寫 #編號，若認得出夥伴所在的專案也會連過去\n- 改善：拿掉設定裡「把 #編號 連到 ASN 的 GitHub 議題」這個勾選，改由上面的寫法自動判斷\n- 改善：開窗清單、帳號切換、遠端檢視等背景檢查的頻率調低，閒置時比較省電、省流量",
+  "pub_date": "2026-11-24T07:10:43.489Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlITGxHT3pFN0FucXZ5RDR1TWRPQmYzWU9QMmhQc2tVWnJHd3lsM0JsM0dacWViM2F6dHkwWTBOcmJBcW1tK1AxTE5OeHlLT2xudDVaNTA0NUgrMXc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDk2NDEwCWZpbGU6QVNOXzAuMi44OV94NjQtc2V0dXAuZXhlCnkzenN4R01hSC8vR2VJZzRtL01OZUNadVVxbjVmdVBCQ1plL2RyTVlmWDRiTEhKenlkOUdocFlaaTdTSVBtRGlnaFkzUnRJdjNBblBXUTBkL1kveERBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.89_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhmNXl4U3JZZ3VobkxVRzRtVk5wRFBoSEI0Z1lqNFhwZmZYU1hQN2k4aStaTGNHb0FxWE5FeCs3cTdkOUN5dGZiS0NidlpNZTlkQkZNOGI1ZUpFRHdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDk3MDIwCWZpbGU6QVNOXzAuMi44OV9hbWQ2NC5BcHBJbWFnZQpadTZ4RzFRTkJlMTF4L2FKWmpCTy9zbTBFdkxPNU1EVVBsMFNEWTBLcFNIWnhGS2Y4Z2NlOHRmcGU4Zng1c2I4eWxQb1BleVBCSkxNWUtlNW4yeEtDQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.89_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjdBdDlJT2VsaHlwMURUNk9Ib0JvVXRRU0lSNkYvZWhsR05oM3FSL0IyUXVNVVp5YUVDclo5L1VGbEUrbDhhRDJjS1JzcWlodVA0a2hpR2oxc3UxZkFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTA0MjQzCWZpbGU6QVNOXzAuMi45MF94NjQtc2V0dXAuZXhlCnppYytZNU9pOTUvUTR5QTR3TThXMm5TQ043cHFrOWgrdGxrWG5xNFJQWTdRUWVhVEpFYmNhTXBpbi9taUY2aFRqNTJrc3c5NGFPb2Q1dDRadVhCUkNRPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.90_x64-setup.exe"
     }
   }
 }
