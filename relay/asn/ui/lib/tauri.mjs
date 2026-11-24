@@ -468,9 +468,13 @@ export const cliLoginApi = {
 // ---------- 回報匯流排出口（#2161 2c-2）：指令名與事件名只寫在這裡 ----------
 // send：後台寫入一筆回報（kind＋data）；get：批次讀同一個 kind 的多台最新回報 → { ok, reports: [{ node, kind, payload, updated_at, changed_at }] }
 // 錯誤是固定白話字串（invoke 出口已包成 Error 並記一行，不記 args）
+// report_get 的錯誤沒有代號（Rust 端是固定白話句），這裡用固定句對照成 err.permanent＝true：
+// 不認得的種類、格式不正確、沒指定設備、超過 50 台＝重試也不會好（對應後台 404／400／413／422）。其餘（太頻繁、暫時讀不到、連不上）算暫時
+export const REPORT_PERMANENT_ERRORS = ['不認得這種回報', '查詢內容不正確', '回報種類的格式不正確', '設備代號的格式不正確', '請至少指定一台設備', '一次最多查詢']
+export const reportErrorPermanent = msg => REPORT_PERMANENT_ERRORS.some(t => String(msg ?? '').includes(t))
 export const reportApi = {
   send: (kind, data) => invoke('report_send', { kind, data }),
-  get: (kind, nodes) => invoke('report_get', { kind, nodes }),
+  get: (kind, nodes) => invoke('report_get', { kind, nodes }).catch(e => { if (reportErrorPermanent(e?.message)) e.permanent = true; throw e }),
 }
 // 後台寫入且內容有變時 Rust 轉出的門鈴：payload { kind, node }，不含內容（要內容再呼叫 reportApi.get）。回傳取消函式（同步回傳，不必等 listen 完成）
 export const onReport = cb => {

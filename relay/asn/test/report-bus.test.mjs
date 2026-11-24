@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createReportBus, isNewer, BATCH_MAX, POLL_MS, FAIL_WAIT_MS } from '../ui/lib/report-bus.mjs'
+import { createReportBus, isNewer, backoffMs, BATCH_MAX, POLL_MS, FAIL_WAIT_MS, BACKOFF_MAX_MS } from '../ui/lib/report-bus.mjs'
 
 const UI = fileURLToPath(new URL('../ui', import.meta.url))
 
@@ -35,14 +35,14 @@ const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve()
 
 function setup(opts = {}) {
   const clock = makeClock()
-  const calls = []
+  const calls = [], times = []
   const store = new Map()   // `${kind}\n${node}` -> report
   let gate = null, fail = false
   const api = {
     get: async (kind, nodes) => {
-      calls.push({ kind, nodes: [...nodes] })
+      calls.push({ kind, nodes: [...nodes] }); times.push(clock.now())
       if (gate) await gate.promise
-      if (fail) throw new Error('讀不到')
+      if (fail) { const e = new Error('讀不到'); if (fail === 'permanent') e.permanent = true; throw e }
       return { ok: true, reports: nodes.map(n => store.get(`${kind}\n${n}`)).filter(Boolean) }
     },
   }
@@ -55,7 +55,7 @@ function setup(opts = {}) {
   })
   const put = (kind, node, changed_at, payload = { v: changed_at }, updated_at = changed_at) => store.set(`${kind}\n${node}`, { node, kind, payload, updated_at, changed_at })
   return {
-    clock, calls, bus, put,
+    clock, calls, times, bus, put,
     ring: (kind, node) => bell({ kind, node }),
     foreground: () => { visible = true; vis() },
     setVisible: v => { visible = v },
@@ -181,13 +181,62 @@ test('連續失敗只在第 1、5、20 次記 warn，恢復後計數歸零', qui
   const s = setup(); s.put('k', 'a', 1); s.bus.subscribe('k', 'a', () => {})
   s.setFail(true)
   await s.clock.advance(300)
-  for (let i = 0; i < 24; i++) await s.clock.advance(FAIL_WAIT_MS)
-  assert.ok(s.calls.length >= 25, `共 ${s.calls.length} 次讀取`)
+  for (let i = 0; i < 2000 && s.calls.length < 21; i++) await s.clock.advance(10000)
+  assert.equal(s.calls.length, 21, `共 ${s.calls.length} 次讀取`)
   assert.equal(logs.length, 3)
   assert.deepEqual(logs.map(l => l.match(/第 (\d+) 次/)[1]), ['1', '5', '20'])
-  s.setFail(false); await s.clock.advance(FAIL_WAIT_MS)
-  s.setFail(true); s.ring('k', 'a'); await s.clock.advance(FAIL_WAIT_MS)
+  s.setFail(false); await s.clock.advance(BACKOFF_MAX_MS + 1000)
+  s.setFail(true); s.ring('k', 'a'); await s.clock.advance(1000)
   assert.equal(logs.length, 4, '恢復後重新從第 1 次算')
+}))
+
+test('退避：連續失敗間隔 5、10、20…秒、300 秒封頂，成功歸零', quietWarn(async () => {
+  const s = setup(); s.put('k', 'a', 1); s.bus.subscribe('k', 'a', () => {})
+  s.setFail(true)
+  for (let i = 0; i < 4000 && s.calls.length < 12; i++) await s.clock.advance(1000)
+  const gaps = s.times.slice(1).map((t, i) => t - s.times[i])
+  assert.deepEqual(gaps, [5000, 10000, 20000, 40000, 80000, 160000, 300000, 300000, 300000, 300000, 300000])
+  assert.deepEqual([1, 2, 3, 7, 8, 40].map(backoffMs), [5000, 10000, 20000, 300000, 300000, 300000])
+  s.setFail(false)
+  for (let i = 0; i < 400 && s.calls.length < 13; i++) await s.clock.advance(1000)
+  s.setFail(true); s.ring('k', 'a')
+  const n = s.calls.length; const t0 = s.clock.now()
+  for (let i = 0; i < 100 && s.calls.length < n + 2; i++) await s.clock.advance(1000)
+  assert.equal(s.times[n + 1] - s.times[n], 5000, '成功之後從 5 秒重新起算')
+  assert.ok(t0 > 0)
+}))
+
+test('退避期間來的門鈴、訂閱、後援只記待讀，到期才讀一次', quietWarn(async () => {
+  const s = setup(); s.put('k', 'a', 1); s.put('k', 'b', 1); s.bus.subscribe('k', 'a', () => {})
+  s.setFail(true); await s.clock.advance(300)   // 第 1 次失敗，退避到 +5000
+  s.ring('k', 'a'); s.bus.subscribe('k', 'b', () => {}); s.ring('k', 'b'); await s.clock.advance(4000)
+  assert.equal(s.calls.length, 1, '退避期間不讀')
+  s.setFail(false); await s.clock.advance(1000)
+  assert.equal(s.calls.length, 2); assert.deepEqual(s.calls[1].nodes.sort(), ['a', 'b'])
+}))
+
+test('看不見時不重試：回到前景才恢復；新的門鈴也會讀', quietWarn(async () => {
+  const s = setup(); s.put('k', 'a', 1); const got = []; s.bus.subscribe('k', 'a', r => got.push(r.changed_at))
+  s.setFail(true); await s.clock.advance(300); assert.equal(s.calls.length, 1)
+  s.setVisible(false); s.setFail(false)
+  await s.clock.advance(60000); assert.equal(s.calls.length, 1, '背景到期也不讀')
+  s.foreground(); await s.clock.advance(300)
+  assert.equal(s.calls.length, 2); assert.deepEqual(got, [1])
+  // 另一路：背景中來了門鈴，算新的觸發
+  s.setFail(true); s.put('k', 'a', 2); s.ring('k', 'a'); await s.clock.advance(300); assert.equal(s.calls.length, 3)
+  s.setVisible(false); s.setFail(false); await s.clock.advance(60000); assert.equal(s.calls.length, 3)
+  s.ring('k', 'a'); await s.clock.advance(300); assert.equal(s.calls.length, 4); assert.deepEqual(got, [1, 2])
+}))
+
+test('永久錯誤：該 kind 暫停，只在下一次門鈴、回前景、後援才再試一次', quietWarn(async () => {
+  const s = setup(); s.put('k', 'a', 1); s.bus.subscribe('k', 'a', () => {})
+  s.setFail('permanent'); await s.clock.advance(300); assert.equal(s.calls.length, 1)
+  await s.clock.advance(POLL_MS - 1000); assert.equal(s.calls.length, 1, '不自動重試（連 5 秒退避也沒有）')
+  s.bus.subscribe('k', 'b', () => {}); await s.clock.advance(600); assert.equal(s.calls.length, 1, '新訂閱不算觸發')
+  await s.clock.advance(1000); assert.equal(s.calls.length, 2, '後援（5 分鐘）再試一次')
+  s.ring('k', 'a'); await s.clock.advance(300); assert.equal(s.calls.length, 3, '門鈴再試一次')
+  s.foreground(); await s.clock.advance(300); assert.equal(s.calls.length, 4, '回前景再試一次')
+  await s.clock.advance(60000); assert.equal(s.calls.length, 4, '每次觸發只試一次')
 }))
 
 test('取消訂閱：到零就停該 kind 與後援；別人還在訂閱就繼續', async () => {
@@ -265,5 +314,23 @@ test('reportApi／onReport：指令名與參數形狀、門鈴取消', async () 
     handler({ payload: { kind: 'k', node: 'n1' } }); assert.deepEqual(got, [{ kind: 'k', node: 'n1' }])
     off(); assert.equal(unlistened, 1)
     const early = m.onReport(() => {}); early(); await flush(); assert.equal(unlistened, 2, '還沒 listen 完就取消也會收掉')
+  } finally { globalThis.__TAURI__ = saved }
+})
+
+test('reportApi.get：固定白話句對照成 err.permanent，暫時性錯誤不標', async () => {
+  const saved = globalThis.__TAURI__
+  let msg = ''
+  globalThis.__TAURI__ = { core: { invoke: async () => { throw msg } }, event: { listen: async () => () => {}, emit: async () => {} } }
+  try {
+    const m = await import(`../ui/lib/tauri.mjs?t=perm-${Date.now()}`)
+    const w = console.warn; console.warn = () => {}
+    try {
+      for (const t of ['不認得這種回報', '查詢內容不正確', '回報種類的格式不正確', '設備代號的格式不正確', '請至少指定一台設備', '一次最多查詢 50 台設備']) {
+        msg = t; const e = await m.reportApi.get('k', ['n']).catch(x => x); assert.equal(e.permanent, true, t)
+      }
+      for (const t of ['查詢太頻繁，請稍後再試', '暫時讀不到回報，請稍後再試', '連不上收發室，請稍後再試']) {
+        msg = t; const e = await m.reportApi.get('k', ['n']).catch(x => x); assert.notEqual(e.permanent, true, t); assert.equal(e.message, t)
+      }
+    } finally { console.warn = w }
   } finally { globalThis.__TAURI__ = saved }
 })

@@ -5,13 +5,18 @@
 //  - 同一個 kind 同時只有一個在途請求；在途時新來的節點排進下一批；一批最多 BATCH_MAX 個，超過就切批、批間序列
 //  - 只有 changed_at 比上次讀到的新才通知訂閱者（保活只更新 updated_at，不重複通知）
 //  - 後援：回到前景時對所有有訂閱者的 kind 讀一次；之後每 POLL_MS（5 分鐘）讀一次（只在可見時）
-//  - 讀失敗不丟給訂閱者，只記一次 console.warn（kind 與連續次數，不含內容）；失敗後至少等 FAIL_WAIT_MS 才再試
+//  - 讀失敗不丟給訂閱者，只記 console.warn（kind 與連續次數，不含內容；第 1、5、20 次才記）
+//  - 失敗後指數退避：同一 kind 連續失敗後下次允許讀的間隔 5、10、20…秒，上限 5 分鐘，成功歸零；退避期間來的門鈴、訂閱、後援只記待讀，到期才用計時器讀
+//  - 失敗後的重試到期時若看不見（背景）就不讀，等回到前景或下一次門鈴
+//  - 永久錯誤（e.permanent＝true，例如不認得的 kind、格式錯誤）：該 kind 暫停讀取，只在下一次門鈴、回前景、後援才再試一次，不自動重試
 //  - 沒有訂閱者的 kind 不讀；取消訂閱到零就停該 kind；全部取消就停後援
 export const DEBOUNCE_MS = 300
 export const MAXWAIT_MS = 1000
 export const BATCH_MAX = 50
 export const POLL_MS = 5 * 60 * 1000
-export const FAIL_WAIT_MS = 5000
+export const FAIL_WAIT_MS = 5000   // 退避起點
+export const BACKOFF_MAX_MS = 5 * 60 * 1000
+export const backoffMs = fails => Math.min(FAIL_WAIT_MS * 2 ** Math.max(0, Math.min(fails, 30) - 1), BACKOFF_MAX_MS)
 export const WARN_AT = new Set([1, 5, 20])   // 同一 kind 連續失敗，只在這幾次記一行 warn
 
 // changed_at 是否比 prev 新：兩邊都是數字就比數字，否則比時間，再不行比字串
@@ -49,7 +54,7 @@ export function createReportBus({
   function schedule(kind) {
     const st = stateOf(kind)
     if (!st || disposed || st.pending.size === 0) return
-    if (st.inflight) return   // 在途：回來後再排下一批
+    if (st.inflight || st.hold) return   // 在途：回來後再排下一批；永久錯誤暫停中：等下一次觸發
     const t = now()
     if (st.timer === null) st.firstAt = t
     else clearKindTimer(st)
@@ -58,10 +63,13 @@ export function createReportBus({
     st.timer = setTimer(() => { st.timer = null; void flush(kind) }, delay)
   }
 
-  function request(kind, node) {
+  // clearHold：門鈴、回前景、後援算「下一次觸發」，會讓暫停中的 kind 再試一次；訂閱不算
+  function request(kind, node, clearHold = false) {
     const st = stateOf(kind)
     if (!st || disposed) return
     st.pending.add(node)
+    st.retryOnly = false; st.fresh = true
+    if (clearHold) st.hold = false
     schedule(kind)
   }
 
@@ -77,11 +85,13 @@ export function createReportBus({
 
   async function flush(kind) {
     const st = stateOf(kind)
-    if (!st || disposed || st.inflight) return
+    if (!st || disposed || st.inflight || st.hold) return
+    if (st.retryOnly && !isVisible()) return   // 失敗後的重試到期時看不見：不讀，等回前景或下一次門鈴
     const nodes = [...st.pending].filter(n => st.subs.has(n))
     st.pending.clear()
     if (nodes.length === 0) return
     st.inflight = true
+    st.fresh = false
     let i = 0
     try {
       for (; i < nodes.length; i += BATCH_MAX) {
@@ -91,11 +101,12 @@ export function createReportBus({
         if (!res || res.ok !== true || !Array.isArray(res.reports)) throw new Error('bad-response')
         for (const r of res.reports) deliver(st, r)
       }
-      st.fails = 0
-    } catch {
+      st.fails = 0; st.failUntil = 0; st.hold = false; st.retryOnly = false
+    } catch (e) {
       if (disposed || stateOf(kind) !== st) return
       st.fails++
-      st.failUntil = now() + FAIL_WAIT_MS
+      if (e?.permanent === true) { st.hold = true; st.failUntil = 0 }   // 永久錯誤：不退避、不自動重試
+      else { st.failUntil = now() + backoffMs(st.fails); st.retryOnly = !st.fresh }
       if (WARN_AT.has(st.fails)) console.warn('[ASN]', `回報讀取失敗：${kind}（連續第 ${st.fails} 次），稍後再試`)   // 只在第 1、5、20 次記，避免洗 console
       for (const n of nodes.slice(i)) st.pending.add(n)   // 沒讀到的下一輪再讀
     } finally {
@@ -103,7 +114,7 @@ export function createReportBus({
     }
   }
 
-  const refreshKind = kind => { const st = stateOf(kind); if (st) for (const n of st.subs.keys()) request(kind, n) }
+  const refreshKind = kind => { const st = stateOf(kind); if (st) { st.hold = false; for (const n of st.subs.keys()) request(kind, n, true) } }
   const refreshAll = () => { if (disposed) return; for (const k of [...kinds.keys()]) refreshKind(k) }
 
   function armPoll() {
@@ -120,14 +131,14 @@ export function createReportBus({
   const offBell = onReport(ev => {
     if (disposed || !ev) return
     const st = stateOf(ev.kind)
-    if (st && st.subs.has(ev.node)) request(ev.kind, ev.node)
+    if (st && st.subs.has(ev.node)) request(ev.kind, ev.node, true)
   })
   const offVisible = onVisible(() => { if (!disposed && isVisible()) refreshAll() })
 
   function subscribe(kind, node, cb) {
     if (disposed || typeof cb !== 'function') return () => {}
     let st = stateOf(kind)
-    if (!st) { st = { subs: new Map(), last: new Map(), pending: new Set(), timer: null, firstAt: 0, inflight: false, failUntil: 0, fails: 0 }; kinds.set(kind, st) }
+    if (!st) { st = { subs: new Map(), last: new Map(), pending: new Set(), timer: null, firstAt: 0, inflight: false, failUntil: 0, fails: 0, hold: false, retryOnly: false, fresh: false }; kinds.set(kind, st) }
     let set = st.subs.get(node)
     if (!set) { set = new Set(); st.subs.set(node, set) }
     set.add(cb)
