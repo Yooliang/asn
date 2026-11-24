@@ -107,15 +107,52 @@ fn 修補_不認得的欄位保留_null_刪欄() {
     put(d.path(), "asn-me.json", r#"{"frame":"custom","future":{"x":[1,2]},"closeTo":"quit","drop":1}"#);
     patch_json(d.path(), RawName::Me, obj(json!({"frame":"native","drop":null,"added":true}))).unwrap();
     let now: Value = serde_json::from_str(&read(d.path(), "asn-me.json")).unwrap();
-    assert_eq!(now, json!({"frame":"native","future":{"x":[1,2]},"closeTo":"quit","added":true}));
+    assert_eq!(now, json!({"version":1,"frame":"native","future":{"x":[1,2]},"closeTo":"quit","added":true}));
     // 刪掉一個本來就沒有的欄位不出錯
     patch_json(d.path(), RawName::Me, obj(json!({"nothing":null}))).unwrap();
     // 想用 patch 改版本號沒有用
     patch_json(d.path(), RawName::Me, obj(json!({"version":99}))).unwrap();
-    assert!(!read(d.path(), "asn-me.json").contains("version"));
+    let after: Value = serde_json::from_str(&read(d.path(), "asn-me.json")).unwrap();
+    assert_eq!(after["version"], json!(1), "patch 改不了版本號：還是 1，不是 99");
     // 檔案不存在也能 patch（等於建檔）
     patch_json(d.path(), RawName::Onboard, obj(json!({"done":true}))).unwrap();
-    assert_eq!(read(d.path(), "asn-onboard.json"), r#"{"done":true}"#);
+    assert_eq!(read(d.path(), "asn-onboard.json"), r#"{"version":1,"done":true}"#);
+}
+
+/// #2162 ⑦ 版本：me、onboard 是 1（chats 維持 0）；讀版本 0 的舊檔不改寫，第一次 patch 才補上 `version:1`（並留一份 .v0.bak）；patch 與整份存都不洗掉別人寫的 version
+#[test]
+fn 版本_舊檔讀不改寫_第一次patch才補_patch不能改_chats不加() {
+    assert_eq!((MeDoc::VERSION, OnboardDoc::VERSION, ChatsDoc::VERSION), (1, 1, 0));
+    for (name, file) in [(RawName::Me, "asn-me.json"), (RawName::Onboard, "asn-onboard.json")] {
+        let d = tempfile::tempdir().unwrap();
+        let old = r#"{"keep":1,"z":{"a":[1]}}"#;
+        put(d.path(), file, old);
+        // 讀（文字與 Rust 端讀法）不動檔案、不產生備份
+        assert_eq!(load_text(d.path(), name).unwrap(), old);
+        let _ = me_flags(d.path());
+        assert_eq!(read(d.path(), file), old, "{file} 讀完原樣");
+        assert!(files_with(d.path(), ".bak").is_empty() && files_with(d.path(), ".bad-").is_empty());
+        // 第一次 patch：補上 version:1，其餘欄位原樣；舊內容留一份 v0 備份
+        patch_json(d.path(), name, obj(json!({"new":true, "version": 99}))).unwrap();
+        let v: Value = serde_json::from_str(&read(d.path(), file)).unwrap();
+        assert_eq!(v, json!({"version":1,"keep":1,"z":{"a":[1]},"new":true}), "{file}");
+        assert_eq!(files_with(d.path(), ".v0.bak").len(), 1, "{file} 升版前留一份舊檔");
+        // 第二次 patch 不再備份、版本不變
+        patch_json(d.path(), name, obj(json!({"new":false}))).unwrap();
+        assert_eq!(files_with(d.path(), ".bak").len(), 1);
+        assert_eq!(serde_json::from_str::<Value>(&read(d.path(), file)).unwrap()["version"], json!(1));
+    }
+    // 較新版寫的檔（version 更大）：patch 不降版
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "asn-me.json", r#"{"version":7,"k":1}"#);
+    patch_json(d.path(), RawName::Me, obj(json!({"version":1,"k":2}))).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&read(d.path(), "asn-me.json")).unwrap(), json!({"version":7,"k":2}));
+    // 整份存（舊版前端的路徑）原文照寫：帶著 version 就留著（舊版前端展開 savedMe 會保留它）
+    save_text(d.path(), RawName::Me, r#"{"version":7,"k":3,"skin":"x"}"#).unwrap();
+    assert_eq!(read(d.path(), "asn-me.json"), r#"{"version":7,"k":3,"skin":"x"}"#);
+    // chats 不加 version
+    patch_json(d.path(), RawName::Chats, obj(json!({"a":1}))).unwrap();
+    assert_eq!(read(d.path(), "asn-chats.json"), r#"{"a":1}"#);
 }
 
 #[test]
@@ -136,7 +173,7 @@ fn 修補_兩條執行緒同時改不同欄位都不會丟() {
         h.join().unwrap();
     }
     let now: Value = serde_json::from_str(&read(d.path(), "asn-me.json")).unwrap();
-    assert_eq!(now, json!({"base":1,"t0":39,"t1":39}));
+    assert_eq!(now, json!({"version":1,"base":1,"t0":39,"t1":39}));
 }
 
 #[test]

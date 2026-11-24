@@ -249,8 +249,8 @@ mod tests {
         assert_eq!(m.matches("atomic::write(path, text.as_bytes(), T::ATOMIC)").count(), 2, "write_locked 要用型別宣告的類別");
         let r = include_str!("raw.rs");
         assert_eq!(r.matches("atomic::STATE").count(), 1, "只有 asn-chats（快取）可以用 STATE");
-        assert!(r.contains(r#"ChatsDoc, "asn-chats", true, atomic::STATE, false"#));
-        assert!(r.contains(r#"MeDoc, "asn-me", true, atomic::SETTINGS, true"#) && r.contains(r#"OnboardDoc, "asn-onboard", true, atomic::SETTINGS, true"#));
+        assert!(r.contains(r#"ChatsDoc, "asn-chats", 0, true, atomic::STATE, false"#));
+        assert!(r.contains(r#"MeDoc, "asn-me", 1, true, atomic::SETTINGS, true"#) && r.contains(r#"OnboardDoc, "asn-onboard", 1, true, atomic::SETTINGS, true"#));
         // 這幾處不准再有舊的 STATE 包裝呼叫（同檔其他處留給 2b，所以只查這幾處的檔案路徑）
         for (src, bad) in [
             (include_str!("../acct_remote.rs"), "crate::write_atomic(&outbox_path("),
