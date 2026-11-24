@@ -234,7 +234,6 @@ async function copyAskpassPath() {
 }
 // 自動更新：啟動與每 6 小時檢查；有新版只在名單上方顯示一條通知，使用者按「更新」才下載安裝（--shot 模式不檢查）。程式在 updater.rs
 const autoCheck = ref(autoCheckFromSaved(savedMe.autoUpdate))
-const ghRefs = ref(savedMe.ghRefs === true)   // 把訊息裡的 #編號 連到 ASN 的 GitHub 議題（#1530，預設關）
 const upd = reactive({ ...initialUpdateState(), checking: false, manual: '', lastCheck: 0, checkErr: '' })
 // 版本更新記錄：從後台公開的 asn_site_releases 讀（Rust 的 site_releases 指令；讀成功的在記憶體留 10 分鐘），讀不到照實說（#462）
 const releases = reactive(initialReleases())
@@ -379,7 +378,7 @@ const sync = () => {
   conn.value = s.conn
   rosterReady.value = core.rosterLoaded === true
   connWhy.value = s.connWhy ?? ''
-  emit('asn:state', { ...s, friends: [...s.friends, ...roomFriends.value], me: { ...me }, ui: { dpMode: lookNow.value.dpMode, bubble: lookNow.value.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed, ghRefs: ghRefs.value } })   // 獨立對話視窗讀這份：已經是依外觀算好的有效值
+  emit('asn:state', { ...s, friends: [...s.friends, ...roomFriends.value], me: { ...me }, ui: { dpMode: lookNow.value.dpMode, bubble: lookNow.value.bubble, toolbar: ui.toolbar, collapsed: ui.collapsed } })   // 獨立對話視窗讀這份：已經是依外觀算好的有效值
 }
 // 名單的活躍度（#347）：名單每次更新、再加每 30 秒（讓 8 小時門檻與離線去抖會自己到期）算一輪；狀態放在普通 Map，畫面靠 activityTick 重算
 let activityPrev = new Map()
@@ -1348,9 +1347,9 @@ await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoo
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
-watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddClaude, autoCheck, ghRefs, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
+watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddClaude, autoCheck, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
 // #2162⓪：先展開讀進來的舊內容，這版不認得的欄位（手機版 mobilePrefs／lastChat／navTab、新版新增的欄位）原樣保留；下面列的欄位每次都明確帶值，會蓋過舊值
-const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; const f = { ...deviceFieldsToSave(devPrefs), chatPins: chatPins.value, me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, ghRefs: ghRefs.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }; void patchWithFallback(meStore, f, () => ({ ...savedMe, ...f })) }, 600)
+const saveMe = trailingThrottle(() => { const { nick, ...rest } = me; const f = { ...deviceFieldsToSave(devPrefs), chatPins: chatPins.value, me: rest, showNowPlaying: showNowPlaying.value, notify: notifyPrefs.value, skin: skin.value, frame: frame.value, closeTo: closeTo.value, autoAddClaude: autoAddClaude.value, autoUpdate: autoCheck.value, tabDim: dims.tabDim, groupDim: dims.groupDim, winMode: ui.mode, dpMode: ui.dpMode, bubble: ui.bubble, toolbar: ui.toolbar, dpCollapsed: ui.collapsed, pinnedChat: ui.pinnedChat, splitSize: sizes.split, mergedSize: sizes.merged, guideSize: sizes.guide, settingSize: sizes.setting, session: sess.ready ? currentSession() : sess.saved }; void patchWithFallback(meStore, f, () => ({ ...savedMe, ...f })) }, 600)
 addEventListener('pagehide', () => saveMe.flush())
 // 系統匣圖示的提示文字帶未讀總數
 watch(() => totalUnread(friends.value), n => { void trayApi.setUnread(n).catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ }) }, { immediate: true })
@@ -2113,7 +2112,7 @@ const app = createApp({
     const settingsState = computed(() => ({
       nowPlaying: { on: showNowPlaying.value, current: nowPlaying.value },
       status: me.status, hasUpload: selfHasUpload.value, avBusy: avBusy.value, avMsg: avMsg.value,
-      notify: notifyPrefs.value, skin: skin.value, ghRefs: ghRefs.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
+      notify: notifyPrefs.value, skin: skin.value, frame: frame.value, mode: ui.mode, dpMode: ui.dpMode, toolbar: ui.toolbar, bubble: ui.bubble,
       tabDim: dims.tabDim, groupDim: dims.groupDim,
       voice: { cfg: { tts_voice: voiceCfg.tts_voice, tts_auto: voiceCfg.tts_auto, stt_lang: voiceCfg.stt_lang, stt_model: voiceCfg.stt_model }, enabled: ttsVoices.value.enabled, voices: ttsVoices.value.voices, sttReady: Boolean(sttSt.value?.ready), installBusy: voice.state.install.busy, note: voice.state.install.text || voiceMsg.value || sttText.value },
       taskMgr: taskMgr.view(),
@@ -2149,7 +2148,6 @@ const app = createApp({
         case 'toolbar': ui.toolbar = TOOLBARS.includes(value) ? value : ui.toolbar; break
         case 'bubble': ui.bubble = normalizeBubble(value); break
         case 'skin': skin.value = normalizeSkin(value); break
-        case 'gh-refs': ghRefs.value = value === true; break
         case 'tabDim': setTabDim(value); break
         case 'groupDim': dims.groupDim = value; break
         case 'voice-save': await saveVoice(value); break
@@ -2276,7 +2274,7 @@ const app = createApp({
       reloginBar, dismissReloginBar, goLogin, roomsNote, refreshRooms,
       frame, FRAMES, FRAME_LABEL, setFrame, closeTo, CLOSE_CHOICES, CLOSE_LABEL, setCloseTo, trayOk, autostart, setAutostart, RESIZE_DIRS, resizeFrom, avMenu,
       contextLabel, avOf, elevatedBadge, meAv, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar,
-      openMember, ghRefs, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
+      openMember, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
       STATUS, selfDeviceName, CONN_LABEL, connWhy, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, pinNote, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr,

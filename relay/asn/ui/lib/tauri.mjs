@@ -48,6 +48,7 @@ export const transport = {
   list: () => invoke('relay_list'),
   taskManagerList: () => invoke('task_manager_list'),   // 電腦版工作管理員：這台電腦上 ASN 管的程式清單（只讀）→ { rows, known, now_ms }
   localWindows: () => invoke('local_windows'),   // 電腦版：直接讀本機視窗狀態（手機沒有這個指令）
+  partnerRepo: name => invoke('partner_repo', { name }),   // 電腦版：這個視窗工作資料夾對應的 GitHub 倉庫「擁有者/repo」（讀 .git 設定檔，不碰網路）；讀不到回 null（手機沒有這個指令，也不會有人叫）
   inbox: () => invoke('relay_inbox'),
   ack: ids => invoke('relay_ack', { ids }),
   rooms: () => invoke('relay_rooms'),

@@ -44,7 +44,7 @@ import { AWAITING_NOTE, AWAITING_NOTE_NO_TERM } from './awaiting.mjs'
 import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 import { clockLabel, composeFieldHeight, lineRows, sentStateText } from './line-chat.mjs'
 import { MEMBER_NOT_FRIEND } from './groups.mjs'
-import { githubUrl, linkRefs, refOf, refRange, refTip } from './msg-ref.mjs'
+import { githubUrl, linkRefs, parseRepo, refOf, refRange, refTip } from './msg-ref.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
 // 看過的大圖：同一個畫面裡再點同一張不必再跨到 Rust（#1493）。登入、登出時清掉（photo.mjs）
@@ -83,7 +83,6 @@ export const ChatPane = {
     callApi: { type: Object, default: null },      // 手機版的通話（lib/mobile-call.mjs 的 createMobileCall 工廠，另帶 phaseText）；電腦版不給，通話走 voice.newCall
     dictApi: { type: Object, default: null },     // 手機版的語音輸入（{ newDictation({ hints, onText }) }，工廠見 lib/mobile-dictation.mjs）；沒給或這支手機沒有語音辨識服務就沒有語音輸入鈕
     loadOlder: { type: Function, default: null },
-    ghRefs: { type: Boolean, default: false },   // 設定「把訊息裡的 #編號 連到 ASN 的 GitHub 議題」（#1530，預設關）  // 往上捲到頂載入更舊的信：(好友 id) => Promise<{ more, added, busy?, error? }>；沒給就不載入
     hintNames: { type: Array, default: () => [] },  // 名單上的夥伴（給語音辨識偏向名字用，選填）；通話對象自己一定會帶
     enterSends: { type: Boolean, default: true },  // Enter 直接送出（電腦預設）；手機的軟鍵盤 Enter 是換行，傳送靠按鈕
     roomCards: { type: Array, default: () => [] },  // 群組：待主持人確認的請求卡片（lib/groups.mjs 的 confirmCards）；非群組不用
@@ -363,8 +362,20 @@ export const ChatPane = {
       mentionMore.value = !!el && el.scrollHeight - el.scrollTop - el.clientHeight > 4
     }
     const afterMenu = () => nextTick(() => { syncMore(); menuEl.value?.querySelector('button.on')?.scrollIntoView({ block: 'nearest' }) })
-    // 訊息裡的 #N（#1530）：群組裡依已載入的範圍判斷是不是群組訊息；不是的話，開關打開才當 GitHub，沒開就是普通文字
-    const refCtx = computed(() => (isRoom.value ? { room: true, ...refRange(props.log, props.friend?.lastSeq), github: props.ghRefs } : { room: false, github: props.ghRefs }))
+    // 訊息裡的 #N（#1530、#1776）：群組裡依已載入的範圍判斷是不是群組訊息；一對一單獨的 #N 連到這位夥伴的 GitHub 倉庫，
+    // 倉庫只有電腦版查得到（這台電腦上的視窗，Rust 端讀 git remote）；查不到就是普通文字。「擁有者/repo#N」全名不受影響，到處都能點
+    const partnerRepo = ref('')
+    let repoSeq = 0
+    const loadRepo = async () => {
+      const f = props.friend, mine = ++repoSeq
+      partnerRepo.value = ''
+      if (!f || f.room === true || f.panel || !props.selfNode || f.node !== props.selfNode || typeof props.agentApi?.partnerRepo !== 'function') return
+      let r = null
+      try { r = await props.agentApi.partnerRepo(f.agent ?? f.nick) } catch (e) { console.info('[ASN] 讀不到夥伴的 GitHub 倉庫', String(e?.message ?? e)) }
+      if (mine === repoSeq) partnerRepo.value = parseRepo(r) ? r : ''
+    }
+    watch(() => [props.friend?.id, props.friend?.node, props.selfNode], loadRepo, { immediate: true })
+    const refCtx = computed(() => (isRoom.value ? { room: true, ...refRange(props.log, props.friend?.lastSeq) } : { room: false, repo: partnerRepo.value }))
     const bodyHtml = text => linkRefs(isRoom.value ? markMentions(renderMarkdown(text), props.friend?.mentionable?.map(t => t.label)) : renderMarkdown(text), refCtx.value)
     // LINE 外觀：輸入框隨字數變高，最多 6 行後內部捲動（算法在 line-chat.mjs 的 composeFieldHeight）；其他外觀不碰 style
     function fitCompose() {
@@ -644,8 +655,10 @@ export const ChatPane = {
       if (el) { clearTimeout(jumpTimer); jumpNote.value = ''; flashEl(el) } else noteFor(r?.error ? '載入失敗，請稍後再試。' : '這則太舊，載不到。')
     }
     const openRef = ref => {
-      if (ref.kind === 'github') openLink(githubUrl(ref.n))?.catch?.(e => console.info('[ASN] 開啟 GitHub 失敗', String(e?.message ?? e)))
-      else void jumpToSeq(ref.n)
+      if (ref.kind === 'github') {
+        const url = githubUrl(ref.repo, ref.n)   // 重新驗過才開，只會是 github.com
+        if (url) openLink(url)?.catch?.(e => console.info('[ASN] 開啟 GitHub 失敗', String(e?.message ?? e)))
+      } else void jumpToSeq(ref.n)
     }
     // 長按（手指才算；滑鼠按久一點照樣是點擊）顯示提示；長按放開後的那次點擊不算
     let pressTimer = null, pressAt = null, pressed = false
@@ -654,7 +667,7 @@ export const ChatPane = {
       clearTimeout(pressTimer); pressed = false
       if (!r || ev.pointerType !== 'touch') return
       pressAt = [ev.clientX, ev.clientY]
-      pressTimer = setTimeout(() => { pressed = true; noteFor(refTip(r.kind, r.n), 3000) }, 500)
+      pressTimer = setTimeout(() => { pressed = true; noteFor(refTip(r.kind, r.n, r.repo), 3000) }, 500)
     }
     const onRefMove = ev => { if (pressAt && Math.hypot(ev.clientX - pressAt[0], ev.clientY - pressAt[1]) > 10) { clearTimeout(pressTimer); pressAt = null } }
     const onRefUp = () => { clearTimeout(pressTimer); pressAt = null }
