@@ -582,7 +582,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         self.use_mux = on;
     }
 
-    /// 這台是不是用終端服務（工作管理員據此決定要不要列「終端服務」那一列，服務沒在跑也要有地方按重啟）
+    /// 這台是不是用終端服務（工作管理員再依存下的名單與上次重啟的失敗記號，決定要不要在服務沒在跑時列佔位，見 `mux_restart::placeholder_wanted`）
     pub fn mux_expected(&self) -> bool {
         self.use_mux
     }
@@ -1489,6 +1489,12 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             resume(names)
         };
         let r = run_steps(true, &STASH, names, verify, stop, || ensure(&m), resume, down, &note);
+        // 起不來（代理斷線）＝記下，工作管理員據此列「沒有在運行」的佔位；成功就清掉。其他失敗（沒動服務）不改
+        match &r {
+            Ok(()) => super::mux_restart::set_last_failed(false),
+            Err(RestartError::Down(_)) => super::mux_restart::set_last_failed(true),
+            Err(_) => {}
+        }
         drop(guard.borrow_mut().take());
         r
     }

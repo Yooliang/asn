@@ -77,6 +77,24 @@ impl Stash {
 /// 上一次起新服務失敗時的名單
 pub static STASH: Stash = Stash::new();
 
+/// 上次重啟終端服務有沒有失敗（起不來、代理斷線）：真才在工作管理員列「沒有在運行」的佔位；下次重啟成功時清掉。只放記憶體
+static LAST_FAILED: AtomicBool = AtomicBool::new(false);
+
+pub fn last_failed() -> bool {
+    LAST_FAILED.load(Ordering::SeqCst)
+}
+
+pub fn set_last_failed(failed: bool) {
+    LAST_FAILED.store(failed, Ordering::SeqCst);
+}
+
+/// 工作管理員要不要在清單沒有終端服務時列「沒有在運行」的佔位（讓本人有地方再按重啟）：
+/// 用終端服務，而且確實有東西等著接回（存下的名單有人）或上次重啟失敗。
+/// 只是用終端服務、最後一位夥伴關掉後服務被正常收掉，不算：那是正常狀態，不能永遠掛著佔位和重啟鈕
+pub fn placeholder_wanted(use_mux: bool, pending: usize, last_failed: bool) -> bool {
+    use_mux && (pending > 0 || last_failed)
+}
+
 /// 還有幾位代理沒接回（存下的名單長度）：工作管理員重啟 ASN 前要告訴本人，因為名單只在記憶體，ASN 重啟就沒了
 pub fn pending_count() -> usize {
     pending_of(&STASH)
@@ -328,6 +346,24 @@ mod tests {
         assert!(r2.is_ok());
         assert_eq!(calls, ["名單", "核對", "停", "起", "接回甲、乙"], "用存下的名單接回");
         assert!(stash.get().is_empty(), "接回之後清掉，不重複接回");
+    }
+
+    /// 西川複看 B1：只是用終端服務、沒有東西等著接回、沒有失敗記號（最後一位夥伴關掉後服務被正常收掉）→ 不列佔位；有名單或失敗記號才列
+    #[test]
+    fn _1860f_佔位只在有東西等著接回或上次失敗時才列() {
+        assert!(!placeholder_wanted(true, 0, false), "正常收掉空服務：不列佔位");
+        assert!(placeholder_wanted(true, 2, false), "有名單等著接回");
+        assert!(placeholder_wanted(true, 0, true), "上次重啟失敗");
+        assert!(!placeholder_wanted(false, 2, true), "沒開終端服務模式一律不列");
+    }
+
+    /// 西川複看 B1：失敗記號由重啟結果決定（起不來＝真，下次成功清掉）；指令端要接得上
+    #[test]
+    fn _1860f_失敗記號_起不來設真_成功清掉() {
+        // 記號是全域的，別的測試也會跑重啟；這裡不碰全域值，只驗指令端有把重啟結果寫進去
+        let term = include_str!("term.rs");
+        let f = term.split("fn restart_mux_with").nth(1).unwrap().split("fn restart_mux_handle").next().unwrap();
+        assert!(f.contains("set_last_failed(true)") && f.contains("set_last_failed(false)"), "重啟結果要寫進失敗記號");
     }
 
     /// 一審複看 1：起不來之後還有幾位沒接回，要能讓畫面知道（重啟 ASN 前的確認框用）；接回後歸零
