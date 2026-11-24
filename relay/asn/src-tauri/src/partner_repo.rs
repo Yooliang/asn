@@ -109,18 +109,50 @@ fn local_target_ok(p: &str) -> bool {
     !(two_seps || s.starts_with("\\??\\"))
 }
 
-/// 正規化後的路徑若是 `\\?\UNC\…` 也不要
-fn canon_local(p: &Path) -> Option<PathBuf> {
-    let c = std::fs::canonicalize(p).ok()?;
-    if c.to_string_lossy().to_ascii_lowercase().starts_with("\\\\?\\unc\\") {
-        return None;
+/// 只在字面上消掉 `.`、`..`（不碰檔案系統、不跟隨任何連結）。`..` 退到根以上就回 None
+fn lexical(p: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut out: Vec<Component> = Vec::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => match out.last() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                _ => return None,
+            },
+            other => out.push(other),
+        }
     }
-    Some(c)
+    Some(out.iter().collect())
 }
 
-/// 是一般檔案（不是資料夾、不是連結）
+/// 是不是連結（symlink；Windows 上連 junction 等 reparse point 也算）。讀不到也當成是（保守）
+fn is_link(p: &Path) -> bool {
+    match std::fs::symlink_metadata(p) {
+        Ok(m) => {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if m.file_attributes() & 0x400 != 0 {
+                    return true;
+                }
+            }
+            m.file_type().is_symlink()
+        }
+        Err(_) => true,
+    }
+}
+
+/// 從這個路徑一路往上到根，每一層都不是連結（只跟本機、實體的路徑）
+fn no_links(p: &Path) -> bool {
+    p.ancestors().filter(|a| !a.as_os_str().is_empty() && a.parent().is_some()).all(|a| !is_link(a))
+}
+
+/// 是一般檔案：本身與每一層父資料夾都不是連結，而且是檔案
 fn plain_file(p: &Path) -> bool {
-    std::fs::symlink_metadata(p).map(|m| !m.file_type().is_symlink() && m.is_file()).unwrap_or(false)
+    no_links(p) && std::fs::symlink_metadata(p).map(|m| m.is_file()).unwrap_or(false)
 }
 
 /// 正規化後的 gitdir：必須在某個 repo 的 `.git/worktrees/<名>` 或 `.git/modules/<…>` 底下。
@@ -146,7 +178,10 @@ fn worktree_config_path(d: &Path, text: &str, read: &dyn Fn(&Path) -> Option<Str
         return None;
     }
     let raw = if Path::new(&target).is_absolute() { PathBuf::from(&target) } else { d.join(&target) };
-    let gitdir = canon_local(&raw)?;
+    let gitdir = lexical(&raw)?;
+    if !no_links(&gitdir) {
+        return None;
+    }
     let (git, in_modules) = git_dir_layout(&gitdir)?;
     let cd = gitdir.join("commondir");
     let common = if plain_file(&cd) {
@@ -157,7 +192,7 @@ fn worktree_config_path(d: &Path, text: &str, read: &dyn Fn(&Path) -> Option<Str
                     return None;
                 }
                 let raw = if Path::new(c).is_absolute() { PathBuf::from(c) } else { gitdir.join(c) };
-                let common = canon_local(&raw)?;
+                let common = lexical(&raw)?;
                 if common != git {
                     return None;
                 }
@@ -181,6 +216,9 @@ fn git_config_path(start: &Path, read: &dyn Fn(&Path) -> Option<String>) -> Opti
     for _ in 0..UP_MAX {
         let d = dir?;
         let dot = d.join(".git");
+        if dot.exists() && !no_links(&dot) {
+            return None;
+        }
         if dot.is_dir() {
             let cfg = dot.join("config");
             return plain_file(&cfg).then_some(cfg);
@@ -385,6 +423,29 @@ mod tests {
     }
 
     const CFG: &str = "[remote \"origin\"]\n\turl = git@github.com:Yooliang/asn.git\n";
+
+    #[test]
+    fn 路徑只在字面上消掉_點與點點_不碰檔案系統() {
+        let p = |s: &str| lexical(Path::new(s)).map(|x| x.to_string_lossy().replace('\\', "/"));
+        assert_eq!(p("/a/b/./c/../d").as_deref(), Some("/a/b/d"));
+        assert_eq!(p("a/./b/..").as_deref(), Some("a"));
+        assert_eq!(p("/a/../.."), None, "退到根以上就不要");
+        assert_eq!(p("../x"), None, "相對路徑一開頭就往上也不要");
+        // 不存在的路徑也照樣算得出來（證明沒去碰檔案系統）
+        assert_eq!(p("/沒有這個資料夾/x/../y").as_deref(), Some("/沒有這個資料夾/y"));
+    }
+
+    #[test]
+    fn gitdir_用點點繞出_git_底下_一律_none() {
+        let t = tempfile::tempdir().unwrap();
+        write(&t.path().join("main/.git/config"), CFG);
+        write(&t.path().join("other/config"), CFG);
+        // 字面上先進 .git/worktrees 再用 .. 繞到外面：正規化後不在 .git/worktrees 底下
+        write(&t.path().join("w/.git"), "gitdir: ../main/.git/worktrees/x/../../../other\n");
+        let (read, got) = recorded(&t.path().join("w"));
+        assert_eq!(got, None);
+        assert!(!read.iter().any(|p| p.ends_with("other/config")), "沒讀到外面的設定：{read:?}");
+    }
 
     #[test]
     fn gitdir_指到_repo_外_或_commondir_指到別的_git_一律_none_且不讀它的設定() {
