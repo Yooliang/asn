@@ -33,12 +33,29 @@ export const GUARD_STEPS =['標籤與版本檔', 'Play 版號計算', 'CHANGELOG
 // 連結只收本 repo 的 Actions 執行頁（run 或 job），不收查詢字串、片段與其他網域
 export const RUN_URL_RE = /^https:\/\/github\.com\/Yooliang\/asn\/actions\/runs\/[0-9]+(\/job\/[0-9]+)?$/
 
+// Play 兩條測試軌道的結果文字（內部測試必成功才會到這裡）。playAlpha：{ status: 'ok'|'failed', kind: 'permission'|'notfound'|'other' }。
+// 只用固定說明，不放 Google 的原始錯誤（留言在公開 issue）。沒給 playAlpha 就只講內部測試。
+const ALPHA_WHY = {
+  permission: ['服務帳戶沒有封閉測試的發布權限', 'Play Console 的「使用者和權限」，替服務帳戶打開「發布到測試軌道」'],
+  notfound: ['Play 上找不到封閉測試軌道', 'Play Console 的「測試」→「封閉測試」，確認軌道已建立'],
+  commit: ['封閉測試在提交時被擋（例如設定未完成或審核中）', 'Play Console 的「測試」→「封閉測試」確認狀態'],
+  other: ['封閉測試軌道設定沒成功（可能還在審核中或設定未完成）', 'Play Console 的「測試」→「封閉測試」確認狀態'],
+}
+export const alphaFailed = a => !!a && a.status === 'failed'
+export const playReady = a => {
+  if (alphaFailed(a)) {
+    const [why, where] = Object.hasOwn(ALPHA_WHY, a.kind) ? ALPHA_WHY[a.kind] : ALPHA_WHY.other
+    return `Play 內部測試已就緒；play-alpha 告警：封閉測試沒發成（內部測試已發出），原因是${why}，請擁有者到${where}處理後，把內部測試這一版推廣到封閉測試，或下次升版號重發`
+  }
+  return a && a.status === 'ok' ? 'Play 內部測試已就緒、封閉測試已就緒' : 'Play 內部測試已就緒'
+}
+
 export const autoEnabled = value => value === true || value === 'true'
 
 const names = list => list.map(j => JOB_NAME[j]).join('、')
 
 // jobs：這次 workflow 實際有的 job（預設全部）；只有電腦版與官網時不帶 Play 三個 job，文字就不提 Play
-export function notifyStatus({ guardResult, auto, results = {}, version, runUrl, jobUrls = {}, guardStep, jobs: jobList = JOBS } = {}) {
+export function notifyStatus({ guardResult, auto, results = {}, version, runUrl, jobUrls = {}, guardStep, jobs: jobList = JOBS, playAlpha } = {}) {
   const JOBS_IN = ALL_JOBS.filter(j => jobList.includes(j))
   // 只有 Linux 的 workflow（沒有電腦版 job）：文字說 Linux，不提電腦版與 Play
   const linuxOnly = JOBS_IN.includes('linux') && !JOBS_IN.includes('desktop')
@@ -77,8 +94,9 @@ export function notifyStatus({ guardResult, auto, results = {}, version, runUrl,
     if (cancelled.length) return mk('warning', `【發版中止】${head}run 被取消，已完成：${succeeded.length ? names(succeeded) : '無'}${unexplained.length ? oddNote : ''}`)
     if (unexplained.length) return mk('error', `【發版異常】${head}上游沒失敗、開關也沒關卻被略過：${names(unexplained)}`)
     if (linuxOnly) return mk('success', `【CI 完成】${head}Linux 未簽章安裝檔已就緒，尚未上線。CI 好了，14 天內要簽`)
-    if (playOnly) return mk('success', `【CI 完成】${head}Play internal 已就緒（已上傳內部測試軌），尚未對外發布`)
-    return mk('success', `【CI 完成】${head}${withPlay ? '未簽章安裝檔與 Play internal 已就緒' : '未簽章安裝檔已就緒'}，尚未上線。CI 好了，14 天內要簽`)
+    const warnAlpha = withPlay && alphaFailed(playAlpha)
+    if (playOnly) return mk(warnAlpha ? 'warning' : 'success', `${warnAlpha ? '【CI 部分完成】' : '【CI 完成】'}${head}${playReady(playAlpha)}，尚未對外發布`)
+    return mk(warnAlpha ? 'warning' : 'success', `${warnAlpha ? '【CI 部分完成】' : '【CI 完成】'}${head}${withPlay ? `未簽章安裝檔已就緒；${playReady(playAlpha)}` : '未簽章安裝檔已就緒'}，尚未上線。CI 好了，14 天內要簽`)
   }
 
   if (linuxOnly) {

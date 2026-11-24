@@ -20,6 +20,7 @@ export function statusFromNeeds(needs, { runUrl, guardStep } = {}) {
     version: n.guard?.outputs?.version,
     runUrl,
     guardStep,
+    playAlpha: n['android-upload']?.outputs?.alpha_status ? { status: n['android-upload'].outputs.alpha_status, kind: n['android-upload'].outputs.alpha_kind } : undefined,
   })
 }
 

@@ -323,6 +323,9 @@ jobs:
     runs-on: ubuntu-24.04
     environment: release
     timeout-minutes: 20
+    outputs:
+      alpha_status: ${{ steps.upload.outputs.alpha_status }}
+      alpha_kind: ${{ steps.upload.outputs.alpha_kind }}
     permissions:
       contents: read
     defaults:
@@ -369,7 +372,8 @@ jobs:
           echo "ASN_PLAY_SA_FILE=$f" >> "$GITHUB_ENV"
 
       # Play 上傳不冪等：失敗後重跑前先看 docs 的 2.6 辦法
-      - name: 上傳到 Play 內部測試
+      - name: 上傳到 Play 內部測試與封閉測試
+        id: upload
         working-directory: relay/asn
         env:
           VERSION_CODE: ${{ needs.guard.outputs.version_code }}
