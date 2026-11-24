@@ -29,6 +29,8 @@ export const LOG_KEEP_MIN = 50
 const byteLength = s => new TextEncoder().encode(s).length   // 中文一字 3 位元組，不能用字串長度
 export const VIEW_BASE = 200   // 畫面預設顯示最近幾列；往上載入更舊的之後，依載入範圍加寬
 const STATUS_POLL_MS = 15_000
+const STATUS_MIN_GAP_MS = 10_000   // 非強制的寄出狀態查詢，距上次完成不到這麼久就略過（#2161）
+const STATUS_FORCE_WHY = new Set(['startup', 'send', 'resume', 'force'])   // 這幾種原因不受最小間隔與「畫面看得到」限制；force 連年齡分級也不管
 const HISTORY_MIN_GAP_MS = 20_000   // 同一位夥伴的往來記錄，兩次向後台取的最短間隔（強制重取除外）
 const STEP_MS = 60_000              // 收信流程裡任何一個「等外面回應」的步驟最久等多久；超過就放棄這一步，不讓 pulling 旗標永遠卡住、定時收信整個停擺
 
@@ -78,13 +80,16 @@ export const restoredFriendOf = ({ model, device, kind, ...rest }) => ({ ...rest
 export const keepsOfflineForWake = f => Boolean(f?.partnerId) && f.archived !== true && WAKE_ENGINES.includes(partnerEngine(f))
 
 export class AsnCore {
-  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], backlogAfterMs = 0, stepMs = STEP_MS }) {
+  #lastStatusAt = null   // 上次寄出狀態查詢完成的時間（this.now()）
+  #polledAt = new Map()  // 訊息 id → 上次被查的時間（年齡分級用）
+  #onVisible = null
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, isActive = () => typeof document === 'undefined' || document.visibilityState !== 'hidden', now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], backlogAfterMs = 0, stepMs = STEP_MS }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
     const guarded = { ...transport }
     for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'partnerAvatar', 'history', 'readSync']) {
       if (typeof transport[k] === 'function') guarded[k] = (...a) => withTimeout(transport[k](...a), k === 'inbox' || k === 'ack' ? stepMs * 2 : stepMs, k)
     }
-    Object.assign(this, { backlogAfterMs, aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
+    Object.assign(this, { backlogAfterMs, aliases: new Set(aliases), transport: guarded, store, selfNode, windowName, isChatVisible, isActive, now, log, pollMs, rosterMs, localMs, statusPollMs, stepMs })
     this.localSeen = new Set()   // 本機現讀曾經看到過的視窗名（之後不見＝剛關掉，見 overlayLocal）
     this.cwdOf = new Map()   // 好友 id → 資料夾標籤（後台名單給的），本機現讀狀態時用來重組個人訊息
     // 門鈴響、回到前景時立刻重拉名單；1 秒內多次合併成一次
@@ -141,7 +146,14 @@ export class AsnCore {
     if (typeof this.transport.localWindows === 'function' && this.localMs > 0) this.timers.push(setInterval(() => void this.refreshLocal(), this.localMs))
     this.timers.push(setInterval(() => void this.pull('poll'), this.pollMs))
     this.timers.push(setInterval(() => void this.refreshSentStatus('poll'), this.statusPollMs))
+    // 回到前景（分頁重新可見）補查一次
+    if (typeof document !== 'undefined' && typeof document.addEventListener === 'function' && !this.#onVisible) {
+      this.#onVisible = () => { if (document.visibilityState === 'visible') void this.resumeSentStatus() }
+      document.addEventListener('visibilitychange', this.#onVisible)
+    }
   }
+  /** 回到前景：強制補查一次寄出狀態（不受最小間隔限制） */
+  resumeSentStatus() { return this.refreshSentStatus('resume') }
   // 本機封存／取消封存：後台名單已經沒有這位（舊好友只剩本機存檔）、後台回找不到時用。只動標記，往來記錄不動；標記隨好友存檔留下
   setLocalArchived(friend, archived) {
     const f = this.friends.get(friend?.id)
@@ -160,7 +172,11 @@ export class AsnCore {
     this.emit('state')
     void this.refreshRoster()
   }
-  async stop() { this.timers.forEach(clearInterval); this.timers = []; await this.flush() }
+  async stop() {
+    this.timers.forEach(clearInterval); this.timers = []
+    if (this.#onVisible && typeof document !== 'undefined') { document.removeEventListener('visibilitychange', this.#onVisible); this.#onVisible = null }
+    await this.flush()
+  }
 
   // ---------- 名單 ----------
   async refreshRoster() {
@@ -621,17 +637,23 @@ export class AsnCore {
   /** 批次查自己寄出訊息的 delivered_at／acked_at／replied_at */
   async refreshSentStatus(why = 'poll') {
     if (typeof this.transport.sentStatus !== 'function') return
+    if (!STATUS_FORCE_WHY.has(why)) {
+      if (!this.isActive()) return   // 分頁隱藏、視窗最小化、手機在背景：不查，回前景時補打
+      if (this.#lastStatusAt !== null && this.now() - this.#lastStatusAt < STATUS_MIN_GAP_MS) return
+    }
     if (this.statusPulling) { this.statusAgain = true; return }
     this.statusPulling = true
     try {
       do {
         this.statusAgain = false
-        const ids = collectPollIds(this.logs, this.now())
+        const ids = collectPollIds(this.logs, this.now(), why === 'force' ? new Map() : this.#polledAt)
         if (!ids.length) break
         let changed = false
         for (const batch of chunkIds(ids)) {
           const rows = await this.transport.sentStatus(batch)
           if (!Array.isArray(rows)) continue
+          const at = this.now()
+          for (const id of batch) this.#polledAt.set(id, at)
           for (const row of rows) {
             for (const lg of this.logs.values()) {
               for (const m of lg) if (applyStatusRow(m, row)) changed = true
@@ -644,7 +666,14 @@ export class AsnCore {
         }
       } while (this.statusAgain)
     } catch (e) { this.log(`sent_status failed (${why}): ${e.message}`) }
-    finally { this.statusPulling = false }
+    finally {
+      this.statusPulling = false
+      this.#lastStatusAt = this.now()
+      // 修剪：logs 裡已不存在的 id 不留
+      const alive = new Set()
+      for (const lg of this.logs.values()) for (const m of lg) if (m?.id) alive.add(m.id)
+      for (const id of [...this.#polledAt.keys()]) if (!alive.has(id)) this.#polledAt.delete(id)
+    }
   }
 
   // ---------- 讀取 ----------
