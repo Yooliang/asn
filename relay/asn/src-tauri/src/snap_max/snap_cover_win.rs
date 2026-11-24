@@ -4,12 +4,14 @@
 //! 在最上層視窗底下、網頁上方放一扇和放大鈕同樣大小的同行程子視窗，它對 `WM_NCHITTEST` 回 `HTTRANSPARENT`，
 //! 讓命中測試越過另一個行程的 WebView2 子視窗、落回最上層視窗（回 `HTMAXBUTTON` 的是 `snap_win.rs`）。
 use super::snap_win;
+use super::snap_hit::exclude_resize_border;
 use super::{clamp_to_client, PxRect};
 use std::ptr::{null, null_mut};
 use std::sync::Once;
 use tauri::AppHandle;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -33,7 +35,8 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
     let parent = parent as HWND;
     unsafe {
         let existing = find(parent);
-        let Some(rect) = rect.and_then(|r| client_clamped(parent, r)) else {
+        let raw = rect.and_then(|r| client_clamped(parent, r));
+        let Some((raw, rect)) = raw.and_then(|raw| hit_rect(parent, raw).map(|e| (raw, e))) else {
             if !existing.is_null() {
                 DestroyWindow(existing);
                 RemoveWindowSubclass(parent, Some(parent_proc), SUBCLASS_ID);
@@ -43,7 +46,7 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
         };
         if !existing.is_null() {
             SetWindowPos(existing, HWND_TOP, rect.left, rect.top, rect.width(), rect.height(), SWP_NOACTIVATE);
-            snap_win::set_rect(parent, rect);
+            snap_win::set_rect(parent, raw, rect);
             return;
         }
         register_class();
@@ -66,7 +69,7 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
         }
         SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         SetWindowSubclass(parent, Some(parent_proc), SUBCLASS_ID, 0);
-        snap_win::install(parent, app, label, rect);
+        snap_win::install(parent, app, label, raw, rect);
     }
 }
 
@@ -80,6 +83,39 @@ unsafe fn client_clamped(parent: HWND, r: PxRect) -> Option<PxRect> {
         return None;
     }
     clamp_to_client(r, c.right - c.left, c.bottom - c.top)
+}
+
+/// 上緣調整大小的邊框高度（實體像素）：SM_CYSIZEFRAME + SM_CXPADDEDBORDER，依最上層視窗所在的 DPI
+unsafe fn resize_border_px(parent: HWND) -> i32 {
+    let dpi = GetDpiForWindow(parent);
+    if dpi == 0 {
+        return 0;
+    }
+    GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi).max(0) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi).max(0)
+}
+
+/// 命中矩形＝原矩形扣掉上緣調整大小的那一條（最大化時不扣）。
+/// 透明蓋板、網頁容器、最上層視窗三處都用它，被扣掉的那條才會落到 tauri 的拖邊縮放視窗
+/// （`TAURI_DRAG_RESIZE_BORDERS`，上緣回 HTTOP，邊框高度是 SM_CYFRAME，比這裡扣的小或相等）。
+unsafe fn hit_rect(parent: HWND, raw: PxRect) -> Option<PxRect> {
+    exclude_resize_border(raw, IsZoomed(parent) != 0, resize_border_px(parent))
+}
+
+/// 最大化／還原或改大小之後，用記下的原矩形重算命中矩形並調整蓋板；算不出來（鈕被擠沒了）就縮成空的
+unsafe fn relayout(parent: HWND, child: HWND) {
+    let Some(raw) = snap_win::raw_of(parent) else { return };
+    let eff = client_clamped(parent, raw).and_then(|c| hit_rect(parent, c).map(|e| (c, e)));
+    let flags = SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS;
+    match eff {
+        Some((c, e)) => {
+            SetWindowPos(child, HWND_TOP, e.left, e.top, e.width(), e.height(), flags);
+            snap_win::set_rect(parent, c, e);
+        }
+        None => {
+            SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, flags);
+            snap_win::set_rect(parent, raw, PxRect { left: 0, top: 0, right: 0, bottom: 0 });
+        }
+    }
 }
 
 fn register_class() {
@@ -102,7 +138,7 @@ unsafe extern "system" fn parent_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             let r = DefSubclassProc(hwnd, msg, wparam, lparam);
             let child = find(hwnd);
             if !child.is_null() {
-                SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                relayout(hwnd, child);
             }
             r
         }
