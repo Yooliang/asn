@@ -14,7 +14,7 @@ import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQ
 import { FILE_ACCEPT, expiryMs, formatBytes, photoExpired, photoTitle, queueStepText, queueSummary, sendInOrder, shownPhotos } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { createZoom, zoomStyle } from './photo-zoom.mjs'
-import { keyDir, locate, navState, photoSeq, stepIndex, swipeDir } from './photo-nav.mjs'
+import { fetchLogLine, keyDir, locate, navState, photoSeq, stepIndex, stepLogLine, swipeDir } from './photo-nav.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
 import { TermView } from './term-view.mjs'
@@ -540,11 +540,16 @@ export const ChatPane = {
       viewer.value = { id: p.id, name: p.name, saved: false, title: photoTitle(p), thumb: p.thumb, src: seen || '', msg: seen ? '' : '載入中…', busy: false, n: 1, total: 1, who: '', at: '' }
       syncNav()
       if (seen) return
+      const t0 = Date.now()
       try {
         const r = await props.photoApi.fetch(p.id, expiryMs(p))
+        console.info(fetchLogLine(true, Date.now() - t0))
         recentShown.set(p.id, r.data_url)
         if (viewer.value && viewer.value.id === p.id) { viewer.value.src = r.data_url; viewer.value.msg = '' }
-      } catch (e) { if (viewer.value && viewer.value.id === p.id) viewer.value.msg = plainMessage(e) }
+      } catch (e) {
+        console.info(fetchLogLine(false, Date.now() - t0, e))
+        if (viewer.value && viewer.value.id === p.id) viewer.value.msg = plainMessage(e)
+      }
     }
     // 同一個對話（或群組）的照片串（#1728）：只看這個畫面的 log，依信件時間排；看圖開著時新訊息進來也會跟著更新張數
     const seqNow = () => photoSeq(props.log, { who: m => (m.k === 'me' ? plain(props.me.nick) : plain(m.who || props.friend.nick)), now: Date.now() })
@@ -557,10 +562,11 @@ export const ChatPane = {
     }
     watch(() => props.log.length, syncNav)
     // 切到上一張／下一張：到頭、到尾就停；每次都重新開圖，縮放自然歸零
-    async function stepViewer(dir) {
+    async function stepViewer(dir, via = '箭頭') {
       const v = viewer.value; if (!v) return
       const seq = seqNow(), i = locate(seq, v.id)
       const j = stepIndex(i, dir, seq.length)
+      console.info(stepLogLine(via, dir, i, j, seq.length))
       if (j < 0 || j === i) return
       await openPhoto(seq[j].p)
     }
@@ -577,7 +583,7 @@ export const ChatPane = {
       swipe = null
       if (w.multi) return
       const dir = swipeDir(e.clientX - w.x, e.clientY - w.y, Math.max(w.s, zoom.s))
-      if (dir) void stepViewer(dir)
+      if (dir) void stepViewer(dir, '滑動')
     }
     const swipeCancel = () => { swipe = null }
     async function saveViewer() {
@@ -740,7 +746,7 @@ export const ChatPane = {
       // 大圖開著才攔方向鍵（輸入框裡的方向鍵不攔）；關著時一律不碰
       if (viewer.value) {
         const dir = keyDir(e)
-        if (dir) { e.preventDefault(); void stepViewer(dir); return }
+        if (dir) { e.preventDefault(); void stepViewer(dir, '鍵盤'); return }
       }
       if (e.key !== 'Escape') return
       if (viewer.value) { closeViewer(); return }
