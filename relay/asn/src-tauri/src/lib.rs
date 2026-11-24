@@ -2377,9 +2377,12 @@ fn start_term_remote_poller(
                 term_remote::poll_once(relay.as_ref(), terms.as_ref(), &data_dir).await;
                 let _ = app.emit("term-req-update", term_remote::pending_views());
             }
+            // 有待處理請求才 2 秒輪詢，閒置 60 秒；新請求註冊時立刻叫醒（#2161 3c）
+            let gap = term_remote::next_poll_gap(term_remote::has_pending());
             tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_secs(term_remote::POLL_INTERVAL_SECS)) => {}
+                _ = tokio::time::sleep(gap) => {}
                 _ = wake.notified() => {}
+                _ = term_remote::new_req_notify().notified() => {}
             }
         }
     });
