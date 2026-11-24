@@ -27,7 +27,14 @@ const OPTION_WINDOW: usize = 8;
 const PROCEED: &str = "Do you want to proceed?";
 const REDACTED: &str = "（這一行可能含密碼或憑證，已省略）";
 /// 含這些字（不分大小寫）的行整行省略
-const SECRET_WORDS: [&str; 10] = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "sk-", "-----begin"];
+const SECRET_WORDS: [&str; 13] = ["password", "passwd", "secret", "token", "api_key", "apikey", "authorization", "bearer ", "sk-", "-----begin", "ghp_", "gho_", "github_pat_"];
+/// 含這些字（分大小寫）的行整行省略；後面要接像金鑰的字元才算，避免一般英文字誤擋
+/// （字首, 後面至少幾個 `[A-Za-z0-9_-]`）
+const SECRET_PREFIXES: [(&str, usize); 3] = [("AKIA", 12), ("AIza", 20), ("eyJ", 10)];
+/// 大寫名稱含這些字、後面接 `=值` 的整行省略（`DB_PASS=…`、`MY_KEY=…`）
+const SECRET_ENV_PARTS: [&str; 8] = ["KEY", "TOKEN", "SECRET", "PASS", "PWD", "CRED", "AUTH", "PRIVATE"];
+/// 連續這麼長的 hex 或 base64／base64url 字串，視為金鑰
+const LONG_RUN: usize = 32;
 
 /// 寄給那個夥伴本人的話（主代理不知道自己的子代理卡在確認框，因為確認框只顯示在終端上給人按）
 pub(crate) const PARTNER_TEXT: &str = "你的視窗卡在確認框超過 5 分鐘，可能是子代理在等權限；可以停掉它，換只用編輯工具的方式重做。";
@@ -51,11 +58,76 @@ fn is_option_line(line: &str) -> bool {
     digits > 0 && digits <= 2 && h[digits..].starts_with(". ") && !h[digits + 2..].trim().is_empty()
 }
 
-fn redact(line: &str) -> String {
+/// 選項行上有 ❯ 游標（`❯ 1. Yes`）。`>` 不算：那是 markdown 引用
+fn has_cursor(line: &str) -> bool {
+    let h = line_head(line);
+    (h.starts_with('❯') || h.starts_with('›')) && is_option_line(line)
+}
+
+fn is_key_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_' || c == '-'
+}
+
+/// 字首之後接著至少 `min` 個金鑰字元
+fn has_prefixed_key(line: &str, prefix: &str, min: usize) -> bool {
+    line.match_indices(prefix).any(|(i, _)| line[i + prefix.len()..].chars().take_while(|c| is_key_char(*c)).count() >= min)
+}
+
+/// `xoxb-`、`xoxp-` 之類（Slack）
+fn has_slack_token(line: &str) -> bool {
+    line.match_indices("xox").any(|(i, _)| {
+        let mut it = line[i + 3..].chars();
+        matches!((it.next(), it.next()), (Some(a), Some('-')) if a.is_ascii_alphabetic())
+    })
+}
+
+/// `://帳號:密碼@主機`
+fn has_url_credentials(line: &str) -> bool {
+    line.match_indices("://").any(|(i, _)| {
+        let rest = &line[i + 3..];
+        let authority = rest.split(|c: char| c == '/' || c.is_whitespace()).next().unwrap_or("");
+        authority.rfind('@').is_some_and(|at| authority[..at].contains(':'))
+    })
+}
+
+/// `DB_PASS=值`：全大寫的名稱含 KEY／TOKEN／SECRET／PASS 等，等號後面有值
+fn has_secret_assignment(line: &str) -> bool {
+    line.split_whitespace().any(|tok| {
+        let Some((name, value)) = tok.split_once('=') else { return false };
+        let name = name.trim_start_matches(|c: char| !c.is_ascii_alphanumeric());
+        let upper_name = !name.is_empty() && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+        upper_name && !value.is_empty() && SECRET_ENV_PARTS.iter().any(|p| name.contains(p))
+    })
+}
+
+/// 連續 32 字以上的 hex，或同時有大寫、小寫、數字的 base64／base64url 字串（只有小寫的長路徑、長單字不算）
+fn has_long_secret_run(line: &str) -> bool {
+    line.split(|c: char| !(c.is_ascii_alphanumeric() || "+/=_-".contains(c))).any(|run| {
+        let run = run.trim_matches(|c: char| "=/-_+".contains(c));
+        if run.chars().count() < LONG_RUN {
+            return false;
+        }
+        let hex = run.chars().all(|c| c.is_ascii_hexdigit());
+        let mixed = run.chars().any(|c| c.is_ascii_uppercase()) && run.chars().any(|c| c.is_ascii_lowercase()) && run.chars().any(|c| c.is_ascii_digit());
+        hex || mixed
+    })
+}
+
+/// 這一行是不是可能含密碼、憑證（寧可多擋，不可漏）
+fn is_secret_line(line: &str) -> bool {
     let low = line.to_lowercase();
-    if SECRET_WORDS.iter().any(|w| low.contains(w)) {
-        return REDACTED.to_string();
-    }
+    let dashed = low.replace('-', "_");
+    SECRET_WORDS.iter().any(|w| low.contains(w))
+        // `api-key`、`api_key`、`apikey` 不分連字號與底線
+        || dashed.contains("api_key")
+        || SECRET_PREFIXES.iter().any(|(p, n)| has_prefixed_key(line, p, *n))
+        || has_slack_token(line)
+        || has_url_credentials(line)
+        || has_secret_assignment(line)
+        || has_long_secret_run(line)
+}
+
+fn shorten(line: &str) -> String {
     if line.chars().count() > LINE_MAX_CHARS {
         let mut s: String = line.chars().take(LINE_MAX_CHARS).collect();
         s.push('…');
@@ -76,13 +148,25 @@ fn analyze(screen: &str) -> Option<(String, String)> {
     let lines: Vec<&str> = screen.lines().collect();
     // 取最後一個（畫面最底下的才是現在的框）
     let idx = lines.iter().rposition(|l| line_head(l).starts_with(PROCEED))?;
-    let options = lines[idx + 1..].iter().take(OPTION_WINDOW).filter(|l| is_option_line(l)).count();
-    if options < MIN_OPTIONS {
+    let below = &lines[idx + 1..];
+    let options = below.iter().take(OPTION_WINDOW).filter(|l| is_option_line(l)).count();
+    // 真的確認框，選項上一定有 ❯ 游標；AI 回覆裡縮排寫的編號清單沒有（#2264 一審 3）
+    if options < MIN_OPTIONS || !below.iter().take(OPTION_WINDOW).any(|l| has_cursor(l)) {
         return None;
     }
     let start = idx.saturating_sub(EXCERPT_MAX_LINES - 6);
     let end = lines.len().min(start + EXCERPT_MAX_LINES);
-    let mut kept: Vec<String> = lines[start..end].iter().map(|l| redact(super::claude_screen::strip_unsafe(l).trim_end())).collect();
+    let mut kept: Vec<String> = Vec::new();
+    // 命中機密的那一行，下一行也省略（長指令折行，值會跑到下一行）；提示字樣與選項不省略，使用者要看得到
+    let mut prev_secret = false;
+    for l in &lines[start..end] {
+        let clean = super::claude_screen::strip_unsafe(l);
+        let clean = clean.trim_end();
+        let structural = line_head(clean).starts_with(PROCEED) || is_option_line(clean);
+        let secret = is_secret_line(clean);
+        kept.push(if secret || (prev_secret && !structural) { REDACTED.to_string() } else { shorten(clean) });
+        prev_secret = secret;
+    }
     while kept.last().is_some_and(|l| l.trim().is_empty()) {
         kept.pop();
     }
@@ -276,6 +360,104 @@ mod tests {
         assert!(!e.contains("abc.def") && !e.contains("API_KEY"), "{e}");
         assert!(e.contains(REDACTED));
         assert!(e.contains("Do you want to proceed?") && e.contains("2. No"), "上限內留下提示字樣與選項：{e}");
+    }
+
+    fn with_line(line: &str) -> String {
+        format!("──────\n {line}\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n")
+    }
+
+    #[test]
+    fn 各種金鑰樣式整行省略() {
+        let b64 = "Zm9vYmFyQmF6MTIzNDU2Nzg5MEFiQ2RFZkdoSWo";
+        let hex = "0123456789abcdef0123456789abcdef";
+        let bad: Vec<String> = vec![
+            "echo ghp_abcdefghijklmnopqrstuvwxyz0123".into(),
+            "echo gho_abcdefghijklmnopqrstuvwxyz0123".into(),
+            "echo github_pat_11ABCDEFG0abcdef".into(),
+            "aws --key AKIAIOSFODNN7EXAMPLE".into(),
+            "curl 'https://x/?key=AIzaSyA-abcdefghijklmnopqrstuvwxyz'".into(),
+            "echo xoxb-1234-5678-abcdef".into(),
+            "echo xoxp-1234".into(),
+            "echo eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9".into(),
+            "curl -H 'api-key: abc'".into(),
+            "curl -H 'X-API-KEY: abc'".into(),
+            "curl --apikey abc".into(),
+            "git clone https://user:pw1234@github.com/a/b".into(),
+            "DB_PASS=hunter2 ./run".into(),
+            "export MY_KEY=abc".into(),
+            "GH_TOKEN=abc gh pr list".into(),
+            "APP_SECRET=abc node a.js".into(),
+            format!("echo {hex}"),
+            format!("echo {b64}"),
+        ];
+        for line in &bad {
+            let e = excerpt_of(&with_line(line)).unwrap();
+            assert!(e.contains(REDACTED), "要省略：{line} → {e}");
+            assert!(e.contains("Do you want to proceed?") && e.contains("2. No"), "提示字樣與選項要留著：{e}");
+        }
+    }
+
+    #[test]
+    fn 一般指令不被誤擋() {
+        let good = [
+            "docker compose config -q 2>&1 | head -5",
+            "git clone https://github.com/a/b",
+            "git clone git@github.com:a/b.git",
+            "curl https://example.com/api/v1/items?page=2",
+            "cd /home/user/projects/some-very-long-directory-name/sub-directory-name && ls",
+            "echo xoxo hello",
+            "AKIA",
+            "PORT=8080 node server.js",
+            "LOAN_WATCH_STATE_PATH=/app/data/state.json",
+            "pnpm exec vue-tsc -b",
+        ];
+        for line in good {
+            let e = excerpt_of(&with_line(line)).unwrap();
+            assert!(!e.contains(REDACTED), "不該省略：{line} → {e}");
+            assert!(e.contains(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn 命中那一行的下一行也省略_折行的值不外洩() {
+        let s = "──────\n curl -H 'Authorization: Bearer\n   abc.def.ghi' https://x\n 這行不相關\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n";
+        let e = excerpt_of(s).unwrap();
+        assert!(!e.contains("abc.def.ghi"), "折到下一行的值要省略：{e}");
+        assert!(e.contains("這行不相關"), "只多省略一行：{e}");
+        // 命中的行緊貼著提示字樣時，提示字樣與選項仍留著
+        let t = "──────\n export API_KEY=1 \\\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n";
+        let e = excerpt_of(t).unwrap();
+        assert!(e.contains("Do you want to proceed?") && e.contains("1. Yes") && e.contains("2. No"), "{e}");
+    }
+
+    #[test]
+    fn ai_回覆裡縮排的提示字樣加編號清單_沒有游標不是確認框() {
+        let mut w = StuckWatch::default();
+        for s in [
+            // 兩格縮排的 markdown 清單（前面沒有 ●）
+            "  Do you want to proceed?\n  1. 好\n  2. 不好\n",
+            // 程式碼區塊裡
+            "```\nDo you want to proceed?\n1. Yes\n2. No\n```\n",
+            // markdown 引用的 > 不算游標
+            "Do you want to proceed?\n> 1. Yes\n  2. No\n",
+        ] {
+            assert_eq!(excerpt_of(s), None, "{s}");
+            watch_once(&mut w, s, T);
+            assert_eq!(watch_once(&mut w, s, T + 10 * STUCK_AFTER_MS), None, "{s}");
+        }
+    }
+
+    #[test]
+    fn 真的權限框畫面照樣判成確認框() {
+        macro_rules! fx {
+            ($n:literal) => {
+                (include_str!(concat!("../../tests/fixtures/term-screens/", $n, ".txt")).replace("\r\n", "\n"), $n)
+            };
+        }
+        for (text, name) in [fx!("claude-permission-bash"), fx!("claude-permission-long-bash"), fx!("claude-permission-scrolled-more-lines")] {
+            let e = excerpt_of(&text).unwrap_or_else(|| panic!("{name} 要判成確認框"));
+            assert!(e.contains("Do you want to proceed?"), "{name}");
+        }
     }
 
     #[test]
