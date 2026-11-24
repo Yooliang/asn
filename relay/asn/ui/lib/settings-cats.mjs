@@ -33,7 +33,7 @@ export const catByKey = key => { const k = normalizeCatKey(key); return SETTING_
 // 「外觀」分類裡的選項，照畫面上的順序（#1547：原「分頁與分組」的分頁依、分組依併進來）。
 // 用不到的選項依所選外觀整個藏起來（不是變灰）：現代沒有獨立工具列；LINE 固定頭像與底色、沒有左側頁籤欄。
 // 藏起來只是不顯示，存檔裡的值原封不動（只讀不寫），換回別的外觀還是原來的設定。
-export const LOOK_OPTIONS = ['skin', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim', 'ghRefs']
+export const LOOK_OPTIONS = ['skin', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim']
 export const LOOK_HIDDEN_BY_SKIN = Object.freeze({ modern: ['toolbar'], line: ['dpMode', 'bubble', 'tabDim'] })
 export const lookShows = (skin, key) => !(LOOK_HIDDEN_BY_SKIN[skin] ?? []).includes(key)
 export const lookOptions = skin => LOOK_OPTIONS.filter(k => lookShows(skin, k))

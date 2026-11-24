@@ -64,7 +64,7 @@ test('#1853 電腦設定頁的每個指令（SETTING_OPS）都在清單裡；清
 
 test('#1853 手機偏好的每個鍵（DEFAULT_PREFS／normalizePrefs）都在清單裡；預設值跟程式一致', () => {
   const keys = new Set([...Object.keys(DEFAULT_PREFS), ...Object.keys(normalizePrefs({}))])
-  assert.ok(keys.size >= 7, '手機偏好鍵取得太少')
+  assert.ok(keys.size >= 6, '手機偏好鍵取得太少')   // 6 個：震動×2、自動檢查、推播、外觀、釘選（#1776 拿掉 ghRefs）
   for (const k of keys) {
     const r = rowOf(`prefs.${k}`)
     assert.ok(r, `設定值清單缺手機偏好 prefs.${k}（新增手機偏好要一起登記）`)
