@@ -143,3 +143,27 @@ test('#2162⑦ session 在 sess.ready 為假且 sess.saved 是 undefined 時也�
   assert.equal(store.patches[0].session, null)
   assert.equal('session' in (await store.load()), false)
 })
+
+// 手機版（m.js）存 me：watch 回呼裡用 patchWithFallback 送欄位；lastChat 等欄位是 undefined 時，送出去的要是 null（後端才會刪欄）
+test('#2162⑧ 手機端存檔：lastChat 是 undefined 時，送出的 patch 那一欄是 null、檔案裡的欄位被刪', async () => {
+  const msrc = fs.readFileSync(new URL('../ui/m.js', import.meta.url), 'utf8')
+  const mm = /watch\(\[me, prefs, devPrefs, ownerName, lastChat[^\n]*?\], \(\) => (\{.*\}), \{ deep: true \}\)/.exec(msrc)
+  assert.ok(mm, '找不到手機版存 me 的 watch 回呼（原始碼改版要跟著改這支）')
+  assert.match(mm[1], /patchWithFallback\(meStore, f, /, '手機版存檔要走 patchWithFallback')
+  const file = { lastChat: 'peer-a', navTab: 'chats', futureField: 1 }
+  const store = memStore(file)
+  const ref = v => ({ value: v })
+  const scope = {
+    me: { nick: '手機', psm: '' }, prefs: {}, devPrefs: {}, ownerName: ref(''), lastChat: ref(undefined), nav: { tab: 'chats', chat: false },
+    PAGE_TAB: 'page', fourthSt: { fourth: null }, HOME_TAB: 'home', deviceFieldsToSave, patchWithFallback, meStore: store, saved: file,
+  }
+  const names = Object.keys(scope)
+  new Function(...names, `return () => ${mm[1]}`)(...names.map(k => scope[k]))()
+  await settle()
+  assert.equal(store.patches.length, 1)
+  assert.equal(store.patches[0].lastChat, null, '要明確送 null（後端刪欄），不能整欄沒送')
+  assert.equal('lastChat' in store.patches[0], true)
+  const back = await store.load()
+  assert.equal('lastChat' in back, false)
+  assert.equal(back.futureField, 1, '別的欄位照舊')
+})

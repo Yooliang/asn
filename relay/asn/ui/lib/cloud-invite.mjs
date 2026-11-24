@@ -3,7 +3,7 @@
 // 這個檔在 node 也要能載入（測試），所以 Vue 與 Tauri 只在元件 setup 裡才取用。
 //
 // 金鑰規矩：新金鑰只存在這個元件的記憶體（created.key），只顯示一次——按「完成」、換到別的設定分類、關掉視窗都會丟掉；
-// 不寫 localStorage、不寫檔、不送進任何記錄。給代理的說明（created.invite）不含金鑰，可以放心貼給代理。
+// 不寫本機偏好、不寫檔、不送進任何記錄。給代理的說明（created.invite）不含金鑰，可以放心貼給代理。
 import { authApi, cloudApi } from './tauri.mjs'
 import { UI_KIT } from './ui-kit.mjs'
 

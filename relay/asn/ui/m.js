@@ -2,6 +2,7 @@
 // 電腦才有的功能（內建收發室、開 Claude 視窗、密碼小幫手、用量、系統匣、多視窗）手機沒有，這個檔案也不叫它們。
 // 打開 App 才收信：前景時照電腦版的節奏輪詢，加上門鈴一響就拉；回到前景時立刻拉一次（推播留給第二期）。
 import { AsnCore } from './lib/core.mjs'
+import { getLocal } from './lib/local-prefs.mjs'
 import { plainMessage } from './lib/plain-errors.mjs'
 import { patchWithFallback } from './lib/settings-save.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
@@ -198,7 +199,7 @@ const showToast = (text, ms = ACCT_TOAST_MS) => { if (!text) return; toast.value
 // 自動更新（自行安裝版才有；Rust 端與外殼都沒編進 Google Play 版）。測試用的清單網址只收 127.0.0.1（Rust 端再擋一次）
 const upd = reactive(initialUpdate())
 const ownerName = ref('')   // 帳號層的名字（租戶稱呼）
-const updTestUrl = (() => { try { return localStorage.getItem('asnUpdateTestUrl') || null } catch { return null } })()
+const updTestUrl = (() => getLocal('asnUpdateTestUrl') || null)()
 const updArgs = () => (updTestUrl ? { url: updTestUrl } : {})
 async function checkUpdate(manual = false) {
   if (!upd.enabled || upd.checking || upd.phase === 'downloading') return
