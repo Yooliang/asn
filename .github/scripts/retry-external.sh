@@ -14,7 +14,7 @@ if [ "${1:-}" = "--before" ]; then before="$2"; shift 2; fi
 # 429（Too Many Requests，例如 Gradle 抓 repo.maven.apache.org 被限流）跟 5xx 一樣是對方的問題，要退避重試；其他 4xx（404、401、403…）不重試。
 # 只認「帶狀態碼」的 429：單獨一句 Too Many Requests 不算（cargo、Gradle 的單元測試也包在這支裡，有些測試拿這句當輸入，真的失敗時不該被多跑兩輪、再寫成外部服務）
 # 這一行由 tests/retry_external.test.mjs 讀出來，拿真實 log 的寫法逐條比對（會重試的、不會重試的都有）
-pattern='HTTP[/ ][0-9.]* (429|5[0-9][0-9])|returned error: (429|5[0-9][0-9])|response code: (429|5[0-9][0-9])|status(: | code )(429|5[0-9][0-9])|\b50[0234]\b.*(Bad Gateway|Gateway|Unavailable|Internal Server Error)|Gateway Time-?out|Service Unavailable|(operation|connection|request|connect|read) timed out|Timeout was reached|connection (reset|refused|closed)|error sending request|伺服器回 (429|5[0-9][0-9])|連不上或逾時|下載中斷'
+pattern='HTTP[/ ][0-9.]* (429|5[0-9][0-9])|returned error: (429|5[0-9][0-9])|response code: (429|5[0-9][0-9])|status(: | code )(429|5[0-9][0-9])|\b50[0234]\b.*(Bad Gateway|Gateway|Unavailable|Internal Server Error)|Gateway Time-?out|Service Unavailable|(operation|connection|request|connect|read) timed out|Timeout was reached|connection (reset|refused|closed)|error sending request|伺服器回 (429|5[0-9][0-9])|下載失敗 (429|5[0-9][0-9])|連不上或逾時|下載中斷'
 
 log="$(mktemp)"
 delays=(15 45)
