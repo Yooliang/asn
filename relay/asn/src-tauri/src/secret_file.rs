@@ -809,7 +809,7 @@ mod tests {
                 continue;
             }
             let text = std::fs::read_to_string(&p).unwrap();
-            let body = text.split("#[cfg(test)]").next().unwrap();
+            let body = &crate::settings::src_scan::prod_source(&text);
             let name = rel.rsplit('/').next().unwrap();
             let no_anon = body.replace("anon.key", "");
             if !key_owners.contains(&name) {

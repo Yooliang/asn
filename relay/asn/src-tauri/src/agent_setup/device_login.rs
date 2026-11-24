@@ -584,7 +584,7 @@ mod tests {
     #[test]
     fn 守衛_輸出網址代碼都不進_log() {
         let src = include_str!("device_login.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         let logs: Vec<&str> = body.lines().filter(|l| l.contains("elog!(")).collect();
         assert_eq!(logs.len(), 1, "只有一行記行數：{logs:?}");
         assert!(logs[0].contains("{lines}") && !logs[0].contains("raw") && !logs[0].contains("clean") && !logs[0].contains("url") && !logs[0].contains("code"), "{}", logs[0]);

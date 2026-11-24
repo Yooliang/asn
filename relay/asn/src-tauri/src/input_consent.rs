@@ -147,7 +147,7 @@ mod tests {
             assert!(!allowed(&r), "{r:?}");
         }
         let src = include_str!("input_consent.rs");
-        let code = src.split("#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         assert!(!code.contains("OkCancelCustom"), "兩顆按鈕的框第一顆會是預設焦點");
         assert!(!code.contains(".show(move"), "要看按了哪一顆，不能只看 true／false");
     }

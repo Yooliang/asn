@@ -4164,7 +4164,7 @@ mod remote_guard_tests {
     #[test]
     fn 守門_外來訊息的送鍵只有兩個本人按下的入口會呼叫_白名單以外的檔案都不准出現() {
         let src = include_str!("term.rs").replace("\r\n", "\n");
-        let prod = src.split("mod remote_guard_tests").next().unwrap();
+        let prod = crate::settings::src_scan::prod_source(&src);
         // held_send：各在 permission_answer_with 與 phone_answer_with 裡呼叫一次；held_send_with 只有 held_send 呼叫
         assert_eq!(prod.matches("self.held_send(").count(), 2, "兩個入口");
         assert_eq!(prod.matches("self.held_send_with(").count(), 1, "只有 held_send");
@@ -4833,7 +4833,7 @@ mod tests {
         assert!(lib.contains("terms.rename(&req.id, &req.title)"), "改名只把編號與標題交給 rename");
         assert!(lib.contains("term_remote::local_confirm_answer"), "代答經遠端確認模組的唯一入口");
         assert!(lib.contains("term_remote::local_confirm_send"), "代送文字經遠端確認模組的唯一入口");
-        let head = src.split("mod tests").next().unwrap();
+        let head = &crate::settings::src_scan::prod_source(&src);
         assert!(!head.contains(".answer("), "後端其他路徑不得呼叫 answer；UI 提示框是唯一入口");
         assert!(!head.contains(".confirm_send("), "後端其他路徑不得呼叫 confirm_send；UI 確認是唯一入口");
         let ans = head.split("pub fn answer(").nth(1).expect("找得到 answer");
@@ -6373,7 +6373,7 @@ mod tests {
         let src = include_str!("term.rs");
         let lib = include_str!("../lib.rs");
         assert!(lib.contains("term_adopt_unlock"));
-        assert!(!src.split("mod tests").next().unwrap().contains(".unlock_adopted("));
+        assert!(!crate::settings::src_scan::prod_source(&src).contains(".unlock_adopted("));
         assert!(!rig.store.exists(), "接手前不應有對照表檔");
         let id2 = rig.svc.adopt(100, 9, 1_000, &rig.config).unwrap();
         assert!(!rig.store.exists(), "接手不得寫對照表檔");

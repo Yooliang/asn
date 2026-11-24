@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn 守門_發起看畫面和打字都不跳本人確認_也沒有畫面命令能回報同意() {
         let me = include_str!("presence.rs");
-        let code = me.split("\nmod tests {").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&me);
         assert!(!code.contains(concat!("#[tauri", "::command]")), "這裡不能有畫面命令");
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         let mut callers = Vec::new();
@@ -91,7 +91,7 @@ mod tests {
                 continue;
             }
             let src = std::fs::read_to_string(&e).unwrap();
-            let code = src.split("\nmod tests {").next().unwrap();
+            let code = &crate::settings::src_scan::prod_source(&src);
             for (i, _) in code.match_indices(concat!("presence", "::confirm(")) {
                 let before = &code[..i];
                 let f = before.rfind("\nasync fn ").max(before.rfind("\nfn ")).expect("在函式裡");

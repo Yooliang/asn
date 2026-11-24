@@ -209,7 +209,7 @@ mod tests {
     #[test]
     fn 守門_這裡不寫日誌_不發事件_不碰檔案_不當掉() {
         let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("fp_scan.rs")).unwrap().replace("\r\n", "\n");
-        let code = src.split("\n#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         for bad in ["elog!", "olog!", concat!("print", "ln!"), concat!("db", "g!"), "log::", "tracing::", "emit(", "ui_log", "std::fs", "fs::", "File::", ".unwrap()", ".expect("] {
             assert!(!code.contains(bad), "fp_scan.rs 不能有：{bad}");
         }

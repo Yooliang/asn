@@ -221,7 +221,7 @@ fn 真的短路徑_存在的檔轉得出來_不存在的轉不出來() {
 #[test]
 fn 守門_不讀不寫使用者的_agy_設定檔() {
     let src = include_str!("../gemini_session.rs");
-    let body = src.split("#[cfg(test)]").next().unwrap_or("");
+    let body = &crate::settings::src_scan::prod_source(src);
     // 不再碰使用者家目錄：沒有 home 參數、不組 ~/.gemini 路徑
     assert!(!body.contains("join(\".gemini\")") && !body.contains("home_dir()"), "不能讀使用者的 agy 設定");
     assert!(!body.contains("(home: &Path") && !body.contains(" home: &Path"), "只有 asn_home，沒有使用者的 home");

@@ -296,17 +296,6 @@ mod tests {
 
     // 分類釘住（#2162 2b）：內嵌的「寫 tmp 再 rename」與非原子的 fs::write 都收進統一寫入後，每一處的 Opts。
     // (名稱, 原始碼, 呼叫開頭, 要用的類別, 這個開頭預期出現幾次)；同一個開頭的每一次出現都要用對類別。
-    /// 正式碼的結尾：「#[cfg(test)] 後面緊接 mod tests」那一個（單一函式上的 #[cfg(test)] 不算）；找不到就整份都是正式碼
-    fn prod_end(src: &str) -> usize {
-        src.match_indices("#[cfg(test)]").map(|(i, m)| (i, i + m.len())).find(|(_, e)| src[*e..].trim_start().starts_with("mod tests")).map_or(src.len(), |(i, _)| i)
-    }
-
-    /// 切點：行內測試模組（`#[cfg(test)]` 後接 `mod tests {`）之前才是正式碼；只有 `mod tests;`（宣告在別的檔）的檔案整份都是正式碼
-    fn prod_part(src: &str) -> &str {
-        let cut = src.match_indices("#[cfg(test)]").map(|(i, m)| (i, i + m.len())).find(|(_, e)| src[*e..].trim_start().starts_with("mod tests {")).map_or(src.len(), |(i, _)| i);
-        &src[..cut]
-    }
-
     // #2162 ⑤：bridge.json、launch-prefs.json 的寫入只准經共用層（持鎖、搬壞檔、版本、fsync）；這三個檔的正式碼不准自己寫檔
     #[test]
     fn 收發室設定與啟動偏好的正式碼不准自己寫檔() {
@@ -315,7 +304,7 @@ mod tests {
             ("launch/prefs.rs", include_str!("../launch/prefs.rs")),
             ("launch/cwds.rs", include_str!("../launch/cwds.rs")),
         ] {
-            let prod = prod_part(src);
+            let prod = &crate::settings::src_scan::prod_source(src);
             assert!(prod.len() > 1000, "{name}：切點切錯了，正式碼只剩 {} 位元組", prod.len());
             for bad in ["fs::write", "write_atomic", "atomic::write", "File::create", "OpenOptions"] {
                 assert!(!prod.contains(bad), "{name}：正式碼不准出現 {bad}（寫檔一律走 settings 的 update_in／try_update_in）");
@@ -362,11 +351,11 @@ mod tests {
             ("acct_remote outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE", 1),
         ];
         for (name, src, anchor, want, times) in sites {
-            let hits: Vec<_> = src.match_indices(anchor).map(|(i, _)| i).collect();
+            let prod_src = crate::settings::src_scan::prod_source(src);
+            let hits: Vec<_> = prod_src.match_indices(anchor).map(|(i, _)| i).collect();
             assert_eq!(hits.len(), times, "{name}：寫入呼叫（{anchor}）出現 {} 次，預期 {times} 次", hits.len());
             for i in hits {
-                assert!(i < prod_end(src), "{name}：寫入點落在測試區之後，禁用字掃描會掃不到它");
-                let line = src[i..].lines().next().unwrap();
+                let line = prod_src[i..].lines().next().unwrap();
                 assert!(line.contains(&format!("atomic::{want}")), "{name}：要用 {want}，實際：{line}");
             }
         }
@@ -399,7 +388,7 @@ mod tests {
             ("engines/mod", include_str!("../bridge/engines/mod.rs")),
             ("quota_core/merge", include_str!("../quota_core/merge.rs")),
         ] {
-            let prod = &src[..prod_end(src)];
+            let prod = &crate::settings::src_scan::prod_source(src);
             for bad in ["std::fs::write(", "fs::write(", ".tmp\""] {
                 assert!(!prod.contains(bad), "{name}：還有 {bad}");
             }

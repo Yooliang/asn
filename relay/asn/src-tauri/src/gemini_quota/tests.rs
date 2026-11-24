@@ -218,7 +218,7 @@ fn 回報列_最近讀到的是使用中_最多五個_過期的窗不送() {
 #[test]
 fn 守門_gemini_額度模組不碰憑證檔也不連網() {
     let src = include_str!("../gemini_quota.rs");
-    let body = src.split("#[cfg(test)]").next().unwrap_or("");
+    let body = &crate::settings::src_scan::prod_source(src);
     let banned = [
         ["oauth", "_creds"].concat(),
         ["access", "_token"].concat(),

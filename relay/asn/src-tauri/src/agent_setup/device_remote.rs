@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn 守門_這個檔不把網址或代碼寫進_log_或事件() {
         let src = include_str!("device_remote.rs");
-        let code = src.split("#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         for bad in ["elog!", "emit(", "println!", "dc.url().to_string", "dc.code().to_string"] {
             assert!(!code.contains(bad), "{bad}");
         }

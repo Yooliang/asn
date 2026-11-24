@@ -173,7 +173,7 @@ mod tests {
         assert!(with.contains("guard::note_exit(&gd, kind == ExitKind::Relaunch)"), "cleanup_with 要依種類決定寫不寫記號");
         let src = include_str!("relaunch.rs");
         let body = src.split("pub async fn relaunch_and_exit").nth(1).unwrap();
-        let body = body.split("#[cfg(test)]").next().unwrap();
+        let body = &crate::settings::src_scan::prod_source(&body);
         assert!(body.contains("cleanup_with(&h, crate::ExitKind::Relaunch)") && !body.contains("note_user_quit"), "重新啟動路徑不能寫 user-quit");
     }
 

@@ -1398,7 +1398,7 @@ mod tests {
     #[test]
     fn 事件記錄_不開別的程式_只讀六個欄位() {
         let all = include_str!("mux_watch.rs").replace("\r\n", "\n");
-        let src = &all[..all.find("#[cfg(test)]").unwrap()];
+        let src = &crate::settings::src_scan::prod_source(all);
         for bad in [concat!("Command", "::new"), concat!("power", "shell"), concat!("wevt", "util"), concat!("std::", "process")] {
             assert!(!src.contains(bad), "不能出現 {bad}");
         }
@@ -1414,7 +1414,7 @@ mod tests {
     #[test]
     fn 只用唯讀權限開控制代碼_不呼叫結束程序() {
         let all = include_str!("mux_watch.rs").replace("\r\n", "\n");
-        let src = &all[..all.find("#[cfg(test)]").unwrap()];
+        let src = &crate::settings::src_scan::prod_source(all);
         assert!(!src.contains(concat!("Terminate", "Process")));
         assert!(!src.contains(concat!("PROCESS_", "TERMINATE")));
         assert!(!src.contains(concat!("PROCESS_", "ALL_ACCESS")));

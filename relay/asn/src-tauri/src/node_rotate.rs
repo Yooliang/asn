@@ -821,7 +821,7 @@ mod tests {
     #[test]
     fn 原始碼的紀錄只有三句_不含金鑰與雜湊() {
         let src = include_str!("node_rotate.rs").replace("\r\n", "\n");
-        let body = src.split("#[cfg(test)]").next().unwrap();
+        let body = &crate::settings::src_scan::prod_source(&src);
         let logs: Vec<&str> = body.lines().filter(|l| l.contains("elog!(")).collect();
         assert_eq!(logs.len(), 3, "{logs:?}");
         for l in &logs {

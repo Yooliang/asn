@@ -389,7 +389,7 @@ mod tests {
     #[test]
     fn 守門_不印金鑰() {
         let src = include_str!("device_login.rs");
-        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        let prod = &crate::settings::src_scan::prod_source(src);
         for banned in [["print", "ln!"].concat(), ["e", "println!"].concat(), ["e", "log!"].concat(), ["o", "log!"].concat(), ["log", "::"].concat(), ["tracing", "::"].concat()] {
             assert!(!prod.contains(&banned), "device_login.rs 不該出現 {banned}（輸出一律走傳進來的 say，且不含金鑰）");
         }

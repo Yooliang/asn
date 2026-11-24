@@ -650,7 +650,7 @@ mod tests {
 
     #[test]
     fn 守門_自動接回開窗前併入本機同意過的資料夾() {
-        let me = include_str!("auto_resume.rs").split("#[cfg(test)]").next().unwrap();
+        let me = &crate::settings::src_scan::prod_source(include_str!("auto_resume.rs"));
         assert!(me.contains("super::cwds::allow_consented(&mut config, &e.facts.cwd, &self.data_dir)"));
         let i = me.find("allow_consented").unwrap();
         let j = me.find("start_resumed_window(").unwrap();
@@ -659,8 +659,8 @@ mod tests {
 
     #[test]
     fn 重開自動接回和橋看同一個_session_資料夾() {
-        let me = include_str!("auto_resume.rs").split("#[cfg(test)]").next().unwrap();
-        let core = include_str!("../bridge/core.rs").split("#[cfg(test)]").next().unwrap();
+        let me = &crate::settings::src_scan::prod_source(include_str!("auto_resume.rs"));
+        let core = &crate::settings::src_scan::prod_source(include_str!("../bridge/core.rs"));
         assert!(me.contains("sessions: crate::bridge::core::claude_sessions_dir()"), "自動接回要用橋的來源");
         assert!(!me.contains(r#".join(".claude").join("sessions")"#), "不能自己再拼一份");
         assert!(core.contains("sessions_dir: claude_sessions_dir(),"), "橋也要走同一個來源");

@@ -38,7 +38,7 @@ mod tests {
     #[test]
     fn 守門_只有_agent_setup_能建立登入網址() {
         let src = include_str!("link.rs");
-        let body = &src[..src.find("#[cfg(test)]").unwrap()];
+        let body = &crate::settings::src_scan::prod_source(src);
         assert!(body.contains("pub(in crate::agent_setup) fn parse"), "建構子要限制在 agent_setup");
         assert!(!body.contains("pub fn parse") && !body.contains("pub(crate) fn parse"), "不能放寬建構子");
         // 整個程式裡，除了 agent_setup 與 secret_remote 以外，不能有任何地方提到登入網址型別或附網址的設定方法

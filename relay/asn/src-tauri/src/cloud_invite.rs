@@ -284,7 +284,7 @@ mod tests {
     #[test]
     fn 守門_金鑰不寫檔不寫log不快取() {
         let src = include_str!("cloud_invite.rs");
-        let prod = &src[..src.find("#[cfg(test)]").unwrap()];
+        let prod = &crate::settings::src_scan::prod_source(src);
         // 用拼接避免這個檢查把自己的字串當成命中
         for banned in [["std::", "fs"].concat(), ["write", "_atomic"].concat(), ["print", "ln!"].concat(), ["e", "println!"].concat(), ["e", "log!"].concat(), ["o", "log!"].concat(), ["log", "::"].concat(), ["tracing", "::"].concat(), ["static ", "mut"].concat(), ["lazy", "_static"].concat(), ["OnceLock"].concat(), ["store", "_save"].concat()] {
             assert!(!prod.contains(&banned), "cloud_invite.rs 不該出現 {banned}（金鑰不寫檔、不寫 log、不快取）");

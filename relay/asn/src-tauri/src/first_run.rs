@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn 守門_lib_rs_在_datadir_startup_之後_第一個寫入者之前呼叫_first_run() {
         let src = include_str!("lib.rs");
-        let code = src.split("\nmod tests {").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         let run = &code[code.find("pub fn run()").expect("有 run()")..];
         let startup = run.find("datadir::startup(").expect("有 datadir::startup");
         let call = run.find("first_run::run_at_startup(").expect("run() 要呼叫 first_run::run_at_startup");

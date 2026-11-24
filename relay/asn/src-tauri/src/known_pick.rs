@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(opts.len(), 4);
         assert_eq!(with_os_rng(|_| 1), Ok(1));
         let src = include_str!("known_pick.rs").replace("\r\n", "\n");
-        let prod = src.split("\n#[cfg(test)]").next().unwrap();
+        let prod = &crate::settings::src_scan::prod_source(&src);
         assert!(!prod.contains(".expect(") && !prod.contains(".unwrap()"), "正式程式碼不 panic");
     }
 
@@ -456,7 +456,7 @@ mod tests {
     #[test]
     fn 守門_這裡不寫日誌_不發事件() {
         let src = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("known_pick.rs")).unwrap().replace("\r\n", "\n");
-        let code = src.split("\n#[cfg(test)]").next().unwrap();
+        let code = &crate::settings::src_scan::prod_source(&src);
         for bad in ["elog!", "olog!", concat!("print", "ln!"), concat!("db", "g!"), "log::", "tracing::", "emit(", "emit_to(", "ui_log"] {
             assert!(!code.contains(bad), "known_pick.rs 不能有：{bad}");
         }
