@@ -4346,6 +4346,11 @@ pub(crate) fn global() -> Option<std::sync::Arc<LiveTerms>> {
 #[path = "term_live_mux.rs"]
 mod live_mux;
 
+/// #1860 F PR3：Windows 真實 mux 重啟整合測試（#[ignore]，CI 的 windows-check 明跑）
+#[cfg(all(test, windows, feature = "gui"))]
+#[path = "term_restart_real.rs"]
+mod restart_real;
+
 #[cfg(test)]
 mod golden;
 

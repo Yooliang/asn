@@ -387,6 +387,23 @@ jobs:
       - name: 跑 Windows 才有的測試（統一寫入重試、金鑰憑證守門）
         run: "cargo test --locked --lib -j 2 -- settings:: quota_readers::"
 
+      # #1860 F PR3：工作管理員「重啟終端服務」在 Windows 上用真的 mux 驗過一輪（取代測試機實按）。
+      # 取得的是安裝檔用的同一份自建 release（版本與雜湊讀 wezterm-pins.json，驗建置來源證明要 gh）；放進 resources/wezterm（工作樹裡的占位檔會被換成真的，只在這台 runner 上）
+      - name: Windows 取得 WezTerm（自建 release、核對雜湊）
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "Windows 取得 WezTerm" -- node "$GITHUB_WORKSPACE/relay/asn/scripts/fetch-wezterm.mjs"
+          wez="$GITHUB_WORKSPACE/relay/asn/src-tauri/resources/wezterm"
+          ls -la "$wez"
+          echo "ASN_WEZTERM_DIR=$(cygpath -w "$wez")" >> "$GITHUB_ENV"
+
+      - name: 真的 mux 重啟（stop／ensure／接回、起不來與重按）
+        shell: bash
+        run: cargo test --locked --lib launch::term::restart_real::windows_real_mux_restart -- --ignored --test-threads=1 --nocapture
+
   # 冒煙測試（畫面啟動，#1973）：獨立 job，與 build 並行。
   # 冒煙只用 runner 自帶的無頭 Chrome 開 relay/asn/ui/*.html，只需要 prep.mjs 產的 vendor，不需要 Rust 成品、
   # 也不需要 apt 系統依賴（gtk／webkit／xvfb 都用不到），所以不裝它們、不載 rust-cache；只補中文字型（見下）。
