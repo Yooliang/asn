@@ -1437,6 +1437,21 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         self.mux_snapshot_at(Instant::now())
     }
 
+    /// 工作管理員的「重啟終端服務」：抓名單 → 停 → 起新的 → 名單交給 `resume`。流程與失敗處理見 `mux_restart::run_steps`。
+    /// 呼叫端要放在背景執行緒（停與起各要等幾秒）
+    pub fn restart_mux(&self, resume: impl FnOnce(Vec<String>)) -> Result<(), super::mux_restart::RestartError> {
+        use super::mux_restart::run_steps;
+        let dir = if self.use_mux { self.dir().ok() } else { None };
+        let handle = dir.as_ref().and_then(|d| self.mux_handle(d, BTreeMap::new()).ok());
+        let Some(m) = handle else { return run_steps(false, Vec::new, || Ok(()), || Ok(()), |_| {}, &|_| {}) };
+        let note = |l: &str| {
+            elog!("{l}");
+            super::mux::note(&m.paths.dir, l);
+        };
+        let names = || self.mux_snapshot().map(|o| o.partners).unwrap_or_default();
+        run_steps(true, names, || m.stop(), || m.ensure().map(|_| ()), resume, &note)
+    }
+
     /// 同 [`Self::mux_snapshot`]，現在時刻由外面給（測試用）。其餘每輪照做，只有核對窗格清單受 [`SWEEP_MISSING_EVERY`] 限制
     fn mux_snapshot_at(&self, now: Instant) -> Option<super::mux_watch::Observed> {
         if !self.use_mux {

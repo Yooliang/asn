@@ -398,6 +398,8 @@ pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, 
     let all_sessions = stuck_resume::all_session_files();
     let src = Sources { claude, claude_ok, pi, procs, terms, partners, all_sessions, known: known_entries, protected, own_pid: std::process::id(), now_ms: now };
     let mut out = serde_json::to_value(build(&switch::RealOs, &src)).map_err(|e| e.to_string())?;
+    // 工作管理員按了「重啟終端服務」、還沒做完：畫面據此顯示「正在重啟…」，底下的代理標「斷線中」
+    out["mux_restarting"] = serde_json::Value::Bool(super::mux_restart::is_restarting());
     // 壓縮次數（#1852）：只有 Claude 視窗有；內建收發室還沒數過的視窗是 null（畫面顯示「—」）
     if let Some(rows) = out.get_mut("rows").and_then(|r| r.as_array_mut()) {
         for r in rows.iter_mut().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("claude")) {

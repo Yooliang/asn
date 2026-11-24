@@ -248,25 +248,55 @@ pub fn crash_entries(names: &[String], known: Vec<KnownEntry>, archived: &std::c
         .collect()
 }
 
+/// 為什麼接回：寫進結果的原因文字，以及接回做完要不要另外排「終端服務中斷」的結果通知
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ResumeWhy {
+    pub cause: &'static str,
+    pub notice: bool,
+}
+
+/// 終端服務自己中斷（`mux_watch` 的事故）：原因「共用的終端服務中斷了」，做完排結果通知
+pub const WHY_CRASH: ResumeWhy = ResumeWhy { cause: super::mux_watch::CAUSE, notice: true };
+/// 使用者在工作管理員按了「重啟終端服務」：原因寫「重啟」，不排「中斷」的通知（本人知道）；
+/// 也不經 `mux_watch` 的事故判斷，所以不計入十分鐘冷卻
+pub const WHY_RESTART: ResumeWhy = ResumeWhy { cause: "重啟", notice: false };
+
 /// 終端服務中斷之後（`mux_watch` 呼叫）：`resume` 為真就照 #788 的做法把這些夥伴接回；
 /// 為假（十分鐘內又中斷）只把名字與原因寫進結果給畫面，不接回
 #[cfg(feature = "gui")]
 pub fn after_mux_crash(work_dir: &Path, data_dir: &Path, names: &[String], resume: bool) {
+    after_mux(work_dir, data_dir, names, resume, WHY_CRASH)
+}
+
+/// 使用者重啟終端服務之後（工作管理員）：把重啟前的夥伴接回，原因寫「重啟」、不計冷卻
+#[cfg(feature = "gui")]
+pub fn after_mux_restart(work_dir: &Path, data_dir: &Path, names: &[String]) {
+    after_mux(work_dir, data_dir, names, true, WHY_RESTART)
+}
+
+#[cfg(feature = "gui")]
+fn after_mux(work_dir: &Path, data_dir: &Path, names: &[String], resume: bool, why: ResumeWhy) {
     let now = crate::heartbeat::now_ms();
     let known = crate::bridge::known::Known::load(&work_dir.join(crate::bridge::known::KNOWN_FILE), now);
     let entries = crash_entries(names, known.entries(), known.archived_names());
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: super::mux_watch::CAUSE, native: Default::default() };
-    resume_entries(work_dir, entries, resume, &deps, || RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: why.cause, native: Default::default() };
+    resume_entries_why(work_dir, entries, resume, why, &deps, || RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
 }
 
-/// `after_mux_crash` 的本體（對外的動作都經 `deps`，測試用假的）：接回、寫紀錄、排「接回結果」通知。
-/// `lock` 取同一時間只讓一條接回在跑的鎖（回的東西活著期間持鎖）
+/// 終端服務中斷的接回（原因與通知照舊）；本體見 [`resume_entries_why`]
 #[cfg(feature = "gui")]
 pub fn resume_entries<G>(work_dir: &Path, entries: Vec<KnownEntry>, resume: bool, deps: &dyn Deps, lock: impl FnOnce() -> G) -> Status {
+    resume_entries_why(work_dir, entries, resume, WHY_CRASH, deps, lock)
+}
+
+/// `after_mux_crash` 的本體（對外的動作都經 `deps`，測試用假的）：接回、寫紀錄、排「接回結果」通知（`why.notice` 為真才排）。
+/// `lock` 取同一時間只讓一條接回在跑的鎖（回的東西活著期間持鎖）
+#[cfg(feature = "gui")]
+pub fn resume_entries_why<G>(work_dir: &Path, entries: Vec<KnownEntry>, resume: bool, why: ResumeWhy, deps: &dyn Deps, lock: impl FnOnce() -> G) -> Status {
     let now = deps.now();
     if !resume {
         let failed = entries.iter().map(|e| Failed { name: e.name.clone(), reason: super::mux_watch::COOLDOWN_REASON.to_string() }).collect();
-        let st = Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: super::mux_watch::CAUSE, native: Vec::new() };
+        let st = Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: why.cause, native: Vec::new() };
         deps.report(&st);
         return st;
     }
@@ -282,7 +312,9 @@ pub fn resume_entries<G>(work_dir: &Path, entries: Vec<KnownEntry>, resume: bool
     let _ = crate::ui_log::append(work_dir, &lines);
     // 接回做完了：斷了幾位、接回幾位、誰沒接回，排一則通知（只有「真的接回過」的那一次；十分鐘內第二次本來就只通知）
     let failed: Vec<String> = st.failed.iter().map(|f| f.name.clone()).collect();
-    super::mux_round::queue_resume_notice(work_dir, broke, &failed, st.at);
+    if why.notice {
+        super::mux_round::queue_resume_notice(work_dir, broke, &failed, st.at);
+    }
     st
 }
 
@@ -543,6 +575,40 @@ mod tests {
         assert_eq!(v["cause"], "共用的終端服務中斷了");
         let f = Fake::new();
         assert_eq!(run(vec![entry("甲")], &f).cause, "", "預設原因是空的");
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn _1860f_重啟的接回_原因寫重啟_中斷照舊() {
+        assert_eq!(WHY_RESTART.cause, "重啟");
+        assert_eq!(WHY_CRASH.cause, "共用的終端服務中斷了", "原本 mux_watch 的原因不變");
+        // 十分鐘內第二次（不接回）那條路，原因也跟著呼叫端給的走
+        let d = tempfile::tempdir().unwrap();
+        let st = resume_entries_why(d.path(), vec![entry("甲")], false, WHY_RESTART, &Fake::new(), || ());
+        assert_eq!(st.cause, "重啟");
+        let st = resume_entries(d.path(), vec![entry("甲")], false, &Fake::new(), || ());
+        assert_eq!(st.cause, super::super::mux_watch::CAUSE, "原路徑行為不變");
+    }
+
+    #[cfg(feature = "gui")]
+    #[test]
+    fn _1860f_重啟的接回_不排中斷通知_原路徑照排() {
+        let d = tempfile::tempdir().unwrap();
+        resume_entries_why(d.path(), vec![entry("甲")], true, WHY_RESTART, &Fake::new(), || ());
+        assert!(super::super::mux_round::read_resume_notice(d.path()).is_none(), "本人按的重啟不用發「中斷」通知");
+        resume_entries(d.path(), vec![entry("甲")], true, &Fake::new(), || ());
+        assert!(super::super::mux_round::read_resume_notice(d.path()).is_some(), "原本 mux_watch 的路徑照排通知");
+    }
+
+    #[test]
+    fn _1860f_重啟的接回_不經監看_不計十分鐘冷卻() {
+        let src = include_str!("auto_resume.rs");
+        let f = src.split("pub fn after_mux_restart").nth(1).unwrap().split("pub fn ").next().unwrap();
+        assert!(f.contains("after_mux(") && f.contains("true"), "重啟一律接回");
+        assert!(!f.contains("Watch") && !f.contains("last_resume_at") && !f.contains("COOLDOWN"), "不碰監看的冷卻紀錄");
+        let lib = include_str!("../lib.rs");
+        let cmd = lib.split("async fn task_manager_restart_mux").nth(1).unwrap().split("async fn ").next().unwrap();
+        assert!(cmd.contains("after_mux_restart") && !cmd.contains("after_mux_crash") && !cmd.contains("last_resume_at"), "重啟指令走重啟的接回");
     }
 
     #[test]
