@@ -1,5 +1,6 @@
 // Tauri 前端小橋：invoke／事件。錯誤一律包成 Error(字串)，讓 AsnCore 用 e.message 處理。
 import { shownPhotos } from './photo.mjs'
+import { makeSnapMax } from './snap-max.mjs'
 const T = globalThis.__TAURI__
 
 // 出口失敗寫記錄（#2106）：只記指令名與原文（限長），不記 args（可能含信件內容、路徑、金鑰）。
@@ -493,6 +494,8 @@ export const applyFrame = native => document.documentElement.classList.toggle('f
 export async function initFrame() {
   try { applyFrame(await invoke('frame_native')) } catch { /* 問不到就維持自訂 */ }
   await listen('asn:frame', native => applyFrame(native))
+  // #1788 放大鈕的分割版面：只有帶 data-snap-max 的視窗（名單、對話、指引設定）會真的回報
+  try { await makeSnapMax({ call: invoke, listen, doc: document, win: window }).start() } catch { /* 沒有也只是少了分割版面 */ }
 }
 // 自訂外框的八個拖邊緣調整大小的把手
 export const RESIZE_DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']

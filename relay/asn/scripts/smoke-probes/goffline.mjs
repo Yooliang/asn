@@ -11,7 +11,8 @@ export const gofflineProbeSource = ({ goffline }) => `(async () => {
   if (want.center) {
     const pl = document.querySelector('.mbar .mbar-plate'), bar = document.querySelector('.mbar');
     if (!pl || !bar) return { ok: false, why: '找不到名牌或標題列' };
-    const p = pl.getBoundingClientRect(), m = bar.getBoundingClientRect(), diff = (p.left + p.right) / 2 - (m.left + m.right) / 2;
+    // 量「標題列內容區」的中心（扣掉左右內距）：無邊框外觀右側要讓出三顆視窗鈕，名牌對剩下的可用寬度置中；其他外觀兩側內距相同，結果和量整條一樣
+    const cs = getComputedStyle(bar), p = pl.getBoundingClientRect(), m = bar.getBoundingClientRect(), diff = (p.left + p.right) / 2 - (m.left + parseFloat(cs.paddingLeft) + m.right - parseFloat(cs.paddingRight)) / 2;
     const wnat = (el) => { const o = el.style.width; el.style.width = 'max-content'; const w = el.getBoundingClientRect().width; el.style.width = o; return w };
     const nat = wnat(pl), wdiff = p.width - nat;
     window.__center = { plateCenter: (p.left + p.right) / 2, barCenter: (m.left + m.right) / 2, diff, width: p.width, natural: nat, wdiff };
