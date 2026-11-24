@@ -61,7 +61,6 @@ const PENDING_ATOMIC: &[(&str, usize)] = &[
     // ---- 不是「寫設定」，只是清掃或另有用途的 .tmp ----
     ("launch/mux.rs", 1),         // 清掉舊心跳檔旁的 .tmp（只刪不寫）
     ("stt.rs", 2),                // 語音模型下載／解壓用的 .tmp 資料夾，整個資料夾換名，不是單一檔案寫入
-    ("attach_cache.rs", 3),       // 附件快取的 bin＋meta 成對暫存檔（兩個檔要一起換名，單檔寫入做不到）；第 3 處是清掃殘留 .tmp
     // ---- 金鑰類：刻意不併，維持自己的寫法（建檔就是 0600、檔名帶 pid 與序號，不能經過預設權限）----
     ("device_id.rs", 1),          // 設備金鑰 write_private
     ("secret_file.rs", 2),         // 節點金鑰／login.bin 的暫存檔命名與殘留清掃

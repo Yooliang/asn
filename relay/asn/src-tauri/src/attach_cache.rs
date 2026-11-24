@@ -21,20 +21,20 @@ const TMP_GRACE: Duration = Duration::from_secs(600);
 /// 記錄快取屬於哪個帳號的檔（放在 attach-cache 底下）：帳號對不上就整個清空
 const OWNER_FILE: &str = ".owner";
 
+/// 快取檔的寫法：同 STATE（不 fsync，掉了重抓就好），再加只有本人可讀（Unix 0600）；資料夾呼叫端已經建好
+const PRIVATE_STATE: crate::settings::atomic::Opts = crate::settings::atomic::Opts { fsync: false, private: true, create_dirs: false };
+
+fn sha256_hex(b: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect()
+}
+
 /// 讀、寫、清理、清空都排隊做（整個行程一把鎖）：同一張圖同時開兩次、兩個視窗同時看，不會互相蓋掉或刪掉剛寫好的檔。
 /// 鎖只包本機檔案操作，下載不在鎖裡
 static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn lock() -> std::sync::MutexGuard<'static, ()> {
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// 暫存檔的尾碼：行程編號＋計數＋時間，同一個行程內不會重複
-fn tmp_suffix() -> String {
-    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let t = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0);
-    format!("{}-{n}-{t:08x}", std::process::id())
 }
 
 /// 帳號 → 寫進 .owner 的值（雜湊，不留 email 原文）。沒登入算一種
@@ -227,6 +227,10 @@ impl AttachCache {
             if bytes.len() as u64 != size || !content_ok(&mime, &bytes) {
                 return None;
             }
+            // 說明檔記了雜湊就必須對得上（舊版寫的沒有這欄，只看大小與檔頭）：同大小但不是同一次寫的 bin（寫到一半當機）也認得出來
+            if info.get("sha256").and_then(Value::as_str).is_some_and(|h| h != sha256_hex(&bytes)) {
+                return None;
+            }
             let name = clean_name_or(info.get("name").and_then(Value::as_str).unwrap_or(""), "file");
             Some(Downloaded { name, mime, bytes })
         })();
@@ -283,31 +287,26 @@ impl AttachCache {
         if !self.dir_ok() {
             return Err("快取資料夾是連結，不寫".into());
         }
-        let sfx = tmp_suffix();
-        let tmp_bin = bin.with_extension(format!("bin.{sfx}.tmp"));
-        let tmp_meta = meta.with_extension(format!("json.{sfx}.tmp"));
         restrict_dir(&self.dir);
         if let Some(p) = self.dir.parent() {
             restrict_dir(p);
         }
-        let info = json!({ "name": d.name, "mime": d.mime, "bytes": d.bytes.len(), "until_ms": until });
-        // 暫存檔一律新建（create_new）：原本就有同名的東西（可能是連結）先拿掉，不會跟著連結寫到別處
-        let fresh = |p: &Path, data: &[u8]| -> std::io::Result<()> {
-            Self::remove_entry(p);
-            create_new_file(p, data)
-        };
+        let info = json!({ "name": d.name, "mime": d.mime, "bytes": d.bytes.len(), "sha256": sha256_hex(&d.bytes), "until_ms": until });
+        // 成對寫入（#2238）：meta 是「這一組寫完了」的完成標記。
+        // 1) 先拿掉舊的 meta（這一組立刻變成「未完成」）→ 2) 寫 bin → 3) 最後才寫 meta。
+        // 任何一步當機，讀取端都只會看到「沒有 meta」或「meta 與 bin 對不上」，當作未命中並清掉，不會讀到半份。
+        // 兩個檔都走統一原子寫入（暫存檔 create_new、不跟連結走，改名覆蓋；同名的連結會被換掉而不是被寫穿）
         let write = || -> std::io::Result<()> {
-            fresh(&tmp_bin, &d.bytes)?;
-            fresh(&tmp_meta, &serde_json::to_vec(&info).unwrap_or_default())?;
-            std::fs::rename(&tmp_bin, &bin)?;
-            std::fs::rename(&tmp_meta, &meta)?;
+            Self::remove_entry(&meta);
+            crate::settings::atomic::write(&bin, &d.bytes, PRIVATE_STATE)?;
+            crate::settings::atomic::write(&meta, &serde_json::to_vec(&info).unwrap_or_default(), PRIVATE_STATE)?;
             for p in [&bin, &meta] {
                 std::fs::File::options().write(true).open(p)?.set_modified(now)?;
             }
             Ok(())
         };
         if let Err(e) = write() {
-            for p in [&tmp_bin, &tmp_meta, &bin, &meta] {
+            for p in [&bin, &meta] {
                 Self::remove_entry(p);
             }
             return Err(format!("寫不進快取：{e}"));
@@ -347,7 +346,7 @@ impl AttachCache {
             } else {
                 // 暫存檔或不認得的檔：這個資料夾只有快取自己寫的東西。暫存檔放一陣子才刪，不搶別的正在寫的
                 let age = pm.modified().map(|t| now.duration_since(t).unwrap_or_default()).unwrap_or(TMP_GRACE);
-                if !name.ends_with(".tmp") || age >= TMP_GRACE {
+                if p.extension().is_none_or(|x| x != "tmp") || age >= TMP_GRACE {
                     Self::remove_entry(&p);
                 }
             }
@@ -585,6 +584,87 @@ mod tests {
         }
         assert_eq!(files(t.path()), vec![format!("{ID}.bin"), format!("{ID}.json")], "沒有留下暫存檔");
         assert!(AttachCache::new(dir).get(ID).is_some());
+    }
+
+    fn jpath(t: &Path, id: &str) -> PathBuf {
+        t.join(format!("{id}.json"))
+    }
+    fn bpath(t: &Path, id: &str) -> PathBuf {
+        t.join(format!("{id}.bin"))
+    }
+
+    #[test]
+    fn 寫到一半當機_只有bin沒有meta_未命中且當下清掉() {
+        let t = tempfile::tempdir().unwrap();
+        let c = AttachCache::new(t.path().to_path_buf());
+        // 模擬：bin 寫完、meta 還沒寫就當機
+        std::fs::write(bpath(t.path(), ID), webp(64)).unwrap();
+        assert!(c.get(ID).is_none());
+        assert!(!bpath(t.path(), ID).exists(), "讀到壞組當下就刪");
+        assert!(c.get(ID).is_none(), "第二次直接未命中");
+        assert!(files(t.path()).is_empty());
+    }
+
+    #[test]
+    fn meta記的大小或雜湊和bin對不上_未命中且兩檔都刪() {
+        let t = tempfile::tempdir().unwrap();
+        let c = AttachCache::new(t.path().to_path_buf());
+        // 大小對不上
+        c.put(ID, &img(64), None).unwrap();
+        std::fs::write(bpath(t.path(), ID), webp(80)).unwrap();
+        assert!(c.get(ID).is_none());
+        assert!(!bpath(t.path(), ID).exists() && !jpath(t.path(), ID).exists(), "兩個檔都已刪");
+        assert!(c.get(ID).is_none());
+        // 大小一樣但不是同一次寫的內容（舊 meta＋新 bin）
+        c.put(ID, &img(64), None).unwrap();
+        let mut other = webp(64);
+        other[20] = 7;
+        std::fs::write(bpath(t.path(), ID), other).unwrap();
+        assert!(c.get(ID).is_none(), "雜湊對不上");
+        assert!(files(t.path()).is_empty());
+    }
+
+    #[test]
+    fn 壞掉的一組在下一次寫同一組時被換掉() {
+        let t = tempfile::tempdir().unwrap();
+        let c = AttachCache::new(t.path().to_path_buf());
+        std::fs::write(bpath(t.path(), ID), b"junk").unwrap();
+        c.put(ID, &img(64), None).unwrap();
+        assert_eq!(c.get(ID).unwrap().bytes, webp(64));
+        assert_eq!(files(t.path()), vec![format!("{ID}.bin"), format!("{ID}.json")]);
+    }
+
+    #[test]
+    fn 正常寫入命中_meta有雜湊_修改時間設成寫入時間() {
+        let t = tempfile::tempdir().unwrap();
+        let c = AttachCache::new(t.path().to_path_buf());
+        let t0 = SystemTime::now() - Duration::from_secs(1000);
+        c.put_at(ID, &img(64), t0).unwrap();
+        for p in [bpath(t.path(), ID), jpath(t.path(), ID)] {
+            let m = std::fs::metadata(&p).unwrap().modified().unwrap();
+            let d = if m > t0 { m.duration_since(t0) } else { t0.duration_since(m) }.unwrap();
+            assert!(d < Duration::from_secs(2), "{p:?} 修改時間要是寫入時間");
+        }
+        let info: Value = serde_json::from_slice(&std::fs::read(jpath(t.path(), ID)).unwrap()).unwrap();
+        assert_eq!(info["sha256"].as_str(), Some(sha256_hex(&webp(64)).as_str()));
+        assert!(c.get_at(ID, t0 + Duration::from_secs(5)).is_some());
+        assert!(files(t.path()).iter().all(|f| !f.ends_with(".tmp")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn 寫入時目標是連結_換掉連結而不是寫穿() {
+        let t = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join("secret.webp");
+        std::fs::write(&target, b"original").unwrap();
+        if std::os::windows::fs::symlink_file(&target, bpath(t.path(), ID)).is_err() {
+            return;
+        }
+        let c = AttachCache::new(t.path().to_path_buf());
+        c.put(ID, &img(64), None).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"original", "連結指的檔不能被寫");
+        assert_eq!(c.get(ID).unwrap().bytes, webp(64));
     }
 
     #[cfg(unix)]
