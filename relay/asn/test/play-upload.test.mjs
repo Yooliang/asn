@@ -192,8 +192,8 @@ test('alpha 的 5xx 與網路錯誤也降級（internal 不受影響）；intern
   } finally { await g.close() }
 })
 
-test('兩條一起提交被擋（4xx／網路錯誤）：走降級，第二個編輯只含 internal 並提交成功；原因寫提交時被擋', async () => {
-  for (const [name, mode] of [['403', 403], ['400', 400], ['網路錯誤', 'net']]) {
+test('兩條一起提交被擋（4xx）：走降級，第二個編輯只含 internal 並提交成功；原因寫提交時被擋', async () => {
+  for (const [name, mode] of [['403', 403], ['400', 400]]) {
     const real = makeRequester({ retries: 0, backoffMs: 1 })
     let commits = 0
     const request = async (m, u, o) => {
@@ -213,6 +213,98 @@ test('兩條一起提交被擋（4xx／網路錯誤）：走降級，第二個�
       assert.equal(count(f.calls, /E2:commit$/), 1)
     } finally { await f.close() }
   }
+})
+
+// commit 結果不確定（網路錯誤、逾時、5xx）：先查 Play 上最大的 versionCode 再決定
+// 假伺服器：第一次 commit 依 mode 失敗；GET bundles（查最大版本）依 maxCode 回應或失敗
+const uncertainRun = async ({ mode, maxCode, queryFails = false, tracks }) => {
+  const real = makeRequester({ retries: 0, backoffMs: 1 })
+  let commits = 0
+  const request = async (m, u, o) => {
+    if (m === 'POST' && u.endsWith(':commit') && ++commits === 1) { if (mode === 'net') throw new Error('連線失敗（網路錯誤）'); return { status: mode, text: '{}' } }
+    return real(m, u, o)
+  }
+  const f = await fake(twoEdits(c => {
+    if (c.method === 'GET' && c.url.endsWith('/bundles')) return queryFails ? [500, {}] : [200, maxCode == null ? {} : { bundles: [{ versionCode: maxCode }] }]
+    return null
+  }))
+  const logs = []
+  try {
+    const out = await publishAab({ aabFile: aab, sa, notes: 'n', tracks, apiBase: f.base, tokenUri: `${f.base}/token`, request, log: m => logs.push(m) }).then(r => ({ r }), e => ({ e }))
+    return { ...out, calls: f.calls, logs }
+  } finally { await f.close() }
+}
+
+test('commit 5xx／網路錯誤＋Play 上最大版本已等於本次 → 視為已發布：成功回報、不降級、不重傳、沒有第二個發布編輯', async () => {
+  for (const mode of ['net', 503, 500]) {
+    const { r, e, calls, logs } = await uncertainRun({ mode, maxCode: 77 })
+    assert.equal(e, undefined, String(mode))
+    assert.deepEqual(r.tracks, ['internal', 'alpha'])
+    assert.equal(r.versionCode, 77)
+    assert.equal(r.alpha.status, 'ok')
+    assert.equal(count(calls, /^POST .*\/upload\/.*\/bundles/), 1, '不重傳')
+    assert.equal(count(calls, /^PUT /), 2, '只有第一輪的兩條軌道設定')
+    assert.ok(logs.some(l => /commit 回應不確定，經查已發布/.test(l)))
+  }
+})
+
+test('commit 不確定＋最大版本小於本次 → 確定沒提交，走降級：第二個發布編輯只含 internal 並提交', async () => {
+  for (const mode of ['net', 502]) {
+    const { r, e, calls } = await uncertainRun({ mode, maxCode: 70 })
+    assert.equal(e, undefined, String(mode))
+    assert.deepEqual(r.tracks, ['internal'])
+    assert.equal(r.alpha.status, 'failed'); assert.equal(r.alpha.kind, 'commit')
+    assert.equal(count(calls, /^POST .*\/upload\/.*\/bundles/), 2)
+    assert.equal(count(calls, /:commit$/), 1, '假伺服器只看到降級那次的提交（第一次在請求層就失敗）')
+  }
+  const { r } = await uncertainRun({ mode: 503, maxCode: null })
+  assert.deepEqual(r.tracks, ['internal'])
+})
+
+test('commit 不確定＋查詢也失敗 → 回報結果不確定（請到 Play Console 確認），不降級、不重傳、不再提交', async () => {
+  for (const mode of ['net', 503]) {
+    const { r, e, calls } = await uncertainRun({ mode, queryFails: true })
+    assert.equal(r, undefined)
+    assert.match(e.message, /結果不確定.*Play Console/s)
+    assert.doesNotMatch(e.message, /HTTP|503/)
+    assert.equal(count(calls, /^POST .*\/upload\/.*\/bundles/), 1, '不重傳')
+    assert.equal(count(calls, /:commit$/), 0, '不再提交（第一次提交在請求層就失敗，沒有第二次）')
+  }
+})
+
+test('commit 不自動重試：第一次 5xx、重試才會得到 4xx 的伺服器 → 只送一次 commit、判為不確定並去查最大版本號；其他請求仍會重試', async () => {
+  let commits = 0
+  let bundleGets = 0
+  const f = await fake(twoEdits(c => {
+    if (c.url.endsWith(':commit')) return ++commits === 1 ? [503, {}] : [400, {}]   // 第一次其實已提交，之後的重試只會得到 400
+    if (c.method === 'GET' && c.url.endsWith('/bundles')) return ++bundleGets === 1 ? [503, {}] : [200, { bundles: [{ versionCode: 77 }] }]   // 查詢的第一次 5xx：要靠重試救回來
+    return null
+  }))
+  try {
+    const r = await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: makeRequester({ retries: 2, backoffMs: 1 }) })
+    assert.deepEqual(r.tracks, ['internal', 'alpha'], '經查已發布，不降級')
+    assert.equal(count(f.calls, /:commit$/), 1, 'commit 只送一次')
+    assert.equal(bundleGets, 2, '查詢請求照常重試')
+    assert.equal(count(f.calls, /^POST .*\/upload\/.*\/bundles/), 1, '不重傳')
+  } finally { await f.close() }
+  let puts = 0
+  const g = await fake(twoEdits(c => (c.method === 'PUT' && c.url.endsWith('/tracks/internal') && ++puts === 1 ? [503, {}] : null)))
+  try {
+    await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: g.base, tokenUri: `${g.base}/token`, request: makeRequester({ retries: 2, backoffMs: 1 }) })
+    assert.equal(puts, 2, '設定軌道的 5xx 仍會重試')
+  } finally { await g.close() }
+})
+
+test('單軌道 internal 的不確定 commit：最大＝本次 → 成功；最大較小 → 照原本整體失敗；4xx 不查詢直接失敗', async () => {
+  const ok = await uncertainRun({ mode: 503, maxCode: 77, tracks: ['internal'] })
+  assert.deepEqual(ok.r.tracks, ['internal'])
+  assert.equal(count(ok.calls, /^POST .*\/upload\/.*\/bundles/), 1)
+  const bad = await uncertainRun({ mode: 503, maxCode: 70, tracks: ['internal'] })
+  assert.match(bad.e.message, /提交編輯失敗/)
+  assert.equal(count(bad.calls, /^POST .*\/upload\/.*\/bundles/), 1)
+  const four = await uncertainRun({ mode: 403, maxCode: 77 })
+  assert.deepEqual(four.r.tracks, ['internal'], '4xx 照舊降級，不因最大版本相等而當成已發布')
+  assert.ok(!four.calls.some(c => c.method === 'GET' && c.url.endsWith('/bundles')), '4xx 不查最大版本')
 })
 
 test('降級後 internal 的提交也失敗＝整體失敗；只有 internal 單軌道時提交失敗＝整體失敗（不降級）', async () => {
