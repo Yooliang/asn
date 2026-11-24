@@ -52,6 +52,13 @@ test('結果：沒有最終結果就繼續等；失敗要說', () => {
   assert.equal(resultOf({ recent: [{ id: ID, status: 'cancelled' }] }, ID).ok, false)
 })
 
+test('#2256 手機只給拒絕（指令不完整）時，說明為什麼只能拒絕、要核准去哪裡', () => {
+  assert.ok(TEXT.incomplete.includes('指令太長，要核准請到電腦上看完整內容'), TEXT.incomplete)
+  assert.ok(TEXT.incomplete.includes('只能拒絕'), TEXT.incomplete)
+  // 畫面真的有顯示這句：不完整、舊選項（只剩拒絕）的那條路
+  assert.match(read('../ui/m.html'), /v-else-if="!pq\.cur\.complete && !pq\.cur\.full\.length">\{\{ PERMREQ_TEXT\.incomplete \}\}/)
+})
+
 test('導覽', () => {
   assert.deepEqual(permReqNav(), { tab: 'chats', sheet: 'permreq', chat: true }, '蓋在點進去的那一則對話上')
   assert.deepEqual(normalizeNav({ sheet: 'permreq', tab: 'x' }), permReqNav())
