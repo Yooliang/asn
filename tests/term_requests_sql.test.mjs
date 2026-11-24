@@ -11,6 +11,7 @@ import fs from 'node:fs'
 
 const DIR = new URL('../supabase/migrations/', import.meta.url)
 const MIG = '20261026400000_term_requests.sql'
+const MIG2 = '20261125310000_perm_req_decide_bell.sql' // #2161 3d-1 重寫了決定函式（成功多回 bell_topic），還原驗證要兩支一起拿掉保護
 const read = f => fs.readFileSync(new URL(f, DIR), 'utf8').replace(/\r\n/g, '\n').replace(/create extension if not exists \w+[^;]*;/g, '')
 const files = fs.readdirSync(DIR).filter(f => f.endsWith('.sql')).sort()
 
@@ -86,7 +87,7 @@ test('實跑：送字——桌面建立、手機列出並用相同雜湊確認�
   assert.deepEqual([l[0].id, l[0].node, l[0].kind, l[0].preview, l[0].enter, l[0].body_hash], [c.id, W1, 'send', '回答 1', true, H])
   assert.equal((await decide(db, { p_id: c.id, p_hash: H2 })).error, 'hash_mismatch', '雜湊不符不放行')
   assert.equal((await rowOf(db, c.id)).status, 'pending', '雜湊不符不改狀態')
-  assert.deepEqual(await decide(db, { p_id: c.id }), { ok: true, status: 'approved' })
+  assert.deepEqual(await decide(db, { p_id: c.id }), { ok: true, status: 'approved', bell_topic: 'bell-w1' })
   assert.equal((await decide(db, { p_id: c.id })).error, 'not_found', '重複決定無效（一次性）')
   const t = (await take(db)).requests
   assert.equal(t.length, 1); assert.deepEqual([t[0].id, t[0].kind, t[0].term_id, t[0].body_hash, t[0].choice_n], [c.id, 'send', '3', H, null])
@@ -113,7 +114,7 @@ test('實跑：手機只能決定——沒簽章、別人、別的租戶、不�
 test('實跑：拒絕會清掉預覽；桌面領取時看得到被拒絕的編號；拒絕後不能再同意', { skip }, async () => {
   const db = await boot()
   const c = await create(db)
-  assert.deepEqual(await decide(db, { p_id: c.id, p_decision: 'deny' }), { ok: true, status: 'denied' })
+  assert.deepEqual(await decide(db, { p_id: c.id, p_decision: 'deny' }), { ok: true, status: 'denied', bell_topic: 'bell-w1' })
   const r = await rowOf(db, c.id)
   assert.equal(r.status, 'denied'); assert.equal(r.preview, null)
   const t = await take(db)
@@ -130,7 +131,7 @@ test('實跑：代答——選項必須是桌面給的；送字不能帶選項�
   assert.ok(c.id)
   assert.equal((await decide(db, { p_id: c.id, p_choice_n: 7 })).error, 'bad_choice', '不在選項裡')
   assert.equal((await decide(db, { p_id: c.id, p_choice_n: null })).error, 'bad_choice', '代答一定要選')
-  assert.deepEqual(await decide(db, { p_id: c.id, p_choice_n: 1 }), { ok: true, status: 'approved' })
+  assert.deepEqual(await decide(db, { p_id: c.id, p_choice_n: 1 }), { ok: true, status: 'approved', bell_topic: 'bell-w1' })
   const t = (await take(db)).requests
   assert.deepEqual([t[0].kind, t[0].choice_n], ['answer', 1])
   const s = await create(db, { p_term_id: '5' })
@@ -171,10 +172,12 @@ test('實跑：內容清洗——控制字元換成空白、預覽最多 200 字
 })
 
 test('還原驗證：拿掉雜湊比對、拿掉一次性條件，對應測試要變紅', { skip }, async () => {
-  const noHash = await boot({ mutate: { [MIG]: s => s.replace("if p_hash is distinct from r.body_hash then", "if false then") } })
+  const unHash = s => s.replaceAll('if p_hash is distinct from r.body_hash then', 'if false then')
+  const unOnce = s => s.replaceAll("if not found or r.status <> 'pending' or r.expires_at <= now() then", 'if not found then')
+  const noHash = await boot({ mutate: { [MIG]: unHash, [MIG2]: unHash } })
   const c = await create(noHash)
-  assert.deepEqual(await decide(noHash, { p_id: c.id, p_hash: H2 }), { ok: true, status: 'approved' }, '拿掉比對後錯的雜湊也過＝雜湊測試有效')
-  const reuse = await boot({ mutate: { [MIG]: s => s.replace("if not found or r.status <> 'pending' or r.expires_at <= now() then", "if not found then") } })
+  assert.deepEqual(await decide(noHash, { p_id: c.id, p_hash: H2 }), { ok: true, status: 'approved', bell_topic: 'bell-w1' }, '拿掉比對後錯的雜湊也過＝雜湊測試有效')
+  const reuse = await boot({ mutate: { [MIG]: unOnce, [MIG2]: unOnce } })
   const d = await create(reuse)
   await decide(reuse, { p_id: d.id })
   assert.equal((await decide(reuse, { p_id: d.id })).ok, true, '拿掉狀態條件後可以重複決定＝一次性測試有效')

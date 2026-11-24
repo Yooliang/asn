@@ -6,7 +6,7 @@ import { fail, HASH_RE, type Json, type Reply, UUID_RE } from "./term_request.ts
 
 export type PermReqDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json | null; error: unknown }>;
-  ring: (topic: string) => Promise<void>;
+  ring: (topic: string, payload?: Record<string, unknown>) => Promise<void>;
   /** 建立成功（新增了一筆）後呼叫，參數是請求編號；用來推播「需要你確認」。沒給就不推 */
   onCreated?: (id: string) => void;
 };
@@ -128,7 +128,11 @@ export async function handlePermReqAction(deps: PermReqDeps, me: { id: string },
     const { id, choice_n, hash } = params ?? {};
     if (typeof id !== "string" || !UUID_RE.test(id) || typeof hash !== "string" || !HASH_RE.test(hash) || !Number.isInteger(choice_n) || choice_n < 1 || choice_n > 9) return fail("bad_request");
     const r = await call(deps, "asn_relay_perm_req_decide", { p_actor: me.id, p_signed_user: signedUser, p_id: id, p_choice_n: choice_n, p_hash: hash });
-    return isReply(r) ? r : { status: 200, body: { ok: true, status: r.data.status } };
+    if (isReply(r)) return r;
+    // 敲「擁有這個權限框的那台電腦」的門鈴（payload 只有 kind，絕不帶 node：舊客戶端看到 kind＋node 會當成回報門鈴而不叫醒）。
+    // bell_topic 是門鈴頻道秘密：只在這裡用，不放進回給手機的內容。舊資料庫沒回這個鍵就不敲。ring 自己吞錯，不影響決定結果
+    if (typeof r.data.bell_topic === "string") await deps.ring(r.data.bell_topic, { kind: "perm_req" });
+    return { status: 200, body: { ok: true, status: r.data.status } };
   }
   return NOT_DONE;
 }

@@ -7,7 +7,7 @@ export type Json = Record<string, any>;
 export type Reply = { status: number; body: Json };
 export type TermReqDeps = {
   rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data: Json | null; error: unknown }>;
-  ring: (topic: string) => Promise<void>;
+  ring: (topic: string, payload?: Record<string, unknown>) => Promise<void>;
   /** 建立成功（新增了一筆）後呼叫，參數是請求編號；用來推播「需要你確認」。沒給就不推 */
   onCreated?: (id: string) => void;
 };
@@ -95,7 +95,10 @@ export async function handleTermReqAction(deps: TermReqDeps, me: { id: string },
     if (typeof id !== "string" || !UUID_RE.test(id) || (decision !== "approve" && decision !== "deny") || typeof hash !== "string" || !HASH_RE.test(hash)) return fail("bad_request");
     if (choice_n != null && (!Number.isInteger(choice_n) || choice_n < 0 || choice_n > 99)) return fail("bad_request");
     const r = await call(deps, "asn_relay_term_req_decide", { p_actor: me.id, p_signed_user: signedUser, p_id: id, p_decision: decision, p_choice_n: choice_n ?? null, p_hash: hash });
-    return isReply(r) ? r : { status: 200, body: { ok: true, status: r.data.status } };
+    if (isReply(r)) return r;
+    // approve／deny 都敲「建立請求的那台電腦」的門鈴，讓它領回結果（payload 只有 kind，不帶 node；bell_topic 不回給手機）
+    if (typeof r.data.bell_topic === "string") await deps.ring(r.data.bell_topic, { kind: "term_req" });
+    return { status: 200, body: { ok: true, status: r.data.status } };
   }
   return { status: 404, body: { error: "not_found" } };
 }
