@@ -15,6 +15,9 @@ const MAX_SENDS: u32 = 6;
 /// 建立失敗後隔多久再試（後台還沒部署、連不上、這扇視窗還有舊的一筆）
 const RETRY_MS: u64 = 60_000;
 pub const TICK_SECS: u64 = 3;
+/// 領取手機決定（perm_req_take）的保底間隔：後台決定後會敲門鈴叫醒（#2161 3d），門鈴漏了最久等這麼久。
+/// 掃描與建立／撤回仍每 [`TICK_SECS`] 一輪（寬限與穩定輪數以輪計，不能因叫醒多跑）
+pub const TAKE_FALLBACK_SECS: u64 = 10;
 /// 連續幾輪（每輪 3 秒）都看不到框才撤回：游標移開再移回、畫面重畫的空檔不算框不見了（#921）
 const ABSENT_GRACE: u32 = 3;
 /// 同一扇視窗出現新的內容，要連續幾輪都是同一個才算換了一個框：換題的過渡畫面每輪都在變，湊不滿（#921）
@@ -131,6 +134,11 @@ impl Tracker {
     }
 }
 
+/// 這一刻要不要發 perm_req_take：沒有進行中的請求絕不發；有的話，被門鈴叫醒就立刻發，否則等到距上次領取滿保底間隔
+pub fn should_take(has_active: bool, secs_since_last_take: u64, woken: bool) -> bool {
+    has_active && (woken || secs_since_last_take >= TAKE_FALLBACK_SECS)
+}
+
 #[cfg(feature = "gui")]
 mod live {
     use super::*;
@@ -181,7 +189,17 @@ mod live {
         }
     }
 
-    pub async fn tick(relay: &Relay, terms: &Arc<LiveTerms>, data_dir: &Path, tracker: &mut Tracker) {
+    /// 領取手機的決定並執行（只有進行中的請求才會呼叫）。回傳 true＝後台有回應
+    pub async fn take_step(relay: &Relay, terms: &Arc<LiveTerms>, data_dir: &Path, tracker: &mut Tracker) -> bool {
+        let Ok(v) = relay.api("perm_req_take", Some(json!({}))).await else { return false };
+        for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
+            execute_taken(relay, terms, data_dir, tracker, &row).await;
+        }
+        true
+    }
+
+    /// 一般一輪（每 TICK_SECS）：掃描、建立／撤回；take_due＝這一輪該不該順便領取（由呼叫端用 should_take 決定）。回傳這輪有沒有領取
+    pub async fn tick(relay: &Relay, terms: &Arc<LiveTerms>, data_dir: &Path, tracker: &mut Tracker, take_due: bool) -> bool {
         let offers = current_offers(terms).await;
         let keys: Vec<(String, String)> = offers.iter().map(|o| (o.name.clone(), o.hash.clone())).collect();
         let now = crate::auth::now_ms();
@@ -209,19 +227,13 @@ mod live {
                 }
             }
         }
-        if tracker.has_active() {
-            if let Ok(v) = relay.api("perm_req_take", Some(json!({}))).await {
-                for row in v.get("requests").and_then(Value::as_array).cloned().unwrap_or_default() {
-                    execute_taken(relay, terms, data_dir, tracker, &row).await;
-                }
-            }
-        }
+        take_due && tracker.has_active() && take_step(relay, terms, data_dir, tracker).await
     }
 
 }
 
 #[cfg(feature = "gui")]
-pub use live::tick;
+pub use live::{take_step, tick};
 
 #[cfg(test)]
 mod tests {
@@ -233,6 +245,42 @@ mod tests {
     }
     fn create(name: &str, hash: &str) -> Action {
         Action::Create { name: name.into(), hash: hash.into() }
+    }
+
+    #[test]
+    fn 領取判斷_真值表() {
+        for secs in [0, 5, TAKE_FALLBACK_SECS, 999] {
+            for woken in [false, true] {
+                assert!(!should_take(false, secs, woken), "沒有進行中的請求絕不領取（{secs} 秒、叫醒={woken}）");
+            }
+        }
+        assert!(!should_take(true, 0, false), "剛領過、沒叫醒：不領");
+        assert!(!should_take(true, TAKE_FALLBACK_SECS - 1, false), "未到保底：不領");
+        assert!(should_take(true, TAKE_FALLBACK_SECS, false), "到保底：領");
+        assert!(should_take(true, TAKE_FALLBACK_SECS + 30, false));
+        assert!(should_take(true, 0, true), "門鈴叫醒：立即領");
+    }
+
+    #[test]
+    fn 領取保底_常數守門() {
+        assert_eq!(TICK_SECS, 3, "golden 會寫進這個值");
+        assert_eq!(TAKE_FALLBACK_SECS, 10);
+        assert!(TAKE_FALLBACK_SECS > TICK_SECS, "保底比掃描輪慢才有意義");
+        assert!(TAKE_FALLBACK_SECS * 12 <= 120, "手機決定有效期 120 秒內至少領 12 次");
+    }
+
+    #[test]
+    fn 守門_輪詢叫醒只領取_不多跑掃描() {
+        let lib = crate::settings::src_scan::prod_source(include_str!("lib.rs")).replace("\r\n", "\n");
+        let start = lib.find("fn start_perm_remote_poller(").expect("找不到 start_perm_remote_poller");
+        let body = &lib[start..];
+        let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+        for need in ["perm_wake", "TAKE_FALLBACK_SECS", "should_take(", "take_step("] {
+            assert!(body.contains(need), "start_perm_remote_poller 要用 {need}");
+        }
+        // 叫醒的分支裡不能呼叫 tick（掃描與寬限以輪計）
+        let wake_arm = body.split("perm_wake.notified()").nth(1).expect("要等 perm_wake");
+        assert!(!wake_arm.contains("perm_remote::tick("), "叫醒只領取，不跑掃描");
     }
 
     #[test]
