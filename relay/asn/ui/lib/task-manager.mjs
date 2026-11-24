@@ -34,7 +34,7 @@ export const TEXT = {
   cancel: '取消',
   stopWindow: '停止這個視窗',
   stopping: '停止中…',
-  viewOnly: '只能看',
+  noStop: '這一項不能從這裡停止',
   wake: '喚醒',
   noPlace: '還沒在名單上，稍後再試',
   wakeFail: '叫醒失敗，請稍後再試',
@@ -139,8 +139,8 @@ export function mergeRows(snapshot, friends, selfNode) {
 export const PATH = { close: 'close', dup: 'dup', term: 'term', none: '' }
 
 const VIEW_ONLY_WHY = {
-  own: '這個視窗是你自己開的，ASN 只能看，不能從這裡停止',
-  process: '這是你自己開的程式，ASN 只能看，不能從這裡停止',
+  own: '這個視窗是你自己開的，不能從這裡停止',
+  process: '這是你自己開的程式，不能從這裡停止',
   mux: '終端服務停掉會一起帶走底下所有視窗，所以不提供停止',
   asn: 'ASN 自己的程式，不能從這裡停止',
 }
@@ -155,7 +155,7 @@ export function stopPlan(row, ctx = {}) {
   const k = row?.kind
   if (VIEW_ONLY_WHY[k]) return { path: PATH.none, ok: false, reason: VIEW_ONLY_WHY[k] }
   if (k === 'terminal') {
-    return row.by_asn === false ? { path: PATH.none, ok: false, reason: '這個終端窗格是你自己開的，ASN 只能看' } : { path: PATH.term, ok: Boolean(row.term_id), reason: row.term_id ? '' : '找不到這個終端' }
+    return row.by_asn === false ? { path: PATH.none, ok: false, reason: '這個終端窗格是你自己開的，不能從這裡停止' } : { path: PATH.term, ok: Boolean(row.term_id), reason: row.term_id ? '' : '找不到這個終端' }
   }
   if (k === 'resuming') {
     const ok = Boolean(row.term_id && row.session_id)
@@ -176,7 +176,7 @@ export function stopPlan(row, ctx = {}) {
     if (!item) return { path, ok: false, reason: '這個視窗不能從這裡管理' }
     return { path, ok: item.ok, reason: item.ok ? '' : item.reason }
   }
-  return { path: PATH.none, ok: false, reason: TEXT.viewOnly }
+  return { path: PATH.none, ok: false, reason: TEXT.noStop }
 }
 
 /** 按下「停止」要寄出的內容：只給既有那三條路用，不含任何殺程序的指令 */
@@ -244,7 +244,6 @@ export function viewRow(r, now, ctx) {
     dup: Boolean(r.dup),
     canStop: plan.ok,
     viewOnly: plan.path === PATH.none,
-    showViewOnly: plan.path === PATH.none,   // 範本只讀這個：交接中的列 plan 不是 none，所以只顯示原因不寫「只能看」
     why: plan.ok ? '' : plan.reason,
     dupNote: r.dup ? TEXT.dupRisk : '',
     canAdopt: canAdopt(r),

@@ -56,16 +56,17 @@ export const TaskNode = {
       <div class="tm-title" role="button" tabindex="0" :aria-expanded="String(open)" @keydown.enter.prevent="$emit('toggle')" @keydown.space.prevent="$emit('toggle')"><b class="tm-name">{{ node.name }}</b><span class="tm-tag dup" v-if="node.dup">{{ TM.dupTag }}</span><span class="tm-state">{{ state }}</span><span class="tm-tag" v-if="node.cmpTag" :class="node.cmpState === 'handing' ? 'cmp-go' : 'cmp-warn'">{{ node.cmpTag }}</span></div>
       <small class="tm-dupnote" v-if="node.dupNote">{{ node.dupNote }}</small>
       <div class="tm-detail" v-if="open">
+        <small class="tm-reason" v-if="node.viewOnly && node.why">{{ node.why }}</small>
         <small class="tm-meta"><span class="tm-f" v-for="f in fields" :key="f.k">{{ f.k }} {{ f.v }}</span></small>
         <small class="tm-where">{{ LABEL.where }} <span class="tm-src"><span class="tm-tag native" v-if="node.native">{{ node.source }}</span><template v-else>{{ node.source }}</template></span></small>
       </div>
     </div>
+    <!-- 動作鈕從右邊排（#2242）：DOM 順序＝畫面由左到右，Tab 順序一致。看畫面 ＞ 交接 ＞ 停止（最右）；沒有停止的列，納入管理或重啟在最右。沒有鈕的列留白，不寫字 -->
     <div class="tm-act" @click.stop @keydown.stop>
-      <asn-button state="danger" class="tm-stop" v-if="!node.viewOnly && !node.handing" :disabled="!node.canStop || busy" :title="node.why" :aria-label="TM.stop + ' ' + node.name" @click="$emit('act', 'tm-ask', node.key)">{{ TM.stop }}</asn-button>
-      <small class="tm-viewonly" v-else-if="node.showViewOnly && !restart" :title="node.why">{{ TM.viewOnly }}</small><!-- 有「重啟」的列（ASN、終端服務）不寫「只能看」，免得跟旁邊的重啟矛盾（#1860 F） -->
       <small class="tm-why" v-if="!node.viewOnly && !node.canStop && node.why">{{ node.why }}</small>
-      <asn-button class="tm-handover" v-if="node.canHandover" :disabled="busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + node.name" @click="$emit('act', 'tm-handover', node.name)">{{ TM.handover }}</asn-button>
       <asn-button class="tm-view-btn" v-if="node.canView" :disabled="busy" :title="TM.viewTip" :aria-label="TM.view + ' ' + node.name" @click="$emit('act', 'tm-view', node.name)">{{ TM.view }}</asn-button>
+      <asn-button class="tm-handover" v-if="node.canHandover" :disabled="busy" :title="TM.handoverTip" :aria-label="TM.handover + ' ' + node.name" @click="$emit('act', 'tm-handover', node.name)">{{ TM.handover }}</asn-button>
+      <asn-button state="danger" class="tm-stop" v-if="!node.viewOnly && !node.handing" :disabled="!node.canStop || busy" :title="node.why" :aria-label="TM.stop + ' ' + node.name" @click="$emit('act', 'tm-ask', node.key)">{{ TM.stop }}</asn-button>
       <asn-button class="tm-adopt" v-if="node.canAdopt" :disabled="busy" :title="TM.adoptTip" :aria-label="TM.adopt + ' ' + node.name" @click="$emit('act', 'tm-adopt', node.key)">{{ TM.adopt }}</asn-button>
       <template v-if="restart">
         <asn-status v-if="restart.busy" class="tm-restarting" kind="busy" :text="TREE_TEXT.restarting"></asn-status>
