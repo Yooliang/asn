@@ -11,7 +11,7 @@ test('常數：列表 60 秒、追進度 15 秒、帳號切換請求 60 秒、�
   assert.equal(lp.LAUNCHERS_LIST_POLL_MS, 60_000)
   assert.equal(lp.LAUNCH_TRACK_POLL_MS, 15_000)
   assert.equal(lp.ACCT_INCOMING_POLL_MS, 60_000)
-  assert.equal(lp.BELL_REFRESH_MIN_GAP_MS, 5_000)
+  assert.equal(lp.BELL_REFRESH_MIN_GAP_MS, 30_000)
   assert.equal(lp.LAUNCHERS_POLL_MAX_MS, 300_000)
   assert.equal(lp.LAUNCHERS_POLL_MS, undefined, '舊的單一常數已拆掉，避免兩種用途又共用一個數字')
 })
@@ -26,11 +26,11 @@ test('nextLaunchersDelay 以 60 秒為基準：成功回 60 秒，被擋加倍�
   assert.equal(lp.nextLaunchersDelay(undefined, denied), 120_000)
 })
 
-test('shouldRefreshOnBell：5 秒內只觸發一次', () => {
+test('shouldRefreshOnBell：30 秒內只觸發一次', () => {
   assert.equal(lp.shouldRefreshOnBell(0, 1_000), true, '從沒刷過')
   assert.equal(lp.shouldRefreshOnBell(10_000, 12_000), false)
-  assert.equal(lp.shouldRefreshOnBell(10_000, 14_999), false)
-  assert.equal(lp.shouldRefreshOnBell(10_000, 15_000), true)
+  assert.equal(lp.shouldRefreshOnBell(10_000, 39_999), false)
+  assert.equal(lp.shouldRefreshOnBell(10_000, 40_000), true)
   assert.equal(lp.shouldRefreshOnBell(10_000, 10_000), false, '同一瞬間連敲')
 })
 

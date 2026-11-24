@@ -6,7 +6,7 @@
 export const LAUNCHERS_LIST_POLL_MS = 60_000   // 列表輪詢（launchersLoop）
 export const LAUNCH_TRACK_POLL_MS = 15_000     // 追剛開的夥伴的啟動進度（只在 launchTrack 有項目時才打）
 export const ACCT_INCOMING_POLL_MS = 60_000    // 取走別台送來的切換帳號請求；請求 3 分鐘作廢，60 秒保底有 3 倍餘裕
-export const BELL_REFRESH_MIN_GAP_MS = 5_000
+export const BELL_REFRESH_MIN_GAP_MS = 30_000   // 啟動設定很少變：門鈴（寄信也會敲）頂多每 30 秒順便刷新一次，最壞每分鐘 2 次，不會抵銷降頻
 export const LAUNCHERS_POLL_MAX_MS = 300_000
 
 const msgOf = e => String(e?.message ?? e ?? '')
