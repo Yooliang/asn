@@ -344,19 +344,24 @@ test('「我的帳號」卡片：帳號後面寫（時間）、沒有（時間�
   assert.ok(!html.includes('較舊') && !html.includes('開新視窗就會更新'))
   assert.ok(html.includes('c@x.test') && html.includes('1 小時前') && html.includes('開 Codex 後才讀得到'), '說明文字照留，時間在帳號後面')
   assert.ok(!/（\d+ (小時|分鐘|天)前・/.test(html) && !html.includes('資料較舊'), '舊的「（時間・哪台）」與「資料較舊」標籤都不見了')
-  // 讀的那台（W）的按鈕外框有 read；另一台（S，old@ 的卡片上）沒有
+  // 讀的那台（W）的設備名後面有「額度回報」小標籤（和 Max 同一類 dv-plan）；另一台（S，old@ 的卡片上）沒有（#2243）
   const oldCard = html.slice(html.indexOf('old@x.test'), html.indexOf('c@x.test'))
-  assert.match(oldCard, /<span class="dv-devrow read">/)
-  assert.match(oldCard, /<span class="dv-devrow">/, '沒讀的那台沒有線')
+  assert.match(oldCard, /<span class="dv-devn">工作機<span class="dv-plan dv-devread">額度回報<\/span><\/span>/)
+  assert.match(oldCard, /<span class="dv-devn">家用機(?:<!---->)?<\/span>/, '沒讀的那台沒有標籤')
+  assert.equal((oldCard.match(/dv-devread/g) || []).length, 1, '只有讀的那一台有標籤')
+  assert.ok(!oldCard.includes('dv-devrow read') && !oldCard.includes('dv-devself'), '舊的藍線與「這台」小字都不見了')
   // 按鈕本身的 class 不變（其他頁的測試與樣式靠它）
   assert.ok(!oldCard.includes('dv-devbtn read'))
 })
 
-test('設備列的藍線：設備名左邊 3px、用主題色；手機版是另一份樣板，不動', () => {
+test('設備列的「額度回報」小標籤：電腦與手機同一份常數與規則，藍線樣式已移除（#2243）', () => {
   const css = read('ui/style.css')
-  assert.match(css, /\.dv-devrow\.read \.dv-devname\{border-left:3px solid var\(--accent\)/)
+  assert.ok(!/dv-devrow\.read|dv-devself/.test(css), '藍線與「這台」的樣式已移除')
   const panel = read('ui/lib/settings-panel.mjs')
-  assert.ok(panel.includes(`:class="['dv-devrow', { read: (a.quota.readNodes || []).includes(b.node) }]"`))
+  assert.ok(panel.includes(`v-if="(a.quota.readNodes || []).includes(b.node)">{{ DEVICE_ROW_TEXT.read }}`))
+  assert.ok(!panel.includes('DEVICE_ROW_TEXT.self'))
+  assert.ok(read('ui/m.html').includes(`v-if="(a.quota.readNodes || []).includes(b.node)">{{ DEVICE_ROW_TEXT.read }}`), '手機同一份規則')
+  assert.ok(!read('ui/m.html').includes('DEVICE_ROW_TEXT.self'))
   assert.ok(!panel.includes('<span v-if="a.quota.meta">（{{ a.quota.meta }}）</span>\n                    </span>\n                    <!-- 設備按鈕'), '「我的帳號」卡片的額度行後面不再接 meta')
   assert.ok(read('ui/m.html').includes('{{ a.quota.meta }}'), '手機版的樣板與樣式是分開的，沒有跟著改')
 })

@@ -51,7 +51,7 @@ const my = () => rosterView(roster([
 ]), { nodeLabel: label, now: NOW })
 
 /** 帳號頁的設備列：[{ name, text, state, disabled, why }]（依畫面順序；#2111 ② 一台一列） */
-const devBtns = html => [...html.matchAll(/<span class="dv-devrow[^"]*"><span class="dv-devname"><span class="dv-devn">([^<]*)(?:<small[^>]*>[^<]*<\/small>|<!---->)?<\/span>(?:<small class="dv-devwhy"[^>]*>([^<]*)<\/small>|<!---->)?<\/span><button([^>]*)>([\s\S]*?)<\/button>/g)].map(m => ({
+const devBtns = html => [...html.matchAll(/<span class="dv-devrow[^"]*"><span class="dv-devname"><span class="dv-devn">([^<]*)(?:<span class="dv-plan dv-devread">[^<]*<\/span>|<!---->)?<\/span>(?:<small class="dv-devwhy"[^>]*>([^<]*)<\/small>|<!---->)?<\/span><button([^>]*)>([\s\S]*?)<\/button>/g)].map(m => ({
   name: m[1], why: m[2] ?? '', text: m[4].replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]+>/g, ''), state: /st-(current|busy|blocked)/.exec(m[3])?.[1] ?? (/dv-devbtn/.test(m[3]) ? 'switch' : ''), disabled: /\sdisabled/.test(m[3]),
 }))
 

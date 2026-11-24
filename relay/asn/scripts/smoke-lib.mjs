@@ -558,6 +558,11 @@ const BASE_SCENARIOS = [
   { name: 'list-merged-520', page: 'list.html', width: 520, state: { signedIn: true, devicesPage: true, roster: 'resets' }, ready: '#app.win .dv-my .dv-acct', probe: MPANE_PROBES.double, shot: 'list-merged-520.png' },
   { name: 'm-acct-devbtn', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-412.png' },
   { name: 'm-acct-devbtn-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: DEVBTN_PROBES.mobile, shot: 'm-acct-devbtn-360.png' },
+  // 帳號頁設備列的「額度回報」小標籤（#2243）：三套外觀＋手機各一張截圖
+  { name: 'list-acct-readtag', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets', localAcct: true }, ready: '#app.win .dv-my .dv-acct', shot: 'list-acct-readtag-aero.png' },
+  { name: 'list-acct-readtag-modern', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets', localAcct: true, skin: 'modern' }, ready: '#app.win .dv-my .dv-acct', shot: 'list-acct-readtag-modern.png' },
+  { name: 'list-acct-readtag-line', page: 'list.html', state: { signedIn: true, devicesPage: true, roster: 'resets', localAcct: true, skin: 'line' }, ready: '#app.win .dv-my .dv-acct', shot: 'list-acct-readtag-line.png' },
+  { name: 'm-acct-readtag', page: 'm.html', state: { signedIn: true, mroster: 'cards' }, ready: '#app.m .m-row-btn', probe: MCARDS_PROBE, shot: 'm-acct-readtag.png' },   // 走進帳號頁（同 m-acct-cards）再截圖
   { name: 'm-devsheet', page: 'm.html', state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MDEVSHEET_PROBES.mobile, shot: 'm-devsheet-412.png' },
   { name: 'm-devsheet-360', page: 'm.html', width: 360, state: { signedIn: true, mnoself: 'android' }, ready: '#app.m .m-row-btn', probe: MDEVSHEET_PROBES.mobile, shot: 'm-devsheet-360.png' },
   // 手機「通知」分頁（#895）：通知分頁看到幾則通知＋四個頁籤的字都放得下；以及通知那一格的未讀紅點。412、360 寬與大字型各一張
