@@ -601,6 +601,7 @@ mod tests {
     }
 
     /// 一審複看 2：使用者重啟後的接回（真的呼叫 after_mux_restart 與重啟原因的接回）不動監看存的冷卻紀錄
+    #[cfg(feature = "gui")]
     #[test]
     fn _1860f_重啟的接回_不改冷卻紀錄() {
         use super::super::mux_watch::{Watch, STATE_FILE};
