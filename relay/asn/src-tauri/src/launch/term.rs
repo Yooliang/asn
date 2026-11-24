@@ -2145,6 +2145,12 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 只給同檔的背景工作用，不接前端命令、CLI、遠端：其他人不能經由這裡讀夥伴畫面（`read`、`status` 照舊拒絕夥伴視窗）。
     /// 看到結束標記就是 Claude 已經結束，畫面上的東西不算；沒看到不代表還活著（標記可能捲出畫面），名單只對活著的 session 才顯示
     fn partner_screen_code(&self, id: &str) -> Result<Option<&'static str>, String> {
+        self.partner_screen_view(id).map(|v| v.and_then(|(code, _)| code))
+    }
+
+    /// 同上，另外回這一次讀到的畫面文字，只給保底通知（stuck_prompt）在背景工作裡比對用，不往外送整個畫面。
+    /// `Ok(None)`＝看到結束標記（視窗已經結束）
+    fn partner_screen_view(&self, id: &str) -> Result<Option<(Option<&'static str>, String)>, String> {
         let snap = self.snapshot_p(id, true)?;
         self.verify_window(&snap)?;
         let nonce = {
@@ -2157,7 +2163,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if nonce.is_some_and(|n| wezterm::pane_exit_from_screen(&text, &n).is_some()) {
             return Ok(None);
         }
-        Ok(super::claude_screen::classify(&text).map(|s| super::claude_screen::status_code(s.kind)))
+        let code = super::claude_screen::classify(&text).map(|s| super::claude_screen::status_code(s.kind));
+        Ok(Some((code, text)))
     }
 
     /// 按鈕前的全部核對，回（畫面文字, 判斷結果, 窗格資訊）。任何一項不符都回錯，不給按鈕也不送字：
@@ -3596,6 +3603,9 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
         let mut notices: std::collections::BTreeMap<String, PartnerNotice> = Default::default();
         // 已經寫過「認不得的選單」的視窗：同一段停留只寫一次（#1799）
         let mut attention_logged: std::collections::BTreeSet<String> = Default::default();
+        // 保底通知：每扇視窗「這段畫面從何時起沒變」
+        // 已通知的紀錄存檔：重啟 ASN 後 30 分鐘內同一段不重寄（#2264 一審 4）
+        let mut stuck = super::stuck_prompt::StuckWatch::load(&log_dir.join(super::stuck_prompt::STATE_FILE), crate::heartbeat::now_ms());
         loop {
             std::thread::sleep(std::time::Duration::from_millis(TICK_MS));
             // 設定頁關掉：不讀畫面，已顯示的提醒也收掉；名單上的固定字過期（2 分鐘）就不再顯示。打開就接著讀
@@ -3627,9 +3637,17 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
                 }
             }
             notices.retain(|id, _| windows.iter().any(|(w, _)| w == id));
+            stuck.retain_windows(&all.iter().filter(|(id, _)| windows.iter().any(|(w, _)| w == id)).map(|(_, n)| n.clone()).collect::<Vec<_>>());
             for id in schedule.due(now, &windows, free_memory_bytes()) {
                 let Some(pace) = windows.iter().find(|(w, _)| *w == id).map(|(_, p)| *p) else { continue };
-                let result = terms.partner_screen_code(&id);
+                let view = terms.partner_screen_view(&id);
+                // 保底（#2256）：畫面停在「Do you want to proceed?」加編號選項超過 5 分鐘，認不認得成權限框都要通知。
+                // 讀到畫面才比對；讀失敗不算框消失（不重置計時）
+                if let (Some((_, name)), Ok(seen)) = (all.iter().find(|(w, _)| *w == id), view.as_ref()) {
+                    let text = seen.as_ref().map(|(_, t)| t.as_str());
+                    stuck.tick(name, text, now, &|line| note(now, line));
+                }
+                let result: Result<Option<&'static str>, String> = view.map(|v| v.and_then(|(code, _)| code));
                 let code = result.as_ref().ok().copied().flatten();
                 if let Some((_, sid)) = matched.iter().find(|(w, _)| *w == id) {
                     write_screen_code(&screen_dir, sid, code, now);
