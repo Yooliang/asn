@@ -1,15 +1,11 @@
 {
-  "version": "0.2.86",
-  "notes": "- 改善：設定與設備頁的標題只留一層，手機設備頁標題列直接顯示設備名稱和狀態，不再重複\n- 修正：亮色外觀的視窗不再出現一條條暗色帶\n- 修正：操作失敗時，錯誤訊息改用白話說明，不會再出現空白訊息\n- 改善：啟動偏好和收發室設定改用統一的存檔方式，壞檔會自動備份、不會蓋掉新版設定",
-  "pub_date": "2026-11-23T22:38:29.097Z",
+  "version": "0.2.87",
+  "notes": "- 新功能：重灌電腦或換新手機後，設備頁會問「是不是取代舊的那台」；確認後新設備沿用舊設備的名稱，舊設備移到「已移除」\n- 改善：重灌後出現新設備時，擁有者會收到一則通知\n- 改善：個人設定、引導進度和對話快取改用統一的存檔方式，新版程式加的設定不會被舊版蓋掉",
+  "pub_date": "2026-11-24T00:17:07.274Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBFbUZtZmFZVSt0bGp6ZXNhbUdEUEVobmJnTFRoWWtPOFpKQUlEQTIyaUNmTFVNVHg1YnFoRXRscVkwdSsyd0Q2aCtzNTBiZWcvc25ZbmNHT3BUZUF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDczNTA4CWZpbGU6QVNOXzAuMi44Nl94NjQtc2V0dXAuZXhlCitkL1ZESXBxK3FoOWViKzJEMkdOVFB0cytvSEduc2R6SnVNdWZZL3hjYWlhbTAzZEY0TUlkb3Yrb09VNUZSVmMwdlcyWWttR3pXNElEZVlXRjZtNUJnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.86_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFROVV2a0xiNGVUczBwME9rVXhqb2VCWUg1Y1ROcXhyWis5UGRqQkgxdzduZ2NHQ3lpL3FSc09KWUNacmxsZEVEWnVMbEJEWGJSVVlOSnhuTHdNOFE4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDc0MDc3CWZpbGU6QVNOXzAuMi44Nl9hbWQ2NC5BcHBJbWFnZQpJeWhRVlRibUZURjduRFRmeXloRmo2OWtGdlplaE4weWZLSkZWazF4UlJ3dnc5VFhZeENtYk9qR3pjZTJQc1p6Rm9VcWtWWnMxVHNBdXdGb2orYy9Cdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.86_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZQZ2FDOGk5NmRNcFdVWXBiQ0Q3bW9FdloyV0prWHNKcUQ2S2tNeHU5MFJaaUxsdTN4bC83OUxBYVFDQTNWS2k5ZDhML3VOdytVdVY2ckcwZ1VBSkFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NDc5NDI2CWZpbGU6QVNOXzAuMi44N194NjQtc2V0dXAuZXhlClJxOVR1VUhEVE85U2gvdSt3a3pyQlh3T1NOZ2tSNElvSVFEbE1FemZvZUtIZHNGbUl4OVlFZkwzU2J2THVHbnN0cHlaYWtVajVLRVNXY3gyTVdseEJnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.87_x64-setup.exe"
     }
   }
 }
