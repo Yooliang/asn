@@ -1440,6 +1440,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 呼叫端要放在背景執行緒（停與起各要等幾秒）
     /// `down`：起新的失敗、有夥伴斷線時呼叫（呼叫端排通知給本人）
     pub fn restart_mux(&self, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
+        self.restart_mux_with(|m| m.ensure().map(|_| ()), resume, down)
+    }
+
+    /// 同 [`Self::restart_mux`]，「起新的」由外面給（測試用：數它被叫了幾次）
+    fn restart_mux_with(&self, ensure: impl FnOnce(&super::mux::Mux<'_>) -> Result<(), String>, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
         use super::mux_restart::{run_steps, RestartError, STASH, STOP_NOT_RUNNING};
         let m = self.restart_mux_handle()?;
         let note = |l: &str| {
@@ -1478,7 +1483,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             drop(guard.borrow_mut().take());
             resume(names)
         };
-        let r = run_steps(true, &STASH, names, verify, stop, || m.ensure().map(|_| ()), resume, down, &note);
+        let r = run_steps(true, &STASH, names, verify, stop, || ensure(&m), resume, down, &note);
         drop(guard.borrow_mut().take());
         r
     }
@@ -6751,15 +6756,22 @@ mod tests {
         fn _1860f_重啟終端服務_沒有服務在跑也能繼續_起新的並接回() {
             let (rig, paths) = mux_rig();
             std::fs::remove_file(&paths.pid).unwrap();
+            // 前提固定：停的結果就是「沒有服務在跑」（pid 檔沒了）
+            assert_eq!(rig.svc.restart_mux_handle().unwrap().stop(), Err(crate::launch::mux_restart::STOP_NOT_RUNNING.to_string()));
             let got = std::cell::RefCell::new(None::<Vec<String>>);
-            let r = rig.svc.restart_mux(|n| *got.borrow_mut() = Some(n), |_| {});
-            if let Err(e) = &r {
-                // 假的環境起不了新服務也算走到了 ensure（不是卡在 stop）
-                assert!(!matches!(e, crate::launch::mux_restart::RestartError::Failed(w) if w == crate::launch::mux_restart::STOP_NOT_RUNNING), "不能卡在沒有服務在跑：{e:?}");
-                assert!(!matches!(e, crate::launch::mux_restart::RestartError::Unmanaged(_)), "服務已經不在，不核對窗格數：{e:?}");
-            } else {
-                assert!(got.borrow().is_some(), "成功就要交出名單接回");
-            }
+            let ensured = std::cell::Cell::new(0);
+            let r = rig.svc.restart_mux_with(
+                |_| {
+                    ensured.set(ensured.get() + 1);
+                    Ok(())
+                },
+                |n| *got.borrow_mut() = Some(n),
+                |_| panic!("起得來就不該通知斷線"),
+            );
+            assert_eq!(r, Ok(()), "沒有服務在跑要當成已經停了，繼續往下走");
+            assert_eq!(ensured.get(), 1, "一定走到起新的，而且只一次");
+            assert!(got.borrow().is_some(), "起好之後要交出名單接回");
+            assert!(rig.runner.killed().is_empty(), "沒有服務在跑，沒有東西要結束");
         }
 
         /// 二審 2：服務裡有 ASN 沒記錄的窗格（清單上有 asn-1，ASN 的對照表是空的）：不停、不起、不接回，回白話錯誤

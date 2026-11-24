@@ -600,6 +600,30 @@ mod tests {
         assert!(super::super::mux_round::read_resume_notice(d.path()).is_some(), "原本 mux_watch 的路徑照排通知");
     }
 
+    /// 一審複看 2：使用者重啟後的接回（真的呼叫 after_mux_restart 與重啟原因的接回）不動監看存的冷卻紀錄
+    #[test]
+    fn _1860f_重啟的接回_不改冷卻紀錄() {
+        use super::super::mux_watch::{Watch, STATE_FILE};
+        let (work, data) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let file = work.path().join(STATE_FILE);
+        let mut w = Watch::default();
+        w.last_resume_at = Some(7);
+        w.save(&file);
+        let before = std::fs::read_to_string(&file).unwrap();
+        // 名單是空的：不會真的開任何視窗，但整條 after_mux_restart 照走
+        after_mux_restart(work.path(), data.path(), &[]);
+        assert_eq!(Watch::load(&file, None).last_resume_at, Some(7), "after_mux_restart 不動冷卻紀錄");
+        // 有人要接回（假的接回動作）：原因寫重啟，同樣不動
+        let st = resume_entries_why(work.path(), vec![entry("甲")], true, WHY_RESTART, &Fake::new(), || ());
+        assert_eq!(st.total, 1);
+        assert_eq!(Watch::load(&file, None).last_resume_at, Some(7), "接回不動冷卻紀錄");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before, "監看的狀態檔整份沒被改");
+        // 對照：紀錄確實讀得到、冷卻確實在算（不是讀不到才「沒變」）
+        let w2 = Watch::load(&file, None);
+        assert!(w2.resume_quota_ok(7 + super::super::mux_watch::RESUME_GAP_MS));
+        assert!(!w2.resume_quota_ok(8));
+    }
+
     #[test]
     fn _1860f_重啟的接回_不經監看_不計十分鐘冷卻() {
         let src = include_str!("auto_resume.rs");

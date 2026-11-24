@@ -77,6 +77,15 @@ impl Stash {
 /// 上一次起新服務失敗時的名單
 pub static STASH: Stash = Stash::new();
 
+/// 還有幾位代理沒接回（存下的名單長度）：工作管理員重啟 ASN 前要告訴本人，因為名單只在記憶體，ASN 重啟就沒了
+pub fn pending_count() -> usize {
+    pending_of(&STASH)
+}
+
+fn pending_of(stash: &Stash) -> usize {
+    stash.get().len()
+}
+
 #[derive(Debug, PartialEq)]
 pub enum RestartError {
     /// 這台沒有終端服務（Linux、沒開終端服務模式）
@@ -319,6 +328,19 @@ mod tests {
         assert!(r2.is_ok());
         assert_eq!(calls, ["名單", "核對", "停", "起", "接回甲、乙"], "用存下的名單接回");
         assert!(stash.get().is_empty(), "接回之後清掉，不重複接回");
+    }
+
+    /// 一審複看 1：起不來之後還有幾位沒接回，要能讓畫面知道（重啟 ASN 前的確認框用）；接回後歸零
+    #[test]
+    fn _1860f_沒接回的人數_起不來有數字_接回後歸零() {
+        let stash = Stash::new();
+        assert_eq!(pending_of(&stash), 0);
+        let (r, _) = flow_with(&stash, two(), Ok(()), Err("連不上".into()));
+        assert!(r.is_err());
+        assert_eq!(pending_of(&stash), 2, "起不來：兩位等著接回");
+        let (r, _) = flow_with(&stash, Some(Vec::new()), Ok(()), Ok(()));
+        assert!(r.is_ok());
+        assert_eq!(pending_of(&stash), 0, "接回後歸零");
     }
 
     #[test]

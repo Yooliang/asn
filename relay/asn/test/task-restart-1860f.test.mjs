@@ -51,6 +51,23 @@ test('#1860F-3 別台的框前面加那台的名字（前綴機制）', async ()
   assert.equal(restartAsnText('「工作機」的'), '重啟「工作機」的 ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。')
 })
 
+test('#1860F-3 有代理沒接回時，重啟 ASN 的確認框多一句；沒有時文字與定稿相同', async () => {
+  const base = '重啟 ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。'
+  const extra = '還有 2 位代理沒接回，重啟後要到這台的工作管理員重按終端服務的重啟。'
+  assert.equal(restartAsnText('', 2), base + extra)
+  assert.equal(restartAsnText('', 0), base)
+  assert.equal(restartAsnText(), base)
+  // 走完整條：電腦端清單帶 restart_pending
+  const o = await opened(mk({ snapshot: { ...taskmgrSnapshot(NOW), restart_pending: 2 } }))
+  o.tm.askRestart(ROOT_KEY)
+  assert.equal(o.tm.view().tree.root.restart.ask, base + extra)
+  o.tm.askRestart(MUX)
+  assert.equal(o.tm.view().tree.groups[0].restart.ask, '重啟終端服務？底下所有代理（3 個）會暫時斷線，之後會自動連回。', '終端服務的確認框不加這句')
+  const z = await opened(mk({ snapshot: { ...taskmgrSnapshot(NOW), restart_pending: 0 } }))
+  z.tm.askRestart(ROOT_KEY)
+  assert.equal(z.tm.view().tree.root.restart.ask, base)
+})
+
 test('#1860F-3 重啟終端服務中：那一列顯示「正在重啟…」、底下代理標「斷線中」且不能停止；回來後恢復', async () => {
   let release
   const gate = new Promise(r => { release = r })

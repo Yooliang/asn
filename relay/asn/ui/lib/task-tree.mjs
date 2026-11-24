@@ -20,7 +20,10 @@ export const TREE_TEXT = Object.freeze({
 })
 
 /** 重啟確認框的字。prefix 是別台設備才加的主詞（例如「工作機」的），這台自己不給 */
-export const restartAsnText = (prefix = '') => `重啟${prefix} ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。`
+/** pending：上次重啟終端服務失敗、還沒接回的代理數。名單只放記憶體，ASN 重啟就沒了，所以有人沒接回時要先講 */
+export const restartAsnText = (prefix = '', pending = 0) =>
+  `重啟${prefix} ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。` +
+  (pending > 0 ? `還有 ${pending} 位代理沒接回，重啟後要到這台的工作管理員重按終端服務的重啟。` : '')
 export const restartMuxText = (n, prefix = '') => `重啟${prefix}終端服務？底下所有代理（${n} 個）會暫時斷線，之後會自動連回。`
 
 export const ROOT_KEY = 'asn'
@@ -55,7 +58,7 @@ export function buildTree(rows) {
  */
 export function treeView(rows, mapRow, ui = {}) {
   const t = buildTree(rows)
-  const { ask = null, restarting = null, frozen = null, prefix = '', error = null } = ui
+  const { ask = null, restarting = null, frozen = null, prefix = '', error = null, pending = 0 } = ui
   // 重啟中：ASN 重啟整棵樹都斷線；終端服務重啟只有它底下的代理斷線（restarting 是節點鍵，'mux:*' 代表不知道是哪一個，全部終端服務）
   const hit = key => restarting === key || (restarting === 'mux:*' && key.startsWith('mux:'))
   const allDown = restarting === ROOT_KEY
@@ -63,7 +66,7 @@ export function treeView(rows, mapRow, ui = {}) {
   // 錯誤掛在一定存在的那一列：有 ASN 本體就掛在 ASN 列（終端服務那一列重啟後可能換了編號、下一輪就消失）；沒有 ASN 列才掛在原本那個節點
   const errorFor = key => (error ? (t.asn ? (key === ROOT_KEY ? error.text : '') : (error.key === key ? error.text : '')) : '')
   const restartOf = (key, text) => ({ target: key, ask: ask === key ? text : '', busy: hit(key) || (key === ROOT_KEY && allDown), disabled: restarting !== null, error: errorFor(key) })
-  const root = t.asn ? { key: ROOT_KEY, node: mapRow(t.asn), statusText: TREE_TEXT.running, restart: restartOf(ROOT_KEY, restartAsnText(prefix)) } : null
+  const root = t.asn ? { key: ROOT_KEY, node: mapRow(t.asn), statusText: TREE_TEXT.running, restart: restartOf(ROOT_KEY, restartAsnText(prefix, pending)) } : null
   const mapAgent = (a, isDown) => (isDown ? down(mapRow(a)) : mapRow(a))
   const groups = t.groups.map(g => {
     const key = muxKey(g.mux.pid)

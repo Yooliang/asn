@@ -385,6 +385,7 @@ export function createTaskManager(deps) {
     frozen: state.restartFrozen,
     prefix: confirmPrefix(),
     error: state.restartError,
+    pending: Math.max(0, Number(state.snapshot?.restart_pending) || 0),
   })
   const liveTree = () => { const n = now(), c = ctx(); return treeView(rowsNow(), r => viewRow(r, n, c), treeUi()) }
 
