@@ -22,6 +22,9 @@ pub(crate) mod integrity;
 #[cfg_attr(not(all(feature = "gui", desktop)), allow(dead_code))]
 pub(crate) mod stuck_resume;
 pub(crate) mod stuck_notice;
+/// 保底：畫面停在「Do you want to proceed?」加編號選項超過 5 分鐘（#2256）
+#[cfg_attr(not(all(feature = "gui", desktop)), allow(dead_code))]
+pub(crate) mod stuck_prompt;
 #[cfg_attr(not(all(feature = "gui", desktop)), allow(dead_code))]
 pub(crate) mod awaiting;
 pub mod auto_resume;

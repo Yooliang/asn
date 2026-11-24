@@ -146,7 +146,7 @@ export const TEXT = {
   askingNoName: '夥伴正在詢問',
   asking: '正在詢問',
   ofWord: '的',
-  incomplete: '內容太長，這裡只看得到一部分，所以只能拒絕。要允許請到電腦上看完整內容。',
+  incomplete: '指令太長，要核准請到電腦上看完整內容。這裡只看得到一部分，所以只能拒絕。',
   viewOnly: '這題要到電腦上回答（多選、一次多題，或要自己打字）。',
   noType: '要自己打字，請到電腦上回答。',
   optionLabel: '選項',
