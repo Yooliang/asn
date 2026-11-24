@@ -212,18 +212,7 @@ const SCREEN_MAX_BYTES: u64 = 512;
 
 /// 代號 → 名單顯示的字。名單別人也可能看到，所以只會是這幾句固定字；檔案裡的其他內容一律不顯示
 fn screen_label(code: &str) -> Option<&'static str> {
-    Some(match code {
-        "permission" => "等你回答：權限",
-        "trust" => "等你回答：信任資料夾",
-        "bypass_warning" => "卡在略過權限警告",
-        "login" => "需要登入",
-        "usage_limit" => "額度用完",
-        "usage_menu" => "額度用完：等你選",
-        "question" | "question_view" => "等你回答：問題",
-        "attention" => "需要人工確認",
-        "held_message" => "等你確認：外來訊息",
-        _ => return None,
-    })
+    crate::launch::screen_catalog::label_of(code)
 }
 
 /// 畫面判斷只改說明，不改名單狀態：信件要不要轉、提醒什麼時候送都照舊

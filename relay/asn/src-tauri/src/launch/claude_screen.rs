@@ -106,20 +106,10 @@ const NOTICE_LOOKBACK: usize = 8;
 /// 底部認不出的選單游標往上看幾行（真的選單底下可能還有預覽）
 const MENU_CURSOR_LOOKBACK: usize = 16;
 
-/// 這個種類對應的固定代號（寫進狀態檔的只有它，不含畫面文字；名單顯示的字見 bridge::roster 的 screen_label）
+/// 這個種類對應的固定代號（寫進狀態檔的只有它，不含畫面文字）。
+/// 代號、名單說明、提醒文字全部在 `screen_catalog::SCREEN_CATALOG`，這裡不再自己列一份（#1813）
 pub fn status_code(kind: ClaudeScreenKind) -> &'static str {
-    match kind {
-        ClaudeScreenKind::Permission => "permission",
-        ClaudeScreenKind::TrustFolder => "trust",
-        ClaudeScreenKind::BypassWarning => "bypass_warning",
-        ClaudeScreenKind::Login => "login",
-        ClaudeScreenKind::UsageLimit => "usage_limit",
-        ClaudeScreenKind::UsageMenu => "usage_menu",
-        ClaudeScreenKind::Question => "question",
-        ClaudeScreenKind::QuestionView => "question_view",
-        ClaudeScreenKind::Attention => "attention",
-        ClaudeScreenKind::HeldMessage => "held_message",
-    }
+    super::screen_catalog::code_of(kind)
 }
 
 /// 權限詢問顯示給本人看的文字最多幾行：再長就不算完整

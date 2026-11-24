@@ -21,33 +21,60 @@ const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isD
 
 const screen = read('src-tauri/src/launch/claude_screen.rs')
 const prod = screen.split('#[cfg(test)]')[0]
-const roster = read('src-tauri/src/bridge/roster.rs')
+const catalogSrc = read('src-tauri/src/launch/screen_catalog.rs').split('#[cfg(test)]')[0]
 
 /** 畫面種類（Rust enum 的每個變體） */
 const kinds = [...prod.split('pub enum ClaudeScreenKind {')[1].split('\n}\n')[0].matchAll(/^\s{4}([A-Z][A-Za-z]+),/gm)].map(m => m[1])
-/** status_code 對照：種類 → 固定代號 */
-const codeOf = Object.fromEntries([...prod.split('pub fn status_code(')[1].split('\n}\n')[0].matchAll(/ClaudeScreenKind::([A-Za-z]+) => "([a-z_]+)"/g)].map(m => [m[1], m[2]]))
-/** 名單 screen_label 認得的代號 */
-const labelCodes = new Set([...roster.split('fn screen_label(')[1].split('\n}\n')[0].matchAll(/^\s+((?:"[a-z_]+"(?:\s*\|\s*)?)+)\s*=>/gm)].flatMap(m => [...m[1].matchAll(/"([a-z_]+)"/g)].map(x => x[1])))
+/** 唯一的清單（Rust SCREEN_CATALOG）：種類 → 固定代號 */
+const codeOf = Object.fromEntries([...catalogSrc.matchAll(/kind: K::([A-Za-z]+),\s*code: "([a-z_]+)"/g)].map(m => [m[1], m[2]]))
 
-test('#1254 #1512 #1632 #1792 每一種畫面種類都有固定代號、名單說明、前端提醒文字（三處同步，不能漏登記）', () => {
+test('#1813 #1254 #1512 #1632 #1792 每一種畫面種類在唯一的清單（screen_catalog.rs）都有一列；提醒文字由它產出的檔案提供', () => {
   assert.ok(kinds.length >= 10, `讀得到畫面種類：${kinds}`)
   const noCode = kinds.filter(k => !codeOf[k])
-  assert.deepEqual(noCode, [], '沒有 status_code 代號的種類')
-  const noLabel = kinds.filter(k => !labelCodes.has(codeOf[k]))
-  assert.deepEqual(noLabel, [], '名單（bridge/roster.rs screen_label）沒有說明的種類：名單上只會看到卡住卻不知道卡在哪')
-  // 前端：每個代號都要有提醒（本人不在電腦前也能知道）；代號不認得就不顯示——正是「沒人知道」的來源
-  // #1799：認不得種類的選單（attention）不再跳提醒，只寫 ui.log；其餘種類照舊都要有提醒文字
+  assert.deepEqual(noCode, [], 'SCREEN_CATALOG 沒有這一列的種類（代號、名單說明、提醒都從這一列來）')
+  assert.deepEqual(Object.keys(codeOf).filter(k => !kinds.includes(k)).sort(), [], '清單有已經不存在的種類')
+  // 前端檔案（由 Rust 清單產出）的代號要和清單完全一致；內容一致由 Rust 測試「前端清單檔和_rust_清單一致」守
+  const gen = read('ui/lib/stuck-screens.mjs')
+  assert.deepEqual([...gen.matchAll(/\{ code: "([a-z_]+)", label:/g)].map(m => m[1]), Object.values(codeOf), 'stuck-screens.mjs 和 Rust 清單的代號不一致')
+  // #1799：認不得種類的選單（attention）不跳提醒，只寫 ui.log；其餘種類都要有提醒文字（本人不在電腦前也能知道）
   const noNotice = kinds.filter(k => codeOf[k] !== 'attention' && !noticeText({ code: codeOf[k], name: '甲' }))
-  assert.deepEqual(noNotice, [], '前端 partner-notice 沒有提醒文字的種類')
+  assert.deepEqual(noNotice, [], '沒有提醒文字的種類')
+  assert.equal(noticeText({ code: 'attention', name: '甲' }), null)
   for (const k of kinds.filter(k => codeOf[k] !== 'attention')) {
     const n = noticeText({ code: codeOf[k], name: '甲' })
     assert.match(n.title + n.body, /[一-鿿]/)
+    assert.ok(n.body.includes('「甲」') && !n.body.includes('{name}'), `${codeOf[k]} 的提醒要換成夥伴名`)
     assert.doesNotMatch(n.title + n.body, /[a-z]+_[a-z_]+|HTTP/, `${codeOf[k]} 的提醒不能秀內部代號`)
   }
-  // 反過來：名單的說明不能有不存在的代號（改名後舊字串殘留）
-  const known = new Set(Object.values(codeOf))
-  assert.deepEqual([...labelCodes].filter(c => !known.has(c)), [], 'screen_label 有已經不存在的代號')
+})
+
+test('#1813 只有一份來源：status_code、名單 screen_label、前端提醒都不准再寫死畫面代號的清單', () => {
+  const codes = Object.values(codeOf)
+  // status_code 與 screen_label 只能轉呼叫清單，函式本體不能有任何代號字串
+  const statusBody = prod.split('pub fn status_code(')[1].split('\n}\n')[0]
+  assert.match(statusBody, /screen_catalog::code_of\(kind\)/)
+  const roster = read('src-tauri/src/bridge/roster.rs').split('#[cfg(test)]')[0]
+  const labelBody = roster.split('fn screen_label(')[1].split('\n}\n')[0]
+  assert.match(labelBody, /screen_catalog::label_of\(code\)/)
+  for (const [what, body] of [['status_code', statusBody], ['screen_label', labelBody]]) {
+    assert.deepEqual(codes.filter(c => body.includes(`"${c}"`)), [], `${what} 不准寫死代號`)
+  }
+  // 前端：提醒與終端提示只能讀 stuck-screens.mjs
+  const pn = read('ui/lib/partner-notice.mjs')
+  assert.match(pn, /from '\.\/stuck-screens\.mjs'/)
+  assert.ok(!/NOTICES\s*=\s*\{|VIEW_HINTS\s*=\s*\{/.test(pn), 'partner-notice 不准再自己列提醒或提示的清單')
+  // 其他檔案：同一個檔案裡不准出現三個以上的畫面代號當作表格的鍵（Rust 的 `"code" =>`、前端的 `code:`）。
+  // 例外：清單本身、產出檔；trust／bypass_warning 兩種在別處各只有一行用途不同的說明（term-entry、stuck_notice），不到三個
+  const hits = []
+  const scan = (file, text) => {
+    const src = text.split('#[cfg(test)]')[0]
+    const arms = new Set([...src.matchAll(/"([a-z_]+)"\s*(?:\|\s*"[a-z_]+"\s*)*=>/g)].map(m => m[1]).filter(c => codes.includes(c)))
+    const keys = new Set([...src.matchAll(/^\s*([a-z_]+):\s*(?:name\s*=>|'|`)/gm)].map(m => m[1]).filter(c => codes.includes(c)))
+    if (arms.size >= 3 || keys.size >= 3) hits.push(`${file}：${[...arms, ...keys]}`)
+  }
+  for (const f of walk(path.join(root, 'src-tauri/src')).filter(f => f.endsWith('.rs') && !f.endsWith('screen_catalog.rs'))) scan(path.relative(root, f), fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n'))
+  for (const f of walk(path.join(root, 'ui')).filter(f => /\.(mjs|js)$/.test(f) && !f.endsWith('stuck-screens.mjs'))) scan(path.relative(root, f), fs.readFileSync(f, 'utf8').replace(/\r\n/g, '\n'))
+  assert.deepEqual(hits, [], '這些檔案又自己列了一份畫面代號的清單：改成從 screen_catalog 查')
 })
 
 test('#1512 #1254 #1632 偵測用的字串都在真實畫面樣本裡找得到（Claude Code 改字或字串打錯就會紅）', () => {

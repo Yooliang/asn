@@ -1,24 +1,18 @@
 // 夥伴卡住的本機提醒（todo-next-162）：後端只給視窗名與固定代號，畫面上的字都在這裡，不顯示任何畫面內容。
 import { HELD_HINT, heldTitle } from './held.mjs'
 import { RISK_TEXT } from './perm-ask.mjs'
+import { STUCK_SCREENS } from './stuck-screens.mjs'
 export const NOTICE_POLL_MS = 15_000
 
-const NOTICES = {
-  permission: name => ({ title: '夥伴在等你回答', body: `「${name}」在等你同意一項操作，請到它的視窗確認。` }),
-  trust: name => ({ title: '夥伴在等你回答', body: `「${name}」在問要不要信任這個資料夾，請到它的視窗確認。` }),
-  bypass_warning: name => ({ title: '夥伴在等你確認', body: `「${name}」第一次開啟，要你同意它的權限設定，請到它的視窗確認。` }),
-  login: name => ({ title: '夥伴需要登入', body: `「${name}」需要登入才能繼續，請到它的視窗登入。` }),
-  usage_limit: name => ({ title: '夥伴的額度用完了', body: `「${name}」的額度用完了，要等額度恢復才能繼續。` }),
-  usage_menu: name => ({ title: '夥伴的額度用完了', body: `「${name}」的額度用完了，在問接下來要怎麼做。手機上可以選「停下來等」或「在這裡等」，付費的選項請到它的視窗選。` }),
-  question: name => ({ title: '夥伴在問你問題', body: `「${name}」在等你選一個答案，請到它的視窗回答。` }),
-  question_view: name => ({ title: '夥伴在問你問題', body: `「${name}」在等你選答案，請到它的視窗回答。` }),
-  held_message: name => ({ title: '夥伴收到外來訊息', body: `「${name}」收到一則外來訊息，等你決定要不要放行。` }),
-}
+// 卡住畫面的種類、提醒與終端提示的字都在 Rust 的 SCREEN_CATALOG（src-tauri/src/launch/screen_catalog.rs），
+// stuck-screens.mjs 是它產出的檔案；這裡不准再自己列一份（#1813）。
+const NOTICES = new Map(STUCK_SCREENS.filter(s => s.notice).map(s => [s.code, s.notice]))
 
-/** 代號 → 要顯示的字；不認得的代號不顯示 */
+/** 代號 → 要顯示的字；不認得的代號、不跳提醒的種類不顯示 */
 export function noticeText(item) {
-  const make = Object.hasOwn(NOTICES, item?.code) ? NOTICES[item.code] : null
-  return make && typeof item.name === 'string' && item.name ? make(item.name) : null
+  const n = NOTICES.get(item?.code)
+  if (!n || typeof item.name !== 'string' || !item.name) return null
+  return { title: n.title, body: n.body.replaceAll('{name}', item.name) }
 }
 
 /** 這一輪要新跳的提醒：上一輪沒有的才跳；回 { fresh, seen }，seen 是下一輪要帶的 */
@@ -43,16 +37,10 @@ export function nextNotices(list, seen = new Set()) {
 }
 
 /** 終端畫面上要顯示的一行提示（畫面開著時本機的同意框不跳）。只給本人看，不含畫面內容 */
-const VIEW_HINTS = {
-  permission: '它在等你同意一項操作：直接在下面的畫面按數字鍵回答。',
-  trust: '它在問要不要信任這個資料夾：直接在下面的畫面回答。',
-  bypass_warning: '它在等你確認權限設定：直接在下面的畫面回答。',
-  usage_menu: '它的額度用完了，在問接下來要怎麼做：直接在下面的畫面選。',
-  held_message: '它收到一則外來訊息，在等你決定要不要放行：請用跳出的提示框，或到它自己的終端視窗處理；這裡打的字不會送出。',
-}
+const VIEW_HINTS = new Map(STUCK_SCREENS.filter(s => s.hint).map(s => [s.code, s.hint]))
 export function viewHint(list, name) {
-  const hit = (Array.isArray(list) ? list : []).find(i => i?.name === name && Object.hasOwn(VIEW_HINTS, i?.code))
-  return hit ? VIEW_HINTS[hit.code] : ''
+  const hit = (Array.isArray(list) ? list : []).find(i => i?.name === name && VIEW_HINTS.has(i?.code))
+  return hit ? VIEW_HINTS.get(hit.code) : ''
 }
 
 /** 這個提醒畫面該不該收：提醒的文字就是那一項的文字（別的提醒、別的夥伴不動） */
