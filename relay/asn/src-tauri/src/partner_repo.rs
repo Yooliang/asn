@@ -99,6 +99,13 @@ fn read_small(p: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
+/// `.git` 檔裡的 gitdir、commondir 只准指到本機路徑：網路路徑（`\\主機\…`、`//主機/…`、`\\?\UNC\…`）一律不跟，
+/// 免得只為了認出 repo 就去連別台主機。
+fn local_target_ok(p: &str) -> bool {
+    let s = p.trim();
+    !(s.starts_with("\\\\") || s.starts_with("//") || s.to_ascii_lowercase().starts_with("\\\\?\\unc\\"))
+}
+
 /// 從資料夾往上找 .git，回要讀的 git 設定檔路徑。.git 是檔案（git worktree）時，跟著「gitdir:」找到真正的 git 資料夾，
 /// 再跟著它的 commondir 找到共用的設定檔（worktree 的 remote 設定在共用的那份）。
 fn git_config_path(start: &Path) -> Option<PathBuf> {
@@ -112,10 +119,16 @@ fn git_config_path(start: &Path) -> Option<PathBuf> {
         if dot.is_file() {
             let text = read_small(&dot)?;
             let target = text.lines().next()?.trim().strip_prefix("gitdir:")?.trim().to_string();
+            if !local_target_ok(&target) {
+                return None;
+            }
             let gitdir = if Path::new(&target).is_absolute() { PathBuf::from(&target) } else { d.join(&target) };
             let common = match read_small(&gitdir.join("commondir")) {
                 Some(c) if !c.trim().is_empty() => {
                     let c = c.trim();
+                    if !local_target_ok(c) {
+                        return None;
+                    }
                     if Path::new(c).is_absolute() { PathBuf::from(c) } else { gitdir.join(c) }
                 }
                 _ => gitdir,
@@ -278,6 +291,20 @@ mod tests {
         // 相對路徑的 gitdir
         write(&t.path().join("wt2/.git"), "gitdir: ../main/.git/worktrees/wt\n");
         assert_eq!(repo_of_dir(&t.path().join("wt2")).as_deref(), Some("Yooliang/asn"));
+    }
+
+    #[test]
+    fn gitdir_或_commondir_指到網路路徑_一律不跟() {
+        assert!(local_target_ok("C:/x/.git/worktrees/a") && local_target_ok("../main/.git") && local_target_ok("/home/u/.git"));
+        for bad in ["\\\\host\\share\\.git", "//host/share/.git", "\\\\?\\UNC\\host\\share\\.git", "  \\\\host\\s"] {
+            assert!(!local_target_ok(bad), "{bad}");
+        }
+        let t = tempfile::tempdir().unwrap();
+        write(&t.path().join("w1/.git"), "gitdir: \\\\host\\share\\repo\\.git\n");
+        assert_eq!(repo_of_dir(&t.path().join("w1")), None, "gitdir 是網路路徑就不讀");
+        write(&t.path().join("main/.git/worktrees/wt/commondir"), "//host/share/.git\n");
+        write(&t.path().join("w2/.git"), "gitdir: ../main/.git/worktrees/wt\n");
+        assert_eq!(repo_of_dir(&t.path().join("w2")), None, "commondir 是網路路徑就不讀");
     }
 
     #[test]
