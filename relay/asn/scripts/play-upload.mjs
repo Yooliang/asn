@@ -78,19 +78,21 @@ const errCode = text => {
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 // 帶逾時與重試的請求；只重試網路錯誤與 5xx。回傳 { status, text }。
-export const makeRequester = ({ fetchFn = globalThis.fetch, timeoutMs = 120000, retries = 3, backoffMs = 1000 } = {}) => async (method, url, { headers = {}, body } = {}) => {
+export const makeRequester = ({ fetchFn = globalThis.fetch, timeoutMs = 120000, retries = 3, backoffMs = 1000 } = {}) => async (method, url, { headers = {}, body, noRetry = false } = {}) => {
+  // noRetry：不自動重試（commit 用）。commit 不冪等：第一次若其實成功但回 5xx／逾時，重試只會得到 4xx，真相就被蓋掉
+  const max = noRetry ? 0 : retries
   let last
-  for (let i = 0; i <= retries; i++) {
+  for (let i = 0; i <= max; i++) {
     const ac = new AbortController()
     const timer = setTimeout(() => ac.abort(), timeoutMs)
     try {
       const r = await fetchFn(url, { method, headers, body, signal: ac.signal })
       const text = await r.text()
-      if (r.status >= 500 && i < retries) { last = `HTTP ${r.status}`; await sleep(backoffMs * (i + 1)); continue }
+      if (r.status >= 500 && i < max) { last = `HTTP ${r.status}`; await sleep(backoffMs * (i + 1)); continue }
       return { status: r.status, text }
     } catch (e) {
       last = e?.name === 'AbortError' ? '逾時' : '網路錯誤'
-      if (i < retries) { await sleep(backoffMs * (i + 1)); continue }
+      if (i < max) { await sleep(backoffMs * (i + 1)); continue }
     } finally { clearTimeout(timer) }
   }
   throw new Error(`連線失敗（${last}）`)
@@ -190,7 +192,7 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode 
       // 兩條一起提交時，若是封閉測試在提交那步被擋（設定未完成、審核中…），也當成 alpha 失敗走降級；只有 internal 的提交失敗就是整體失敗
       let cr = null
       let cerr = null
-      try { cr = await request('POST', `${app}/edits/${id}:commit`, { headers: auth }) } catch (err) { cerr = err }
+      try { cr = await request('POST', `${app}/edits/${id}:commit`, { headers: auth, noRetry: true }) } catch (err) { cerr = err }
       const uncertain = cerr !== null || cr.status >= 500   // 網路錯誤、逾時、5xx：Play 可能其實已經提交了
       const failed = cerr !== null || cr.status < 200 || cr.status >= 300
       if (failed) {

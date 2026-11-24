@@ -272,6 +272,29 @@ test('commit 不確定＋查詢也失敗 → 回報結果不確定（請到 Play
   }
 })
 
+test('commit 不自動重試：第一次 5xx、重試才會得到 4xx 的伺服器 → 只送一次 commit、判為不確定並去查最大版本號；其他請求仍會重試', async () => {
+  let commits = 0
+  let bundleGets = 0
+  const f = await fake(twoEdits(c => {
+    if (c.url.endsWith(':commit')) return ++commits === 1 ? [503, {}] : [400, {}]   // 第一次其實已提交，之後的重試只會得到 400
+    if (c.method === 'GET' && c.url.endsWith('/bundles')) return ++bundleGets === 1 ? [503, {}] : [200, { bundles: [{ versionCode: 77 }] }]   // 查詢的第一次 5xx：要靠重試救回來
+    return null
+  }))
+  try {
+    const r = await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: makeRequester({ retries: 2, backoffMs: 1 }) })
+    assert.deepEqual(r.tracks, ['internal', 'alpha'], '經查已發布，不降級')
+    assert.equal(count(f.calls, /:commit$/), 1, 'commit 只送一次')
+    assert.equal(bundleGets, 2, '查詢請求照常重試')
+    assert.equal(count(f.calls, /^POST .*\/upload\/.*\/bundles/), 1, '不重傳')
+  } finally { await f.close() }
+  let puts = 0
+  const g = await fake(twoEdits(c => (c.method === 'PUT' && c.url.endsWith('/tracks/internal') && ++puts === 1 ? [503, {}] : null)))
+  try {
+    await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: g.base, tokenUri: `${g.base}/token`, request: makeRequester({ retries: 2, backoffMs: 1 }) })
+    assert.equal(puts, 2, '設定軌道的 5xx 仍會重試')
+  } finally { await g.close() }
+})
+
 test('單軌道 internal 的不確定 commit：最大＝本次 → 成功；最大較小 → 照原本整體失敗；4xx 不查詢直接失敗', async () => {
   const ok = await uncertainRun({ mode: 503, maxCode: 77, tracks: ['internal'] })
   assert.deepEqual(ok.r.tracks, ['internal'])
