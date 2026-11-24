@@ -19,7 +19,7 @@ export const TREE_TEXT = Object.freeze({
 })
 
 /** 重啟確認框的字。prefix 是別台設備才加的主詞（例如「工作機」的），這台自己不給 */
-export const restartAsnText = (prefix = '') => `重啟${prefix}ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。`
+export const restartAsnText = (prefix = '') => `重啟${prefix} ASN？收發室會暫時斷線，代理視窗不受影響，之後會自動連回。`
 export const restartMuxText = (n, prefix = '') => `重啟${prefix}終端服務？底下所有代理（${n} 個）會暫時斷線，之後會自動連回。`
 
 export const ROOT_KEY = 'asn'

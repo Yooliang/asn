@@ -1224,12 +1224,14 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .tm-tree{display:flex;flex-direction:column;gap:var(--sp-2);min-width:0}
 .tm-kids{display:flex;flex-direction:column;gap:var(--sp-2);min-width:0;margin-left:var(--sp-4);padding-left:var(--sp-3);border-left:1px solid var(--line)}
 .tm-kids.top{margin-left:0;padding-left:0;border-left:0}
-.tm-node{display:flex;align-items:flex-start;gap:var(--sp-2);min-width:0;padding:var(--sp-2) var(--sp-3);border:1px solid var(--line);border-radius:var(--radius-1);background:var(--panel);font-size:var(--fs-2);color:var(--fg)}
+.tm-node{display:flex;flex-wrap:wrap;align-items:flex-start;gap:var(--sp-2);min-width:0;padding:var(--sp-2) var(--sp-3);border:1px solid var(--line);border-radius:var(--radius-1);background:var(--panel);font-size:var(--fs-2);color:var(--fg)}
 .tm-node.dup{background:#fff7f2}
 .tm-node.view .tm-name{color:var(--muted)}
 .tm-fold{flex:none;padding:0}
 .tm-fold-gap{flex:none;width:var(--sp-5)}
-.tm-main{flex:1 1 auto;display:flex;flex-direction:column;gap:var(--sp-1);min-width:0}
+.tm-restart-confirm{flex:1 1 100%}
+.tm-restart-err{flex:1 1 100%;color:#b3261e;text-align:right}
+.tm-main{flex:1 1 0;display:flex;flex-direction:column;gap:var(--sp-1);min-width:0}
 .tm-title{display:flex;flex-wrap:wrap;align-items:center;gap:var(--sp-2)}
 .tm-state{color:var(--muted);font-size:var(--fs-1)}
 /* 整列點一下切換小字（#2219）：游標、hover、鍵盤焦點框 */
