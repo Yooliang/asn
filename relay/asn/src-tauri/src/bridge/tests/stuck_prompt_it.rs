@@ -81,6 +81,45 @@ async fn 一直被限頻_過一小時放棄並寫_log() {
     assert!(h.core.log.has("過了一小時還沒送成"), "{:?}", h.core.log.recent());
 }
 
+/// 從畫面一路到送出：假畫面、假時鐘餵進 term.rs 用的 `tick`（計時＋佇列），取出來交給收發室送
+async fn run_chain(screens: &[(&str, u64)]) -> H {
+    use crate::launch::stuck_prompt::{take_pending, StuckWatch, QUEUE_TEST_LOCK};
+    let box_screen = " Do you want to proceed?\n ❯ 1. Yes\n   2. No\n";
+    let d = tempfile::tempdir().unwrap();
+    let mut w = StuckWatch::load(&d.path().join("stuck.json"), T0);
+    let queued = {
+        let _g = QUEUE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = take_pending();
+        for (cmd, at) in screens {
+            let screen = format!("──────\n echo {cmd}\n{box_screen}");
+            w.tick("T-乙", Some(&screen), *at, &|_| {});
+        }
+        take_pending()
+    };
+    let mut h = harness(&[("T-乙", "idle")]).await;
+    for p in queued {
+        h.core.stuck_prompt_enqueue(T0, p);
+    }
+    h.core.stuck_prompt_send(T0).await;
+    h
+}
+
+#[tokio::test]
+async fn 串接_畫面停在確認框五分鐘_兩份都送出() {
+    let five = crate::launch::stuck_prompt::STUCK_AFTER_MS;
+    let h = run_chain(&[("a", T0), ("a", T0 + five - 1), ("a", T0 + five)]).await;
+    assert_eq!(h.fr.wait_notices().iter().filter(|b| b["kind"] == "stuck_prompt").count(), 1);
+    assert_eq!(to_partner(&h).len(), 1);
+}
+
+#[tokio::test]
+async fn 串接_中途畫面變了_不送() {
+    let five = crate::launch::stuck_prompt::STUCK_AFTER_MS;
+    let h = run_chain(&[("a", T0), ("b", T0 + five - 1), ("b", T0 + five)]).await;
+    assert!(h.fr.wait_notices().iter().all(|b| b["kind"] != "stuck_prompt"), "新的框才過一毫秒");
+    assert!(to_partner(&h).is_empty());
+}
+
 /// 給夥伴本人的那份只能寄信（relay send），不能經過任何會把字送進終端的函式：
 /// 夥伴這時正停在確認框上，打進去的字和 Enter 可能被當成選了某個選項（#2264 一審 1）
 #[test]

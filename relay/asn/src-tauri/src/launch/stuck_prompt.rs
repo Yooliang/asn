@@ -259,6 +259,18 @@ impl StuckWatch {
         Some(StuckPrompt { name: name.to_string(), excerpt })
     }
 
+    /// 背景讀畫面每讀到一次就呼叫一次（term.rs 的接縫）：該通知就放進佇列、記一行說明、把已寄紀錄存檔。
+    /// 抽成這個函式是為了能用假畫面與假時鐘從頭走到寄出（串接測試）
+    pub(crate) fn tick(&mut self, name: &str, screen: Option<&str>, now: u64, note: &dyn Fn(&str)) {
+        if let Some(p) = self.observe(name, screen, now) {
+            note(&format!("夥伴「{}」的畫面停在確認框超過 5 分鐘，已排通知", p.name));
+            push_pending(p);
+            if let Err(e) = self.save_if_dirty() {
+                note(&format!("保底通知的已寄紀錄存不進檔案，重啟後可能重寄：{e}"));
+            }
+        }
+    }
+
     /// 已經不在名單上的視窗：紀錄拿掉
     pub(crate) fn retain_windows(&mut self, names: &[String]) {
         self.tracks.retain(|n, _| names.contains(n));
@@ -268,6 +280,9 @@ impl StuckWatch {
 
 /// 背景讀畫面放進來、收發室取走（只在記憶體）
 static PENDING: Mutex<Vec<StuckPrompt>> = Mutex::new(Vec::new());
+/// 測試用：會動到全域佇列的測試（這個檔與 bridge 的串接測試）一次只跑一個
+#[cfg(test)]
+pub(crate) static QUEUE_TEST_LOCK: Mutex<()> = Mutex::new(());
 /// 佇列最多放幾筆（收發室一直取不走時不無限長）
 const PENDING_MAX: usize = 50;
 
@@ -571,7 +586,7 @@ mod tests {
 
     #[test]
     fn 佇列放進去取走一次() {
-        // 全域佇列：先清空再測，不和其他測試搶（只有這個測試動它）
+        let _g = QUEUE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _ = take_pending();
         push_pending(StuckPrompt { name: "甲".into(), excerpt: "x".into() });
         assert_eq!(take_pending().len(), 1);

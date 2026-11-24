@@ -3645,13 +3645,7 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
                 // 讀到畫面才比對；讀失敗不算框消失（不重置計時）
                 if let (Some((_, name)), Ok(seen)) = (all.iter().find(|(w, _)| *w == id), view.as_ref()) {
                     let text = seen.as_ref().map(|(_, t)| t.as_str());
-                    if let Some(p) = stuck.observe(name, text, now) {
-                        note(now, &format!("夥伴「{}」的畫面停在確認框超過 5 分鐘，已排通知", p.name));
-                        super::stuck_prompt::push_pending(p);
-                        if let Err(e) = stuck.save_if_dirty() {
-                            note(now, &format!("保底通知的已寄紀錄存不進檔案，重啟後可能重寄：{e}"));
-                        }
-                    }
+                    stuck.tick(name, text, now, &|line| note(now, line));
                 }
                 let result: Result<Option<&'static str>, String> = view.map(|v| v.and_then(|(code, _)| code));
                 let code = result.as_ref().ok().copied().flatten();
