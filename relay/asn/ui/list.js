@@ -28,7 +28,7 @@ import { friendMatchesQuery, normalizeSearchQuery, rosterShownGroups } from './l
 import { deviceAsn } from './lib/presence.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { createReportScheduler } from './lib/report-reload.mjs'
-import { POLL_MS as REMOTE_UPD_POLL_MS, mineFromStatus, remoteUpdateView } from './lib/remote-update.mjs'
+import { mineFromStatus, nextPollMs, remoteUpdateView } from './lib/remote-update.mjs'
 import { emo, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
@@ -297,16 +297,31 @@ const remoteBtn = node => remoteUpdateView(remoteMine.value, node, !!asnBadge(no
 const requestRemoteUpdate = async node => {
   if (remoteBtn(node)?.busy) return
   remoteErr[node] = ''
+  remoteRequestedAt = Date.now()
+  scheduleRemoteUpd()   // 馬上用 15 秒重排（舊 timer 先清掉）
   remoteMine.value = { ...remoteMine.value, [node]: { state: 'pending', detail: '' } }   // 先顯示「已送出」，失敗再還原
   try { await updateApi.remoteRequest(node) } catch (e) {
     remoteMine.value = { ...remoteMine.value, [node]: null }
     remoteErr[node] = plainMessage(e)
   }
-  void refreshRemoteUpd()
+  await refreshRemoteUpd()
+  scheduleRemoteUpd()
+}
+// 輪詢（#2161 F1）：setTimeout 迴圈，間隔由 nextPollMs 決定（進行中 15 秒、平時 5 分鐘、隱藏且沒進行中就暫停）；一個 timer 不疊加
+let remoteTimer = null, remoteRequestedAt = 0
+const scheduleRemoteUpd = () => {
+  clearTimeout(remoteTimer)
+  remoteTimer = null
+  const ms = nextPollMs(remoteMine.value, { hidden: document.visibilityState === 'hidden', requestedAt: remoteRequestedAt })
+  if (ms == null) return
+  remoteTimer = setTimeout(async () => { await refreshRemoteUpd(); scheduleRemoteUpd() }, ms)
 }
 if (!info.shot) {
-  void refreshRemoteUpd()
-  setInterval(() => void refreshRemoteUpd(), REMOTE_UPD_POLL_MS)
+  void refreshRemoteUpd().then(scheduleRemoteUpd)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') void refreshRemoteUpd().then(scheduleRemoteUpd)
+    else scheduleRemoteUpd()
+  })
 }
 const dims = reactive(loadDims(savedMe))   // 分頁依（設備／廠商／狀態）與分組依；舊存檔的 groupMode 在這裡轉換
 
