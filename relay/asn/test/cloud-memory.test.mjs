@@ -56,3 +56,13 @@ test('設備樹：離線的雲端夥伴靠記憶仍標「雲端」；名單算�
   assert.equal(on.find(r => r.key === 'J').cloud, false)
   assert.deepEqual(nextCloudNodes(['J'], on), [])
 })
+
+test('saveCloudNodes：傳入無法序列化的值（循環參照）不丟錯，也沒寫進去', () => {
+  const d = {}
+  const st = { getItem: k => (k in d ? d[k] : null), setItem: (k, v) => { d[k] = String(v) }, removeItem: k => { delete d[k] } }
+  const loop = []
+  loop.push(loop)
+  assert.doesNotThrow(() => saveCloudNodes(loop, st))
+  assert.deepEqual(d, {}, '存不進去就當沒存')
+  assert.deepEqual(loadCloudNodes(st), [])
+})
