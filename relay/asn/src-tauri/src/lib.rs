@@ -2419,14 +2419,38 @@ fn term_remote_pending() -> Vec<term_remote::PendingView> {
 
 /// 手機回答權限框（#853）的背景工作
 #[cfg(all(desktop, feature = "gui"))]
-fn start_perm_remote_poller(app: tauri::AppHandle, relay: std::sync::Arc<Relay>, terms: std::sync::Arc<launch::term::LiveTerms>, data_dir: std::path::PathBuf) {
+fn start_perm_remote_poller(
+    app: tauri::AppHandle,
+    relay: std::sync::Arc<Relay>,
+    terms: std::sync::Arc<launch::term::LiveTerms>,
+    data_dir: std::path::PathBuf,
+    perm_wake: std::sync::Arc<tokio::sync::Notify>,
+) {
     use tauri::Manager;
     tauri::async_runtime::spawn(async move {
         let mut tracker = perm_remote::Tracker::default();
+        // 掃描與建立／撤回維持每 TICK_SECS 一輪；領取手機決定（perm_req_take）有進行中的請求才發：
+        // 保底每 TAKE_FALLBACK_SECS 一次，後台敲門鈴（perm_wake）就立刻發一次。叫醒只領取，不多跑掃描（寬限以輪計）
+        let tick_every = std::time::Duration::from_secs(perm_remote::TICK_SECS);
+        let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + tick_every, tick_every);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let mut last_take = std::time::Instant::now();
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(perm_remote::TICK_SECS)).await;
-            if app.state::<auth::AuthState>().status().signed_in {
-                perm_remote::tick(relay.as_ref(), &terms, &data_dir, &mut tracker).await;
+            tokio::select! {
+                _ = ticker.tick() => {
+                    if app.state::<auth::AuthState>().status().signed_in {
+                        let take_due = perm_remote::should_take(true, last_take.elapsed().as_secs(), false);
+                        if perm_remote::tick(relay.as_ref(), &terms, &data_dir, &mut tracker, take_due).await {
+                            last_take = std::time::Instant::now();
+                        }
+                    }
+                }
+                _ = perm_wake.notified() => {
+                    if app.state::<auth::AuthState>().status().signed_in && perm_remote::should_take(tracker.has_active(), last_take.elapsed().as_secs(), true) {
+                        perm_remote::take_step(relay.as_ref(), &terms, &data_dir, &mut tracker).await;
+                        last_take = std::time::Instant::now();
+                    }
+                }
             }
         }
     });
@@ -3814,10 +3838,11 @@ pub fn run() {
                 #[cfg(desktop)]
                 let secret_wake = if handle.state::<App>().shot.is_none() { Some(secret_remote::desktop::start(&handle, r.clone())) } else { None };
                 #[cfg(desktop)]
-                let (term_wake, view_notify) = if handle.state::<App>().shot.is_none() {
+                let (term_wake, view_notify, perm_notify) = if handle.state::<App>().shot.is_none() {
                     let w = Arc::new(tokio::sync::Notify::new());
                     let vw = Arc::new(tokio::sync::Notify::new());
-                    start_perm_remote_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone());
+                    let pw = Arc::new(tokio::sync::Notify::new());
+                    start_perm_remote_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), pw.clone());
                     start_device_key_publish(r.clone(), handle.state::<App>().data_dir.clone());
                     start_view_poller(handle.clone(), r.clone(), handle.state::<Arc<launch::term::LiveTerms>>().inner().clone(), handle.state::<App>().data_dir.clone(), handle.state::<App>().node.clone(), vw.clone());
                     start_term_remote_poller(
@@ -3827,9 +3852,9 @@ pub fn run() {
                         handle.state::<App>().data_dir.clone(),
                         w.clone(),
                     );
-                    (Some(w), Some(vw))
+                    (Some(w), Some(vw), Some(pw))
                 } else {
-                    (None, None)
+                    (None, None, None)
                 };
                 // 門鈴：有 anon 金鑰才開；一響就叫前端去拉信
                 if let Some(url) = anon_url {
@@ -3838,6 +3863,8 @@ pub fn run() {
                     let term_wake_bell = term_wake.clone();
                     #[cfg(desktop)]
                     let view_wake_bell = view_notify.clone();
+                    #[cfg(desktop)]
+                    let perm_wake_bell = perm_notify.clone();
                     tauri::async_runtime::spawn(async move {
                         let topic = loop {
                             match r.api("whoami", None).await {
@@ -3861,6 +3888,12 @@ pub fn run() {
                                     #[cfg(desktop)]
                                     bell::BellAction::WakeSecret => {
                                         if let Some(w) = &secret_wake {
+                                            w.notify_one();
+                                        }
+                                    }
+                                    #[cfg(desktop)]
+                                    bell::BellAction::WakePerm => {
+                                        if let Some(w) = &perm_wake_bell {
                                             w.notify_one();
                                         }
                                     }

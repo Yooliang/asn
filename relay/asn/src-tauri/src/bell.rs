@@ -26,6 +26,8 @@ pub enum BellKind {
     Legacy,
     /// 回報匯流排更新了（只告知哪台哪種，不帶內容）；kind、node 都要有且格式合格
     Report { kind: String, node: String },
+    /// 只指名種類、不帶 node 的門鈴（後台對「擁有該請求的那台」敲，例如 perm_req／term_req）；kind 格式要合格
+    Scoped(String),
 }
 
 /// 門鈴響了要做的事（純資料，方便測；實際動作在 lib.rs）
@@ -36,6 +38,8 @@ pub enum BellAction {
     /// emit 'relay-report-bell'，payload {kind, node}
     EmitReport { kind: String, node: String },
     WakeSecret,
+    /// 叫醒手機決定權限框的領取（perm_req_take）
+    WakePerm,
     WakeTerm,
     WakeView,
 }
@@ -51,26 +55,43 @@ fn valid_node(s: &str) -> bool {
 
 /// 依 broadcast 的 payload 判斷門鈴種類。payload 不是物件、kind 不是字串、格式不合都當 Legacy
 pub fn bell_kind(payload: &Value) -> BellKind {
-    let (Some(kind), Some(node)) = (payload.get("kind").and_then(Value::as_str), payload.get("node").and_then(Value::as_str)) else { return BellKind::Legacy };
-    if !valid_kind(kind) || !valid_node(node) {
+    let Some(kind) = payload.get("kind").and_then(Value::as_str) else { return BellKind::Legacy };
+    if !valid_kind(kind) {
         return BellKind::Legacy; // 保守：看不懂就照舊叫醒全部
     }
-    BellKind::Report { kind: kind.to_string(), node: node.to_string() }
+    match payload.get("node") {
+        None => BellKind::Scoped(kind.to_string()),
+        Some(n) => match n.as_str() {
+            Some(node) if valid_node(node) => BellKind::Report { kind: kind.to_string(), node: node.to_string() },
+            _ => BellKind::Legacy, // node 有給但不合格：保守
+        },
+    }
 }
 
-/// 門鈴響了要做哪些事。Legacy＝以前的全部；Report 只通知回報
+/// 門鈴響了要做哪些事。Legacy＝以前的全部（含 WakePerm）；Report 只通知回報；
+/// Scoped 的 perm_req／term_req 只叫醒對應的領取，未知的 Scoped 當 Legacy（保守不漏）
 pub fn ring_actions(ring: &Ring) -> Vec<BellAction> {
+    let all = || vec![BellAction::EmitBell, BellAction::WakeSecret, BellAction::WakePerm, BellAction::WakeTerm, BellAction::WakeView];
     match ring {
-        Ring::Joined | Ring::Bell(BellKind::Legacy) => vec![BellAction::EmitBell, BellAction::WakeSecret, BellAction::WakeTerm, BellAction::WakeView],
+        Ring::Joined | Ring::Bell(BellKind::Legacy) => all(),
+        Ring::Bell(BellKind::Scoped(k)) => match k.as_str() {
+            "perm_req" => vec![BellAction::WakePerm],
+            "term_req" => vec![BellAction::WakeTerm],
+            _ => all(),
+        },
         Ring::Bell(BellKind::Report { kind, node }) => vec![BellAction::EmitReport { kind: kind.clone(), node: node.clone() }],
         Ring::Down => vec![],
     }
 }
 
 /// 只管收信的門鈴聽眾（桌面內建橋、`asn recv --watch`、inbox 模式）用：這一響要不要叫醒收信。
-/// 回報門鈴不叫醒（回報不是信）；其他照舊一律叫醒（含 Joined／Down，與改版前的 `move |_|` 相同）
+/// 回報門鈴與 perm_req／term_req 不叫醒（不是信）；其他照舊一律叫醒（含 Joined／Down、未知的 Scoped，與改版前的 `move |_|` 相同）
 pub fn wakes_mail(ring: &Ring) -> bool {
-    !matches!(ring, Ring::Bell(BellKind::Report { .. }))
+    match ring {
+        Ring::Bell(BellKind::Report { .. }) => false,
+        Ring::Bell(BellKind::Scoped(k)) => !matches!(k.as_str(), "perm_req" | "term_req"),
+        _ => true,
+    }
 }
 
 /// 頻道收到的事：加入成功、或一則 broadcast（只會是這個 topic 的）
@@ -323,7 +344,7 @@ mod tests {
         assert_eq!(bell_kind(&Value::Null), BellKind::Legacy, "沒有 payload");
         assert_eq!(bell_kind(&json!("echo")), BellKind::Legacy, "payload 不是物件");
         assert_eq!(bell_kind(&json!({"kind": "echo", "node": "n1"})), rep("echo", "n1"));
-        assert_eq!(bell_kind(&json!({"kind": "echo"})), BellKind::Legacy, "node 缺");
+        assert_eq!(bell_kind(&json!({"kind": "echo"})), BellKind::Scoped("echo".into()), "node 缺＝只指名種類");
         assert_eq!(bell_kind(&json!({"kind": "echo", "node": null})), BellKind::Legacy, "node 是 null");
         assert_eq!(bell_kind(&json!({"node": "n1"})), BellKind::Legacy, "kind 缺");
         assert_eq!(bell_kind(&json!({"kind": "echo", "node": "a".repeat(33)})), BellKind::Legacy, "node 太長");
@@ -334,17 +355,38 @@ mod tests {
         assert_eq!(bell_kind(&json!({"kind": 5})), BellKind::Legacy, "kind 不是字串");
         assert_eq!(bell_kind(&json!({"kind": "echo", "node": "bad node!"})), BellKind::Legacy, "node 格式錯");
         assert_eq!(bell_kind(&json!({"kind": "echo", "node": 7})), BellKind::Legacy, "node 不是字串");
-        assert_eq!(bell_kind(&json!({"kind": "view_req"})), BellKind::Legacy, "沒有專屬分支，也沒有 node");
+        assert_eq!(bell_kind(&json!({"kind": "view_req"})), BellKind::Scoped("view_req".into()), "沒有 node＝Scoped，未知的 Scoped 在 ring_actions 當舊門鈴");
     }
 
     #[test]
     fn 門鈴分流_回報不叫醒收信_舊門鈴叫醒全部() {
         use BellAction::*;
-        assert_eq!(ring_actions(&Ring::Bell(BellKind::Legacy)), vec![EmitBell, WakeSecret, WakeTerm, WakeView]);
-        assert_eq!(ring_actions(&Ring::Joined), vec![EmitBell, WakeSecret, WakeTerm, WakeView], "入群成功照舊");
+        assert_eq!(ring_actions(&Ring::Bell(BellKind::Legacy)), vec![EmitBell, WakeSecret, WakePerm, WakeTerm, WakeView]);
+        assert_eq!(ring_actions(&Ring::Joined), vec![EmitBell, WakeSecret, WakePerm, WakeTerm, WakeView], "入群成功照舊（再加權限框領取）");
         let r = ring_actions(&Ring::Bell(BellKind::Report { kind: "echo".into(), node: "n1".into() }));
         assert_eq!(r, vec![EmitReport { kind: "echo".into(), node: "n1".into() }]);
         assert!(!r.contains(&EmitBell) && !r.contains(&WakeSecret) && !r.contains(&WakeTerm) && !r.contains(&WakeView));
+        assert!(ring_actions(&Ring::Down).is_empty());
+    }
+
+    #[test]
+    fn 門鈴種類_只有_kind_是_scoped_有_node_是_report() {
+        assert_eq!(bell_kind(&json!({"kind": "perm_req"})), BellKind::Scoped("perm_req".into()));
+        assert_eq!(bell_kind(&json!({"kind": "perm_req", "node": "x"})), BellKind::Report { kind: "perm_req".into(), node: "x".into() });
+        assert_eq!(bell_kind(&json!({"kind": "???"})), BellKind::Legacy);
+        assert_eq!(bell_kind(&json!({})), BellKind::Legacy);
+        assert_eq!(bell_kind(&json!([1, 2])), BellKind::Legacy, "非物件");
+        assert_eq!(bell_kind(&json!(7)), BellKind::Legacy, "非物件");
+    }
+
+    #[test]
+    fn 門鈴分流_scoped_只叫醒對應的領取_未知的當舊門鈴() {
+        use BellAction::*;
+        let sc = |k: &str| Ring::Bell(BellKind::Scoped(k.into()));
+        assert_eq!(ring_actions(&sc("perm_req")), vec![WakePerm]);
+        assert_eq!(ring_actions(&sc("term_req")), vec![WakeTerm]);
+        assert_eq!(ring_actions(&sc("something_new")), vec![EmitBell, WakeSecret, WakePerm, WakeTerm, WakeView], "未知的 Scoped 全叫醒，不漏");
+        assert_eq!(ring_actions(&Ring::Bell(BellKind::Report { kind: "perm_req".into(), node: "x".into() })), vec![EmitReport { kind: "perm_req".into(), node: "x".into() }], "有 node 的仍是回報");
         assert!(ring_actions(&Ring::Down).is_empty());
     }
 
@@ -354,6 +396,7 @@ mod tests {
         let cb = lib.split("bell::run(url, topic, move |ring| {").nth(1).expect("有門鈴回呼").split(".await;").next().unwrap();
         assert!(cb.contains("bell::ring_actions(ring)"), "回呼要依門鈴種類分流");
         assert!(cb.contains("\"relay-report-bell\""), "回報門鈴走自己的事件");
+        assert!(cb.contains("BellAction::WakePerm =>") && cb.contains("perm_wake_bell"), "權限框領取要被門鈴叫醒");
         assert!(cb.contains("BellAction::EmitBell =>"), "舊門鈴的 relay-bell 只在 EmitBell 裡 emit");
         assert_eq!(cb.matches("emit(\"relay-bell\"").count(), 1, "relay-bell 不能在回呼裡無條件 emit");
     }
@@ -361,6 +404,9 @@ mod tests {
     #[test]
     fn 收信聽眾_回報門鈴不叫醒_其他照舊叫醒() {
         assert!(!wakes_mail(&Ring::Bell(BellKind::Report { kind: "echo".into(), node: "n1".into() })), "回報門鈴不是信，不叫醒收信");
+        assert!(!wakes_mail(&Ring::Bell(BellKind::Scoped("perm_req".into()))), "權限框決定不是信");
+        assert!(!wakes_mail(&Ring::Bell(BellKind::Scoped("term_req".into()))), "終端確認不是信");
+        assert!(wakes_mail(&Ring::Bell(BellKind::Scoped("something_new".into()))), "未知的 Scoped 保守叫醒");
         assert!(wakes_mail(&Ring::Bell(BellKind::Legacy)), "舊門鈴照舊叫醒");
         assert!(wakes_mail(&Ring::Joined), "連上（含重連）照舊叫醒，補收斷線期間的信");
         assert!(wakes_mail(&Ring::Down), "與改版前 move |_| 相同");
