@@ -642,6 +642,183 @@ test('#2003 (c) 核心的「需要播種」訊息講的是程式真的認得的�
   assert.ok(!msgs.some(m => /--since/.test(m)), '不能再寫 --since')
 })
 
+// ---- #2229 告警檔 alert.json ----
+const ALERT = path.join(path.dirname(STATE), 'alert.json')
+const alertOf = (e) => JSON.parse(e.fsMap.get(ALERT))
+const dirtyGit = { 'status --porcelain': () => ({ status: 0, stdout: ' M src/foo.js\n', stderr: '' }) }
+const postFails = (e) => { e.deps.asnCli = () => ({ status: 2, stdout: '', stderr: '拒絕：找不到呼叫者所屬的 Claude 視窗' }) }
+
+test('#2229 貼群組失敗：寫告警檔（類別、一句人話、次數、時間），發版照常', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  postFails(e)
+  e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' }) // dry-run 失敗 → 會貼群組
+  await runOnce(opts, e.deps)
+  const a = alertOf(e).alerts['post-failed']
+  assert.equal(a.status, 'active')
+  assert.equal(a.count, 1)
+  assert.equal(a.firstAt, a.lastAt)
+  assert.ok(a.message.includes('通知群組失敗'))
+  assert.ok(!JSON.stringify(a).includes('Claude 視窗'), '錯誤原文不進告警檔')
+})
+
+test('#2229 同原因再發生：只更新次數與最後時間，不重寫成新告警；原因改變才算新告警', async () => {
+  let mode = 'dirty'
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  const base = e.deps.git
+  e.deps.git = (args, o) => (mode === 'dirty' && args.join(' ') === 'status --porcelain' ? dirtyGit['status --porcelain']() : mode === 'fetch' && args.join(' ') === 'fetch origin' ? { status: 1, stdout: '', stderr: 'x' } : base(args, o))
+  await runOnce(opts, e.deps)
+  const first = alertOf(e).alerts['prep-failed']
+  assert.equal(first.count, 1)
+  assert.equal(first.status, 'active')
+  e.clock.t = T0 + 120_000
+  await runOnce(opts, e.deps)
+  const second = alertOf(e).alerts['prep-failed']
+  assert.equal(second.count, 2)
+  assert.equal(second.firstAt, first.firstAt, '第一次時間不變')
+  assert.notEqual(second.lastAt, first.lastAt)
+  mode = 'fetch'
+  e.clock.t = T0 + 240_000
+  await runOnce(opts, e.deps)
+  const third = alertOf(e).alerts['prep-failed']
+  assert.equal(third.count, 1, '原因改變＝新告警重新計')
+  assert.notEqual(third.reason, first.reason)
+})
+
+test('#2229 狀況恢復：標成 resolved；之後再發生算新告警', async () => {
+  let dirty = true
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  const base = e.deps.git
+  e.deps.git = (args, o) => (dirty && args.join(' ') === 'status --porcelain' ? dirtyGit['status --porcelain']() : base(args, o))
+  await runOnce(opts, e.deps)
+  dirty = false
+  e.clock.t = T0 + 120_000
+  assert.equal((await runOnce(opts, e.deps)).outcome, 'dryRun')
+  const done = alertOf(e).alerts['prep-failed']
+  assert.equal(done.status, 'resolved')
+  assert.ok(done.resolvedAt)
+  dirty = true
+  e.fsMap.set(STATE, JSON.stringify(seededState()))
+  e.clock.t = T0 + 240_000
+  await runOnce(opts, e.deps)
+  const again = alertOf(e).alerts['prep-failed']
+  assert.equal(again.status, 'active')
+  assert.equal(again.count, 1)
+})
+
+test('#2229 貼群組之後成功：post-failed 標成 resolved', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  postFails(e)
+  e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' })
+  await runOnce(opts, e.deps)
+  e.deps.asnCli = () => ({ status: 0, stdout: '', stderr: '' })
+  e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' })
+  e.fsMap.set(STATE, JSON.stringify(seededState({ pending: {} })))
+  e.clock.t = T0 + 120_000
+  await runOnce(opts, e.deps)
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
+})
+
+test('#2229 告警檔寫不進去：只記 log，不讓這一輪失敗、不影響發版', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')], gitOver: dirtyGit })
+  const w = e.deps.writeFile
+  e.deps.writeFile = (p, s) => { if (p.includes('alert.json')) throw new Error('disk full'); w(p, s) }
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'prep-failed')
+  assert.ok(e.calls.logs.some((l) => l.includes('寫告警檔失敗')))
+  const ok = env({ desktopRows: [row('v0.2.45')] })
+  const w2 = ok.deps.writeFile
+  ok.deps.writeFile = (p, s) => { if (p.includes('alert.json')) throw new Error('disk full'); w2(p, s) }
+  postFails(ok)
+  assert.equal((await runOnce(opts, ok.deps)).outcome, 'dryRun')
+})
+
+// ---- #2229 常駐程式單一實例鎖（pid 檔）----
+import { acquireInstance, releaseInstance, pidFileOf } from '../../../tools/release/auto_publish.mjs'
+const PIDF = pidFileOf(opts)
+// 假行程表：alive＝活著的 pid；cmd＝pid → 是不是 auto_publish（沒列＝查不到 null）
+function inst(e, { alive = [], cmd = {} } = {}) {
+  const d = { ...e.deps, pidAlive: (p) => alive.includes(p), isAutoPublish: (p) => (p in cmd ? cmd[p] : null) }
+  return d
+}
+
+test('#2229 單一實例：沒有 pid 檔 → 拿到鎖，內容是自己的 pid；結束時刪掉', () => {
+  const e = env()
+  const r = acquireInstance(opts, inst(e))
+  assert.equal(r.got, true)
+  assert.ok(String(e.fsMap.get(PIDF)).startsWith('4242\n'))
+  releaseInstance(opts, inst(e), r.content)
+  assert.equal(e.fsMap.has(PIDF), false)
+})
+
+test('#2229 單一實例：已有活著的 auto_publish → 拿不到鎖，pid 檔不動', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = acquireInstance(opts, inst(e, { alive: [777], cmd: { 777: true } }))
+  assert.equal(r.got, false)
+  assert.equal(r.pid, 777)
+  assert.equal(e.fsMap.get(PIDF), `777\n${T0}`)
+})
+
+test('#2229 單一實例：殘留 pid 檔（行程已不在）→ 接手照常啟動', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = acquireInstance(opts, inst(e, { alive: [] }))
+  assert.equal(r.got, true)
+  assert.equal(r.tookOver, 777)
+  assert.ok(String(e.fsMap.get(PIDF)).startsWith('4242\n'))
+})
+
+test('#2229 單一實例：pid 被別的程式重用（活著但不是 auto_publish）→ 不誤判，接手', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = acquireInstance(opts, inst(e, { alive: [777], cmd: { 777: false } }))
+  assert.equal(r.got, true)
+})
+
+test('#2229 單一實例：查不到那個 pid 是什麼程式 → 保守不啟動（避免兩個同時發版）', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = acquireInstance(opts, inst(e, { alive: [777] }))
+  assert.equal(r.got, false)
+  assert.equal(r.unknown, true)
+})
+
+test('#2229 單一實例：兩個同時啟動只有一個拿到鎖', () => {
+  const e = env()
+  const a = inst(e, { alive: [4242, 5151], cmd: { 4242: true, 5151: true } })
+  const b = { ...a, pid: 5151 }
+  const ra = acquireInstance(opts, a)
+  const rb = acquireInstance(opts, b)
+  assert.deepEqual([ra.got, rb.got], [true, false])
+  assert.equal(rb.pid, 4242)
+})
+
+test('#2229 單一實例：兩個同時接手同一份殘留，只有一個贏', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const a = inst(e)
+  const b = { ...a, pid: 5151 }
+  // b 在 a 接手過程中才動手：a 先完成接手後 b 再來，看到的是 a 活著的鎖
+  const ra = acquireInstance(opts, a)
+  const b2 = { ...b, pidAlive: (p) => p === 4242, isAutoPublish: () => true }
+  const rb = acquireInstance(opts, b2)
+  assert.deepEqual([ra.got, rb.got], [true, false])
+})
+
+test('#2229 單一實例：結束時 pid 檔已被別人換掉就不刪', () => {
+  const e = env()
+  const r = acquireInstance(opts, inst(e))
+  e.fsMap.set(PIDF, `9999\n${T0}`)
+  releaseInstance(opts, inst(e), r.content)
+  assert.equal(e.fsMap.get(PIDF), `9999\n${T0}`)
+})
+
+test('#2229 單一實例：已有活著的 → claimInstance 寫告警（already-running，白話說明）且不動 pid 檔', async () => {
+  const { claimInstance } = await import('../../../tools/release/auto_publish.mjs')
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = claimInstance(opts, inst(e, { alive: [777], cmd: { 777: true } }))
+  assert.equal(r.got, false)
+  const a = alertOf(e).alerts['already-running']
+  assert.equal(a.status, 'active')
+  assert.ok(a.message.includes('已經有一個') && a.message.includes('先停掉舊的'))
+  assert.equal(e.fsMap.get(PIDF), `777\n${T0}`)
+})
+
 // ---- #2229 無害雜檔（*.stackdump）不卡工作樹 ----
 const statusOut = (out) => ({ 'status --porcelain': () => ({ status: 0, stdout: out, stderr: '' }) })
 
@@ -697,4 +874,17 @@ test('#2229 雜檔刪不掉：停下回報，不跑發佈', async () => {
   const r = await runOnce(opts, e.deps)
   assert.equal(r.outcome, 'prep-failed')
   assert.equal(e.calls.spawn.length, 0)
+})
+
+test('#2229 雜檔刪不掉、或有清單外改動而停下：都寫 prep-failed 告警（原因不同＝各自一筆新告警）', async () => {
+  const a = env({ desktopRows: [row('v0.2.45')], gitOver: statusOut('?? bash.exe.stackdump\n') })
+  a.deps.unlink = (p) => { if (p.endsWith('.stackdump')) throw new Error('EBUSY'); return env().deps.unlink(p) }
+  await runOnce(opts, a.deps)
+  assert.equal(alertOf(a).alerts['prep-failed'].reason, '工作樹有無法刪除的雜檔，請人工處理')
+  const b = env({ desktopRows: [row('v0.2.45')], gitOver: statusOut('?? bash.exe.stackdump\n?? notes.txt\n') })
+  await runOnce(opts, b.deps)
+  const x = alertOf(b).alerts['prep-failed']
+  assert.equal(x.reason, '工作樹有其他未提交的改動，不自動清理')
+  assert.equal(x.status, 'active')
+  assert.ok(x.message.includes('還沒發佈'))
 })

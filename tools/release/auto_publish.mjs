@@ -187,14 +187,95 @@ export function releaseLock(lockPath, deps, content) {
 
 const logPathOf = (opts) => path.join(path.dirname(opts.state), 'auto-publish.log')
 
+// 告警檔（#2229）：常駐程式不在 Claude 視窗底下，asn-cli 寄不了信；卡住或貼群組失敗時改寫這個檔，由 asn真／asn雯 的巡檢讀。
+// 格式：{ updatedAt, alerts: { <類別>: { cause, reason, message, ref, firstAt, lastAt, count, status: 'active'|'resolved', resolvedAt? } } }
+// 節流：同類別、同 reason 且還是 active → 只更新 lastAt／count；reason 變了、或已 resolved 後再發生 → 重新計（新告警）。
+// 恢復時標成 resolved（留著讓讀的人分得出「發生過、現在沒事」）。訊息只放固定文案與版本，不放 git／子程序原文。
+export const ALERT_FILE = 'alert.json'
+export const alertPathOf = (opts) => path.join(path.dirname(opts.state), ALERT_FILE)
+
+export function makeAlerts(opts, deps) {
+  const p = alertPathOf(opts)
+  const load = () => { try { const a = JSON.parse(deps.readFile(p)); return a && typeof a === 'object' && a.alerts && typeof a.alerts === 'object' ? a : { alerts: {} } } catch { return { alerts: {} } } }
+  const save = (alerts) => {
+    try { atomicWrite(deps, p, JSON.stringify({ updatedAt: new Date(deps.now()).toISOString(), alerts }, null, 2)) } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+  }
+  return {
+    raise(cause, reason, message, ref = null) {
+      try {
+        const now = new Date(deps.now()).toISOString()
+        const cur = load().alerts
+        const old = cur[cause]
+        const next = old && old.status === 'active' && old.reason === reason
+          ? { ...old, message, ref: ref ?? old.ref, lastAt: now, count: (old.count ?? 1) + 1 }
+          : { cause, reason, message, ref, firstAt: now, lastAt: now, count: 1, status: 'active' }
+        save({ ...cur, [cause]: next })
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
+    resolve(cause) {
+      try {
+        const cur = load().alerts
+        if (cur[cause]?.status !== 'active') return
+        save({ ...cur, [cause]: { ...cur[cause], status: 'resolved', resolvedAt: new Date(deps.now()).toISOString() } })
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
+  }
+}
+
 // 貼群組：只准傳固定文案（不可含 git／子程序原文，remote URL 可能帶 token）
-function makePost(opts, deps) {
-  return (text) => {
+// 失敗時寫告警檔 post-failed（getRef 給目前處理的版本；noAlert 給沒持鎖的分支，免得和持鎖者搶寫告警檔）
+function makePost(opts, deps, alerts, getRef = () => null) {
+  return (text, { noAlert = false } = {}) => {
     if (!opts.room) { deps.log(`（沒有 --room，未貼群組）${text}`); return }
     let r
     try { r = deps.asnCli(['send', '--room', opts.room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
-    if (r.status !== 0) deps.log(`貼群組失敗：${asnCliFail(r)}`)
+    if (r.status !== 0) {
+      deps.log(`貼群組失敗：${asnCliFail(r)}`)
+      if (!noAlert) alerts.raise('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
+    } else if (!noAlert) alerts.resolve('post-failed')
   }
+}
+
+// 常駐程式單一實例鎖（#2229）：重啟排程時 Stop-ScheduledTask 只結束外層 powershell、舊 node 還在，會變兩個同時跑。
+// pid 檔 <state 資料夾>/auto-publish.pid，內容「pid 換行 毫秒時間戳」，用 link 排他建立（兩個同時啟動只有一個建得成）。
+// 檔裡的 pid 還活著「而且命令列確實是 auto_publish」才算有人在跑；pid 不在、或被別的程式重用（命令列不是 auto_publish）都視為殘留，接手。
+// deps.isAutoPublish(pid) 回 true／false／null（null＝查不到命令列：保守當作有人在跑，由人確認後刪 pid 檔）。
+export const pidFileOf = (opts) => path.join(path.dirname(opts.state), 'auto-publish.pid')
+
+export function acquireInstance(opts, deps) {
+  const f = pidFileOf(opts)
+  const mine = `${deps.pid}
+${deps.now()}`
+  const tryCreate = () => { try { deps.createLock(f, mine); return true } catch (e) { if (e.code === 'EEXIST') return false; throw e } }
+  if (tryCreate()) return { got: true, content: mine }
+  let other = NaN
+  try { other = parseLock(deps.readFile(f)).pid } catch { /* 讀不到：當作殘留或剛被刪 */ }
+  if (Number.isFinite(other) && other !== deps.pid && deps.pidAlive(other)) {
+    const who = deps.isAutoPublish(other)
+    if (who !== false) return { got: false, pid: other, unknown: who === null }
+  }
+  const stale = `${f}.stale-${deps.pid}`
+  try { deps.rename(f, stale) } catch { return { got: false, pid: null, lost: true } }
+  try { deps.unlink(stale) } catch { /* 刪不掉不影響 */ }
+  if (!tryCreate()) return { got: false, pid: null, lost: true }
+  return { got: true, content: mine, tookOver: Number.isFinite(other) ? other : null }
+}
+
+// 啟動時呼叫：拿不到鎖就寫 log 與告警檔（類別 already-running），呼叫端據此以非 0 結束
+export function claimInstance(opts, deps) {
+  const inst = acquireInstance(opts, deps)
+  if (!inst.got) {
+    const why = inst.pid ? `已經有一個自動發佈常駐程式在跑（pid ${inst.pid}），這個沒有啟動。若要重啟，請先停掉舊的、確認它結束後再啟動${inst.unknown ? '（查不到那個 pid 是什麼程式；確定它不是自動發佈的話，刪掉 auto-publish.pid 再啟動）' : ''}` : '同時有另一個常駐程式在啟動，這個沒有啟動'
+    deps.log(why)
+    makeAlerts(opts, deps).raise('already-running', 'already-running', why)
+  }
+  return inst
+}
+
+// 結束時刪 pid 檔：內容還是自己的才刪
+export function releaseInstance(opts, deps, content) {
+  const f = pidFileOf(opts)
+  try { if (deps.readFile(f) === content) deps.unlink(f) } catch { /* 沒有就算了 */ }
 }
 
 // 被鎖住時記「開始被擋的時間」的檔：每個 pid 一份，只有該程序自己讀寫，所以不需要鎖
@@ -213,7 +294,9 @@ function makeNotices(opts, deps) {
 export async function runOnce(opts, deps) {
   const { gh, spawn, log } = deps
   const lockPath = `${opts.state}.lock`
-  const post = makePost(opts, deps)
+  const alerts = makeAlerts(opts, deps)
+  let ref = null
+  const post = makePost(opts, deps, alerts, () => ref)
   const notices = makeNotices(opts, deps)
   const lock = acquireLock(lockPath, deps)
   if (!lock.got) {
@@ -227,7 +310,7 @@ export async function runOnce(opts, deps) {
     if (!Number.isFinite(b.since)) atomicWrite(deps, bp, JSON.stringify({ since: now, noticed: false }))
     else if (!b.noticed && now - b.since > BLOCKED_NOTICE_MS) {
       atomicWrite(deps, bp, JSON.stringify({ ...b, noticed: true }))
-      post('自動發佈被鎖住超過 30 分鐘，請檢查')
+      post('自動發佈被鎖住超過 30 分鐘，請檢查', { noAlert: true })
     }
     return { outcome: 'locked' }
   }
@@ -251,14 +334,17 @@ export async function runOnce(opts, deps) {
     } catch (e) { badWhy = `讀不懂：${e.message}` }
     if (badWhy) {
       log(`state 檔${badWhy}，停止這一輪（不覆蓋）`)
+      alerts.raise('bad-state', 'bad-state', '自動發佈的 state 檔讀不懂或結構不對，已停止處理且不覆蓋原檔，請人工檢查或修復 state 檔')
       if (!nt.badState) { setN({ badState: true }); post('自動發佈的 state 檔讀不懂或結構不對，已停止處理且不覆蓋原檔，請檢查') }
       return { outcome: 'bad-state' }
     }
     if (nt.badState) setN({ badState: undefined })
+    alerts.resolve('bad-state')
 
     // gh 連續失敗計時（持鎖才寫 notices）：從第一次失敗起算，超過 GH_FAIL_NOTICE_MS 貼一次固定句，不放 stderr；成功後清掉
     const ghFailed = () => {
       const now = deps.now()
+      if (Number.isFinite(nt.ghFailSince) && now - nt.ghFailSince > GH_FAIL_NOTICE_MS) alerts.raise('gh-failed', 'gh-failed', '連續 30 分鐘查不到 GitHub 上的發版狀態，請檢查工作機的 gh 登入與網路')
       if (!Number.isFinite(nt.ghFailSince)) setN({ ghFailSince: now, ghFailNoticed: false })
       else if (!nt.ghFailNoticed && now - nt.ghFailSince > GH_FAIL_NOTICE_MS) {
         setN({ ghFailNoticed: true })
@@ -275,6 +361,7 @@ export async function runOnce(opts, deps) {
       runs = runs.concat(toRuns(w.platform, w.re, rows))
     }
 
+    alerts.resolve('gh-failed')
     if (nt.ghFailSince !== undefined) { log('gh 已恢復，清掉連續失敗計時'); setN({ ghFailSince: undefined, ghFailNoticed: undefined }) }
 
     const d = decide({ runs, state, now: deps.now() })
@@ -297,8 +384,10 @@ export async function runOnce(opts, deps) {
       if (r.report) post(r.report)
       return { outcome: ok ? d.action : `${d.action}-failed`, key: d.key }
     }
+    ref = `${d.key}（${d.tag}）`
     const prep = prepareWorktree(deps)
     if (!prep.ok) {
+      alerts.raise('prep-failed', prep.cat, `${ref} 還沒發佈：${prep.cat}。處理好之後會自動重試`, ref)
       // 準備階段失敗（還沒開始發佈）：不記進 done，清掉 inflight，下一輪再試；同一類別只貼一次
       log(`工作樹準備失敗：${prep.why}`)
       d.state.inflight = null
@@ -307,6 +396,7 @@ export async function runOnce(opts, deps) {
       return { outcome: 'prep-failed', key: d.key }
     }
     if (nt.prep !== undefined) setN({ prep: undefined })
+    alerts.resolve('prep-failed')
 
     const root = rootOf(deps)
     const args = [path.join(root, 'tools', 'release', 'local_sign_publish.mjs')]
@@ -415,6 +505,16 @@ export function realDeps(opts, repoRoot = REPO_ROOT) {
       try { fs.linkSync(tmp, p) } finally { try { fs.unlinkSync(tmp) } catch { /* ignore */ } }
     },
     unlink: (p) => fs.unlinkSync(p),
+    isAutoPublish: (pid) => {
+      try {
+        const r = process.platform === 'win32'
+          ? spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter 'ProcessId=${Number(pid)}').CommandLine`], { encoding: 'utf8', timeout: 15000 })
+          : spawnSync('ps', ['-p', String(Number(pid)), '-o', 'args='], { encoding: 'utf8', timeout: 15000 })
+        const out = String(r.stdout ?? '').trim()
+        if (r.status !== 0 || !out) return null
+        return /auto_publish/.test(out)
+      } catch { return null }
+    },
     pidAlive: (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } },
     log: (m) => {
       const line = `[${new Date().toISOString()}] ${m}\n`
@@ -440,6 +540,15 @@ async function main() {
   if (!wt.ok) { console.error(wt.why); process.exit(2) }
   const st = checkStartup(opts, deps)
   if (!st.ok) { console.error(st.why); process.exit(2) }
+  let inst = null
+  if (!opts.once) {
+    inst = claimInstance(opts, deps)
+    if (!inst.got) process.exit(3)
+    if (inst.tookOver) deps.log(`發現殘留的 pid 檔（pid ${inst.tookOver} 已不在或不是自動發佈），已接手`)
+    const cleanup = () => releaseInstance(opts, deps, inst.content)
+    process.on('exit', cleanup)
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(sig, () => process.exit(0))
+  }
   do {
     try { await runOnce(opts, deps) } catch (e) { deps.log(`這一輪發生例外：${e.stack || e.message}`) }
     if (opts.once) break
