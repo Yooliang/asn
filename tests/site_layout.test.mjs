@@ -27,7 +27,12 @@ const externalRefs = html => [...html.matchAll(/<([a-z][a-z0-9]*)\b[^>]*?\s(src|
   .map(m => ({ tag: m[1].toLowerCase(), attr: m[2].toLowerCase(), url: m[3] }))
 const isInstallerLink = r => r.tag === 'a' && r.attr === 'href' && r.url.startsWith(UPDATE_BASE)
   && new RegExp(INSTALLER_HREF_RE.source).test(`href="${r.url}"`)
-const disallowedExternal = html => externalRefs(html).filter(r => !isInstallerLink(r))
+// #2203：Google Play 的 ASN 頁面（首頁手機入口與下載區按鈕）也是允許的外部連結，只放這一個網址
+// Linux 版連結（AppImage／deb，發版腳本 linux_publish.mjs 的 patchLinuxLinks 維護）同樣是官網自己的下載檔
+const isLinuxLink = r => r.tag === 'a' && r.attr === 'href' && r.url.startsWith(UPDATE_BASE) && /\/ASN_\d+\.\d+\.\d+_amd64\.(?:AppImage|deb)$/.test(r.url)
+const PLAY_URL = 'https://play.google.com/store/apps/details?id=tw.yooliang.asn'
+const isPlayLink = r => r.tag === 'a' && r.attr === 'href' && r.url === PLAY_URL
+const disallowedExternal = html => externalRefs(html).filter(r => !isInstallerLink(r) && !isLinuxLink(r) && !isPlayLink(r))
 
 test('各頁的共用區段與 make-layout.mjs 產生的一致（改了選單要重跑 node site/make-layout.mjs）', () => {
   for (const f of files) {
