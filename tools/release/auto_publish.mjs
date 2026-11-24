@@ -223,6 +223,48 @@ function makePost(opts, deps, alerts, getRef = () => null) {
   }
 }
 
+// 常駐程式單一實例鎖（#2229）：重啟排程時 Stop-ScheduledTask 只結束外層 powershell、舊 node 還在，會變兩個同時跑。
+// pid 檔 <state 資料夾>/auto-publish.pid，內容「pid 換行 毫秒時間戳」，用 link 排他建立（兩個同時啟動只有一個建得成）。
+// 檔裡的 pid 還活著「而且命令列確實是 auto_publish」才算有人在跑；pid 不在、或被別的程式重用（命令列不是 auto_publish）都視為殘留，接手。
+// deps.isAutoPublish(pid) 回 true／false／null（null＝查不到命令列：保守當作有人在跑，由人確認後刪 pid 檔）。
+export const pidFileOf = (opts) => path.join(path.dirname(opts.state), 'auto-publish.pid')
+
+export function acquireInstance(opts, deps) {
+  const f = pidFileOf(opts)
+  const mine = `${deps.pid}
+${deps.now()}`
+  const tryCreate = () => { try { deps.createLock(f, mine); return true } catch (e) { if (e.code === 'EEXIST') return false; throw e } }
+  if (tryCreate()) return { got: true, content: mine }
+  let other = NaN
+  try { other = parseLock(deps.readFile(f)).pid } catch { /* 讀不到：當作殘留或剛被刪 */ }
+  if (Number.isFinite(other) && other !== deps.pid && deps.pidAlive(other)) {
+    const who = deps.isAutoPublish(other)
+    if (who !== false) return { got: false, pid: other, unknown: who === null }
+  }
+  const stale = `${f}.stale-${deps.pid}`
+  try { deps.rename(f, stale) } catch { return { got: false, pid: null, lost: true } }
+  try { deps.unlink(stale) } catch { /* 刪不掉不影響 */ }
+  if (!tryCreate()) return { got: false, pid: null, lost: true }
+  return { got: true, content: mine, tookOver: Number.isFinite(other) ? other : null }
+}
+
+// 啟動時呼叫：拿不到鎖就寫 log 與告警檔（類別 already-running），呼叫端據此以非 0 結束
+export function claimInstance(opts, deps) {
+  const inst = acquireInstance(opts, deps)
+  if (!inst.got) {
+    const why = inst.pid ? `已經有一個自動發佈常駐程式在跑（pid ${inst.pid}），這個沒有啟動。若要重啟，請先停掉舊的、確認它結束後再啟動${inst.unknown ? '（查不到那個 pid 是什麼程式；確定它不是自動發佈的話，刪掉 auto-publish.pid 再啟動）' : ''}` : '同時有另一個常駐程式在啟動，這個沒有啟動'
+    deps.log(why)
+    makeAlerts(opts, deps).raise('already-running', 'already-running', why)
+  }
+  return inst
+}
+
+// 結束時刪 pid 檔：內容還是自己的才刪
+export function releaseInstance(opts, deps, content) {
+  const f = pidFileOf(opts)
+  try { if (deps.readFile(f) === content) deps.unlink(f) } catch { /* 沒有就算了 */ }
+}
+
 // 被鎖住時記「開始被擋的時間」的檔：每個 pid 一份，只有該程序自己讀寫，所以不需要鎖
 const blockedPathOf = (opts, deps) => `${opts.state}.blocked-since-${deps.pid}`
 
@@ -450,6 +492,16 @@ export function realDeps(opts, repoRoot = REPO_ROOT) {
       try { fs.linkSync(tmp, p) } finally { try { fs.unlinkSync(tmp) } catch { /* ignore */ } }
     },
     unlink: (p) => fs.unlinkSync(p),
+    isAutoPublish: (pid) => {
+      try {
+        const r = process.platform === 'win32'
+          ? spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter 'ProcessId=${Number(pid)}').CommandLine`], { encoding: 'utf8', timeout: 15000 })
+          : spawnSync('ps', ['-p', String(Number(pid)), '-o', 'args='], { encoding: 'utf8', timeout: 15000 })
+        const out = String(r.stdout ?? '').trim()
+        if (r.status !== 0 || !out) return null
+        return /auto_publish/.test(out)
+      } catch { return null }
+    },
     pidAlive: (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } },
     log: (m) => {
       const line = `[${new Date().toISOString()}] ${m}\n`
@@ -475,6 +527,15 @@ async function main() {
   if (!wt.ok) { console.error(wt.why); process.exit(2) }
   const st = checkStartup(opts, deps)
   if (!st.ok) { console.error(st.why); process.exit(2) }
+  let inst = null
+  if (!opts.once) {
+    inst = claimInstance(opts, deps)
+    if (!inst.got) process.exit(3)
+    if (inst.tookOver) deps.log(`發現殘留的 pid 檔（pid ${inst.tookOver} 已不在或不是自動發佈），已接手`)
+    const cleanup = () => releaseInstance(opts, deps, inst.content)
+    process.on('exit', cleanup)
+    for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(sig, () => process.exit(0))
+  }
   do {
     try { await runOnce(opts, deps) } catch (e) { deps.log(`這一輪發生例外：${e.stack || e.message}`) }
     if (opts.once) break

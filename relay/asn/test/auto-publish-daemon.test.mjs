@@ -731,3 +731,90 @@ test('#2229 告警檔寫不進去：只記 log，不讓這一輪失敗、不影�
   postFails(ok)
   assert.equal((await runOnce(opts, ok.deps)).outcome, 'dryRun')
 })
+
+// ---- #2229 常駐程式單一實例鎖（pid 檔）----
+import { acquireInstance, releaseInstance, pidFileOf } from '../../../tools/release/auto_publish.mjs'
+const PIDF = pidFileOf(opts)
+// 假行程表：alive＝活著的 pid；cmd＝pid → 是不是 auto_publish（沒列＝查不到 null）
+function inst(e, { alive = [], cmd = {} } = {}) {
+  const d = { ...e.deps, pidAlive: (p) => alive.includes(p), isAutoPublish: (p) => (p in cmd ? cmd[p] : null) }
+  return d
+}
+
+test('#2229 單一實例：沒有 pid 檔 → 拿到鎖，內容是自己的 pid；結束時刪掉', () => {
+  const e = env()
+  const r = acquireInstance(opts, inst(e))
+  assert.equal(r.got, true)
+  assert.ok(String(e.fsMap.get(PIDF)).startsWith('4242\n'))
+  releaseInstance(opts, inst(e), r.content)
+  assert.equal(e.fsMap.has(PIDF), false)
+})
+
+test('#2229 單一實例：已有活著的 auto_publish → 拿不到鎖，pid 檔不動', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = acquireInstance(opts, inst(e, { alive: [777], cmd: { 777: true } }))
+  assert.equal(r.got, false)
+  assert.equal(r.pid, 777)
+  assert.equal(e.fsMap.get(PIDF), `777\n${T0}`)
+})
+
+test('#2229 單一實例：殘留 pid 檔（行程已不在）→ 接手照常啟動', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = acquireInstance(opts, inst(e, { alive: [] }))
+  assert.equal(r.got, true)
+  assert.equal(r.tookOver, 777)
+  assert.ok(String(e.fsMap.get(PIDF)).startsWith('4242\n'))
+})
+
+test('#2229 單一實例：pid 被別的程式重用（活著但不是 auto_publish）→ 不誤判，接手', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = acquireInstance(opts, inst(e, { alive: [777], cmd: { 777: false } }))
+  assert.equal(r.got, true)
+})
+
+test('#2229 單一實例：查不到那個 pid 是什麼程式 → 保守不啟動（避免兩個同時發版）', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = acquireInstance(opts, inst(e, { alive: [777] }))
+  assert.equal(r.got, false)
+  assert.equal(r.unknown, true)
+})
+
+test('#2229 單一實例：兩個同時啟動只有一個拿到鎖', () => {
+  const e = env()
+  const a = inst(e, { alive: [4242, 5151], cmd: { 4242: true, 5151: true } })
+  const b = { ...a, pid: 5151 }
+  const ra = acquireInstance(opts, a)
+  const rb = acquireInstance(opts, b)
+  assert.deepEqual([ra.got, rb.got], [true, false])
+  assert.equal(rb.pid, 4242)
+})
+
+test('#2229 單一實例：兩個同時接手同一份殘留，只有一個贏', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const a = inst(e)
+  const b = { ...a, pid: 5151 }
+  // b 在 a 接手過程中才動手：a 先完成接手後 b 再來，看到的是 a 活著的鎖
+  const ra = acquireInstance(opts, a)
+  const b2 = { ...b, pidAlive: (p) => p === 4242, isAutoPublish: () => true }
+  const rb = acquireInstance(opts, b2)
+  assert.deepEqual([ra.got, rb.got], [true, false])
+})
+
+test('#2229 單一實例：結束時 pid 檔已被別人換掉就不刪', () => {
+  const e = env()
+  const r = acquireInstance(opts, inst(e))
+  e.fsMap.set(PIDF, `9999\n${T0}`)
+  releaseInstance(opts, inst(e), r.content)
+  assert.equal(e.fsMap.get(PIDF), `9999\n${T0}`)
+})
+
+test('#2229 單一實例：已有活著的 → claimInstance 寫告警（already-running，白話說明）且不動 pid 檔', async () => {
+  const { claimInstance } = await import('../../../tools/release/auto_publish.mjs')
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const r = claimInstance(opts, inst(e, { alive: [777], cmd: { 777: true } }))
+  assert.equal(r.got, false)
+  const a = alertOf(e).alerts['already-running']
+  assert.equal(a.status, 'active')
+  assert.ok(a.message.includes('已經有一個') && a.message.includes('先停掉舊的'))
+  assert.equal(e.fsMap.get(PIDF), `777\n${T0}`)
+})
