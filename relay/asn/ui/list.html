@@ -67,7 +67,7 @@
     </div>
     <!-- 四個大分頁（0.2.18，和手機同樣的字、同樣的順序）：夥伴／對話／設定／通知（#1429）。左邊直排的設備頁籤只在「夥伴」裡 -->
     <nav class="top-tabs" role="tablist" aria-label="大分頁">
-      <button v-for="t in TOP_TABS" :key="t.key" class="ttab" :class="['ttab-' + t.key, { on: top === t.key }]" type="button" role="tab" :aria-selected="top === t.key" :aria-label="t.key === 'notice' && noticeUnreadN ? t.label + '（' + noticeUnreadN + ' 則未讀）' : t.label" :title="skin === 'line' ? t.label : null" @click="goTop(t.key)">
+      <button v-for="t in (skin === 'line' ? TOP_TABS_LINE : TOP_TABS)" :key="t.key" class="ttab" :class="['ttab-' + t.key, { on: top === t.key }]" type="button" role="tab" :aria-selected="top === t.key" :aria-label="t.key === 'notice' && noticeUnreadN ? t.label + '（' + noticeUnreadN + ' 則未讀）' : t.label" :title="skin === 'line' ? t.label : null" @click="goTop(t.key)">
         <line-icon class="ttab-ic" v-if="skin === 'line'" :name="t.key" :size="22"></line-icon>
         <span>{{ t.label }}</span>
         <!-- 紅點掛在「夥伴」（#1429）：對話清單的未讀（原本掛在「對話」，算法不變）或任一台設備頁籤有未讀；「對話」分頁不再掛紅點 -->

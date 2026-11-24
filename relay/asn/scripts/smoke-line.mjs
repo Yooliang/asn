@@ -22,6 +22,7 @@ export const LINE_PROBES = {
   deskNav: { skinCheck: true, line: 'desk-nav' },
   deskChat: { skinCheck: true, line: 'desk-chat' },
   deskNarrow: { skinCheck: true, line: 'desk-narrow' },
+  deskNavNotice: { skinCheck: true, line: 'desk-nav-notice' },
   mobileNav: { skinCheck: true, line: 'm-nav' },
   mobileChat: { skinCheck: true, line: 'm-chat' },
   deskMsgs: { skinCheck: true, line: 'msgs' },
@@ -250,8 +251,16 @@ export const lineProbeSource = kind => `(async () => {
     if (Math.abs(br.left - pr.left) > 1 || br.height < pr.height - 2) return { ok: false, why: 'LINE 外觀：' + '左欄沒有貼在名單欄最左邊、撐滿高度' };
     const btns = [...bar.querySelectorAll('.ttab')];
     const name = b => b.getAttribute('aria-label').replace(/（.*/, '');
-    const want = ['夥伴', '對話', '設定', '通知'];
-    if (btns.map(name).join() !== want.join()) return { ok: false, why: 'LINE 外觀：' + '左欄順序要是 夥伴、對話、設定、通知：' + btns.map(name).join() };
+    const want = ['夥伴', '對話', '通知', '設定'];
+    if (btns.map(name).join() !== want.join()) return { ok: false, why: 'LINE 外觀：' + '左欄順序要是 夥伴、對話、通知、設定（通知、設定靠下）：' + btns.map(name).join() };
+    // #1785：設定在欄的最底、通知在它正上方；上面兩顆和下面兩顆之間有空隙；紅點跟著通知圖示
+    const rect = b => b.getBoundingClientRect();
+    if (Math.abs(br.bottom - rect(btns[3]).bottom - 14) > 2) return { ok: false, why: 'LINE 外觀：' + '「設定」要貼在左欄最底：欄底 ' + br.bottom + '、設定底 ' + rect(btns[3]).bottom };
+    if (Math.abs(rect(btns[3]).top - rect(btns[2]).bottom - 6) > 2) return { ok: false, why: 'LINE 外觀：' + '「通知」要在「設定」正上方、只隔一個間距' };
+    if (rect(btns[2]).top - rect(btns[1]).bottom < 40) return { ok: false, why: 'LINE 外觀：' + '上方兩顆（夥伴、對話）與下方兩顆（通知、設定）之間要有空隙：' + (rect(btns[2]).top - rect(btns[1]).bottom) };
+    if (Math.abs(rect(btns[0]).top - br.top - 14) > 2) return { ok: false, why: 'LINE 外觀：' + '「夥伴」要留在最上方' };
+    const dot = btns[2].querySelector('.rtab-count');
+    if (dot) { const d = rect(dot), n = rect(btns[2]); if (d.top < n.top - 4 || d.top > n.top + 12 || d.right > n.right + 4 || d.left < n.left) return { ok: false, why: 'LINE 外觀：' + '通知的未讀紅點沒有跟著通知圖示' }; }
     for (const b of btns) {
       if (b.getAttribute('title') !== name(b)) return { ok: false, why: 'LINE 外觀：' + '圖示要有滑過提示（title）：' + name(b) };
       if (!b.querySelector('svg.lic')) return { ok: false, why: 'LINE 外觀：' + '左欄按鈕沒有線條圖示：' + name(b) };
@@ -263,7 +272,7 @@ export const lineProbeSource = kind => `(async () => {
     if (onBtn().join() !== '夥伴') return { ok: false, why: 'LINE 外觀：' + '一開始選中的應該是夥伴：' + onBtn().join() };
     const mark = getComputedStyle(btns[0], '::before');
     if (mark.content === 'none' || parseFloat(mark.width) < 2) return { ok: false, why: 'LINE 外觀：' + '選中的那顆沒有亮色細條' };
-    await real({ click: at(btns[2]) });
+    await real({ click: at(btns[3]) });
     if (!(await wait(() => onBtn().join() === '設定', 20))) return { ok: false, why: 'LINE 外觀：' + '點左欄「設定」沒有切到設定分頁：' + onBtn().join() };
     await real({ click: at(btns[0]) });
     if (!(await wait(() => onBtn().join() === '夥伴', 20))) return { ok: false, why: 'LINE 外觀：' + '點左欄「夥伴」沒有切回：' + onBtn().join() };
@@ -323,6 +332,20 @@ export const lineProbeSource = kind => `(async () => {
     await real({ click: at(call) });
     const hit = () => (globalThis.__smokeCalls || []).some(c => c[0] === 'stt_status') || globalThis.__smokeMissing.includes('stt_status');
     if (!(await wait(hit, 20))) return { ok: false, why: 'LINE 外觀：' + '按標題列的通話鍵，沒有走到既有的通話流程（沒有向語音功能查狀態）' };
+    return { ok: true, why: '' };
+  }
+
+  // #1785：通知有未讀時，數字徽章跟著通知圖示（掛在通知鈕上），通知與設定一起靠下
+  if (kind === 'desk-nav-notice') {
+    const bell = await wait(() => document.querySelector('.top-tabs .ttab-notice .rtab-count') && document.querySelector('.top-tabs .ttab-notice'));
+    if (!bell) return { ok: false, why: 'LINE 外觀：' + '通知有未讀卻沒有數字徽章' };
+    const set = document.querySelector('.top-tabs .ttab-settings'), badge = bell.querySelector('.rtab-count');
+    const n = bell.getBoundingClientRect(), s = set.getBoundingClientRect(), d = badge.getBoundingClientRect(), bar = document.querySelector('.top-tabs').getBoundingClientRect();
+    if (Math.abs(bar.bottom - s.bottom - 14) > 2) return { ok: false, why: 'LINE 外觀：' + '「設定」要貼在左欄最底' };
+    if (Math.abs(s.top - n.bottom - 6) > 2) return { ok: false, why: 'LINE 外觀：' + '「通知」要在「設定」正上方' };
+    if (d.top < n.top - 4 || d.top > n.top + 12 || d.right > n.right + 4 || d.left < n.left) return { ok: false, why: 'LINE 外觀：' + '未讀徽章沒有跟著通知圖示：徽章 ' + JSON.stringify([d.left, d.top, d.right]) + '、通知鈕 ' + JSON.stringify([n.left, n.top, n.right]) };
+    const order = [...document.querySelectorAll('.top-tabs .ttab')].map(b => b.className.split(' ').find(c => c.startsWith('ttab-')).slice(5)).join();
+    if (order !== 'partners,chats,notice,settings') return { ok: false, why: 'LINE 外觀：' + '焦點順序（DOM 順序）要跟畫面一致：' + order };
     return { ok: true, why: '' };
   }
 

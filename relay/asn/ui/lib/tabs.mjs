@@ -13,6 +13,9 @@ export const TOP_TABS = [
   { key: 'settings', label: '設定' },
   { key: 'notice', label: '通知' },
 ]
+// 電腦版 LINE 外觀的左側直排圖示欄（#1785）：夥伴、對話在上方；通知、設定一起靠下，設定在最底。
+// DOM 順序就是畫面順序（不用 CSS order），鍵盤 Tab 的焦點順序才會跟看到的一致：夥伴→對話→通知→設定。
+export const TOP_TABS_LINE = [TOP_TABS[0], TOP_TABS[1], TOP_TABS[3], TOP_TABS[2]]
 // 不是設備頁籤的畫面（tab 的值）：對話、通知、使用指引（設定裡的一列）、設定
 export const FIXED_TABS = [
   { key: 'chats', label: '對話' },
