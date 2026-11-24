@@ -12,9 +12,12 @@ const LOCK: &str = "send-rate.lock";
 const KEEP_IDS: usize = 200;
 /// 鎖檔超過這麼久還在，當作前一個程序掛掉遺留
 const LOCK_STALE_MS: u128 = 10_000;
-/// 寄信等鎖最多約 2 秒；退額度是在橋的收信迴圈裡做，等太久會卡住收信，所以只等約 0.4 秒，拿不到就不退
-const LOCK_TRIES_SEND: u32 = 50;
-const LOCK_TRIES_REFUND: u32 = 10;
+/// 寄信等鎖最多 8 秒（比 `LOCK_STALE_MS` 短，不會等到把活著的鎖當遺留）；退額度是在橋的收信迴圈裡做，等太久會卡住收信，所以只等約 0.4 秒，拿不到就不退。
+/// 以時間計、不以次數計：機器很忙時睡眠會拖長，次數用完的牆上時間不可預期（#2291：整套測試高並行時 2 秒內沒輪到就放棄、無鎖照寫，少算 1～3 封）。
+const LOCK_WAIT_SEND: std::time::Duration = std::time::Duration::from_secs(8);
+const LOCK_WAIT_REFUND: std::time::Duration = std::time::Duration::from_millis(400);
+/// 輪詢間隔：短一點，鎖一放掉就有人接手；各程序／執行緒錯開一點，避免同拍搶
+const LOCK_POLL_MS: u64 = 5;
 /// 剩這麼多封（含）以下，寄信後提醒
 pub const WARN_LEFT: usize = 5;
 
@@ -25,11 +28,14 @@ impl Drop for Lock {
     }
 }
 
-/// 拿鎖（每次等 40 毫秒，最多 `tries` 次）；拿不到回 None，由呼叫端決定要不要照樣做
-fn lock(home: &Path, tries: u32) -> Option<Lock> {
+/// 拿鎖（最多等 `wait` 的時間）；拿不到回 None，由呼叫端決定要不要照樣做
+fn lock(home: &Path, wait: std::time::Duration) -> Option<Lock> {
     let _ = std::fs::create_dir_all(home);
     let p = home.join(LOCK);
-    for _ in 0..tries {
+    let start = std::time::Instant::now();
+    let mut n: u64 = 0;
+    while n == 0 || start.elapsed() < wait {
+        n += 1;
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
             Ok(_) => return Some(Lock(p)),
             // Windows：鎖檔剛被刪、還在刪除中時，建檔回「拒絕存取」不是「已存在」。當成別人拿著，等一下再試；
@@ -39,7 +45,8 @@ fn lock(home: &Path, tries: u32) -> Option<Lock> {
                 if stale {
                     let _ = std::fs::remove_file(&p);
                 } else {
-                    std::thread::sleep(std::time::Duration::from_millis(40));
+                    // 加上程序號與次數造成的小抖動（0～4 毫秒）
+                    std::thread::sleep(std::time::Duration::from_millis(LOCK_POLL_MS + (u64::from(std::process::id()) + n) % 5));
                 }
             }
             Err(_) => return None,
@@ -67,7 +74,7 @@ fn recent_of(all: &Map<String, Value>, window: &str) -> Vec<u64> {
 
 /// 寄一封前先計次。成功回「寄完還剩幾封」；已滿回 Err(幾分鐘後可再寄)
 pub fn take(home: &Path, window: &str, limit: usize, now: u64) -> Result<usize, u64> {
-    let _lock = lock(home, LOCK_TRIES_SEND); // 拿不到就照樣算：寧可多算一次，也不因為鎖卡住寄不出信
+    let _lock = lock(home, LOCK_WAIT_SEND); // 拿不到就照樣算：寧可多算一次，也不因為鎖卡住寄不出信
     let mut all = load(home, now);
     let recent = recent_of(&all, window);
     if recent.len() >= limit {
@@ -87,7 +94,7 @@ pub fn take(home: &Path, window: &str, limit: usize, now: u64) -> Result<usize, 
 /// 一封信只退一次（`mail_id`）；窗口這一小時沒有任何紀錄就沒有東西可退——額度只會回到上限，不會存成「欠額」。
 /// 拿不到鎖就不退（少退一封比寫壞計數檔好）。回傳這次有沒有真的退。
 pub fn refund(home: &Path, window: &str, mail_id: &str, now: u64) -> bool {
-    let Some(_lock) = lock(home, LOCK_TRIES_REFUND) else { return false };
+    let Some(_lock) = lock(home, LOCK_WAIT_REFUND) else { return false };
     let ids_file = home.join(REFUNDED);
     let mut ids: Vec<String> = std::fs::read_to_string(&ids_file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
     if ids.iter().any(|i| i == mail_id) {
@@ -198,6 +205,26 @@ mod tests {
         let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
         std::fs::File::options().write(true).open(h.join(LOCK)).unwrap().set_modified(old).unwrap();
         assert_eq!(take(&h, "乙", 3, 3000), Ok(2), "超過 10 秒的鎖檔當作遺留，不卡住");
+    }
+
+    #[test]
+    fn 鎖被占著超過舊的兩秒等待上限_寄信照樣等到放掉才算_不無鎖照寫() {
+        let d = home();
+        let h = d.path().to_path_buf();
+        let held = lock(&h, std::time::Duration::from_secs(1)).expect("先拿到鎖");
+        let h2 = h.clone();
+        let t0 = std::time::Instant::now();
+        let waiter = std::thread::spawn(move || {
+            let r = take(&h2, "甲", 5, 1000);
+            (r, t0.elapsed())
+        });
+        std::thread::sleep(std::time::Duration::from_millis(2500)); // 舊程式 50 次 × 40 毫秒＝約 2 秒就放棄、無鎖照寫
+        assert_eq!(count(&h, "甲", 1000), 0, "鎖還被占著，等鎖的人不能先寫");
+        drop(held);
+        let (r, waited) = waiter.join().unwrap();
+        assert_eq!(r, Ok(4));
+        assert!(waited >= std::time::Duration::from_millis(2400), "要等到鎖放掉：{waited:?}");
+        assert_eq!(count(&h, "甲", 1000), 1);
     }
 
     #[test]
