@@ -92,14 +92,28 @@ pub struct BindOutcome {
     /// created＝新建節點（稍後重新啟動）；bound＝已綁到帳號；pending＝這台沒擋，但還沒綁到
     pub state: &'static str,
     pub note: String,
+    /// 綁定成功但自動重新啟動失敗時的白話提示（#2204）；平常不出現。畫面收到要顯示它、不能直接進名單（新金鑰還沒載入）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restart_failed: Option<String>,
+}
+
+/// 綁定已成功（created）但重新啟動失敗給畫面的白話提示；原始錯誤在 relaunch_and_exit 已寫進 ui.log
+pub const BIND_RESTART_FAILED_TEXT: &str = "已經綁定好了，但 ASN 沒能自動重新開啟，請自己關閉後再重新開啟。";
+
+/// 綁定結果加上重新啟動的結果：created 且重啟失敗時，仍回 created（綁定已成功），另附提示，不把綁定結果吃掉
+pub fn with_restart_result(mut out: BindOutcome, restart: Result<(), String>) -> BindOutcome {
+    if out.state == "created" && restart.is_err() {
+        out.restart_failed = Some(BIND_RESTART_FAILED_TEXT.to_string());
+    }
+    out
 }
 
 /// 有節點金鑰時 node_claim 的結果 → 綁定結果。任何失敗都不擋使用（tenant_not_yours＝舊租戶還沒被認領，之後每次啟動再試）
 pub fn claim_outcome(r: Result<Value, CallErr>) -> BindOutcome {
     match r {
-        Ok(v) if v.get("already").and_then(Value::as_bool) == Some(true) => BindOutcome { state: "bound", note: "這台電腦本來就在你的帳號底下".into() },
-        Ok(_) => BindOutcome { state: "bound", note: "已把這台電腦連到你的帳號".into() },
-        Err(e) => BindOutcome { state: "pending", note: if e.code == "tenant_not_yours" { "這台電腦尚未綁到你的帳號（認領後會自動完成）".into() } else { e.text } },
+        Ok(v) if v.get("already").and_then(Value::as_bool) == Some(true) => BindOutcome { state: "bound", note: "這台電腦本來就在你的帳號底下".into(), restart_failed: None },
+        Ok(_) => BindOutcome { state: "bound", note: "已把這台電腦連到你的帳號".into(), restart_failed: None },
+        Err(e) => BindOutcome { state: "pending", note: if e.code == "tenant_not_yours" { "這台電腦尚未綁到你的帳號（認領後會自動完成）".into() } else { e.text }, restart_failed: None },
     }
 }
 
@@ -528,7 +542,7 @@ pub async fn bind_this(app: &App, auth: &AuthState) -> Result<BindOutcome, Strin
     if app.relay.is_some() {
         let id = match identity::resolve() {
             Ok(i) => i,
-            Err(t) => return Ok(BindOutcome { state: "pending", note: t }),
+            Err(t) => return Ok(BindOutcome { state: "pending", note: t, restart_failed: None }),
         };
         if let Err(e) = call(&c.client, &c.relay_url, &token, "account_bootstrap", None, json!({})).await {
             return Ok(claim_outcome(Err(e)));
@@ -542,7 +556,7 @@ pub async fn bind_this(app: &App, auth: &AuthState) -> Result<BindOutcome, Strin
     let id = v.get("id").and_then(Value::as_str).unwrap_or("");
     let key = v.get("key").and_then(Value::as_str).unwrap_or("");
     write_node_files(&identity::relay_home(), id, key, restrict_file)?;
-    Ok(BindOutcome { state: "created", note: "已替這台電腦建立節點".into() })
+    Ok(BindOutcome { state: "created", note: "已替這台電腦建立節點".into(), restart_failed: None })
 }
 
 /// 遠端更新：對自己帳號下的別台設備留一筆「更新」請求（後台只認登入憑證的本人，對別人的設備一律 not_found）。
@@ -572,14 +586,32 @@ pub async fn update_remote_status(app: State<'_, App>, auth: State<'_, AuthState
 #[tauri::command]
 pub async fn auth_bind(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle) -> Result<BindOutcome, String> {
     let out = bind_this(&app, &auth).await?;
-    if out.state == "created" {
-        restart_now(&app, handle).await?;
+    if out.state != "created" {
+        return Ok(out);
     }
-    Ok(out)
+    // 綁定已經成功：重新啟動失敗也不能把結果吃掉（否則重試時回 bound、不重啟，新金鑰沒載入就進名單）
+    let restart = restart_now(&app, handle).await;
+    Ok(with_restart_result(out, restart))
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn _2204_綁定成功但重啟失敗_仍回_created_並附白話提示() {
+        use super::{with_restart_result, BindOutcome, BIND_RESTART_FAILED_TEXT};
+        let mk = |s: &'static str| BindOutcome { state: s, note: "n".into(), restart_failed: None };
+        let out = with_restart_result(mk("created"), Err("原始錯誤".into()));
+        assert_eq!(out.state, "created", "綁定結果不能被吃掉");
+        assert_eq!(out.restart_failed.as_deref(), Some(BIND_RESTART_FAILED_TEXT));
+        assert!(!BIND_RESTART_FAILED_TEXT.contains("原始錯誤"));
+        assert_eq!(with_restart_result(mk("created"), Ok(())).restart_failed, None, "重啟成功不帶提示");
+        assert_eq!(with_restart_result(mk("bound"), Err("x".into())).restart_failed, None, "沒要重啟的不帶提示");
+        let j = serde_json::to_value(with_restart_result(mk("created"), Err("x".into()))).unwrap();
+        assert_eq!(j["state"], "created");
+        assert!(j["restart_failed"].is_string());
+        assert!(serde_json::to_value(mk("bound")).unwrap().get("restart_failed").is_none(), "平常不出現這個欄位");
+    }
+
     #[test]
     fn 安裝請求的本文_install_照舊_relogin_多帶_mode_不認得的不送() {
         use super::setup_request_body;

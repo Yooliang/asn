@@ -733,8 +733,14 @@ impl Manager {
     /// 重新啟動失敗（新程序開不起來）後恢復收發：收橋前橋在跑才重新啟動橋（設定檔沒動過，照 `try_start` 的一般流程）
     #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub fn resume_after_failed_relaunch(&self, was_running: bool) {
-        if was_running {
-            self.try_start();
+        if !was_running {
+            return;
+        }
+        self.try_start();
+        // 重新啟動失敗、收發又沒恢復＝要留下訊號：寫進 bridge.log（畫面上的 error 只在設定頁看得到）
+        let err = self.inner.lock().unwrap().error.clone();
+        if let Some(e) = err {
+            BridgeLog::new(Some(self.work_dir.join("bridge.log"))).line(&format!("relaunch: failed to resume bridge after failed relaunch: {e}"));
         }
     }
 }

@@ -7,7 +7,7 @@ export const PROVIDERS = [
 export const providerKeys = () => PROVIDERS.map(p => p.key)
 
 // 登入畫面的階段：idle（等你按）、waiting（瀏覽器開著，等回呼）、setting（登入完成，正在替這台電腦建立節點）、error
-export const PHASES = ['idle', 'waiting', 'setting', 'error']
+export const PHASES = ['idle', 'waiting', 'setting', 'error', 'restart']   // restart＝已綁定好但沒能自動重新開啟，請使用者自己重開（不給再按登入）
 
 export function phaseText(phase, provider = '') {
   const name = PROVIDERS.find(p => p.key === provider)?.name ?? ''
@@ -16,6 +16,15 @@ export function phaseText(phase, provider = '') {
     case 'setting': return '登入完成，正在設定這台電腦…'
     default: return ''
   }
+}
+
+// 登入後綁定的結果 → 登入畫面下一步（#2204）：
+// 綁定成功但自動重新啟動失敗（restart_failed 有字）＝停在「請自己重新開啟」，不能進名單（新金鑰還沒載入，重試也只會回 bound 不重啟）
+export function bindNext(out) {
+  const text = typeof out?.restart_failed === 'string' ? out.restart_failed.trim() : ''
+  if (text) return { action: 'restart-needed', text }
+  if (out?.state === 'created') return { action: 'wait' }
+  return { action: 'enter' }
 }
 
 // Rust 端回來的錯誤字串 → 畫面用的話（已經是中文就原樣，空的給預設）

@@ -77,9 +77,27 @@ async fn _2204_manager_橋沒在跑_收橋回_false_恢復也不會硬開() {
 async fn _2204_manager_收橋拿走_running_並放掉收信鎖() {
     let d = tempfile::tempdir().unwrap();
     let m = Manager::new(None, None, "T".into(), d.path().to_path_buf(), d.path().to_path_buf());
-    let (r, _fin, _rd) = fake_running(10);
+    let (r, _fin, rd) = fake_running(10);
+    let pid_file = lock::pid_file(rd.path());
+    assert!(pid_file.exists(), "收橋前持有收信鎖");
     m.inner.lock().unwrap().running = Some(r);
     assert!(m.status().running);
     assert!(m.drain_for_relaunch(Duration::from_secs(3)).await, "收橋前橋在跑要回 true");
     assert!(!m.status().running, "收橋後 Manager 不再持有橋");
+    assert!(!pid_file.exists(), "收信鎖要真的放掉，新程序才拿得到");
+}
+
+#[tokio::test]
+async fn _2204_復原失敗要寫_bridge_log_橋沒在跑則不啟動也不寫() {
+    let d = tempfile::tempdir().unwrap();
+    // 沒有節點金鑰 → try_start 一定失敗
+    let m = Manager::new(None, None, "T".into(), d.path().to_path_buf(), d.path().to_path_buf());
+    let log = d.path().join("bridge.log");
+    m.resume_after_failed_relaunch(false);
+    assert!(!m.status().running && !log.exists(), "原本沒在跑：不啟動、不寫 log");
+    m.resume_after_failed_relaunch(true);
+    assert!(!m.status().running);
+    assert!(m.status().error.is_some(), "失敗原因要存起來");
+    let text = std::fs::read_to_string(&log).expect("復原失敗要寫 bridge.log");
+    assert!(text.contains("failed to resume bridge"), "log 內容：{text}");
 }

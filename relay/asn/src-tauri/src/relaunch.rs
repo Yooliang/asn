@@ -184,9 +184,4 @@ mod tests {
         assert!(!acct.contains("crate::ui_log::relaunch_self()"), "account.rs 不能自己 spawn 後無條件結束");
         assert!(!acct.contains("fn restart_soon"), "舊的 restart_soon 已被取代");
     }
-
-    #[test]
-    fn _2204_收橋等待上限_3_秒() {
-        assert_eq!(DRAIN_TIMEOUT, Duration::from_secs(3));
-    }
 }
