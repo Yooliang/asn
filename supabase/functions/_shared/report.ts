@@ -1,7 +1,8 @@
 // 回報匯流排（#2161 第 2b 段）：report（寫）與 report_get（讀）。資料庫見 migrations/20261125100000_report_bus.sql、20261125200000_report_readers_wrapper.sql。
 // 節點身分只取自金鑰解出的 me.id，body 不收節點代號。這兩個動作是節點層（金鑰）動作，不需要本人簽章；網頁節點一律不准（見 web_session.ts）。
 // report：Edge 先驗 kind 格式、payload 是物件、序列化大小（不合就不打資料庫）；資料庫再依登記表驗證。內容變了才敲門鈴。
-// 門鈴只帶 { kind, node }（哪台哪種更新了），不帶內容；讀取一律走 report_get。門鈴失敗不影響 report。
+// 門鈴只帶 { kind, node }（哪台哪種更新了），不帶內容；讀取一律走 report_get。門鈴在背景發（回應不等），失敗不影響 report。
+// 身分：handler 只信呼叫端傳進來的 me（index.ts 先用金鑰解出節點；沒金鑰或金鑰無效在到這裡之前就回 401），所以這裡沒有 401 分支。
 import type { RpcFn } from "./partners.ts";
 
 export const REPORT_ACTIONS = new Set(["report", "report_get"]);
@@ -17,7 +18,9 @@ type Fail = { status: number; error: string; message: string };
 export interface ReportDeps {
   rpc: RpcFn;
   /** 對一個門鈴頻道敲一下並帶 payload（失敗自己吞掉；這裡再包一層保險） */
-  ringReport: (topic: string, payload: Record<string, unknown>) => Promise<void>;
+  ring: (topic: string, payload?: Record<string, unknown>) => Promise<void>;
+  /** 把背景工作交出去（正式環境是 signal.background）；回應先送出，門鈴在背景發 */
+  background: (p: Promise<unknown>) => void;
 }
 
 const BAD: Fail = { status: 400, error: "bad_request", message: "請求內容不正確。" };
@@ -110,16 +113,35 @@ export function rejectResult(d: Record<string, unknown>): Result {
   return { status: x.status, body };
 }
 
+/** 門鈴讀者上限與分批大小：超過上限只通知前面的人（其餘靠 report_get 後援輪詢） */
+export const REPORT_RING_MAX = 200;
+export const REPORT_RING_BATCH = 25;
+
+/** 背景工作：查讀者、排除寫入者自己、最多 200 個、每批 25 個（批內並行、批間序列）敲門鈴。任何例外都吞掉只記 log，不影響回應。 */
 async function ringReaders(deps: ReportDeps, node: string, kind: string): Promise<void> {
   try {
     const { data, error } = await deps.rpc("asn_relay_report_readers", { p_node: node, p_kind: kind });
     if (error) { console.error("report readers", error); return; }
-    const topics = isObj(data) && Array.isArray(data.bell_topics) ? data.bell_topics : [];
+    const readers = isObj(data) && Array.isArray(data.readers) ? data.readers : [];
+    const bells = isObj(data) && Array.isArray(data.bell_topics) ? data.bell_topics : [];
+    if (readers.length !== bells.length) { console.error("report readers: 名單與頻道數量不一致", readers.length, bells.length); return; }
+    const seen = new Set<string>();
+    const topics: string[] = [];
+    for (let i = 0; i < readers.length; i++) {
+      const t = bells[i];
+      // 雙保險：資料庫已排除寫入者，Edge 再排除一次
+      if (readers[i] === node || typeof readers[i] !== "string" || typeof t !== "string" || t.length === 0 || seen.has(t)) continue;
+      seen.add(t);
+      topics.push(t);
+    }
+    if (topics.length > REPORT_RING_MAX) console.error("report readers 超過上限，只通知前面的", topics.length, REPORT_RING_MAX);
+    const list = topics.slice(0, REPORT_RING_MAX);
     const payload = reportBellPayload(kind, node);
-    const uniq = [...new Set(topics.filter((t): t is string => typeof t === "string" && t.length > 0))];
-    await Promise.all(uniq.map(async (t) => {
-      try { await deps.ringReport(t, payload); } catch (e) { console.error("report bell", String(e)); }
-    }));
+    for (let i = 0; i < list.length; i += REPORT_RING_BATCH) {
+      await Promise.all(list.slice(i, i + REPORT_RING_BATCH).map(async (t) => {
+        try { await deps.ring(t, payload); } catch (e) { console.error("report bell", String(e)); }
+      }));
+    }
   } catch (e) {
     console.error("report bell error", String(e));
   }
@@ -143,7 +165,7 @@ export async function handleReport(deps: ReportDeps, me: { id: string }, body: u
     return rejectResult(d);
   }
   const changed = d.changed === true;
-  if (changed) await ringReaders(deps, me.id, req.kind);
+  if (changed) deps.background(ringReaders(deps, me.id, req.kind).catch((e) => console.error("report bell error", String(e))));
   return { status: 200, body: { ok: true, changed } };
 }
 

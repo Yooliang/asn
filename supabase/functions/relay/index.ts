@@ -74,34 +74,19 @@ async function sha256Hex(s: string): Promise<string> {
 // 手機推播（#797）：沒設秘密 FCM_SERVICE_ACCOUNT 就是 null，一律安靜不送（也不影響寄信）。見 _shared/push_ctl.ts
 const fcm = createFcm({ get: (k) => Deno.env.get(k) });
 
-// Doorbell: broadcast carries no mail content.
+// Doorbell: broadcast carries no mail content. payload 預設 {}（既有呼叫端不變）；回報匯流排（#2161）帶 { kind, node }，同樣不含內容。舊客戶端只看 event=bell。
 // Also write the Firebase RTDB bell node b/<hash> = { at } (pointer only, see docs/relay/SIGNAL.md): devices that listen to it
 // pull /updates only when it changes. No-op when IRORI_FIREBASE_DB_URL / IRORI_FIREBASE_SA are not both set; failures only log.
-async function ring(topic: string) {
-  try {
-    const r = await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
-      method: "POST",
-      headers: { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ messages: [{ topic, event: "bell", payload: {}, private: false }] }),
-    });
-    if (!r.ok) console.error("bell failed", r.status, await r.text());
-  } catch (e) {
-    console.error("bell error", String(e));
-  }
-  signal.background(signal.putBell(topic));
-}
-
-// 回報匯流排的門鈴（#2161 2b）：與 ring 同一套頻道與 RTDB 指標，差別只在廣播 payload 帶 { kind, node }（不含內容）。舊客戶端只看 event=bell，不看 payload；失敗只記 log。
-async function ringReport(topic: string, payload: Record<string, unknown>) {
+async function ring(topic: string, payload: Record<string, unknown> = {}) {
   try {
     const r = await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
       method: "POST",
       headers: { apikey: SERVICE_KEY, authorization: `Bearer ${SERVICE_KEY}`, "content-type": "application/json" },
       body: JSON.stringify({ messages: [{ topic, event: "bell", payload, private: false }] }),
     });
-    if (!r.ok) console.error("report bell failed", r.status, await r.text());
+    if (!r.ok) console.error("bell failed", r.status, await r.text());
   } catch (e) {
-    console.error("report bell error", String(e));
+    console.error("bell error", String(e));
   }
   signal.background(signal.putBell(topic));
 }
@@ -644,7 +629,7 @@ async function handle(req: Request): Promise<Response> {
   }
   // 回報匯流排（#2161 2b，見 _shared/report.ts）：節點一律是金鑰所屬的 me.id（body 不收節點）；節點層動作，不需本人簽章；網頁節點禁止（WEB_DENIED_ACTIONS）
   if (action === "report" && req.method === "POST") {
-    const r = await handleReport({ rpc, ringReport }, me, await req.json().catch(() => null));
+    const r = await handleReport({ rpc, ring, background: signal.background }, me, await req.json().catch(() => null));
     return json(r.status, r.body);
   }
   if (action === "report_get" && req.method === "POST") {
