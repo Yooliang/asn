@@ -3948,9 +3948,10 @@ pub fn run() {
     let builder = builder
         .on_window_event(|w, ev| {
             // 手機核對指紋的 QR Code 視窗被關掉（#1863）：交給領取迴圈判斷是不是本人關的（是就回報取消）
-            if w.label() == wins::FP_SHOW_LABEL {
+            if wins::is_fp_show_label(w.label()) {
                 if let tauri::WindowEvent::Destroyed = ev {
-                    fp_show::on_window_closed(&w.app_handle());
+                    wins::fp_show_destroyed(w.label());
+                    fp_show::on_window_closed(&w.app_handle(), w.label());
                 }
             }
             // 關掉名單視窗：設定「縮到系統匣」（預設）就只藏起來，程序與收信照常；設「結束程式」才真的結束

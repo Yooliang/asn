@@ -53,6 +53,31 @@ Deno.test("請求：資料庫拒絕（非本人、太頻繁）就照碼回、不
   assertEquals(boom.rung.length, 0);
 });
 
+Deno.test("請求與結束：門鈴失敗吞掉，照樣回成功與編號", async () => {
+  const mkRingFail = (reply: Record<string, unknown>) => {
+    const m = mk(reply);
+    m.deps.ring = () => Promise.reject(new Error("realtime down"));
+    return m;
+  };
+  const m = mkRingFail({ id: ID, expires_at: "t", bell_topic: TOPIC });
+  assertEquals(await handleFpShowAction(m.deps, phone, "fp_show_request", { node: "wrk9b2" }, "U1"), { status: 200, body: { id: ID, expires_at: "t" } });
+  const e = mkRingFail({ ok: true, status: "ended", bell_topic: TOPIC });
+  assertEquals(await handleFpShowAction(e.deps, phone, "fp_show_end", { id: ID }, "U1"), { status: 200, body: { ok: true, status: "ended" } });
+});
+
+Deno.test("請求：太頻繁時帶回同一人進行中那筆的編號（放在 scope）；沒編號或格式不對就不帶", async () => {
+  const m = mk({ error: "rate_limited", id: ID });
+  const r = await handleFpShowAction(m.deps, phone, "fp_show_request", { node: "wrk9b2" }, "U1");
+  assertEquals(r.status, 429);
+  assertEquals(r.body.error, "rate_limited");
+  assertEquals(r.body.scope, ID);
+  assertEquals(m.rung.length, 0);
+  for (const reply of [{ error: "rate_limited", id: null }, { error: "rate_limited", id: "x" }, { error: "rate_limited" }, { error: "forbidden", id: ID }]) {
+    const b = (await handleFpShowAction(mk(reply).deps, phone, "fp_show_request", { node: "wrk9b2" }, "U1")).body;
+    assert(!("scope" in b), JSON.stringify(reply));
+  }
+});
+
 Deno.test("請求：舊資料庫沒回門鈴頻道（或是 null）不敲也不炸", async () => {
   for (const reply of [{ id: ID, expires_at: "t" }, { id: ID, expires_at: "t", bell_topic: null }]) {
     const m = mk(reply);

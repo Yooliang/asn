@@ -1,7 +1,7 @@
 // #1863 核對指紋時請電腦自動跳出 QR Code：手機與電腦共用的純函式（ui/lib/fp-show.mjs）
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { FP_SHOW_MIN_VERSION, FP_SHOW_RATE_LIMIT_MS, FP_SHOW_TEXT, FP_SHOW_WAIT_MS, FP_SHOW_WINDOW_MS, createFpShowFlow, fpShowPhaseOf, fpShowPrecheck, fpShowRequestError, groupFp16, newFpShowState } from '../ui/lib/fp-show.mjs'
+import { FP_SHOW_MIN_VERSION, FP_SHOW_RATE_LIMIT_MS, FP_SHOW_TEXT, FP_SHOW_WAIT_MS, FP_SHOW_WINDOW_MS, createFpShowFlow, fpShowPhaseOf, fpShowRateLimitedId, fpShowPrecheck, fpShowRequestError, groupFp16, newFpShowState } from '../ui/lib/fp-show.mjs'
 
 const ID = '11111111-1111-4111-8111-111111111111'
 const ID2 = '22222222-2222-4222-8222-222222222222'
@@ -139,6 +139,21 @@ test('rate_limited：顯示剛剛已經通知過，繼續等，下一秒再請�
   c.add(1000); await flow.tick()
   assert.equal(flow.state.id, ID2, '過了限制就拿到編號')
   assert.equal(flow.state.note, '')
+})
+
+test('rate_limited 帶著那一筆的編號：沿用它接著查狀態，不另外開一筆', async () => {
+  const c = clock()
+  const f = fakeApi({ requestErr: () => { throw new Error(`fp_show_request HTTP 429 rate_limited:${ID}`) }, statuses: ['shown'] })
+  const flow = createFpShowFlow({ api: f.api, now: c.now })
+  await flow.start('PC1', online)
+  assert.equal(flow.state.id, ID)
+  assert.equal(flow.state.note, '')
+  c.add(1000); await flow.tick()
+  assert.equal(flow.state.phase, 'shown')
+  assert.deepEqual(f.calls.filter(x => x[0] === 'request').length, 1, '沒有再開新的一筆')
+  assert.deepEqual(f.calls.filter(x => x[0] === 'status'), [['status', ID]])
+  assert.equal(fpShowRateLimitedId(new Error('fp_show_request HTTP 429 rate_limited:../x')), '')
+  assert.equal(fpShowRateLimitedId(new Error('fp_show_request HTTP 429 rate_limited')), '')
 })
 
 test('不管怎麼結束都會呼叫 end：取消、離開、重試、逾時、電腦端取消', async () => {

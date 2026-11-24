@@ -70,8 +70,12 @@ begin
     return jsonb_build_object('error', 'not_found');
   end if;
   -- 同一台電腦 10 秒內不能重複請求（含已被取代、已結案的）
+  -- 同一個人在這台還有一筆進行中的請求：把它的編號一起回（手機接著查那筆，不另外開）；別人的不會回給你
   if exists (select 1 from relay.fp_show_requests where node = p_target and created_at > now() - interval '10 seconds') then
-    return jsonb_build_object('error', 'rate_limited');
+    select r.id into v_id from relay.fp_show_requests r
+      where r.node = p_target and r.requested_by = p_signed_user and r.status in ('pending', 'shown')
+      order by r.created_at desc limit 1;
+    return jsonb_build_object('error', 'rate_limited', 'id', v_id);
   end if;
   -- 每台同時只留一筆：舊的活請求被新的取代
   update relay.fp_show_requests set status = 'superseded', ended_at = now(), detail = '被新的請求取代'

@@ -76,6 +76,8 @@ pub fn timed_out(elapsed_secs: u64) -> bool {
 #[derive(Debug, Default)]
 pub struct Tracker {
     pub open: Option<(String, u64)>,
+    /// 目前開著的那扇視窗的標籤（每扇新視窗一個新標籤）。視窗被關掉的事件帶標籤進來，對不上的（我們自己剛關掉的舊窗）一律不理
+    pub win: Option<String>,
     pub handled: HashSet<String>,
 }
 
@@ -89,8 +91,8 @@ impl Tracker {
 pub trait FpIo {
     fn take(&self) -> impl Future<Output = Result<Value, String>> + Send;
     fn ack(&self, id: &str, status: &'static str) -> impl Future<Output = Result<(), String>> + Send;
-    /// until_secs＝這扇視窗幾秒後要自己關（視窗算倒數用）
-    fn open_window(&self, id: &str, until_secs: u64) -> Result<(), String>;
+    /// until_secs＝這扇視窗幾秒後要自己關（視窗算倒數用）。回傳這扇視窗的標籤（正在關的舊窗不會被拿來用）
+    fn open_window(&self, id: &str, until_secs: u64) -> Result<String, String>;
     fn close_window(&self);
     fn log(&self, line: &str);
 }
@@ -98,20 +100,34 @@ pub trait FpIo {
 /// 開視窗並回報 shown；開不起來或回報失敗就關掉（手機會等到逾時，畫面說沒有回應）
 async fn show<I: FpIo>(io: &I, tr: &mut Tracker, id: String, now: u64) {
     tr.handled.insert(id.clone());
-    if let Err(e) = io.open_window(&id, WINDOW_SECS) {
-        io.log(&format!("指紋 QR Code：開視窗失敗：{e}"));
-        tr.open = None;
-        return;
+    match io.open_window(&id, WINDOW_SECS) {
+        Ok(label) => tr.win = Some(label),
+        Err(e) => {
+            io.log(&format!("指紋 QR Code：開視窗失敗：{e}"));
+            tr.open = None;
+            tr.win = None;
+            return;
+        }
     }
     tr.open = Some((id.clone(), now));
     if let Err(e) = io.ack(&id, "shown").await {
         io.log(&format!("指紋 QR Code：回報已顯示失敗，關掉視窗：{e}"));
         io.close_window();
         tr.open = None;
+        tr.win = None;
+    }
+}
+
+/// 視窗被關掉的事件（label＝被關掉的那扇）：只有對得上目前開著的視窗才當成本人關的；
+/// 我們自己剛關掉的舊窗，事件晚到時新請求已經開了新窗，不能被它取消（#1863 一審）
+pub async fn window_closed<I: FpIo>(io: &I, tr: &mut Tracker, label: &str) {
+    if tr.win.as_deref() == Some(label) {
+        cancel(io, tr, None).await;
     }
 }
 
 fn close<I: FpIo>(io: &I, tr: &mut Tracker, why: &str) {
+    tr.win = None;
     if let Some((id, _)) = tr.open.take() {
         io.log(&format!("指紋 QR Code：關掉視窗（{why}）"));
         io.close_window();
@@ -166,8 +182,8 @@ pub async fn cancel<I: FpIo>(io: &I, tr: &mut Tracker, id: Option<&str>) {
 pub enum UiEvent {
     /// 按了「取消核對」
     Cancel(String),
-    /// 視窗被關掉了（標題列的 X、原生外框的關閉）
-    Closed,
+    /// 視窗被關掉了（標題列的 X、原生外框的關閉）；帶那扇視窗的標籤
+    Closed(String),
 }
 
 #[cfg(feature = "gui")]
@@ -200,7 +216,7 @@ mod live {
             let body = json!({ "id": id, "status": status });
             async move { r.api("fp_show_ack", Some(body)).await.map(|_| ()) }
         }
-        fn open_window(&self, id: &str, until_secs: u64) -> Result<(), String> {
+        fn open_window(&self, id: &str, until_secs: u64) -> Result<String, String> {
             let until_ms = crate::heartbeat::now_ms() + until_secs * 1000;
             crate::wins::open_fp_show(&self.app, id, until_ms)
         }
@@ -244,7 +260,7 @@ mod live {
                     }
                     ev = rx.recv() => match ev {
                         Some(UiEvent::Cancel(id)) => cancel(&io, &mut tr, Some(&id)).await,
-                        Some(UiEvent::Closed) => cancel(&io, &mut tr, None).await,
+                        Some(UiEvent::Closed(label)) => window_closed(&io, &mut tr, &label).await,
                         None => return,
                     },
                 }
@@ -262,9 +278,9 @@ mod live {
     }
 
     /// 視窗被關掉（X 或原生外框）：當成本人取消
-    pub fn on_window_closed(app: &AppHandle) {
+    pub fn on_window_closed(app: &AppHandle, label: &str) {
         if let Some(tx) = app.try_state::<UiTx>() {
-            let _ = tx.0.send(UiEvent::Closed);
+            let _ = tx.0.send(UiEvent::Closed(label.to_string()));
         }
     }
 }
@@ -283,6 +299,8 @@ mod tests {
         take: Mutex<Vec<Result<Value, String>>>,
         ack_fail: bool,
         calls: Mutex<Vec<String>>,
+        /// 目前開著的視窗標籤與已開過幾扇（模擬真的視窗：開著就沿用，關掉後再開是新的一扇、新標籤）
+        win: Mutex<(Option<String>, u32)>,
     }
     impl Fake {
         fn with(takes: Vec<Value>) -> Self {
@@ -306,12 +324,18 @@ mod tests {
             let fail = self.ack_fail;
             async move { if fail { Err("fp_show_ack HTTP 404 not_found".into()) } else { Ok(()) } }
         }
-        fn open_window(&self, id: &str, until: u64) -> Result<(), String> {
+        fn open_window(&self, id: &str, until: u64) -> Result<String, String> {
             self.push(format!("open {id} {until}"));
-            Ok(())
+            let mut w = self.win.lock().unwrap();
+            if w.0.is_none() {
+                w.1 += 1;
+                w.0 = Some(format!("w{}", w.1));
+            }
+            Ok(w.0.clone().unwrap())
         }
         fn close_window(&self) {
             self.push("close".into());
+            self.win.lock().unwrap().0 = None;
         }
         fn log(&self, _: &str) {}
     }
@@ -423,11 +447,34 @@ mod tests {
     }
 
     #[test]
+    fn 舊窗的關閉事件晚到_新請求已開窗_不能被取消() {
+        let io = Fake::with(vec![
+            json!({ "requests": [req(A, "pending")], "closed": [] }),
+            json!({ "requests": [], "closed": [{ "id": A, "status": "ended" }] }),
+            json!({ "requests": [req(B, "pending")], "closed": [] }),
+        ]);
+        let mut tr = Tracker::default();
+        run(step(&io, &mut tr, 1)); // 開 A（視窗 w1）
+        run(step(&io, &mut tr, 2)); // 手機結束 A：我們關 w1
+        run(step(&io, &mut tr, 3)); // B 進來：開新的一扇 w2
+        assert_eq!(tr.open_id(), Some(B));
+        assert_eq!(tr.win.as_deref(), Some("w2"));
+        let n = io.calls().len();
+        run(window_closed(&io, &mut tr, "w1")); // w1 的 Destroyed 現在才到
+        assert_eq!(tr.open_id(), Some(B), "舊窗的關閉事件不能取消新請求");
+        assert_eq!(io.calls().len(), n, "不回報、不關窗");
+        assert!(io.calls().contains(&format!("ack {B} shown")), "新請求照常回報 shown");
+        run(window_closed(&io, &mut tr, "w2")); // 對得上的才算本人關的
+        assert_eq!(tr.open_id(), None);
+        assert_eq!(io.calls().last(), Some(&format!("ack {B} cancelled")));
+    }
+
+    #[test]
     fn 直接關掉視窗_當成取消() {
         let io = Fake::with(vec![json!({ "requests": [req(A, "pending")], "closed": [] })]);
         let mut tr = Tracker::default();
         run(step(&io, &mut tr, 1));
-        run(cancel(&io, &mut tr, None));
+        run(window_closed(&io, &mut tr, "w1"));
         assert_eq!(io.calls().last(), Some(&format!("ack {A} cancelled")));
     }
 }

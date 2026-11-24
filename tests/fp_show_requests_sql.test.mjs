@@ -147,6 +147,22 @@ test('10 秒內同一台不能重複請求；過了 10 秒可以', { skip }, asy
   assert.ok((await request(db)).id)
 })
 
+test('rate_limited 帶回同一人進行中那筆的編號；別人的不會回給你', { skip }, async () => {
+  const db = await boot()
+  const a = await request(db)
+  const again = await request(db)
+  assert.equal(again.error, 'rate_limited')
+  assert.equal(again.id, a.id, '同一人那台還在進行中的那筆')
+  await db.query(`update relay.fp_show_requests set status = 'ended', ended_at = now() where id = $1`, [a.id])
+  assert.equal((await request(db)).id ?? null, null, '已結束的不回')
+  const db2 = await boot()
+  const b = await request(db2)
+  await db2.query(`update relay.fp_show_requests set requested_by = '99999999-9999-4999-8999-999999999999' where id = $1`, [b.id])
+  const other = await request(db2)
+  assert.equal(other.error, 'rate_limited')
+  assert.equal(other.id ?? null, null, '別人的請求編號不能回給你')
+})
+
 test('舊請求被新請求取代：每台同時只留一筆活的', { skip }, async () => {
   const db = await boot()
   const a = await request(db)

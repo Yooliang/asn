@@ -230,21 +230,33 @@ pub fn panel_label(kind: &str) -> Option<String> {
 
 /// 視窗標籤是不是 panel.html 開的視窗（指引、設定、核對指紋的 QR Code）
 pub fn is_panel_label(label: &str) -> bool {
-    label.strip_prefix("panel-").is_some_and(|k| PANEL_KINDS.contains(&k))
+    label.strip_prefix("panel-").is_some_and(|k| PANEL_KINDS.contains(&k)) || is_fp_show_label(label)
 }
+
+/// 核對指紋 QR Code 視窗的標籤：panel-fpshow 或 panel-fpshow-<第幾扇>。每開一扇新的就換一個編號，
+/// 這樣正在關的舊窗不會被新請求拿來用，舊窗晚到的關閉事件也對不上新窗（#1863 一審）
+pub fn is_fp_show_label(label: &str) -> bool {
+    label == FP_SHOW_LABEL || label.strip_prefix("panel-fpshow-").is_some_and(|n| !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()))
+}
+
+/// 目前開著的 QR Code 視窗標籤（關窗時就清掉，之後的新請求一定開新的一扇）
+static FP_SHOW_CUR: Mutex<Option<String>> = Mutex::new(None);
+static FP_SHOW_GEN: AtomicU64 = AtomicU64::new(0);
 
 /// 開（或叫出）手機核對用的 QR Code 視窗（#1863）：已開著就把新的請求編號與到期時間交給它並叫到前面；沒開就置頂開在螢幕中央。
 /// 網址只帶請求編號與到期時間（毫秒），QR 的內容由視窗自己向本機要（device_own_fingerprint_qr）
-pub fn open_fp_show(app: &AppHandle, id: &str, until_ms: u64) -> Result<(), String> {
-    if let Some(win) = app.get_webview_window(FP_SHOW_LABEL) {
-        let _ = app.emit_to(FP_SHOW_LABEL, "asn:fpshow", serde_json::json!({ "id": id, "until": until_ms }));
+pub fn open_fp_show(app: &AppHandle, id: &str, until_ms: u64) -> Result<String, String> {
+    let cur = FP_SHOW_CUR.lock().unwrap().clone();
+    if let Some((label, win)) = cur.and_then(|l| app.get_webview_window(&l).map(|w| (l, w))) {
+        let _ = app.emit_to(label.as_str(), "asn:fpshow", serde_json::json!({ "id": id, "until": until_ms }));
         let _ = win.unminimize();
         let _ = win.show();
         let _ = win.set_focus();
-        return Ok(());
+        return Ok(label);
     }
+    let label = format!("{FP_SHOW_LABEL}-{}", FP_SHOW_GEN.fetch_add(1, Ordering::Relaxed) + 1);
     let native = app.try_state::<Frame>().map(|f| f.0.load(Ordering::Relaxed)).unwrap_or(false);
-    WebviewWindowBuilder::new(app, FP_SHOW_LABEL, WebviewUrl::App(format!("panel.html?kind=fpshow&id={}&until={until_ms}", q(id)).into()))
+    WebviewWindowBuilder::new(app, &label, WebviewUrl::App(format!("panel.html?kind=fpshow&id={}&until={until_ms}", q(id)).into()))
         .title("核對這台電腦")
         .inner_size(480.0, 540.0)
         .min_inner_size(360.0, 460.0)
@@ -256,13 +268,23 @@ pub fn open_fp_show(app: &AppHandle, id: &str, until_ms: u64) -> Result<(), Stri
         .additional_browser_args(BROWSER_ARGS)
         .build()
         .map_err(|e| e.to_string())?;
-    Ok(())
+    *FP_SHOW_CUR.lock().unwrap() = Some(label.clone());
+    Ok(label)
 }
 
-/// 關掉手機核對用的 QR Code 視窗（沒開著就什麼都不做）
+/// 關掉手機核對用的 QR Code 視窗（沒開著就什麼都不做）。先把「目前視窗」清掉，晚一點才銷毀的舊窗之後不會再被拿來用
 pub fn close_fp_show(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window(FP_SHOW_LABEL) {
+    let cur = FP_SHOW_CUR.lock().unwrap().take();
+    if let Some(win) = cur.and_then(|l| app.get_webview_window(&l)) {
         let _ = win.close();
+    }
+}
+
+/// 某扇 QR Code 視窗銷毀了：若它還是「目前視窗」（本人自己關的）就清掉
+pub fn fp_show_destroyed(label: &str) {
+    let mut cur = FP_SHOW_CUR.lock().unwrap();
+    if cur.as_deref() == Some(label) {
+        *cur = None;
     }
 }
 
@@ -903,6 +925,10 @@ mod tests {
     fn 核對指紋視窗_是_panel_視窗但不能變分頁_也不能由畫面叫開() {
         assert_eq!(panel_label("fpshow").as_deref(), Some(FP_SHOW_LABEL));
         assert!(is_panel_label(FP_SHOW_LABEL), "外框切換、截圖都要把它當 panel 視窗");
+        assert!(is_panel_label("panel-fpshow-3") && is_fp_show_label("panel-fpshow-12"), "每扇新窗一個新編號，也是 panel 視窗");
+        for bad in ["panel-fpshow-", "panel-fpshow-x", "panel-fpshow3", "panel-guide-1"] {
+            assert!(!is_fp_show_label(bad), "{bad}");
+        }
         assert!(!DOCKABLE_PANELS.contains(&"fpshow"));
         let src = include_str!("wins.rs").replace("\r\n", "\n");
         let open = src.split("pub async fn open_panel(").nth(1).unwrap().split("\n}\n").next().unwrap();

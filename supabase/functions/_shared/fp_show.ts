@@ -19,14 +19,27 @@ async function call(deps: FpShowDeps, fn: string, args: Record<string, unknown>)
     console.error(fn, error);
     return fail("internal");
   }
-  if (data && typeof data === "object" && !Array.isArray(data) && typeof (data as Json).error === "string") return fail((data as Json).error);
+  if (data && typeof data === "object" && !Array.isArray(data) && typeof (data as Json).error === "string") {
+    const code = (data as Json).error as string;
+    const reply = fail(code);
+    // 太頻繁但同一人那台還有一筆進行中的請求：把那筆的編號放在 scope，手機接著查它的狀態，不另外開一筆
+    const live = (data as Json).id;
+    if (code === "rate_limited" && typeof live === "string" && UUID_RE.test(live)) return { ...reply, body: { ...reply.body, scope: live } };
+    return reply;
+  }
   return { data: data ?? {} };
 }
 const isReply = (x: { data: Json } | Reply): x is Reply => "status" in x;
 
 /** 敲「那台電腦」的門鈴：payload 只有 kind（有 node 舊客戶端會當回報門鈴而不叫醒）。bell_topic 是頻道秘密，不放進回給手機的內容。舊資料庫沒回就不敲 */
 async function ringTarget(deps: FpShowDeps, topic: unknown): Promise<void> {
-  if (typeof topic === "string") await deps.ring(topic, { kind: "fp_show" });
+  if (typeof topic !== "string") return;
+  // 資料已經寫進去了：門鈴失敗不能讓整個請求回 500（手機會一直重送、電腦卻已經跳窗）。吞掉並記 log；電腦視窗開著時本來就每 5 秒自己再領一次
+  try {
+    await deps.ring(topic, { kind: "fp_show" });
+  } catch (e) {
+    console.error("fp_show ring failed", String(e));
+  }
 }
 
 export async function handleFpShowAction(deps: FpShowDeps, me: { id: string }, action: string, params: Json, signedUser: string | null): Promise<Reply> {

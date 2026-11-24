@@ -67,6 +67,12 @@ export function fpShowRequestError(e) {
   return 'error'
 }
 
+/** rate_limited 時後台把「同一人那台還在進行中的那筆」編號接在代碼後面（rate_limited:<編號>）：取出來，沒有或格式不對回空字串 */
+export function fpShowRateLimitedId(e) {
+  const m = /\brate_limited:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/i.exec(String(e?.message ?? e ?? ''))
+  return m ? m[1].toLowerCase() : ''
+}
+
 /** fp_show_status 的 status → 畫面階段：'wait'｜'shown'｜'pc_cancelled'｜'noreply'（結束、被取代、過期都當沒回應） */
 export function fpShowPhaseOf(status) {
   if (status === 'pending') return 'wait'
@@ -96,7 +102,11 @@ export function createFpShowFlow({ state = newFpShowState(), api, now = () => Da
     try { r = await api.request(st.node) } catch (e) {
       if (st.gen !== gen) return
       const k = fpShowRequestError(e)
-      if (k === 'rate_limited') st.note = FP_SHOW_TEXT.rateLimited   // 後台沒給編號：下一秒再請求，10 秒過了就會成功
+      if (k === 'rate_limited') {
+        const live = fpShowRateLimitedId(e)
+        // 後台帶了那筆還在進行中的編號：沿用它接著查狀態，不另外開一筆；沒帶就下一秒再請求，10 秒過了就會成功
+        if (live) { st.id = live; st.note = '' } else st.note = FP_SHOW_TEXT.rateLimited
+      }
       else if (k === 'old') st.phase = 'old'
       else log('[ASN] 請電腦跳出 QR Code 失敗，繼續等', String(e?.message ?? e))
       return
