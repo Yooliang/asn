@@ -800,6 +800,35 @@ test('#2229 單一實例：兩個同時接手同一份殘留，只有一個贏',
   assert.deepEqual([ra.got, rb.got], [true, false])
 })
 
+test('#2229 單一實例：接手殘留時，rename 前 A 已換成新的有效鎖 → B 不能搬走它，B 退出、A 的鎖還在', () => {
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  const a = inst(e, { alive: [4242], cmd: { 4242: true } })
+  const b = { ...a, pid: 5151 }
+  const realRename = b.rename
+  let ra = null
+  // 真的交錯：B 讀完殘留 pid 檔、動手 rename 之前，A 整個接手完成並建好自己的有效鎖
+  b.rename = (x, y) => { if (!ra) ra = acquireInstance(opts, a); return realRename(x, y) }
+  const rb = acquireInstance(opts, b)
+  assert.equal(ra.got, true)
+  assert.equal(rb.got, false)
+  assert.equal(rb.lost, true)
+  assert.equal(e.fsMap.get(PIDF), ra.content, 'A 的鎖要還在原名')
+  assert.equal(e.fsMap.has(`${PIDF}.stale-5151`), false)
+})
+
+test('#2229 單一實例：正常啟動拿到鎖 → 之前 active 的 already-running 告警變 resolved', async () => {
+  const { claimInstance } = await import('../../../tools/release/auto_publish.mjs')
+  const e = env({ files: { [PIDF]: `777\n${T0}` } })
+  claimInstance(opts, inst(e, { alive: [777], cmd: { 777: true } }))
+  assert.equal(alertOf(e).alerts['already-running'].status, 'active')
+  e.fsMap.delete(PIDF)
+  const r = claimInstance(opts, inst(e))
+  assert.equal(r.got, true)
+  const a = alertOf(e).alerts['already-running']
+  assert.equal(a.status, 'resolved')
+  assert.ok(a.resolvedAt)
+})
+
 test('#2229 單一實例：結束時 pid 檔已被別人換掉就不刪', () => {
   const e = env()
   const r = acquireInstance(opts, inst(e))
