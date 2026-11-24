@@ -251,3 +251,54 @@ test('升級後再降級：新版 patch 過、帶 version:1 的 asn-me.json，�
   assert.deepEqual(store.data.newFeature, { on: true, list: [1, 2] })
   assert.equal(store.data.version, 1)
 })
+
+// ---- 頂層 undefined → null（刪欄）----
+test('送出前頂層的 undefined 轉成 null（後端刪欄）；巢狀的 undefined 不處理（照 JSON 原本行為拿掉）', async () => {
+  const s = fake()
+  await patchWithFallback(s, { a: undefined, b: 1, c: { d: undefined, e: 2 } }, {}, clock())
+  assert.deepEqual(Object.keys(s.calls[0][1]).sort(), ['a', 'b', 'c'])
+  assert.equal(s.calls[0][1].a, null)
+  assert.deepEqual(JSON.parse(JSON.stringify(s.calls[0][1].c)), { e: 2 })
+})
+
+test('欠著的 null：沒有新值就照樣刪欄；新呼叫給了值就蓋掉', async () => {
+  for (const [second, expect] of [[{ b: 2 }, { b: 2 }], [{ a: 'v', b: 2 }, { a: 'v', b: 2 }]]) {
+    const st = memStore({ a: 'old' })
+    const realPatch = st.patch
+    let first = true
+    st.patch = async f => { if (first) { first = false; throw asErr(UNREADABLE) } return realPatch(f) }
+    let release
+    const gate = new Promise(r => { release = r })
+    const p1 = patchWithFallback(st, { a: undefined }, {}, { wait: () => gate, warn: () => {} })
+    await new Promise(r => setTimeout(r, 0))
+    await patchWithFallback(st, second, {}, clock())
+    release()
+    await p1
+    assert.deepEqual(st.data, expect)
+  }
+})
+
+test('欠著的 null 自己等完重試：照樣送 null（刪欄）', async () => {
+  const st = memStore({ a: 'old', keep: 1 })
+  const realPatch = st.patch
+  let first = true
+  st.patch = async f => { if (first) { first = false; throw asErr(UNREADABLE) } return realPatch(f) }
+  await patchWithFallback(st, { a: undefined }, {}, clock())
+  assert.deepEqual(st.data, { keep: 1 })
+})
+
+test('merge 退回整份存：undefined／null 欄位不會寫成 null，而是整份裡沒有這一欄', async () => {
+  const s = fake([MERGE])
+  await patchWithFallback(s, { a: undefined, b: 1 }, undefined, clock())
+  assert.deepEqual(s.calls[1], ['save', { b: 1 }])
+  const st = fake([UNREADABLE, MERGE])
+  let release
+  const gate = new Promise(r => { release = r })
+  const p1 = patchWithFallback(st, { gone: undefined }, {}, { wait: () => gate, warn: () => {} })
+  await new Promise(r => setTimeout(r, 0))
+  await patchWithFallback(st, { b: 2 }, { old: 0, gone: 'stale', b: 2 }, clock())
+  release()
+  await p1
+  const saved = st.calls.find(x => x[0] === 'save')[1]
+  assert.deepEqual(saved, { old: 0, b: 2 }, '舊的欠著 null 在整份存裡也要刪掉 gone')
+})

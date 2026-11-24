@@ -20,8 +20,8 @@ const runSave = (file, patch = {}, store = memStore(file)) => {
     me: { nick: '本機', psm: '', status: 'online', ...patch.me }, devPrefs: {},
     chatPins: ref([]), showNowPlaying: ref(true), notifyPrefs: ref({}), skin: ref(patch.skin ?? 'aero'), frame: ref('x'), closeTo: ref('x'),
     autoAddClaude: ref(false), autoCheck: ref(true), ghRefs: ref([]),
-    dims: { tabDim: 'a', groupDim: 'b' }, ui: { mode: 'm', dpMode: 'd', bubble: 1, toolbar: 1, collapsed: [], pinnedChat: '' },
-    sizes: { split: 1, merged: 2, guide: 3, setting: 4 }, sess: { ready: false, saved: { tabs: [] } }, currentSession: () => ({}),
+    dims: { tabDim: 'a', groupDim: 'b' }, ui: { mode: 'm', dpMode: 'd', bubble: 1, toolbar: 1, collapsed: [], pinnedChat: '', ...patch.ui },
+    sizes: { split: 1, merged: 2, guide: 3, setting: 4 }, sess: { ready: false, saved: { tabs: [] }, ...patch.sess }, currentSession: () => ({}),
   }
   const names = Object.keys(scope)
   const fn = new Function(...names, `return ${m[1]}`)(...names.map(k => scope[k]))
@@ -123,4 +123,23 @@ test('#2162⑦ saveMe 碰到「暫時讀不到」：等 3 秒再 patch 一次，
   assert.equal(store.saves, 0, '不改用整份存')
   assert.equal(store.data.skin, 'line')
   assert.equal(store.data.futureField, 1)
+})
+
+test('#2162⑦ 取消置頂：pinnedChat 變成 undefined，送出的是 null、檔案裡的 pinnedChat 被刪掉，重新讀回來是沒有（JSON 會拿掉 undefined，不轉的話舊值會留在檔案裡、重開置頂又回來）', async () => {
+  const file = { pinnedChat: 'peer-a', skin: 'modern', futureField: 1 }
+  const store = runSave(file, { ui: { pinnedChat: undefined } })
+  await settle()
+  assert.equal(store.patches.length, 1)
+  assert.equal(store.patches[0].pinnedChat, null, '要明確送 null（後端刪欄），不能整欄沒送')
+  assert.equal('pinnedChat' in store.patches[0], true)
+  const back = await store.load()
+  assert.equal('pinnedChat' in back, false, '重新讀回來沒有 pinnedChat')
+  assert.equal(back.futureField, 1, '別的欄位照舊')
+})
+
+test('#2162⑦ session 在 sess.ready 為假且 sess.saved 是 undefined 時也一樣：欄位被刪、不是留著舊值', async () => {
+  const store = runSave({ session: { tabs: [1] } }, { sess: { saved: undefined } })
+  await settle()
+  assert.equal(store.patches[0].session, null)
+  assert.equal('session' in (await store.load()), false)
 })

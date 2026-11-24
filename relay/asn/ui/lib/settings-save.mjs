@@ -16,6 +16,16 @@ const sleepMs = ms => new Promise(r => setTimeout(r, ms))
 // 每個存檔物件各記一份「欠著的欄位」：碰到 unreadable、正在等 3 秒的呼叫，把它還沒存進去的欄位登記在這裡（欄位名 → { 值, 呼叫編號 }）。
 // 之後進來的新呼叫會把欠著的欄位併進自己這次要送的欄位（同一欄以新值為準），送出去就等於幫舊呼叫存了；舊呼叫等完發現欄位已被接手（或被新值蓋掉）就不再重試。
 // 這樣連續 patch 不同欄位（先 { done }、再 { pendingDeviceName }）時，舊的欄位不會因為「有更新的呼叫」而丟掉；同一欄的舊值也不會蓋掉新值。
+// 頂層欄位值是 undefined：JSON.stringify 會把它拿掉，整份存時這一欄會跟著從檔案消失；改成 patch 之後它只是「沒送」，舊值會留在檔案裡
+// （例如取消置頂後 pinnedChat 變成 undefined，重開置頂又回來）。所以送出前把頂層的 undefined 轉成 null，後端收到 null 就刪掉那一欄。
+// 只處理頂層：後端的合併是頂層逐欄覆蓋，巢狀物件整個換掉，裡面的 undefined 跟以前整份存時一樣由 JSON 拿掉，結果相同，不需要特別處理。
+const undefinedToNull = f => Object.fromEntries(Object.entries(f ?? {}).map(([k, v]) => [k, v === undefined ? null : v]))
+// 整份存的內容：base 再蓋上 over；over 裡值是 null 的欄位代表刪欄，整份存時直接拿掉（寫進去會變成值 null）
+const wholeWith = (base, over) => {
+  const out = { ...(base ?? {}), ...over }
+  for (const [k, v] of Object.entries(over)) if (v === null) delete out[k]
+  return out
+}
 const state = new WeakMap()
 const stateOf = store => { let st = state.get(store); if (!st) { st = { n: 0, owed: new Map() }; state.set(store, st) } return st }
 
@@ -31,6 +41,7 @@ const stateOf = store => { let st = state.get(store); if (!st) { st = { n: 0, ow
  * opts：{ wait, warn }，測試注入。
  */
 export async function patchWithFallback(store, fields, full, { wait = sleepMs, warn = console.warn } = {}) {
+  fields = undefinedToNull(fields)
   const st = stateOf(store)
   const id = ++st.n
   // 接手別的呼叫欠著的欄位（新值優先：這次有送的欄位，舊值直接作廢）
@@ -47,7 +58,7 @@ export async function patchWithFallback(store, fields, full, { wait = sleepMs, w
     if (hasCode(e, CODE_MERGE)) {
       try {
         const whole = typeof full === 'function' ? full() : full
-        await store.save(whole ? { ...whole, ...carried } : send)
+        await store.save(wholeWith(whole ?? null, whole ? carried : send))
         return true
       } catch (e2) { giveBack(); throw e2 }
     }
