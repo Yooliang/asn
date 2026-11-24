@@ -30,6 +30,13 @@ Deno.test("login：只收視窗名，內容與工具名都丟掉", () => {
   assertEquals(parseWaitingNotice({ window: "", kind: "login" }), null);
 });
 
+Deno.test("stuck_prompt（#2256）：收畫面片段（換行留著、控制字元換空白、限 600 字），工具名丟掉", () => {
+  assertEquals(parseWaitingNotice({ window: "asn雯", kind: "stuck_prompt", detail: "Do you want to proceed?\n ❯ 1. Yes\u001b[0m\n   2. No", tool: "Bash" }), { window: "asn雯", kind: "stuck_prompt", detail: "Do you want to proceed?\n ❯ 1. Yes [0m\n   2. No", tool: null });
+  assertEquals(parseWaitingNotice({ window: "asn雯", kind: "stuck_prompt" }), { window: "asn雯", kind: "stuck_prompt", detail: null, tool: null });
+  assertEquals([...(parseWaitingNotice({ window: "asn雯", kind: "stuck_prompt", detail: "甲".repeat(700) })?.detail ?? "")].length, 600);
+  assertEquals(parseWaitingNotice({ window: "asn雯", kind: "stuck_prompt", detail: 1 }), null);
+});
+
 Deno.test("forward_stuck：只收固定的原因代號與 1～2 位數字的次數，其餘丟掉", () => {
   assertEquals(parseWaitingNotice({ window: "T-收發室", kind: "forward_stuck", detail: "frame", tool: "3" }), { window: "T-收發室", kind: "forward_stuck", detail: "frame", tool: "3" });
   assertEquals(parseWaitingNotice({ window: "T-收發室", kind: "forward_stuck_manual", detail: "wrong_to", tool: "3" })?.kind, "forward_stuck_manual");
