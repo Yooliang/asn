@@ -3274,6 +3274,7 @@ pub fn run() {
     // 資料資料夾：Windows 是 %APPDATA%\tw.yooliang.asn（舊識別資料夾的內容首次啟動時複製過來，見 datadir.rs）
     let data_dir = crate::envc::get_os("ASN_DATA").map(PathBuf::from).unwrap_or_else(|| datadir::startup(&work_dir, shot.is_some()));
     settings::init(settings::Roots { data: data_dir.clone(), home: identity::relay_home(), work: (!work_dir.as_os_str().is_empty()).then(|| work_dir.clone()) });
+    settings::atomic::sweep_stale_in_background([Some(data_dir.clone()), Some(identity::relay_home()), (!work_dir.as_os_str().is_empty()).then(|| work_dir.clone())].into_iter().flatten().collect()); // #2171 清崩潰殘留的暫存檔（背景）
     // 新裝電腦的預設值（#1617）：要在任何東西寫進 data_dir／work_dir 之前判斷（之後它們就不是空的了）。
     // 截圖模式與 ASN_DATA 覆蓋（開發、測試用，不是真的安裝）不跑；沒有節點時 work_dir 是空路徑，當作沒有
     #[cfg(all(desktop, feature = "gui"))]

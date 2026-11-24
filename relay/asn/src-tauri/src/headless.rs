@@ -172,6 +172,7 @@ fn run(o: RunOpts) -> i32 {
         say(&format!("asn-bridge：建不了工作資料夾：{e}"));
         return 2;
     }
+    crate::settings::atomic::sweep_stale_in_background(vec![work_dir.clone(), id.relay_home.clone()]); // #2171 清崩潰殘留的暫存檔（背景）
     let window = crate::default_window_name(&id.node);
     let relay = Arc::new(crate::relay::Relay::new(id.base_url.clone(), id.key.clone(), id.node.clone(), window));
     relay.set_owner_dir(work_dir.clone());
