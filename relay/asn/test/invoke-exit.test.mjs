@@ -370,3 +370,36 @@ test('⑭：account-roster 不再有 invoke( 字樣，待搬清單為空，指�
   assert.ok(src(path.join(UI, 'lib/claude-accounts.mjs')).includes('api.roster()'))
   assert.ok(src(path.join(UI, 'm.js')).includes('mobileAccountApi.roster()'))
 })
+
+// ---- #2162 ⑦：後端設定層的錯誤代號在出口統一拆開 ----
+test('invoke 出口：設定層錯誤的代號拆到 e.code，e.message 只剩白話句；log 記完整原文（含代號）', async () => {
+  const raw = '[settings:write] 設定檔寫入失敗，這次沒有存，稍後再試'
+  const { invoke } = await load(async () => { throw raw })
+  const cap = capture()
+  try {
+    await assert.rejects(invoke('settings_patch', { name: 'me', patch: {} }), e => e instanceof Error && e.message === '設定檔寫入失敗，這次沒有存，稍後再試' && !e.message.includes('[settings:') && e.code === 'settings:write')
+  } finally { cap.restore() }
+  assert.equal(cap.lines.length, 1)
+  assert.equal(cap.lines[0][1], `invoke 失敗：settings_patch ${raw}`, 'log 保留代號')
+})
+
+test('invoke 出口：Error 物件也一樣拆；代號不在開頭、或不是 settings 的不動；沒有代號的不帶 code', async () => {
+  const cases = [
+    [new Error('[settings:merge] 無法合併'), '無法合併', 'settings:merge'],
+    ['  [settings:too_big] 存檔太大', '存檔太大', 'settings:too_big'],
+    ['前面有字 [settings:write] 不拆', '前面有字 [settings:write] 不拆', undefined],
+    ['[other:x] 別人的代號', '[other:x] 別人的代號', undefined],
+    ['一般錯誤', '一般錯誤', undefined],
+  ]
+  for (const [thrown, message, code] of cases) {
+    const { invoke } = await load(async () => { throw thrown })
+    const cap = capture()
+    try { await assert.rejects(invoke('x'), e => e.message === message && e.code === code) } finally { cap.restore() }
+  }
+})
+
+test('守門：除了 tauri.mjs（拆代號）和 settings-save.mjs（說明），ui/ 不准有程式出現 [settings: 字樣——判斷一律用 e.code，不繞過出口去比對文字', () => {
+  const all = walk(UI).filter(f => /\.(m?js|html)$/.test(f)).filter(f => !['lib/tauri.mjs', 'lib/settings-save.mjs'].includes(rel(f)))
+  const bad = all.filter(f => src(f).includes('[settings:')).map(rel)
+  assert.deepEqual(bad, [], `這些檔案自己比對設定層的代號字樣：${bad.join(', ')}（改用 e.code）`)
+})

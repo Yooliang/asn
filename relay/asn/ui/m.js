@@ -3,6 +3,7 @@
 // 打開 App 才收信：前景時照電腦版的節奏輪詢，加上門鈴一響就拉；回到前景時立刻拉一次（推播留給第二期）。
 import { AsnCore } from './lib/core.mjs'
 import { plainMessage } from './lib/plain-errors.mjs'
+import { patchWithFallback } from './lib/settings-save.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { LineIcon, itemIcon, isDangerItem, tabIcon } from './lib/line-icons.mjs'
 import { FpMark, phoneFpMark } from './lib/fp-mark.mjs'
@@ -256,7 +257,7 @@ if (screen.value === 'main') {
   lastChat.value = normalizeLastChat(saved.lastChat)
   // 重開 App 回到上次的大分頁（夥伴／對話／設定／通知，存的是分頁鍵）；上次正在看某一則對話就直接回到那一則
 savedTab = restoreMobileTab(saved.navTab)
-watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat], () => { const { nick, ...rest } = me; void meStore.save({ ...saved, ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? fourthSt.fourth?.from || HOME_TAB : nav.tab, navChat: nav.tab === 'chats' && !!nav.chat }) }, { deep: true })
+watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat], () => { const { nick, ...rest } = me; const f = { ...deviceFieldsToSave(devPrefs), me: rest, mobilePrefs: { ...prefs }, ownerName: ownerName.value, lastChat: lastChat.value, navTab: nav.tab === PAGE_TAB ? fourthSt.fourth?.from || HOME_TAB : nav.tab, navChat: nav.tab === 'chats' && !!nav.chat }; void patchWithFallback(meStore, f, () => ({ ...saved, ...f })) }, { deep: true })
   watch(() => [me.status, me.psm], () => { void mobileStateApi.presence(me.status, me.psm ?? '').catch(() => { /* 出口的 invoke 已記一行並去重，這裡不再多記，避免洗記錄 */ }) }, { immediate: true })
   // #1281：進前景／進背景立刻告知 Rust（在線回報帶 foreground，後台推播只看前景）。外殼在 onStart／onStop 呼叫 window.__asnFgEvent，
   // 再用 visibilitychange 補強；啟動時也告知一次目前狀態（推播喚醒時 Rust 預設在背景）。

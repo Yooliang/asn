@@ -5,13 +5,19 @@
 export const KNOWN_PEER_FAILED_TEXT = '操作沒有成功，請稍後再試。'
 
 /**
+ * 後端設定層的錯誤開頭有固定代號，invoke 出口（ui/lib/tauri.mjs）已把它拆到 err.code、message 只剩白話句，所以正常情況這裡用不到；
+ * 留著當保險：萬一有字串沒經過出口，給人看的文字也不會冒出代號。log 保留原文。沒有代號的字串原樣回傳
+ */
+export const stripCode = s => String(s ?? '').replace(/^\s*\[[a-z]+:[a-z_]+\]\s*/, '')
+
+/**
  * 預設：沒有對照時，畫面顯示的就是錯誤原文。
  * Tauri 的 Err(String) 若沒經過 lib/tauri.mjs 會以「字串」拋出（e.message 是 undefined），所以字串、Error、
  * 帶 message 的物件都取得出文字；取不到（undefined、null、空字串、沒有 message 的物件）就回通用白話，絕不回空字串。
  */
 export const plainMessage = (e, fallback) => {
   const raw = typeof e === 'string' ? e : e?.message
-  const s = typeof raw === 'string' ? raw.trim() : ''
+  const s = typeof raw === 'string' ? stripCode(raw).trim() : ''
   return s || (typeof fallback === 'string' && fallback.trim()) || KNOWN_PEER_FAILED_TEXT
 }
 
@@ -19,7 +25,7 @@ export const plainMessage = (e, fallback) => {
 export const agentSetupErrorText = e => (typeof e === 'string' ? e : e?.message || String(e))
 
 /** 引導頁「完成」失敗：字串或 Error 都原文顯示（以前 onboard.js 自己的 String(e?.message ?? e)） */
-export const onboardErrorText = e => String(e?.message ?? e)
+export const onboardErrorText = e => stripCode(String(e?.message ?? e))
 
 /** 本機重新登入失敗：字串或 Error 都原文顯示（以前 relogin-flow.mjs 自己的 errText） */
 export const reloginErrorText = e => (typeof e === 'string' ? e : e?.message || String(e))

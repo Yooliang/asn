@@ -119,7 +119,7 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
       if (!check) return { ok: true, why: '' };
       if (!note) return { ok: false, why: '連不上後台時，引導畫面沒有說「連上後會自動套用」，或卡在錯誤上：' + (document.querySelector('.login-err')?.textContent ?? '') };
       if (!note.textContent.includes('連上後會自動套用')) return { ok: false, why: '說明寫的是：' + note.textContent };
-      const saved = (globalThis.__smokeCalls || []).filter(c => c[0] === 'store_save' && c[1]?.name === 'onboard').some(c => String(c[1].text).includes('pendingDeviceName'));
+      const saved = (globalThis.__smokeCalls || []).filter(c => c[1]?.name === 'onboard').some(c => (c[0] === 'settings_patch' && typeof c[1].patch?.pendingDeviceName === 'string') || (c[0] === 'store_save' && String(c[1].text).includes('pendingDeviceName')));
       if (!saved) return { ok: false, why: '名字沒有先存在本機' };
       return { ok: true, why: '' };
     }

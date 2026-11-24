@@ -220,7 +220,7 @@ test('#1803 名字被規則擋下不能靜默：後台已改、本機寄信名�
 
 test('#1803 首次引導連不上或沒簽章時不卡住：名字先存本機、說「連上後會自動套用」，之後補送；名字不合規則照舊擋', async () => {
   const { setDeviceNameOnboard, syncPendingDeviceName, PENDING_NOTE, PENDING_KEY } = await import('../ui/lib/device-rename.mjs')
-  const mkStore = init => { let v = init; return { load: async () => v, save: async x => { v = x }, get: () => v } }
+  const mkStore = init => { let v = init; return { load: async () => v, save: async x => { v = x }, patch: async f => { const d = { ...(v ?? {}) }; for (const [k, x] of Object.entries(f)) { if (x === null) delete d[k]; else d[k] = x } v = d }, get: () => v } }
   // 離線：存本機、回 deferred
   const st = mkStore({ other: 1 })
   const off = await setDeviceNameOnboard(async () => { throw '改名沒成功，請稍後再試' }, st, { node: 'P', name: ' 測試手機 ' })
@@ -256,7 +256,7 @@ test('#1803 首次引導連不上或沒簽章時不卡住：名字先存本機�
 
 test('#1839 首次引導存的待送名字，不能蓋掉之後在設備頁改的新名字（兩道防線）', async () => {
   const { setDeviceNameOnboard, syncPendingDeviceName, renameDeviceFromPage, PENDING_KEY, PENDING_BASE_KEY } = await import('../ui/lib/device-rename.mjs')
-  const mkStore = init => { let v = init; return { load: async () => v, save: async x => { v = x }, get: () => v } }
+  const mkStore = init => { let v = init; return { load: async () => v, save: async x => { v = x }, patch: async f => { const d = { ...(v ?? {}) }; for (const [k, x] of Object.entries(f)) { if (x === null) delete d[k]; else d[k] = x } v = d }, get: () => v } }
   const mk = () => ({ info: { window_name: '舊預設名', old_names: [] }, me: { nick: '' }, core: { setWindowName() {}, nodeNames: {} } })
   const offline = async () => { throw '改名沒成功，請稍後再試' }
   // 第一道：引導離線存待送 → 設備頁改名成功 → 待送被清掉 → 補送什麼都不送
