@@ -548,8 +548,19 @@ fn modified_ms(path: &Path) -> Option<i64> {
 }
 
 // ---------- MiniMax key：Windows 憑證管理員 ----------
+/// 憑證管理員裡正式項目的名稱前綴
+#[cfg_attr(not(windows), allow(dead_code))]
+const CRED_PREFIX: &str = "ASN/quota-minimax/";
+/// 測試版一律用這個前綴（永遠不會等於正式前綴）；cred 層在測試版也只認這個前綴，其餘直接 panic
+#[cfg(test)]
+const CRED_TEST_PREFIX: &str = "ASN-TEST/quota-minimax/";
+#[cfg(not(test))]
 fn cred_target(email: &str) -> String {
-    format!("ASN/quota-minimax/{email}")
+    format!("{CRED_PREFIX}{email}")
+}
+#[cfg(test)]
+fn cred_target(email: &str) -> String {
+    format!("{CRED_TEST_PREFIX}{email}")
 }
 
 #[cfg(windows)]
@@ -561,7 +572,32 @@ pub mod cred {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
+    /// 測試版的假後端：記憶體裡每個執行緒各一份，測試完全不碰真的憑證管理員
+    /// （#2200：憑證管理員是整台機器共用，多行程並行時會弄丟項目，而且開發機上放著真的金鑰）
+    #[cfg(test)]
+    pub(super) mod fake {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+        thread_local! {
+            pub static STORE: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
+        }
+        pub fn guard(target: &str) {
+            assert!(target.starts_with("ASN-TEST/"), "測試碰到非測試前綴的憑證名稱：{target}");
+        }
+    }
+
     pub fn read(target: &str) -> Option<String> {
+        #[cfg(test)]
+        {
+            fake::guard(target);
+            return fake::STORE.with(|m| m.borrow().get(target).cloned()).and_then(|b| String::from_utf8(b).ok()).filter(|s| !s.is_empty());
+        }
+        #[cfg(not(test))]
+        read_real(target)
+    }
+
+    #[cfg(not(test))]
+    fn read_real(target: &str) -> Option<String> {
         let name = wide(target);
         let mut p: *mut CREDENTIALW = std::ptr::null_mut();
         // SAFETY: name 以 0 結尾且活到呼叫結束；p 成功時由系統配置，下面讀完就 CredFree。
@@ -578,6 +614,18 @@ pub mod cred {
     }
 
     pub fn write(target: &str, secret: &str) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            fake::guard(target);
+            fake::STORE.with(|m| m.borrow_mut().insert(target.to_string(), secret.as_bytes().to_vec()));
+            return Ok(());
+        }
+        #[cfg(not(test))]
+        write_real(target, secret)
+    }
+
+    #[cfg(not(test))]
+    fn write_real(target: &str, secret: &str) -> Result<(), String> {
         let mut name = wide(target);
         let mut blob = secret.as_bytes().to_vec();
         let c = CREDENTIALW {
@@ -602,6 +650,18 @@ pub mod cred {
     }
 
     pub fn delete(target: &str) {
+        #[cfg(test)]
+        {
+            fake::guard(target);
+            fake::STORE.with(|m| m.borrow_mut().remove(target));
+            return;
+        }
+        #[cfg(not(test))]
+        delete_real(target)
+    }
+
+    #[cfg(not(test))]
+    fn delete_real(target: &str) {
         let name = wide(target);
         // SAFETY: name 以 0 結尾且活到呼叫結束；沒有這筆時只是回傳失敗。
         unsafe { CredDeleteW(name.as_ptr(), CRED_TYPE_GENERIC, 0) };

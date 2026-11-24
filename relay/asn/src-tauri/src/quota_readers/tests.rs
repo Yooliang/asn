@@ -280,7 +280,7 @@ fn source_never_touches_claude_home() {
 #[cfg(windows)]
 #[test]
 fn cred_round_trip() {
-    let target = format!("ASN/quota-minimax-test/{}", std::process::id());
+    let target = format!("ASN-TEST/quota-minimax-test/{}", std::process::id());
     assert_eq!(cred::read(&target), None);
     cred::write(&target, "").unwrap();
     assert_eq!(cred::read(&target), None, "空的憑證當成沒有");
@@ -501,4 +501,27 @@ fn agy_輪詢沒有可信的帳號來源_一律不查_不記到任何帳號() {
     assert_eq!(agy_poll_account(h.path()), None);
     let v = view_with(h.path(), true, |_| false);
     assert!(v.get("agy_account").is_none(), "設定頁資料不再帶 agy 的帳號");
+}
+
+#[cfg(windows)]
+#[test]
+fn tests_never_reach_real_credential_store() {
+    // 正式前綴與測試前綴不同，測試版的目標名稱一定是測試前綴
+    assert_ne!(CRED_PREFIX, CRED_TEST_PREFIX);
+    assert!(!CRED_TEST_PREFIX.starts_with("ASN/") && CRED_TEST_PREFIX.starts_with("ASN-TEST/"));
+    assert!(cred_target("a@x.test").starts_with(CRED_TEST_PREFIX));
+    // 走正式的寫入、刪除路徑，確認實際落在假後端、名稱是測試前綴
+    let d = tempfile::tempdir().unwrap();
+    add_minimax(d.path(), "guard@x.test", "test-value").unwrap();
+    let keys: Vec<String> = cred::fake::STORE.with(|m| m.borrow().keys().cloned().collect());
+    assert_eq!(keys, vec![format!("{CRED_TEST_PREFIX}guard@x.test")]);
+    remove_minimax(d.path(), "guard@x.test").unwrap();
+    assert!(cred::fake::STORE.with(|m| m.borrow().is_empty()));
+}
+
+#[cfg(windows)]
+#[test]
+#[should_panic(expected = "非測試前綴")]
+fn cred_layer_panics_on_real_prefix_in_tests() {
+    let _ = cred::read(&format!("{CRED_PREFIX}someone@x.test"));
 }
