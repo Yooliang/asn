@@ -8,7 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { getAccessToken, loadServiceAccount, makeJwt, makeRequester, publishAab, releaseNotes } from '../scripts/play-upload.mjs'
+import { DEFAULT_TRACKS, getAccessToken, loadServiceAccount, makeJwt, makeRequester, publishAab, releaseNotes } from '../scripts/play-upload.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } })
@@ -68,14 +68,16 @@ test('完整流程：順序、參數、AAB 內容、zh-TW 更新說明、不刪�
       'POST /androidpublisher/v3/applications/tw.yooliang.asn/edits',
       'POST /upload/androidpublisher/v3/applications/tw.yooliang.asn/edits/E1/bundles',
       'PUT /androidpublisher/v3/applications/tw.yooliang.asn/edits/E1/tracks/internal',
+      'PUT /androidpublisher/v3/applications/tw.yooliang.asn/edits/E1/tracks/alpha',
       'POST /androidpublisher/v3/applications/tw.yooliang.asn/edits/E1:commit',
     ])
-    const [tok, , up, tr, cm] = f.calls
+    const [tok, , up, tr, tr2, cm] = f.calls
     assert.match(tok.body.toString(), /grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=[\w-]+\.[\w-]+\.[\w-]+/)
     assert.equal(up.url.split('?')[1], 'uploadType=media')
     assert.equal(up.headers.authorization, 'Bearer tok123')
     assert.deepEqual(up.body, fs.readFileSync(aab))
     assert.deepEqual(JSON.parse(tr.body), { track: 'internal', releases: [{ name: '9.9.9', versionCodes: ['77'], status: 'completed', releaseNotes: [{ language: 'zh-TW', text: '- 新功能' }] }] })
+    assert.deepEqual(JSON.parse(tr2.body), { track: 'alpha', releases: [{ name: '9.9.9', versionCodes: ['77'], status: 'completed', releaseNotes: [{ language: 'zh-TW', text: '- 新功能' }] }] })
     assert.equal(cm.headers.authorization, 'Bearer tok123')
     assert.ok(!f.calls.some(c => c.method === 'DELETE'))
     assert.ok(!logs.join('\n').includes(keyBody))
@@ -87,7 +89,7 @@ for (const [name, failAt] of [['上傳失敗', '/bundles'], ['設定軌道失敗
     const f = await fake(c => c.url.includes(failAt) ? [403, { error: { code: 403, message: `秘密訊息 ${keyBody}`, status: 'PERMISSION_DENIED', errors: [{ reason: 'forbidden' }] } }] : happy(c))
     try {
       await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: req }), e => {
-        assert.match(e.message, /HTTP 403，forbidden/)
+        assert.match(e.message, failAt === '/tracks/' ? /發布權限/ : /HTTP 403，forbidden/)
         assert.ok(!e.message.includes('秘密訊息') && !e.message.includes(keyBody))
         return true
       })
@@ -98,6 +100,77 @@ for (const [name, failAt] of [['上傳失敗', '/bundles'], ['設定軌道失敗
     } finally { await f.close() }
   })
 }
+
+const count = (calls, re) => calls.filter(c => re.test(`${c.method} ${c.url}`)).length
+
+test('兩條軌道：同一個編輯、AAB 只傳一次、兩條都設同一個 versionCode、只提交一次', async () => {
+  assert.deepEqual(DEFAULT_TRACKS, ['internal', 'alpha'])
+  const f = await fake(happy)
+  try {
+    const r = await publishAab({ aabFile: aab, sa, notes: 'n', version: '1.0', apiBase: f.base, tokenUri: `${f.base}/token`, request: req })
+    assert.deepEqual(r.tracks, ['internal', 'alpha'])
+    assert.equal(count(f.calls, /^POST \/androidpublisher\/v3\/applications\/[^/]+\/edits$/), 1, '只建一個編輯')
+    assert.equal(count(f.calls, /^POST .*\/upload\/.*\/bundles/), 1, 'AAB 只傳一次')
+    assert.equal(count(f.calls, /:commit$/), 1, '只提交一次')
+    const puts = f.calls.filter(c => c.method === 'PUT')
+    assert.deepEqual(puts.map(c => c.url.split('/').pop()), ['internal', 'alpha'])
+    for (const p of puts) {
+      assert.ok(p.url.includes('/edits/E1/'), '同一個編輯')
+      assert.deepEqual(JSON.parse(p.body).releases[0].versionCodes, ['77'])
+    }
+    assert.ok(f.calls.findIndex(c => c.url.endsWith(':commit')) > f.calls.findLastIndex(c => c.method === 'PUT'), '兩條都設好才提交')
+  } finally { await f.close() }
+})
+
+test('任一條軌道失敗都不提交、清掉編輯：第二條（alpha）失敗，錯誤點名封閉測試', async () => {
+  const f = await fake(c => c.url.endsWith('/tracks/alpha') ? [403, { error: { code: 403, message: `秘密 ${keyBody}`, status: 'PERMISSION_DENIED', errors: [{ reason: 'forbidden' }] } }] : happy(c))
+  const logs = []
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: req, log: m => logs.push(m) }), e => {
+      assert.match(e.message, /封閉測試/)
+      assert.match(e.message, /Play Console/)
+      assert.match(e.message, /使用者和權限/)
+      assert.match(e.message, /沒有發布任何軌道/)
+      assert.ok(!/HTTP|403|forbidden|PERMISSION/.test(e.message), '訊息沒有英文錯誤碼')
+      assert.ok(!e.message.includes(keyBody) && !e.message.includes('秘密'))
+      return true
+    })
+    assert.equal(count(f.calls, /:commit$/), 0, '不提交')
+    assert.equal(f.calls.at(-1).method, 'DELETE')
+    assert.ok(logs.some(l => /alpha/.test(l) && /HTTP 403，forbidden/.test(l)), '原始代碼進 log')
+    assert.ok(!logs.join(' ').includes('秘密'))
+  } finally { await f.close() }
+  const g = await fake(c => c.url.endsWith('/tracks/internal') ? [403, {}] : happy(c))
+  try {
+    await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: g.base, tokenUri: `${g.base}/token`, request: req }), /內部測試/)
+    assert.equal(count(g.calls, /:commit$/), 0)
+    assert.equal(count(g.calls, /\/tracks\/alpha$/), 0, 'internal 失敗就不再碰 alpha')
+    assert.equal(g.calls.at(-1).method, 'DELETE')
+  } finally { await g.close() }
+})
+
+test('軌道錯誤白話：403 說權限、404 說軌道不存在、其他說稍後重發；都不含英文錯誤碼', async () => {
+  for (const [status, re] of [[403, /發布權限.*使用者和權限/s], [401, /發布權限/], [404, /找不到.*封閉測試.*已建立/s], [500, /稍後重發/]]) {
+    const f = await fake(c => c.url.endsWith('/tracks/alpha') ? [status, { error: { status: 'X_CODE' } }] : happy(c))
+    try {
+      await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: makeRequester({ retries: 0, backoffMs: 1 }) }), e => re.test(e.message) && !/HTTP|X_CODE/.test(e.message))
+      assert.equal(count(f.calls, /:commit$/), 0)
+    } finally { await f.close() }
+  }
+})
+
+test('單軌道舊行為：tracks 或舊參數 track 指定一條時只設那一條、只提交一次', async () => {
+  for (const opt of [{ tracks: ['internal'] }, { track: 'internal' }]) {
+    const f = await fake(happy)
+    try {
+      const r = await publishAab({ aabFile: aab, sa, notes: 'n', apiBase: f.base, tokenUri: `${f.base}/token`, request: req, ...opt })
+      assert.deepEqual(r.tracks, ['internal'])
+      assert.deepEqual(f.calls.filter(c => c.method === 'PUT').map(c => c.url.split('/').pop()), ['internal'])
+      assert.equal(count(f.calls, /:commit$/), 1)
+    } finally { await f.close() }
+  }
+  await assert.rejects(publishAab({ aabFile: aab, sa, notes: 'n', tracks: [], request: req }), /軌道清單不可為空/)
+})
 
 test('換權杖失敗：只報狀態與 OAuth 錯誤代碼，沒有建立編輯', async () => {
   const f = await fake(() => [400, { error: 'invalid_grant', error_description: keyBody }])

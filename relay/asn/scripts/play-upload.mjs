@@ -1,6 +1,6 @@
-// 自動上傳 AAB 到 Google Play 內部測試並發布（Google Play Developer API v3，androidpublisher）。
-// 流程：edits.insert → edits.bundles.upload → edits.tracks.update（internal、completed、zh-TW 更新說明）→ edits.commit。
-// 任何一步失敗就不 commit，並用 edits.delete 清掉半成品。
+// 自動上傳 AAB 到 Google Play 內部測試與封閉測試並發布（Google Play Developer API v3，androidpublisher）。
+// 流程：edits.insert → edits.bundles.upload（只傳一次）→ 每條軌道各 edits.tracks.update（預設 internal、alpha；completed、zh-TW 更新說明）→ edits.commit（只一次）。
+// 任何一步失敗就不 commit，並用 edits.delete 清掉半成品，不會出現一條軌道有、另一條沒有。
 // 認證：Google 服務帳戶 JSON 金鑰（預設 %USERPROFILE%\.asn\play\play-service-account.json，可用 ASN_PLAY_SA_FILE 覆蓋），
 // 用 node:crypto 簽 JWT（RS256）換存取權杖，不新增相依套件。金鑰只讀進記憶體，不印出、不寫 log；錯誤只帶 HTTP 狀態與 Google 的錯誤代碼。
 // 用法：npm run publish:play（或 npm run release:play -- --upload，建置完接著上傳）。
@@ -16,6 +16,11 @@ export const PACKAGE_NAME = 'tw.yooliang.asn'
 export const SCOPE = 'https://www.googleapis.com/auth/androidpublisher'
 const DEFAULT_TOKEN_URI = 'https://oauth2.googleapis.com/token'
 const DEFAULT_BASE = 'https://androidpublisher.googleapis.com'
+// 預設同時發內部測試（internal）與封閉測試（Play API 的軌道名是 alpha）。
+// 為什麼預設兩條：測試人員改用 Google 群組管理，群組只能加在封閉測試；內部測試仍保留給開發者自己快速驗證。
+export const DEFAULT_TRACKS = ['internal', 'alpha']
+const TRACK_NAMES = { internal: '內部測試', alpha: '封閉測試' }
+const trackLabel = t => TRACK_NAMES[t] ? `${TRACK_NAMES[t]}（${t}）` : t
 const NOTES_LIMIT = 500   // Play 每種語言的更新說明上限
 
 export const defaultKeyFile = () => process.env.ASN_PLAY_SA_FILE || path.join(os.homedir(), '.asn', 'play', 'play-service-account.json')
@@ -39,6 +44,14 @@ export const makeJwt = (sa, nowSec = Math.floor(Date.now() / 1000), tokenUri = s
   const claim = b64u(JSON.stringify({ iss: sa.client_email, scope: SCOPE, aud: tokenUri, iat: nowSec, exp: nowSec + 3600 }))
   const sig = crypto.sign('RSA-SHA256', Buffer.from(`${head}.${claim}`), sa.private_key).toString('base64url')
   return `${head}.${claim}.${sig}`
+}
+
+// 設定軌道失敗：權限不夠或軌道不存在時給白話說明（做什麼、誰去哪裡處理）；技術代碼只寫 log，不放進訊息。
+export const trackError = (track, status) => {
+  const label = trackLabel(track)
+  if (status === 401 || status === 403) return `服務帳戶沒有「${label}」軌道的發布權限，這次沒有發布任何軌道。請擁有者到 Play Console 的「使用者和權限」，替服務帳戶打開「發布到測試軌道」的權限後再重發。`
+  if (status === 404) return `Play 找不到「${label}」軌道，這次沒有發布任何軌道。請擁有者到 Play Console 的「測試」頁面確認該測試軌道已建立（封閉測試要先建立一個軌道），再重發。`
+  return `設定「${label}」軌道失敗，這次沒有發布任何軌道，請稍後重發；若持續失敗請查看上傳記錄。`
 }
 
 // Google 錯誤回應只取代碼（error.status／errors[0].reason，或 OAuth 的 error 欄位），不帶訊息全文。
@@ -98,7 +111,10 @@ const maxInEdit = async (call, app, id, auth) => {
 
 // expectCode：這次 AAB 應該是的 versionCode（release-play.mjs 依 play-version.mjs 算的）。有給就先查 Play 上的最大值，
 // 不比它大就不上傳；上傳後 Play 回的 versionCode 也要等於它，不然就不提交（AAB 和預期的不是同一份）
-export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode = null, packageName = PACKAGE_NAME, track = 'internal', apiBase = DEFAULT_BASE, tokenUri, request = makeRequester(), log = () => {} }) => {
+export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode = null, packageName = PACKAGE_NAME, tracks = null, track = null, apiBase = DEFAULT_BASE, tokenUri, request = makeRequester(), log = () => {} }) => {
+  // tracks 優先；舊參數 track（單一軌道）仍可用；都沒給就用預設兩條
+  const trackList = [...new Set(tracks ?? (track ? [track] : DEFAULT_TRACKS))]
+  if (!trackList.length || trackList.some(t => typeof t !== 'string' || !t)) throw new Error('軌道清單不可為空')
   const token = await getAccessToken(sa, request, tokenUri || sa.token_uri)
   const auth = { authorization: `Bearer ${token}` }
   const json = { ...auth, 'content-type': 'application/json' }
@@ -125,11 +141,18 @@ export const publishAab = async ({ aabFile, sa, notes, version = '', expectCode 
     const versionCode = up.versionCode
     if (versionCode == null) throw new Error('上傳 AAB 失敗（回應沒有 versionCode）')
     if (expectCode != null && Number(versionCode) !== expectCode) throw new Error(`上傳的 AAB 是 versionCode ${versionCode}，不是預期的 ${expectCode}，不提交`)
-    log(`設定 ${track} 軌道（versionCode ${versionCode}）…`)
-    await call('設定測試軌道', 'PUT', `${app}/edits/${id}/tracks/${track}`, { headers: json, body: JSON.stringify({ track, releases: [{ name: version || String(versionCode), versionCodes: [String(versionCode)], status: 'completed', releaseNotes: [{ language: 'zh-TW', text: notes }] }] }) })
+    for (const t of trackList) {
+      log(`設定 ${t} 軌道（versionCode ${versionCode}）…`)
+      const body = JSON.stringify({ track: t, releases: [{ name: version || String(versionCode), versionCodes: [String(versionCode)], status: 'completed', releaseNotes: [{ language: 'zh-TW', text: notes }] }] })
+      const r = await request('PUT', `${app}/edits/${id}/tracks/${t}`, { headers: json, body })
+      if (r.status < 200 || r.status >= 300) {
+        log(`設定 ${t} 軌道失敗：HTTP ${r.status}，${errCode(r.text)}`)   // 原始代碼只進 log
+        throw new Error(trackError(t, r.status))
+      }
+    }
     log('提交 …')
     await call('提交編輯', 'POST', `${app}/edits/${id}:commit`, { headers: auth })
-    return { versionCode: Number(versionCode), editId: id }
+    return { versionCode: Number(versionCode), editId: id, tracks: trackList }
   } catch (e) {
     try { await request('DELETE', `${app}/edits/${id}`, { headers: auth }) } catch { /* 清不掉就算了，編輯會自己過期 */ }
     throw e
@@ -160,6 +183,8 @@ const main = async () => {
   const aab = arg ? arg.slice(6) : path.join(root, 'src-tauri', 'target', 'play', `ASN_${version}_play.aab`)
   const codeArg = process.argv.find(a => a.startsWith('--expect-code='))
   const expectCode = codeArg ? Number(codeArg.slice('--expect-code='.length)) : null
+  const tracksArg = process.argv.find(a => a.startsWith('--tracks='))
+  const tracks = tracksArg ? tracksArg.slice('--tracks='.length).split(',').map(x => x.trim()).filter(Boolean) : null
   const checkOnly = process.argv.includes('--check-only')
   try {
     if (codeArg && !Number.isInteger(expectCode)) throw new Error('--expect-code 要是整數')
@@ -174,8 +199,8 @@ const main = async () => {
     if (!fs.existsSync(aab)) throw new Error(`找不到要上傳的 AAB：${aab}\n請先執行 npm run release:play 建置。`)
     const sa = loadServiceAccount(defaultKeyFile())
     const notes = releaseNotes(fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8'), version)
-    const r = await publishAab({ aabFile: aab, sa, notes, version, expectCode, log: m => console.log(m) })
-    console.log(`已發布到 Play 內部測試：版本 ${version}（versionCode ${r.versionCode}）`)
+    const r = await publishAab({ aabFile: aab, sa, notes, version, expectCode, tracks, log: m => console.log(m) })
+    console.log(`已發布到 Play ${r.tracks.map(trackLabel).join('、')}：版本 ${version}（versionCode ${r.versionCode}）`)
   } catch (e) {
     console.error(`上傳中止：${e.message}`)
     process.exit(1)
