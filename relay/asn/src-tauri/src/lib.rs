@@ -3000,11 +3000,12 @@ fn settings_patch(app: State<'_, App>, name: String, patch: serde_json::Map<Stri
     settings::patch_json(&app.data_dir, settings::RawName::parse(&name).map_err(|e| e.0)?, patch)
 }
 
-/// 回報匯流排（#2161）的統一送出口：去重、保活、節流、退避都在 report.rs；錯誤文字固定白話，不含 payload
+/// 回報匯流排（#2161）的統一送出口：去重、保活、節流、退避都在 report.rs；錯誤文字固定白話，不含 payload。
+/// 這個指令會等送出完成（最久約 20 秒），呼叫端不要 await，用 fire-and-forget
 #[cfg(feature = "gui")]
 #[tauri::command]
 async fn report_send(app: State<'_, App>, kind: String, data: serde_json::Value) -> Result<(), String> {
-    let relay = relay_of(&app)?;
+    let relay = relay_of(&app).map_err(|_| report::not_ready())?;
     let dir = app.work_dir.clone();
     report::global(relay, Arc::new(move |line| ui_log::log_info(&dir, line))).report(&kind, data).await
 }
@@ -3012,7 +3013,7 @@ async fn report_send(app: State<'_, App>, kind: String, data: serde_json::Value)
 #[cfg(feature = "gui")]
 #[tauri::command]
 async fn report_get(app: State<'_, App>, kind: String, nodes: Vec<String>) -> Result<serde_json::Value, String> {
-    let relay = relay_of(&app)?;
+    let relay = relay_of(&app).map_err(|_| report::not_ready())?;
     let dir = app.work_dir.clone();
     report::global(relay, Arc::new(move |line| ui_log::log_info(&dir, line))).get(&kind, &nodes).await
 }

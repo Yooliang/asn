@@ -9,6 +9,12 @@
 //! 5. App 在背景（最小化／不可見）或離線時停止送（[`Reporter::set_active`]），回到前景補送一次最新值。
 //! 6. 失敗退避重試（1 秒、2、4…上限 5 分鐘）；收到 429 以 `retry_after_seconds` 為準；記錄只寫 kind、次數、錯誤類別，不寫內容。
 //!
+//! 保活：要靠呼叫端每 60 秒（或各 kind 的 keepalive_ms）呼叫一次 `report()`；`tick` 只送待送值、不會自己補送沒變的值。
+//!
+//! TODO(#2161 2d 前必接)：`Reporter::set_active` 目前沒有接到任何來源（預設 true）。第一個真正的 kind 接上之前，一定要接到
+//! 既有的前景／在線狀態：桌面看視窗可見且未最小化（lib.rs 的 `visible()`、`any_visible`）、手機看 `Relay::set_foreground`
+//! （relay.rs 的 foreground_at）、離線看連線狀態；否則背景與離線時仍會一直送。
+//!
 //! 單一寫入者：同一行程內，同一個 kind 同時只有一個在途請求、一份待送值（`Mutex` 內的 per-kind 狀態）。
 //! 跨行程（同一台多開）不做檔案鎖，只靠後台伺服器端的最小間隔與 `rate`／`rate_node` 限流擋住（被擋就依 retry_after 退避）。
 //!
@@ -33,16 +39,43 @@ pub struct KindSpec {
     pub fields: &'static [&'static str],
     /// 一定要刪掉的欄位名（任何層級）；通用的金鑰類欄位名另外一律刪
     pub redact: &'static [&'static str],
+    /// 這些頂層欄位放行 email（與後台 spec 的 allow_email 同語意：只放行該欄位；欄位內的金鑰片段照遮）
+    pub allow_email: &'static [&'static str],
+    /// 這些頂層欄位放行疑似金鑰的字串（例如公鑰、SHA-256；與後台 allow_secret 同語意）。同時不因欄位名含 key 而被刪
+    pub allow_secret: &'static [&'static str],
 }
 
 /// 用戶端登記表。目前只有測試用的 `echo`（後台 echo：欄位只有 text）
-pub const KINDS: &[KindSpec] = &[KindSpec { kind: "echo", min_interval_ms: 5_000, keepalive_ms: 60_000, fields: &["text"], redact: &[] }];
+pub const KINDS: &[KindSpec] = &[KindSpec { kind: "echo", min_interval_ms: 5_000, keepalive_ms: 60_000, fields: &["text"], redact: &[], allow_email: &[], allow_secret: &[] }];
 
 /// payload 序列化後的上限（與 Edge 的 REPORT_MAX_BYTES 一致）
 pub const MAX_BYTES: usize = 65_536;
 pub const GET_MAX_NODES: usize = 50;
 const BACKOFF_FIRST_MS: u64 = 1_000;
 const BACKOFF_MAX_MS: u64 = 300_000;
+/// 給畫面的錯誤，開頭固定帶 `[report:代號]`，前端靠代號判斷、不比對中文（比照 settings 的 `CODE_*`）。
+/// 永久錯誤（前端不重試）：unknown_kind、bad_request；其餘是暫時性。系統原文與 payload 一律不進這些字串
+pub const CODE_UNKNOWN_KIND: &str = "[report:unknown_kind]";
+pub const CODE_BAD_REQUEST: &str = "[report:bad_request]";
+pub const CODE_RATE: &str = "[report:rate]";
+pub const CODE_NETWORK: &str = "[report:network]";
+pub const CODE_SERVER: &str = "[report:server]";
+pub const CODE_NOT_READY: &str = "[report:not_ready]";
+
+fn coded(code: &str, msg: &str) -> String {
+    format!("{code} {msg}")
+}
+fn unknown_kind() -> String {
+    coded(CODE_UNKNOWN_KIND, "不認得這種回報")
+}
+fn bad_request(msg: &str) -> String {
+    coded(CODE_BAD_REQUEST, msg)
+}
+/// relay 還沒準備好（沒有金鑰、尚未連上等本機狀態）：不回系統原文
+pub fn not_ready() -> String {
+    coded(CODE_NOT_READY, "收發室還沒準備好，請稍後再試")
+}
+
 const MASK_EMAIL: &str = "[email]";
 const MASK_SECRET: &str = "[已遮罩]";
 
@@ -62,50 +95,91 @@ fn node_ok(n: &str) -> bool {
 /// report_get 的預檢：kind 格式、nodes 每個格式合格、去重（保留第一次出現的順序）後 1～50 個。錯誤文字固定白話
 pub fn precheck_get(kind: &str, nodes: &[String]) -> Result<Vec<String>, String> {
     if !kind_ok(kind) {
-        return Err("回報種類的格式不正確".into());
+        return Err(bad_request("回報種類的格式不正確"));
     }
     if !nodes.iter().all(|n| node_ok(n)) {
-        return Err("設備代號的格式不正確".into());
+        return Err(bad_request("設備代號的格式不正確"));
     }
     let mut seen = std::collections::HashSet::new();
     let uniq: Vec<String> = nodes.iter().filter(|n| seen.insert(n.as_str())).cloned().collect();
     if uniq.is_empty() {
-        return Err("請至少指定一台設備".into());
+        return Err(bad_request("請至少指定一台設備"));
     }
     if uniq.len() > GET_MAX_NODES {
-        return Err(format!("一次最多查詢 {GET_MAX_NODES} 台設備"));
+        return Err(bad_request("一次最多查詢 50 台設備"));
     }
     Ok(uniq)
 }
 
 // ---- 送出前整理 ----
+/// 欄位名是不是金鑰類：依底線、連字號、大小寫交界切成詞，任一個詞**等於**下列之一才算
+/// （api_key、access_token、secret_value 會刪；hotkey、keyboard、tokens_used 不是）
+const SECRET_WORDS: &[&str] = &["key", "token", "secret", "password", "passwd", "credential", "credentials", "apikey", "authorization", "cookie", "bearer"];
 fn secret_field(name: &str) -> bool {
-    let n = name.to_ascii_lowercase();
-    ["key", "token", "secret", "password", "passwd", "credential", "authorization", "cookie", "bearer"].iter().any(|w| n.contains(w))
+    let mut words: Vec<String> = vec![];
+    let mut cur = String::new();
+    let mut prev_lower = false;
+    for c in name.chars() {
+        if c == '_' || c == '-' || c == ' ' {
+            words.push(std::mem::take(&mut cur));
+            prev_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && prev_lower {
+            words.push(std::mem::take(&mut cur));
+        }
+        cur.extend(c.to_lowercase());
+        prev_lower = c.is_lowercase() || c.is_ascii_digit();
+    }
+    words.push(cur);
+    words.iter().any(|w| SECRET_WORDS.contains(&w.as_str()))
 }
 fn email_re() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
     R.get_or_init(|| regex::Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+").expect("email 規則"))
 }
+/// 與後台 report_check_value 的第二道防線同規則：連續 32 個以上的 [A-Za-z0-9_+=-]（**沒有 /**）
 fn secret_re() -> &'static regex::Regex {
     static R: OnceLock<regex::Regex> = OnceLock::new();
-    R.get_or_init(|| regex::Regex::new(r"[A-Za-z0-9+/=_\-]{32,}").expect("金鑰規則"))
+    R.get_or_init(|| regex::Regex::new(r"[A-Za-z0-9_+=\-]{32,}").expect("金鑰規則"))
 }
-fn mask_str(s: &str) -> String {
-    let a = email_re().replace_all(s, MASK_EMAIL);
+/// JWT 形狀或 sk- 開頭（整串遮掉）
+fn secret_prefix_re() -> &'static regex::Regex {
+    static R: OnceLock<regex::Regex> = OnceLock::new();
+    R.get_or_init(|| regex::Regex::new(r"^(?:eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.|sk-[A-Za-z0-9_-]{8,})").expect("金鑰前綴規則"))
+}
+/// 整串剛好是標準 UUID（8-4-4-4-12）或純 hex 長度恰 32／40：不是金鑰，後台預設放行
+fn benign_whole(s: &str) -> bool {
+    let hex = |t: &str| !t.is_empty() && t.bytes().all(|c| c.is_ascii_hexdigit());
+    if matches!(s.len(), 32 | 40) && hex(s) {
+        return true;
+    }
+    let p: Vec<&str> = s.split('-').collect();
+    p.len() == 5 && p.iter().zip([8usize, 4, 4, 4, 12]).all(|(x, n)| x.len() == n && hex(x))
+}
+/// 只遮字串的值（不碰 key）。email_ok／secret_ok＝該欄位在登記裡明列了 allow_email／allow_secret（只放行那個欄位）
+fn mask_str(s: &str, email_ok: bool, secret_ok: bool) -> String {
+    if !secret_ok && secret_prefix_re().is_match(s) {
+        return MASK_SECRET.to_string();
+    }
+    let a = if email_ok { std::borrow::Cow::Borrowed(s) } else { email_re().replace_all(s, MASK_EMAIL) };
+    if secret_ok || benign_whole(s) {
+        return a.into_owned();
+    }
     secret_re().replace_all(&a, MASK_SECRET).into_owned()
 }
-fn scrub(v: &Value, redact: &[&str]) -> Value {
+fn scrub(v: &Value, redact: &[&str], email_ok: bool, secret_ok: bool) -> Value {
     match v {
-        Value::String(s) => Value::String(mask_str(s)),
-        Value::Array(a) => Value::Array(a.iter().map(|x| scrub(x, redact)).collect()),
+        Value::String(s) => Value::String(mask_str(s, email_ok, secret_ok)),
+        Value::Array(a) => Value::Array(a.iter().map(|x| scrub(x, redact, email_ok, secret_ok)).collect()),
         Value::Object(m) => {
             let mut out = Map::new();
             for (k, x) in m {
                 if secret_field(k) || redact.iter().any(|r| r.eq_ignore_ascii_case(k)) {
                     continue;
                 }
-                out.insert(mask_str(k), scrub(x, redact));
+                // key 原樣，只遮 value
+                out.insert(k.clone(), scrub(x, redact, email_ok, secret_ok));
             }
             Value::Object(out)
         }
@@ -115,11 +189,18 @@ fn scrub(v: &Value, redact: &[&str]) -> Value {
 
 /// 整理出要送的 payload：必須是物件；只留登記欄位；刪欄位、遮 email 與金鑰片段；大小不超過上限
 pub fn sanitize(spec: &KindSpec, data: &Value) -> Result<Value, String> {
-    let Value::Object(m) = data else { return Err("回報內容必須是物件".into()) };
-    let kept: Map<String, Value> = m.iter().filter(|(k, _)| spec.fields.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
-    let out = scrub(&Value::Object(kept), spec.redact);
+    let Value::Object(m) = data else { return Err(bad_request("回報內容必須是物件")) };
+    let mut kept = Map::new();
+    for (k, v) in m.iter().filter(|(k, _)| spec.fields.contains(&k.as_str())) {
+        let (email_ok, secret_ok) = (spec.allow_email.contains(&k.as_str()), spec.allow_secret.contains(&k.as_str()));
+        if (!secret_ok && secret_field(k)) || spec.redact.iter().any(|r| r.eq_ignore_ascii_case(k)) {
+            continue;
+        }
+        kept.insert(k.clone(), scrub(v, spec.redact, email_ok, secret_ok));
+    }
+    let out = Value::Object(kept);
     if out.to_string().len() > MAX_BYTES {
-        return Err("回報內容太大".into());
+        return Err(bad_request("回報內容太大"));
     }
     Ok(out)
 }
@@ -209,11 +290,11 @@ impl Backend for RelayBackend {
         Box::pin(async move {
             match self.0.api_status("report_get", json!({ "kind": kind, "nodes": nodes })).await {
                 Ok((200..=299, body)) => Ok(body),
-                Ok((404, _)) => Err("不認得這種回報".into()),
-                Ok((429, _)) => Err("查詢太頻繁，請稍後再試".into()),
-                Ok((400 | 413 | 422, _)) => Err("查詢內容不正確".into()),
-                Ok(_) => Err("暫時讀不到回報，請稍後再試".into()),
-                Err(_) => Err("連不上收發室，請稍後再試".into()),
+                Ok((404, _)) => Err(unknown_kind()),
+                Ok((429, _)) => Err(coded(CODE_RATE, "查詢太頻繁，請稍後再試")),
+                Ok((400 | 413 | 422, _)) => Err(bad_request("查詢內容不正確")),
+                Ok(_) => Err(coded(CODE_SERVER, "收發室暫時沒有正常回應，請稍後再試")),
+                Err(_) => Err(coded(CODE_NETWORK, "連不上收發室，請稍後再試")),
             }
         })
     }
@@ -230,11 +311,16 @@ struct KState {
     last_attempt_at: Option<u64>,
     /// 失敗後最早可再試的時間
     retry_at: u64,
+    /// 連續「網路／5xx」失敗次數：只有它決定退避長度（429 與後台拒絕有自己的等待來源，不累加）
     fails: u32,
+    /// 連續各類失敗總次數：只給記錄的「第幾次」與「已恢復」用
+    errs: u32,
     inflight: bool,
 }
 struct Inner {
     active: bool,
+    /// 後台回 rate_node（整台設備的總量上限）時所有 kind 一起等到這個時間；一般 rate 只影響該 kind
+    global_retry_at: u64,
     kinds: HashMap<&'static str, KState>,
 }
 
@@ -255,7 +341,7 @@ impl Reporter {
         Reporter::with_specs(backend, KINDS, clock, log)
     }
     pub fn with_specs(backend: Arc<dyn Backend>, specs: &'static [KindSpec], clock: Arc<dyn Fn() -> u64 + Send + Sync>, log: Arc<dyn Fn(&str) + Send + Sync>) -> Reporter {
-        Reporter { backend, specs, clock, log, st: Mutex::new(Inner { active: true, kinds: HashMap::new() }) }
+        Reporter { backend, specs, clock, log, st: Mutex::new(Inner { active: true, global_retry_at: 0, kinds: HashMap::new() }) }
     }
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.st.lock().unwrap_or_else(|p| p.into_inner())
@@ -263,7 +349,7 @@ impl Reporter {
 
     /// 統一送出口。回 Err 只有「不認得的 kind」或「內容不合格」（固定白話）；網路與後台的失敗在背景重試、不回錯
     pub async fn report(&self, kind: &str, data: Value) -> Result<(), String> {
-        let spec = spec_in(self.specs, kind).ok_or_else(|| "不認得這種回報".to_string())?;
+        let spec = spec_in(self.specs, kind).ok_or_else(unknown_kind)?;
         let payload = sanitize(spec, &data)?;
         let hash = hash_of(&payload);
         let now = (self.clock)();
@@ -271,8 +357,9 @@ impl Reporter {
             let mut g = self.lock();
             let ks = g.kinds.entry(spec.kind).or_default();
             let fresh = ks.last_sent_at.is_some_and(|t| now.saturating_sub(t) < spec.keepalive_ms);
-            if ks.last_hash == Some(hash) && fresh {
-                // 跟最後送出的一樣、也還沒到保活：不送，連較舊的待送值也作廢（最新值就是已送出的那份）
+            if ks.last_hash == Some(hash) && fresh && !ks.inflight {
+                // 跟最後送出的一樣、也還沒到保活：不送，連較舊的待送值也作廢（最新值就是已送出的那份）。
+                // 有請求在途時不能這樣判：在途那份送完後最後送出的就變了，這個「舊值」反而是最新值，要留著待送
                 ks.pending = None;
                 return Ok(());
             }
@@ -315,21 +402,25 @@ impl Reporter {
             if !g.active {
                 return;
             }
+            let global_wait = now < g.global_retry_at;
             let ks = g.kinds.entry(spec.kind).or_default();
             let due = ks.last_attempt_at.map_or(0, |t| t.saturating_add(spec.min_interval_ms));
-            if ks.inflight || ks.pending.is_none() || now < ks.retry_at || now < due {
+            if global_wait || ks.inflight || ks.pending.is_none() || now < ks.retry_at || now < due {
                 return;
             }
             let (v, h) = ks.pending.take().expect("剛檢查過");
             ks.inflight = true;
             ks.last_attempt_at = Some(now);
-            (v, h, ks.fails)
+            (v, h, ks.errs)
         };
         let res = self.backend.send(spec.kind, &value).await;
         let now2 = (self.clock)();
         let mut line = None;
         {
             let mut g = self.lock();
+            if let Err(SendErr::Rate { retry_after_ms, node: true }) = &res {
+                g.global_retry_at = g.global_retry_at.max(now2.saturating_add(*retry_after_ms));
+            }
             let ks = g.kinds.entry(spec.kind).or_default();
             ks.inflight = false;
             let requeue = |ks: &mut KState| {
@@ -342,26 +433,28 @@ impl Reporter {
                     ks.last_hash = Some(hash);
                     ks.last_sent_at = Some(now2);
                     ks.fails = 0;
+                    ks.errs = 0;
                     ks.retry_at = 0;
                     if n_before > 0 {
                         line = Some(format!("回報 kind={} 已恢復（失敗 {n_before} 次後送出）", spec.kind));
                     }
                 }
                 Err(e) => {
-                    ks.fails += 1;
+                    ks.errs += 1;
                     match e {
                         SendErr::Rate { retry_after_ms, .. } => {
                             ks.retry_at = now2.saturating_add(*retry_after_ms);
                             requeue(ks);
                         }
                         SendErr::Network | SendErr::Server(_) => {
+                            ks.fails += 1;
                             ks.retry_at = now2.saturating_add(backoff_ms(ks.fails));
                             requeue(ks);
                         }
                         // 後台說這份內容不行：重送也一樣，丟掉；之後有新內容照常送
                         SendErr::Rejected(_) => ks.retry_at = 0,
                     }
-                    line = Some(format!("回報 kind={} 失敗第 {} 次 類別={}", spec.kind, ks.fails, e.class()));
+                    line = Some(format!("回報 kind={} 失敗第 {} 次 類別={}", spec.kind, ks.errs, e.class()));
                 }
             }
         }
@@ -404,11 +497,17 @@ mod tests {
         sent: Mutex<Vec<(String, Value)>>,
         script: Mutex<VecDeque<Result<bool, SendErr>>>,
         gets: Mutex<Vec<(String, Vec<String>)>>,
+        /// 設了就讓 send 等它（測試在途情境）
+        gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
     }
     impl Backend for Arc<Fake> {
         fn send<'a>(&'a self, kind: &'a str, payload: &'a Value) -> BoxFut<'a, Result<bool, SendErr>> {
             Box::pin(async move {
                 self.sent.lock().unwrap().push((kind.to_string(), payload.clone()));
+                let gate = self.gate.lock().unwrap().clone();
+                if let Some(g) = gate {
+                    g.notified().await;
+                }
                 self.script.lock().unwrap().pop_front().unwrap_or(Ok(true))
             })
         }
@@ -449,7 +548,7 @@ mod tests {
     async fn 未登記的_kind_拒絕_不送() {
         let g = rig();
         let e = g.r.report("nope", json!({"text": "x"})).await.unwrap_err();
-        assert_eq!(e, "不認得這種回報");
+        assert_eq!(e, "[report:unknown_kind] 不認得這種回報");
         assert!(g.fake.sent.lock().unwrap().is_empty());
         assert!(g.r.report("echo", json!("不是物件")).await.is_err());
         assert!(g.fake.sent.lock().unwrap().is_empty());
@@ -581,6 +680,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn 在途時回報已送出的舊值_在途完成後補送() {
+        // A 送出 → B 在途 → report(A) → B 成功 → A 被補送（同上一個測試的情境，這裡特別斷言「後台最後留下的是 A」）
+        let g = rig();
+        g.say("a").await;
+        g.advance(10_000);
+        let gate = Arc::new(tokio::sync::Notify::new());
+        *g.fake.gate.lock().unwrap() = Some(gate.clone());
+        let (r, fake) = (&g.r, g.fake.clone());
+        tokio::join!(r.report("echo", json!({"text": "b"})), async {
+            while fake.sent.lock().unwrap().len() < 2 {
+                tokio::task::yield_now().await;
+            }
+            r.report("echo", json!({"text": "a"})).await.unwrap();
+            gate.notify_one();
+        });
+        *g.fake.gate.lock().unwrap() = None;
+        g.advance(5_000);
+        g.r.tick().await;
+        assert_eq!(g.texts().last().map(String::as_str), Some("a"));
+    }
+
+    #[tokio::test]
+    async fn rate_node_所有_kind_一起等_一般_rate_只影響該_kind() {
+        const S: &[KindSpec] = &[
+            KindSpec { kind: "k1", min_interval_ms: 0, keepalive_ms: 60_000, fields: &["text"], redact: &[], allow_email: &[], allow_secret: &[] },
+            KindSpec { kind: "k2", min_interval_ms: 0, keepalive_ms: 60_000, fields: &["text"], redact: &[], allow_email: &[], allow_secret: &[] },
+        ];
+        let mk = |first: SendErr| {
+            let fake = Arc::new(Fake::default());
+            fake.script.lock().unwrap().push_back(Err(first));
+            let now = Arc::new(AtomicU64::new(1_000));
+            let n2 = now.clone();
+            (Reporter::with_specs(Arc::new(fake.clone()), S, Arc::new(move || n2.load(Ordering::SeqCst)), Arc::new(|_| {})), fake, now)
+        };
+        // rate_node：k1 被擋，k2 也要等到 retry_after
+        let (r, fake, now) = mk(SendErr::Rate { retry_after_ms: 30_000, node: true });
+        r.report("k1", json!({"text": "x"})).await.unwrap();
+        r.report("k2", json!({"text": "y"})).await.unwrap();
+        assert_eq!(fake.sent.lock().unwrap().len(), 1, "k2 不送");
+        now.fetch_add(29_000, Ordering::SeqCst);
+        r.tick().await;
+        assert_eq!(fake.sent.lock().unwrap().len(), 1, "retry_after 前兩個都不送");
+        now.fetch_add(1_000, Ordering::SeqCst);
+        r.tick().await;
+        assert_eq!(fake.sent.lock().unwrap().len(), 3, "到了 k1 重送、k2 送出");
+        // 一般 rate：k2 不受影響
+        let (r, fake, _) = mk(SendErr::Rate { retry_after_ms: 30_000, node: false });
+        r.report("k1", json!({"text": "x"})).await.unwrap();
+        r.report("k2", json!({"text": "y"})).await.unwrap();
+        assert_eq!(fake.sent.lock().unwrap().len(), 2, "k2 照送");
+    }
+
+    #[tokio::test]
+    async fn 連續_429_不累加退避_之後第一次網路失敗仍從_1_秒起() {
+        let g = rig();
+        g.fake.script.lock().unwrap().extend([Err(SendErr::Rate { retry_after_ms: 6_000, node: false }), Err(SendErr::Rate { retry_after_ms: 6_000, node: false }), Err(SendErr::Rate { retry_after_ms: 6_000, node: false }), Err(SendErr::Rejected("x".into())), Err(SendErr::Network)]);
+        g.say("a").await;
+        for _ in 0..3 {
+            g.advance(6_000);
+            g.r.tick().await;
+        }
+        assert_eq!(g.texts().len(), 4);
+        g.say("b").await; // 被後台拒絕那份之後的新值
+        g.advance(6_000);
+        g.r.tick().await;
+        let n = g.texts().len();
+        let ks_fails = g.r.lock().kinds["echo"].fails;
+        assert_eq!(ks_fails, 1, "只有網路失敗才累加（第 {n} 次送出）：429 與拒絕不算");
+        assert_eq!(g.r.lock().kinds["echo"].retry_at - (g.now.load(Ordering::SeqCst)), 1_000, "退避仍從 1 秒起");
+    }
+
+    #[tokio::test]
     async fn 後台拒絕內容_丟掉不重試_新內容照常送() {
         let g = rig();
         g.fake.script.lock().unwrap().push_back(Err(SendErr::Rejected("too_long".into())));
@@ -595,7 +766,7 @@ mod tests {
 
     #[tokio::test]
     async fn 遮罩_email_與金鑰類欄位不出現在送出的內容_記錄也不含內容() {
-        const S: &[KindSpec] = &[KindSpec { kind: "t", min_interval_ms: 0, keepalive_ms: 60_000, fields: &["text", "api_key", "who", "n"], redact: &["who"] }];
+        const S: &[KindSpec] = &[KindSpec { kind: "t", min_interval_ms: 0, keepalive_ms: 60_000, fields: &["text", "api_key", "who", "n"], redact: &["who"], allow_email: &[], allow_secret: &[] }];
         let fake = Arc::new(Fake::default());
         fake.script.lock().unwrap().push_back(Err(SendErr::Network));
         let logs = Arc::new(Mutex::new(vec![]));
@@ -610,6 +781,101 @@ mod tests {
         assert!(body.contains("[email]") && body.contains("[已遮罩]") && body.contains("\"ok\":3"), "{body}");
         let all = logs.lock().unwrap().join("\n");
         assert!(!all.is_empty() && !all.contains("example.com") && !all.contains("0123456789") && !all.contains("聯絡"), "記錄不含內容：{all}");
+    }
+
+    const T: KindSpec = KindSpec {
+        kind: "t",
+        min_interval_ms: 0,
+        keepalive_ms: 60_000,
+        fields: &["a", "b", "c", "hotkey", "keyboard", "tokens_used", "api_key", "access_token", "secret_value", "pubkey", "apiKey"],
+        redact: &[],
+        allow_email: &["c"],
+        allow_secret: &["pubkey"],
+    };
+    fn one(field: &str, v: Value) -> Value {
+        sanitize(&T, &json!({ field: v })).unwrap()
+    }
+
+    #[test]
+    fn 遮罩_uuid_hex32_hex40_原樣保留_和後台第二道防線一致() {
+        let uuid = "123e4567-e89b-12d3-a456-426614174000";
+        let h32 = "0123456789abcdef0123456789ABCDEF";
+        let h40 = "0123456789abcdef0123456789abcdef01234567";
+        for s in [uuid, h32, h40] {
+            assert_eq!(one("a", json!(s)), json!({ "a": s }), "{s}");
+        }
+        // 夾在文字裡就不是「整串」：後台也會擋，這裡遮掉
+        assert_eq!(one("a", json!(format!("id {h32}"))), json!({ "a": "id [已遮罩]" }));
+    }
+
+    #[test]
+    fn 遮罩_hex64_與_base64_44_沒_allow_secret_被遮_有才保留_jwt_與_sk_也遮() {
+        let h64 = "ab".repeat(32);
+        let b64 = format!("{}=", "A".repeat(43));
+        for s in [&h64, &b64] {
+            assert_eq!(one("a", json!(s)), json!({ "a": "[已遮罩]" }), "{s}");
+            assert_eq!(one("pubkey", json!(s)), json!({ "pubkey": s }), "allow_secret 的欄位保留：{s}");
+        }
+        assert_eq!(one("a", json!("eyJhbGciOi.eyJzdWIiOi.sig")), json!({ "a": "[已遮罩]" }));
+        assert_eq!(one("a", json!("sk-abcdefgh1234")), json!({ "a": "[已遮罩]" }));
+    }
+
+    #[test]
+    fn 遮罩_含斜線的長路徑不被遮() {
+        let p = "/usr/local/share/very-long-directory/another/segment/file_name.txt";
+        assert!(p.len() > 40);
+        assert_eq!(one("a", json!(p)), json!({ "a": p }));
+    }
+
+    #[test]
+    fn 遮罩_allow_email_只放行_email_不放行金鑰() {
+        assert_eq!(one("c", json!("a@b.co")), json!({ "c": "a@b.co" }));
+        assert_eq!(one("a", json!("a@b.co")), json!({ "a": "[email]" }), "沒有 allow_email 的欄位照遮");
+        assert_eq!(one("c", json!("sk-abcdefgh1234 a@b.co")), json!({ "c": "[已遮罩]" }), "金鑰照遮");
+        assert_eq!(one("c", json!(format!("a@b.co {}", "ab".repeat(32)))), json!({ "c": "a@b.co [已遮罩]" }));
+    }
+
+    #[test]
+    fn 遮罩_不動_json_的_key_兩個不同_key_不會互相蓋掉() {
+        let v = one("b", json!({ "a@b.co": 1, "c@d.co": 2, "x".repeat(40): 3 }));
+        assert_eq!(v["b"].as_object().unwrap().len(), 3, "{v}");
+        assert_eq!(v["b"]["a@b.co"], 1);
+        assert_eq!(v["b"]["c@d.co"], 2);
+    }
+
+    #[test]
+    fn 金鑰類欄位名_整詞比對_hotkey_keyboard_tokens_used_保留_api_key_等被刪() {
+        let all = json!({ "hotkey": "1", "keyboard": "2", "tokens_used": 3, "api_key": "x", "access_token": "x", "secret_value": "x", "apiKey": "x", "pubkey": "p", "a": "ok" });
+        let out = sanitize(&T, &all).unwrap();
+        let mut keys: Vec<&String> = out.as_object().unwrap().keys().collect();
+        keys.sort();
+        assert_eq!(keys, ["a", "hotkey", "keyboard", "pubkey", "tokens_used"], "{out}");
+        for (n, want) in [("hotkey", false), ("keyboard", false), ("tokens_used", false), ("api_key", true), ("access_token", true), ("secret_value", true), ("apiKey", true), ("my-password", true), ("key", true), ("monkey", false)] {
+            assert_eq!(secret_field(n), want, "{n}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 在途時回報已送出的舊值_待送不能被清掉() {
+        let g = rig();
+        g.say("a").await;
+        g.advance(10_000);
+        let gate = Arc::new(tokio::sync::Notify::new());
+        *g.fake.gate.lock().unwrap() = Some(gate.clone());
+        let r = &g.r;
+        let fake = g.fake.clone();
+        let (_, _) = tokio::join!(r.report("echo", json!({"text": "b"})), async {
+            while fake.sent.lock().unwrap().len() < 2 {
+                tokio::task::yield_now().await;
+            }
+            // b 還在途；這時回報 a（等於最後一次成功送出的那份）：不能把待送清掉，因為 b 送完後最新值是 a
+            r.report("echo", json!({"text": "a"})).await.unwrap();
+            gate.notify_one();
+        });
+        *g.fake.gate.lock().unwrap() = None;
+        g.advance(5_000);
+        g.r.tick().await;
+        assert_eq!(g.texts(), ["a", "b", "a"], "最終狀態要回到 a");
     }
 
     #[test]
@@ -714,6 +980,72 @@ mod tests {
         assert!(all.contains("類別=rate") && !all.contains("example.com"), "{all}");
     }
 
+    fn assert_coded(e: &str, code: &str) {
+        assert!(e.starts_with(&format!("{code} ")) && e.len() > code.len() + 1, "{e}");
+        for bad in ["os error", "127.0.0.1", "Connection", "refused", "payload", "someone@example.com", "0123456789abcdef"] {
+            assert!(!e.contains(bad), "{bad} 不該出現在 {e}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 錯誤代號_每一種都觸發一次_前綴與固定白話_不含系統原文() {
+        // unknown_kind／bad_request：本機判斷
+        let g = rig();
+        assert_coded(&g.r.report("nope", json!({"text": SECRET_TEXT})).await.unwrap_err(), CODE_UNKNOWN_KIND);
+        assert_coded(&g.r.report("echo", json!(SECRET_TEXT)).await.unwrap_err(), CODE_BAD_REQUEST);
+        assert_coded(&g.r.report("echo", json!({"text": "a ".repeat(40_000)})).await.unwrap_err(), CODE_BAD_REQUEST);
+        let many: Vec<String> = (0..51).map(|i| format!("n{i}")).collect();
+        for (k, n) in [("Echo", vec!["a".to_string()]), ("echo", vec![]), ("echo", many), ("echo", vec!["a b".to_string()])] {
+            assert_coded(&g.r.get(k, &n).await.unwrap_err(), CODE_BAD_REQUEST);
+        }
+        // 後台各種狀態碼（report_get）：404／429／400／413／422／500／502
+        let (url, _) = http_server(vec![(404, "{}"), (429, "{}"), (400, "{}"), (413, "{}"), (422, "{}"), (500, "{}"), (502, "{}")]);
+        let b = RelayBackend(Arc::new(Relay::new(url, "fake-key".into(), "N-1".into(), "N-1-ASN".into())));
+        let nodes = ["N-2".to_string()];
+        let want = [CODE_UNKNOWN_KIND, CODE_RATE, CODE_BAD_REQUEST, CODE_BAD_REQUEST, CODE_BAD_REQUEST, CODE_SERVER, CODE_SERVER];
+        for code in want {
+            assert_coded(&b.get("echo", &nodes).await.unwrap_err(), code);
+        }
+        // network：連不上
+        let dead = RelayBackend(Arc::new(Relay::new("http://127.0.0.1:9/relay".into(), "fake-key".into(), "N-1".into(), "N-1-ASN".into())));
+        assert_coded(&dead.get("echo", &nodes).await.unwrap_err(), CODE_NETWORK);
+        // not_ready
+        assert_coded(&not_ready(), CODE_NOT_READY);
+        // 代號集合固定
+        let all = [CODE_UNKNOWN_KIND, CODE_BAD_REQUEST, CODE_RATE, CODE_NETWORK, CODE_SERVER, CODE_NOT_READY];
+        let names: Vec<&str> = all.iter().map(|c| c.trim_start_matches("[report:").trim_end_matches(']')).collect();
+        assert_eq!(names, ["unknown_kind", "bad_request", "rate", "network", "server", "not_ready"]);
+    }
+
+    fn prod_src() -> String {
+        let src = include_str!("report.rs").replace("\r\n", "\n");
+        let end = src.find("#[cfg(test)]\nmod tests").expect("找得到測試區");
+        src[..end].to_string()
+    }
+
+    #[test]
+    fn 守門_給前端的錯誤只能用代號常數建構_report_rs_與_lib_rs_的兩個指令() {
+        let prod = prod_src();
+        let bare = regex::Regex::new(r#"Err\(\s*(?:"|format!|String::from)|Err\([^\n]*\.into\(\)\)|ok_or(?:_else)?\(\s*(?:\|\|\s*)?"|map_err\(\|[a-z_]+\|\s*(?:e\b|"|format!)"#).unwrap();
+        for (i, l) in prod.lines().enumerate() {
+            if l.trim_start().starts_with("//") {
+                continue;
+            }
+            assert!(!bare.is_match(l), "report.rs 第 {} 行用裸字串建構錯誤，要走 coded／bad_request／unknown_kind／not_ready：{l}", i + 1);
+        }
+        // 每個代號常數在正式碼裡除了定義之外至少還被用過一次
+        for c in ["CODE_UNKNOWN_KIND", "CODE_BAD_REQUEST", "CODE_RATE", "CODE_NETWORK", "CODE_SERVER", "CODE_NOT_READY"] {
+            assert!(prod.matches(c).count() >= 2, "{c} 定義了卻沒人用");
+        }
+        let lib = include_str!("lib.rs").replace("\r\n", "\n");
+        for name in ["report_send", "report_get"] {
+            let body = lib.split(&format!("async fn {name}(")).nth(1).unwrap_or_else(|| panic!("找不到 {name}")).split("\n}\n").next().unwrap();
+            assert!(body.contains("relay_of(&app).map_err(|_| report::not_ready())?"), "{name}：relay 還沒準備好要回 not_ready，不可回系統原文");
+            assert!(!body.contains("relay_of(&app)?"), "{name}");
+            assert!(!bare.is_match(body), "{name} 不可裸寫字串錯誤");
+        }
+    }
+
     #[tokio::test]
     async fn 端到端_report_get_對照後台狀態碼() {
         let (url, seen) = http_server(vec![(200, r#"{"ok":true,"reports":[{"node":"N-2","kind":"echo","payload":{"text":"hi"}}]}"#), (404, r#"{"error":"unknown_kind"}"#)]);
@@ -721,7 +1053,7 @@ mod tests {
         let b = RelayBackend(relay);
         let ok = b.get("echo", &["N-2".to_string()]).await.unwrap();
         assert_eq!(ok["reports"][0]["payload"]["text"], "hi");
-        assert_eq!(b.get("zzz", &["N-2".to_string()]).await.unwrap_err(), "不認得這種回報");
+        assert_eq!(b.get("zzz", &["N-2".to_string()]).await.unwrap_err(), "[report:unknown_kind] 不認得這種回報");
         let q = seen.lock().unwrap()[0].clone();
         assert!(q.starts_with("POST /relay?action=report_get "));
         assert!(q.contains(r#""nodes":["N-2"]"#));
