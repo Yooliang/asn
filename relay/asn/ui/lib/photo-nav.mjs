@@ -58,3 +58,27 @@ export function keyDir(e) {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return 0
   return e.key === 'ArrowLeft' ? PREV : e.key === 'ArrowRight' ? NEXT : 0
 }
+
+// #1910：擁有者回報電腦上箭頭切不了圖，但重現不出來。先把切換與抓圖的結果寫進 ui.log（console.info 的 [ASN] 開頭會進 ui.log），
+// 下次發生才有證據。只記方向、第幾張、成功失敗、毫秒、失敗類別；不記檔名、照片編號與內容。
+const ERR_CODE_RE = /^[a-z][a-z0-9_:]{0,40}$/
+
+/** 失敗原因的類別：後端帶的固定代號（err.code）才照抄，其他一律 other；沒有錯誤是 ok */
+export function fetchErrClass(e) {
+  if (!e) return 'ok'
+  const c = typeof e.code === 'string' ? e.code : ''
+  return ERR_CODE_RE.test(c) ? c : 'other'
+}
+
+/** 切換那一行：從哪個入口（箭頭、鍵盤、滑動）、往哪邊、切到第幾張；到頭到尾沒切也記 */
+export function stepLogLine(via, dir, from, to, total) {
+  const way = dir === PREV ? '上一張' : dir === NEXT ? '下一張' : '不明'
+  const moved = to >= 0 && to !== from
+  return `[ASN] 看圖切換 ${via} ${way}：${moved ? `第 ${from + 1} → ${to + 1} 張` : `停在第 ${from + 1} 張（已到頭或到尾）`}／共 ${total} 張`
+}
+
+/** 抓圖那一行：成功或失敗、花幾毫秒、失敗類別 */
+export function fetchLogLine(ok, ms, e = null) {
+  const t = Math.max(0, Math.round(Number(ms) || 0))
+  return ok ? `[ASN] 看圖抓圖 成功 ${t}ms` : `[ASN] 看圖抓圖 失敗 ${t}ms 類別=${fetchErrClass(e)}`
+}
