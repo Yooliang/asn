@@ -15,7 +15,7 @@ export function unmatchedText(r) {
 }
 
 // visible(群組代號)：使用者現在正在看這個群組嗎（可回 Promise）；沒指定 mark 的讀取只有看著的那個才標已讀
-export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x, onRooms = () => {}, onFail = () => {} }) {
+export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x, onRooms = () => {}, onFail = () => {}, counter = null }) {
   const api = makeRoomApi(invoke, { readCmd, postCmd, attachCmd })   // 後端呼叫一律走 tauri.mjs 的具名出口；invoke 仍可注入（測試用）
   const st = reactive({ rooms: [], loaded: false, err: false, signed: true, logs: {}, cards: {}, note: '', deciding: false, notices: {} })
   const raw = id => st.rooms.find(r => r?.id === id) ?? null
@@ -26,6 +26,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
   const identityOf = id => memberIdentity(raw(id), selfNode, windowName)
 
   async function refresh() {
+    counter?.hit('list:refresh')
     try {
       const r = await api.rooms()
       st.rooms = Array.isArray(r?.rooms) ? r.rooms : []
@@ -48,6 +49,13 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     const first = !log.length
     const unread = row.unread > 0
     if (!first && !force && !needsRead(log, row.lastSeq) && !unread) return await refreshReceipts(id, ident, log)
+    if (counter) {   // 本機計數（#2161 F3）：真的要打後台了，每個成立的條件各記一次
+      counter.hit('read:total', id)
+      if (first) counter.hit('read:first', id)
+      if (force) counter.hit('read:force', id)
+      if (needsRead(log, row.lastSeq)) counter.hit('read:needsRead', id)
+      if (unread) counter.hit('read:unread', id)
+    }
     reading.add(id)
     try {
       // mark:false＝背景讀進來（例如重開還原的分頁）；沒指定就問這個群組現在是不是正在看（背景分頁、視窗看不到都不標已讀）
@@ -97,6 +105,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
   async function refreshReceipts(id, ident, log) {
     const wakeWait = !noWakes && hasPendingWakes(log, now())
     if (!hasPendingReads(log) && !wakeWait) return false
+    if (counter) { if (hasPendingReads(log)) counter.hit('receipts:reads', id); if (wakeWait) counter.hit('receipts:wakes', id) }
     try {
       const r = await api.read({ room: id, agent: ident.agent || null, since: log[log.length - 1].seq, limit: 1, mark: false })
       if (wakeWait && !Array.isArray(r?.wakes)) noWakes = true   // 舊後台沒有這個欄位：不再為順序而問
@@ -107,8 +116,9 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     return false
   }
 
-  async function loadCards(id) {
+  async function loadCards(id, why = 'other') {
     if (!raw(id)) return
+    counter?.hit(`cards:${why}`, id)
     try { const r = await groupApi.confirmList(id); st.cards[id] = confirmCards(r?.confirms) } catch { /* 舊後台沒有這個動作：不顯示卡片；出口已把失敗寫進 log */ }
   }
 
