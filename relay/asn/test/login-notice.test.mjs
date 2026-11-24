@@ -54,5 +54,5 @@ test('接線守門：登入畫面只在這台有金鑰時講收發信照常；�
   assert.match(read('ui/lib/tauri.mjs'), /logout: \(stop = false\) => \{ shownPhotos\.clear\(\); return invoke\('auth_logout', \{ stop: stop === true \}\) \}/)
   const rs = read('src-tauri/src/account.rs')
   assert.match(rs, /handle: AppHandle, stop: Option<bool>\) -> Result<\(\), String> \{/)
-  assert.match(rs, /if stop == Some\(true\) \{\s*stop_soon\(&app, handle\);\s*\} else \{\s*restart_soon\(&app, handle\);/, '沒選就照舊重新啟動、收發信照常')
+  assert.match(rs, /if stop == Some\(true\) \{\s*stop_soon\(&app, handle\);\s*\} else \{\s*restart_now\(&app, handle\)\.await\?;/, '沒選就照舊重新啟動、收發信照常')
 })

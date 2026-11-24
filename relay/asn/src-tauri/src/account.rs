@@ -310,7 +310,7 @@ pub async fn auth_logout(app: State<'_, App>, auth: State<'_, AuthState>, handle
     if stop == Some(true) {
         stop_soon(&app, handle);
     } else {
-        restart_soon(&app, handle);
+        restart_now(&app, handle).await?;
     }
     Ok(())
 }
@@ -331,28 +331,25 @@ fn stop_soon(app: &App, handle: AppHandle) {
     });
 }
 
-/// 晚一點再重新啟動，讓指令先把結果回給畫面（--shot 模式不重啟）
-fn restart_soon(app: &App, handle: AppHandle) {
+/// 重新啟動（--shot 模式不重啟）。新程序開起來才回 Ok，舊程序晚一點再自己結束（讓指令先把結果回給畫面）；
+/// 開不起來回白話錯誤、ASN 繼續跑，不再無條件結束（#2204）。步驟與守護記號的處理見 relaunch.rs
+async fn restart_now(app: &App, handle: AppHandle) -> Result<(), String> {
     if app.shot.is_some() {
-        return;
+        return Ok(());
     }
     // 安卓：行程不能由自己重新啟動（沒有可執行檔可再叫起）。由畫面請外殼重開（lib 的 android 模組），這裡不動
     if cfg!(target_os = "android") {
-        return;
+        return Ok(());
     }
     #[cfg(desktop)]
-    let work_dir = app.work_dir.clone();
-    tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-        crate::cleanup(&handle);
-        // 不用 tauri 的 AppHandle 重開：它讓新程序繼承本程序的 stderr，斷掉的管線會一路傳下去（#1771）
-        #[cfg(desktop)]
-        match crate::ui_log::relaunch_self() {
-            Ok(()) => crate::ui_log::log_exit(&work_dir, "重新啟動（登入狀態改變）"),
-            Err(e) => crate::ui_log::log_exit(&work_dir, &format!("重新啟動失敗：{e}")),
-        }
-        handle.exit(0);
-    });
+    {
+        crate::relaunch::relaunch_and_exit(&handle, &app.work_dir, "重新啟動（登入狀態改變）", crate::relaunch::EXIT_DELAY).await
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = handle;
+        Ok(())
+    }
 }
 
 /// 登入畫面的「暫時不登入」：只有這台已有節點金鑰時才准（記住這個選擇，之後開機照舊進名單）
@@ -576,7 +573,7 @@ pub async fn update_remote_status(app: State<'_, App>, auth: State<'_, AuthState
 pub async fn auth_bind(app: State<'_, App>, auth: State<'_, AuthState>, handle: AppHandle) -> Result<BindOutcome, String> {
     let out = bind_this(&app, &auth).await?;
     if out.state == "created" {
-        restart_soon(&app, handle);
+        restart_now(&app, handle).await?;
     }
     Ok(out)
 }

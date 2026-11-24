@@ -147,7 +147,7 @@ pub fn guard_dir() -> Option<PathBuf> {
 fn alive_path(dir: &Path) -> PathBuf {
     dir.join("alive.json")
 }
-fn quit_path(dir: &Path) -> PathBuf {
+pub(crate) fn quit_path(dir: &Path) -> PathBuf {
     dir.join("user-quit")
 }
 fn relaunch_path(dir: &Path) -> PathBuf {
@@ -207,6 +207,13 @@ pub fn touch_alive(dir: &Path, pid: u32, now: u64) {
 /// 正常結束（cleanup 會呼叫：結束、關視窗、更新安裝、登出關機）：守護看到就不重開
 pub fn note_user_quit(dir: &Path) {
     let _ = crate::write_atomic(&quit_path(dir), "1");
+}
+/// 結束前的記號：一般結束寫「正常結束」記號；重新啟動（`relaunching`）不寫，
+/// 新程序沒起來時守護才會把 ASN 拉回來（#2204）
+pub fn note_exit(dir: &Path, relaunching: bool) {
+    if !relaunching {
+        note_user_quit(dir);
+    }
 }
 /// 設定頁按「恢復自動重開」：清掉暫停與重開紀錄
 pub fn resume(dir: &Path) {
