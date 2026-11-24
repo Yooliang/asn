@@ -1,15 +1,11 @@
 {
-  "version": "0.2.91",
-  "notes": "- 新功能：工作管理員可以直接重新啟動 ASN 和終端服務，按下去會先在原位確認\n- 改善：工作管理員畫面不再出現「只能看」，原因改放進細項；動作按鈕從右邊排，「停止」固定在最右邊\n- 改善：電腦版 LINE 外觀的左欄，把通知和設定移到最下面\n- 改善：帳號頁的設備列拿掉「這台」，讀額度的那台改用「額度回報」小標籤\n- 修正：ASN 當掉後留下的暫存檔，下次啟動時會自動清掉",
-  "pub_date": "2026-11-24T09:40:20.352Z",
+  "version": "0.2.92",
+  "notes": "- 新功能：夥伴卡在確認框超過 5 分鐘沒人處理時，會通知擁有者和夥伴本人\n- 改善：手機上只能選「拒絕」時，會說明為什麼不能允許\n- 修正：Claude 權限框的選項下方出現「↑ N more lines」或頁尾折行時，也能正確認出來\n- 修正：下載附件時若程式當掉，下次不會讀到只存一半的檔案\n- 改善：Android 版除了內部測試，也會同時發佈到 Google Play 的封閉測試",
+  "pub_date": "2026-11-24T12:06:23.343Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjFwbFRJRXdvTXVrOXI4aHBzQ0JHYmtzaElQdmVIa1VkcGllWFRoeFN5dkxGajE4blFabHV5b1ZBVDhFdFM2bU85cC9CZ01lODFDb2Z3dk1mZlpmbmdNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTEzMjE5CWZpbGU6QVNOXzAuMi45MV94NjQtc2V0dXAuZXhlCmJTdnp6SG5PWXYxd1lQZXhsWUlINGViOWpEeHYybzFpQW1aTmZjclV1SDNqcEdyUnFvN1RyMGFwK1p6Z0pjNmd5K3ZRbm0zclk2ZjlhMGNwK0xFVkJnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.91_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZudXV4S0RaNWxrRnFDWFVEdlljbkp1dU1MS2NrNEdFUlJZRzA2bEp5RjBKNHNpZEhEOFoybDh3ZUwrLzBYd013SFZPZFQ5NzNIZDMzZVNXaEtwTXdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTEzODM2CWZpbGU6QVNOXzAuMi45MV9hbWQ2NC5BcHBJbWFnZQpuNVVOczA4QzA4WWYyOTFWWXBjVjVCN0hpd0dvb1hFb3BDSTcxdmZDVlo1emFPZHE2dFlIMmRNTGZNbEMvbTJBbmpDMVl2M05qeno2emlVZXF1b3lBZz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.91_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZUcHc3aHJZRWlJdmViNHQxVFBTZlRFaERldXQzS3FqUkQ3eWxFOUhSZSt5MkQwcWJQVXpuNGtIcnRpMGJrK1crdlQxT1UrMWdXUnYrZVJTU3ZmbXdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTIxOTgyCWZpbGU6QVNOXzAuMi45Ml94NjQtc2V0dXAuZXhlCm9LY2xycnFpa3FPeDk4Q0UybFA5SjBRWEtNQ3JYKzM1UFRYNnB0TnU1Ukd6d0ZnSDVVZzJzZDFhRXpqM1lRUk4xVzZlczNaMXA4TWRwOFVYdG1qL0FnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.92_x64-setup.exe"
     }
   }
 }
