@@ -176,9 +176,6 @@ pub fn set_frame(app: AppHandle, frame: State<'_, Frame>, native: bool) {
     frame.0.store(native, Ordering::Relaxed);
     for (label, w) in app.webview_windows() {
         if label == "list" || label.starts_with("chat-") || is_panel_label(&label) {
-            if native {
-                crate::snap_max::clear_now(&w);
-            }
             let _ = w.set_decorations(native);
         }
     }
