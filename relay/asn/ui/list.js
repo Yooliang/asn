@@ -40,6 +40,7 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { copyText, createGroupApi, memberFriendId, roomHue, roomInitial } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
+import { createRoomPollCounter } from './lib/room-poll-counter.mjs'
 import { isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
@@ -351,7 +352,8 @@ const core = new AsnCore({
 // ---------- 群組（真人好友與群組）：群組在名單的「群組」分頁，點進去在對話分頁（整合）或對話視窗（分開）聊 ----------
 // 群組對話用「假夥伴」接上既有的對話窗：id 是 room:<群組代號>。發言、讀取、同意／拒絕都走 Rust 指令並帶本人簽章
 const groupApi = createGroupApi(invoke)
-const hub = createRoomHub({ invoke, groupApi, selfNode: info.node, windowName: info.window_name, photos: true, reactive, visible: rid => chatShownId(roomChatId(rid)), onRooms: r => reloginWatch.noteRooms(r), onFail: e => reloginWatch.noteError(e) })   // 只有正在看的群組才標已讀（背景分頁、視窗看不到都不標）
+const roomPollCounter = createRoomPollCounter()   // 群組輪詢本機計數（#2161 F3）：每分鐘一行 [ASN] 群組輪詢計數 寫進 ui.log
+const hub = createRoomHub({ counter: roomPollCounter, invoke, groupApi, selfNode: info.node, windowName: info.window_name, photos: true, reactive, visible: rid => chatShownId(roomChatId(rid)), onRooms: r => reloginWatch.noteRooms(r), onFail: e => reloginWatch.noteError(e) })   // 只有正在看的群組才標已讀（背景分頁、視窗看不到都不標）
 const roomRows = computed(() => hub.rows())
 const roomsNote = computed(() => roomsNoteText(hub.st))   // 群組清單原位的說明（讀不到、或登入失效只列得出這台的群組）；正常時是空字串
 const roomFriends = computed(() => roomRows.value.map(r => ({ ...roomPseudoFriend(r), unread: r.unread })))
@@ -414,12 +416,13 @@ const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: inf
 core.on('state', sync)
 core.on('log', pushLog)
 // 重抓群組列表，並更新開著的群組對話的新訊息與待主持人確認的卡片
-async function refreshRooms() {
+async function refreshRooms(why = 'other') {
+  roomPollCounter.hit(`list:refreshRooms:${why}`)
   await hub.refresh()
   for (const id of openedRooms) {
     const rid = roomIdOf(id)
     if (!hub.raw(rid)) continue
-    await hub.read(rid); await hub.loadCards(rid)
+    await hub.read(rid); await hub.loadCards(rid, 'refreshRooms')
     pushLog(id)
   }
   sync()
@@ -1178,7 +1181,7 @@ async function decideCard(chatId, cardId, approve) {
 const groupFlow = createGroupFlow({
   api: groupApi, copy: copyText, reactive,
   openRoom: rid => void openChat(`room:${rid}`),
-  refreshRooms: () => refreshRooms(),
+  refreshRooms: () => refreshRooms('groupFlow'),
   getFriends: () => friends.value,
   getRoom: rid => hub.raw(rid),
   logOf: f => core.viewOf(f.id),
@@ -1350,7 +1353,7 @@ window.addEventListener('resize', () => {
 if (ui.mode === 'merged') await windowApi.mainLayout(true, sizes.merged.w, sizes.merged.h, true)
 
 await listen('term-being-viewed', list => { beingViewed.value = Array.isArray(list) ? list : [] })
-await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms(); refreshLaunchersOnBell() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
+await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms('bell'); refreshLaunchersOnBell() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
 
@@ -1674,8 +1677,8 @@ const app = createApp({
     // 大幅廣告的左右鍵與小圓點：換了就重新計時，不會剛點完又被自動換掉
     const stepAd = d => { adI.value = d < 0 ? prevAd(adI.value, ads.value.length) : nextAd(adI.value, ads.value.length); if (!info.shot) startAds() }
     const jumpAd = i => { adI.value = goAd(i, ads.value.length); if (!info.shot) startAds() }
-    setInterval(() => void refreshRooms(), 60_000)
-    void refreshRooms()
+    setInterval(() => void refreshRooms('timer'), 60_000)
+    void refreshRooms('start')
     const query = ref('')
     const collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
     const dev = pages
