@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import * as Vue from 'vue'
 import { renderToString } from 'vue/server-renderer'
-import { PENDING_HINT, PROVIDERS, SKIP_LABEL, accountView, canStart, errorText, needsDeviceSetup, phaseText, providerKeys, showSkip } from '../ui/lib/login.mjs'
+import { bindNext, PENDING_HINT, PROVIDERS, SKIP_LABEL, accountView, canStart, errorText, needsDeviceSetup, phaseText, providerKeys, showSkip } from '../ui/lib/login.mjs'
 import { LoginPanel } from '../ui/lib/login-panel.mjs'
 import { defaultExe, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
 import { assertShotNotBlank } from './shot-png.mjs'
@@ -19,6 +19,21 @@ test('登入方式只有 Google 與 GitHub，Rust 端的白名單一致', () => 
   assert.deepEqual(providerKeys(), ['google', 'github'])
   assert.deepEqual(PROVIDERS.map(p => p.label), ['用 Google 登入', '用 GitHub 登入'])
   assert.ok(read('src-tauri/src/auth.rs').includes('pub const PROVIDERS: [&str; 2] = ["google", "github"];'))
+})
+
+test('#2204 綁定成功但重新啟動失敗：停在請自己重開的畫面，不進名單、不能再按登入', () => {
+  const next = bindNext({ state: 'created', note: 'x', restart_failed: '已經綁定好了，但 ASN 沒能自動重新開啟，請自己關閉後再重新開啟。' })
+  assert.equal(next.action, 'restart-needed')
+  assert.match(next.text, /請自己關閉後再重新開啟/)
+  assert.deepEqual(bindNext({ state: 'created' }), { action: 'wait' }, '重啟成功：等它自己重開')
+  for (const s of ['bound', 'pending']) assert.deepEqual(bindNext({ state: s }), { action: 'enter' })
+  assert.equal(canStart('restart'), false)
+  assert.equal(showSkip(true, 'restart'), false)
+  const js = read('ui/login.js'), html = read('ui/login.html')
+  assert.ok(js.includes("phase.value = 'restart'") && js.includes('bindNext(out)'), 'login.js 要用 bindNext 並停在 restart')
+  assert.ok(html.includes("phase === 'restart'"), '畫面要顯示提示')
+  assert.ok(read('ui/lib/login-panel.mjs').includes('out?.restart_failed'), '設定頁也要顯示提示')
+  assert.ok(read('src-tauri/src/account.rs').includes('with_restart_result(out, restart)'), 'auth_bind 不能用 ? 吃掉綁定結果')
 })
 
 test('階段：等待中不能再按登入；出錯可以重來', () => {

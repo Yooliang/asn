@@ -105,6 +105,7 @@ test('登入後：新建節點要重開（有外殼自動重開），已有節�
   assert.equal(ask.action, 'ask'); assert.match(ask.text, /重新打開/)
   for (const s of ['bound', 'pending', undefined]) assert.deepEqual(afterBind({ state: s }, b), { action: 'enter' })
   assert.deepEqual(afterBind(null, b), { action: 'enter' })
+  assert.deepEqual(afterBind({ state: 'created', restart_failed: '請自己重新開啟' }, b), { action: 'ask', text: '請自己重新開啟' }, '#2204 重啟失敗要顯示提示')
 })
 
 test('自動更新：發現新版 → 橫幅文字與按鈕；下載中顯示進度；失敗可重試；沒有新版或 Play 版什麼都不顯示', () => {

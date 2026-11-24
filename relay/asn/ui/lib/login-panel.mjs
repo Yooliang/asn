@@ -32,7 +32,7 @@ export const LoginPanel = {
       await refresh()
     }
     // 登入完成後自動綁定這台電腦（舊租戶還沒被認領時不擋，小字會提示）
-    const login = key => run(async () => { waiting.value = true; await authApi.login(key); waiting.value = false; await authApi.bind() })
+    const login = key => run(async () => { waiting.value = true; await authApi.login(key); waiting.value = false; const out = await authApi.bind(); if (out?.restart_failed) throw new Error(out.restart_failed) })   // 綁定好但沒能自動重開：把提示顯示在小字（#2204）
     const saveName = async () => {
       if (nameBusy.value) return
       const c = checkName(nameText.value)
