@@ -53,8 +53,10 @@ begin
     elsif p_kind = 'stuck_prompt' then
       v_body := coalesce(nullif(v_computer, ''), relay.device_label(p_node)) || '：夥伴「' || v_window || '」' || v_what;
       -- 畫面片段：換行留著，其他控制字元換成空白，最多 600 字
-      if btrim(coalesce(p_detail, '')) <> '' then
-        v_body := v_body || E'\n' || left(btrim(regexp_replace(p_detail, '[\x01-\x09\x0b-\x1f\x7f]', ' ', 'g')), 600);
+      -- 先清理再判斷：只有 tab、換行、空白的片段清完是空的，就不接（btrim 不剪 tab 與換行）
+      v_reason := left(btrim(regexp_replace(coalesce(p_detail, ''), '[\x01-\x09\x0b-\x1f\x7f]', ' ', 'g'), E' \n'), 600);
+      if v_reason <> '' then
+        v_body := v_body || E'\n' || v_reason;
       end if;
     else
       v_body := coalesce(nullif(v_computer, ''), relay.device_label(p_node)) || '：夥伴「' || v_window || '」' || v_what || E'\n' || '已經等超過 2 分鐘。';
