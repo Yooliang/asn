@@ -116,6 +116,78 @@ fn write_with(path: &Path, bytes: &[u8], o: Opts, next: &mut dyn FnMut(&Path) ->
     Ok(())
 }
 
+/// 殘留暫存檔的保險期：修改時間比這個新的一律不碰（別的 ASN 行程可能正在寫）
+const STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+/// 嚴格比對 `<任意>.<純數字 pid>.<純數字序號>.tmp`，回傳 pid；不符一律 None
+fn stale_pid(name: &str) -> Option<u32> {
+    let rest = name.strip_suffix(".tmp")?;
+    let (rest, seq) = rest.rsplit_once('.')?;
+    let (base, pid) = rest.rsplit_once('.')?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if base.is_empty() || !digits(seq) || !digits(pid) {
+        return None;
+    }
+    pid.parse().ok()
+}
+
+/// 清掉崩潰或斷電後殘留的暫存檔：只掃傳入資料夾那一層；只刪一般檔案、格式嚴格相符、pid 不是自己、
+/// 且修改時間早於 10 分鐘的。不查 pid 是否還活著（pid 會重用、Windows 上也不可靠），
+/// 靠 10 分鐘保險避免刪到另一個 ASN 行程（asn-cli、asn-bridge）正在寫的檔。回傳刪掉幾個；失敗跳過。
+pub fn sweep_stale(dirs: &[&Path], my_pid: u32) -> usize {
+    let (n, hit) = sweep_stale_at(dirs, my_pid, std::time::SystemTime::now());
+    if let Some(line) = sweep_summary(n, &hit) {
+        elog!("{line}");
+    }
+    n
+}
+
+/// 開執行緒在背景掃，不拖慢啟動、不佔 UI 執行緒
+pub fn sweep_stale_in_background(dirs: Vec<PathBuf>) {
+    let _ = std::thread::Builder::new().name("sweep-stale-tmp".into()).spawn(move || {
+        let refs: Vec<&Path> = dirs.iter().map(|p| p.as_path()).collect();
+        sweep_stale(&refs, std::process::id());
+    });
+}
+
+fn sweep_stale_at(dirs: &[&Path], my_pid: u32, now: std::time::SystemTime) -> (usize, Vec<PathBuf>) {
+    let mut total = 0;
+    let mut hit = Vec::new();
+    for dir in dirs {
+        let Ok(rd) = std::fs::read_dir(dir) else { continue };
+        let mut n = 0;
+        for e in rd.flatten() {
+            let name = e.file_name();
+            let Some(pid) = name.to_str().and_then(stale_pid) else { continue };
+            if pid == my_pid {
+                continue;
+            }
+            let path = e.path();
+            let Ok(md) = std::fs::symlink_metadata(&path) else { continue };
+            if !md.file_type().is_file() {
+                continue;
+            }
+            let old = md.modified().ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|d| d >= STALE_AFTER);
+            if old && std::fs::remove_file(&path).is_ok() {
+                n += 1;
+            }
+        }
+        if n > 0 {
+            total += n;
+            hit.push(dir.to_path_buf());
+        }
+    }
+    (total, hit)
+}
+
+fn sweep_summary(n: usize, dirs: &[PathBuf]) -> Option<String> {
+    if n == 0 {
+        return None;
+    }
+    let list: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+    Some(format!("[ASN] 清掉崩潰後殘留的原子寫入暫存檔 {n} 個（資料夾：{}）", list.join("、")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,5 +524,93 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ---- sweep_stale（#2171）----
+    use std::time::{Duration, SystemTime};
+
+    fn later(m: u64) -> SystemTime {
+        SystemTime::now() + Duration::from_secs(m * 60)
+    }
+    fn touch(d: &Path, name: &str) -> PathBuf {
+        let p = d.join(name);
+        std::fs::write(&p, b"x").unwrap();
+        p
+    }
+
+    #[test]
+    fn 舊的別人pid格式相符的被刪() {
+        let d = tempfile::tempdir().unwrap();
+        let a = touch(d.path(), "settings.json.4242.7.tmp");
+        let b = touch(d.path(), "a.b.c.99.0.tmp");
+        let (n, hit) = sweep_stale_at(&[d.path()], 1, later(11));
+        assert_eq!(n, 2);
+        assert!(!a.exists() && !b.exists());
+        assert_eq!(hit, vec![d.path().to_path_buf()]);
+    }
+
+    #[test]
+    fn 自己pid的不刪() {
+        let d = tempfile::tempdir().unwrap();
+        let a = touch(d.path(), "x.json.4242.7.tmp");
+        assert_eq!(sweep_stale_at(&[d.path()], 4242, later(60)).0, 0);
+        assert!(a.exists());
+    }
+
+    #[test]
+    fn 十分鐘內的不刪() {
+        let d = tempfile::tempdir().unwrap();
+        let a = touch(d.path(), "x.json.4242.7.tmp");
+        assert_eq!(sweep_stale_at(&[d.path()], 1, later(9)).0, 0);
+        assert!(a.exists());
+        assert_eq!(sweep_stale_at(&[d.path()], 1, later(11)).0, 1);
+    }
+
+    #[test]
+    fn 格式不符的tmp不刪() {
+        let d = tempfile::tempdir().unwrap();
+        let names = ["a.tmp", "a.x.1.tmp", "a.1.x.tmp", ".1.2.tmp", "a.1..tmp", "a.1.2.tmp.bak", "a.1.2", "a.99999999999999999999.1.tmp", "a.-1.2.tmp"];
+        let ps: Vec<PathBuf> = names.iter().map(|n| touch(d.path(), n)).collect();
+        assert_eq!(sweep_stale_at(&[d.path()], 1, later(60)).0, 0);
+        assert!(ps.iter().all(|p| p.exists()));
+    }
+
+    #[test]
+    fn 同名資料夾不刪且不遞迴() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("x.1.2.tmp");
+        std::fs::create_dir(&dir).unwrap();
+        let inner = touch(&dir, "y.3.4.tmp");
+        assert_eq!(sweep_stale_at(&[d.path()], 9, later(60)).0, 0);
+        assert!(dir.is_dir() && inner.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink不跟隨() {
+        let d = tempfile::tempdir().unwrap();
+        let target = touch(d.path(), "real.txt");
+        let link = d.path().join("x.1.2.tmp");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert_eq!(sweep_stale_at(&[d.path()], 9, later(60)).0, 0);
+        assert!(link.symlink_metadata().is_ok() && target.exists());
+    }
+
+    #[test]
+    fn 資料夾不存在不出錯() {
+        let d = tempfile::tempdir().unwrap();
+        let ghost = d.path().join("nope");
+        assert_eq!(sweep_stale_at(&[ghost.as_path()], 1, later(60)).0, 0);
+        assert_eq!(sweep_stale(&[ghost.as_path()], 1), 0);
+    }
+
+    #[test]
+    fn 有刪才有記錄且不含檔名() {
+        assert!(sweep_summary(0, &[]).is_none());
+        let d = tempfile::tempdir().unwrap();
+        touch(d.path(), "secret_name.json.4242.7.tmp");
+        let (n, hit) = sweep_stale_at(&[d.path()], 1, later(60));
+        let line = sweep_summary(n, &hit).unwrap();
+        assert!(line.starts_with("[ASN]") && line.contains("1 個") && !line.contains("secret_name"));
     }
 }
