@@ -48,11 +48,6 @@ fn lock(home: &Path, tries: u32) -> Option<Lock> {
     None
 }
 
-fn write_atomic(file: &Path, text: &str) {
-    // 純狀態（掉了可重建）：不 fsync；錯誤照舊吞掉
-    let _ = crate::settings::atomic::write(file, text.as_bytes(), crate::settings::atomic::STATE);
-}
-
 /// 讀計數檔，只留一小時內的時間點
 fn load(home: &Path, now: u64) -> Map<String, Value> {
     let all: Map<String, Value> = std::fs::read_to_string(home.join(FILE)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
@@ -83,7 +78,8 @@ pub fn take(home: &Path, window: &str, limit: usize, now: u64) -> Result<usize, 
     let left = limit.saturating_sub(next.len());
     all.insert(window.to_string(), json!(next));
     let _ = std::fs::create_dir_all(home);
-    write_atomic(&home.join(FILE), &serde_json::to_string(&all).unwrap_or_default());
+    // 純狀態（掉了可重建）：不 fsync；錯誤照舊吞掉
+    let _ = crate::settings::atomic::write(&home.join(FILE), serde_json::to_string(&all).unwrap_or_default().as_bytes(), crate::settings::atomic::STATE);
     Ok(left)
 }
 
@@ -101,7 +97,7 @@ pub fn refund(home: &Path, window: &str, mail_id: &str, now: u64) -> bool {
     if ids.len() > KEEP_IDS {
         ids.drain(..ids.len() - KEEP_IDS);
     }
-    write_atomic(&ids_file, &serde_json::to_string(&ids).unwrap_or_default());
+    let _ = crate::settings::atomic::write(&ids_file, serde_json::to_string(&ids).unwrap_or_default().as_bytes(), crate::settings::atomic::STATE);
     let mut all = load(home, now);
     let mut recent = recent_of(&all, window);
     if recent.is_empty() {
@@ -113,7 +109,7 @@ pub fn refund(home: &Path, window: &str, mail_id: &str, now: u64) -> bool {
     } else {
         all.insert(window.to_string(), json!(recent));
     }
-    write_atomic(&home.join(FILE), &serde_json::to_string(&all).unwrap_or_default());
+    let _ = crate::settings::atomic::write(&home.join(FILE), serde_json::to_string(&all).unwrap_or_default().as_bytes(), crate::settings::atomic::STATE);
     true
 }
 

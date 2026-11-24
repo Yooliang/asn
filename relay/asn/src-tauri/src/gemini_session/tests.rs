@@ -226,7 +226,7 @@ fn 守門_不讀不寫使用者的_agy_設定檔() {
     assert!(!body.contains("join(\".gemini\")") && !body.contains("home_dir()"), "不能讀使用者的 agy 設定");
     assert!(!body.contains("(home: &Path") && !body.contains(" home: &Path"), "只有 asn_home，沒有使用者的 home");
     // 寫檔只有 write_if_changed 一個地方，而且只拿 asn_home 底下的路徑
-    assert_eq!(body.matches("write_atomic(").count(), 1);
+    assert_eq!(body.matches("atomic::write(").count(), 1);
     assert_eq!(body.matches("write_if_changed(&").count(), 2);
     assert!(body.contains("write_if_changed(&cmd_path") && body.contains("write_if_changed(&out"));
     assert!(!body.contains(&["std::fs::", "write("].concat()));

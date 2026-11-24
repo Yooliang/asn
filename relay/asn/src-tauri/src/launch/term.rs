@@ -2586,7 +2586,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let file = StoreFile { version: STORE_VERSION, next: g.next, terms };
         drop(g);
         let text = serde_json::to_string_pretty(&file).map_err(|e| format!("無法寫入終端對照表：{e}"))?;
-        atomic_write(&self.store, &text)
+        if let Some(parent) = self.store.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("無法建立終端對照表資料夾：{e}"))?;
+            }
+        }
+        crate::settings::atomic::write(&self.store, text.as_bytes(), crate::settings::atomic::STATE)
+            .map_err(|e| format!("無法更新終端對照表：{e}"))
     }
 }
 
@@ -3264,16 +3270,6 @@ fn normalize_title(raw: &str) -> Result<String, String> {
         return Err("標題含有不允許的字元".into());
     }
     Ok(t.to_string())
-}
-
-fn atomic_write(path: &Path, text: &str) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("無法建立終端對照表資料夾：{e}"))?;
-        }
-    }
-    crate::settings::atomic::write(path, text.as_bytes(), crate::settings::atomic::STATE)
-        .map_err(|e| format!("無法更新終端對照表：{e}"))
 }
 
 // 下面這段才是 Tauri 指令要的型別與正式進入點。核心邏輯在上面，測試不經過 Tauri。
@@ -8790,7 +8786,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("terms.json");
         std::fs::write(&p, "舊").unwrap();
-        atomic_write(&p, "新").unwrap();
+        crate::settings::atomic::write(&p, "新".as_bytes(), crate::settings::atomic::STATE).unwrap();
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "新");
         let left = std::fs::read_dir(d.path()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
         assert_eq!(left, 0);
@@ -8803,7 +8799,7 @@ mod tests {
         let p = d.path().join("terms.json");
         std::fs::create_dir(&p).unwrap();
         std::fs::write(p.join("keep.txt"), "舊").unwrap();
-        assert!(atomic_write(&p, "新").is_err());
+        assert!(crate::settings::atomic::write(&p, "新".as_bytes(), crate::settings::atomic::STATE).is_err());
         assert!(p.join("keep.txt").exists(), "目標不能被刪");
         let left = std::fs::read_dir(d.path()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
         assert_eq!(left, 0);

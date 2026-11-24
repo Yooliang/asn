@@ -196,7 +196,7 @@ fn account_dir(home: &Path, email: &str) -> R<PathBuf> {
 }
 
 // ---------- 檔案：原子寫入、權限 ----------
-use crate::claude_json::write_atomic;
+use crate::settings::atomic;
 
 /// 資料夾權限只給本人。Windows 用 icacls 拿掉繼承、只授權目前使用者；其他系統用 0700。
 /// 盡力而為（失敗只印固定字串，不影響功能；帳號庫本來就在家目錄底下，不是共享位置）。
@@ -516,7 +516,7 @@ fn read_usable_at(dir: &Path) -> Option<i64> {
 
 /// 記下「上次確認可用」：只寫時間。寫不成功不影響任何事（呼叫端不看結果）
 fn write_usable_at(dir: &Path, now_ms: i64) -> std::io::Result<()> {
-    write_atomic(&dir.join(USABLE_AT), now_ms.to_string().as_bytes())
+    atomic::write(&dir.join(USABLE_AT), now_ms.to_string().as_bytes(), atomic::SETTINGS)
 }
 
 pub fn list(home: &Path) -> Vec<AccountInfo> {
@@ -552,8 +552,8 @@ pub fn save_current(home: &Path) -> R<AccountInfo> {
     ensure_store(home);
     migrate_legacy(home);
     std::fs::create_dir_all(&dir)?;
-    write_atomic(&dir.join(CRED), &cred)?;
-    write_atomic(&dir.join(FRAG), frag.as_bytes())?;
+    atomic::write(&dir.join(CRED), &cred, atomic::SETTINGS)?;
+    atomic::write(&dir.join(FRAG), frag.as_bytes(), atomic::SETTINGS)?;
     list(home).into_iter().find(|a| a.email == email).ok_or(AccErr::NotFound)
 }
 
@@ -859,15 +859,15 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
             let l = who(c);
             let (ok, what) = verdict(&l, &owner.uuid, &owner.email);
             if ok {
-                write_atomic(&owner.dir.join(CRED), c)?;
-                write_atomic(&owner.dir.join(FRAG), frag.as_bytes())?;
+                atomic::write(&owner.dir.join(CRED), c, atomic::SETTINGS)?;
+                atomic::write(&owner.dir.join(FRAG), frag.as_bytes(), atomic::SETTINGS)?;
                 let _ = std::fs::remove_file(owner.dir.join(QUAR)); // 已有核對過的新權杖，舊的隔離檔沒用了
                 // 上次確認可用（#1512 C）：只記時間；寫失敗不影響切換（不用 ?，不改切換的流程）
                 let _ = write_usable_at(&owner.dir, crate::auth::now_ms() as i64);
                 elog!("切走前核對 {}：{what}，已回存", owner.email);
             } else if matches!(l, Lookup::Timeout | Lookup::Failed) {
                 // 查不到不代表不對：先隔離，切回這個帳號時再查（#591）
-                write_atomic(&owner.dir.join(QUAR), c)?;
+                atomic::write(&owner.dir.join(QUAR), c, atomic::SETTINGS)?;
                 elog!("切走前核對 {}：{what}，先存成隔離檔，切回時再核對", owner.email);
             } else {
                 elog!("切走前核對 {}：{what}，這次不回存", owner.email);
@@ -913,22 +913,22 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
     }
     // 每個檔各記一個切換前的狀態：本來有就存內容，本來沒有就留一個空的記號（還原時刪掉新寫的那份）
     match &old_cred {
-        Some(c) => write_atomic(&bk.join("credentials.json"), c)?,
-        None => write_atomic(&bk.join(ABSENT_CRED), b"")?,
+        Some(c) => atomic::write(&bk.join("credentials.json"), c, atomic::SETTINGS)?,
+        None => atomic::write(&bk.join(ABSENT_CRED), b"", atomic::SETTINGS)?,
     }
     match &old_cj {
-        Some(t) => write_atomic(&bk.join("claude.json"), t.as_bytes())?,
-        None => write_atomic(&bk.join(ABSENT_CJ), b"")?,
+        Some(t) => atomic::write(&bk.join("claude.json"), t.as_bytes(), atomic::SETTINGS)?,
+        None => atomic::write(&bk.join(ABSENT_CJ), b"", atomic::SETTINGS)?,
     }
     bump_switch_seq(home);
 
     // 4. 原子寫入；任何一步失敗就還原
     let apply = || -> std::io::Result<()> {
-        write_atomic(&cred_path(home), &tgt_cred)?;
+        atomic::write(&cred_path(home), &tgt_cred, atomic::SETTINGS)?;
         if fault == Fault::AfterCredentials {
             return Err(std::io::Error::other("injected"));
         }
-        write_atomic(&cj_path(home), new_cj.as_bytes())
+        atomic::write(&cj_path(home), new_cj.as_bytes(), atomic::SETTINGS)
     };
     if let Err(e) = apply() {
         let gone_ok = |r: std::io::Result<()>| match r {
@@ -936,11 +936,11 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
             _ => Ok(()),
         };
         let r1 = match &old_cred {
-            Some(c) => write_atomic(&cred_path(home), c),
+            Some(c) => atomic::write(&cred_path(home), c, atomic::SETTINGS),
             None => gone_ok(std::fs::remove_file(cred_path(home))),
         };
         let r2 = match &old_cj {
-            Some(t) => write_atomic(&cj_path(home), t.as_bytes()),
+            Some(t) => atomic::write(&cj_path(home), t.as_bytes(), atomic::SETTINGS),
             None => gone_ok(std::fs::remove_file(cj_path(home))),
         };
         return Err(if r1.is_err() || r2.is_err() {
@@ -951,7 +951,7 @@ pub fn switch_impl(home: &Path, email: &str, fault: Fault, who: &dyn Fn(&[u8]) -
     }
     match quar_done {
         Some(true) => {
-            write_atomic(&dir.join(CRED), &tgt_cred)?;
+            atomic::write(&dir.join(CRED), &tgt_cred, atomic::SETTINGS)?;
             let _ = std::fs::remove_file(dir.join(QUAR));
         }
         Some(false) => {
@@ -974,12 +974,12 @@ pub fn undo_last_switch(home: &Path) -> R<String> {
     };
     // 登入檔：本來有就寫回內容；本來沒有（有「不存在」記號）就刪掉切換新寫的那份，算還原成功
     match std::fs::read(bk.join("credentials.json")) {
-        Ok(cred) => write_atomic(&cred_path(home), &cred)?,
+        Ok(cred) => atomic::write(&cred_path(home), &cred, atomic::SETTINGS)?,
         Err(_) if bk.join(ABSENT_CRED).exists() => gone_ok(std::fs::remove_file(cred_path(home)))?,
         Err(_) => return Err(no_backup()),
     }
     match std::fs::read(bk.join("claude.json")) {
-        Ok(t) => write_atomic(&cj_path(home), &t)?,
+        Ok(t) => atomic::write(&cj_path(home), &t, atomic::SETTINGS)?,
         Err(_) if bk.join(ABSENT_CJ).exists() => gone_ok(std::fs::remove_file(cj_path(home)))?,
         Err(_) => {}
     }

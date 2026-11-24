@@ -71,12 +71,6 @@ pub fn windows_key(raw: &str) -> String {
     s.replace('\\', "/")
 }
 
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    path.parent().ok_or_else(|| std::io::Error::other("no parent"))?;
-    // 帳號與憑證相關檔：設定類（fsync）；暫存檔名由統一寫入決定
-    crate::settings::atomic::write(path, bytes, crate::settings::atomic::SETTINGS)
-}
-
 fn skip_ws(b: &[u8], mut i: usize) -> usize {
     while i < b.len() && (b[i] as char).is_ascii_whitespace() {
         i += 1;
@@ -336,7 +330,7 @@ pub fn ensure_project_trusted(home: &Path, project_key: &str) -> Result<TrustWri
     let Ok(meta) = std::fs::metadata(&path) else {
         let body = minimal_new_file(project_key);
         validate_json(&body)?;
-        write_atomic(&path, body.as_bytes())?;
+        crate::settings::atomic::write(&path, body.as_bytes(), crate::settings::atomic::SETTINGS)?;
         return Ok(TrustWrite::Created);
     };
     let mtime_before = meta.modified().ok();
@@ -347,7 +341,7 @@ pub fn ensure_project_trusted(home: &Path, project_key: &str) -> Result<TrustWri
     if out == text {
         return Ok(TrustWrite::Noop);
     }
-    write_atomic(&path, out.as_bytes())?;
+    crate::settings::atomic::write(&path, out.as_bytes(), crate::settings::atomic::SETTINGS)?;
     if let (Some(b), Ok(a)) = (mtime_before, std::fs::metadata(&path).and_then(|m| m.modified())) {
         if b == a && out != text {
             // 部分檔案系統 mtime 粒度較粗；內容已變仍算 Updated

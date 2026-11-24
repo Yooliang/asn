@@ -92,7 +92,7 @@ fn write_if_changed(p: &Path, text: &str) -> Result<(), String> {
     if std::fs::read_to_string(p).ok().as_deref() == Some(text) {
         return Ok(());
     }
-    crate::claude_json::write_atomic(p, text.as_bytes()).map_err(|e| format!("無法寫入 {}：{e}", p.display()))
+    crate::settings::atomic::write(p, text.as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("無法寫入 {}：{e}", p.display()))
 }
 
 /// Windows 的 8.3 短路徑（路徑必須已存在）。失敗回 None；磁碟關了 8.3 時會回原本的長路徑。

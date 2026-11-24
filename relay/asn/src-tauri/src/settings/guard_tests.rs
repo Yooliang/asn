@@ -18,6 +18,9 @@
 //! 5. 巨集展開出來的程式、`cfg_attr`、`#[cfg(any(test, …))]` 都當正式碼，不特別處理。
 //!    例：procscan.rs 的 fake_proc_tests，因為 cfg 裡含 `not(`／`any(`，被當成正式碼掃（不影響結果，只是多掃）。
 //! 6. 切割時結構不完整（找不到結尾）會直接 panic 並指出檔名與行號，不會悄悄當成整檔都是測試碼。
+//! 7. 路徑如果經過函式參數或回傳值才傳進讀寫，守門抓不到（只看「檔名字樣」和「讀寫動作」是否在相鄰行）。
+//!    例：`launch/config.rs` 在第 16 行組出 launcher.json 的路徑並回傳，到第 63 行起才以參數接手去讀，兩處相隔太遠；agents.json 則是把路徑
+//!    交給 `load_workers_config` 處理，實作沒有追進去。這兩個都是使用者手寫、不搬進設定層的檔（乙組），靠審查補。
 //!
 //! 兩份待搬／例外清單的規則比照 `test/invoke-exit.test.mjs`：次數只准變少、不准變多；
 //! 變少時清單也要同步改，否則一樣紅（讓清單只會縮、不會留著過期的空白支票）。
@@ -51,12 +54,12 @@ const PENDING_JSON: &[(&str, usize)] = &[
     ("bridge/forward_selftest.rs", 3),    // 自我測試產生的 sender-settings.json、recv-settings.json 兩個檔（給 claude --settings 讀的產生檔，R54；同一行兩處，以前只算一次）；第 3 處是 SELFTEST_FILE 常數的讀寫（#2232 B 常數追蹤新增，自我測試結果＝狀態）
     ("bridge/rooms.rs", 2),                // rooms-held.json（佇列）、rooms-cursor.json（游標，Node 橋共用格式）
     // ---- #2232 B 擴大規則（檔名常數、File::open／fs::read／rename 等）新掃出的命中；逐一看過都是狀態／佇列／憑證／標記檔，沒有「設定類該走共用層卻沒走」的，所以沒有「待搬」項 ----
-    ("bridge/core/outbox.rs", 1),         // OUTBOX_FILE reply-outbox.json：待重送的回信佇列（丙組）
+    ("bridge/core/outbox.rs", 1),         // OUTBOX_FILE reply-outbox.json：待重送的回信佇列（丙組）。實際計到的只有 1 處：load_with 裡「改名失敗」那句 log 訊息用到 OUTBOX_FILE，且緊鄰標記檔的 read_to_string；真正讀寫寄件匣的地方是用 file 變數（先 join(OUTBOX_FILE) 再傳），守門追不到（已知限制 7）
     ("bridge/core/upstream_retry.rs", 1), // RETRY_FILE retry-pending.json：上游重試佇列（丙組）
     ("bridge/engines/partner_queue.rs", 1), // PARTNERS_FILE acp-partners.json：ACP 夥伴的登記狀態（丙組）
     ("bridge/forward_gate.rs", 1),        // INFLIGHT_FILE forward-inflight.json：轉交進行中的標記（狀態）
     ("claude_accounts.rs", 9),            // 讀寫 Claude 的 .credentials.json／.claude.json（外部程式的檔）與帳號庫的 account.json／憑證備份（憑證類，明確不搬進設定層；以前檔名在常數裡掃不到）
-    ("claude_extra.rs", 1),               // CREDENTIALS／STOPS：額外帳號的憑證檔與停用狀態（憑證／狀態類）
+    ("claude_extra.rs", 1),               // 計到的是 read_dir 裡讀 CREDENTIALS（額外帳號的 .credentials.json 憑證檔，fs::read）1 處；STOPS（claude-extra-stops.json 停用狀態）的路徑經 stops_path 函式回傳才讀，守門沒計到（已知限制 7）；寫入走 atomic::write，不算
     ("cli/send_rate.rs", 2),              // FILE send-rate.json、REFUNDED send-refunded.json：送信頻率計數（計數類，丙組）
     ("datadir.rs", 1),                    // MARKER：資料夾搬遷完成的標記檔（一次性標記，不是設定）
     ("device_id.rs", 1),                  // KNOWN_FILE device_known.json：已知設備清單（狀態；與金鑰同一支，刻意維持自己的寫法）
@@ -65,20 +68,16 @@ const PENDING_JSON: &[(&str, usize)] = &[
     ("lastlogin.rs", 1),                  // last-login.json：上次登入的記憶（狀態；寫入已走 atomic::write(STATE)，讀取是直接讀）
     ("launch/auto_resume.rs", 1),         // STATUS_FILE auto-resume.json：自動接回的狀態（狀態）
     ("launch/mux_round.rs", 1),           // RESUME_NOTICE_FILE mux-resume-notice.json：接回通知（狀態）
-    ("launch/mux_watch.rs", 2),           // STATE_FILE／NOTICE_FILE／BLIND_FILE：mux 監看的狀態、通知、盲區紀錄（狀態）
-    ("launch/wezterm_fetch.rs", 2),       // STATE_FILE fetch-state.json：wezterm 下載進度（狀態）＋隨包的 wezterm-pins.json（唯讀）
+    ("launch/mux_watch.rs", 2),           // 計到的是 BLIND_FILE（mux-blind.json 盲區紀錄）與 NOTICE_FILE（mux-notice.json 服務停通知）各一處 read_to_string（狀態）；STATE_FILE（mux-resume.json）的路徑由 state_file 函式回傳、以參數傳進讀寫，守門沒計到（已知限制 7）；寫入走 atomic::write，不算
+    ("launch/wezterm_fetch.rs", 2),       // STATE_FILE fetch-state.json（wezterm 下載退避紀錄，狀態）的兩處 read_to_string（read_fail 讀失敗種類與時間、read_fail_lib 讀缺少的函式庫名，各一處）；寫入走 atomic::write，不算；隨包的 wezterm-pins.json 是 include_str! 編進來的，不在讀寫動作內，沒有計到
     ("relay.rs", 2),                      // SPOOL_FILE window-spool.json：視窗訊息暫存佇列（佇列，丙組）
 ];
 
 /// 原子寫入重複實作：目前還允許的檔與次數（`fn write_atomic`／`fn atomic_write`／`fn save_atomic`、自己拼 `.tmp"`）。
 const PENDING_ATOMIC: &[(&str, usize)] = &[
-    // ---- 轉接函式：本身只是呼叫 settings::atomic::write（沒有自己寫 tmp），為了讓舊呼叫處不用大改而留著 ----
-    ("lib.rs", 1),                // crate::write_atomic：轉接到 atomic::write(STATE)
-    ("bridge/pending.rs", 1),     // save_atomic：轉接到 atomic::write(QUEUE)
-    ("claude_extra.rs", 1),       // write_atomic：轉接到 atomic::write（憑證，私有權限）
-    ("claude_json.rs", 1),        // write_atomic：轉接到 atomic::write(SETTINGS)
-    ("cli/send_rate.rs", 1),      // write_atomic：轉接到 atomic::write(STATE)
-    ("launch/term.rs", 1),        // atomic_write：先建資料夾再轉接到 atomic::write(STATE)，並把錯誤改成白話
+    // ---- 轉接函式：本身只是呼叫 settings::atomic::write（沒有自己寫 tmp）。#2232 C 已把 claude_extra、claude_json、cli/send_rate、launch/term 四個改成直接呼叫並刪掉；下面兩個還有呼叫端，留著 ----
+    ("lib.rs", 1),                // crate::write_atomic：轉接到 atomic::write(STATE)。仍有約 40 處呼叫（bridge/core.rs 屬 #2161 範圍，其餘分散在 bridge/、guard.rs、acct_remote.rs 等 20 多個檔），待另開單逐一改，改完才能刪
+    ("bridge/pending.rs", 1),     // save_atomic：轉接到 atomic::write(QUEUE)。只剩 bridge/core.rs（#2161 範圍）呼叫，待 #2161 一起改；outbox.rs 的三處已在 #2232 C 改成直接呼叫
     // ---- 不是「寫設定」，只是清掃或另有用途的 .tmp ----
     ("launch/mux.rs", 1),         // 清掉舊心跳檔旁的 .tmp（只刪不寫）
     ("stt.rs", 3),                // 語音模型下載／解壓用的 .tmp 資料夾，整個資料夾換名，不是單一檔案寫入；第 3 處是下載到 `.part` 再換名（大檔下載，#2232 B 新增）
@@ -232,6 +231,25 @@ fn 已搬進共用層的甲組檔案不在清單且計數為零() {
         }
     }
     assert!(hits.is_empty(), "已搬進共用層的設定檔又出現私有讀寫：{hits:?}\n怎麼辦：{HOW_TO}");
+}
+
+// 反例（#2267 一審建議）：這些寫法不該被判成命中；對照的正例確認規則真的有在運作
+#[test]
+fn 守門的反例不誤判() {
+    // 只有宣告那一行、旁邊沒有讀寫動作：不算（宣告不是讀寫）
+    assert_eq!(count_json("const F: &str = \"x.json\";"), 0);
+    assert_eq!(count_json("const F: &str = \"x.json\";\nfn f() {\n    let a = 1;\n}"), 0);
+    // 對照：同一個常數在讀寫動作旁被用到就算 1 處（宣告那行仍不算）
+    assert_eq!(count_json("const F: &str = \"x.json\";\nfn f() {\n    let a = 1;\n    let b = 2;\n    let s = std::fs::read_to_string(F);\n}"), 1);
+    // self.persist()（存檔方法）不是原子寫入的寫法
+    assert_eq!(count_atomic("fn save(&self) {\n    self.persist();\n    self.inner.persist()?;\n}"), 0);
+    // 對照：真正的 NamedTempFile 轉正寫法有算
+    assert_eq!(count_atomic("let f = tmp.persist_noclobber(&p)?;"), 1);
+    // Foo::new" 這類字樣（`::new` 後面接引號）不是 `.new"` 暫存檔名
+    assert_eq!(count_atomic("let x = Foo::new\"abc\";"), 0);
+    assert_eq!(count_atomic("let x = Foo::new(\"abc\");"), 0);
+    // 對照：真的把暫存檔取名成 `.new` 才算
+    assert_eq!(count_atomic("let t = format!(\"{}.new\", p);"), 1);
 }
 
 #[test]
