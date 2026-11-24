@@ -1,15 +1,11 @@
 {
-  "version": "0.2.95",
-  "notes": "- 改善：電腦版 LINE、現代外觀拿掉標題列，最小化／放大／關閉三顆鈕移到右上角；滑到放大鈕可以選 Windows 的分割版面",
-  "pub_date": "2026-11-24T17:12:09.378Z",
+  "version": "0.2.96",
+  "notes": "- 改善：看別台夥伴的終端時不再顯示藍色「只能看」提示列，正在看哪台、哪位改寫在輸入框的提示字裡",
+  "pub_date": "2026-11-24T19:58:00.423Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybisrSlBmM0tEdWVta2lYdWVhZjJ0d2hzd1o4OFJsRjFXOGFxRjNRNlQ5MGd3RGZNWTlUVHBvQm85YzA5aDF5bUg4VGFUelFMLzFVb2ZBYTg4K0kvV3c0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTQwMzI4CWZpbGU6QVNOXzAuMi45NV94NjQtc2V0dXAuZXhlClQ2OXF3ODlaQTdJcmYvUEg1Y3lTUWRNS0dkY2R4RXh4OVZ2NjNKUlhUeEM1M0pWeks1bllONWUxcksxVjdCOURlMEFnM0JCZXhNck45NENMeVU0ZUR3PT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.95_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZPcmJHUlZVMHA2bU5UK2lNZjdGT0ZlVjFURTJIcnQ4S0RaNWNWMktIb1RkejUySnJ6d1h6bFdadlNjdzE0dDNXSUJZREZ0S0svbm10RG5kbFlOc0FNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTQxMDMxCWZpbGU6QVNOXzAuMi45NV9hbWQ2NC5BcHBJbWFnZQp1T2VNcUp1S3BmRzhPbHZhZ3NkZG9TcjVIMzR5MEF6eWRxQi9CSXVlQXNGMEFUaWltRE5SM25XanFNVHhvSExMc0tSTzZ2bmljdDBLT3JEeGkyY3REQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.95_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjAxcDQ5ekU4NTBubmI1ZjF1V2RkYVdibWdOZHAwamF4OFFzMTdvdUtjVFB2c0k0cFRKN1g2SmluUzMyV212OXFyU3FYcmREOGppcG0rblpkM1U1ZlFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTUwMjgwCWZpbGU6QVNOXzAuMi45Nl94NjQtc2V0dXAuZXhlCm5CQ0grYXhhaEtDd2YzWlBvbUV1QW9GVVk5LzVZczhjUVFoMVhTVk5rSDJYU3VMMGdIOEhDMUNzK2R4Q1pwajh6cUVITksvSmt2d1o4eURtdFdFZENnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.96_x64-setup.exe"
     }
   }
 }
