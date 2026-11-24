@@ -392,7 +392,7 @@ test('min_interval_seconds 下限 1：插入 0 或負數的 kind 會失敗；rep
   assert.equal((await b.q("select has_table_privilege('authenticated', 'relay.report_rate', 'insert') a"))[0].a, false)
 })
 
-test('第二道防線的豁免：UUID、純 hex（32／40／64）、44 字元 base64 公鑰形狀不被擋；allow_secret 只放行該欄位；真的像金鑰的照擋', { skip }, async () => {
+test('第二道防線的豁免：預設只放行 UUID、32／40 位 hex；64 位 hex 與 44 字元 base64 要 allow_secret；allow_secret 只放行該欄位；真的像金鑰的照擋', { skip }, async () => {
   const b = await boot()
   const SP = { fields: { id: { type: 'string', max: 100 }, other: { type: 'string', max: 200 }, tok: { type: 'string', max: 200, allow_secret: true } }, allow_secret: ['listed'] }
   SP.fields.listed = { type: 'string', max: 200 }
@@ -402,12 +402,19 @@ test('第二道防線的豁免：UUID、純 hex（32／40／64）、44 字元 ba
   const MD5 = 'd41d8cd98f00b204e9800998ecf8427e'
   const PUB = 'dGhpcyBpcyBhIDMyIGJ5dGUgcHVibGljIGtleSEhISE='
   assert.equal(PUB.length, 44)
-  for (const [n, v] of Object.entries({ UUID, SHA256, SHA1, MD5, PUB })) assert.equal(await b.spec(SP, { id: v }), null, `${n} 預設放行`)
+  for (const [n, v] of Object.entries({ UUID, SHA1, MD5 })) assert.equal(await b.spec(SP, { id: v }), null, `${n} 預設放行`)
+  // 64 位 hex 與 44 字元 base64 與 32 位元組私鑰無法區分：預設擋，要在欄位明寫 allow_secret
+  for (const [n, v] of Object.entries({ SHA256, PUB })) {
+    assert.equal(await b.spec(SP, { id: v }), 'looks_like_secret', `${n} 預設擋`)
+    assert.equal(await b.spec(SP, { tok: v }), null, `${n} 在 allow_secret 欄位（欄位內）放行`)
+    assert.equal(await b.spec(SP, { listed: v }), null, `${n} 在 allow_secret 欄位（頂層陣列）放行`)
+    assert.equal(await b.spec(SP, { tok: v, other: v }), 'looks_like_secret', `${n}：other 沒豁免照擋`)
+  }
   // 前提：同樣長度、但不是上述形狀的真的會被擋
   const LONG = 'AbCdEfGhIjKlMnOpQrStUvWxYz0123456789'
   const JWT = 'eyJhbGciOiJI.eyJzdWIiOiIx.abc123'
   const SK = 'sk-proj-abcdef123456'
-  for (const [n, v] of Object.entries({ LONG, JWT, SK, hex33: SHA1 + 'a', b64_45: PUB + 'A', uuidplus: UUID + 'abcdef0123456789' })) {
+  for (const [n, v] of Object.entries({ LONG, JWT, SK, hex65: SHA256 + 'a', hex33: SHA1 + 'a', b64_45: PUB + 'A', uuidplus: UUID + 'abcdef0123456789' })) {
     assert.equal(await b.spec(SP, { id: v }), 'looks_like_secret', `${n} 仍被擋`)
   }
   // allow_secret：欄位內寫 true、或頂層陣列列欄位名；都只放行該欄位

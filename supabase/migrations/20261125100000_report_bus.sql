@@ -4,10 +4,11 @@
 -- 內容：
 --   1. relay.report_kinds（登記表）、relay.reports（最新值，主鍵 (node, kind)，節點刪除時連帶清掉）。兩張表啟用 RLS、不開任何 policy、收回權限。
 --   2. 驗證：relay.report_check_value／report_check_spec（通用宣告式規格，未列欄位一律拒絕；預設擋疑似 email 與疑似金鑰）、relay.report_validate（查登記表、大小、spec、validator）。
---   （規格內欄位可用 allow_email／allow_secret 豁免第二道防線；UUID、32/40/64 位 hex、44 字元 base64 公鑰形狀預設不算金鑰。）
+--   （規格內欄位可用 allow_email／allow_secret 豁免第二道防線；整串是 UUID 或 32／40 位 hex 預設不算金鑰；64 位 hex 與 44 字元 base64 一律要 allow_secret。）
 --   3. 寫入 public.asn_relay_report：雜湊去重、保活、伺服器端頻率限制（同節點同 kind 最小間隔；每節點滾動約 60 秒總量上限，數的是寫入次數、存 relay.report_rate）。不影響 nodes.last_seen_at。
 --   4. 讀取 public.asn_relay_report_get ＋ relay.report_can_read／relay.report_readers（self／owner／room 三種範圍，同一份可見規則）。
 --   5. 只登記一個測試用 kind：echo。
+-- 每節點總量上限（relay.report_rate）是防濫用的軟限制、不是精確配額：鎖只鎖到 (node, kind)，同節點不同 kind 併發時可能多放 1～2 次，計數桶窗口也只是近似。
 -- 事件型（mode='event'）只預留欄位與約定，本段不實作（事件不覆蓋最新值，之後另開單，避免各自寫各自的）。
 -- 授權：函式一律 security definer、search_path 空；對外的 public.* 只授權 service_role；relay.* 內部函式只收回 public／anon／authenticated。
 -- 回復：supabase/sql/rollback/20261125100000_report_bus_down.sql（drop 函式與兩張表）。
@@ -94,15 +95,14 @@ begin
     end if;
     -- 疑似金鑰：長度 32 以上的連續英數／底線／減號／加號／等號片段，或 JWT、sk- 開頭。
     -- 整個字串剛好是下列常見的非機密形狀時，不算長片段（避免誤擋）：標準 UUID（8-4-4-4-12）、
-    -- 純 hex 且長度恰為 32／40／64（MD5／SHA-1／SHA-256 形狀）、44 字元以 = 結尾的 base64（32 位元組公鑰形狀）。
-    -- 取捨：這三種形狀的字串也可能真的是機密（例如 32 位元組的私鑰、64 位 hex 的金鑰）；規格層無從分辨，
-    -- 所以只豁免「整串吻合」者，且金鑰欄位不該放進 payload；欄位明確要收長 token 時用 allow_secret 放行。
+    -- 純 hex 且長度恰為 32／40（MD5／SHA-1 這類雜湊，不是金鑰）。
+    -- 刻意不豁免 64 位 hex 與 44 字元以 = 結尾的 base64：這正是 32 位元組私鑰最常見的兩種長相，
+    -- 與 SHA-256 雜湊或公鑰在字串上無法區分，預設一律擋；欄位確實要收（例如公鑰、SHA-256）時，在該欄位明寫 allow_secret。
     -- JWT 與 sk- 開頭不豁免（除非 allow_secret）。
     if not (coalesce((p_def ->> 'allow_secret')::boolean, false) or ('secret:' || p_key) = any (p_allow)) then
       if (v_s ~ '[A-Za-z0-9_+=-]{32,}'
             and v_s !~ '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
-            and v_s !~ '^([0-9A-Fa-f]{32}|[0-9A-Fa-f]{40}|[0-9A-Fa-f]{64})$'
-            and v_s !~ '^[A-Za-z0-9+/]{43}=$')
+            and v_s !~ '^([0-9A-Fa-f]{32}|[0-9A-Fa-f]{40})$')
          or v_s ~ '^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.' or v_s ~ '^sk-[A-Za-z0-9_-]{8,}' then
         return 'looks_like_secret';
       end if;
@@ -217,6 +217,8 @@ end;
 $function$;
 
 -- ===== 寫入 =====
+-- 已知近似：鎖只鎖到 (node, kind)，同一節點不同 kind 併發時，每節點總量上限可能多放 1～2 次；
+-- 計數桶也是近似（窗口實際約 60～70 秒）。這個上限是防濫用的軟限制，不是精確配額。
 create or replace function public.asn_relay_report(p_node text, p_kind text, p_payload jsonb)
  returns jsonb
  language plpgsql
@@ -234,7 +236,7 @@ declare
   v_hash text;
   v_since_write numeric;
   v_cnt int;
-  v_bucket bigint := floor(extract(epoch from now()) / 10);
+  v_bucket bigint := floor(extract(epoch from now()) / c_bucket);
   v_oldest bigint;
 begin
   if p_node is null or p_kind is null or not exists (select 1 from relay.nodes where id = p_node and status = 'active') then
@@ -271,7 +273,7 @@ begin
   end if;
   insert into relay.report_rate (node, bucket, n) values (p_node, v_bucket, 1)
     on conflict (node, bucket) do update set n = relay.report_rate.n + 1;
-  delete from relay.report_rate where node = p_node and bucket <= v_bucket - c_buckets - 6;   -- 順手清自己的過期桶
+  delete from relay.report_rate where node = p_node and bucket <= v_bucket - c_buckets * 2;   -- 順手清自己的過期桶
   if not v_found then
     insert into relay.reports (node, kind, payload, hash, size, updated_at, changed_at, written_at)
       values (p_node, p_kind, p_payload, v_hash, octet_length(p_payload::text), now(), now(), now());
