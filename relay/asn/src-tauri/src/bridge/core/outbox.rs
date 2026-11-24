@@ -203,7 +203,7 @@ impl Outbox {
                         } else {
                             notify = true;
                             if let Some(sg) = &sig {
-                                if let Err(we) = pending::save_atomic(&mark, sg) {
+                                if let Err(we) = crate::settings::atomic::write(&mark, sg.to_string().as_bytes(), crate::settings::atomic::QUEUE) {
                                     logs.push(format!("reply outbox: 寫標記檔 {OUTBOX_FILE}{BAD_MARK} 失敗：{we}"));
                                 }
                             }
@@ -255,7 +255,7 @@ impl Outbox {
                 _ => Ok(()),
             };
         }
-        pending::save_atomic(&self.tomb_path(), &json!(self.tomb))
+        crate::settings::atomic::write(&self.tomb_path(), json!(self.tomb).to_string().as_bytes(), crate::settings::atomic::QUEUE)
     }
 
     /// 放棄時寄件匣存不進檔：另記一筆「這封信已放棄」，免得重開後舊片段又被寄出去
@@ -287,7 +287,7 @@ impl Outbox {
 
     fn save(&mut self, items: &[OutboxItem]) -> std::io::Result<()> {
         let v: Value = serde_json::from_str(&file_text(items)).unwrap_or(Value::Null);
-        pending::save_atomic(&self.file, &v)?;
+        crate::settings::atomic::write(&self.file, v.to_string().as_bytes(), crate::settings::atomic::QUEUE)?;
         // 存檔成功＝存檔裡已不含已放棄的舊片段，小檔不再需要
         if !self.tomb.is_empty() {
             self.tomb.clear();

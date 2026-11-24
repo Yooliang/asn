@@ -58,7 +58,7 @@ fn command_of(v: &Value) -> Option<&str> {
 
 fn write_checked(path: &Path, bak: &Path, new: &Value, expect_cmd: Option<&str>) -> Result<(), String> {
     let text = serde_json::to_string_pretty(new).map_err(|e| e.to_string())?;
-    crate::claude_json::write_atomic(path, text.as_bytes()).map_err(|e| format!("寫入 settings.json 失敗：{e}"))?;
+    crate::settings::atomic::write(path, text.as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("寫入 settings.json 失敗：{e}"))?;
     // 寫完讀回核對：statusLine.command 要是預期的，其他鍵一個都不能少
     let ok = match read_settings(path) {
         Ok(b) => command_of(&b) == expect_cmd && new.as_object().is_some_and(|n| n.keys().filter(|k| *k != "statusLine").all(|k| b.get(k) == new.get(k))),
@@ -67,7 +67,7 @@ fn write_checked(path: &Path, bak: &Path, new: &Value, expect_cmd: Option<&str>)
     if !ok {
         if let Ok(old) = std::fs::read(bak) {
             // 還原備份失敗也只能回錯誤：呼叫端會寫 log，備份檔還在
-            let _ = crate::claude_json::write_atomic(path, &old);
+            let _ = crate::settings::atomic::write(path, &old, crate::settings::atomic::SETTINGS);
         }
         return Err("寫完核對不一致（可能同時有別的程式在改），已還原成原來的內容".into());
     }

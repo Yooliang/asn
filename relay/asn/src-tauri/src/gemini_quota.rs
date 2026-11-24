@@ -239,7 +239,7 @@ fn record_at(home: &Path, r: &Reading, reads: (Option<i64>, Option<i64>), now_ms
     }
     let obj: Map<String, Value> = all.iter().map(|(k, e)| (k.clone(), entry_to_value(e))).collect();
     let text = serde_json::to_string(&Value::Object(obj)).map_err(|e| e.to_string())?;
-    crate::claude_json::write_atomic(&path(home), text.as_bytes()).map_err(|e| e.to_string())?;
+    crate::settings::atomic::write(&path(home), text.as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())?;
     Ok(true)
 }
 

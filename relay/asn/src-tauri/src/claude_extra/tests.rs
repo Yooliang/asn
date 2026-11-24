@@ -5,6 +5,12 @@ use crate::nowin::NoWindow;
 const NOW: i64 = 1_793_000_000_000;
 const MIN: i64 = 60_000;
 
+/// 與正式碼 refresh 裡寫憑證的選項一致（fsync、私有、不建父資料夾）；測試直接走統一寫入
+fn write_cred(path: &Path, value: &Value) -> Result<(), ()> {
+    let o = crate::settings::atomic::Opts { fsync: true, private: true, create_dirs: false };
+    crate::settings::atomic::write(path, value.to_string().as_bytes(), o).map_err(|_| ())
+}
+
 fn login(dir: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join(CREDENTIALS), r#"{"claudeAiOauth":{"accessToken":"a","refreshToken":"r","expiresAt":1}}"#).unwrap();
@@ -114,7 +120,7 @@ fn write_atomic_replaces_and_leaves_no_temp() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join(CREDENTIALS);
     std::fs::write(&p, "old").unwrap();
-    write_atomic(&p, &json!({ "new": true })).unwrap();
+    write_cred(&p, &json!({ "new": true })).unwrap();
     assert_eq!(std::fs::read_to_string(&p).unwrap(), r#"{"new":true}"#);
     assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
 }
@@ -125,7 +131,7 @@ fn write_atomic_failure_keeps_old_file() {
     // 目標是資料夾：改名一定失敗
     let target = d.path().join("target");
     std::fs::create_dir_all(target.join("inside")).unwrap();
-    assert!(write_atomic(&target, &json!({ "new": true })).is_err());
+    assert!(write_cred(&target,&json!({ "new": true })).is_err());
     assert!(target.join("inside").is_dir());
     let names: Vec<_> = std::fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(names, [std::ffi::OsString::from("target")], "暫存檔要清掉");
@@ -239,7 +245,7 @@ fn written_credentials_are_private() {
     use std::os::unix::fs::PermissionsExt;
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join(CREDENTIALS);
-    write_atomic(&p, &json!({})).unwrap();
+    write_cred(&p, &json!({})).unwrap();
     assert_eq!(std::fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
 }
 
@@ -256,7 +262,7 @@ fn write_atomic_waits_for_briefly_locked_file() {
         std::thread::sleep(std::time::Duration::from_millis(200));
         drop(held);
     });
-    write_atomic(&p, &json!({ "new": true })).unwrap();
+    write_cred(&p, &json!({ "new": true })).unwrap();
     release.join().unwrap();
     assert_eq!(std::fs::read_to_string(&p).unwrap(), r#"{"new":true}"#);
 }

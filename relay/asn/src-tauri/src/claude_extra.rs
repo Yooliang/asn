@@ -149,15 +149,6 @@ pub fn merged(raw: &Value, got: &Value, now_ms: i64) -> Option<Value> {
     Some(out)
 }
 
-/// 先寫同資料夾的暫存檔再改名：任何一步失敗，舊檔都還在，暫存檔也清掉。
-/// 改名失敗要再試：Windows 上防毒或索引程式短暫開著檔案就會失敗，而這時舊的 refresh token 已經作廢，放棄就要重新登入。
-/// 重試由 settings::atomic 負責，只認 Windows 的 5／32／33（存取被拒、共用違規、鎖定違規），最多 5 次、每次隔 200 毫秒。
-pub fn write_atomic(path: &Path, value: &Value) -> Result<(), ()> {
-    // 憑證只有本人能讀（Unix 0600；Windows 繼承資料夾的權限）；要 fsync；不建父資料夾
-    let o = crate::settings::atomic::Opts { fsync: true, private: true, create_dirs: false };
-    crate::settings::atomic::write(path, value.to_string().as_bytes(), o).map_err(|_| ())
-}
-
 /// 重置時間可能帶小數秒與時區偏移：明寫了偏移就換成 UTC；沒寫時區的不猜（iso_or_none，#1195）
 fn reset_iso(v: &Value) -> Option<String> {
     let s = v.as_str()?;
@@ -191,7 +182,12 @@ async fn refresh(home: &Path, name: &str, path: &Path, raw: &Value, mark: Option
     let req = client()?.post(TOKEN_URL).json(&body).header("user-agent", "asn-quota-reader");
     let got = get_json(req).await.map_err(|_| stop(()))?;
     let new = merged(raw, &got, now_ms).ok_or(()).map_err(stop)?;
-    write_atomic(path, &new).map_err(stop)?;
+    // 先寫同資料夾的暫存檔再改名：任何一步失敗，舊檔都還在，暫存檔也清掉。
+    // 改名失敗要再試：Windows 上防毒或索引程式短暫開著檔案就會失敗，而這時舊的 refresh token 已經作廢，放棄就要重新登入。
+    // 重試由 settings::atomic 負責，只認 Windows 的 5／32／33（存取被拒、共用違規、鎖定違規），最多 5 次、每次隔 200 毫秒。
+    // 憑證只有本人能讀（Unix 0600；Windows 繼承資料夾的權限）；要 fsync；不建父資料夾
+    let o = crate::settings::atomic::Opts { fsync: true, private: true, create_dirs: false };
+    crate::settings::atomic::write(path, new.to_string().as_bytes(), o).map_err(|_| ()).map_err(stop)?;
     Ok(new[OAUTH_KEY].clone())
 }
 

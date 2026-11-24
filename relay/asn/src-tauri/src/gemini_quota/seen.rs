@@ -113,7 +113,7 @@ impl Seen {
         if let Some(d) = p.parent() {
             let _ = std::fs::create_dir_all(d);
         }
-        let _ = crate::claude_json::write_atomic(&p, text.as_bytes());
+        let _ = crate::settings::atomic::write(&p, text.as_bytes(), crate::settings::atomic::SETTINGS);
     }
 
     /// 這個視窗這次讀到的數值：更新記住的值，回每條窗該怎麼處理
