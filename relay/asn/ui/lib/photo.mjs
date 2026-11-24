@@ -97,8 +97,24 @@ export function photoExpired(p, now = Date.now()) {
 }
 
 // 最近看過的大圖（附件編號 → data URL），最多 max 張，超過丟最久沒看的。只放在記憶體，關掉 App 就沒了
-export function recentPhotos(max = VIEWER_RECENT_MAX) {
-  const m = new Map()
+// 對話裡直接顯示圖片（#1911）後多三樣：maxChars＝所有大圖字串長度的總量上限（一串多張不會互相擠掉，也不會無限長大）、
+// pin／unpin＝畫面上看得到的圖不丟、subscribe＝內容有變（新增、丟掉、清空）就通知畫面重畫。最新放進去的那張一定留著
+export function recentPhotos(max = VIEWER_RECENT_MAX, { maxChars = Infinity } = {}) {
+  const m = new Map(), pinned = new Set(), subs = new Set()
+  let chars = 0
+  const len = v => (typeof v === 'string' ? v.length : 0)
+  const notify = () => { for (const f of [...subs]) { try { f() } catch { /* 訂閱者壞了不影響存取 */ } } }
+  const drop = id => { if (m.has(id)) { chars -= len(m.get(id)); m.delete(id) } }
+  function trim() {
+    let changed = false
+    while (m.size > 1 && (m.size > max || chars > maxChars)) {
+      const keys = [...m.keys()]
+      const victim = keys.slice(0, -1).find(k => !pinned.has(k))
+      if (victim === undefined) break
+      drop(victim); changed = true
+    }
+    return changed
+  }
   return {
     get(id) {
       if (!m.has(id)) return null
@@ -106,17 +122,27 @@ export function recentPhotos(max = VIEWER_RECENT_MAX) {
       m.delete(id); m.set(id, v)
       return v
     },
+    peek: id => (m.has(id) ? m.get(id) : null),   // 只看不算「最近看過」（畫面重畫時用）
+    has: id => m.has(id),
     set(id, v) {
-      m.delete(id); m.set(id, v)
-      while (m.size > max) m.delete(m.keys().next().value)
+      drop(id); m.set(id, v); chars += len(v)
+      trim(); notify()
     },
-    clear() { m.clear() },
+    pin(id) { pinned.add(id) },
+    unpin(id) { pinned.delete(id) },
+    subscribe(fn) { subs.add(fn); return () => subs.delete(fn) },
+    clear() { m.clear(); chars = 0; notify() },
     get size() { return m.size },
+    get chars() { return chars },
   }
 }
 
-// 這個畫面共用的一份：登入、登出、Rust 通知快取清空（attach-cache-cleared）時都會清掉，換人登入看不到上一個帳號的圖
-export const shownPhotos = recentPhotos()
+export const INLINE_RECENT_MAX = 80                 // 對話裡直接顯示：最多記幾張
+export const INLINE_RECENT_CHARS = 32 * 1024 * 1024  // 以及所有大圖加起來的字串長度上限（約 24 MB 的圖）
+
+// 這個畫面共用的一份：登入、登出、Rust 通知快取清空（attach-cache-cleared）時都會清掉，換人登入看不到上一個帳號的圖。
+// 大圖放在這裡，對話裡直接顯示與點開大圖共用；畫面上看得到的圖會被釘住不丟，捲出畫面後才依「最久沒看」與總量上限丟
+export const shownPhotos = recentPhotos(INLINE_RECENT_MAX, { maxChars: INLINE_RECENT_CHARS })
 
 // 附件的到期時間 → 毫秒（給 Rust 的快取只存到這個時間）；沒有或格式不對回 null
 export function expiryMs(p) {

@@ -155,6 +155,7 @@
 :root[data-skin="modern"] .avb.xl .pin-dot{right:4px;bottom:4px;width:26px;height:26px;padding:5px;border-width:3px}
 
 /* ---------- 看大圖的另存、關閉與左右切換（#1728）：現代＝半透明白圓鈕＋白色線條圖示；到頭的那一顆透明度 .35 ---------- */
+:root[data-skin="modern"]{--att-r:12px}
 :root[data-skin="modern"] .photo-viewer .pv-btn{border:0;border-radius:50%;background:rgba(255,255,255,.18);color:#fff;box-shadow:none}
 :root[data-skin="modern"] .photo-viewer .pv-btn:hover:not(:disabled){background:#2f7a70}
 :root[data-skin="modern"] .photo-viewer .pv-btn:disabled{opacity:.4}

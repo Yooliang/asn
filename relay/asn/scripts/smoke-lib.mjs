@@ -1094,7 +1094,12 @@ export const injectSource = table => `(() => {
       // 探測中途換掉某個指令的回應（例如「剛裝好 Claude，再偵測一次」）：頁面設 globalThis.__smokeOverride = { 指令: 值 }
       if (globalThis.__smokeOverride && Object.prototype.hasOwnProperty.call(globalThis.__smokeOverride, cmd)) return JSON.parse(JSON.stringify(globalThis.__smokeOverride[cmd]));
       const v = T[cmd];
-      if (v && typeof v === 'object' && v.by) { const k = args && args[v.by]; return Object.prototype.hasOwnProperty.call(v.values, k) ? v.values[k] : v.fallback }
+      if (v && typeof v === 'object' && v.by) {
+        const k = args && args[v.by], r = Object.prototype.hasOwnProperty.call(v.values, k) ? v.values[k] : v.fallback;
+        if (r && r.__hang) return new Promise(() => {});   // 這一筆永遠不回（#1911：圖片一直在下載中）
+        if (r && r.__fail) throw r.__fail;                  // 這一筆回錯誤（#1911：圖片沒載入成功）
+        return r;
+      }
       return v === undefined ? null : JSON.parse(JSON.stringify(v));
     } },
   };

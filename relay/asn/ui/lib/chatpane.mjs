@@ -14,6 +14,9 @@ import { MENTION_MORE_HINT, applyMention, markMentions, mentionOptions, mentionQ
 import { FILE_ACCEPT, expiryMs, formatBytes, photoExpired, photoTitle, queueStepText, queueSummary, sendInOrder, shownPhotos } from './photo.mjs'
 import { attachmentFromFile, imageFromBlob } from './photo-canvas.mjs'
 import { createZoom, zoomStyle } from './photo-zoom.mjs'
+import { actionItems, actsMode, autoFetchOk, bigButtonText, createFetchQueue, gridCell, inlineBox, inlineState, remainText, useGrid } from './photo-inline.mjs'
+import { AttActions } from './att-actions.mjs'
+import { AttPhoto } from './att-photo.mjs'
 import { fetchLogLine, keyDir, locate, navState, photoSeq, stepIndex, stepLogLine, swipeDir } from './photo-nav.mjs'
 import { Annotator } from './annotator.mjs'
 import { ActionBar, canOfferConsole, groupMenuItems, opsMenuItems, sameFriend } from './actionbar.mjs'
@@ -46,15 +49,16 @@ import { clockLabel, composeFieldHeight, lineRows, sentStateText } from './line-
 import { MEMBER_NOT_FRIEND } from './groups.mjs'
 import { githubUrl, linkRefs, parseRepo, refOf, refRange, refTip } from './msg-ref.mjs'
 
-const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, reactive } = Vue
+const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, onUpdated, reactive } = Vue
 // 看過的大圖：同一個畫面裡再點同一張不必再跨到 Rust（#1493）。登入、登出時清掉（photo.mjs）
 const recentShown = shownPhotos
 const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', awaiting: '等你在那台電腦按確認', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
 
 export const ChatPane = {
   name: 'ChatPane',
-  components: { ...UI_KIT, Annotator, ActionBar, CallView, ConfirmCards, AsnAvatar, TermView, RemoteView, RemoteInput },
+  components: { ...UI_KIT, Annotator, ActionBar, CallView, ConfirmCards, AsnAvatar, TermView, RemoteView, RemoteInput, AttActions, AttPhoto },
   props: {
+    phone: { type: Boolean, default: false },      // 手機：對話裡的圖片自動下載的大小門檻較小（1.5 MB，電腦 3 MB）、圖框較小、動作列多「分享」（#1911）
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
     friendAv: { type: String, default: '' },       // 大頭貼圖片網址（自動產生或設備上傳）
@@ -532,6 +536,76 @@ export const ChatPane = {
     async function revealSaved() {
       try { await props.photoApi.reveal() } catch (e) { photoMsg.value = plainMessage(e); savedHere.value = false }
     }
+    // ---- 對話裡的圖片直接顯示（#1911）：縮圖先放著，捲進畫面才自動下載大圖（同時最多 2 張、其餘排隊；超過大小門檻要人按） ----
+    // 大圖放在 shownPhotos（photo.mjs）：看得到的圖釘住不丟，捲出畫面後依「最久沒看」與總量上限才丟；點開大圖與這裡共用同一份
+    const picTick = ref(0)                           // 大圖記憶體有變就加一，畫面重畫
+    const jobs = reactive({}), forced = reactive({}), inView = reactive({})   // 下載狀態、人按過「下載照片」、目前在畫面內
+    const attPhoto = id => { for (const m of props.log) for (const p of m?.photos ?? []) if (p?.id === id) return p; return null }
+    const fetchQueue = createFetchQueue({
+      onChange(id, st) { if (st === 'queued' || st === 'loading' || st === 'failed') jobs[id] = st; else delete jobs[id] },
+    })
+    async function loadInline(p) {
+      const t0 = Date.now()
+      try {
+        const r = await props.photoApi.fetch(p.id, expiryMs(p))
+        console.info(fetchLogLine(true, Date.now() - t0))
+        recentShown.set(p.id, r.data_url)
+      } catch (e) { console.info(fetchLogLine(false, Date.now() - t0, e)); throw e }
+    }
+    function wantInline(p, force = false) {
+      if (!props.photoApi || p.kind !== 'image' || photoExpired(p) || recentShown.has(p.id)) return
+      if (!force && (jobs[p.id] === 'failed' || !autoFetchOk(p, props.phone) && !forced[p.id])) return
+      if (force) { forced[p.id] = true; delete jobs[p.id] }
+      fetchQueue.add(p.id, () => loadInline(p))
+    }
+    const onShownChange = () => { picTick.value++; for (const id of Object.keys(inView)) { const p = inView[id] && attPhoto(id); if (p) wantInline(p) } }
+    const unsubShown = recentShown.subscribe(onShownChange)
+    function onSeen(entries) {
+      for (const e of entries) {
+        const id = e.target?.dataset?.att, p = id && attPhoto(id)
+        if (!p) continue
+        if (e.isIntersecting) { inView[id] = true; recentShown.pin(id); wantInline(p) }
+        else { inView[id] = false; recentShown.unpin(id); fetchQueue.cancel(id) }
+      }
+    }
+    let seenIo = null
+    function scanAtt() {
+      const root = msgsEl.value
+      const fresh = root ? root.querySelectorAll('[data-att]:not([data-obs])') : []
+      if (!fresh.length) return
+      if (!seenIo && typeof IntersectionObserver !== 'undefined') seenIo = new IntersectionObserver(onSeen, { root, rootMargin: '160px 0px', threshold: 0.01 })
+      for (const el of fresh) {
+        el.setAttribute('data-obs', '1')
+        if (seenIo) seenIo.observe(el); else onSeen([{ target: el, isIntersecting: true }])
+      }
+    }
+    onMounted(() => nextTick(scanAtt))
+    onUpdated(scanAtt)
+    onBeforeUnmount(() => { unsubShown(); if (seenIo) seenIo.disconnect(); for (const id of Object.keys(inView)) { recentShown.unpin(id); fetchQueue.cancel(id) } })
+    const imgsOf = m => (m?.photos ?? []).filter(p => p.kind !== 'file')
+    const filesOf = m => (m?.photos ?? []).filter(p => p.kind === 'file')
+    const picState = p => {
+      void picTick.value
+      return inlineState(p, { phone: props.phone, shown: recentShown.has(p.id), job: jobs[p.id], forced: !!forced[p.id], visible: !!inView[p.id] })
+    }
+    const picSrc = p => { void picTick.value; return recentShown.peek(p.id) || p.thumb || '' }
+    const picBox = p => inlineBox(p, { phone: props.phone })
+    const picActs = p => actsMode(picState(p))
+    const picNote = p => remainText(p)
+    const picBig = p => bigButtonText(p, formatBytes)
+    const gridCellPx = computed(() => gridCell({ phone: props.phone }))
+    const canShare = computed(() => !!(props.phone && props.photoApi && typeof props.photoApi.share === 'function'))
+    const attItems = computed(() => actionItems({ phone: canShare.value }))
+    async function shareFile(p) {
+      savedHere.value = false; photoMsg.value = ''
+      try { await props.photoApi.share(p.id, p.name) } catch (e) { photoMsg.value = plainMessage(e) }
+    }
+    // 「儲存」「另存新檔」：目前只有一種存法（電腦跳「另存新檔」讓人選位置、手機存進「下載/ASN」），兩個都先走它；差異留給 #1912
+    function actPhoto(p, key) {
+      if (!props.photoApi) return
+      if (key === 'share') return shareFile(p)
+      return saveFile(p)
+    }
     async function openPhoto(p) {
       if (!props.photoApi || photoExpired(p)) return
       if (p.kind === 'file') return saveFile(p)
@@ -774,7 +848,7 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { opLine, opHold, opRelease, opPressHold, opPressRelease, opShown, barFirst, barClass, onOpNote,confirmNote, stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, stepViewer, swipeDown, swipeUp, swipeCancel, photoTitle, foldLocked, zoom, zoomer, pvStyle }
+    return { opLine, opHold, opRelease, opPressHold, opPressRelease, opShown, barFirst, barClass, onOpNote,confirmNote, stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, stepViewer, swipeDown, swipeUp, swipeCancel, photoTitle, foldLocked, zoom, zoomer, pvStyle, imgsOf, filesOf, picState, picSrc, picBox, picActs, picNote, picBig, gridCellPx, attItems, actPhoto, useGrid, wantInline }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
@@ -860,14 +934,19 @@ export const ChatPane = {
               <div class="call-end-note" v-if="shownBody(m).ends">{{ CALL_END_NOTE }}</div>
               <div class="unanswered" v-if="m.k === 'me' && m.unanswered != null && !isAsn">{{ m.unanswered > 0 ? '超過 ' + m.unanswered + ' 分鐘未回' : '對方視窗已關閉，未回' }}</div>
               <div class="photos" v-if="m.photos && m.photos.length">
-                <template v-for="p in m.photos" :key="p.id">
-                  <button v-if="p.kind === 'file'" type="button" class="filecard" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'檔案：' + photoTitle(p) + (expired(p) ? '（已過期）' : '，點一下下載並另存')" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">
+                <div class="att-grid" v-if="useGrid(imgsOf(m).length)" :style="{ '--gw': gridCellPx + 'px' }">
+                  <att-photo v-for="p in imgsOf(m)" :key="p.id" :p="p" :state="picState(p)" :src="picSrc(p)" :box="picBox(p)" :cell="gridCellPx" :title="photoTitle(p)" :big-text="picBig(p)" :can-open="!!photoApi" @open="openPhoto(p)" @retry="wantInline(p, true)" @load="wantInline(p, true)"></att-photo>
+                </div>
+                <template v-else>
+                  <div class="att" v-for="p in imgsOf(m)" :key="p.id">
+                    <att-photo :p="p" :state="picState(p)" :src="picSrc(p)" :box="picBox(p)" :title="photoTitle(p)" :big-text="picBig(p)" :can-open="!!photoApi" @open="openPhoto(p)" @retry="wantInline(p, true)" @load="wantInline(p, true)"></att-photo>
+                    <att-actions v-if="photoApi && picActs(p) !== 'none'" :items="attItems" :off="picActs(p) === 'off'" :note="picNote(p)" :label="'照片：' + p.name" @act="k => actPhoto(p, k)"></att-actions>
+                  </div>
+                </template>
+                <template v-for="p in filesOf(m)" :key="p.id">
+                  <button type="button" class="filecard" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'檔案：' + photoTitle(p) + (expired(p) ? '（已過期）' : '，點一下下載並另存')" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">
                     <svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M6 2.5h8.5L19 7v14.5H6z" fill="#fff" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/><path d="M14.5 2.5V7H19" fill="none" stroke="#4a5d73" stroke-width="1.4" stroke-linejoin="round"/></svg>
                     <span class="fc-text"><span class="fc-name">{{ p.name }}</span><span class="fc-sub">{{ expired(p) ? '已過期，檔案已刪除' : formatBytes(p.bytes) + '　點一下下載並另存' }}</span></span>
-                  </button>
-                  <button v-else type="button" class="photo" :class="{ gone: expired(p) }" :title="photoTitle(p)" :aria-label="'照片：' + photoTitle(p)" :disabled="expired(p) || !photoApi" @click="openPhoto(p)">
-                    <img v-if="p.thumb && !expired(p)" :src="p.thumb" alt="">
-                    <span v-else class="photo-ph">{{ expired(p) ? '照片已過期' : '照片' }}</span>
                   </button>
                 </template>
               </div>
