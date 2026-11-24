@@ -3,15 +3,16 @@
 // 電腦版（list.js）與手機版（m.js）用同一份：電腦版看本機偵測，手機版看那台電腦的設備卡狀態。
 import { AGENT_INSTALL_UI, STATE, installAction, vendorState } from './device-state.mjs'
 import { normalizeSearchQuery } from './search.mjs'
+import { getLocal, removeLocal, setLocal } from './local-prefs.mjs'
 
-/** 「先不用」記在本機的鍵（localStorage；電腦版、手機版各自記） */
+/** 「先不用」記在本機的鍵（本機偏好，經 local-prefs.mjs；電腦版、手機版各自記） */
 export const GUIDE_HIDDEN_KEY = 'asnNewComputerGuideHidden'
 
-export function loadGuideHidden(storage = globalThis.localStorage) {
-  try { return storage.getItem(GUIDE_HIDDEN_KEY) === '1' } catch { return false }
+export function loadGuideHidden(storage) {
+  return getLocal(GUIDE_HIDDEN_KEY, storage) === '1'
 }
-export function saveGuideHidden(hidden, storage = globalThis.localStorage) {
-  try { if (hidden) storage.setItem(GUIDE_HIDDEN_KEY, '1'); else storage.removeItem(GUIDE_HIDDEN_KEY) } catch { /* 存不進去（私密模式等）就當沒記 */ }
+export function saveGuideHidden(hidden, storage) {
+  if (hidden) setLocal(GUIDE_HIDDEN_KEY, '1', storage); else removeLocal(GUIDE_HIDDEN_KEY, storage)   // 存不進去（私密模式等）就當沒記
 }
 
 /**
