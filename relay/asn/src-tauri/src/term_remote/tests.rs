@@ -50,6 +50,74 @@ fn 逾時清掉本機狀態() {
     assert!(pending_views().is_empty());
 }
 
+// ---- #2161 3c：閒置慢輪詢、有請求快輪詢 ----
+
+fn drain_new_req() {
+    let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+    rt.block_on(async {
+        while tokio::time::timeout(Duration::from_millis(5), new_req_notify().notified()).await.is_ok() {}
+    });
+}
+
+#[test]
+fn 輪詢_has_pending_隨註冊與過期變化() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    reset_for_test();
+    assert!(!has_pending());
+    register_fake_answer("1", "11111111-1111-1111-1111-111111111111");
+    assert!(has_pending());
+    reset_for_test();
+    seed_expired_outgoing();
+    assert!(!has_pending());
+}
+
+#[test]
+fn 輪詢_註冊本機請求會叫醒新請求通知() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    reset_for_test();
+    drain_new_req();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+    // 沒註冊時不會醒
+    assert!(rt.block_on(async { tokio::time::timeout(Duration::from_millis(100), new_req_notify().notified()).await }).is_err());
+    register_fake_answer("1", "11111111-1111-1111-1111-111111111111");
+    assert!(rt.block_on(async { tokio::time::timeout(Duration::from_millis(100), new_req_notify().notified()).await }).is_ok());
+}
+
+#[test]
+fn 輪詢_間隔時序_註冊後變快_過期後回慢() {
+    let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    reset_for_test();
+    assert_eq!(next_poll_gap(has_pending()), Duration::from_secs(60));
+    register_fake_answer("1", "11111111-1111-1111-1111-111111111111");
+    assert_eq!(next_poll_gap(has_pending()), Duration::from_secs(2));
+    // 該筆過期（created 回推超過 REQ_TTL）後回到慢輪詢
+    reset_for_test();
+    seed_expired_outgoing();
+    assert_eq!(next_poll_gap(has_pending()), Duration::from_secs(60));
+    assert_eq!(next_poll_gap(true), Duration::from_secs(2));
+    assert_eq!(next_poll_gap(false), Duration::from_secs(60));
+}
+
+#[test]
+fn 輪詢_常數守門() {
+    assert_eq!(POLL_INTERVAL_SECS, 2);
+    assert_eq!(IDLE_POLL_INTERVAL_SECS, 60);
+    assert_eq!(REQ_TTL, Duration::from_secs(120));
+    assert!(Duration::from_secs(POLL_INTERVAL_SECS) * 10 < REQ_TTL);
+}
+
+#[test]
+fn 輪詢_迴圈原始碼用上閒置間隔與新請求叫醒() {
+    let lib = include_str!("../lib.rs").replace("\r\n", "\n");
+    let start = lib.find("fn start_term_remote_poller(").expect("找不到 start_term_remote_poller");
+    let body = &lib[start..];
+    let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+    assert!(body.contains("has_pending()"), "迴圈要依有無待處理請求決定間隔");
+    assert!(body.contains("next_poll_gap("), "迴圈要用 next_poll_gap");
+    assert!(body.contains("new_req_notify().notified()"), "迴圈要等新請求叫醒");
+    assert!(!body.contains("sleep(std::time::Duration::from_secs(term_remote::POLL_INTERVAL_SECS))"), "不可回到固定 2 秒");
+}
+
 #[test]
 fn 資料夾顯示名只取最後一段() {
     let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

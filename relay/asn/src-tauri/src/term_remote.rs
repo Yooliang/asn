@@ -209,6 +209,8 @@ fn register_local(key: &str, outgoing: Outgoing) -> Result<(), String> {
         }
         bm.insert(term_id, key.to_string());
         m.insert(key.to_string(), outgoing);
+        // 有新請求：叫醒輪詢迴圈改走快輪詢（notify_one 是同步的，持鎖呼叫無妨）
+        NEW_REQ.notify_one();
         Ok(())
     })
 }
@@ -580,6 +582,25 @@ pub fn pending_views() -> Vec<PendingView> {
 }
 
 pub const POLL_INTERVAL_SECS: u64 = 2;
+/// 本機沒有待處理請求時的保底輪詢間隔（#2161 3c）。有請求時 `register_local` 會立刻叫醒並改走快輪詢。
+pub const IDLE_POLL_INTERVAL_SECS: u64 = 60;
+
+/// 本機有新請求註冊時叫醒輪詢迴圈（`register_local` 呼叫 `notify_one`）。
+static NEW_REQ: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+pub fn new_req_notify() -> &'static tokio::sync::Notify {
+    &NEW_REQ
+}
+
+/// 本機有沒有等手機核准的請求（走 `with_out`，順手清掉過期項目）。
+pub fn has_pending() -> bool {
+    with_out(|m| !m.is_empty())
+}
+
+/// 下一圈 `term_req_take` 輪詢前要睡多久：有請求 2 秒，閒置 60 秒。
+pub fn next_poll_gap(has_pending: bool) -> Duration {
+    Duration::from_secs(if has_pending { POLL_INTERVAL_SECS } else { IDLE_POLL_INTERVAL_SECS })
+}
 
 #[cfg(test)]
 pub fn reset_for_test() {
