@@ -41,6 +41,14 @@ test('呼叫 store(\'xxx\') 的名稱只准是 me、onboard、chats（對應後�
   assert.deepEqual(bad, [], `store 名稱不在白名單：${bad.join('；')}`)
 })
 
+test('也不准用 makeStore(\'xxx\') 直接建新名稱（名稱同樣只准 me、onboard、chats）', () => {
+  const ok = new Set(['me', 'onboard', 'chats'])
+  const seen = []
+  for (const f of files) for (const m of src(f).matchAll(/(?<![\w.$])makeStore\(\s*(['"`])([^'"`]*)\1/g)) seen.push([rel(f), m[2]])
+  const bad = seen.filter(([, n]) => !ok.has(n)).map(([f, n]) => `${f}：${n}`)
+  assert.deepEqual(bad, [], `makeStore 名稱不在白名單：${bad.join('；')}`)
+})
+
 // ---- 出口本身的行為 ----
 const fake = (init = {}) => { const d = { ...init }; return { d, getItem: k => (k in d ? d[k] : null), setItem: (k, v) => { d[k] = String(v) }, removeItem: k => { delete d[k] } } }
 

@@ -11,7 +11,7 @@ export function loadCloudNodes(storage) {
 }
 
 export function saveCloudNodes(nodes, storage) {
-  setLocal(CLOUD_MEMORY_KEY, JSON.stringify(nodes), storage)   // 存不進去（私密模式等）就當沒記（local-prefs 內部吞掉）
+  try { setLocal(CLOUD_MEMORY_KEY, JSON.stringify(nodes), storage) } catch {}   // 存不進去（私密模式、無法序列化等）就當沒記
 }
 
 /** 設備樹算完後，下一份要記住的名單：這次出現的設備照 cloudStore 增減，沒出現的（名單暫時沒載到）維持原樣。不改傳入的陣列 */
