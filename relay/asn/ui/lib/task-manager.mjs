@@ -281,7 +281,7 @@ function confirmBody(r, rows, now) {
 // ---------- 控制器：頁面開著時才每 5 秒更新 ----------
 
 // restartAsk：正在原位確認重啟的節點鍵；restart：正在重啟的節點鍵；restartFrozen：重啟終端服務當下記的那一組（舊服務停了、清單找不到它時撐著畫面）；restartError：{ key, text }
-export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '', restartAsk: null, restart: null, restartFrozen: null, restartError: null, restartUntil: null })
+export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '', restartAsk: null, restart: null, restartFrozen: null, restartWant: null, restartError: null, restartUntil: null })
 
 // 控制器的 view() 另外帶 tree（ASN ＞ 終端服務 ＞ 代理，見 task-tree.mjs）；rows 還是平的一份，找列、停止與測試都用它
 
@@ -408,6 +408,8 @@ export function createTaskManager(deps) {
     state.restartUntil = null
     state.restart = key
     state.restartFrozen = isAsn ? null : liveTree().groups.find(g => g.key === key) ?? null
+    // 佔位組（服務沒在跑）底下沒有代理可記：等接回的名字用電腦端回報的存下名單（舊版電腦端沒給就空，settleRestart 至少等到真的服務列出現）
+    state.restartWant = state.restartFrozen?.placeholder ? (Array.isArray(state.snapshot?.restart_pending_names) ? state.snapshot.restart_pending_names.map(String) : []) : null
     try {
       if (isAsn) await api.taskManagerRestartAsn()
       else await api.taskManagerRestartMux()
@@ -417,6 +419,7 @@ export function createTaskManager(deps) {
       state.restartError = { key, text: typeof e === 'string' && e ? e : TREE_TEXT.restartFail }
       state.restart = null
       state.restartFrozen = null
+      state.restartWant = null
       state.restartUntil = null
       // 失敗後馬上重讀清單：服務可能已經停了、名單變了；錯誤掛在一定存在的 ASN 列（見 task-tree 的 errorFor）
       await refresh()
@@ -445,13 +448,14 @@ export function createTaskManager(deps) {
     } else {
       const rows = rowsNow()
       const have = new Set(rows.map(r => viewRow(r, t, ctx()).name))
-      const want = (state.restartFrozen?.agents ?? []).filter(a => a.kind !== 'process').map(a => a.name)
+      const want = state.restartWant ?? (state.restartFrozen?.agents ?? []).filter(a => a.kind !== 'process').map(a => a.name)
       const back = rows.some(r => r.kind === 'mux') && want.every(n => have.has(n))
       if (!back && !expired) return
       if (!back) log('[工作管理員] 重啟終端服務：逾時，部分代理還沒接回')
     }
     state.restart = null
     state.restartFrozen = null
+    state.restartWant = null
     state.restartUntil = null
   }
 
