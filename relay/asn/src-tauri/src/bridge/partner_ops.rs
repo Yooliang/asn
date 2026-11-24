@@ -124,6 +124,16 @@ pub(crate) trait OpsEnv: Send + Sync {
     /// 等前任寫完交接檔的最長時間與輪詢間隔
     fn handoff_wait_ms(&self) -> u64;
     fn handoff_poll_ms(&self) -> u64;
+    /// 單調時鐘（毫秒，只能拿來算經過多久）：等交接的逾時與通知間隔都用它，測試換成假時鐘、不真的睡
+    fn mono_ms(&self) -> u64 {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+    }
+    /// 等前任太久：通知擁有者（後台 waiting_notice，kind=handoff_wait）。`agents`＝還在跑的子代理件數（不知道就 None）、`minutes`＝已等分鐘。
+    /// 回 Ok(說明) 或 Err(原因)，都只寫 log；舊後台不認得（400／404）算 Ok
+    fn handoff_wait_notice(&self, _window: &str, _agents: Option<usize>, _minutes: u64) -> Result<String, String> {
+        Ok(String::new())
+    }
     /// pi 視窗的登記檔與控制檔所在的使用者家目錄（測試換成暫存資料夾）
     fn pi_home(&self) -> PathBuf {
         crate::identity::home_dir()
@@ -216,6 +226,16 @@ impl OpsEnv for SystemOpsEnv {
     }
     fn handoff_poll_ms(&self) -> u64 {
         2_000
+    }
+    fn handoff_wait_notice(&self, window: &str, agents: Option<usize>, minutes: u64) -> Result<String, String> {
+        // detail＝已等分鐘、tool＝子代理件數，都只送純數字（後台也只收純數字）
+        let body = json!({ "window": window, "kind": "handoff_wait", "detail": minutes.to_string(), "tool": agents.map(|n| n.to_string()) });
+        match crate::rt::block_on(self.relay.api_status("waiting_notice", body)) {
+            Ok((200, v)) => Ok(format!("notify={}", v.get("notify").and_then(Value::as_str).unwrap_or(""))),
+            Ok((status @ (400 | 404), _)) => Ok(format!("後台回 {status}，舊後台不認得這個種類，只留本機紀錄")),
+            Ok((status, _)) => Err(format!("後台回 {status}")),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -1710,14 +1730,14 @@ impl PartnerOps {
         let _handing = handoff_wait::HandingGuard::new(&self.handing, &t.name);
         if let Err(e) = self.env.tell(&t.name, &ask_handoff_text(&path)) {
             self.log.line(&format!("partner_op handover: cannot ask {} to write handoff: {}", clean(&t.name, 40), clean(&e, 120)));
-            return failed("沒能請它寫交接（訊息送不進那個視窗），舊視窗沒有關，也沒有換班");
+            return failed(handoff_wait::fail_text("沒能請它寫交接（訊息送不進那個視窗）"));
         }
         match self.wait_for_handoff(op, &t, &path) {
             handoff_wait::HandoffWait::Written => {}
-            handoff_wait::HandoffWait::WindowGone => return failed("舊視窗在等交接的時候被關掉了，沒有換班"),
+            handoff_wait::HandoffWait::WindowGone => return failed(format!("舊視窗在等交接的時候被關掉了，{}", handoff_wait::FAIL_NEXT_GONE)),
             handoff_wait::HandoffWait::TimedOut => {
                 self.log.line(&format!("partner_op handover: {} did not finish the handoff in time, old window left open (path {})", clean(&t.name, 40), path.display()));
-                return failed("等了很久，交接還沒寫完，舊視窗沒有關。等它做完再按一次換班，或自己先把它關掉");
+                return failed(handoff_wait::fail_text("等了很久（最長 3 小時），交接還沒寫完"));
             }
         }
         let complete = true;

@@ -245,5 +245,24 @@ test('實跑（pglite，#1908）：stage:agents:N 收下，其他帶數字的怪
   assert.equal((await prog('H', a.id, 'stage:handoff')).ok, true, '不帶件數的舊格式照收')
 })
 
+// 回復檔（#1908）：階段代號又只收不帶件數的格式，已有的舊格式不受影響
+const down1908 = fs.readFileSync(new URL('../supabase/sql/rollback/20261125400000_partner_op_progress_agents_count_down.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+
+test('靜態＋實跑（#1908 回復檔）：套用回復檔後 stage:agents:N 被擋、stage:handoff 照收；權限照舊只給 service_role', { skip }, async () => {
+  assert.match(down1908, /\^stage:\[a-z\]\{1,20\}\$/)
+  assert.doesNotMatch(down1908, /\(:\[0-9\]/)
+  assert.match(down1908, /revoke all on function public\.asn_relay_partner_op_progress\(text, uuid, text\) from public, anon, authenticated;/)
+  assert.match(down1908, /grant execute on function public\.asn_relay_partner_op_progress\(text, uuid, text\) to service_role;/)
+  const { db, op, one } = await boot()
+  await db.exec(sql1908)
+  await db.exec(down1908)
+  const a = await op({ op: 'handover' })
+  await one(`select public.irori_relay_partner_op_pending('H') r`)
+  const prog = (d) => one('select public.asn_relay_partner_op_progress($1,$2,$3) r', ['H', a.id, d]).then(x => x.r)
+  assert.equal((await prog('stage:agents:3')).error, 'bad_request', '回復後不收帶件數的')
+  assert.equal((await prog('stage:agents')).ok, true)
+  assert.equal((await prog('stage:handoff')).ok, true)
+})
+
 // 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
 closeAtEnd()

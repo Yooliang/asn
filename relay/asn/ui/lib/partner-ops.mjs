@@ -322,7 +322,7 @@ const CODE_TEXT = {
   bad_model: '模型名稱只能用英數與 . _ [ ] -，1～60 字',
   bad_note: `補充的話最多 ${NOTE_MAX} 字`,
   name_taken: '電腦上已經有同名的視窗，換個名字',
-  busy: '這個視窗還有一個操作在進行中，等它完成再試',
+  busy: '這個視窗還有一個操作在進行中，等它完成再試；如果是換班卡住了，可以改按「關閉視窗」',
   rate_limited: '這台電腦這個小時管理太多次了，稍後再試',
   protected: 'ASN 通知與 ASN 自己的視窗不能這樣操作',
   already_online: '這位夥伴已經在線上，不需要喚醒',
@@ -366,8 +366,18 @@ const stageCount = detail => {
   return Number.isInteger(n) && n >= 1 ? n : null
 }
 // 換班接手等前任把子代理做完：寫得出件數就寫「等 N 個子代理做完」，寫不出就「等它把手上的工作做完」
-export function agentsWaitText(n) {
-  return n ? `等 ${n} 個子代理做完…（第 1／${HANDOVER_STEPS.length} 步）` : `等它把手上的工作做完…（第 1／${HANDOVER_STEPS.length} 步）`
+// waitedMs：已經等了多久（毫秒）。滿 1 分鐘才寫「已等多久」；超過 AGENTS_HINT_MS 同一行再加「可以到工作管理員按『關閉視窗』放行」（只放文字，不放按鈕）
+export const AGENTS_HINT_MS = 15 * 60 * 1000
+export function waitedText(ms) {
+  const m = Math.floor((Number(ms) || 0) / 60000)
+  if (m < 1) return ''
+  return m < 60 ? `${m} 分鐘` : `${Math.floor(m / 60)} 小時${m % 60 ? ` ${m % 60} 分鐘` : ''}`
+}
+export function agentsWaitText(n, waitedMs = 0) {
+  const w = waitedText(waitedMs)
+  const step = `第 1／${HANDOVER_STEPS.length} 步${w ? `，已等 ${w}` : ''}`
+  const hint = waitedMs >= AGENTS_HINT_MS ? '；可以到工作管理員按『關閉視窗』放行' : ''
+  return `${n ? `等 ${n} 個子代理做完` : '等它把手上的工作做完'}…（${step}）${hint}`
 }
 // 喚醒找不到對話紀錄：電腦端回報的原句（與 src-tauri/src/bridge/partner_ops.rs 的 NO_RECORD 逐字相同，測試會對照）與後台的代號
 export const NO_RECORD_TEXT = '找不到原本的對話紀錄，只能開新的夥伴'
@@ -436,8 +446,8 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
       if (waited > limit) return { phase: 'failed', done: true, text: `沒有成功：${STALE_TEXT}` }
       if (op === 'handover') {
         const stage = stageOf(row.detail)
-        if (stage === 'agents') return { phase: 'working', done: false, text: agentsWaitText(stageCount(row.detail)) }
-        const at =HANDOVER_STEPS.findIndex(s => s.key === stage)
+        if (stage === 'agents') return { phase: 'working', done: false, text: agentsWaitText(stageCount(row.detail), waited) }
+        const at = HANDOVER_STEPS.findIndex(s => s.key === stage)
         return { phase: 'working', done: false, text: at >= 0 ? `${HANDOVER_STEPS[at].text}中…（第 ${at + 1}／${HANDOVER_STEPS.length} 步）` : '正在處理…' }
       }
       if (stageOf(row.detail) === 'queued') return { phase: 'working', done: false, text: '排隊中，等它忙完…' }

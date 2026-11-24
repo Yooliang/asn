@@ -30,6 +30,8 @@ struct FakeOs {
     /// 開在共用終端服務（mux）裡、對照表認得的程序 → 終端編號；關掉的窗格記在 mux_stopped
     mux_sess: Mutex<HashMap<u32, String>>,
     mux_stopped: Mutex<Vec<String>>,
+    /// 假時鐘：累計「睡過」的毫秒數（sleep 不真的睡，只把時鐘往前推）
+    slept: std::sync::atomic::AtomicU64,
 }
 
 impl Os for FakeOs {
@@ -62,7 +64,8 @@ impl Os for FakeOs {
     fn started_ms(&self, pid: u32) -> Option<u64> {
         self.started.lock().unwrap().get(&pid).copied()
     }
-    fn sleep(&self, _ms: u64) {
+    fn sleep(&self, ms: u64) {
+        self.slept.fetch_add(ms, Ordering::SeqCst);
         if let Some(f) = self.on_sleep.lock().unwrap().as_ref() {
             f();
         }
@@ -112,9 +115,22 @@ struct FakeEnv {
     partners: Mutex<Vec<crate::launch::stuck_resume::PartnerRef>>,
     /// 讀畫面對各名字判斷的畫面代號（逾時訊息用）
     screens: Mutex<Vec<(String, &'static str)>>,
+    /// 等交接的上限與輪詢間隔（毫秒，假時鐘）；預設 50／1
+    wait_ms: std::sync::atomic::AtomicU64,
+    poll_ms: std::sync::atomic::AtomicU64,
+    /// 通知擁有者的紀錄：(視窗名, 子代理件數, 已等分鐘, 送出時的假時鐘毫秒)；notice_result＝後台的回覆（None＝成功）
+    notices: Mutex<Vec<(String, Option<usize>, u64, u64)>>,
+    notice_result: Mutex<Option<Result<String, String>>>,
 }
 
 impl OpsEnv for FakeEnv {
+    fn mono_ms(&self) -> u64 {
+        self.os.slept.load(Ordering::SeqCst)
+    }
+    fn handoff_wait_notice(&self, window: &str, agents: Option<usize>, minutes: u64) -> Result<String, String> {
+        self.notices.lock().unwrap().push((window.to_string(), agents, minutes, self.mono_ms()));
+        self.notice_result.lock().unwrap().clone().unwrap_or_else(|| Ok("notify=sent".into()))
+    }
     fn screen_code(&self, name: &str) -> Option<&'static str> {
         self.screens.lock().unwrap().iter().find(|(n, _)| n == name).map(|(_, c)| *c)
     }
@@ -178,10 +194,10 @@ impl OpsEnv for FakeEnv {
         self.progress.lock().unwrap().push(detail.to_string());
     }
     fn handoff_wait_ms(&self) -> u64 {
-        50
+        self.wait_ms.load(Ordering::SeqCst)
     }
     fn handoff_poll_ms(&self) -> u64 {
-        1
+        self.poll_ms.load(Ordering::SeqCst)
     }
     fn pi_home(&self) -> PathBuf {
         self.pi_home.clone()
@@ -330,6 +346,7 @@ fn rig(o: Opt) -> Rig {
         immortal: Mutex::new(HashSet::new()),
         mux_sess: Mutex::new(HashMap::new()),
         mux_stopped: Mutex::new(Vec::new()),
+        slept: std::sync::atomic::AtomicU64::new(0),
     });
     let env = Arc::new(FakeEnv {
         os,
@@ -356,6 +373,10 @@ fn rig(o: Opt) -> Rig {
         opening: Mutex::new(Default::default()),
         partners: Mutex::new(Vec::new()),
         screens: Mutex::new(Vec::new()),
+        wait_ms: std::sync::atomic::AtomicU64::new(50),
+        poll_ms: std::sync::atomic::AtomicU64::new(1),
+        notices: Mutex::new(Vec::new()),
+        notice_result: Mutex::new(None),
     });
     let status = tmp.path().join("status");
     let control = tmp.path().join("control");
@@ -891,7 +912,7 @@ fn 換班接手守門_前任沒寫完或請求送不進去_不關舊視窗_不�
         r.env.tell_fails.store(tell_fails, Ordering::SeqCst);
         let res = r.run("handover", json!({}));
         assert_eq!(res.status, "failed", "沒寫完不換班：{}", res.detail);
-        assert!(res.detail.contains("舊視窗沒有關"), "{}", res.detail);
+        assert!(res.detail.contains("換班沒做成，舊視窗還在。可以再試一次，或按『關閉視窗』"), "失敗訊息要寫出下一步：{}", res.detail);
         // 兩種原因各說各的：請求送不進去不能被「等逾時」的結果蓋過去
         assert!(res.detail.contains(if tell_fails { "送不進" } else { "等了很久" }), "{}", res.detail);
         assert!(r.terminated().is_empty(), "舊視窗不能關：{:?}", r.terminated());
@@ -983,8 +1004,133 @@ fn 換班接手_等的時候舊視窗被關掉_失敗_不開新視窗() {
     *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || { os.alive.lock().unwrap().remove(&220); }));
     let res = r.run("handover", json!({}));
     assert_eq!(res.status, "failed");
-    assert!(res.detail.contains("被關掉"), "{}", res.detail);
+    assert!(res.detail.contains("被關掉") && res.detail.contains("沒有開新視窗") && res.detail.contains("喚醒"), "要寫出下一步：{}", res.detail);
     assert!(r.launched().is_empty());
+}
+
+#[test]
+fn 換班接手_等待中收到本人按的關閉_等待收手_回報失敗_不開新視窗() {
+    // M1（電腦端）：換班在等的時候，後台放行的 close 真的走 execute 關掉前任視窗；等待迴圈要發現視窗沒了、收手，不能開新視窗
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    let ops = r.ops.clone();
+    let closed = Arc::new(Mutex::new(None::<OpResult>));
+    let c2 = closed.clone();
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        let mut slot = c2.lock().unwrap();
+        if slot.is_none() {
+            assert!(ops.close_allowed_during_handoff("close", "目標"), "等待中才放行");
+            *slot = Some(ops.execute(&mk_op("close", json!({ "id": "op-close" }))));
+        }
+    }));
+    let res = r.run("handover", json!({}));
+    let close = closed.lock().unwrap().take().expect("等待中有收到 close");
+    assert_eq!(close.status, "ok", "{}", close.detail);
+    assert!(r.terminated().contains(&220), "close 真的把前任關了");
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("被關掉") && res.detail.contains("沒有開新視窗"), "{}", res.detail);
+    assert!(r.launched().is_empty(), "不開新視窗");
+    assert!(!r.ops.close_allowed_during_handoff("close", "目標"), "收手後不再放行");
+}
+
+#[test]
+fn 換班接手_等待輪詢_前一分鐘照設定_之後拉長到十秒() {
+    assert_eq!(handoff_wait::poll_interval(2_000, 0), 2_000);
+    assert_eq!(handoff_wait::poll_interval(2_000, 59_999), 2_000);
+    assert_eq!(handoff_wait::poll_interval(2_000, 60_000), 10_000);
+    assert_eq!(handoff_wait::poll_interval(2_000, 2 * 3_600_000), 10_000);
+    assert_eq!(handoff_wait::poll_interval(30_000, 3_600_000), 30_000, "設定比 10 秒長就照設定");
+    assert_eq!(handoff_wait::poll_interval(0, 0), 1, "不會是 0");
+    // 實際走一趟：假時鐘等 30 分鐘，前一分鐘每 5 秒一次、之後每 10 秒一次
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    r.env.wait_ms.store(30 * 60_000, Ordering::SeqCst);
+    r.env.poll_ms.store(5_000, Ordering::SeqCst);
+    let polls = Arc::new(AtomicUsize::new(0));
+    let p2 = polls.clone();
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || { p2.fetch_add(1, Ordering::SeqCst); }));
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "failed");
+    // 前 60 秒 12 次（5 秒一次）＋之後 (1800-60)/10 = 174 次
+    assert_eq!(polls.load(Ordering::SeqCst), 12 + 174, "輪詢次數");
+}
+
+#[test]
+fn 換班接手_等超過_15_分鐘通知擁有者_之後每小時一次_內容帶件數與分鐘() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    r.status_file("sid-220", tasks_status(2));
+    r.env.wait_ms.store(3 * 3_600_000, Ordering::SeqCst);
+    r.env.poll_ms.store(5_000, Ordering::SeqCst);
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    let n = r.env.notices.lock().unwrap().clone();
+    // 15 分、1 小時 15 分、2 小時 15 分各一次，共 3 次（假時鐘到 3 小時結束）；件數＝2
+    let minutes: Vec<u64> = n.iter().map(|x| x.2).collect();
+    assert_eq!(minutes.len(), 3, "{n:?}");
+    assert!(minutes[0] == 15 && minutes[1] == 75 && minutes[2] == 135, "{minutes:?}");
+    assert!(n.iter().all(|x| x.0 == "目標" && x.1 == Some(2)), "{n:?}");
+    assert!(n[0].3 >= 15 * 60_000 && n[0].3 < 15 * 60_000 + 10_001, "第一次剛過 15 分鐘：{}", n[0].3);
+}
+
+#[test]
+fn 換班接手_沒等到_15_分鐘不通知_寫完了就不再通知() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    r.env.wait_ms.store(3 * 3_600_000, Ordering::SeqCst);
+    r.env.poll_ms.store(5_000, Ordering::SeqCst);
+    let told = r.env.told_path.clone();
+    let os = r.env.os.clone();
+    // 假時鐘到 14 分鐘就寫好
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        if os.slept.load(Ordering::SeqCst) >= 14 * 60_000 {
+            if let Some(p) = told.lock().unwrap().clone() {
+                std::fs::create_dir_all(Path::new(&p).parent().unwrap()).unwrap();
+                std::fs::write(&p, "# 交接\nx").unwrap();
+            }
+        }
+    }));
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(r.env.notices.lock().unwrap().is_empty(), "14 分鐘寫完，不通知");
+}
+
+#[test]
+fn 換班接手_件數讀不到時通知不帶件數_通知送不進去也只寫_log_換班照常() {
+    let r = rig(Opt::default());
+    write_old_transcript(&r);
+    r.env.write_on_tell.store(false, Ordering::SeqCst);
+    r.env.wait_ms.store(20 * 60_000, Ordering::SeqCst);
+    r.env.poll_ms.store(5_000, Ordering::SeqCst);
+    *r.env.notice_result.lock().unwrap() = Some(Err("後台回 500".into()));
+    let told = r.env.told_path.clone();
+    let os = r.env.os.clone();
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        if os.slept.load(Ordering::SeqCst) >= 16 * 60_000 {
+            if let Some(p) = told.lock().unwrap().clone() {
+                std::fs::create_dir_all(Path::new(&p).parent().unwrap()).unwrap();
+                std::fs::write(&p, "# 交接\nx").unwrap();
+            }
+        }
+    }));
+    let res = r.run("handover", json!({}));
+    assert_eq!(res.status, "ok", "通知失敗不影響換班：{}", res.detail);
+    let n = r.env.notices.lock().unwrap().clone();
+    assert_eq!(n.len(), 1, "{n:?}");
+    assert_eq!(n[0].1, None, "讀不到件數就不帶");
+}
+
+#[test]
+fn 通知時機_十五分鐘後第一次_之後每小時() {
+    use handoff_wait::notice_due;
+    assert!(!notice_due(0, None) && !notice_due(15 * 60_000 - 1, None));
+    assert!(notice_due(15 * 60_000, None));
+    assert!(!notice_due(15 * 60_000 + 3_599_999, Some(15 * 60_000)));
+    assert!(notice_due(15 * 60_000 + 3_600_000, Some(15 * 60_000)));
 }
 
 #[test]
@@ -1005,6 +1151,7 @@ fn 換班接手_等待中放行本人按關閉_換班結束後恢復一次一件
     }));
     let res = r.run("handover", json!({}));
     assert_eq!(res.status, "ok", "{}", res.detail);
+    assert!(!seen.lock().unwrap().is_empty(), "等待期間至少輪詢過一次");
     assert!(seen.lock().unwrap().iter().all(|x| *x == (true, false, false)), "等待中只放行這個視窗的關閉：{:?}", seen.lock().unwrap());
     assert!(!r.ops.close_allowed_during_handoff("close", "目標"), "換班結束後不再放行");
 }

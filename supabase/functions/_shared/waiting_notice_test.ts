@@ -43,3 +43,11 @@ Deno.test("forward_stuck：只收固定的原因代號與 1～2 位數字的次�
   assertEquals(parseWaitingNotice({ window: "T-收發室", kind: "forward_stuck", detail: "信件內文：機密", tool: "rm -rf /" }), { window: "T-收發室", kind: "forward_stuck", detail: null, tool: null });
   assertEquals(parseWaitingNotice({ window: "T-收發室", kind: "forward_stuck", detail: "frame", tool: "123" })?.tool, null);
 });
+
+Deno.test("handoff_wait（#1908）：detail 只收 1～4 位數字（已等分鐘）、tool 只收 1～3 位數字（子代理件數），自由文字丟掉", () => {
+  assertEquals(parseWaitingNotice({ window: "asn雯", kind: "handoff_wait", detail: "25", tool: "3" }), { window: "asn雯", kind: "handoff_wait", detail: "25", tool: "3" });
+  assertEquals(parseWaitingNotice({ window: "asn雯", kind: "handoff_wait", detail: "25" }), { window: "asn雯", kind: "handoff_wait", detail: "25", tool: null });
+  assertEquals(parseWaitingNotice({ window: "asn雯", kind: "handoff_wait", detail: "很久\n以後", tool: "Bash" }), { window: "asn雯", kind: "handoff_wait", detail: null, tool: null });
+  assertEquals(parseWaitingNotice({ window: "asn雯", kind: "handoff_wait", detail: "12345", tool: "1234" }), { window: "asn雯", kind: "handoff_wait", detail: null, tool: null });
+  assertEquals(parseWaitingNotice({ window: "", kind: "handoff_wait", detail: "5" }), null);
+});
