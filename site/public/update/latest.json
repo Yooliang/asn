@@ -1,15 +1,11 @@
 {
-  "version": "0.2.93",
-  "notes": "- 改善：在手機上允許或拒絕權限確認、或確認終端請求後，電腦會馬上收到，不用再等下一次檢查",
-  "pub_date": "2026-11-24T13:01:29.586Z",
+  "version": "0.2.94",
+  "notes": "- 改善：設備更新狀態的檢查改成平時每 5 分鐘一次，只有遠端更新進行中才加快，閒置時更省電、省流量\n- 改善：訊息寄出狀態的檢查改得更節省：剛寄出的勤一點、舊的慢一點，視窗看不到時不檢查",
+  "pub_date": "2026-11-24T13:59:55.670Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9nTW1tSkhWOU0zdnlLK0tUOVFoNWtkTXRuY1Y2d2pRL3VQRE9xSWVPMUVoQzhiajhFQWxPN2Q3NlNBWTgzdHZlanUyQzJXUVA4Z0UvSTFoSU9jbHc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTI1Mjg5CWZpbGU6QVNOXzAuMi45M194NjQtc2V0dXAuZXhlClBWNkhVNTVXb0YyMTl2S0xYK3dDT0xmR2Q2L05oLzQwZ3UrU3ZNdEtwQlRwYzZUaWhTWGxCeGFUZHJsQUFaZDJyNXdqQysxakFEejRuY0ExbUZkakJnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.93_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBFZ3RVRjJFWHVmTzZDZDdUY01sanpMYnV6cmZKakVzK2Q2Mk02aThzQ2hnWlUvczh1U25hbUVMY2MxajErRk5xNGNHU05JSHN0TDBOKzloaHJBNlFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTI1ODk3CWZpbGU6QVNOXzAuMi45M19hbWQ2NC5BcHBJbWFnZQpCaFJDd2JmNmorZ0xlU1l1MEFGOXRBSkRVb0JwWnpKbkFzYTNVU0pFMFV3Yk5hWEFEdE5oRjRpb0VsYUtHSWRtZ29XVWcyMk04cGllN0NCb3UySmFEQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.93_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjltSWMxZ3dXT1Z3eVlUM2pZYnliRVpVclRwWGZ0TlkvNkdESXZJRWhRblU0TmJpUmtKV1JYbm90czcvMFhyMTNKNDBIU0luZ0NXbmplNTBPZFdzTXdVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTI4Nzk1CWZpbGU6QVNOXzAuMi45NF94NjQtc2V0dXAuZXhlCitNenB6alF6dUhoYVR0UUFpcUdOOFR6U2N0MnFpaEtTcW9oUklXZ2lBZEZWWGczVm1ZcmJ3akUvSFgxN0ZIN1lERmxZNGVUOVdVNWdGVHV4UTloU0RnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.94_x64-setup.exe"
     }
   }
 }
