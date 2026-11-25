@@ -279,8 +279,8 @@ test('dispose：清掉計時器與監聽，之後什麼都不做；在途回來�
 const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)])
 const rel = f => path.relative(UI, f).split(path.sep).join('/')
 
-test('守門：ui/ 底下除 tauri.mjs 外沒有 report_send／report_get／relay-report 字串', () => {
-  const bad = walk(UI).filter(f => /\.(m?js|html)$/.test(f) && rel(f) !== 'lib/tauri.mjs')
+test('守門：ui/ 底下除 tauri.mjs（與事件名唯一來源 rust-events.mjs）外沒有 report_send／report_get／relay-report 字串', () => {
+  const bad = walk(UI).filter(f => /\.(m?js|html)$/.test(f) && !['lib/tauri.mjs', 'lib/rust-events.mjs'].includes(rel(f)))   // #2038：事件表登記所有 Rust 事件名
     .filter(f => /report_send|report_get|relay-report/.test(fs.readFileSync(f, 'utf8'))).map(rel)
   assert.deepEqual(bad, [])
   const ex = fs.readFileSync(path.join(UI, 'lib/tauri.mjs'), 'utf8')
