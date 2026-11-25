@@ -7,6 +7,19 @@ use std::time::Duration;
 
 /// 假主迴圈：像 run_loop 一樣，一個動作做到完（`work_ms`）才回頭看離開訊號
 fn fake_running(work_ms: u64) -> (Running, Arc<AtomicBool>, tempfile::TempDir) {
+    fake_with(async move { tokio::time::sleep(Duration::from_millis(work_ms)).await })
+}
+
+/// 假主迴圈，進行中的動作由 `gate` 放行才做完（事件驅動，不靠牆鐘）：
+/// 機器忙到測試執行緒被卡住時，動作也不會自己先做完（#2297）
+fn fake_gated() -> (Running, Arc<AtomicBool>, Arc<Notify>, tempfile::TempDir) {
+    let gate = Arc::new(Notify::new());
+    let g = gate.clone();
+    let (r, fin, d) = fake_with(async move { g.notified().await });
+    (r, fin, gate, d)
+}
+
+fn fake_with(work: impl std::future::Future<Output = ()> + Send + 'static) -> (Running, Arc<AtomicBool>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let shutdown = Arc::new(Notify::new());
     let loop_done = Arc::new(AtomicBool::new(false));
@@ -15,7 +28,7 @@ fn fake_running(work_ms: u64) -> (Running, Arc<AtomicBool>, tempfile::TempDir) {
     let t = crate::rt::spawn(async move {
         let _done = guard;
         // 進行中的送出：先做，做完才輪到離開訊號
-        tokio::time::sleep(Duration::from_millis(work_ms)).await;
+        work.await;
         fin.store(true, Ordering::SeqCst);
         sd.notified().await;
     });
@@ -26,9 +39,17 @@ fn fake_running(work_ms: u64) -> (Running, Arc<AtomicBool>, tempfile::TempDir) {
 
 #[tokio::test]
 async fn _2204_drain_進行中的送出做完才回來() {
-    let (r, finished, _d) = fake_running(300);
-    assert!(!finished.load(Ordering::SeqCst));
-    assert!(r.drain(Duration::from_secs(5)).await, "時限內做完要回 true");
+    // 動作要等 gate 放行才做完：開始 drain 時動作一定還在進行，之後放行 drain 才能回來。
+    // 放行前的等待只是讓 drain 真的先卡住一下；就算機器忙到它提早放行，結論（drain 回來時一定做完）也不變
+    let (r, finished, gate, _d) = fake_gated();
+    assert!(!finished.load(Ordering::SeqCst), "放行前動作不會做完");
+    let release = async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(!finished.load(Ordering::SeqCst), "drain 還在等：動作沒放行就不會做完");
+        gate.notify_one();
+    };
+    let (done, _) = tokio::join!(r.drain(Duration::from_secs(30)), release);
+    assert!(done, "放行後要回 true（30 秒只是防掛死的上限）");
     assert!(finished.load(Ordering::SeqCst), "drain 回來時，進行中的送出一定已經做完");
 }
 
