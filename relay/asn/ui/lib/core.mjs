@@ -398,7 +398,7 @@ export class AsnCore {
         }
         if (quietN) {
           this.log(`spool delivered ${quietN} message(s) quietly`)
-          this.emit('notify', { kind: 'msg', friend: quietLast, line: `收到 ${quietN} 封你不在時代收的信`, sound: 'msg', toast: true })
+          this.emit('notify', { kind: 'msg', friend: quietLast, line: `收到 ${quietN} 封你不在時代收的信`, sound: 'msg', toast: true, digest: true })
         }
         if (itemErr) this.#setConn('off', '有信件處理失敗（已跳過，詳見記錄）')
       } while (this.again)
@@ -463,7 +463,7 @@ export class AsnCore {
     this.emit('log', r.id)
     // 別台設備已經讀過：進對話但不提示；合併提示也不算它（回 null）。對話正開著時已讀位置是這裡剛推進的，照常提示
     if (already && !visible) { if (quiet) return null }
-    else if (shown && !quiet) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible, hasFile: photos.some(a => a.kind === 'file') })
+    else if (shown && !quiet) this.emit('notify', { kind: 'msg', friend: f, line: text ? plain(text) : noticeOf(photos), sound: 'msg', toast: !visible, hasFile: photos.some(a => a.kind === 'file'), at: t, mine: m.from_node === this.selfNode })
     if (nudge && !quiet && !(already && !visible)) this.emit('notify', { kind: 'nudge', friend: f, line: '傳送了一個震動', sound: 'nudge', toast: !visible, shake: visible })
     // 回信是扇出給我所有設備的：我在別台設備上說的話這台還沒有，順手補一次（人在別台說、這台只看到 AI 的回覆就會斷掉）
     if (typeof m.fanout_id === 'string') void this.syncHistory(r.id, { force: true })

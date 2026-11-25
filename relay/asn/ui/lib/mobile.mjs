@@ -8,6 +8,7 @@ import { noticeOf } from './photo.mjs'
 import { PAGE_TAB, normalizePage } from './mobile-fourth.mjs'
 import { DEFAULT_SKIN, normalizeSkin } from './skin.mjs'
 import { EMPTY_PINS, normalizePins } from './chat-pins.mjs'
+import { normalizeCfg } from './voice-prefs.mjs'
 
 // ---------- 單欄導覽 ----------
 // 狀態：{ tab: 'chats' | 'list' | 'notice' | 'me' | 'page', sheet: '' | 'ops' | …, chat: true | false }。sheet＝蓋在分頁上的一層：「⋯」選單（底部浮層）、要密碼、終端請求、群組對話框、換內頁前的確認（leave）。
@@ -173,8 +174,10 @@ export const PULL_TEXT = { idle: '', pull: '下拉重新整理', ready: '放開�
 export const shouldRefreshOnRelease = (h, loading) => !loading && h >= PTR_THRESHOLD
 
 // ---------- 提示 ----------
-export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true, skin: DEFAULT_SKIN, chatPins: EMPTY_PINS }
-export const normalizePrefs = raw => ({ vibrateMsg: raw?.vibrateMsg === true, vibrateNudge: raw?.vibrateNudge !== false, autoUpdate: raw?.autoUpdate !== false, push: raw?.push !== false, skin: normalizeSkin(raw?.skin), chatPins: normalizePins(raw?.chatPins) })   // skin＝外觀（lib/skin.mjs）；舊存檔裡的 ghRefs（已拿掉的設定，#1776）讀到就忽略
+export const DEFAULT_PREFS = { vibrateMsg: false, vibrateNudge: true, autoUpdate: true, push: true, skin: DEFAULT_SKIN, chatPins: EMPTY_PINS, voice: normalizeVoicePrefs(null) }
+// 手機的語音設定（#2304）：欄位名與電腦的 voice.json 相同、驗證用同一支 normalizeCfg；手機只存這三項（沒有語音辨識模型），自動念預設關
+export function normalizeVoicePrefs(raw) { const { tts_voice, tts_auto, stt_lang } = normalizeCfg(raw); return { tts_voice, tts_auto, stt_lang } }
+export const normalizePrefs = raw => ({ vibrateMsg: raw?.vibrateMsg === true, vibrateNudge: raw?.vibrateNudge !== false, autoUpdate: raw?.autoUpdate !== false, push: raw?.push !== false, skin: normalizeSkin(raw?.skin), chatPins: normalizePins(raw?.chatPins), voice: normalizeVoicePrefs(raw?.voice) })   // skin＝外觀（lib/skin.mjs）；舊存檔裡的 ghRefs（已拿掉的設定，#1776）讀到就忽略
 export const NUDGE_VIBRATE_MS = 300
 export const MSG_VIBRATE_MS = 60
 
@@ -210,6 +213,7 @@ export function androidBridge(win) {
     selfUpdateEnabled: () => call('selfUpdateEnabled') === true,   // 自行安裝版才有（Google Play 版是 false）
     installApk: path => String(call('installApk', path) ?? 'error'),   // ok／need_permission／error／unsupported
     call: callBridge(win, b),   // 偽通話用的語音辨識與念出（沒有就是 null，畫面不出現通話鈕）
+    read: readBridge(win, b),   // 念出訊息（喇叭鈕、自動念；ReadAloud.kt，與通話各用各的語音引擎）；外殼太舊或這支手機沒有語音合成就是 null
     keepAwake: on => call('keepAwake', on === true),   // 通話中螢幕不要自己暗掉
     push: pushBridge(win, b),   // 推播（#797，FCM）：App 關著也要響；外殼沒有這些方法或沒有 Firebase 就是 null／unavailable
   }
@@ -251,6 +255,40 @@ function callBridge(win, b) {
       const h = s => { let e = null; try { e = JSON.parse(s) } catch { return } fn(e) }
       win.__asnCallEvent = h
       return () => { if (win.__asnCallEvent === h) win.__asnCallEvent = null }
+    },
+  }
+}
+
+// 念出訊息的外殼橋（ReadAloud.kt）。事件走自己的 window.__asnReadEvent(json字串)，不跟通話、語音輸入搶同一個接收者。
+// voices() 取得這支手機的語音合成聲音與語言：{ voices:[{ id, name, lang, quality, needsNet }], langs:[語言標籤] }；
+// 取不到（外殼沒回應、引擎沒啟動、格式壞掉）一律回空清單並寫一行 log，不靜默失敗。
+export const VOICES_WAIT_MS = 5000
+function readBridge(win, b, { log = m => console.info('[ASN]', m) } = {}) {
+  if (typeof b.readAvailable !== 'function') return null
+  const run = (fn, ...a) => { try { return typeof b[fn] === 'function' ? b[fn](...a) : undefined } catch { return undefined } }
+  if (run('readAvailable') !== true) return null
+  const empty = why => { log(`念出：取不到聲音清單（${why}）`); return { voices: [], langs: [] } }
+  const parse = raw => {
+    let o = null
+    try { o = typeof raw === 'string' ? JSON.parse(raw) : raw } catch { return null }
+    if (!o || !Array.isArray(o.voices)) return null
+    return { voices: o.voices.filter(v => v && typeof v.id === 'string'), langs: Array.isArray(o.langs) ? o.langs.filter(x => typeof x === 'string') : [] }
+  }
+  const listeners = new Set()
+  const dispatch = s => { let e = null; try { e = JSON.parse(s) } catch { return } for (const f of [...listeners]) f(e) }
+  win.__asnReadEvent = dispatch
+  return {
+    speak: (id, text, voiceId) => run('readSpeak', String(id), String(text), String(voiceId ?? '')),
+    stop: () => run('readStop'),
+    onEvent(fn) { listeners.add(fn); return () => listeners.delete(fn) },
+    voices() {
+      const first = run('readVoices')
+      if (first === undefined) return Promise.resolve(empty('外殼沒有回應'))
+      if (first !== 'pending') { const r = parse(first); return Promise.resolve(r && r.voices.length ? r : empty(r ? '清單是空的' : '格式不對')) }
+      return new Promise(resolve => {   // 引擎還在啟動：等外殼用 read-voices 事件送來
+        const timer = setTimeout(() => { off(); resolve(empty('等太久')) }, VOICES_WAIT_MS)
+        const off = (() => { const f = e => { if (e?.t !== 'read-voices') return; clearTimeout(timer); off(); const r = e.error ? null : parse(e); resolve(r && r.voices.length ? r : empty(e.error || (r ? '清單是空的' : '格式不對'))) }; listeners.add(f); return () => listeners.delete(f) })()
+      })
     },
   }
 }

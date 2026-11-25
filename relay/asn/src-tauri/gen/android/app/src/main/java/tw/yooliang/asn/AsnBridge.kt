@@ -139,6 +139,13 @@ class AsnBridge(private val activity: MainActivity) {
   @JavascriptInterface fun callStopSpeak() = activity.callVoice.stopSpeak()
   @JavascriptInterface fun callEnd() = activity.callVoice.end()
 
+  // ---------- 念出訊息（#2304）：喇叭鈕與自動念，見 ReadAloud.kt；事件（read-done／read-error／read-voices）由它推回網頁 ----------
+  @JavascriptInterface fun readAvailable(): Boolean = activity.readAloud.available()
+  @JavascriptInterface fun readSpeak(id: String, text: String, voiceId: String) = activity.readAloud.speak(id, text, voiceId)
+  @JavascriptInterface fun readStop() = activity.readAloud.stop()
+  /** 聲音與語言清單（JSON 字串 {voices,langs}）；引擎還在啟動時回 "pending"，之後由 read-voices 事件送 */
+  @JavascriptInterface fun readVoices(): String = activity.readAloud.voices()
+
   // ---------- 推播（#797，FCM）：見 AsnPush.kt；事件（perm／token／token-error／refresh）由它推回網頁 ----------
   /** unavailable（沒有 Firebase）／granted／ask（還沒問過通知權限）／denied（問過被拒，不再問） */
   @JavascriptInterface fun pushState(): String = AsnPush.state(activity)

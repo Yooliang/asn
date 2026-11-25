@@ -32,6 +32,7 @@ import { UI_KIT } from './lib/ui-kit.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
 import { PUSH_TEXT, createPushSync, pushSettingView } from './lib/mobile-push.mjs'
 import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
+import { autoSpeakPlan, createMobileSpeaker } from './lib/mobile-speak.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { ONBOARD_STORE, TEXT as ONBOARD_TEXT, checkName, markOnboarded, planOnboarding } from './lib/onboard.mjs'
 import { POLL_MS as SECRET_POLL_MS, TEXT as SECRET_TEXT, countdownText as secretCountdown, errorText as secretError, normalizeList as secretList, nextToAsk as secretNext, secretError as secretValidate } from './lib/secret-ask.mjs'
@@ -188,6 +189,11 @@ let memberJump = null
 watch(lastChat, v => { if (memberJump && v !== memberJump.from && v !== memberJump.to) memberJump = null })
 const me = reactive({ psm: '', status: 'online', nick: info.window_name })
 const prefs = reactive({ ...DEFAULT_PREFS })
+// 念出訊息（#2304）：對話裡的喇叭鈕與「收到新訊息自動念」。外殼（ReadAloud.kt）沒有、或這支手機沒有語音合成就沒有喇叭鈕
+const speaker = bridge?.read ? createMobileSpeaker({ native: bridge.read, voice: () => prefs.voice?.tts_voice ?? '', reactive, log: m => console.info('[ASN]', m) }) : null
+const speakApi = speaker
+// 手機的聲音清單與語言（第 2 張的設定頁用）：取不到回空清單並已寫 log
+const readVoices = () => (bridge?.read ? bridge.read.voices() : Promise.resolve({ voices: [], langs: [] }))
 const friends = ref([]), conn = ref('connecting'), nodeOrder = ref([]), nodeFacts = ref({}), nodeNames = ref({})   // nodeNames＝節點 → 後台記的設備名（手機自己沒有夥伴列，名字只在這裡）
 // 設備順序與手動顯示的隱藏設備：存在這支手機自己的設定（asn-me.json 的 deviceOrder／deviceShown／deviceRemoved）當離線快取，有登入就與帳號層同步（lib/device-sync.mjs）
 const devPrefs = reactive({ deviceOrder: [], deviceShown: [], deviceRemoved: [], deviceRev: 0, deviceSynced: false })
@@ -290,6 +296,10 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
   core.on('avatars', () => { avatars.value = core.avatarMap() })
   core.on('notify', n => {
     const plan = notifyPlan(n, { openId: viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: lastChat.value }), foreground: document.visibilityState === 'visible', prefs })
+    if (speaker) {   // 自動念：只念對方的新訊息（歷史、自己發的、背景、通話中都不念；設定預設關）
+      const ap = autoSpeakPlan(n, { cfg: prefs.voice, foreground: document.visibilityState === 'visible', calling: callOn.value })
+      if (ap.ok) speaker.speakAuto(`auto:${n.friend?.id}:${n.at}`, n.line)
+    }
     if (plan.vibrate) { if (bridge) bridge.vibrate(plan.vibrate); else navigator.vibrate?.(plan.vibrate) }
     if (plan.shake) { shake.value = true; setTimeout(() => { shake.value = false }, 700) }
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
@@ -608,7 +618,7 @@ const app = createApp({
     const dictApi = canDictate(bridge?.call) ? {
       newDictation: ({ hints, onText } = {}) => createMobileDictation({ hints, onText, native: bridge.call, reactive, log: m => console.info('[ASN]', m) }),
     } : null
-    const onCallState = on => { callOn.value = on; bridge?.keepAwake(on) }
+    const onCallState = on => { callOn.value = on; if (on) speaker?.stop(); bridge?.keepAwake(on) }   // 開始通話就停掉念出（兩邊不要同時出聲）
     const sendTo = async (id, text, opts) => { if (isRoomChat(id)) return postRoom(id, text, opts); const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
     const nudgeTo = id => { if (!isRoomChat(id)) core.nudge(id) }   // 群組沒有震動與傳檔（工具列的鈕在群組畫面已藏起來）
     // 送一張附件；done（選填）收 { ok, error }：一次選多張時等這張的結果再送下一張（#1497）
@@ -1752,7 +1762,7 @@ const app = createApp({
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
-      friends, callApi, dictApi, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
+      friends, callApi, dictApi, speakApi, readVoices, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
       SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGos, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }

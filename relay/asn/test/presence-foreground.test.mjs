@@ -12,7 +12,7 @@ const lib = rd('src-tauri', 'src', 'lib.rs')
 const relay = rd('src-tauri', 'src', 'relay.rs')
 
 test('外殼：onStop 先送 false、結束通話丟例外也一定送出且會呼叫 super；onStart 送 true', () => {
-  assert.match(act, /override fun onStop\(\) \{\n(    \/\/[^\n]*\n)+    try \{\n      fgEvent\(false\)\n      callVoice\.onBackground\(\)\n    \} finally \{\n      super\.onStop\(\)\n    \}/)
+  assert.match(act, /override fun onStop\(\) \{\n(    \/\/[^\n]*\n)+    try \{\n      fgEvent\(false\)\n      callVoice\.onBackground\(\)\n      readAloud\.onBackground\(\)\n    \} finally \{\n      super\.onStop\(\)\n    \}/)
   assert.match(act, /override fun onStart\(\) \{\n    super\.onStart\(\)\n    fgEvent\(true\)/)
   assert.match(act, /window\.__asnFgEvent && window\.__asnFgEvent\(\$fg\)/)
   assert.doesNotMatch(act, /super\.onStop\(\) 之前送出/, '註解不說「之前送出」（只是排進佇列）')
