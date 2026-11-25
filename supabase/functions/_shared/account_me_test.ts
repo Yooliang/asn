@@ -97,7 +97,7 @@ Deno.test("relay/index.ts：chat_history 在節點金鑰驗證之後且走本人
   assertEquals(h.includes("handleChatHistory(") && h.includes("SIGN_HEADER") && h.includes("me,"), true);
   const send = src.slice(src.indexOf('action === "send" && req.method'), src.indexOf("// 遠端開視窗"));
   assertEquals(send.includes("...personArgs(b.as_person, signed)"), true);
-  assertEquals(send.includes("for (const t of bellTopicsOf(sent)) await ring(t)"), true);
+  assertEquals(send.includes("for (const t of bellTopicsOf(sent)) await ring(t, MAIL_BELL)"), true);
 });
 
 Deno.test("handleChatHistory：節點取自金鑰（me.id）、使用者取自簽章；附件資訊套在每則上；錯誤對應", async () => {

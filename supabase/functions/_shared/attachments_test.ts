@@ -257,9 +257,9 @@ Deno.test("relay/index.ts：附件動作在節點驗證之後；send 寄出前�
   const at = (s: string, from = 0) => src.indexOf(s, from);
   assert(at("ATTACH_ACTIONS.has(action)") > at("asn_relay_auth"), "附件動作要在金鑰驗證之後");
   const send = src.slice(at('action === "send"'), at("// 遠端開視窗"));
-  assert(send.includes("prepareAttachments") && send.includes("reconcileAttachments") && send.includes("ring(t)"));
+  assert(send.includes("prepareAttachments") && send.includes("reconcileAttachments") && send.includes("ring(t, MAIL_BELL)"));
   assert(send.indexOf("prepareAttachments") < send.indexOf("sendWithClientId("), "先驗附件再寄信");
-  assert(send.indexOf("const missing = await reconcileAttachments") < send.indexOf("ring(t)"), "先綁再敲門鈴");
+  assert(send.indexOf("const missing = await reconcileAttachments") < send.indexOf("ring(t, MAIL_BELL)"), "先綁再敲門鈴");
   assert(send.includes("me.id"), "綁定與驗證的節點是金鑰所屬節點");
   // #1205：lookup 命中、idem 回 duplicate、第一次寄，三條路都要補綁＋核對
   assertEquals((send.match(/reconcileAttachments[(]/g) ?? []).length, 3, "三條路都走補綁＋核對");

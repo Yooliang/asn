@@ -92,6 +92,7 @@ import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { MEMBER_NOT_FRIEND, copyText, createGroupApi, memberFriendId } from './lib/groups.mjs'
 import { createRoomHub } from './lib/room-hub.mjs'
+import { createRoomBellGate } from './lib/bell-rooms.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
@@ -231,6 +232,7 @@ async function startUpdate() {
 }
 let core = null
 const roomsHook = {}   // 群組更新的入口（畫面掛上後才有；門鈴與回到前景用）
+const roomBells = createRoomBellGate({ refresh: () => void roomsHook.refresh?.() })   // 哪一聲門鈴要重抓群組清單（#2161 B1）
 const lastMap = reactive({})   // 夥伴 id → 最後說的一句話（名單第三行）
 const refreshLast = id => { lastMap[id] = lastWords(core?.logOf(id)) }
 let startCore = null
@@ -305,7 +307,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
   })
   startCallPoll({ anyCall: () => callOn.value, pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
-  core.on('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void roomsHook.refresh?.() })   // #2038 PR-5；Rust 端的門鈴（前景時有效）
+  core.on('relay-bell', p => { void core.pull('bell'); core.refreshRosterSoon(); roomBells.ring(p) })   // #2038 PR-5；Rust 端的門鈴（前景時有效）
   await core.hub.ready()   // #2038 PR-5：舊寫法是 await 門鈴的註冊，等註冊完才往下；這行保住同樣的啟動順序（零行為變化）
   watchAndroidUpdateProgress(core.hub, { upd, withProgress })   // 只有「下載中」才套用（#2038 PR-2）
   upd.enabled = bridge?.selfUpdateEnabled() === true
@@ -434,6 +436,7 @@ const app = createApp({
     const roomRowOf = id => hub.rowOf(id)
     const roomEmptyText = computed(() => (query.value.trim() ? '找不到符合的群組。' : hub.st.err ? ROOM_LOAD_FAIL_TEXT : ROOM_EMPTY_HINT))
     async function refreshRooms() {
+      roomBells.noteRefresh()
       await hub.refresh()
       if (isRoomChat(lastChat.value) && nav.tab === 'chats') await showRoom()
     }
