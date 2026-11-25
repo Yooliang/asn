@@ -6,14 +6,18 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { defaultExe, e2eTmpDir, maskSecrets, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
+import { defaultExe, e2eMainExe, e2eTmpDir, hooksExeSkip, maskSecrets, runShot, shotCaptureSupported } from '../scripts/shot.mjs'
 import { FAKE_KEY, U } from './fake-relay.mjs'
 import { nudgeBody } from '../ui/lib/text.mjs'
 import { assertShotNotBlank, checkShot } from './shot-png.mjs'
 
-test('asn.exe 端到端（假 relay）', { skip: !fs.existsSync(defaultExe) && '先執行 npm run build', timeout: 120_000 }, async () => {
+// 發版機設 ASN_SHOT_TOAST_LENIENT=1（#2033），這個變數只有 test-hooks 版 exe 讀得到（#2163 PR-3b），所以那時主情境改用 hooks 版；
+// 沒設時照舊測會發出去的那份（target/release）
+const mainExe = e2eMainExe()
+const mainSkip = mainExe === defaultExe ? !fs.existsSync(defaultExe) && '先執行 npm run build' : hooksExeSkip()
+test('asn.exe 端到端（假 relay）', { skip: mainSkip, timeout: 120_000 }, async () => {
   const out = e2eTmpDir('asn-e2e-')
-  const r = await runShot(out)
+  const r = await runShot(out, mainExe)
   assert.equal(r.code, 0, r.log)
   const reqs = r.relay.reqs
   assert.ok(reqs.every(q => q.key === FAKE_KEY), '每個請求都帶 x-relay-key')

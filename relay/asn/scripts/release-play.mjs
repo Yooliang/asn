@@ -32,7 +32,8 @@ if (!smokeGate({ root, skip: splitSkipFlag(process.argv.slice(2)).skip }).ok) fa
 const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(process.env.LOCALAPPDATA || os.homedir(), 'Android', 'Sdk')
 if (!process.env.JAVA_HOME) fail('沒有設 JAVA_HOME（Android Studio 的 jbr 資料夾）')
 const ndkDir = path.join(sdk, 'ndk')
-const env = { ...process.env, ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk }
+// ASN_SHIPPING_BUILD=1：build.rs 看到它又帶了 test-hooks feature 就在編譯期失敗（#2163 PR-3b）
+const env = { ...process.env, ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, ASN_SHIPPING_BUILD: '1' }
 delete env.ORG_GRADLE_PROJECT_asnDist   // Play 版：外殼不帶安裝權限與安裝程式碼
 if (!env.NDK_HOME && fs.existsSync(ndkDir)) env.NDK_HOME = path.join(ndkDir, fs.readdirSync(ndkDir).sort().at(-1))
 const ext = process.platform === 'win32' ? '.exe' : ''

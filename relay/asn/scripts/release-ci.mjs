@@ -34,6 +34,9 @@ export const tauriBuildArgs = tauriJs => [tauriJs, 'build', '--bundles', 'nsis',
 export const sha256SumsText = entries =>
   [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)).map(e => `${e.sha256}  ${e.name}\n`).join('')
 
+/** 正式安裝檔的建置環境：ASN_SHIPPING_BUILD=1，build.rs 看到它又帶了 test-hooks 就直接 panic（#2163 PR-3b 第二道證明） */
+export const shippingEnv = env => ({ ...env, ASN_SHIPPING_BUILD: '1' })
+
 export const sha256OfFile = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex')
 
 /** 安裝檔必須存在且非空；回錯誤訊息或 null */
@@ -46,8 +49,8 @@ export function main(argv = process.argv.slice(2), env = process.env) {
   const fail = m => { console.error(`CI 建置中止：${m}`); process.exit(1) }
   const parsed = parseCiArgs(argv)
   if (parsed.error) fail(parsed.error)
-  const run = (cmd, args) => {
-    const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', env })
+  const run = (cmd, args, runEnv = env) => {
+    const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', env: runEnv })
     if (r.status !== 0) fail(`${path.basename(args[0] ?? cmd)} 失敗（結束碼 ${r.status}）`)
   }
   const node = process.execPath
@@ -60,12 +63,16 @@ export function main(argv = process.argv.slice(2), env = process.env) {
   run(node, ['scripts/prep.mjs'])
   run(node, ['scripts/fetch-wezterm.mjs'])
   if (!wezTermReady()) fail('resources/wezterm 不是這次取得的自建版 WezTerm（SOURCE.txt 與樣板不一致或缺檔），不打包')
-  run(node, tauriBuildArgs(path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js')))
+  // e2e 專用的 test-hooks 版（要在正式建置之前建：正式建置會覆蓋 target/release/asn.exe；第三方依賴共用，只多編 asn 本體）。絕不進安裝檔
+  run(node, ['scripts/build-hooks-exe.mjs'])
+  run(node, tauriBuildArgs(path.join('node_modules', '@tauri-apps', 'cli', 'tauri.js')), shippingEnv(env))
 
   const name = installerName(version)
   const exe = path.join(root, 'src-tauri', 'target', 'release', 'bundle', 'nsis', name)
   const problem = installerProblem(exe)
   if (problem) fail(problem)
+  // 證明正式 exe（tauri 改寫後、會被包進安裝檔的那個）沒有測試掛鉤：標記掃描＋行為探針，兩者都帶 hooks 版當對照組
+  run(node, ['scripts/hooks-proof.mjs'])
 
   const out = parsed.out ? path.resolve(parsed.out) : path.join(root, 'src-tauri', 'target', 'release-ci')
   fs.rmSync(out, { recursive: true, force: true })

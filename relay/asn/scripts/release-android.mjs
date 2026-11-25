@@ -29,7 +29,8 @@ const notes = androidNotes({ arg: opts.notes, changelog: fs.existsSync(changelog
 const sdk = process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || path.join(process.env.LOCALAPPDATA || os.homedir(), 'Android', 'Sdk')
 if (!process.env.JAVA_HOME) fail('沒有設 JAVA_HOME（Android Studio 的 jbr 資料夾）')
 const ndkDir = path.join(sdk, 'ndk')
-const env = { ...process.env, ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, ORG_GRADLE_PROJECT_asnDist: 'sideload' }
+// ASN_SHIPPING_BUILD=1：build.rs 看到它又帶了 test-hooks feature 就在編譯期失敗（#2163 PR-3b）
+const env = { ...process.env, ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, ORG_GRADLE_PROJECT_asnDist: 'sideload', ASN_SHIPPING_BUILD: '1' }
 if (!env.NDK_HOME && fs.existsSync(ndkDir)) env.NDK_HOME = path.join(ndkDir, fs.readdirSync(ndkDir).sort().at(-1))
 const run = (cmd, args) => { const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', env, shell: false }); if (r.status !== 0) fail(`${path.basename(cmd)} 失敗（結束碼 ${r.status}）`) }
 const node = process.execPath
