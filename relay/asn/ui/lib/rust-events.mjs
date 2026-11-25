@@ -41,4 +41,4 @@ export const RUST_EVENTS = Object.freeze({
 })
 
 // 已經搬到 hub 的事件（其餘還是各處直接 listen，之後的 PR 再搬）
-export const HUB_MIGRATED = Object.freeze(['agent-setup', 'agent-setup-remote', 'asn:frame', 'asn:open', 'update-progress', 'android-update-progress', 'asn:stt-progress', 'claude-mod-status', 'claude-account-auto', 'grok-account-auto', 'auth-signed-out', 'attach-cache-cleared', 'asn:invite', 'asn:now-playing', 'term-being-viewed'])
+export const HUB_MIGRATED = Object.freeze(['agent-setup', 'agent-setup-remote', 'asn:frame', 'asn:open', 'update-progress', 'android-update-progress', 'asn:stt-progress', 'claude-mod-status', 'claude-account-auto', 'grok-account-auto', 'auth-signed-out', 'attach-cache-cleared', 'asn:invite', 'asn:now-playing', 'term-being-viewed', 'relay-bell'])

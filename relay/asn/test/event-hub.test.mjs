@@ -116,7 +116,7 @@ test('事件表：26 種、欄位齊、已搬的 4 種都在表裡', () => {
     assert.equal(typeof v.shape, 'string', k)
   }
   for (const k of HUB_MIGRATED) assert.ok(k in RUST_EVENTS, k)
-  assert.deepEqual([...HUB_MIGRATED].sort(), ['agent-setup', 'agent-setup-remote', 'android-update-progress', 'asn:frame', 'asn:invite', 'asn:now-playing', 'asn:open', 'asn:stt-progress', 'attach-cache-cleared', 'auth-signed-out', 'claude-account-auto', 'claude-mod-status', 'grok-account-auto', 'term-being-viewed', 'update-progress'].sort())
+  assert.deepEqual([...HUB_MIGRATED].sort(), ['agent-setup', 'agent-setup-remote', 'android-update-progress', 'asn:frame', 'asn:invite', 'asn:now-playing', 'asn:open', 'asn:stt-progress', 'attach-cache-cleared', 'auth-signed-out', 'claude-account-auto', 'claude-mod-status', 'grok-account-auto', 'relay-bell', 'term-being-viewed', 'update-progress'].sort())
 })
 
 // ---------- AsnCore 委派 ----------
