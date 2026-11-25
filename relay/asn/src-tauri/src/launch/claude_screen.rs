@@ -1594,6 +1594,23 @@ Esc to cancel
     }
 
     #[test]
+    fn 單號2335_擁有者實機畫面_認得出來_只標狀態() {
+        let text = fixture!("claude-limit-weekly.real").replace("\r\n", "\n");
+        // 前提：實機畫面的三個形狀都在，不然這支測的不是它
+        let lines: Vec<&str> = text.trim_end().lines().collect();
+        let at = lines.iter().position(|l| *l == WEEKLY).expect("要有額度那一行");
+        assert!(lines[at - 1].starts_with("  ⎿  sent id="), "額度行是工具呼叫底下的第二個 ⎿");
+        assert!(lines[at..].iter().any(|l| l.starts_with("✻ Waiting for 1 background agent")));
+        assert!(lines[at..].iter().any(|l| l.starts_with("● Agent \"") && l.contains("You've hit your weekly limit · resets")));
+        let s = classify(&text).expect("要認得週額度用完");
+        assert_eq!((s.kind, status_code(s.kind)), (K::UsageLimit, "usage_limit"));
+        assert_eq!((s.allow_once, s.deny, s.options.len()), (None, None, 0));
+        // 同一張畫面少掉額度那一行：子代理失敗那行也有同一句字，但不能靠它認
+        let without: Vec<&str> = lines.iter().enumerate().filter(|(i, _)| *i != at).map(|(_, l)| *l).collect();
+        assert_eq!(kind(&without.join("\n")), None);
+    }
+
+    #[test]
     fn 單號2335_各種額度名稱與掛法都認得() {
         for said in [
             "You've hit your limit · resets 5pm (Asia/Taipei)",

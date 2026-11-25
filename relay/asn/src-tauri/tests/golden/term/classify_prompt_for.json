@@ -83,6 +83,12 @@
     "grok": "None",
     "pi": "None"
   },
+  "fixture/claude-limit-weekly.real.txt": {
+    "agy": "None",
+    "claude": "None",
+    "grok": "None",
+    "pi": "None"
+  },
   "fixture/claude-login-expired.synthetic.txt": {
     "agy": "None",
     "claude": "None",

@@ -13,6 +13,7 @@
   "fixture/claude-limit-menu-paid-first.synthetic.txt": null,
   "fixture/claude-limit-menu.real.txt": null,
   "fixture/claude-limit-weekly-subagents.synthetic.txt": null,
+  "fixture/claude-limit-weekly.real.txt": null,
   "fixture/claude-login-expired.synthetic.txt": null,
   "fixture/claude-login-method.txt": null,
   "fixture/claude-lookalike-model-text.txt": null,

@@ -1,0 +1,16 @@
+● asn - asn_send (MCP)(to: "u:xxxxxxxx", reply_to: "xxxxxxxx-…", expects_reply: false,
+                      body: "（略，約 6 行內文）
+                      …")
+  ⎿  sent id=xxxxxxxx-… to=u:xxxxxxxx from=w02/夥伴-1
+  ⎿  You've hit your weekly limit · resets Nov 26, 8pm (Asia/Taipei)
+     /usage-credits to finish what you're working on.
+
+✻ Waiting for 1 background agent to finish
+
+● Agent "（某任務名稱）" failed: Agent terminated early due to an API error: You've hit your weekly limit · resets Nov 26, 8pm (Asia/Taipei) (error type rate_limit, HTTP 429, request id req_xxxx, model sent
+  to the API: claude-sonnet-5-5)
+                                                                       ✓ Update installed · Restart to update
+──────────────────────────────────────────────────────────── 夥伴-1 ─
+❯
+────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents
