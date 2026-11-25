@@ -1,15 +1,11 @@
 {
-  "version": "0.2.96",
-  "notes": "- 改善：看別台夥伴的終端時不再顯示藍色「只能看」提示列，正在看哪台、哪位改寫在輸入框的提示字裡",
-  "pub_date": "2026-11-24T19:58:00.423Z",
+  "version": "0.2.97",
+  "notes": "- 修正：電腦版 LINE、現代外觀恢復原本的標題列，視窗又可以拖動、放大鈕恢復正常（退回 0.2.96 的改動）\n- 新功能：對話裡的圖片直接顯示在訊息中，捲到才下載，可以直接儲存",
+  "pub_date": "2026-11-25T00:37:11.885Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjAxcDQ5ekU4NTBubmI1ZjF1V2RkYVdibWdOZHAwamF4OFFzMTdvdUtjVFB2c0k0cFRKN1g2SmluUzMyV212OXFyU3FYcmREOGppcG0rblpkM1U1ZlFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTUwMjgwCWZpbGU6QVNOXzAuMi45Nl94NjQtc2V0dXAuZXhlCm5CQ0grYXhhaEtDd2YzWlBvbUV1QW9GVVk5LzVZczhjUVFoMVhTVk5rSDJYU3VMMGdIOEhDMUNzK2R4Q1pwajh6cUVITksvSmt2d1o4eURtdFdFZENnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.96_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBBRWlRVjN3WHpNV1Z2UzY0OS9EYlpqKzd5VU9hS3dmbFBmYy9uZG1FbWFGRlpURmp2UFkyRkorNjAzYWZwVWNKWEdveXFMS3ZvdDgwWlBZZDlBQVFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTUwNjczCWZpbGU6QVNOXzAuMi45Nl9hbWQ2NC5BcHBJbWFnZQozSStsNEJJZmRiZ0tsNURMV3RaWmhQRE1GandVUENwcThSLzRIbjVmd2dKcTl0bkNyWnAzUmF1UlZjVStXaFVielRxVHN6bi9ZQzRyZVl3M2psQTBDdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.96_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnl5eW56TkhpaHNmeHN3aTYyM05xV2p4cHFMeUhSWUpLRmR3R1gvVTIzYms5UTNZMm5RUjNBejFHWHpnWVArUllzT3VWZG5jY0M4UFlwV0lxMmg4endVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTY3MDMxCWZpbGU6QVNOXzAuMi45N194NjQtc2V0dXAuZXhlCjd0RVdMYVRQdjJwMmJzSTJDdlRXMTdFZk84VTYvTXNHMFZJZGgvcUpqamhlcGFvWHNoUFFtVXROaWVlcjhmMGJXbmd4OWM0UlI5STRpRnhQUnBaakFBPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.97_x64-setup.exe"
     }
   }
 }
