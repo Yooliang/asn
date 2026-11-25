@@ -14,6 +14,37 @@ export function unmatchedText(r) {
   return `${names.join('、')} 不在這個群組，這則沒有點到${names.length > 1 ? '他們' : '他'}。`
 }
 
+// 背景群組（使用者沒在看）的已讀補查間隔：5 分鐘才問一次後台（#2161 F3）；可見的群組每次都查
+export const RECEIPTS_BACKGROUND_MS = 300_000
+
+// 確認卡片的重整名單（#2161 F3）：只對「看得見的」與「有變動的」群組打 group_confirm_list。
+// 後台建立確認時會經 room_append 寫一則群組訊息（last_seq 加一），所以列的 lastSeq／unread 變了就是可能有新卡片。
+//  timer（60 秒計時器）：只打看得見的；bell（門鈴）：看得見的＋有變動的；其他（start、groupFlow…）：全打並建立快照。
+// isVisible 可回 Promise。回 Set(要打的群組代號)；略過的次數記 cards:skippedBackground
+export function createCardGate({ counter = null } = {}) {
+  let prev = new Map()
+  return async function pick(why, ids, { rowOf, isVisible }) {
+    const out = new Set()
+    for (const id of ids) {
+      const row = rowOf(id)
+      const before = prev.get(id)
+      const changed = !before || !row || before.lastSeq !== row.lastSeq || before.unread !== row.unread
+      const all = why !== 'timer' && why !== 'bell'
+      if (all || (await Promise.resolve().then(() => isVisible(id)).catch(() => false)) === true || (why === 'bell' && changed)) out.add(id)
+      else counter?.hit('cards:skippedBackground', id)
+    }
+    // 快照＝『上次真的重抓確認清單時』的列狀態：沒打到的群組不覆寫，否則計時器那一輪會把變化吃掉、門鈴就看不出來（asn真 一審）
+    const next = new Map(prev)
+    for (const id of ids) {
+      const row = rowOf(id)
+      if (row && out.has(id)) next.set(id, { lastSeq: row.lastSeq, unread: row.unread })
+      else if (!row) next.delete(id)
+    }
+    prev = next
+    return out
+  }
+}
+
 // visible(群組代號)：使用者現在正在看這個群組嗎（可回 Promise）；沒指定 mark 的讀取只有看著的那個才標已讀
 export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd = 'relay_room_read', postCmd = 'relay_room_post', attachCmd = 'relay_send_attachment', photos = false, visible = () => true, now = () => Date.now(), reactive = x => x, onRooms = () => {}, onFail = () => {}, counter = null }) {
   const api = makeRoomApi(invoke, { readCmd, postCmd, attachCmd })   // 後端呼叫一律走 tauri.mjs 的具名出口；invoke 仍可注入（測試用）
@@ -38,6 +69,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
   }
 
   let reading = new Set()
+  const lastReceiptsAt = {}   // 群組代號 → 上次問已讀的時間（一般讀取與補查都算）
   let noWakes = false
   // 讀一個群組的新訊息（第一次讀最近 ROOM_FIRST_LOAD 則）；回 true＝有新資料
   async function read(id, { force = false, mark } = {}) {
@@ -48,7 +80,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
     const log = st.logs[id] ?? []
     const first = !log.length
     const unread = row.unread > 0
-    if (!first && !force && !needsRead(log, row.lastSeq) && !unread) return await refreshReceipts(id, ident, log)
+    if (!first && !force && !needsRead(log, row.lastSeq) && !unread) return await refreshReceipts(id, ident, log, force)
     if (counter) {   // 本機計數（#2161 F3）：真的要打後台了，每個成立的條件各記一次
       counter.hit('read:total', id)
       if (first) counter.hit('read:first', id)
@@ -65,6 +97,7 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
       const r = await api.read({ room: id, agent: ident.agent || null, since, limit: first ? ROOM_FIRST_LOAD : 200, mark: seen })
       const mine = (room.mine ?? []).map(m => m?.member)
       st.logs[id] = applyWakes(applyReads(mergeRoomLog(log, roomLog(r?.messages, mine, room.members, { photos })), r?.reads), r?.wakes, offlineKeysOf(room))
+      lastReceiptsAt[id] = now()   // 一般讀取也帶回已讀，背景補查的間隔從這裡重算
       if (seen) for (const m of room.mine ?? []) if (m.member === ident.key) m.unread = 0
       st.note = ''
       return true
@@ -102,9 +135,13 @@ export function createRoomHub({ invoke, groupApi, selfNode, windowName, readCmd 
 
   // 沒有新訊息時：自己發的訊息還有人沒讀，就問一次後台「已讀 N」有沒有變（不標已讀、只讀最後一則之後＝不會有訊息內容）
   // 同一次呼叫也補晚到的叫醒順序（最近 10 分鐘內發出、還沒有順序的訊息）；後台只回已存的結果，不會重新排序
-  async function refreshReceipts(id, ident, log) {
+  async function refreshReceipts(id, ident, log, force = false) {
     const wakeWait = !noWakes && hasPendingWakes(log, now())
     if (!hasPendingReads(log) && !wakeWait) return false
+    // 背景群組（沒在看）5 分鐘才補查一次；看得見的每次都查，剛變成看得見的那一刻也馬上查（#2161 F3）
+    const seen = (await Promise.resolve().then(() => visible(id)).catch(() => false)) === true
+    if (!force && !seen && Number.isFinite(lastReceiptsAt[id]) && now() - lastReceiptsAt[id] < RECEIPTS_BACKGROUND_MS) { counter?.hit('receipts:skippedBackground', id); return false }
+    lastReceiptsAt[id] = now()
     if (counter) { if (hasPendingReads(log)) counter.hit('receipts:reads', id); if (wakeWait) counter.hit('receipts:wakes', id) }
     try {
       const r = await api.read({ room: id, agent: ident.agent || null, since: log[log.length - 1].seq, limit: 1, mark: false })
