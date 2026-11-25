@@ -10,6 +10,7 @@ on:
       - 'relay/asn/ui/**'
       - 'relay/asn/scripts/smoke*'
       - 'relay/asn/scripts/ui-shots*'
+      - 'relay/asn/scripts/settings-effects*'
       - 'relay/asn/test/**'
       - '.github/workflows/asn-ui-shots.yml'
   workflow_dispatch:
@@ -105,6 +106,17 @@ jobs:
           node scripts/hit-targets.mjs --out "$RUNNER_TEMP/ui-hit-targets"
           ASN_HIT_TARGETS_LATEST="$RUNNER_TEMP/ui-hit-targets/hit-targets.json" node --test test/hit-targets.test.mjs
 
+      # 設定項目效果紀錄（T4）：每個設定項目真的操作一次，比「假 Tauri 收到的指令、設定檔欄位差異、localStorage 差異」跟 test/golden/settings-effects.json；
+      # 只報告（continue-on-error），跟 T2、T3 一樣；有差異時步驟轉黃、摘要最上面寫明。本機重錄：ASN_GOLDEN_UPDATE=1 node scripts/settings-effects.mjs
+      - name: 設定項目效果紀錄（只報告）
+        id: fx
+        continue-on-error: true
+        working-directory: new/relay/asn
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/settings-effects.mjs --out "$RUNNER_TEMP/ui-settings-effects" 2>&1 | tee "$RUNNER_TEMP/ui-settings-effects.log"
+
       - name: 報告寫進摘要
         if: always()
         shell: bash
@@ -117,6 +129,13 @@ jobs:
           if [ "${{ steps.hit.outcome }}" != "success" ]; then
             echo "> **🔴 手機觸控目標檢查沒有通過或沒有跑完（步驟結果：${{ steps.hit.outcome }}）：有新增或惡化的過小觸控目標，或量測工具自己壞了。**" >> "$GITHUB_STEP_SUMMARY"
             echo "::warning::手機觸控目標檢查沒有通過或沒有跑完（步驟結果：${{ steps.hit.outcome }}）"
+          fi
+          if [ "${{ steps.fx.outcome }}" != "success" ]; then
+            echo "> **🔴 設定項目效果紀錄與 golden 不一致，或沒有跑完（步驟結果：${{ steps.fx.outcome }}）：有設定項目送出的指令、存檔欄位或 localStorage 變了，請看上一步的 log。**" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::設定項目效果紀錄與 golden 不一致或沒有跑完（步驟結果：${{ steps.fx.outcome }}）"
+            if [ -f "$RUNNER_TEMP/ui-settings-effects.log" ]; then
+              { echo '```'; tail -n 60 "$RUNNER_TEMP/ui-settings-effects.log"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi
           if [ -f "$RUNNER_TEMP/ui-hit-targets/report.md" ]; then
             head -c 100000 "$RUNNER_TEMP/ui-hit-targets/report.md" >> "$GITHUB_STEP_SUMMARY"
@@ -138,5 +157,6 @@ jobs:
             ${{ runner.temp }}/ui-shots/diff/
             ${{ runner.temp }}/ui-hit-targets/report.md
             ${{ runner.temp }}/ui-hit-targets/hit-targets.json
+            ${{ runner.temp }}/ui-settings-effects/settings-effects.json
           if-no-files-found: ignore
           retention-days: 7

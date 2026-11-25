@@ -1,0 +1,3584 @@
+{
+ "version": 1,
+ "note": "設定項目效果紀錄（#1763 T4）。每筆＝一個控制項真的操作一次後：假 Tauri 收到的指令、設定檔 me 的欄位差異、localStorage 差異。在舊程式上錄，搬完用同一份驗收。重錄：ASN_GOLDEN_UPDATE=1 node scripts/settings-effects.mjs",
+ "scenarios": [
+  "list-set-me-aero",
+  "list-set-devices-aero",
+  "list-set-accounts-aero",
+  "list-set-cloud-aero",
+  "list-set-look-aero",
+  "list-set-notify-aero",
+  "list-set-voice-aero",
+  "list-set-window-aero",
+  "list-set-launch-aero",
+  "list-set-usage-aero",
+  "list-set-update-aero",
+  "list-set-about-aero",
+  "m-set-me-aero",
+  "m-set-devices-aero",
+  "m-set-accounts-aero",
+  "m-set-cloud-aero",
+  "m-set-look-aero",
+  "m-set-notify-aero",
+  "m-set-update-aero",
+  "m-set-about-aero"
+ ],
+ "entries": [
+  {
+   "platform": "desk",
+   "cat": "about",
+   "kind": "button",
+   "label": "使用指引",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "show_main",
+     "args": null
+    }
+   ],
+   "prefs": [
+    {
+     "from": "@setting",
+     "path": "session.active.id",
+     "to": "@guide"
+    },
+    {
+     "from": "",
+     "path": "session.panel.guide",
+     "to": "start"
+    },
+    {
+     "from": [
+      {
+       "id": "@setting"
+      }
+     ],
+     "path": "session.tabs",
+     "to": [
+      {
+       "id": "@setting"
+      },
+      {
+       "id": "@guide"
+      }
+     ]
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "open-guide"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "about",
+   "kind": "button",
+   "label": "官網",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "open_link",
+     "args": {
+      "url": "https://asnmessenger.web.app/"
+     },
+     "err": "command open_link not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "open-link"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "about",
+   "kind": "button",
+   "label": "檢視記錄",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "open_ui_log",
+     "args": null,
+     "err": "command open_ui_log not found"
+    },
+    {
+     "cmd": "open_machine_log_dir",
+     "args": null,
+     "err": "command open_machine_log_dir not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "open-ui-log"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "about",
+   "kind": "button",
+   "label": "版本紀錄",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "checkbox|自動檢查更新#1",
+    "button|立即檢查#1",
+    "button|重試#1"
+   ],
+   "calls": [
+    {
+     "cmd": "show_main",
+     "args": null
+    },
+    {
+     "cmd": "claude_quota_state",
+     "args": null,
+     "err": "command claude_quota_state not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "open-update"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "about",
+   "via": "button|版本紀錄#1",
+   "kind": "button",
+   "label": "立即檢查",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "update_check",
+     "args": null,
+     "err": "command update_check not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "check-update"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "about",
+   "via": "button|版本紀錄#1",
+   "kind": "button",
+   "label": "重試",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "site_releases",
+     "args": {
+      "force": true
+     },
+     "err": "command site_releases not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "releases-retry"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "about",
+   "via": "button|版本紀錄#1",
+   "kind": "checkbox",
+   "label": "自動檢查更新",
+   "nth": 1,
+   "input": "取消勾選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "autoUpdate",
+     "to": false
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "autoCheck"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "about",
+   "kind": "button",
+   "label": "隱私權政策",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "open_link",
+     "args": {
+      "url": "https://asnmessenger.web.app/privacy"
+     },
+     "err": "command open_link not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "open-link"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "accounts",
+   "kind": "button",
+   "label": "⋯",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|重新產生查詢代碼#1",
+    "button|撤銷代碼#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "accounts",
+   "via": "button|⋯#1",
+   "kind": "button",
+   "label": "撤銷代碼",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|取消#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "quota-unshare"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "accounts",
+   "via": "button|⋯#1",
+   "kind": "button",
+   "label": "重新產生查詢代碼",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|取消#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "quota-share"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "撤銷",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|確認撤銷#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|撤銷#1",
+   "kind": "button",
+   "label": "確認撤銷",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_revoke",
+     "args": {
+      "node": "C1"
+     },
+     "err": "command cloud_agent_revoke not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "撤銷",
+   "nth": 2,
+   "input": "按一下",
+   "reveals": [
+    "button|確認撤銷#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|撤銷#2",
+   "kind": "button",
+   "label": "確認撤銷",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_revoke",
+     "args": {
+      "node": "C2"
+     },
+     "err": "command cloud_agent_revoke not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "撤銷",
+   "nth": 3,
+   "input": "按一下",
+   "reveals": [
+    "button|確認撤銷#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|撤銷#3",
+   "kind": "button",
+   "label": "確認撤銷",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_revoke",
+     "args": {
+      "node": "C3"
+     },
+     "err": "command cloud_agent_revoke not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|設備名#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#1",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_rename",
+     "args": {
+      "name": "小真",
+      "node": "C1"
+     },
+     "err": "command cloud_agent_rename not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#1",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#1",
+   "kind": "text",
+   "label": "設備名",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "改名",
+   "nth": 2,
+   "input": "按一下",
+   "reveals": [
+    "text|設備名#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#2",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_rename",
+     "args": {
+      "name": "日本VM",
+      "node": "C2"
+     },
+     "err": "command cloud_agent_rename not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#2",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#2",
+   "kind": "text",
+   "label": "設備名",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "改名",
+   "nth": 3,
+   "input": "按一下",
+   "reveals": [
+    "text|設備名#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#3",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_rename",
+     "args": {
+      "name": "新代理",
+      "node": "C3"
+     },
+     "err": "command cloud_agent_rename not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#3",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|改名#3",
+   "kind": "text",
+   "label": "設備名",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "輸入短碼核准主機",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|主機上顯示的短碼#1",
+    "text|主機的名字#1",
+    "text|節點代號（可留空，系統自動取）#1",
+    "button|取消#1",
+    "button|核准#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|輸入短碼核准主機#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "button",
+   "label": "核准",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "text",
+   "label": "主機上顯示的短碼",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "text",
+   "label": "主機的名字",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "text",
+   "label": "節點代號（可留空，系統自動取）",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "邀請雲端代理",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|代理的名字#1",
+    "button|取消#1",
+    "button|建立#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|邀請雲端代理#1",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|邀請雲端代理#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|邀請雲端代理#1",
+   "kind": "button",
+   "label": "建立",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_create",
+     "args": {
+      "name": "雲端代理"
+     },
+     "err": "command cloud_agent_create not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "cloud",
+   "via": "button|邀請雲端代理#1",
+   "kind": "text",
+   "label": "代理的名字",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "kind": "button",
+   "label": "拖曳調整「擁有者的手機」的順序，或按鍵盤的上下鍵",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "kind": "button",
+   "label": "拖曳調整「舊手機」的順序，或按鍵盤的上下鍵",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "kind": "button",
+   "label": "拖曳調整「辦公室」的順序，或按鍵盤的上下鍵",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|‹#1",
+    "button|工作管理員#1",
+    "checkbox|讀 Grok 額度#1",
+    "checkbox|允許別台設備替這台切換帳號#1",
+    "button|改名#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#1",
+   "kind": "button",
+   "label": "‹",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|拖曳調整「辦公室」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#2",
+    "button|拖曳調整「擁有者的手機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#3",
+    "button|拖曳調整「舊手機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#4"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#1",
+   "kind": "button",
+   "label": "工作管理員",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "auth_status",
+     "args": null
+    },
+    {
+     "cmd": "task_manager_list",
+     "args": null,
+     "err": "command task_manager_list not found"
+    },
+    {
+     "cmd": "relay_launchers",
+     "args": {
+      "ids": null
+     }
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "tm-open"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#1",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|這台設備的名字#1",
+    "button|取消#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "device-rename-clear"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#1",
+   "kind": "checkbox",
+   "label": "允許別台設備替這台切換帳號",
+   "nth": 1,
+   "input": "取消勾選",
+   "calls": [
+    {
+     "cmd": "acct_remote_allow_set",
+     "args": {
+      "on": false
+     },
+     "err": "command acct_remote_allow_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "acct-allow-switch"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#1",
+   "kind": "checkbox",
+   "label": "讀 Grok 額度",
+   "nth": 1,
+   "input": "勾選",
+   "calls": [
+    {
+     "cmd": "quota_readers_set",
+     "args": {
+      "on": true,
+      "source": "grok"
+     },
+     "err": "command quota_readers_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "quota-source"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 2,
+   "input": "按一下",
+   "reveals": [
+    "button|‹#1",
+    "button|改名#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#2",
+   "kind": "button",
+   "label": "‹",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|拖曳調整「辦公室」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#2",
+    "button|拖曳調整「擁有者的手機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#3",
+    "button|拖曳調整「舊手機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#4"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#2",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|這台設備的名字#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "device-rename-clear"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 3,
+   "input": "按一下",
+   "reveals": [
+    "button|‹#1",
+    "checkbox|允許這支手機替這台登入（Codex 等）#1",
+    "button|改名#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#3",
+   "kind": "button",
+   "label": "‹",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|拖曳調整「辦公室」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#2",
+    "button|拖曳調整「擁有者的手機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#3",
+    "button|拖曳調整「舊手機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#4"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#3",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|這台設備的名字#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "device-rename-clear"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#3",
+   "kind": "checkbox",
+   "label": "允許這支手機替這台登入（Codex 等）",
+   "nth": 1,
+   "input": "勾選",
+   "calls": [
+    {
+     "cmd": "device_known_login_ok",
+     "args": {
+      "node": "M1",
+      "on": true
+     },
+     "err": "command device_known_login_ok not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "known-login-ok"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 4,
+   "input": "按一下",
+   "reveals": [
+    "button|‹#1",
+    "button|改名#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#4",
+   "kind": "button",
+   "label": "‹",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|拖曳調整「辦公室」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#2",
+    "button|拖曳調整「擁有者的手機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#3",
+    "button|拖曳調整「舊手機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#4"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "devices",
+   "via": "button|詳情#4",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|這台設備的名字#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "device-rename-clear"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "launch",
+   "kind": "button",
+   "label": "重新檢查",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "ai_cli_status",
+     "args": {
+      "force": true
+     },
+     "err": "command ai_cli_status not found"
+    },
+    {
+     "cmd": "ai_cli_detect",
+     "args": null,
+     "err": "command ai_cli_detect not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "launch-recheck"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "launch",
+   "kind": "button",
+   "label": "＋ 加入資料夾…",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "launch_cwd_browse",
+     "args": null,
+     "err": "command launch_cwd_browse not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "launch-cwd-add"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "launch",
+   "kind": "number",
+   "label": "別的設備一小時最多替這台開 個新夥伴",
+   "nth": 1,
+   "input": "輸入 7",
+   "calls": [
+    {
+     "cmd": "launch_prefs_set",
+     "args": {
+      "prefs": {
+       "cwdAllow": [],
+       "launchDisplay": "foreground",
+       "maxPerHourSet": 7,
+       "recentCwd": [],
+       "showAdvanced": false
+      }
+     },
+     "err": "command launch_prefs_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "launch-max"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "radio",
+   "label": "LINE 風格",
+   "nth": 1,
+   "input": "點選",
+   "calls": [
+    {
+     "cmd": "snap_max_set",
+     "args": {
+      "dpr": 1,
+      "h": 36,
+      "w": 46,
+      "x": 807,
+      "y": 13
+     },
+     "err": "command snap_max_set not found"
+    },
+    {
+     "cmd": "snap_max_set",
+     "args": {
+      "dpr": 1,
+      "h": 36,
+      "w": 46,
+      "x": 807,
+      "y": 13
+     },
+     "err": "command snap_max_set not found"
+    }
+   ],
+   "prefs": [
+    {
+     "from": null,
+     "path": "skin",
+     "to": "line"
+    }
+   ],
+   "storage": [
+    {
+     "key": "asnSkin",
+     "from": "aero",
+     "to": "line"
+    }
+   ],
+   "dialog": null,
+   "acts": [
+    "skin"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "radio",
+   "label": "復古 Aero",
+   "nth": 1,
+   "input": "點選（原本就選著）",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "radio",
+   "label": "現代",
+   "nth": 1,
+   "input": "點選",
+   "calls": [
+    {
+     "cmd": "snap_max_set",
+     "args": {
+      "dpr": 1,
+      "h": 36,
+      "w": 46,
+      "x": 807,
+      "y": 13
+     },
+     "err": "command snap_max_set not found"
+    },
+    {
+     "cmd": "snap_max_set",
+     "args": {
+      "dpr": 1,
+      "h": 36,
+      "w": 46,
+      "x": 807,
+      "y": 13
+     },
+     "err": "command snap_max_set not found"
+    }
+   ],
+   "prefs": [
+    {
+     "from": null,
+     "path": "skin",
+     "to": "modern"
+    }
+   ],
+   "storage": [
+    {
+     "key": "asnSkin",
+     "from": "aero",
+     "to": "modern"
+    }
+   ],
+   "dialog": null,
+   "acts": [
+    "skin"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "select",
+   "label": "分組依",
+   "nth": 1,
+   "input": "選「廠商」",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "groupDim",
+     "to": "engine"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "groupDim"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "select",
+   "label": "分頁依",
+   "nth": 1,
+   "input": "選「活躍度」",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "groupDim",
+     "to": "engine"
+    },
+    {
+     "from": null,
+     "path": "tabDim",
+     "to": "status"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "tabDim"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "select",
+   "label": "工具列位置",
+   "nth": 1,
+   "input": "選「輸入框下方」",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "toolbar",
+     "to": "bottom"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "toolbar"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "select",
+   "label": "文字底色",
+   "nth": 1,
+   "input": "選「色彩（雙方同色）」",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "bubble",
+     "to": "color"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "bubble"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "select",
+   "label": "視窗外框",
+   "nth": 1,
+   "input": "選「Windows 原生」",
+   "calls": [
+    {
+     "cmd": "set_frame",
+     "args": {
+      "native": true
+     },
+     "err": "command set_frame not found"
+    }
+   ],
+   "prefs": [
+    {
+     "from": null,
+     "path": "frame",
+     "to": "native"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "frame"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "select",
+   "label": "視窗模式",
+   "nth": 1,
+   "input": "選「分離（每位好友各一扇視窗）」",
+   "calls": [
+    {
+     "cmd": "main_layout",
+     "args": {
+      "h": 660,
+      "merged": false,
+      "recenter": false,
+      "w": 360
+     }
+    },
+    {
+     "cmd": "open_panel",
+     "args": {
+      "h": 560,
+      "kind": "setting",
+      "title": "設定：外觀",
+      "w": 480
+     },
+     "err": "command open_panel not found"
+    }
+   ],
+   "prefs": [
+    {
+     "from": null,
+     "path": "session.active",
+     "to": null
+    },
+    {
+     "from": [
+      {
+       "id": "@setting"
+      }
+     ],
+     "path": "session.tabs",
+     "to": []
+    },
+    {
+     "from": "merged",
+     "path": "winMode",
+     "to": "split"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "mode"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "look",
+   "kind": "select",
+   "label": "頭像模式",
+   "nth": 1,
+   "input": "選「右（對話區右邊一欄）」",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "dpMode",
+     "to": "right"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "dpMode"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 2,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "auth_ai_wake_limit_set",
+     "args": {
+      "limit": 20
+     },
+     "err": "command auth_ai_wake_limit_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "kind": "button",
+   "label": "登出",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|取消#1",
+    "button|只登出#1",
+    "button|登出並關閉 ASN#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "via": "button|登出#1",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|登出#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "via": "button|登出#1",
+   "kind": "button",
+   "label": "只登出",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|登出#1"
+   ],
+   "calls": [
+    {
+     "cmd": "auth_logout",
+     "args": {
+      "stop": false
+     },
+     "err": "command auth_logout not found"
+    },
+    {
+     "cmd": "auth_status",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "via": "button|登出#1",
+   "kind": "button",
+   "label": "登出並關閉 ASN",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|登出#1"
+   ],
+   "calls": [
+    {
+     "cmd": "auth_logout",
+     "args": {
+      "stop": true
+     },
+     "err": "command auth_logout not found"
+    },
+    {
+     "cmd": "auth_status",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "kind": "button",
+   "label": "選擇圖片…",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "kind": "checkbox",
+   "label": "顯示正在聽的歌",
+   "nth": 1,
+   "input": "勾選",
+   "calls": [
+    {
+     "cmd": "set_now_playing",
+     "args": {
+      "on": true
+     },
+     "err": "command set_now_playing not found"
+    }
+   ],
+   "prefs": [
+    {
+     "from": null,
+     "path": "showNowPlaying",
+     "to": true
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "now-playing"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "kind": "number",
+   "label": "AI 之間互相叫醒的上限（每次你發言後） 儲存你在群組發言後，AI 之間最多可以互相叫醒幾輪。0",
+   "nth": 1,
+   "input": "輸入 21",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "via": "number|AI 之間互相叫醒的上限（每次你發言後） 儲存你在群組發言後，AI 之間最多可以互相叫醒幾輪。0#1",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "via": "number|AI 之間互相叫醒的上限（每次你發言後） 儲存你在群組發言後，AI 之間最多可以互相叫醒幾輪。0#1",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 2,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "auth_ai_wake_limit_set",
+     "args": {
+      "limit": 21
+     },
+     "err": "command auth_ai_wake_limit_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "kind": "text",
+   "label": "我的名字 儲存帳號的名字，所有設備共用。",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "via": "text|我的名字 儲存帳號的名字，所有設備共用。#1",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "auth_account_name_set",
+     "args": {
+      "name": "測試值"
+     },
+     "err": "command auth_account_name_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "me",
+   "via": "text|我的名字 儲存帳號的名字，所有設備共用。#1",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 2,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "auth_ai_wake_limit_set",
+     "args": {
+      "limit": 20
+     },
+     "err": "command auth_ai_wake_limit_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "notify",
+   "kind": "checkbox",
+   "label": "右下角通知",
+   "nth": 1,
+   "input": "取消勾選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "notify.toast",
+     "to": false
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "notify"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "notify",
+   "kind": "checkbox",
+   "label": "收到檔案聲音",
+   "nth": 1,
+   "input": "取消勾選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "notify.file",
+     "to": false
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "notify"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "notify",
+   "kind": "checkbox",
+   "label": "通知聲音",
+   "nth": 1,
+   "input": "取消勾選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "notify.msg",
+     "to": false
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "notify"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "notify",
+   "kind": "checkbox",
+   "label": "震動聲音",
+   "nth": 1,
+   "input": "取消勾選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "notify.nudge",
+     "to": false
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "notify"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "update",
+   "kind": "button",
+   "label": "立即檢查",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "update_check",
+     "args": null,
+     "err": "command update_check not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "check-update"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "update",
+   "kind": "button",
+   "label": "重試",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "site_releases",
+     "args": {
+      "force": true
+     },
+     "err": "command site_releases not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "releases-retry"
+   ],
+   "platformOnly": null
+  },
+  {
+   "platform": "desk",
+   "cat": "update",
+   "kind": "checkbox",
+   "label": "自動檢查更新",
+   "nth": 1,
+   "input": "取消勾選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "autoUpdate",
+     "to": false
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "autoCheck"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "usage",
+   "kind": "button",
+   "label": "重新整理",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "usage_summary",
+     "args": {
+      "tzOffsetMin": -480
+     }
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "usage-refresh"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "voice",
+   "kind": "button",
+   "label": "下載語音辨識",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "stt_install",
+     "args": null,
+     "err": "command stt_install not found"
+    },
+    {
+     "cmd": "tts_voices",
+     "args": null
+    },
+    {
+     "cmd": "stt_status",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "voice-install"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "voice",
+   "kind": "select",
+   "label": "語音輸入的語言",
+   "nth": 1,
+   "input": "選「自動判斷」",
+   "calls": [
+    {
+     "cmd": "voice_cfg_set",
+     "args": {
+      "cfg": {
+       "stt_lang": "auto",
+       "stt_model": "small",
+       "tts_auto": false,
+       "tts_voice": ""
+      }
+     },
+     "err": "command voice_cfg_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "voice-save"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "voice",
+   "kind": "select",
+   "label": "語音辨識模型",
+   "nth": 1,
+   "input": "選「較快（約 60 MB）」",
+   "calls": [
+    {
+     "cmd": "voice_cfg_set",
+     "args": {
+      "cfg": {
+       "stt_lang": "zh",
+       "stt_model": "base",
+       "tts_auto": false,
+       "tts_voice": ""
+      }
+     },
+     "err": "command voice_cfg_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "voice-save"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "desk",
+   "cat": "window",
+   "kind": "select",
+   "label": "關閉視窗時",
+   "nth": 1,
+   "input": "選「結束程式」",
+   "calls": [
+    {
+     "cmd": "set_close_to_tray",
+     "args": {
+      "tray": false
+     },
+     "err": "command set_close_to_tray not found"
+    }
+   ],
+   "prefs": [
+    {
+     "from": null,
+     "path": "closeTo",
+     "to": "quit"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "acts": [
+    "closeTo"
+   ],
+   "platformOnly": "desk"
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "kind": "button",
+   "label": "使用指引",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|開始使用 ASN名字、大頭貼、設定部分是電腦版功能#1",
+    "button|讓這台電腦的 Claude 視窗出現在名單上裝好 ASN 就會自動電腦版功能#1",
+    "button|讓雲端 AI 代理加入例如 Grok部分是電腦版功能#1",
+    "button|群組怎麼用目前能做的事手機也能用#1",
+    "button|常見問題沒回覆、改名、狀態燈、震動#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "via": "button|使用指引#1",
+   "kind": "button",
+   "label": "常見問題沒回覆、改名、狀態燈、震動",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "via": "button|使用指引#1",
+   "kind": "button",
+   "label": "群組怎麼用目前能做的事手機也能用",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "via": "button|使用指引#1",
+   "kind": "button",
+   "label": "讓這台電腦的 Claude 視窗出現在名單上裝好 ASN 就會自動電腦版功能",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "via": "button|使用指引#1",
+   "kind": "button",
+   "label": "讓雲端 AI 代理加入例如 Grok部分是電腦版功能",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "via": "button|使用指引#1",
+   "kind": "button",
+   "label": "開始使用 ASN名字、大頭貼、設定部分是電腦版功能",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "kind": "button",
+   "label": "官網",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "open_link",
+     "args": {
+      "url": "https://asnmessenger.web.app/"
+     },
+     "err": "command open_link not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "kind": "button",
+   "label": "版本紀錄",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|重試#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "via": "button|版本紀錄#1",
+   "kind": "button",
+   "label": "重試",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "site_releases",
+     "args": {
+      "force": true
+     },
+     "err": "command site_releases not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "kind": "button",
+   "label": "返回",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "about",
+   "kind": "button",
+   "label": "隱私權政策",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "open_link",
+     "args": {
+      "url": "https://asnmessenger.web.app/privacy"
+     },
+     "err": "command open_link not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "kind": "button",
+   "label": "切換",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "android_acct_switch",
+     "args": {
+      "email": "me@example.com",
+      "node": "Q"
+     },
+     "err": "command android_acct_switch not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "kind": "button",
+   "label": "帳號",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "kind": "button",
+   "label": "設備",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|詳情#1",
+    "button|拖曳調整「辦公室」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#2",
+    "button|拖曳調整「工作機」的順序，或按鍵盤的上下鍵#1",
+    "button|詳情#3"
+   ],
+   "calls": [
+    {
+     "cmd": "relay_device_replace_candidates",
+     "args": null,
+     "err": "command relay_device_replace_candidates not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "via": "button|設備#1",
+   "kind": "button",
+   "label": "拖曳調整「工作機」的順序，或按鍵盤的上下鍵",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "via": "button|設備#1",
+   "kind": "button",
+   "label": "拖曳調整「辦公室」的順序，或按鍵盤的上下鍵",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "via": "button|設備#1",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|改名#1"
+   ],
+   "calls": [
+    {
+     "cmd": "android_known_list",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "via": "button|設備#1",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 2,
+   "input": "按一下",
+   "reveals": [
+    "button|改名#1"
+   ],
+   "calls": [
+    {
+     "cmd": "android_known_list",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "via": "button|設備#1",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 3,
+   "input": "按一下",
+   "reveals": [
+    "button|確認#1",
+    "button|改名#1"
+   ],
+   "calls": [
+    {
+     "cmd": "android_known_list",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "kind": "button",
+   "label": "返回",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "accounts",
+   "kind": "button",
+   "label": "關閉",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "撤銷",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|確認撤銷#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|撤銷#1",
+   "kind": "button",
+   "label": "確認撤銷",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_revoke",
+     "args": {
+      "node": "C1"
+     },
+     "err": "command cloud_agent_revoke not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "撤銷",
+   "nth": 2,
+   "input": "按一下",
+   "reveals": [
+    "button|確認撤銷#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|撤銷#2",
+   "kind": "button",
+   "label": "確認撤銷",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_revoke",
+     "args": {
+      "node": "C2"
+     },
+     "err": "command cloud_agent_revoke not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "撤銷",
+   "nth": 3,
+   "input": "按一下",
+   "reveals": [
+    "button|確認撤銷#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|撤銷#3",
+   "kind": "button",
+   "label": "確認撤銷",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_revoke",
+     "args": {
+      "node": "C3"
+     },
+     "err": "command cloud_agent_revoke not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|改名#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#1",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_rename",
+     "args": {
+      "name": "小真",
+      "node": "C1"
+     },
+     "err": "command cloud_agent_rename not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#1",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#1",
+   "kind": "text",
+   "label": "改名",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "改名",
+   "nth": 2,
+   "input": "按一下",
+   "reveals": [
+    "text|改名#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#2",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_rename",
+     "args": {
+      "name": "日本VM",
+      "node": "C2"
+     },
+     "err": "command cloud_agent_rename not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#2",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#2",
+   "kind": "text",
+   "label": "改名",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "改名",
+   "nth": 3,
+   "input": "按一下",
+   "reveals": [
+    "text|改名#1",
+    "button|取消#1",
+    "button|儲存#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#3",
+   "kind": "button",
+   "label": "儲存",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_rename",
+     "args": {
+      "name": "新代理",
+      "node": "C3"
+     },
+     "err": "command cloud_agent_rename not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#3",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|改名#3",
+   "kind": "text",
+   "label": "改名",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "輸入短碼核准主機",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|主機上顯示的短碼#1",
+    "text|主機的名字#1",
+    "text|節點代號（可留空，系統自動取）#1",
+    "button|取消#1",
+    "button|核准#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|輸入短碼核准主機#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "button",
+   "label": "核准",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "text",
+   "label": "主機上顯示的短碼",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "text",
+   "label": "主機的名字",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|輸入短碼核准主機#1",
+   "kind": "text",
+   "label": "節點代號（可留空，系統自動取）",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "返回",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "kind": "button",
+   "label": "邀請雲端代理",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|代理的名字#1",
+    "button|取消#1",
+    "button|建立#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|邀請雲端代理#1",
+   "kind": "button",
+   "label": "取消",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|邀請雲端代理#1",
+    "button|輸入短碼核准主機#1",
+    "button|改名#1",
+    "button|撤銷#1",
+    "button|改名#2",
+    "button|撤銷#2",
+    "button|改名#3",
+    "button|撤銷#3"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|邀請雲端代理#1",
+   "kind": "button",
+   "label": "建立",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "cloud_agent_create",
+     "args": {
+      "name": "雲端代理"
+     },
+     "err": "command cloud_agent_create not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "cloud",
+   "via": "button|邀請雲端代理#1",
+   "kind": "text",
+   "label": "代理的名字",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "帳號",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|切換#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "via": "button|帳號#1",
+   "kind": "button",
+   "label": "切換",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "android_acct_switch",
+     "args": {
+      "email": "me@example.com",
+      "node": "Q"
+     },
+     "err": "command android_acct_switch not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "拖曳調整「工作機」的順序，或按鍵盤的上下鍵",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "拖曳調整「辦公室」的順序，或按鍵盤的上下鍵",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "設備",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "relay_device_replace_candidates",
+     "args": null,
+     "err": "command relay_device_replace_candidates not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "button|改名#1"
+   ],
+   "calls": [
+    {
+     "cmd": "android_known_list",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "via": "button|詳情#1",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|這台設備的名字#1",
+    "button|取消#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 2,
+   "input": "按一下",
+   "reveals": [
+    "button|改名#1"
+   ],
+   "calls": [
+    {
+     "cmd": "android_known_list",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "via": "button|詳情#2",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|這台設備的名字#1",
+    "button|儲存#1",
+    "button|取消#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "詳情",
+   "nth": 3,
+   "input": "按一下",
+   "reveals": [
+    "button|確認#1",
+    "button|改名#1"
+   ],
+   "calls": [
+    {
+     "cmd": "android_known_list",
+     "args": null
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "via": "button|詳情#3",
+   "kind": "button",
+   "label": "改名",
+   "nth": 1,
+   "input": "按一下",
+   "reveals": [
+    "text|這台設備的名字#1",
+    "button|儲存#1",
+    "button|取消#1"
+   ],
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "via": "button|詳情#3",
+   "kind": "button",
+   "label": "確認",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": "確認「工作機」的指紋請在那台電腦的設定頁按「顯示 QR code」，再用相機掃它；也可以改成用選",
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "返回",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "devices",
+   "kind": "button",
+   "label": "關閉",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "look",
+   "kind": "button",
+   "label": "返回",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "look",
+   "kind": "radio",
+   "label": "LINE 風格",
+   "nth": 1,
+   "input": "點選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "mobilePrefs.skin",
+     "to": "line"
+    }
+   ],
+   "storage": [
+    {
+     "key": "asnSkin",
+     "from": "aero",
+     "to": "line"
+    }
+   ],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "look",
+   "kind": "radio",
+   "label": "復古 Aero",
+   "nth": 1,
+   "input": "點選（原本就選著）",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "look",
+   "kind": "radio",
+   "label": "現代",
+   "nth": 1,
+   "input": "點選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "mobilePrefs.skin",
+     "to": "modern"
+    }
+   ],
+   "storage": [
+    {
+     "key": "asnSkin",
+     "from": "aero",
+     "to": "modern"
+    }
+   ],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "me",
+   "kind": "button",
+   "label": "換大頭貼",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "me",
+   "kind": "button",
+   "label": "登出",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "auth_logout",
+     "args": {
+      "stop": false
+     },
+     "err": "command auth_logout not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  },
+  {
+   "platform": "phone",
+   "cat": "me",
+   "kind": "button",
+   "label": "返回",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "me",
+   "kind": "number",
+   "label": "AI 之間互相叫醒的上限（每次你發言後）你在群組發言後，AI 之間最多可以互相叫醒幾輪。0 表示",
+   "nth": 1,
+   "input": "輸入 21",
+   "calls": [
+    {
+     "cmd": "auth_ai_wake_limit_set",
+     "args": {
+      "limit": 21
+     },
+     "err": "command auth_ai_wake_limit_set not found"
+    },
+    {
+     "cmd": "auth_ai_wake_limit_get",
+     "args": null,
+     "err": "command auth_ai_wake_limit_get not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "me",
+   "kind": "select",
+   "label": "狀態",
+   "nth": 1,
+   "input": "選「忙碌」",
+   "calls": [
+    {
+     "cmd": "set_presence",
+     "args": {
+      "psm": "",
+      "status": "busy"
+     }
+    }
+   ],
+   "prefs": [
+    {
+     "from": null,
+     "path": "me.status",
+     "to": "busy"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "me",
+   "kind": "text",
+   "label": "個人訊息",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [
+    {
+     "cmd": "set_presence",
+     "args": {
+      "psm": "測試值",
+      "status": "online"
+     }
+    }
+   ],
+   "prefs": [
+    {
+     "from": null,
+     "path": "me.psm",
+     "to": "測試值"
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "me",
+   "kind": "text",
+   "label": "我的名字帳號的名字，所有設備共用，改了每台設備都會跟著變。",
+   "nth": 1,
+   "input": "輸入「測試值」",
+   "calls": [
+    {
+     "cmd": "auth_account_name_set",
+     "args": {
+      "name": "測試值"
+     },
+     "err": "command auth_account_name_set not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "notify",
+   "kind": "button",
+   "label": "返回",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "notify",
+   "kind": "checkbox",
+   "label": "對方傳來「震動」時，手機跟著震動",
+   "nth": 1,
+   "input": "取消勾選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "mobilePrefs.vibrateNudge",
+     "to": false
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "notify",
+   "kind": "checkbox",
+   "label": "收到新訊息時輕輕震一下",
+   "nth": 1,
+   "input": "勾選",
+   "calls": [],
+   "prefs": [
+    {
+     "from": null,
+     "path": "mobilePrefs.vibrateMsg",
+     "to": true
+    }
+   ],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "update",
+   "kind": "button",
+   "label": "返回",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": "phone"
+  },
+  {
+   "platform": "phone",
+   "cat": "update",
+   "kind": "button",
+   "label": "重試",
+   "nth": 1,
+   "input": "按一下",
+   "calls": [
+    {
+     "cmd": "site_releases",
+     "args": {
+      "force": true
+     },
+     "err": "command site_releases not found"
+    }
+   ],
+   "prefs": [],
+   "storage": [],
+   "dialog": null,
+   "platformOnly": null
+  }
+ ]
+}
