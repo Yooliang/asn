@@ -2578,8 +2578,13 @@ fn room_with_followups(h: &EH, first: &str, extra: Vec<(u64, &str, &str, Value)>
 
 /// 502 兩次（原本＋工作者 10 秒重試）之後，核心到補送時間會去讀群組；回傳 (mark 檔, 這一輪的 harness)
 async fn up1828_start(name: &str, extra: impl FnOnce(&EH, &str)) -> (EH, std::path::PathBuf) {
+    up1828_start_env(name, &[], extra).await
+}
+
+/// 同上，但可以指定假驅動的環境變數（例如讓它回完錯誤後很久才結束行程）
+async fn up1828_start_env(name: &str, env: &[(&str, &str)], extra: impl FnOnce(&EH, &str)) -> (EH, std::path::PathBuf) {
     crate::bridge::engines::acp_worker::set_net_retry_ms_for_test(400);
-    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[], "acp", &[]).await;
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), env, "acp", &[]).await;
     h.core.cfg.upstream_retry_ms = [300, 600];
     let mark = h.work.path().join(name);
     let first = format!("請處理這件事\n@@UP502_FIRST 2 {}", mark.display());
@@ -2622,4 +2627,17 @@ async fn 單號1828_讀群組後台失敗_照常補送() {
     assert_eq!(mark_lines(&mark), 3);
     let log = h.core.log.recent().join("\n");
     assert!(log.contains("upstream-retry room_read failed") && log.contains("upstream-retry resent"), "{log}");
+}
+
+#[tokio::test]
+async fn 單號2292_再試仍是502_舊驅動還沒結束時補送_不能沿用它而被結案成crash() {
+    // 假驅動回完 502 要兩秒才結束行程（模擬機器忙、行程收尾慢）。工作者自己再試的那一輪仍然 502 之後，
+    // 補送在 300 毫秒後就來：若工作者還留著那個快結束的驅動，補送會送給它、被它的結束結案成 crash（整套並行時偶發）
+    let (mut h, mark) = up1828_start_env("up2292.txt", &[("FAKE_AGY_FAIL_EXIT_MS", "2000"), ("FAKE_AGY_ECHO_PID", "1")], |h, _| h.fr.st.lock().unwrap().rooms = vec![]).await;
+    tick_wait(&mut h, "補送成功", |h| room_bodies(h).iter().any(|b| b.contains("收到："))).await;
+    let pids: Vec<String> = std::fs::read_to_string(&mark).unwrap().lines().filter(|l| !l.is_empty()).map(String::from).collect();
+    assert_eq!(pids.len(), 3, "{}", h.log_text());
+    let body = room_bodies(&h).into_iter().find(|b| b.contains("收到：")).unwrap();
+    assert!(!body.contains(&format!("(pid={})", pids[1])), "補送沿用了快結束的舊驅動（pid={}）：{body}", pids[1]);
+    assert!(!h.log_text().contains("code=crash"), "補送不該被舊驅動的結束拖成 crash：{}", h.log_text());
 }
