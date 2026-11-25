@@ -6,10 +6,9 @@ import { VoiceInput } from './voice-input.mjs'
 import { createCallSession, isCallActive } from './call-session.mjs'
 import { makeVoiceApi } from './tauri.mjs'
 import { plainMessage } from './plain-errors.mjs'
+import { sttProgressText } from './progress-events.mjs'
 
-const MB = n => `${Math.round(n / 1048576)} MB`
-
-export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive = x => x, log = () => {} }) {
+export function createVoiceUi({ invoke, hub = null, createMic, createAudio, reactive = x => x, log = () => {} }) {
   const api = makeVoiceApi(invoke)   // 後端呼叫一律走 tauri.mjs 的具名出口；invoke 仍可注入（測試用）
   const state = reactive({
     tts: { key: '', phase: 'idle', error: '' },
@@ -42,14 +41,11 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
   let pendingText = null   // 目前這次錄音辨識完要交給誰（多個面板共用時，交給「按結束」的那個面板）
   input.onText = t => { const f = pendingText; pendingText = null; if (f) f(t) }
 
-  let unlisten = null
+  let unsubProgress = null   // 只訂一次；dispose 時退訂
   async function trackProgress() {
-    if (unlisten) return
-    unlisten = await listen('asn:stt-progress', p => {
-      if (p.stage === 'done') { state.install.text = ''; return }
-      const what = p.stage === 'engine' ? '辨識引擎' : '語音模型'
-      state.install.text = p.total ? `正在下載${what}… ${MB(p.done)} / ${MB(p.total)}` : `正在下載${what}… ${MB(p.done)}`
-    })
+    if (!hub) return
+    if (!unsubProgress) unsubProgress = hub.subscribe('asn:stt-progress', p => { state.install.text = sttProgressText(p) })
+    await hub.ready?.()   // 向 Rust 註冊完成才開始下載，早到的進度不會漏
   }
 
   return {
@@ -122,5 +118,7 @@ export function createVoiceUi({ invoke, listen, createMic, createAudio, reactive
       finally { state.install.busy = false; state.install.text = '' }
     },
     dismissInstall: () => { state.install.needed = false },
+    /** 視窗關閉時退訂進度事件 */
+    dispose() { unsubProgress?.(); unsubProgress = null },
   }
 }

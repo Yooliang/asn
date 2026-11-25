@@ -89,7 +89,11 @@ export function createAgentInstall({ invoke, reactive, signedIn = async () => fa
   const setRemoteAllow = async on => {
     try { await api.remoteAllowSet(on === true); s.remoteAllow = on === true } catch (e) { s.msg = errText(e) }
   }
-  return { state: s, load, ask, decline, confirm, cancel, onEvent, dismiss, openTerminal, setRemoteAllow }
+  // 從事件中心訂閱 agent-setup：重複呼叫先退訂舊的，同一時間只會有一個訂閱（#2038 PR-2）
+  let unsub = null
+  const detach = () => { unsub?.(); unsub = null }
+  const attach = hub => { detach(); unsub = hub.subscribe('agent-setup', e => onEvent(e)); return detach }
+  return { state: s, load, ask, decline, confirm, cancel, onEvent, attach, detach, dismiss, openTerminal, setRemoteAllow }
 }
 
 /** 給設備細部頁的資料（純資料，不含函式）。要不要顯示按鈕由畫面看這台 Claude 的 installAction 決定 */

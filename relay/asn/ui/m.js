@@ -74,7 +74,8 @@ import { headTone } from './lib/head-tone.mjs'
 import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
 import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
-import { authApi, cloudApi, deviceReplaceApi, invoke, listen, makeFpShowApi, mobileAccountApi, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
+import { watchAndroidUpdateProgress } from './lib/progress-events.mjs'
+import { authApi, bindRustEvents, cloudApi, deviceReplaceApi, invoke, listen, makeFpShowApi, mobileAccountApi, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, removedDevices, deviceNameError, deviceNameOf, unnamedLabelOf } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
@@ -278,6 +279,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     aliases: info.old_names, pollMs: info.poll_ms, rosterMs: info.roster_ms, backlogAfterMs: 5 * 60_000,
     log: m => console.info('[ASN]', m),
   })
+  bindRustEvents(core.hub)   // Rust 事件從 core 訂閱（#2038）
   setLocalArchiver((f, a) => core.setLocalArchived(f, a))   // 後台沒有的舊好友封存時改記在本機
   const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; nodeNames.value = s.nodeNames ?? {}; nodeFacts.value = s.nodeFacts ?? {}; for (const f of s.friends) refreshLast(f.id) }
   const pushLog = id => { logs[id] = core.viewOf(id) }
@@ -292,7 +294,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
   })
   startCallPoll({ anyCall: () => callOn.value, pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
   await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void roomsHook.refresh?.() })   // Rust 端的門鈴（前景時有效）
-  await listen('android-update-progress', p => { if (upd.phase === 'downloading') Object.assign(upd, withProgress(upd, p)) })   // 下載完才到的進度事件不能把畫面又拉回「下載中」
+  watchAndroidUpdateProgress(core.hub, { upd, withProgress })   // 只有「下載中」才套用（#2038 PR-2）
   upd.enabled = bridge?.selfUpdateEnabled() === true
   setInterval(() => { if (shouldAutoCheck(upd, prefs)) void checkUpdate() }, UPDATE_CHECK_MS)
   setInterval(() => { if (document.visibilityState === 'visible') void core.syncReads() }, READ_VISIBLE_POLL_MS)   // 別台讀過的紅點不用等 60 秒才消（#856）

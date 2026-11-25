@@ -92,6 +92,7 @@ import { PI_ONLY_CHANNELS, PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteL
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
+import { watchUpdateProgress } from './lib/progress-events.mjs'
 import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
@@ -264,7 +265,6 @@ const installUpdate = async () => {
   try { await updateApi.install() } catch (e) { setUpd(withFailure(upd, plainMessage(e))) }
 }
 if (!info.shot) {
-  await listen('update-progress', p => setUpd(withProgress(upd, p)))
   setInterval(() => { if (autoCheck.value) void checkUpdate() }, CHECK_MS)
   if (autoCheck.value) void checkUpdate()
 }
@@ -364,6 +364,7 @@ const core = new AsnCore({
   log: m => console.info('[ASN]', m),
 })
 bindRustEvents(core.hub)   // Rust 事件從 core 訂閱（#2038）；橋只在有人訂閱時才向 Tauri 註冊
+if (!info.shot) watchUpdateProgress(core.hub, { getUpd: () => upd, setUpd, withProgress })   // 更新下載進度（#2038 PR-2）
 
 // ---------- 群組（真人好友與群組）：群組在名單的「群組」分頁，點進去在對話分頁（整合）或對話視窗（分開）聊 ----------
 // 群組對話用「假夥伴」接上既有的對話窗：id 是 room:<群組代號>。發言、讀取、同意／拒絕都走 Rust 指令並帶本人簽章
@@ -1133,7 +1134,7 @@ void loadLaunchPrefs()
 void loadPiSetup()
 setInterval(() => void pollLaunchResults(), LAUNCH_TRACK_POLL_MS)   // 只在有剛開的夥伴要追進度時才查
 // 語音：整合模式的對話分頁用這一份；設定存在 Rust 端的 voice.json（對話視窗也讀同一份）
-const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })
+const voice = createVoiceUi({ invoke, hub: core.hub, createMic, createAudio: browserAudio, reactive })
 const callTick = ref(0)                 // 通話狀態變動時加一，讓「關閉閒置」的可用判斷重算
 const mergedCalls = reactive({})        // 整合模式：哪些分頁的 chat-pane 正在通話（chat-pane 的 call-state 事件）
 const setPaneCall = (id, on) => { if (on) mergedCalls[id] = true; else delete mergedCalls[id]; callTick.value++ }
@@ -1982,7 +1983,8 @@ const app = createApp({
       onDone: (ok, node) => { if (!ok) return; void accounts.refreshRoster(); if (node && node !== info.node) void accounts.loadReports([node]) },
     })
     onBeforeUnmount(() => reloginFlow.stop())
-    core.on('agent-setup', e => agentInstall.onEvent(e))   // hub 已經把事件裡的內容（payload）直接交給函式
+    agentInstall.attach(core.hub)   // 只訂一次（再呼叫會先退訂舊的）；hub 把事件內容（payload）直接交給函式
+    onBeforeUnmount(() => agentInstall.detach())
     // ---------- 新手引導卡（#1605）：這台電腦一個視窗也沒有時，取代「還沒有視窗」的空白字 ----------
     // 狀態全沿用既有偵測（ai_cli_detect 的 cliTools＋本機帳號），規則在 lib/new-computer-guide.mjs
     const guideHidden = ref(loadGuideHidden())

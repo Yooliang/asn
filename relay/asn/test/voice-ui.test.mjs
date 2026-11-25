@@ -2,6 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createVoiceUi } from '../ui/lib/voice-ui.mjs'
+import { createEventHub } from '../ui/lib/event-hub.mjs'
 import { AUTO_CHOICES, DEFAULT_CFG, normalizeCfg, shouldAutoSpeak, sttStatusText } from '../ui/lib/voice-prefs.mjs'
 import { build } from './audio-helpers.mjs'
 
@@ -18,10 +19,10 @@ function rig({ ready = true } = {}) {
       if (cmd === 'tts_speak') return { mime: 'audio/mpeg', audio: 'QUJD' }
       throw new Error('unexpected ' + cmd)
     },
-    listen: async (evt, fn) => { listeners[evt] = fn },
+    hub: createEventHub({ listen: async (evt, fn) => { listeners[evt] = fn } }),
   }
   r.ui = createVoiceUi({
-    invoke: r.invoke, listen: r.listen,
+    invoke: r.invoke, hub: r.hub,
     createMic: () => ({ start: async () => {}, stop: async () => take }),
     createAudio: () => ({ play: async () => {}, stop() {}, onended: null }),
   })
