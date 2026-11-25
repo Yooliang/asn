@@ -216,7 +216,7 @@ pub fn write_inflight_with(dir: &Path, items: &[(String, String, Option<String>)
         }
         m.insert(id.to_ascii_lowercase(), e);
     }
-    crate::write_atomic(&dir.join(INFLIGHT_FILE), &json!({ "v": 2, "items": m }).to_string())
+    crate::settings::atomic::write(&dir.join(INFLIGHT_FILE), json!({ "v": 2, "items": m }).to_string().as_bytes(), crate::settings::atomic::STATE)
 }
 
 /// 全文雜湊（sha256，十六進位）：逐位元組，不做任何換行或空白處理
@@ -247,7 +247,7 @@ fn private_dir(dir: &Path, sub: &str) {
 pub fn write_body(dir: &Path, id: &str, text: &str) -> std::io::Result<()> {
     let f = file_of(dir, BODY_DIR, id).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad id"))?;
     private_dir(dir, BODY_DIR);
-    crate::write_atomic(&f, text)
+    crate::settings::atomic::write(&f, text.as_bytes(), crate::settings::atomic::STATE)
 }
 
 pub fn remove_applied(dir: &Path, id: &str) {
@@ -263,7 +263,7 @@ pub fn read_body(dir: &Path, id: &str) -> Option<String> {
 pub fn write_applied(dir: &Path, id: &str, hash: &str) -> std::io::Result<()> {
     let f = file_of(dir, APPLIED_DIR, id).ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "bad id"))?;
     private_dir(dir, APPLIED_DIR);
-    crate::write_atomic(&f, hash)
+    crate::settings::atomic::write(&f, hash.as_bytes(), crate::settings::atomic::STATE)
 }
 
 pub fn read_applied(dir: &Path, id: &str) -> Option<String> {

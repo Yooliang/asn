@@ -202,7 +202,7 @@ pub fn record_failure(work_dir: &Path, name: &str, profile: &str, error: &str) {
     let mut lines: Vec<String> = std::fs::read_to_string(&file).unwrap_or_default().lines().filter(|l| !l.trim().is_empty()).map(String::from).collect();
     lines.push(json!({ "at": crate::heartbeat::now_ms(), "name": name, "profile": profile, "error": error }).to_string());
     let skip = lines.len().saturating_sub(FAIL_KEEP);
-    let _ = crate::write_atomic(&file, &(lines[skip..].join("\n") + "\n"));
+    let _ = crate::settings::atomic::write(&file, (lines[skip..].join("\n") + "\n").as_bytes(), crate::settings::atomic::STATE);
 }
 
 /// `since_ms` 之後這個名字的請求處理得如何：Some(Ok)＝已開出並記進名冊、Some(Err)＝失敗（中文原因）、None＝還沒處理。名字不分大小寫

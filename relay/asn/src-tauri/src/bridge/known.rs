@@ -193,7 +193,7 @@ impl Known {
         if !self.archived.is_empty() {
             body["archived"] = json!(self.archived.iter().take(MAX_NAMES).collect::<Vec<_>>());
         }
-        crate::write_atomic(file, &body.to_string()).map_err(|e| format!("{}：{e}", file.display()))?;
+        crate::settings::atomic::write(file, body.to_string().as_bytes(), crate::settings::atomic::STATE).map_err(|e| format!("{}：{e}", file.display()))?;
         self.dirty = false;
         self.saved_at = now;
         Ok(())
