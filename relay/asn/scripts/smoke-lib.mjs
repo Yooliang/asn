@@ -791,6 +791,9 @@ const BASE_SCENARIOS = [
   { name: 'm-line-table-360', page: 'm.html', width: 360, state: { signedIn: true, mbar: 'offline', lineTable: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'table' }, shot: 'm-line-table-360.png' },
   { name: 'm-line-table-412', page: 'm.html', width: 412, state: { signedIn: true, mbar: 'offline', lineTable: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'table' }, shot: 'm-line-table-412.png' },
   { name: 'm-line-dict', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, lineDict: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'dict' }, shot: 'm-line-dict.png' },
+  { name: 'm-speak-aero', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, mSpeak: true, skin: 'aero' }, ready: '#app.m .m-chat .chatpane', probe: { mspeak: true }, shot: 'm-speak-aero.png' },
+  { name: 'm-speak-modern', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, mSpeak: true, skin: 'modern' }, ready: '#app.m .m-chat .chatpane', probe: { mspeak: true }, shot: 'm-speak-modern.png' },
+  { name: 'm-speak-line', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, mSpeak: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { mspeak: true }, shot: 'm-speak-line.png' },
   { name: 'm-line-send', page: 'm.html', state: { signedIn: true, mbar: 'offline', lineMsgs: true, lineDict: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'send' }, shot: 'm-line-send.png' },
   { name: 'm-line-head-online', page: 'm.html', state: { signedIn: true, mbar: 'claude', lineMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'head' }, shot: 'm-line-head-online.png' },
   { name: 'm-line-head-busy', page: 'm.html', state: { signedIn: true, mbar: 'busy', lineMsgs: true, skin: 'line' }, ready: '#app.m .m-chat .chatpane', probe: { lineM: 'head' }, shot: 'm-line-head-busy.png' },
@@ -1049,6 +1052,8 @@ export const injectSource = table => `(() => {
   // 語音輸入（#1536）：表裡的 __dict＝true 就給一個假的通話外殼（還沒允許麥克風：按下去先停在準備中，探測用 __asnCallEvent 送「允許」才開始聽；開始聽之後一直停在聆聽中、不回結果），手機輸入列才會有麥克風
   if (T.__launchInstallBtn) globalThis.__smokeLaunchInstallBtn = true;   // 冒煙：打開 Claude 那一列的「進行安裝／進行更新」旗標（#1548 ⑤；正式版旗標預設關）
   if (T.__dict) globalThis.AsnAndroid = Object.assign(globalThis.AsnAndroid || {}, { vibrate() {}, callAvailable: () => true, callMicState: () => 'ask', callRequestMic() { (globalThis.__smokeDict ||= []).push('ask') }, callListen() { (globalThis.__smokeDict ||= []).push('listen') }, callStopListen() {}, callEnd() {}, callSpeak() {}, callStopSpeak() {} });
+  // 念出訊息（#2304）：表裡的 __speak＝true 就給一個假的念出外殼（念與停都記在 __smokeSpeak），手機對方的每則訊息才有喇叭鈕
+  if (T.__speak) globalThis.AsnAndroid = Object.assign(globalThis.AsnAndroid || {}, { vibrate() {}, readAvailable: () => true, readSpeak(id, text, voice) { (globalThis.__smokeSpeak ||= []).push({ id, text, voice }) }, readStop() { (globalThis.__smokeSpeak ||= []).push('stop') }, readVoices: () => JSON.stringify({ voices: [], langs: [] }) });
   if (T.__confirmViewer) globalThis.AsnAndroid = { confirmViewer(id) { (globalThis.__smokeConfirms ||= []).push(id); setTimeout(() => globalThis.__asnConfirmViewer && globalThis.__asnConfirmViewer(id, T.__confirmViewer), T.__confirmDelay || 30) } };
   const tv = T.__tvLive ? (globalThis.__smokeTv = { paused: false, timer: 0, seq: 0, sent: 0, id: 7 }) : null;
   const tvSend = () => {
