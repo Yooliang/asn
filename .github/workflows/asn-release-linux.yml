@@ -186,16 +186,36 @@ jobs:
 
       # npm run build 用 tauri.nosign.conf.json（createUpdaterArtifacts=false，不產更新器檔與 .sig），Linux 只會有 deb 與 AppImage；
       # 打包 AppImage 會從 GitHub 抓工具，外部服務 5xx／逾時才重試（最多 3 次），其他失敗照常紅
+      # e2e 專用的 test-hooks 版（#2163 PR-3b）：要在正式建置之前建（正式建置會覆蓋 target/release/asn），放 target/e2e，絕不進安裝檔
+      - name: 建 e2e 專用的 test-hooks 版
+        run: |
+          set -euo pipefail
+          node scripts/prep.mjs
+          node scripts/build-hooks-exe.mjs
+
       - name: 建置 deb 與 AppImage
+        env:
+          # build.rs 看到它又帶了 test-hooks feature 就在編譯期失敗
+          ASN_SHIPPING_BUILD: '1'
         run: |
           set -euo pipefail
           bash "$GITHUB_WORKSPACE/.github/scripts/retry-external.sh" "建置 deb 與 AppImage" --before 'rm -rf "$GITHUB_WORKSPACE/relay/asn/src-tauri/target/release/bundle/appimage" "$HOME/.cache/tauri"' -- npm run build
 
       - name: 需要成品的測試（端到端）
         timeout-minutes: 15
+        env:
+          # 找不到 hooks 版時要紅，不能略過變成假綠
+          ASN_E2E_REQUIRE_HOOKS: '1'
         run: |
           set -euo pipefail
           xvfb-run -a node --test --test-timeout=600000 test/e2e.test.mjs test/launch-cwd.test.mjs test/login.test.mjs test/login-e2e-screen.test.mjs test/login-e2e-bind.test.mjs test/partner-launch-notice-shot.test.mjs
+
+      # 證明正式 exe 沒有測試掛鉤：標記掃描＋行為探針，都以 hooks 版當對照組（#2163 PR-3b）
+      - name: 證明正式版沒有測試掛鉤
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          xvfb-run -a node scripts/hooks-proof.mjs
 
       - name: 冒煙測試（畫面啟動）
         run: |
