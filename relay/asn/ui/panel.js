@@ -38,6 +38,7 @@ function useFpShow() {
     } catch (e) { console.info('[ASN] 指紋 QR Code 做不出來', String(e?.message ?? e)); fps.err = FP_SHOW_TEXT.pcQrFailed }
     try { fps.fp = groupFp16(String(await knownDeviceApi.ownFingerprint() ?? '').slice(0, 16)) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
   }
+  // TODO(#2038 PR-7)：視窗之間的事件，之後搬進事件中心（hub）
   listen('asn:fpshow', p => { if (typeof p?.id === 'string') { fps.id = p.id; fps.busy = false } if (Number.isFinite(p?.until)) fps.until = p.until; tickLeft() })
   const fpsCancel = async () => {
     if (fps.busy || !fps.id) return
