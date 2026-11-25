@@ -10,6 +10,11 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, Window, WindowEvent};
 
+/// 對話視窗的最小尺寸。寬度要 ≤ 500：Windows 11 的貼齊分割版面（Snap Layouts）規定最小寬度不能超過 500 有效像素，
+/// 超過的話版面雖然出現了，視窗也貼不進去（#2303）。
+const CHAT_MIN_W: f64 = 500.0;
+const CHAT_MIN_H: f64 = 440.0;
+
 const TOAST_W: f64 = 270.0;
 const TOAST_H: f64 = 96.0;
 const TOAST_GAP: f64 = 8.0;
@@ -209,7 +214,7 @@ pub async fn open_chat(app: AppHandle, frame: State<'_, Frame>, id: String, titl
     let mut b = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(format!("chat.html?id={}", q(&id)).into()))
         .title(title)
         .inner_size(720.0, 600.0)
-        .min_inner_size(520.0, 440.0)
+        .min_inner_size(CHAT_MIN_W, CHAT_MIN_H)
         .decorations(frame.0.load(Ordering::Relaxed))
         .disable_drag_drop_handler()   // 讓 WebView2 的 HTML5 拖放（分頁排序）能觸發
         .additional_browser_args(BROWSER_ARGS);
@@ -835,6 +840,14 @@ mod tests {
         record_progress(&json!({"phase": "late"}));
         assert_eq!(setup_progress_snapshot(), vec![json!({"phase": "done", "ok": true})]);
         PROG_LAST.lock().unwrap().clear();
+    }
+
+    #[test]
+    fn t2303_對話視窗最小寬度不超過貼齊分割版面的上限500() {
+        assert!(CHAT_MIN_W <= 500.0, "對話視窗最小寬度 {CHAT_MIN_W} 超過 500，貼不進 Windows 11 的分割版面");
+        assert_eq!(CHAT_MIN_H, 440.0, "高度不在 #2303 範圍，不該動");
+        // 預設開窗寬度不能比最小寬度還小
+        assert!(720.0 >= CHAT_MIN_W);
     }
 
     #[test]
