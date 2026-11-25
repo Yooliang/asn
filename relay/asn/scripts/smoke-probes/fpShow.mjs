@@ -1,4 +1,5 @@
 // 冒煙探測「核對指紋時電腦自動跳出 QR Code」（probe.fpShow，#1863）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
+import { FP_SHOW_MIN_VERSION } from '../../ui/lib/fp-show.mjs'
 //
 // 電腦（panel.html?kind=fpshow）：標題、說明、QR Code 畫布、指紋、倒數、「取消核對」（按下去會叫 fp_show_cancel 帶那筆編號），三套外觀
 // 手機（m.html）：設定 → 設備 → 工作機的「確認」→ 選「用相機掃電腦上的 QR Code」之後的畫面：
@@ -108,7 +109,8 @@ export const fpShowPhoneSource = mode => `(async () => {
 const asnRow = version => [{ window_name: 'asn', version, status: 'online', psm: '' }]
 const PHONE_MEMBERS = mode => [
   { id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] },
-  { id: 'R', name: '工作機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }], ...(mode === 'noreply' ? {} : { asn: asnRow(mode === 'old' ? '0.2.50' : '0.2.97') }) },
+  // 在線那台的版本跟著門檻走（門檻改了，假資料不能被誤判成舊版）
+  { id: 'R', name: '工作機', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }], ...(mode === 'noreply' ? {} : { asn: asnRow(mode === 'old' ? '0.2.50' : FP_SHOW_MIN_VERSION) }) },
 ]
 
 // until 給很遠的未來：視窗的倒數最多顯示 5 分鐘（panel.js 夾住），截圖每次一樣
