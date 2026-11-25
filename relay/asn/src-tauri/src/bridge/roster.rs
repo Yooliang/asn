@@ -435,10 +435,19 @@ pub(crate) fn hidden_of(os: &dyn crate::launch::console_resolve::ConsoleOs, pid:
     crate::launch::console_resolve::find_for(pid, os).ok().map(|(_, w)| !w.visible)
 }
 
+/// 夥伴的 hidden：開在共用終端服務（mux）裡的沒有自己的主控台視窗，「藏起來」＝看畫面的 GUI 沒開（#2307），先看這個；
+/// 不在 mux 裡才照主控台視窗判斷。以前只有後者，mux 裡的夥伴永遠是 None，重開機接回就當成前台，全部跳出視窗
+pub(crate) fn hidden_of_named(os: &dyn crate::launch::console_resolve::ConsoleOs, name: &str, pid: u32) -> Option<bool> {
+    match os.mux_visible(name) {
+        Some(visible) => Some(!visible),
+        None => hidden_of(os, pid),
+    }
+}
+
 /// 給有程序編號的視窗（Claude、pi）填上 hidden；ACP 工作者與 Codex 沒有程序編號（pid 0）、也沒有視窗，維持 None
 pub(crate) fn apply_hidden(windows: &mut [Window], os: &dyn crate::launch::console_resolve::ConsoleOs) {
     for w in windows.iter_mut() {
-        w.hidden = if w.engine == "claude" || w.engine == "pi" { hidden_of(os, w.pid) } else { None };
+        w.hidden = if w.engine == "claude" || w.engine == "pi" { hidden_of_named(os, &w.name, w.pid) } else { None };
     }
 }
 
@@ -820,6 +829,39 @@ mod tests {
         let os2 = FakeOs { console: vec![(10, true), (20, true)], wt: vec![], procs: base_procs() };
         apply_hidden(&mut ws, &os2);
         assert_eq!(ws[0].hidden, Some(false));
+    }
+
+    /// 在 FakeOs 外再加「共用終端服務裡的夥伴有沒有看畫面的視窗」
+    struct MuxOs {
+        inner: FakeOs,
+        views: Vec<(&'static str, bool)>,
+    }
+    impl ConsoleOs for MuxOs {
+        fn find_console(&self, pid: u32) -> Option<ConsoleWin> {
+            self.inner.find_console(pid)
+        }
+        fn find_wt_windows(&self, wt_pid: u32) -> Vec<ConsoleWin> {
+            self.inner.find_wt_windows(wt_pid)
+        }
+        fn mux_visible(&self, name: &str) -> Option<bool> {
+            self.views.iter().find(|(n, _)| *n == name).map(|(_, v)| *v)
+        }
+        fn table(&self) -> Vec<Proc> {
+            self.inner.table()
+        }
+        fn own_pid(&self) -> u32 {
+            900
+        }
+    }
+
+    #[test]
+    fn hidden_共用終端服務裡的夥伴看畫面的視窗沒開就是隱藏_2307() {
+        // 70 號程序找不到任何主控台視窗（mux 裡的 claude 就是這樣）：以前一律 None → 存成 hidden=false → 重開機接回全部跳出視窗
+        let os = MuxOs { inner: FakeOs { console: vec![(10, true)], wt: vec![], procs: base_procs() }, views: vec![("藏著", false), ("開著", true)] };
+        let mk = |name: &str, pid: u32| Window::claude(name, None, "", pid, 0, None);
+        let mut ws = vec![mk("藏著", 70), mk("開著", 70), mk("不在mux", 10), mk("沒人知道", 70)];
+        apply_hidden(&mut ws, &os);
+        assert_eq!(ws.iter().map(|w| w.hidden).collect::<Vec<_>>(), vec![Some(true), Some(false), Some(false), None]);
     }
 
     const NOW: u64 = 10_000_000_000;
