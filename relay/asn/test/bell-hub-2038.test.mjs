@@ -36,9 +36,14 @@ test('接線：m.js 有 4 個門鈴接收處，各自對應的動作都在', () 
   }
 })
 
-test('接線：m.js 的門鈴接收處維持不等註冊完成（沿用原本 void listen 的語意）', () => {
+test('接線：m.js 頂層門鈴之後緊接 await core.hub.ready()（原本是 await listen），根元件三處不等（原本 void listen）', () => {
   assert.ok(!/await core\.on\('relay-bell'/.test(m))
-  assert.ok(!/await core\.hub\.ready\(\)/.test(m))
+  const lines = m.split('\n')
+  const top = lines.findIndex(l => /^\s*core\.on\('relay-bell'/.test(l))
+  const isReady = l => /^\s*await core\.hub\.ready\(\)/.test(l)   // 只認真的程式行，註解掉的不算
+  assert.ok(top > 0, 'm.js 頂層門鈴不見了')
+  assert.ok(isReady(lines[top + 1] ?? ''), '頂層門鈴下一行要是 await core.hub.ready()，保住原本 await listen 的啟動順序')
+  assert.equal(lines.filter(isReady).length, 1, '只在頂層那一處等；根元件三處維持不等')
 })
 
 test('接線：list.js 有 2 個門鈴接收處，頂層那個排在 await core.ready() 之前', () => {

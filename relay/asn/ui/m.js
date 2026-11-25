@@ -306,6 +306,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
   })
   startCallPoll({ anyCall: () => callOn.value, pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
   core.on('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void roomsHook.refresh?.() })   // #2038 PR-5；Rust 端的門鈴（前景時有效）；原本就不等註冊完成，維持不等
+  await core.hub.ready()   // #2038 PR-5：舊寫法是 await 門鈴的註冊，等註冊完才往下；這行保住同樣的啟動順序（零行為變化）
   watchAndroidUpdateProgress(core.hub, { upd, withProgress })   // 只有「下載中」才套用（#2038 PR-2）
   upd.enabled = bridge?.selfUpdateEnabled() === true
   setInterval(() => { if (shouldAutoCheck(upd, prefs)) void checkUpdate() }, UPDATE_CHECK_MS)
