@@ -24,7 +24,7 @@ import { checkRecord } from './site_record_check.mjs'
 import { listZip } from './zip_lite.mjs'
 import { publishRelease as realPublishRelease, attachToRelease as realAttachToRelease } from './github_release.mjs'
 import { linuxSignPublish } from './linux_publish.mjs'
-import { makeAsnCli, asnCliFail } from './asn_cli.mjs'
+import { makeAsnCli, asnCliFail, formatPostFailedMarker } from './asn_cli.mjs'
 import { onlineAheadOfMain } from './abort_notice.mjs'
 
 export const REPO = 'Yooliang/asn'
@@ -362,6 +362,7 @@ export async function localSignPublish(opts, deps) {
       try { r = await asnCli(['send', '--room', room, '--body', text]) } catch (e) { r = { status: 1, stderr: e?.message } }
       if (r?.status !== 0) {
         S.postFailed = true
+        S.postFailedText = text
         log(`貼群組失敗（${asnCliFail(r)}），請自行通知：${text}`)
       }
     })
@@ -407,7 +408,7 @@ export async function localSignPublish(opts, deps) {
       bad(`推送回 main 連續被拒 ${MAX_TRIES} 次（有人一直在推 main）：請人工處理，不強推`)
     })
 
-    return { ok: true, dryRun: false, failedStep: null, completed, record: S.record, latest: S.latest, dir: S.dir, postFailed: S.postFailed === true }
+    return { ok: true, dryRun: false, failedStep: null, completed, record: S.record, latest: S.latest, dir: S.dir, postFailed: S.postFailed === true, postFailedText: S.postFailedText ?? null }
   } catch (e) {
     const known = e instanceof StepError
     const done = completed.length ? completed.join('、') : '（無）'
@@ -468,7 +469,10 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   opts.room = opts.room ?? env.ASN_RELEASE_ROOM ?? null
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
   const r = await localSignPublish(opts, realDeps(repoRoot, env))
-  if (r.ok && r.postFailed) console.log('注意：群組沒貼成功，請自行通知（要貼的原文在上面的 log）')
+  if (r.ok && r.postFailed) {
+    console.log('注意：群組沒貼成功，請自行通知（要貼的原文在上面的 log）')
+    console.log(formatPostFailedMarker(r.postFailedText)) // 給常駐程式留告警用（#2345）；發佈本身成功，結束碼不變
+  }
   console.log(r.ok ? (r.dryRun ? '演練完成（沒有發布任何東西）' : `完成：v${opts.version}`) : `中止於第 ${r.failedStep} 步（${r.failedName}）`)
   return r.ok ? 0 : 1
 }

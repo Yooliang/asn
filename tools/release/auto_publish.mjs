@@ -11,7 +11,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
-import { makeAsnCli, asnCliFail } from './asn_cli.mjs'
+import { makeAsnCli, asnCliFail, parsePostFailedMarker } from './asn_cli.mjs'
 
 // repo 根目錄取自這支腳本自己的位置，不用 git rev-parse：後者要靠 cwd 才知道在哪個 repo，而 cwd 正是會漂移的東西；
 // 腳本在哪個 worktree 裡，根目錄就是那個 worktree（checkWorktree 再確認它不是主 checkout）。
@@ -220,6 +220,20 @@ export function makeAlerts(opts, deps) {
         save({ ...cur, [cause]: next })
       } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
     },
+    // 累加版 raise（#2345）：同類已有 active 告警時，把這一行接在原訊息後面（同一行不重複），不蓋掉前一筆；沒有就新建。
+    // 用在同一版電腦版與 Linux 都沒貼成，兩個平台的補貼原文都要留。ref 取最新一筆，--ack-alert 一次清全部
+    raiseAppend(cause, reason, line, ref = null) {
+      try {
+        const cur = load().alerts
+        const old = cur[cause]
+        if (old && old.status === 'active' && old.reason === reason) {
+          const lines = String(old.message).split('\n')
+          if (!lines.includes(line)) this.raise(cause, reason, `${old.message}\n${line}`, ref)
+          return
+        }
+        this.raise(cause, reason, line, ref)
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
     resolve(cause) {
       try {
         const cur = load().alerts
@@ -250,7 +264,7 @@ function makePost(opts, deps, alerts, getRef = () => null) {
     try { r = deps.asnCli(['send', '--room', opts.room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
     if (r.status !== 0) {
       deps.log(`貼群組失敗：${asnCliFail(r)}`)
-      if (!noAlert) alerts.raise('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
+      if (!noAlert) alerts.raiseAppend('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
     } else if (!noAlert) alerts.resolve('post-failed')
   }
 }
@@ -438,7 +452,16 @@ export async function runOnce(opts, deps) {
     log(`執行：node ${args.join(' ')}`)
     const r = spawn('node', args, { cwd: root })
     log(`子程序結束碼 ${r.status}\n--- stdout ---\n${r.stdout ?? ''}\n--- stderr ---\n${r.stderr ?? ''}`)
-    return finish(r.status === 0, `local_sign_publish 結束碼 ${r.status}，細節看 auto-publish.log`)
+    const out = finish(r.status === 0, `local_sign_publish 結束碼 ${r.status}，細節看 auto-publish.log`)
+    // 正式發佈成功但群組沒貼成（#2345）：子程序結束碼是 0，只能靠 stdout 的固定標記得知。發佈結果照記成功（不暫停發佈），
+    // 另外留 post-failed 告警讓人補貼。放在 finish 之後：finish 若貼出別的訊息成功會 resolve post-failed，不能把這筆清掉；
+    // 之後只有 --ack-alert post-failed（一次清全部）、或下一次真的貼成功才會清；已發佈的版本不是失敗類，--ack 不收。
+    // 同一版電腦版與 Linux 都沒貼成時用累加寫入，兩個平台的原文都保留
+    if (r.status === 0 && d.action === 'publish') {
+      const pf = parsePostFailedMarker(r.stdout)
+      if (pf) alerts.raiseAppend('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
+    }
+    return out
   } finally {
     releaseLock(lockPath, deps, lock.content)
   }

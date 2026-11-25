@@ -287,6 +287,7 @@ test('貼群組失敗不中止：網站檔已先提交推送，整體仍成功�
   assert.ok(kinds(x.w).indexOf('git push') >= 0 && kinds(x.w).indexOf('git push') < kinds(x.w).indexOf('asn-cli send'))
   assert.ok(x.w.logs.some(l => /貼群組失敗/.test(l)))
   assert.equal(x.r.postFailed, true)
+  assert.match(x.r.postFailedText, /Linux 版發版完成/, '#2345 結果帶要人工補貼的原文')
   const y = world()
   y.deps.asnCli = async () => { throw new Error('boom') }
   const r = await localSignPublish(y.opts, y.deps)
