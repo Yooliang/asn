@@ -40,17 +40,22 @@ fn fake_with(work: impl std::future::Future<Output = ()> + Send + 'static) -> (R
 #[tokio::test]
 async fn _2204_drain_進行中的送出做完才回來() {
     // 動作要等 gate 放行才做完：開始 drain 時動作一定還在進行，之後放行 drain 才能回來。
-    // 放行前的等待只是讓 drain 真的先卡住一下；就算機器忙到它提早放行，結論（drain 回來時一定做完）也不變
+    // 放行前的等待只是讓 drain 真的先卡住一下；就算機器忙到它提早放行，結論（drain 回來時一定做完）也不變。
+    // 「drain 回來的那一刻動作做完了沒」要在 drain 回來當下量，不能等 join 完才看（那時放行早已發生，drain 提早回來也看不出來）
     let (r, finished, gate, _d) = fake_gated();
     assert!(!finished.load(Ordering::SeqCst), "放行前動作不會做完");
+    let drained = async {
+        let ok = r.drain(Duration::from_secs(30)).await;
+        (ok, finished.load(Ordering::SeqCst))
+    };
     let release = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(!finished.load(Ordering::SeqCst), "drain 還在等：動作沒放行就不會做完");
         gate.notify_one();
     };
-    let (done, _) = tokio::join!(r.drain(Duration::from_secs(30)), release);
-    assert!(done, "放行後要回 true（30 秒只是防掛死的上限）");
-    assert!(finished.load(Ordering::SeqCst), "drain 回來時，進行中的送出一定已經做完");
+    let ((ok, finished_at_return), _) = tokio::join!(drained, release);
+    assert!(ok, "放行後要回 true（30 秒只是防掛死的上限）");
+    assert!(finished_at_return, "drain 回來的那一刻，進行中的送出一定已經做完");
 }
 
 #[tokio::test]
