@@ -29,11 +29,27 @@ test('接線：list.js、m.js 不再直接 listen relay-bell（relay-report-bell
 })
 
 test('接線：m.js 有 4 個門鈴接收處，各自對應的動作都在', () => {
-  const calls = [...m.matchAll(/core(?:\.hub)?\.on\('relay-bell', ([^\n]*)/g)].map(x => x[1])
+  const calls = [...m.matchAll(/core(?:\?\.hub|\.hub)?\.on\('relay-bell', ([^\n]*)/g)].map(x => x[1])
   assert.equal(calls.length, 4)
   for (const must of ["core.pull('bell')", 'checkSecrets()', 'checkPermReqs()', 'checkTermReqs()']) {
     assert.ok(calls.some(c => c.includes(must)), `m.js 缺門鈴接收處：${must}`)
   }
+})
+
+// 為什麼沒登入時不訂也沒關係：core 只在啟動時 screen 是 'main' 才建立。沒登入（login）、首次引導（onboard）、錯誤（fatal）畫面要進到 main，一定會重跑整頁：
+// 登入成功 finishLogin → location.reload() 或 bridge.relaunch()；引導完成 finishOnboard → location.reload()；
+// 「先不要，回名單」(backFromLogin) 只在 !info.needs_login 時顯示，也就是一開始就在 main、core 已存在。所以根元件不會在 core 是 null 的情況下進到 main。
+test('接線：m.js 根元件三處門鈴在沒登入（core 是 null）時不會拋錯', () => {
+  const lines = m.split('\n')
+  const mHtml = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
+  const fn = (name) => { const i = m.indexOf(name); return i < 0 ? '' : m.slice(i, i + 600) }
+  const login = fn('async function finishLogin()').split('async function startLogin')[0]
+  const onboard = fn('const finishOnboard =').split('\n')[0]
+  assert.ok(login.includes('location.reload()') && login.includes('bridge.relaunch()'), 'finishLogin 必須整頁重跑（reload／relaunch）')
+  assert.ok(onboard.includes('location.reload()'), 'finishOnboard 必須整頁重跑')
+  assert.ok(/v-if="[^"]*!info\.needs_login[^"]*"[^>]*@click="backFromLogin"/.test(mHtml), '回名單按鈕只能在 !info.needs_login 時顯示')
+  assert.equal(lines.filter(l => /^\s*core\.hub\.on\('relay-bell'/.test(l)).length, 0, '有沒加守門的 core.hub.on，沒登入時會拋錯')
+  assert.equal(lines.filter(l => /^\s*core\?\.hub\.on\('relay-bell'/.test(l)).length, 3)
 })
 
 test('接線：m.js 頂層門鈴之後緊接 await core.hub.ready()（原本是 await listen），根元件三處不等（原本 void listen）', () => {
