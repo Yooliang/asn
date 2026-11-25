@@ -3,11 +3,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import * as Vue from 'vue'
-import { renderToString } from 'vue/server-renderer'
+import { mountComponent } from './helpers/render.mjs'
 import { SETTING_CATS, SETTING_KEYS, catByKey, catSummary } from '../ui/lib/settings-cats.mjs'
 import { SETTING_OPS, SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { closesDialog } from '../ui/lib/dialog.mjs'
+import { withIdentity } from './helpers/with-identity.mjs'
 
 const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
@@ -85,11 +85,20 @@ const fullState = () => ({
     { key: 'P', label: '手機一號', self: false, kind: '手機', online: false, onlineText: '離線', reportedText: '', empty: '這台設備還沒有回報任何廠商', vendors: [] },
   ],
 })
-const render = async (catKey, st = fullState()) => {
-  globalThis.Vue = Vue
-  const app = Vue.createSSRApp({ render: () => Vue.h(SettingsPanel, { st, catKey, meAv: 'data:image/png;base64,AAAA' }) })
-  return renderToString(app)
+// #1763 T5：真的掛載元件（happy-dom），用選擇器查 DOM、模擬操作，不再把 SSR 輸出的字串切開
+const AV = 'data:image/png;base64,AAAA'
+const mountCat = (catKey, st = fullState(), extra = {}) => mountComponent(SettingsPanel, { st, catKey, meAv: AV, ...extra })
+// 掛載 → 等一輪（讓元件 onMounted 的非同步更新跑完）→ 跑檢查 → 一定卸載
+const withCat = async (catKey, st, fn, extra) => {
+  const m = mountCat(catKey, st ?? fullState(), extra)
+  try { await m.nextTick(); return await fn(m) } finally { m.unmount() }
 }
+// 使用者看得到或讀得到的字：文字內容＋輸入框／按鈕的 aria-label、placeholder、title
+const seen = (m) => {
+  const attrs = m.findAll('[aria-label],[placeholder],[title]').flatMap((el) => ['aria-label', 'placeholder', 'title'].map((a) => el.getAttribute(a)).filter(Boolean))
+  return `${m.container.textContent}\n${attrs.join('\n')}`
+}
+const checks = (m) => m.findAll('input[type=checkbox]').map((el) => [el.getAttribute('aria-label'), el.checked])
 
 test('設定表單：每一類都轉得出來，各類原本的項目都在', async () => {
   const want = {
@@ -111,45 +120,68 @@ test('設定表單：每一類都轉得出來，各類原本的項目都在', as
   }
   assert.deepEqual(Object.keys(want), SETTING_KEYS, '每一類都有檢查')
   for (const [key, words] of Object.entries(want)) {
-    const html = await render(key)
-    for (const w of words) assert.ok(html.includes(w), `${key} 少了「${w}」`)
-    // 一次只顯示被點的那一類：別類的項目不會混進來
-    for (const [other, ow] of Object.entries(want)) if (other !== key && other !== 'about') assert.ok(!html.includes(ow.at(-1)), `${key} 混進了 ${other} 的「${ow.at(-1)}」`)
+    await withCat(key, undefined, (m) => {
+      const html = seen(m)
+      for (const w of words) assert.ok(html.includes(w), `${key} 少了「${w}」`)
+      // 一次只顯示被點的那一類：別類的項目不會混進來
+      for (const [other, ow] of Object.entries(want)) if (other !== key && other !== 'about') assert.ok(!html.includes(ow.at(-1)), `${key} 混進了 ${other} 的「${ow.at(-1)}」`)
+    })
   }
 })
 
 test('設定表單：照目前的值顯示（選中項、勾選、數字、文字）', async () => {
   const st = fullState()
   st.frame = 'native'; st.dpMode = 'right'; st.autostart.on = true; st.launch.maxPerHour = 9; st.hasUpload = true
-  assert.match(await render('look', st), /<select[^>]*value="native"[^>]*aria-label="視窗外框"/)   // 伺服器端轉出來的選中值寫在 select 上
-  assert.match(await render('look', st), /<select[^>]*value="right"[^>]*aria-label="頭像模式"/)
-  assert.match(await render('window', st), /type="checkbox"[^>]*checked/)
-  assert.match(await render('launch', st), /type="number"[^>]*value="9"/)
-  { const html = await render('launch', st); assert.ok(html.includes('>D:/a</span>') && html.includes('>D:/b</span>') && html.includes('建議：D:/c'), '清單一列一個資料夾、建議列照顯示') }
-  assert.ok((await render('me', st)).includes('目前用的是這台設備上傳的大頭貼。'))
+  await withCat('look', st, (m) => {
+    assert.equal(m.find('select[aria-label="視窗外框"]').value, 'native')   // 選中值真的落在 select 上
+    assert.equal(m.find('select[aria-label="頭像模式"]').value, 'right')
+  })
+  await withCat('window', st, (m) => assert.ok(m.findAll('input[type=checkbox]').some((el) => el.checked), '登入時自動啟動打勾'))
+  await withCat('launch', st, (m) => {
+    assert.equal(m.find('input[type=number]').value, '9')
+    const text = m.container.textContent
+    const rows = m.findAll('span').map((el) => el.textContent)
+    assert.ok(rows.includes('D:/a') && rows.includes('D:/b') && text.includes('建議：D:/c'), '清單一列一個資料夾、建議列照顯示')
+  })
+  await withCat('me', st, (m) => assert.ok(seen(m).includes('目前用的是這台設備上傳的大頭貼。')))
   const off = fullState(); off.trayOk = false; off.autostart.supported = false; off.voice.enabled = false
-  assert.ok((await render('window', off)).includes('建不起系統匣圖示'))
-  assert.ok(!(await render('window', off)).includes('登入時自動啟動'))
+  await withCat('window', off, (m) => {
+    assert.ok(seen(m).includes('建不起系統匣圖示'))
+    assert.ok(!seen(m).includes('登入時自動啟動'))
+  })
   // 視窗與系統匣不再放任何命令列（寄信指令、密碼小幫手的設定指令）
-  const win = await render('window')
-  assert.ok(!win.includes('<code') && !win.includes('寄信指令') && !win.includes('密碼小幫手') && !win.includes('asn-cli') && !win.includes('SSH_ASKPASS'))
+  await withCat('window', undefined, (m) => {
+    const win = seen(m)
+    assert.ok(win.includes('關閉視窗時'), '視窗與系統匣分類有渲染')
+    assert.equal(m.find('code'), null)
+    // 查整份 HTML（含隱藏的屬性、data-*），不只看使用者看得到的字
+    const raw = m.container.innerHTML
+    for (const bad of ['寄信指令', '密碼小幫手', 'asn-cli', 'SSH_ASKPASS']) assert.ok(!raw.includes(bad) && !win.includes(bad), `視窗與系統匣不該出現「${bad}」`)
+  })
   // 密碼小幫手收進「啟動設定」的進階（收合）
-  const ln = await render('launch')
-  assert.ok(ln.includes('<details') && ln.includes('進階') && ln.includes('密碼小幫手') && ln.includes('SSH_ASKPASS'))
-  assert.ok((await render('voice', off)).includes('念出訊息要由維護者在後台啟用'))
+  await withCat('launch', undefined, (m) => {
+    const d = m.find('details.set-adv')
+    assert.ok(d, '有收合區')
+    assert.equal(m.find('summary', d).textContent, '進階')
+    assert.ok(m.find('[aria-label="密碼小幫手"]', d), '密碼小幫手在進階收合區裡')
+    assert.ok(m.find('code', d).textContent.includes('SSH_ASKPASS'), '設定指令在進階收合區裡')
+  })
+  await withCat('voice', off, (m) => assert.ok(seen(m).includes('念出訊息要由維護者在後台啟用')))
 })
 
 test('設定表單：通知四個勾選照目前的值顯示', async () => {
   const st = fullState(); st.notify = { toast: false, msg: true, nudge: false, file: true }
-  const html = await render('notify', st)
-  const boxes = [...html.matchAll(/<input type="checkbox"([^>]*)>/g)].map(m => [/aria-label="([^"]+)"/.exec(m[1])[1], /\bchecked\b/.test(m[1])])
-  assert.deepEqual(boxes, [['右下角通知', false], ['通知聲音', true], ['震動聲音', false], ['收到檔案聲音', true]])
-  assert.ok(!html.includes('音效'))
+  await withCat('notify', st, (m) => {
+    assert.deepEqual(checks(m), [['右下角通知', false], ['通知聲音', true], ['震動聲音', false], ['收到檔案聲音', true]])
+    assert.ok(!seen(m).includes('音效'))
+  })
 })
 
 test('設定表單：認不得的類別不顯示任何表單項目', async () => {
-  const html = await render('nope')
-  assert.ok(!/<select|<input|<textarea|<button/.test(html))
+  await withCat('nope', undefined, (m) => {
+    assert.ok(m.find('.settings'), '認不得的類別仍渲染設定外框（不是整個沒掛起來才查不到表單）')
+    assert.equal(m.findAll('select,input,textarea,button').length, 0)
+  })
 })
 
 test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住；元件裡 act 的每個 op 都在清單裡', () => {
@@ -207,18 +239,58 @@ test('開網址不用 explorer.exe（長網址會被當成路徑開成檔案總�
   assert.ok(lib.includes('ShellExecuteW('))
 })
 
-test('守門：電腦設定第一頁——登入帳號資訊與我的名字同處、登出鈕獨立在最下面；設備與帳號分類不再放登入狀態', () => {
-  const src = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-  const me = src.slice(src.indexOf("catKey === 'me'"), src.indexOf("catKey === 'notify'"))
-  const accts = src.slice(src.indexOf("cat === 'devices'"), src.indexOf("catKey === 'look'"))
-  assert.ok(me.indexOf('<login-panel>') >= 0 && me.indexOf('<login-panel>') < me.indexOf('class="av-set"'), '登入狀態（含我的名字）在第一頁最前面')
-  assert.ok(me.indexOf('<logout-panel>') > me.indexOf('class="np-set"'), '登出鈕在第一頁所有項目之後')
-  assert.ok(!accts.includes('<login-panel>') && !accts.includes('<logout-panel>'), '設備與帳號分類不再放登入狀態與登出')
-  assert.ok(accts.includes('允許別台設備替這台切換帳號'), '切換帳號的允許選項在這台詳情的連線安全裡（#1860）')
-  assert.ok(!accts.includes('<cloud-invite-panel>'), '雲端代理搬到自己一類，設備頁不再放')
-  const lp = fs.readFileSync(new URL('../ui/lib/login-panel.mjs', import.meta.url), 'utf8')
-  assert.ok(lp.includes('LogoutPanel') && /<asn-button state="danger" :disabled="busy" @click="ask">登出<\/asn-button>/.test(lp))
-  assert.match(fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8'), /\.logout-set\{margin-top:3\d+px/)
+test('電腦設定第一頁（真的渲染）——登入帳號資訊與我的名字同處、登出鈕獨立在最下面；設備與帳號分類不再放登入狀態', async () => {
+  const after = (a, b) => Boolean(a.compareDocumentPosition(b) & 4)   // b 在 a 之後（文件順序）
+  await withCat('me', undefined, async (m) => {
+    const login = m.find('.login-set'), av = m.find('.av-set'), np = m.find('.np-set')
+    assert.ok(login && av && np, '第一頁有登入狀態、大頭貼、正在聽的歌')
+    assert.ok(after(login, av), '登入狀態（含我的名字）在第一頁最前面')
+    assert.equal(m.find('.settings').firstElementChild, login, '登入狀態是第一頁第一個項目')
+    // 登出區塊（登入後或有訊息時才出現）：一出現就必須是最後一個項目，也在所有項目之後
+    for (let i = 0; i < 5 && !m.find('.logout-set'); i++) await new Promise((r) => setTimeout(r, 10))
+    const out = m.find('.logout-set')
+    assert.ok(out, '登出區塊有渲染（沒登入時顯示錯誤訊息的那一塊）')
+    assert.ok(after(np, out), '登出鈕在第一頁所有項目之後')
+    assert.equal(m.find('.settings').lastElementChild, out, '登出區塊自成一塊、在最下面')
+  })
+  // 負向斷言（找不到）一定要先證明這一頁真的渲染了、而且用的選擇器在「該出現的那一頁」找得到，否則選擇器寫錯也會永遠過關
+  await withCat('cloud', undefined, (m) => {
+    assert.ok(m.find('.settings'), '雲端代理分類有渲染')
+    const cloud = m.find('.cloud-set')
+    assert.ok(cloud, '對照組：.cloud-set 在雲端代理分類找得到（下面設備頁的負向斷言用的就是這個選擇器）')
+    assert.equal(cloud.getAttribute('aria-label'), '雲端代理')
+    assert.equal(m.find('[aria-label="雲端代理"]'), cloud, '依 aria-label 也找得到同一塊')
+  })
+  await withCat('devices', undefined, (m) => {
+    assert.ok(m.find('.settings'), '設備分類有渲染')
+    assert.ok(m.find('.dv-set') && m.container.textContent.includes('家用機'), '設備分類特有的內容（設備列表）在')
+    assert.equal(m.find('.login-set'), null, '設備分類不再放登入狀態')
+    assert.equal(m.find('.logout-set'), null, '設備分類不再放登出')
+    assert.equal(m.find('.cloud-set'), null, '雲端代理搬到自己一類，設備頁不再放')
+    assert.equal(m.find('[aria-label="雲端代理"]'), null, '設備頁也沒有雲端代理的標籤')
+  })
+  await withCat('accounts', undefined, (m) => {
+    assert.ok(m.find('.settings'), '帳號分類有渲染')
+    assert.ok(m.find('.dv-acctpage'), '帳號分類特有的區塊在')
+    assert.equal(m.find('.login-set'), null)
+    assert.equal(m.find('.logout-set'), null)
+  })
+  const withIds = fullState(); withIds.devices = withIds.devices.map(withIdentity)
+  await withCat('devices', withIds, (m) => {
+    assert.ok(m.findAll('label.chk').some((l) => l.textContent.includes('允許別台設備替這台切換帳號')), '切換帳號的允許選項在這台詳情的連線安全裡（#1860）')
+    assert.equal(m.find('.login-set'), null)
+    assert.equal(m.find('.logout-set'), null)
+  }, { dev: 'H' })
+  // 登出鈕離上面的項目有一段距離（實際算出來的 margin-top，不讀 CSS 字串）
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  await withCat('me', undefined, (m) => {
+    const style = m.document.createElement('style'); style.textContent = css; m.document.head.appendChild(style)
+    try {
+      const probe = m.document.createElement('div'); probe.className = 'logout-set'; m.find('.settings').appendChild(probe)
+      const mt = parseInt(m.window.getComputedStyle(probe).marginTop, 10)
+      assert.ok(mt >= 30 && mt < 40, `登出區塊上緣留白實際是 ${mt}px`)
+    } finally { style.remove() }
+  })
 })
 
 test('守門：手機設定頁——分類列表在上、使用指引在列表後；登出在「個人」內頁最下面（#1093）；帳號在名字下（個人頁）、版本在關於頁', () => {
@@ -244,18 +316,29 @@ test('守門：手機設定頁——分類列表在上、使用指引在列表�
 
 test('視窗與系統匣：「ASN 意外關閉時自動重新開啟」預設關、說明寫清楚、暫停時有人話提示與恢復鈕；不支援就不顯示（todo-next-191 B1）', async () => {
   const st = fullState()
-  assert.ok(!(await render('window', st)).includes('自動重新開啟'), '沒有 guard 狀態（舊版後端）就不顯示')
+  await withCat('window', st, (m) => assert.ok(!seen(m).includes('自動重新開啟'), '沒有 guard 狀態（舊版後端）就不顯示'))
   st.guard = { supported: true, on: false, busy: false, paused: '', blocked: '' }
-  let html = await render('window', st)
-  assert.ok(html.includes('ASN 意外關閉時自動重新開啟'))
-  assert.ok(html.includes('只在 ASN 意外關閉時重開，你自己按結束不會重開。'))
-  assert.ok(!html.includes('恢復自動重開'))
+  await withCat('window', st, async (m) => {
+    const html = seen(m)
+    assert.ok(html.includes('ASN 意外關閉時自動重新開啟'))
+    assert.ok(html.includes('只在 ASN 意外關閉時重開，你自己按結束不會重開。'))
+    assert.ok(!html.includes('恢復自動重開'))
+    // 預設關；勾起來會送 guard 指令
+    const box = m.find('input[aria-label="ASN 意外關閉時自動重新開啟"]')
+    assert.equal(box.checked, false)
+    await m.trigger(box, 'change', { checked: true })
+    assert.deepEqual(m.emitted('act'), [['guard', true]])
+  })
   st.guard = { ...st.guard, on: true, paused: 'ASN 最近反覆被關閉，已暫停自動重開。' }
-  html = await render('window', st)
-  assert.ok(html.includes('ASN 最近反覆被關閉，已暫停自動重開。') && html.includes('恢復自動重開'))
-  assert.ok(!/pid|AsnGuard|schtasks|排程名/.test(html), '畫面不出現程序代號或排程名')
+  await withCat('window', st, async (m) => {
+    const html = seen(m)
+    assert.ok(html.includes('ASN 最近反覆被關閉，已暫停自動重開。') && html.includes('恢復自動重開'))
+    assert.ok(!/pid|AsnGuard|schtasks|排程名/.test(m.container.innerHTML), '整份 HTML（含屬性）不出現程序代號或排程名')
+    await m.trigger(m.findByText('恢復自動重開'), 'click')
+    assert.deepEqual(m.emitted('act'), [['guard-resume', undefined]], '恢復鈕送出 guard-resume')
+  })
   st.guard = { supported: false, on: false, busy: false, paused: '', blocked: '' }
-  assert.ok(!(await render('window', st)).includes('自動重新開啟'), '不支援的系統不顯示')
+  await withCat('window', st, (m) => assert.ok(!seen(m).includes('自動重新開啟'), '不支援的系統不顯示'))
   // 接線：預設關（以系統上的排程為準，不另存）；讀狀態、開關、恢復都走後端指令
   const js = read('list.js')
   assert.match(js, /const guard = reactive\(\{ supported: false, on: false, busy: false, paused: '', blocked: '' \}\)/)
