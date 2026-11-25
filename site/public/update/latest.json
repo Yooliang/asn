@@ -1,15 +1,11 @@
 {
-  "version": "0.2.97",
-  "notes": "- 修正：電腦版 LINE、現代外觀恢復原本的標題列，視窗又可以拖動、放大鈕恢復正常（退回 0.2.96 的改動）\n- 新功能：對話裡的圖片直接顯示在訊息中，捲到才下載，可以直接儲存",
-  "pub_date": "2026-11-25T00:37:11.885Z",
+  "version": "0.2.98",
+  "notes": "- 新功能：手機核對指紋時，電腦會自動跳出 QR Code，不用再到設定頁找；設定頁的 QR Code 分頁拿掉了\n- 修正：重開機自動接回時，原本藏在背景的夥伴不會再全部跳出視窗\n- 修正：重開 ASN 後會認回還開著的終端畫面，不會再多開一扇或記錯前景背景\n- 改善：夥伴換班時，會先等子代理做完、交接寫完才關舊視窗\n- 修正：上游服務暫時出錯重試仍失敗時，夥伴不會再因此中斷\n- 改善：群組的已讀確認只查看得到或有變動的群組，背景群組改成 5 分鐘補查一次，更省流量",
+  "pub_date": "2026-11-25T12:41:43.309Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnl5eW56TkhpaHNmeHN3aTYyM05xV2p4cHFMeUhSWUpLRmR3R1gvVTIzYms5UTNZMm5RUjNBejFHWHpnWVArUllzT3VWZG5jY0M4UFlwV0lxMmg4endVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTY3MDMxCWZpbGU6QVNOXzAuMi45N194NjQtc2V0dXAuZXhlCjd0RVdMYVRQdjJwMmJzSTJDdlRXMTdFZk84VTYvTXNHMFZJZGgvcUpqamhlcGFvWHNoUFFtVXROaWVlcjhmMGJXbmd4OWM0UlI5STRpRnhQUnBaakFBPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.97_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybi9YZmJhaXJ1d2t6M1JuNDV3R29IQ3ZJZHJDZE1zSm1mbjBBWVlxZys5UjNkREpKZHhDeFVwUEtaTDJQRGZOamJZOEo1V1RlSjBidnhlQkJXZVFVRGdjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NTY3NzE3CWZpbGU6QVNOXzAuMi45N19hbWQ2NC5BcHBJbWFnZQp0UDNBVmNPU29YZ01Zb1NPMUZtL1o3ZzJBeDlzWkNaVlg2SFB6cTJuR1MyV21tYmNBS3BIUkl6c3NmV0ExWjh3ZGwycGF0eVJ3bVhOQWhEWVdNSFhEUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.97_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjk2RXQ5VGIzUFliZ05vOCtjY04yeTVCMGlPSHZQZlNNZHhhZGZBK1MwNGZCRTBYdUZmek9VTEhaeDR4YkZwcUdqQmZmdXZISTVORUxQbTBDYVlUSndFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjEwNTAyCWZpbGU6QVNOXzAuMi45OF94NjQtc2V0dXAuZXhlCkZEYTlnb0RET2xRdXgzOHFlenpsKy8xVmpidGprRXp3b3k1MjVsc3NDUCtMSEgydlNyT1Z0Z0J2NWJ2MXhVSXE3QlM3T0tIZE5MVE14NHp2OGV1UkRnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.98_x64-setup.exe"
     }
   }
 }
