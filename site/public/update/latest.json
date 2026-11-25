@@ -1,15 +1,11 @@
 {
-  "version": "0.2.98",
-  "notes": "- 新功能：手機核對指紋時，電腦會自動跳出 QR Code，不用再到設定頁找；設定頁的 QR Code 分頁拿掉了\n- 修正：重開機自動接回時，原本藏在背景的夥伴不會再全部跳出視窗\n- 修正：重開 ASN 後會認回還開著的終端畫面，不會再多開一扇或記錯前景背景\n- 改善：夥伴換班時，會先等子代理做完、交接寫完才關舊視窗\n- 修正：上游服務暫時出錯重試仍失敗時，夥伴不會再因此中斷\n- 改善：群組的已讀確認只查看得到或有變動的群組，背景群組改成 5 分鐘補查一次，更省流量",
-  "pub_date": "2026-11-25T12:41:43.309Z",
+  "version": "0.2.99",
+  "notes": "- 新功能：手機可以把訊息念出來，每則訊息旁有喇叭鈕；也能設定自動念新訊息，預設關閉\n- 修正：夥伴的 Claude 週額度用完時，ASN 會正確認出來並提示，不會再誤以為夥伴還在工作\n- 改善：設定與狀態檔的寫入方式統一，寫入更可靠\n- 改善：畫面接收電腦與手機事件的方式整理成同一套，安裝、下載進度、帳號登入與邀請等提示更不容易漏接或重複",
+  "pub_date": "2026-11-25T17:15:43.922Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjk2RXQ5VGIzUFliZ05vOCtjY04yeTVCMGlPSHZQZlNNZHhhZGZBK1MwNGZCRTBYdUZmek9VTEhaeDR4YkZwcUdqQmZmdXZISTVORUxQbTBDYVlUSndFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjEwNTAyCWZpbGU6QVNOXzAuMi45OF94NjQtc2V0dXAuZXhlCkZEYTlnb0RET2xRdXgzOHFlenpsKy8xVmpidGprRXp3b3k1MjVsc3NDUCtMSEgydlNyT1Z0Z0J2NWJ2MXhVSXE3QlM3T0tIZE5MVE14NHp2OGV1UkRnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.98_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjlmK0oyNTVISEZvc1ZQYUZVWDlmcnRjcmVXT1EvdTdVbWN0ZzJFRGUyTHpSQ05jWjh3cFZYczYvU1FIU3gyRG1lRG5rZWV0RmdkTEl0R2s5RWtleHdRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjExMTEzCWZpbGU6QVNOXzAuMi45OF9hbWQ2NC5BcHBJbWFnZQpydGVrbllRSi9JOHpMVEdWRmswZ0RSRE5QVGZGS3lCQnFsaWh6WEZSRUhUK2R2RzNoUnUyZSsvL3NyTENraHBqaXpjWVpML3krc1I4cDJRWjU1TzJEdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.98_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnp4Ty9QN1A1SmpWWGVDRktKdzhUYURCY3ptMmkrMlFGSlpJcDd2N2NiVW0vb0lKSlg2ajZZRnFSR0dUVWVndUN2Rk9sd1pGb3ZqVUZlcEdSbGdDSnd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjI2OTQzCWZpbGU6QVNOXzAuMi45OV94NjQtc2V0dXAuZXhlClB1a1dmelVmdFpHQ1VpcXhQSmhjZXlpOUtxSFUyREVuZVhtdUdWdHl0UHBLRlB5MVJEUzhMQVhlRkdHZG96L2dVakxFcHU2S2VFaXJsY05NQkJPVkJnPT0K",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.99_x64-setup.exe"
     }
   }
 }
