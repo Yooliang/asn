@@ -1547,20 +1547,30 @@ fn 過期_閒置視窗_外掛完全沒動靜_短逾時就退回重開_不白等(
 
 #[test]
 fn 過期_外掛有動靜_狀態檔更新_就解除探測_繼續等到忙完() {
-    let r = rig(Opt { mod_wait: 60_000, ..Opt::default() });
+    // 探測逾時是真實時間（#994 同一類）：原本設 40ms，全套高並行時「第一次輪詢」到「外掛回應」之間只要被排程延遲
+    // 超過 40ms，就在外掛接手前被當成不在、退回重開（#2311）。這裡要驗的是「外掛有動靜後，探測不再生效」，
+    // 所以探測時間給 1 秒（外掛第二輪就回應，要被延遲 1 秒才會誤判），而「忙完回報」改成事件驅動：
+    // 一定等到真實時間超過探測時間之後才寫，確保真的跨過探測期限（探測沒解除就會在那之前被判 Lost）。
+    const PROBE: u64 = 1_000;
+    let r = rig(Opt { mod_wait: 60_000, mod_probe: PROBE, ..Opt::default() });
     stale_status(&r, "idle");
     let (status, calls) = (r.status.clone(), Arc::new(AtomicUsize::new(0)));
+    let t0 = std::time::Instant::now();
+    let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let finished2 = finished.clone();
     *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
         std::thread::sleep(std::time::Duration::from_millis(2));
-        match calls.fetch_add(1, Ordering::SeqCst) {
+        let n = calls.fetch_add(1, Ordering::SeqCst);
+        if n == 1 {
             // 外掛接手：開始執行，狀態變忙（at 變了）
-            1 => std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "busy" }).to_string()).unwrap(),
-            // 超過探測時間（40ms）很久之後才忙完回報
-            100 => std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": true, "detail": "好了" } }).to_string()).unwrap(),
-            _ => {}
+            std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "busy" }).to_string()).unwrap();
+        } else if n > 1 && t0.elapsed() >= std::time::Duration::from_millis(PROBE + 300) && !finished2.swap(true, Ordering::SeqCst) {
+            // 超過探測時間之後才忙完回報
+            std::fs::write(status.join("sid-220.json"), json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": true, "detail": "好了" } }).to_string()).unwrap();
         }
     }));
     let res = r.run("model", json!({ "model": "sonnet" }));
+    assert!(finished.load(Ordering::SeqCst), "要等到跨過探測時間才忙完");
     assert_eq!(res.status, "ok", "{}", res.detail);
     assert_eq!(res.detail, "好了");
     assert!(r.launched().is_empty() && r.terminated().is_empty());
