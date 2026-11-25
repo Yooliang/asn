@@ -11,6 +11,7 @@ export const RUST_EVENTS = Object.freeze({
   // 視窗外框、右下角提示
   'asn:frame': { scope: 'all', platform: 'desktop', shape: 'bool（是否原生外框）' },
   'asn:open': { scope: 'all', platform: 'desktop', shape: '{cid}' },
+  'asn:fpshow': { scope: 'window', platform: 'desktop', shape: '{id,until}（指紋 QR 視窗換請求）' },
   // 邀請、正在播放
   'asn:invite': { scope: 'all', platform: 'both', shape: '邀請碼字串' },
   'asn:now-playing': { scope: 'all', platform: 'desktop', shape: '字串' },
