@@ -335,9 +335,14 @@ pub(crate) struct WindowSnapshot {
     pub own_wez: Vec<u32>,
     pub procs: Vec<super::switch::Proc>,
     pub own: u32,
+    /// 開在共用終端服務（mux）裡的夥伴：(名字, 看畫面的 GUI 是否開著)（#2307）
+    pub mux_views: Vec<(String, bool)>,
 }
 
 impl super::console_resolve::ConsoleOs for WindowSnapshot {
+    fn mux_visible(&self, name: &str) -> Option<bool> {
+        self.mux_views.iter().find(|(n, _)| n == name).map(|(_, v)| *v)
+    }
     fn find_console(&self, pid: u32) -> Option<super::console_resolve::ConsoleWin> {
         let mut it = self.console.iter().filter(|(p, _)| *p == pid);
         let (_, visible) = it.next()?;
@@ -375,10 +380,20 @@ fn own_wezterm_pids() -> Vec<u32> {
     }
 }
 
+/// 開在共用終端服務裡的夥伴：(名字, 看畫面的 GUI 是否開著)。對照表裡 mux 的夥伴列逐一問 `mux_console_query`；問不到的不列（呼叫端當不知道）
+#[cfg(all(windows, not(test)))]
+fn mux_views() -> Vec<(String, bool)> {
+    super::term::partner_rows()
+        .into_iter()
+        .filter(|p| p.mux)
+        .filter_map(|p| super::term::mux_console_query(&p.id).get("visible").and_then(Value::as_bool).map(|v| (p.name, v)))
+        .collect()
+}
+
 pub(crate) fn window_snapshot() -> WindowSnapshot {
     #[cfg(all(windows, not(test)))]
     {
-        WindowSnapshot { console: win::console_windows(), wt: win::wt_windows(), wez: win::wez_windows(), own_wez: own_wezterm_pids(), procs: super::switch::winapi::process_table(), own: std::process::id() }
+        WindowSnapshot { console: win::console_windows(), wt: win::wt_windows(), wez: win::wez_windows(), own_wez: own_wezterm_pids(), procs: super::switch::winapi::process_table(), own: std::process::id(), mux_views: mux_views() }
     }
     #[cfg(not(all(windows, not(test))))]
     {

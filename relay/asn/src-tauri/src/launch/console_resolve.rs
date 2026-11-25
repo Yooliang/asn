@@ -48,6 +48,11 @@ pub(crate) trait ConsoleOs {
     fn find_wez_windows(&self, _gui_pid: u32) -> Vec<ConsoleWin> {
         vec![]
     }
+    /// 開在共用終端服務（mux）裡、名字是 `name` 的夥伴現在有沒有看畫面的視窗（#2307）：mux 裡的程式沒有自己的主控台視窗，
+    /// 「前台／背景」＝看畫面的 GUI 開著沒有。不在 mux 裡（或不知道）＝None，由呼叫端改用主控台視窗判斷。預設沒有
+    fn mux_visible(&self, _name: &str) -> Option<bool> {
+        None
+    }
     fn table(&self) -> Vec<Proc>;
     fn own_pid(&self) -> u32;
 }
