@@ -1,15 +1,11 @@
 {
-  "version": "0.2.99",
-  "notes": "- 新功能：手機可以把訊息念出來，每則訊息旁有喇叭鈕；也能設定自動念新訊息，預設關閉\n- 修正：夥伴的 Claude 週額度用完時，ASN 會正確認出來並提示，不會再誤以為夥伴還在工作\n- 改善：設定與狀態檔的寫入方式統一，寫入更可靠\n- 改善：畫面接收電腦與手機事件的方式整理成同一套，安裝、下載進度、帳號登入與邀請等提示更不容易漏接或重複",
-  "pub_date": "2026-11-25T17:15:43.922Z",
+  "version": "0.2.100",
+  "notes": "- 改善：收到私信或名單變動時，不再每次都重新讀取群組清單，閒置時更省流量\n- 改善：門鈴的接收方式整理進同一套事件處理，沒登入時也不會出錯",
+  "pub_date": "2026-11-25T19:11:03.794Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybnp4Ty9QN1A1SmpWWGVDRktKdzhUYURCY3ptMmkrMlFGSlpJcDd2N2NiVW0vb0lKSlg2ajZZRnFSR0dUVWVndUN2Rk9sd1pGb3ZqVUZlcEdSbGdDSnd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjI2OTQzCWZpbGU6QVNOXzAuMi45OV94NjQtc2V0dXAuZXhlClB1a1dmelVmdFpHQ1VpcXhQSmhjZXlpOUtxSFUyREVuZVhtdUdWdHl0UHBLRlB5MVJEUzhMQVhlRkdHZG96L2dVakxFcHU2S2VFaXJsY05NQkJPVkJnPT0K",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.99_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjl1THJvc2ZPenVRWlg5WUhzS21LRFFqWUJFL2E2TCtNcThIcktwYU1kVTdiRVhQZ0RNWnpCMTZLV1hNTjJhb3pQeFpobVN0cWpIaVcwNTd2ZzkzdkFjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjI3NTM2CWZpbGU6QVNOXzAuMi45OV9hbWQ2NC5BcHBJbWFnZQp1d1djcmZXdVVLL2VBTnBJYU1HbzV2ZTN0bkZ1TmJKTkFQUmw2ZVJQR0c0M3plSmZZYlBtNEFiNWxIMnhUZ3M0N0s4SkNTMGM4YXZZbkNQZ3RJUnpCQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.99_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhGL0FVL21abDhqcW1FZUR6WnhWaTVrenZRNXYveEFWNFNWamxYQU5jbzFSeHB5ZlJ1Mld3RXhFV1ljUXQ2b29BL1ZsVUtSWTI3VnBzcjJhSXRxeFEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjMzODYzCWZpbGU6QVNOXzAuMi4xMDBfeDY0LXNldHVwLmV4ZQptME9hQVlXbnNWZ2I5NmZiMVZraXZaeWJZN1ZTT0NXaS8xdUsyNTRCeVlBUGhkbTFSWVI2NEt4NzhGeHhEVzhiRzFpeUY0VjdFUTRsZGVQajdwZk5Edz09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.100_x64-setup.exe"
     }
   }
 }
