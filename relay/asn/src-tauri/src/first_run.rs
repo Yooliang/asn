@@ -86,7 +86,7 @@ pub fn decide(data_dir: &Path, others: &[&Path]) -> Decision {
 }
 
 fn write_marker(data_dir: &Path, body: &Value) -> Result<(), String> {
-    crate::write_atomic(&data_dir.join(MARKER), &body.to_string()).map_err(|e| e.to_string())
+    crate::settings::atomic::write(&data_dir.join(MARKER), body.to_string().as_bytes(), crate::settings::atomic::STATE).map_err(|e| e.to_string())
 }
 
 /// 啟動時呼叫一次（要在任何東西寫進 data_dir／work_dir 之前）。

@@ -54,7 +54,7 @@ pub fn record(file: &Path, from: &str, to: &str, now_ms: u64) -> Result<(), Stri
     list.retain(|r| r.from != from && !r.from.eq_ignore_ascii_case(to));
     list.push(Renamed { from: from.to_string(), to: to.to_string(), at: now_ms });
     let arr: Vec<Value> = list.iter().map(|r| json!({ "from": r.from, "to": r.to, "at": r.at })).collect();
-    crate::write_atomic(file, &json!({ "version": 1, "renamed": arr }).to_string()).map_err(|e| format!("{}：{e}", file.display()))
+    crate::settings::atomic::write(file, json!({ "version": 1, "renamed": arr }).to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("{}：{e}", file.display()))
 }
 
 #[cfg(test)]

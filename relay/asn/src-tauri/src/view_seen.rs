@@ -48,7 +48,7 @@ impl SeenIds {
 
     pub fn save_file(&self, dir: &Path, file: &str) -> Result<(), String> {
         let text = serde_json::to_string(self).map_err(|e| e.to_string())?;
-        crate::write_atomic(&dir.join(file), &text).map_err(|e| format!("存觀看紀錄失敗：{e}"))
+        crate::settings::atomic::write(&dir.join(file), text.as_bytes(), crate::settings::atomic::STATE).map_err(|e| format!("存觀看紀錄失敗：{e}"))
     }
 
     /// 去掉已經到期（加上誤差）的，回新的一份

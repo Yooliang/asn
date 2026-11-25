@@ -115,7 +115,7 @@ pub fn write(dir: &Path, e: &Entry) -> Result<(), String> {
     for old in read_all(dir).into_iter().filter(|o| o.pid == e.pid) {
         let _ = std::fs::remove_file(file_of(dir, old.pid, old.started_ms));
     }
-    crate::write_atomic(&file_of(dir, e.pid, e.started_ms), &e.to_json().to_string()).map_err(|err| format!("寫不進登記：{err}"))
+    crate::settings::atomic::write(&file_of(dir, e.pid, e.started_ms), e.to_json().to_string().as_bytes(), crate::settings::atomic::STATE).map_err(|err| format!("寫不進登記：{err}"))
 }
 
 /// 拿掉一筆（本人「不接了」或程序已結束時清理）

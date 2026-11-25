@@ -178,7 +178,7 @@ fn read_marker(data_dir: &Path) -> Option<(String, Option<String>)> {
 fn write_marker(data_dir: &Path, mod_dir: &Path, now_secs: u64) {
     let ver = plugin_version(mod_dir).unwrap_or_default();
     let body = serde_json::json!({ "installedVersion": ver, "installedAt": now_secs, "dir": mod_dir.to_string_lossy() });
-    if let Err(e) = crate::write_atomic(&data_dir.join(MARKER_FILE), &format!("{}\n", serde_json::to_string_pretty(&body).unwrap_or_default())) {
+    if let Err(e) = crate::settings::atomic::write(&data_dir.join(MARKER_FILE), format!("{}\n", serde_json::to_string_pretty(&body).unwrap_or_default()).as_bytes(), crate::settings::atomic::STATE) {
         elog!("[claude-mod] 寫標記檔失敗：{e}");
     }
 }

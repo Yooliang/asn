@@ -41,7 +41,7 @@ fn write(file: &Path, models: &HashMap<String, String>) -> Result<(), String> {
     let mut keys: Vec<&String> = models.keys().collect();
     keys.sort();
     let map: Map<String, Value> = keys.into_iter().map(|k| (k.clone(), json!(models[k]))).collect();
-    crate::write_atomic(file, &json!({ "version": 1, "models": map }).to_string()).map_err(|e| format!("記不下選好的模型（{}）：{e}", file.display()))
+    crate::settings::atomic::write(file, json!({ "version": 1, "models": map }).to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("記不下選好的模型（{}）：{e}", file.display()))
 }
 
 /// 記下某個工作者選好的模型（原本的檔案壞了就從空的重寫）

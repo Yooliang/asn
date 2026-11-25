@@ -1178,7 +1178,7 @@ impl PartnerOps {
     }
 
     fn write_control(&self, sid: &str, body: &Value) -> bool {
-        crate::write_atomic(&self.dirs.control.join(format!("{sid}.json")), &body.to_string()).is_ok()
+        crate::settings::atomic::write(&self.dirs.control.join(format!("{sid}.json")), body.to_string().as_bytes(), crate::settings::atomic::STATE).is_ok()
     }
 
     /// 有外掛的視窗（改名、切換模型）：寫控制檔，等外掛在狀態檔回報 control:{id, ok, detail}，視窗忙碌就排隊等（回報 stage:queued）。

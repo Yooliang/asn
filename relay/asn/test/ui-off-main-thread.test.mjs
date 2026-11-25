@@ -47,7 +47,7 @@ function commands() {
 }
 
 // 直接在本體裡做這些事＝會卡住畫面
-const IO = [/std::fs::/, /\bfs::(read|write|remove|create_dir|rename|copy|metadata)/, /write_atomic\(/, /ui_log::append\(/, /\bLOCK\.lock\(\)/, /local_switch\(/, /profile_lookup/, /load_all\(/, /quota_all_with_waiting\(/, /reqwest/, /block_on\(/]
+const IO = [/std::fs::/, /\bfs::(read|write|remove|create_dir|rename|copy|metadata)/, /write_atomic\(/, /\batomic::write\(/, /ui_log::append\(/, /\bLOCK\.lock\(\)/, /local_switch\(/, /profile_lookup/, /load_all\(/, /quota_all_with_waiting\(/, /reqwest/, /block_on\(/]
 // 還沒改的同步指令（之後改成非同步就從這裡拿掉；清單只准變短）
 // 這一刀只改 asn真 點名的那幾支；守門順手找出的這四支另排（todo-next-191 後續）
 const PENDING = new Set(['grok_account_current', 'grok_account_switch', 'term_view_input', 'capture_ui_ready'])

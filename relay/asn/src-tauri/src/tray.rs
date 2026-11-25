@@ -192,7 +192,7 @@ mod sys {
     pub fn set(on: bool, exe: &Path) -> Result<(), String> {
         let f = file();
         if on {
-            crate::write_atomic(&f, &super::desktop_entry(exe)).map_err(|e| e.to_string())
+            crate::settings::atomic::write(&f, super::desktop_entry(exe).as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| e.to_string())
         } else {
             match std::fs::remove_file(&f) {
                 Ok(()) => Ok(()),
