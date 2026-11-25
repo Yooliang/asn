@@ -8,7 +8,8 @@ import { speakableText, SPEAK_MAX } from './tts-player.mjs'
 import { speechSegments } from './speech-split.mjs'
 import { plainMessage } from './plain-errors.mjs'
 
-export const AUTO_FRESH_MS = 5 * 60_000   // 自動念只念這麼近以內寄來的信；更舊的是補收的歷史，不念
+// 名字刻意不用 fresh／online：這是「訊息多舊就不念」，不是設備在線的新鮮度（#2161 守門管的是後者）
+export const AUTO_SPEAK_MAX_AGE_MS = 5 * 60_000   // 自動念只念這麼近以內寄來的信；更舊的是補收的歷史，不念
 export const AUTO_QUEUE_MAX = 3           // 自動念排隊最多幾則，超過丟掉最舊的
 export const SPEAK_DOG_BASE_MS = 30_000   // 保險計時：外殼一直沒回報念完時，不讓按鈕卡在「停止」
 export const SPEAK_DOG_PER_CHAR_MS = 400
@@ -25,7 +26,7 @@ export function autoSpeakPlan(notify, { cfg, foreground = true, calling = false,
   if (notify.mine === true) return { ok: false, why: 'mine' }
   if (notify.digest === true) return { ok: false, why: 'digest' }
   const at = Number(notify.at)
-  if (!Number.isFinite(at) || now - at > AUTO_FRESH_MS) return { ok: false, why: 'history' }
+  if (!Number.isFinite(at) || now - at > AUTO_SPEAK_MAX_AGE_MS) return { ok: false, why: 'history' }
   if (!speakableText(notify.line, SPEAK_MAX)) return { ok: false, why: 'empty' }
   return { ok: true, why: '' }
 }

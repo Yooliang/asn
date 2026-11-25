@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { AUTO_FRESH_MS, AUTO_QUEUE_MAX, autoSpeakPlan, createMobileSpeaker } from '../ui/lib/mobile-speak.mjs'
+import { AUTO_SPEAK_MAX_AGE_MS, AUTO_QUEUE_MAX, autoSpeakPlan, createMobileSpeaker } from '../ui/lib/mobile-speak.mjs'
 import { speakableText } from '../ui/lib/tts-player.mjs'
 import { androidBridge, normalizePrefs, DEFAULT_PREFS } from '../ui/lib/mobile.mjs'
 
@@ -31,9 +31,9 @@ test('自動念：自己發的不念', () => {
   assert.equal(plan(msg({ mine: true })).why, 'mine')
 })
 test('自動念：歷史訊息（太舊、沒有時間）不念', () => {
-  assert.equal(plan(msg({ at: NOW - AUTO_FRESH_MS - 1 })).why, 'history')
+  assert.equal(plan(msg({ at: NOW - AUTO_SPEAK_MAX_AGE_MS - 1 })).why, 'history')
   assert.equal(plan(msg({ at: undefined })).why, 'history')
-  assert.equal(plan(msg({ at: NOW - AUTO_FRESH_MS })).ok, true, '剛好在時限內還是念')
+  assert.equal(plan(msg({ at: NOW - AUTO_SPEAK_MAX_AGE_MS })).ok, true, '剛好在時限內還是念')
 })
 test('自動念：補收的合併提示（「收到 N 封你不在時代收的信」）不念', () => {
   assert.equal(plan(msg({ digest: true })).why, 'digest')
