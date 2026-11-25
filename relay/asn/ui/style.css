@@ -40,6 +40,8 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .tb svg{display:block;filter:drop-shadow(0 1px 0 rgba(255,255,255,.7))}
 .tb:hover,.tb.snap-hover{filter:brightness(1.06)}
 .tb.snap-down{filter:brightness(.94)}
+/* #2300 放大鈕的提示：蓋板蓋住之後系統的 title 不會跳出來，由 lib/snap-max.mjs 自己畫；樣子仿系統提示（小字、淺底、細邊、淡陰影），不接滑鼠 */
+.snap-tip{position:fixed;left:0;top:0;z-index:2147483000;pointer-events:none;box-sizing:border-box;padding:3px 8px;border:1px solid #c8c8c8;border-radius:4px;background:#f9f9f9;color:#1b1b1b;font:12px/1.4 "Segoe UI","Microsoft JhengHei UI","Microsoft JhengHei",system-ui,sans-serif;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.16)}
 .tb.close svg{filter:drop-shadow(0 1px 1px rgba(80,0,0,.45))}
 .tb.close{width:46px;background:linear-gradient(#f0a497 0 45%,var(--close) 50%,#e2624f);color:#fff;border-color:#7c1d14}
 .tb.close:hover{filter:brightness(1.12)}

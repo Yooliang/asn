@@ -18,10 +18,66 @@ const same = (a, b) => (a === b) || (!!a && !!b && a.x === b.x && a.y === b.y &&
 // Rust 通知 → 要加的樣式（不認得的當作清掉）
 export const snapClasses = name => CLASS_OF[name] ?? CLASS_OF.leave
 
-export function makeSnapMax({ call, listen, doc, win, raf = f => win.requestAnimationFrame(f) }) {
+// ---- 放大鈕的提示文字（#2300）：蓋板蓋住之後網頁收不到滑鼠，title 不會跳出來，所以前端自己畫一個 ----
+export const TIP_DELAY_MS = 500   // 跟系統提示一樣，停一下才出現
+export const TIP_GAP = 6          // 離按鈕下緣
+export const TIP_MARGIN = 4       // 離視窗邊緣
+export const TIP_CLASS = 'snap-tip'
+// 沒最大化寫「最大化」，已最大化寫「還原」
+export const tipText = maximized => (maximized === true ? '還原' : '最大化')
+// 提示放在按鈕正下方、水平置中；靠邊放不下就往內挪，不超出視窗（視窗比提示還窄時貼左）
+export function tipPos(btnRect, tipSize, viewport) {
+  const { left: bl, right: br, bottom: bb, top: bt } = btnRect
+  const { width: w, height: h } = tipSize
+  const { width: vw, height: vh } = viewport
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi))
+  const left = clamp(Math.round((bl + br) / 2 - w / 2), TIP_MARGIN, vw - w - TIP_MARGIN)
+  let top = bb + TIP_GAP
+  if (top + h > vh - TIP_MARGIN) top = bt - TIP_GAP - h   // 下面放不下就放在按鈕上方
+  return { left: Math.max(TIP_MARGIN, left), top: Math.max(TIP_MARGIN, top) }
+}
+
+// 提示的生命週期：hover 後等 TIP_DELAY_MS 才問視窗狀態並畫出來；leave／down 收掉；等待期間收到 leave 就不會出現
+export function makeTip({ doc, win, getBtn, isMaximized, delay = TIP_DELAY_MS }) {
+  let timer = null, el = null, seq = 0
+  const hide = () => {
+    seq++
+    if (timer !== null) { win.clearTimeout(timer); timer = null }
+    if (el) { el.remove(); el = null }
+  }
+  const render = async my => {
+    let maximized
+    try { maximized = await isMaximized() } catch (e) { console.warn('[ASN]', `放大鈕提示：問不到視窗是否最大化 ${e?.message ?? e}`); return }
+    const b = getBtn()
+    if (my !== seq || !b) return   // 問的時候已經離開或按下
+    const t = doc.createElement('div')
+    t.className = TIP_CLASS
+    t.setAttribute('role', 'tooltip')
+    t.textContent = tipText(maximized)
+    t.style.visibility = 'hidden'
+    doc.body.appendChild(t)
+    const r = t.getBoundingClientRect()
+    const { left, top } = tipPos(b.getBoundingClientRect(), { width: r.width, height: r.height }, { width: win.innerWidth, height: win.innerHeight })
+    t.style.left = `${left}px`
+    t.style.top = `${top}px`
+    t.style.visibility = 'visible'
+    el = t
+  }
+  const hover = () => {
+    if (timer !== null || el) return   // 已在等或已顯示：重複的 hover 不重排
+    const my = ++seq
+    timer = win.setTimeout(() => { timer = null; void render(my) }, delay)
+  }
+  return { hover, hide, shown: () => el }
+}
+
+export function makeSnapMax({ call, listen, doc, win, raf = f => win.requestAnimationFrame(f), isMaximized = null }) {
   let last = null, queued = false, observed = null
   const btn = () => doc.querySelector(SNAP_SELECTOR)
+  // 沒給 isMaximized（測試、舊呼叫）就沒有提示
+  const tip = isMaximized ? makeTip({ doc, win, getBtn: btn, isMaximized }) : null
   const paint = name => {
+    if (tip) { if (name === 'hover') tip.hover(); else tip.hide() }
     const b = btn()
     if (!b) return
     b.classList.remove('snap-hover', 'snap-down')

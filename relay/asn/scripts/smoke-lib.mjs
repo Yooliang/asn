@@ -1074,7 +1074,7 @@ export const injectSource = table => `(() => {
       listen: async (evt, fn) => { const ls = (globalThis.__smokeListeners ||= {}); (ls[evt] ||= []).push(fn); return () => { ls[evt] = (ls[evt] || []).filter(f => f !== fn) } },
       emit: async () => {},
     },
-    window: { getCurrentWindow: () => ({ startResizeDragging() {}, label: 'smoke' }) },
+    window: { getCurrentWindow: () => ({ startResizeDragging() {}, isMaximized: async () => globalThis.__smokeMaximized === true, label: 'smoke' }) },   // __smokeMaximized：放大鈕提示探測（#2300）用來切「已最大化」
     core: { invoke: async (cmd, args) => {
       if (T.__fail && Object.prototype.hasOwnProperty.call(T.__fail, cmd)) { (globalThis.__smokeCalls ||= []).push([cmd, args]); throw T.__fail[cmd] }   // 後台回錯誤（#1763 T3）：表裡的 __fail[指令]＝錯誤文字
       if (T.__hang && T.__hang.indexOf(cmd) >= 0) { (globalThis.__smokeCalls ||= []).push([cmd, args]); return new Promise(() => {}) }   // 讀取中的畫面（#1763 T3）：這個指令永遠不回

@@ -495,7 +495,9 @@ export async function initFrame() {
   try { applyFrame(await invoke('frame_native')) } catch { /* 問不到就維持自訂 */ }
   await listen('asn:frame', native => applyFrame(native))
   // #1788 放大鈕的分割版面：只有帶 data-snap-max 的視窗（名單、對話、指引設定）會真的回報
-  try { await makeSnapMax({ call: invoke, listen, doc: document, win: window }).start() } catch { /* 沒有也只是少了分割版面 */ }
+  // 放大鈕的提示文字要知道現在最大化了沒：用 Tauri 視窗 API（core:default 已含 is-maximized），不新增 Rust 指令
+  const isMaximized = () => T.window.getCurrentWindow().isMaximized()
+  try { await makeSnapMax({ call: invoke, listen, doc: document, win: window, isMaximized }).start() } catch { /* 沒有也只是少了分割版面 */ }
 }
 // 自訂外框的八個拖邊緣調整大小的把手
 export const RESIZE_DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']

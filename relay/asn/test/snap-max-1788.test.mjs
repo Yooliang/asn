@@ -1,7 +1,7 @@
 // #1788 放大鈕的分割版面：回報位置給 Rust、接收 Rust 的滑過／按下通知
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makeSnapMax, snapArgs, snapClasses } from '../ui/lib/snap-max.mjs'
+import { makeSnapMax, snapArgs, snapClasses, tipText, tipPos, TIP_DELAY_MS, TIP_GAP, TIP_MARGIN, TIP_CLASS } from '../ui/lib/snap-max.mjs'
 
 const rect = { x: 600, y: 0, width: 46, height: 36 }
 
@@ -158,4 +158,157 @@ test('切回原生外框清除失敗：之後鈕消失時會再清一次，不�
   fail = false; present = false
   await sm.push()
   assert.equal(calls.filter(c => c === 'snap_max_clear').length, 2)
+})
+
+// ---- #2300 放大鈕的提示文字 ----
+const brect = { left: 600, right: 646, top: 0, bottom: 36 }
+const VP = { width: 700, height: 500 }
+const SIZE = { width: 50, height: 22 }
+
+test('tipText：沒最大化寫「最大化」，已最大化寫「還原」', () => {
+  assert.equal(tipText(false), '最大化')
+  assert.equal(tipText(true), '還原')
+  assert.equal(tipText(undefined), '最大化')
+})
+
+test('tipPos：正常時在按鈕正下方置中', () => {
+  const p = tipPos({ left: 300, right: 346, top: 0, bottom: 36 }, SIZE, VP)
+  assert.deepEqual(p, { left: 323 - 25, top: 36 + TIP_GAP })
+})
+
+test('tipPos：靠右邊緣往左挪，不超出視窗', () => {
+  const edge = tipPos({ left: 654, right: 700, top: 0, bottom: 36 }, { width: 80, height: 22 }, VP)
+  assert.equal(edge.left, VP.width - 80 - TIP_MARGIN, '貼著右邊留邊')
+  assert.equal(edge.top, 36 + TIP_GAP)
+})
+
+test('tipPos：窄視窗（比提示還窄）貼左、下面放不下改放按鈕上方', () => {
+  const p = tipPos({ left: 0, right: 46, top: 0, bottom: 36 }, { width: 80, height: 22 }, { width: 60, height: 500 })
+  assert.equal(p.left, TIP_MARGIN, '寬度不夠時至少不超出左邊')
+  const low = tipPos({ left: 300, right: 346, top: 470, bottom: 500 }, SIZE, VP)
+  assert.equal(low.top, 470 - TIP_GAP - SIZE.height)
+  assert.ok(low.top >= TIP_MARGIN)
+})
+
+function tipEnv({ maximized = false, w = 700, h = 500, failMax = false } = {}) {
+  const timers = new Map(); let id = 0
+  const body = { kids: [], appendChild(e) { this.kids.push(e); e.parent = this } }
+  const mkEl = () => ({
+    style: {}, attrs: {}, className: '', textContent: '',
+    setAttribute(k, v) { this.attrs[k] = v },
+    getBoundingClientRect() { return { width: 50, height: 22 } },
+    remove() { const i = body.kids.indexOf(this); if (i >= 0) body.kids.splice(i, 1) },
+  })
+  const state = { maximized }
+  const btn = { classList: { add() {}, remove() {} }, getBoundingClientRect: () => ({ ...brect, x: 600, y: 0, width: 46, height: 36 }) }
+  const win = {
+    devicePixelRatio: 1, innerWidth: w, innerHeight: h,
+    setTimeout: (f, ms) => { timers.set(++id, [f, ms]); return id },
+    clearTimeout: i => timers.delete(i),
+  }
+  const doc = { body, createElement: mkEl, querySelector: () => btn }
+  const sm = makeSnapMax({
+    call: async () => {}, listen: async () => {}, doc, win, raf: f => f(),
+    isMaximized: async () => { if (failMax) throw new Error('x'); return state.maximized },
+  })
+  const fire = async () => { for (const [i, [f]] of [...timers]) { timers.delete(i); f() } await new Promise(r => setImmediate(r)) }
+  return { sm, body, timers, state, fire }
+}
+
+test('提示：hover 後要等延遲才出現，不是立刻', async () => {
+  const { sm, body, timers } = tipEnv()
+  sm.paint('hover')
+  assert.equal(body.kids.length, 0, '還沒到時間不能出現')
+  assert.equal([...timers.values()][0][1], TIP_DELAY_MS)
+})
+
+test('提示：延遲後出現，沒最大化寫「最大化」、在鈕下方、沒超出視窗', async () => {
+  const { sm, body, fire } = tipEnv()
+  sm.paint('hover'); await fire()
+  assert.equal(body.kids.length, 1)
+  const t = body.kids[0]
+  assert.equal(t.textContent, '最大化')
+  assert.equal(t.className, TIP_CLASS)
+  assert.equal(t.attrs.role, 'tooltip')
+  assert.equal(t.style.top, `${36 + TIP_GAP}px`)
+  assert.ok(parseInt(t.style.left) + 50 <= 700 - TIP_MARGIN && parseInt(t.style.left) >= TIP_MARGIN)
+  assert.equal(t.style.visibility, 'visible')
+})
+
+test('提示：已最大化時寫「還原」', async () => {
+  const { sm, body, fire } = tipEnv({ maximized: true })
+  sm.paint('hover'); await fire()
+  assert.equal(body.kids[0].textContent, '還原')
+})
+
+test('提示：文字每次出現都重問視窗狀態（最大化後再 hover 變「還原」）', async () => {
+  const { sm, body, fire, state } = tipEnv()
+  sm.paint('hover'); await fire()
+  assert.equal(body.kids[0].textContent, '最大化')
+  sm.paint('leave')
+  state.maximized = true
+  sm.paint('hover'); await fire()
+  assert.equal(body.kids[0].textContent, '還原')
+})
+
+test('提示：leave 收掉；down 收掉', async () => {
+  const { sm, body, fire } = tipEnv()
+  sm.paint('hover'); await fire()
+  sm.paint('leave')
+  assert.equal(body.kids.length, 0)
+  sm.paint('hover'); await fire()
+  assert.equal(body.kids.length, 1)
+  sm.paint('down')
+  assert.equal(body.kids.length, 0)
+})
+
+test('提示：延遲期間 leave（或 down）就不會出現', async () => {
+  for (const name of ['leave', 'down']) {
+    const { sm, body, timers, fire } = tipEnv()
+    sm.paint('hover')
+    sm.paint(name)
+    assert.equal(timers.size, 0, '計時被取消')
+    await fire()
+    assert.equal(body.kids.length, 0, name)
+  }
+})
+
+test('提示：問視窗狀態期間（已過延遲）收到 leave 也不會出現', async () => {
+  const { sm, body, timers } = tipEnv()
+  sm.paint('hover')
+  const [f] = [...timers.values()][0]
+  timers.clear()
+  f()               // 計時到了，開始問狀態（非同步）
+  sm.paint('leave') // 問到答案之前離開
+  await new Promise(r => setImmediate(r))
+  assert.equal(body.kids.length, 0)
+})
+
+test('提示：重複 hover 不會疊出兩個', async () => {
+  const { sm, body, fire } = tipEnv()
+  sm.paint('hover'); sm.paint('hover'); await fire()
+  sm.paint('hover'); await fire()
+  assert.equal(body.kids.length, 1)
+})
+
+test('提示：問不到視窗狀態就不亂寫文字（不出現），也不拋錯', async () => {
+  const { sm, body, fire } = tipEnv({ failMax: true })
+  const warn = console.warn; console.warn = () => {}
+  try { sm.paint('hover'); await fire() } finally { console.warn = warn }
+  assert.equal(body.kids.length, 0)
+})
+
+test('接線：tauri.mjs 把 Tauri 視窗的 isMaximized 交給 makeSnapMax（不新增 Rust 指令）', async () => {
+  const fs = await import('node:fs')
+  const src = codeOnly(fs.readFileSync(new URL('../ui/lib/tauri.mjs', import.meta.url), 'utf8'))
+  assert.ok(/getCurrentWindow\(\)\.isMaximized\(\)/.test(src), '要用 getCurrentWindow().isMaximized()')
+  assert.ok(/makeSnapMax\(\{[^}]*isMaximized[^}]*\}\)/.test(src), 'makeSnapMax 要收到 isMaximized')
+  const css = fs.readFileSync(new URL('../ui/style.css', import.meta.url), 'utf8')
+  assert.ok(css.includes(`.${TIP_CLASS}{`) && /\.snap-tip\{[^}]*pointer-events:none/.test(css), '提示不能接滑鼠')
+})
+
+test('提示：沒給 isMaximized（舊呼叫）就沒有提示，樣式照舊', () => {
+  const { classes, sm } = fake(rect)
+  sm.paint('hover')
+  assert.ok(classes.has('snap-hover'))
 })
