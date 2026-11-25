@@ -15,13 +15,15 @@
 mod read;
 mod table;
 #[cfg(test)]
+mod guard;
+#[cfg(test)]
 mod scan;
 #[cfg(test)]
 mod read_tests;
 #[cfg(test)]
 mod tests;
 
-pub use read::{ms, ms_from, on_exact_1, on_exact_1_from};
+pub use read::{ms, ms_from, on_exact_1, on_exact_1_from, path, path_from, switch_raw, switch_raw_from};
 pub use table::{DYNAMIC_OK, FLAGS, NOT_ENV};
 
 /// 型別化讀取的規格（#2163 PR-2a）：登記了才能用 [`read`] 裡對應的讀取函式，預設值與範圍從這裡拿。
@@ -33,6 +35,12 @@ pub enum Typed {
     Exact1,
     /// 毫秒數：`trim()` 後解析成 u64，落在 `[min, max]` 才採用，否則用 `default`。見 [`ms`]
     Ms { default: u64, min: u64, max: u64 },
+    /// 平台預設的開關（#2163 PR-2b）：登記表只負責「從哪讀到原始字串」，**不 trim、不改大小寫**，
+    /// 交給呼叫端既有的純函式依平台判定（Windows 預設開、其他平台預設關，規則在 `win_term::switches_from`、
+    /// `screen_watch::enabled_on`，各有測試）。見 [`switch_raw`]
+    PlatformSwitch,
+    /// 路徑：原樣取環境變數的值（`var_os`，不要求是合法 Unicode、不 trim），空值怎麼處理由呼叫端決定。見 [`path`]
+    Path,
 }
 
 /// 分類

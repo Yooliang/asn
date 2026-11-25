@@ -521,7 +521,7 @@ pub fn locate(fs: &dyn Fs) -> Result<WezTermDir, String> {
 /// `locate` 的本體：ASN 自己取得的那份從哪個上層資料夾找（正式版＝`mux::default_base()`）由呼叫的人給。
 /// 測試（例如 CI 真的下載的 `linux_real_fetch_wezterm`）用它指定暫存的位置，不經過測試中的 `default_base`
 pub fn locate_in(fs: &dyn Fs, fetched_base: Option<PathBuf>) -> Result<WezTermDir, String> {
-    let env = std::env::var_os(DIR_ENV).map(PathBuf::from);
+    let env = crate::flags::path(DIR_ENV);
     if cfg!(windows) {
         locate_with(env, bundled_dir(), fs)
     } else {

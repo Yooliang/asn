@@ -110,11 +110,12 @@ pub static FLAGS: &[Flag] = &[
     prod("ASN_RECV_HEARTBEAT_MS", old!("RECV_HEARTBEAT_MS"), "30000", "收信心跳（毫秒）", &["heartbeat.rs"], Pin::Value("30000")),
     prod("ASN_RECV_STALE_MS", old!("RECV_STALE_MS"), "90000", "心跳過期（毫秒）", &["heartbeat.rs"], Pin::Value("90000")),
     prod("ASN_PULL_BACKOFF_MS", old!("PULL_BACKOFF_MS"), "5000,10000,20000,40000,60000", "收信失敗退避（逗號分隔毫秒）", &["cli/env.rs"], Pin::Value("5000,10000,20000,40000,60000")),
+    // 等 #1470（節點金鑰預設改加密）合併再動：它會改 secret_file.rs 的同一段讀法，這張先不碰，避免衝突（#2163 PR-2b 刻意略過）
     prod("ASN_SEAL_NODE_KEY", None, "關（設 1 加密、0 不加密）", "Windows 節點金鑰是否加密存放（過渡期開關）", &["secret_file.rs"], Pin::Value("false")),
-    prod("ASN_TERM_WEZTERM", None, "Windows 開、其他平台關（設 0 關、1 開）", "是否用自帶 WezTerm 開視窗（名字定義在 win_term.rs 的常數，term.rs、bridge/mod.rs 經常數讀）", &["launch/win_term.rs"], Pin::Value("Windows 開、其他平台關")),
-    prod("ASN_TERM_MUX", None, "Windows 開、其他平台關（設 0 關、1 開）", "共用終端服務（mux）開關（名字定義在 win_term.rs 的常數，term.rs、bridge/mod.rs 經常數讀）", &["launch/win_term.rs"], Pin::Value("Windows 開、其他平台關")),
-    prod("ASN_SCREEN_WATCH", None, "Windows 開、其他平台關（設 0 關、1 開）", "讀夥伴畫面判斷卡在哪（名字定義在 screen_watch.rs 的常數）", &["launch/screen_watch.rs"], Pin::Value("Windows 開、其他平台關")),
-    prod("ASN_WEZTERM_DIR", None, "內建或安裝位置", "指定 WezTerm 資料夾（部署覆蓋，測試也用）", &["launch/wezterm.rs"], LOGIC),
+    prod("ASN_TERM_WEZTERM", None, "Windows 開、其他平台關（設 0 關、1 開）", "是否用自帶 WezTerm 開視窗（名字定義在 win_term.rs 的常數，term.rs、bridge/mod.rs 經常數讀）", &["launch/win_term.rs"], Pin::Value("Windows 開、其他平台關")).typed(Typed::PlatformSwitch),
+    prod("ASN_TERM_MUX", None, "Windows 開、其他平台關（設 0 關、1 開）", "共用終端服務（mux）開關（名字定義在 win_term.rs 的常數，term.rs、bridge/mod.rs 經常數讀）", &["launch/win_term.rs"], Pin::Value("Windows 開、其他平台關")).typed(Typed::PlatformSwitch),
+    prod("ASN_SCREEN_WATCH", None, "Windows 開、其他平台關（設 0 關、1 開）", "讀夥伴畫面判斷卡在哪（名字定義在 screen_watch.rs 的常數）", &["launch/screen_watch.rs"], Pin::Value("Windows 開、其他平台關")).typed(Typed::PlatformSwitch),
+    prod("ASN_WEZTERM_DIR", None, "內建或安裝位置", "指定 WezTerm 資料夾（部署覆蓋，測試也用）", &["launch/wezterm.rs"], LOGIC).typed(Typed::Path),
     // ---- 內部傳遞 -------------------------------------------------------------------
     internal("ASN_LAUNCH_ARGS", "—", "開視窗的參數（父程序設給啟動腳本）", &["launch/local.rs"]).with_legacy(old!("LAUNCH_ARGS")),
     internal("ASN_LAUNCH_DIR", "—", "開視窗的工作目錄（父程序設給啟動腳本）", &["launch/local.rs"]).with_legacy(old!("LAUNCH_DIR")),
