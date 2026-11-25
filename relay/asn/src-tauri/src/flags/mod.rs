@@ -14,6 +14,9 @@
 
 mod read;
 mod table;
+mod test_var;
+#[cfg(test)]
+mod test_var_guard;
 #[cfg(test)]
 mod guard;
 #[cfg(test)]
@@ -25,6 +28,7 @@ mod tests;
 
 pub use read::{ms, ms_from, on_exact_1, on_exact_1_from, path, path_from, switch_raw, switch_raw_from};
 pub use table::{DYNAMIC_OK, FLAGS, NOT_ENV};
+pub use test_var::{hooks_enabled, test_var, test_var_from};
 
 /// 型別化讀取的規格（#2163 PR-2a）：登記了才能用 [`read`] 裡對應的讀取函式，預設值與範圍從這裡拿。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

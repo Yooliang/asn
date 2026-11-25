@@ -44,7 +44,7 @@ const PACKAGE_MANAGED: &[&str] = &["pi"];
 
 /// 測試用假的執行檔資料夾時不看真實的安裝位置（不然這台剛好裝了 pi，測試就分不出「沒有 pi」）
 fn package_manager_binary(name: &str) -> Option<PathBuf> {
-    if crate::envc::get("ASN_MOCK_BIN_DIR").is_some() {
+    if crate::flags::test_var("ASN_MOCK_BIN_DIR").is_some() {
         return None;
     }
     let env_dir = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
@@ -77,7 +77,7 @@ fn find_in_dirs(dirs: &[PathBuf], name: &str) -> Option<PathBuf> {
 
 /// 測試用假的執行檔資料夾時不看真實家目錄（不然這台剛好裝了 claude／grok，測試就分不出「沒有」；同 package_manager_binary）
 fn known_home_binary_real(name: &str) -> Option<PathBuf> {
-    if crate::envc::get("ASN_MOCK_BIN_DIR").is_some() {
+    if crate::flags::test_var("ASN_MOCK_BIN_DIR").is_some() {
         return None;
     }
     known_home_binary(&crate::identity::home_dir(), name)
@@ -95,7 +95,7 @@ fn known_home_binary(home: &std::path::Path, name: &str) -> Option<PathBuf> {
 }
 
 fn resolve_on_path(name: &str) -> Option<PathBuf> {
-    if let Some(p) = crate::envc::get("ASN_MOCK_BIN_DIR") {
+    if let Some(p) = crate::flags::test_var("ASN_MOCK_BIN_DIR") {
         let base = PathBuf::from(p);
         let win = base.join(format!("{name}.exe"));
         if win.is_file() {

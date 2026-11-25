@@ -33,6 +33,9 @@ path = "src/bin/asn_bridge.rs"
 default = ["gui"]
 gui = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-dialog", "dep:tauri-plugin-updater", "dep:tauri-plugin-opener", "dep:tauri-plugin-deep-link"]
 sideload = []
+# 測試掛鉤（#2163 PR-3a）：開了才讓正式建置也讀「測試／CI／除錯」類的環境變數（見 src/flags/test_var.rs）。
+# 預設不開；發版建置絕不能帶。e2e 專用的建置由 PR-3b 處理
+test-hooks = []
 
 [lib]
 name = "asn_lib"

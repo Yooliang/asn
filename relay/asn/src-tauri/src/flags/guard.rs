@@ -17,12 +17,12 @@ fn fits(func: &str, typed: Typed) -> bool {
     )
 }
 
-fn is_ident(c: char) -> bool {
+pub(super) fn is_ident(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
 /// 收集 `const 名字: &str = "字串"`（含 `pub(crate)`、`static`）
-fn consts(text: &str, out: &mut BTreeMap<String, String>) {
+pub(super) fn consts(text: &str, out: &mut BTreeMap<String, String>) {
     let mut rest = text;
     while let Some(p) = rest.find(": &str") {
         let before = &rest[..p];
@@ -73,6 +73,9 @@ pub fn check(files: &[(String, String)]) -> Vec<String> {
                 };
                 match find(&name) {
                     None => bad.push(format!("{file}:{line} flags::{func}({name}) 的名字沒登記在 flags::FLAGS")),
+                    Some(f) if matches!(f.kind, super::Kind::Test | super::Kind::Ci | super::Kind::Debug) => {
+                        bad.push(format!("{file}:{line} flags::{func}({name}) 是測試／CI／除錯分類的變數，只能用 flags::test_var 讀"))
+                    }
                     Some(f) if !fits(func, f.typed) => bad.push(format!("{file}:{line} flags::{func}({name}) 型別對不上：登記的 typed 是 {:?}", f.typed)),
                     _ => {}
                 }

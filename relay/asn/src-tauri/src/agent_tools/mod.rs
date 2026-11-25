@@ -63,7 +63,7 @@ pub fn parse_version(out: &str) -> Option<String> {
 /// 跑偵測到的那個執行檔的 `--version`（不讀任何設定或憑證檔）；結束碼不是 0、逾時、看不懂都回空字串。
 /// 測試用假的執行檔資料夾時不跑（假檔不是真的程式）
 fn installed_version(binary: &str) -> String {
-    if crate::envc::get("ASN_MOCK_BIN_DIR").is_some() {
+    if crate::flags::test_var("ASN_MOCK_BIN_DIR").is_some() {
         return String::new();
     }
     let Some(exe) = resolve_binary(binary) else { return String::new() };

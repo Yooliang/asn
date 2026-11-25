@@ -574,7 +574,7 @@ fn 守門_密碼不寫檔不進環境變數不進指令列不進剪貼簿() {
         }
     }
     assert!(bad.is_empty(), "{}", bad.join("\n"));
-    // 只讀這兩個環境變數（都不是機密）；測試管道覆寫只在除錯版
+    // 只讀這兩個環境變數（都不是機密）；測試管道覆寫經 flags::test_var 讀（正式建置讀不到）
     for (name, text) in sources() {
         for l in code_only(&text).lines().filter(|l| l.contains("env::var(")) {
             assert!(l.contains("ASN_ASKPASS_PIPE") || l.contains("SSH_ASKPASS_PROMPT"), "{name}: 讀了不認得的環境變數：{l}");
@@ -582,7 +582,7 @@ fn 守門_密碼不寫檔不進環境變數不進指令列不進剪貼簿() {
     }
     let pipe = code_only(&sources().into_iter().find(|x| x.0 == "pipe.rs").unwrap().1);
     let at = pipe.find("ASN_ASKPASS_PIPE").expect("找不到測試管道覆寫");
-    assert!(pipe[at.saturating_sub(200)..at].contains("#[cfg(debug_assertions)]"), "測試管道覆寫必須只在除錯版");
+    assert!(pipe[at.saturating_sub(40)..at].contains(&format!("flags::{}(", "test_var")), "測試管道覆寫必須經 flags::test_var 讀（只在測試／除錯／test-hooks 建置才讀得到）");
 }
 
 #[test]
