@@ -252,6 +252,14 @@ export const makeKnownPeerApi = (call = invoke) => ({
   forget: (node, challenge) => call('android_known_forget', { node, challenge }),
   scanConfirm: (node, challenge) => call('android_known_scan_confirm', { node, challenge }),   // → ok｜mismatch｜bad_qr｜blocked｜locked｜not_verified
 })
+// 核對指紋時請那台電腦自動跳出 QR Code（#1863）：手機端的三個動作（本人簽章在 Rust）；流程見 fp-show.mjs
+export const makeFpShowApi = (call = invoke) => ({
+  request: node => call('android_fp_show_request', { node }),   // → { id, expires_at }；rate_limited／not_found 等原樣丟出
+  status: id => call('android_fp_show_status', { id }),          // → { status: pending｜shown｜pc_cancelled｜ended｜superseded｜expired }
+  end: id => call('android_fp_show_end', { id }),
+})
+// 電腦跳出的 QR Code 視窗上按「取消核對」：交給 Rust 的領取迴圈回報並關窗
+export const fpShowCancel = id => invoke('fp_show_cancel', { id })
 // 設備細部頁「安裝並登入 Claude Code」：確認、取消、開關。安裝與驗證全在 Rust（agent_setup）
 export const makeAgentSetupApi = (call = invoke) => ({
   remoteAllowGet: () => call('agent_setup_remote_allow_get'),                // → true｜false

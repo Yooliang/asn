@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>ASN</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="kit.css">
 <link rel="stylesheet" href="skin-common.css">
 <link rel="stylesheet" href="modern.css">
 <link rel="stylesheet" href="line.css">
@@ -27,6 +28,16 @@
     <template v-else-if="kind === 'setting' && st && itemTitle">
       <settings-panel :title="title" :st="st" :cat-key="key" :me-av="meAv" @act="act" @avatar-file="pickFile"></settings-panel>
     </template>
+    <!-- 手機正在核對這台的指紋（#1863）：QR Code 由本機產生，只用 canvas 畫；指紋、倒數只用文字節點 -->
+    <section class="fps" v-else-if="kind === 'fpshow'" aria-live="polite">
+      <h2 class="fps-h">{{ FPS.pcHeading }}</h2>
+      <p class="fps-body">{{ FPS.pcBody }}</p>
+      <div class="fps-qr"><fp-qr-canvas v-if="fps.qr" :qr="fps.qr" :module-px="6"></fp-qr-canvas></div>
+      <p class="fps-err" v-if="fps.err" role="alert">{{ fps.err }}</p>
+      <p class="fps-fp" v-if="fps.fp">{{ FPS.pcFp(fps.fp) }}</p>
+      <p class="fps-left">{{ FPS.pcCountdown(fps.left) }}</p>
+      <div class="fps-act"><asn-button class="fps-cancel" :disabled="fps.busy" @click="fpsCancel">{{ FPS.pcCancel }}</asn-button></div>
+    </section>
   </div>
 </div>
 <script src="vendor/vue.global.prod.js"></script>

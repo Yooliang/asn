@@ -74,10 +74,11 @@ import { headTone } from './lib/head-tone.mjs'
 import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
 import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
-import { authApi, cloudApi, deviceReplaceApi, invoke, listen, mobileAccountApi, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
+import { authApi, cloudApi, deviceReplaceApi, invoke, listen, makeFpShowApi, mobileAccountApi, mobileAskApi, mobileLaunchApi, mobileOpsApi, mobilePhotoApi, mobilePushApi, mobileRelayApi, mobileSetupApi, mobileSiteApi, mobileStateApi, mobileUpdateApi, openLink, shellApi, store } from './lib/tauri.mjs'
 import { mobileRemoteInputApi, mobileRemoteViewApi } from './lib/mobile-remote-view.mjs'
 import { joinKnown, removedDevices, deviceNameError, deviceNameOf, unnamedLabelOf } from './lib/device-known.mjs'
 import { TEXT as KNOWN_TEXT, NAME_MAX, errorText as knownErrorText, renameErrorText, knownPeers, needsConfirm as knownNeedsConfirm, peerOf as knownPeerOf } from './lib/mobile-known-peers.mjs'
+import { FP_SHOW_POLL_MS, FP_SHOW_TEXT, createFpShowFlow, newFpShowState } from './lib/fp-show.mjs'
 import { CLOUD_KEY_KEEP_MS, CLOUD_LEAVE_TEXT, CLOUD_TEXT, COPY_NOTE as CLOUD_COPY_NOTE, INVITE_NOTE as CLOUD_INVITE_NOTE, POLL_MS as CLOUD_POLL_MS, createMobileCloud } from './lib/mobile-cloud.mjs'
 import { buildLogView } from './lib/changelog.mjs'
 import { PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, openPlayStore, playNewText as playNewTextOf, playUpdateVersion, playUpdateView } from './lib/play-update.mjs'
@@ -705,6 +706,29 @@ const app = createApp({
       }
       vp.note = SCAN_NOTES[r] ?? ''
     }
+    // #1863：選「用相機掃電腦上的 QR Code」之後，先請那台電腦自動跳出 QR Code（流程與字在 fp-show.mjs，電腦跳出的視窗共用同一份字）。
+    // 那台的 ASN 不在線就不送、直接說沒有回應；跳出來了才換成「出現了」，本人按鈕開相機（接回上面的 scanPeer）。
+    // 掃完、取消、離開這個畫面（選方法的浮層收掉、換了一台）一律請電腦收掉視窗（fpShow.finish 會呼叫 fp_show_end，同一筆只送一次）
+    const fs = reactive(newFpShowState())
+    const fpShow = createFpShowFlow({ state: fs, api: makeFpShowApi(), log: (...a) => console.info(...a) })
+    let fsTimer = 0
+    const fsStopTimer = () => { clearInterval(fsTimer); fsTimer = 0 }
+    const fpShowStart = async () => {
+      const cur = vp.cur
+      if (!cur || vp.busy) return
+      fsStopTimer()
+      await fpShow.start(cur.node, core?.asn?.[cur.node])
+      if (fs.phase === 'wait') fsTimer = setInterval(() => { void fpShow.tick().then(() => { if (fs.phase !== 'wait') fsStopTimer() }) }, FP_SHOW_POLL_MS)
+    }
+    // 重試：先重讀名單（那台可能剛打開 ASN），再從頭來
+    const fpShowRetry = async () => {
+      try { await core?.refreshRoster() } catch (e) { console.info('[ASN] 重讀名單失敗，照舊重試', String(e?.message ?? e)) }
+      await fpShowStart()
+    }
+    const fpShowEnd = () => { fsStopTimer(); void fpShow.finish() }
+    const fpShowScan = async () => { await scanPeer(); fpShowEnd() }
+    watch(() => (vp.method && vp.cur ? vp.cur.node : ''), (node, old) => { if (old && node !== old && fs.phase !== 'idle') fpShowEnd() })
+    window.addEventListener('pagehide', () => { if (fs.phase !== 'idle') fpShowEnd() })
     const closePeerSheet = () => { vp.sheet = false; vp.ch = null; vp.sheetName = '' }
     const PEER_NOTES = { wrong: KNOWN_TEXT.wrong, none: KNOWN_TEXT.noneMatch, locked: KNOWN_TEXT.lockedNow, blocked: KNOWN_TEXT.blocked, expired: KNOWN_TEXT.expired, not_ready: KNOWN_TEXT.notReady }
     // 選一個（-1＝都不一樣）：Rust 判斷；選對才過本人確認再記住。結果都收掉浮層，需要說的話放在條下面
@@ -1717,7 +1741,7 @@ const app = createApp({
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
-      KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, reaccept, reacceptAsk, reacceptNo, reacceptYes, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, removedBlock, acctRowLine, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody,
+      KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, reaccept, reacceptAsk, reacceptNo, reacceptYes, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, removedBlock, acctRowLine, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody, fs, FP_SHOW_TEXT, fpShowStart, fpShowRetry, fpShowEnd, fpShowScan,
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideNode, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       SUB_LAPSED_TEXT, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLoginTargets, acctLoginPress, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, acctHead, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,

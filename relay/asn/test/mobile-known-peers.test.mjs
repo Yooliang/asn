@@ -33,7 +33,7 @@ test('文字：頂端條、浮層、按鈕都是繁體中文，名字和指紋�
   assert.equal(groupFp('0123456789abcdef'), '0123 4567 89ab cdef', '核對用完整 16 碼分組')
   assert.equal(groupFp('01234567'), '')
   assert.equal(groupFp(null), '')
-  for (const t of Object.values(TEXT).map(x => (typeof x === 'function' ? x('示範', '01234567') : x))) assert.doesNotMatch(t.replace(/QR code|ASN/g, ''), /[A-Za-z]{3,}/, t)
+  for (const t of Object.values(TEXT).map(x => (typeof x === 'function' ? x('示範', '01234567') : x))) assert.doesNotMatch(t.replace(/QR [Cc]ode|ASN/g, ''), /[A-Za-z]{3,}/, t)
 })
 
 test('指紋寫法和電腦版一樣：名字後面接「（指紋 xxxxxxxx）」', () => {
@@ -381,12 +381,13 @@ test('守門：四選一的答案、選項不進日誌、事件；畫面層不�
 // ---- 掃電腦畫面上的 QR code 核對指紋：畫面只拿得到狀態字，拿不到掃到的字 ----
 
 test('掃 QR code 的文字：照規格、繁體中文', () => {
-  assert.equal(TEXT.scanButton, '用相機掃電腦上的 QR code')
+  assert.equal(TEXT.scanButton, '用相機掃電腦上的 QR Code')
   assert.equal(TEXT.scanFallback, '沒辦法掃，改用選的')
   assert.equal(TEXT.scanMismatch, '掃到的指紋和這支手機記住的不一樣，可能被換過，已經擋下。請到設定 → 設備，開那台的「詳情」按「重新認這台」，再重新連線。')
-  assert.equal(TEXT.scanBad, '這不是 ASN 的指紋 QR code，請掃電腦設定頁上的那個。')
+  assert.equal(TEXT.scanBad, '這不是 ASN 的指紋 QR Code，請掃那台電腦跳出來的那個。')
   assert.equal(TEXT.scanNoCamera, '沒辦法用相機，改用選的。')
-  assert.match(TEXT.methodBody, /顯示 QR code/)
+  assert.match(TEXT.methodBody, /自動跳出一個 QR Code/, '#1863 起電腦自動跳出，不用到設定頁找')
+  assert.doesNotMatch(TEXT.methodBody + TEXT.scanBad, /設定頁/)
 })
 
 function fakeScan(status, answers = {}) {
@@ -466,13 +467,16 @@ test('守門：掃到的字不經過網頁——橋只回狀態字、Rust 命令
 
 test('m.html：選方法的浮層只用文字節點；掃描是主要按鈕、改用選的接到原本的四選一；結果說明放在條下面', () => {
   const html = read('../ui/m.html')
-  const sheet = html.slice(html.indexOf('v-if="vp.method && vp.cur && !vp.sheet"'), html.indexOf('v-if="vp.sheet && vp.cur && vp.ch"'))
+  const sheet = html.slice(html.indexOf('v-if="vp.method && vp.cur && !vp.sheet && fs.phase === \'idle\'"'), html.indexOf('v-if="vp.sheet && vp.cur && vp.ch"'))
   assert.ok(sheet.length > 100)
   assert.doesNotMatch(sheet, /v-html|innerHTML/)
-  assert.match(sheet, /class="m-btn m-btn-big"[^>]*@click="scanPeer">\{\{ KNOWN_TEXT\.scanButton \}\}/)
+  // #1863：主要按鈕先請電腦跳出 QR Code（fpShowStart）；跳出來了（shown）才由「用相機掃」接回原本的掃描
+  assert.match(sheet, /class="m-btn m-btn-big m-fps-go"[^>]*@click="fpShowStart">\{\{ KNOWN_TEXT\.scanButton \}\}/)
+  assert.match(sheet, /v-else-if="fs\.phase === 'shown'"[\s\S]*?@click="fpShowScan">\{\{ KNOWN_TEXT\.scanButton \}\}/)
   assert.match(sheet, /@click="methodPickInstead">\{\{ KNOWN_TEXT\.scanFallback \}\}/)
   assert.match(sheet, /@click="closeMethodSheet">\{\{ KNOWN_TEXT\.cancel \}\}/)
   const js = read('../ui/m.js')
+  assert.match(js, /const fpShowScan = async \(\) => \{ await scanPeer\(\); fpShowEnd\(\) \}/, '掃完（不論結果）一律請電腦收掉視窗')
   assert.match(js, /knownPeers\.scan\(cur\.node\)/)
   for (const k of ['mismatch', 'bad_qr']) assert.match(js, new RegExp(`${k}: KNOWN_TEXT\.scan`))
   assert.match(js, /KNOWN_TEXT\.scanNoCamera/)

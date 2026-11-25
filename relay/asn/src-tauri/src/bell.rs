@@ -42,6 +42,8 @@ pub enum BellAction {
     WakePerm,
     WakeTerm,
     WakeView,
+    /// 叫醒「手機要核對這台指紋」的領取（fp_show_take，#1863）；只有 fp_show 門鈴會叫，舊門鈴不叫（每封信都多打一次後台不划算）
+    WakeFpShow,
 }
 
 fn valid_kind(s: &str) -> bool {
@@ -77,6 +79,7 @@ pub fn ring_actions(ring: &Ring) -> Vec<BellAction> {
         Ring::Bell(BellKind::Scoped(k)) => match k.as_str() {
             "perm_req" => vec![BellAction::WakePerm],
             "term_req" => vec![BellAction::WakeTerm],
+            "fp_show" => vec![BellAction::WakeFpShow],
             _ => all(),
         },
         Ring::Bell(BellKind::Report { kind, node }) => vec![BellAction::EmitReport { kind: kind.clone(), node: node.clone() }],
@@ -89,7 +92,7 @@ pub fn ring_actions(ring: &Ring) -> Vec<BellAction> {
 pub fn wakes_mail(ring: &Ring) -> bool {
     match ring {
         Ring::Bell(BellKind::Report { .. }) => false,
-        Ring::Bell(BellKind::Scoped(k)) => !matches!(k.as_str(), "perm_req" | "term_req"),
+        Ring::Bell(BellKind::Scoped(k)) => !matches!(k.as_str(), "perm_req" | "term_req" | "fp_show"),
         _ => true,
     }
 }
@@ -385,6 +388,9 @@ mod tests {
         let sc = |k: &str| Ring::Bell(BellKind::Scoped(k.into()));
         assert_eq!(ring_actions(&sc("perm_req")), vec![WakePerm]);
         assert_eq!(ring_actions(&sc("term_req")), vec![WakeTerm]);
+        assert_eq!(ring_actions(&sc("fp_show")), vec![WakeFpShow], "手機要核對指紋：只叫醒指紋視窗的領取（#1863）");
+        assert!(!ring_actions(&Ring::Bell(BellKind::Legacy)).contains(&WakeFpShow), "舊門鈴（每封信）不多打 fp_show_take");
+        assert_eq!(bell_kind(&json!({"kind": "fp_show"})), BellKind::Scoped("fp_show".into()), "後台的門鈴只帶 kind");
         assert_eq!(ring_actions(&sc("something_new")), vec![EmitBell, WakeSecret, WakePerm, WakeTerm, WakeView], "未知的 Scoped 全叫醒，不漏");
         assert_eq!(ring_actions(&Ring::Bell(BellKind::Report { kind: "perm_req".into(), node: "x".into() })), vec![EmitReport { kind: "perm_req".into(), node: "x".into() }], "有 node 的仍是回報");
         assert!(ring_actions(&Ring::Down).is_empty());
@@ -397,6 +403,7 @@ mod tests {
         assert!(cb.contains("bell::ring_actions(ring)"), "回呼要依門鈴種類分流");
         assert!(cb.contains("\"relay-report-bell\""), "回報門鈴走自己的事件");
         assert!(cb.contains("BellAction::WakePerm =>") && cb.contains("perm_wake_bell"), "權限框領取要被門鈴叫醒");
+        assert!(cb.contains("BellAction::WakeFpShow =>") && cb.contains("fp_wake_bell"), "指紋 QR Code 視窗的領取要被門鈴叫醒（#1863）");
         assert!(cb.contains("BellAction::EmitBell =>"), "舊門鈴的 relay-bell 只在 EmitBell 裡 emit");
         assert_eq!(cb.matches("emit(\"relay-bell\"").count(), 1, "relay-bell 不能在回呼裡無條件 emit");
     }
@@ -406,6 +413,7 @@ mod tests {
         assert!(!wakes_mail(&Ring::Bell(BellKind::Report { kind: "echo".into(), node: "n1".into() })), "回報門鈴不是信，不叫醒收信");
         assert!(!wakes_mail(&Ring::Bell(BellKind::Scoped("perm_req".into()))), "權限框決定不是信");
         assert!(!wakes_mail(&Ring::Bell(BellKind::Scoped("term_req".into()))), "終端確認不是信");
+        assert!(!wakes_mail(&Ring::Bell(BellKind::Scoped("fp_show".into()))), "手機要核對指紋不是信");
         assert!(wakes_mail(&Ring::Bell(BellKind::Scoped("something_new".into()))), "未知的 Scoped 保守叫醒");
         assert!(wakes_mail(&Ring::Bell(BellKind::Legacy)), "舊門鈴照舊叫醒");
         assert!(wakes_mail(&Ring::Joined), "連上（含重連）照舊叫醒，補收斷線期間的信");

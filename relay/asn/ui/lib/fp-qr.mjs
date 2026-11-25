@@ -1,12 +1,9 @@
-// 設定頁「認得的電腦」：把這台的指紋畫成 QR code，讓手機用「確認指紋 → 掃 QR code」掃來核對。
+// 把這台的指紋畫成 QR Code，讓手機用「確認指紋 → 用相機掃」掃來核對。手機要核對時這台會自動跳出視窗顯示它（#1863，panel.js 的 fpshow）。
 // 格子由 Rust 排好（device_own_fingerprint_qr 回 { size, rows }，rows 每列一個字串、'1' 是深色）；這裡只負責驗資料、畫在 canvas 上。
-// 只用 canvas 畫（不用 v-html、不用 innerHTML、不產生圖片網址）。四周留 4 格空白，每格 4 個像素。
+// 只用 canvas 畫（不用 v-html、不用 innerHTML、不產生圖片網址）。四周留 4 格空白，每格預設 4 個像素（跳出的視窗畫大一點）。
 export const QR_TEXT = {
-  show: '顯示 QR code',
-  hide: '隱藏 QR code',
-  note: '用手機的「確認指紋 → 掃 QR code」掃這個',
-  alt: '這台電腦的指紋 QR code',
-  failed: '暫時做不出 QR code，請稍後再試。',
+  alt: '這台電腦的指紋 QR Code',
+  failed: '暫時做不出 QR Code，請稍後再試。',
 }
 
 /** 每格幾個像素 */
@@ -47,11 +44,11 @@ export function paint(ctx, plan) {
 }
 
 export const FpQrCanvas = {
-  props: { qr: { type: Object, default: null } },
+  props: { qr: { type: Object, default: null }, modulePx: { type: Number, default: MODULE_PX } },
   setup(props) {
     const { ref, computed, onMounted, watch, nextTick } = globalThis.Vue
     const el = ref(null)
-    const plan = computed(() => drawPlan(props.qr))
+    const plan = computed(() => drawPlan(props.qr, Math.min(12, Math.max(MODULE_PX, Math.round(props.modulePx) || MODULE_PX))))
     const px = computed(() => plan.value?.side ?? 0)
     const draw = () => {
       const c = el.value

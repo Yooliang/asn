@@ -138,7 +138,9 @@ test('守門（獨立視窗）：panel.html／panel.js 有自訂外框、標題�
 test('守門（Rust）：open_panel／close_panels 有註冊、只認兩種視窗、外框設定與截圖涵蓋', () => {
   const lib = read('src-tauri/src/lib.rs'), wins = read('src-tauri/src/wins.rs')
   assert.ok(lib.includes('wins::open_panel') && lib.includes('wins::close_panels'))
-  assert.ok(wins.includes('const PANEL_KINDS: [&str; 2] = ["guide", "setting"]'))
+  // #1863：panel.html 多一種「手機核對指紋時自動跳出的 QR Code」視窗，但只有指引、設定能變分頁、能由畫面叫開
+  assert.ok(wins.includes('const PANEL_KINDS: [&str; 3] = ["guide", "setting", "fpshow"]'))
+  assert.ok(wins.includes('const DOCKABLE_PANELS: [&str; 2] = ["guide", "setting"]'))
   assert.ok(/label == "list" \|\| label\.starts_with\("chat-"\) \|\| is_panel_label\(&label\)/.test(wins), '切換外框時指引、設定視窗也跟著改')
   assert.ok(wins.includes('panel.html?kind={kind}') && wins.includes('.min_inner_size(360.0, 320.0)'))
   assert.ok(wins.includes('.disable_drag_drop_handler()'))
