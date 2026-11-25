@@ -93,6 +93,7 @@ import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { watchUpdateProgress } from './lib/progress-events.mjs'
+import { watchAccountEvents } from './lib/account-events.mjs'
 import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
@@ -272,7 +273,7 @@ if (!info.shot) {
 // 登入之後又掉才會再出現。判斷與元件和手機共用（lib/relogin-bar.mjs，#1764）：收到清掉登入的事件、群組列表回報登入失效、後台回 401 時立刻再查，
 // 平常每分鐘看一次登入狀態（取不到就不顯示，不吵人）
 let onSignedIn = () => {}   // 設備與帳號那段接上
-const reloginWatch = createReloginWatch({ status: () => authApi.status(), listen, canSkipLogin: () => info.can_skip_login === true, reactive, onSignedIn: () => onSignedIn() })
+const reloginWatch = createReloginWatch({ status: () => authApi.status(), canSkipLogin: () => info.can_skip_login === true, reactive, onSignedIn: () => onSignedIn() })
 const reloginBar = reloginWatch.st
 const dismissReloginBar = reloginWatch.dismiss
 const goLogin = () => location.replace('login.html')
@@ -364,6 +365,7 @@ const core = new AsnCore({
   log: m => console.info('[ASN]', m),
 })
 bindRustEvents(core.hub)   // Rust 事件從 core 訂閱（#2038）；橋只在有人訂閱時才向 Tauri 註冊
+if (!info.shot) reloginWatch.attach(core.hub)   // 登入被清掉的事件（#2038 PR-3）
 if (!info.shot) watchUpdateProgress(core.hub, { getUpd: () => upd, setUpd, withProgress })   // 更新下載進度（#2038 PR-2）
 
 // ---------- 群組（真人好友與群組）：群組在名單的「群組」分頁，點進去在對話分頁（整合）或對話視窗（分開）聊 ----------
@@ -2039,9 +2041,9 @@ const app = createApp({
     // 帳號列表（#374）也跟著這個節奏，但只在「設備與帳號」開著時讀（打開那一刻另讀一次，見下面監看設定頁那段）
     const devicesOpen = () => ['devices', 'accounts'].includes(normalizeCatKey(ui.panel.setting))
     setInterval(() => { void accounts.refreshQuota(); if (devicesOpen()) void accounts.refreshRoster() }, 5 * 60_000)
-    void listen('claude-mod-status', p => { accounts.state.mod = p ?? null })   // Rust 背景安裝 Claude 外掛完成
-    void listen('claude-account-auto', p => void accounts.onAuto(p))
-    void listen('grok-account-auto', p => void accounts.onAuto(p))   // Grok 自動加入也走同一支：重抓清單並回報   // Rust 背景工作自動加入／回存之後
+    // 帳號類事件走事件中心（#2038 PR-3）；兩處 Rust 送同名 claude-mod-status，前端一個訂閱
+    const offAccountEvents = watchAccountEvents(core.hub, accounts)
+    onBeforeUnmount(offAccountEvents)
     if (!info.shot) {
       setInterval(() => void accounts.pollIncoming(), ACCT_INCOMING_POLL_MS)
       void listen('relay-bell', () => void accounts.pollIncoming())

@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { AUTH_LOST_EVENT, ROOMS_NEED_LOGIN_TEXT, ReloginBar, createReloginWatch, looksLikeLoginLost, reloginBarText, roomsLoginLost, roomsNoteText } from '../ui/lib/relogin-bar.mjs'
+import { createEventHub } from '../ui/lib/event-hub.mjs'
 import { RELOGIN_BAR_TEXT } from '../ui/lib/login.mjs'
 import { createRoomHub } from '../ui/lib/room-hub.mjs'
 import { ROOM_LOAD_FAIL_TEXT } from '../ui/lib/mobile-rooms.mjs'
@@ -10,8 +11,9 @@ import { ROOM_LOAD_FAIL_TEXT } from '../ui/lib/mobile-rooms.mjs'
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const mk = ({ signedIn = true, hasNode = true } = {}) => {
   const cur = { signedIn }, listeners = {}
-  const w = createReloginWatch({ status: async () => ({ signed_in: cur.signedIn }), listen: async (e, fn) => { (listeners[e] ||= []).push(fn) }, canSkipLogin: () => hasNode })
-  return { w, cur, fire: e => (listeners[e] || []).forEach(f => f()) }
+  const hub = createEventHub({ listen: async (e, fn) => { (listeners[e] ||= []).push(fn); return () => { listeners[e] = (listeners[e] || []).filter(f => f !== fn) } } })
+  const w = createReloginWatch({ status: async () => ({ signed_in: cur.signedIn }), hub, canSkipLogin: () => hasNode })
+  return { w, cur, hub, listeners, fire: e => (listeners[e] || []).forEach(f => f()) }
 }
 
 test('正常狀態：已登入時提醒條不出現，群組說明是空的', async () => {
@@ -83,7 +85,7 @@ test('回到前景要再查一次（手機不能只在開 App 時查）', async 
 
 test('沒有節點金鑰（新電腦）或查不到狀態：不顯示', async () => {
   assert.equal(await mk({ signedIn: false, hasNode: false }).w.refresh(), false)
-  const w = createReloginWatch({ status: async () => { throw new Error('x') }, listen: async () => {}, canSkipLogin: () => true })
+  const w = createReloginWatch({ status: async () => { throw new Error('x') }, hub: createEventHub({ listen: async () => () => {} }), canSkipLogin: () => true })
   assert.equal(await w.refresh(), false)
 })
 

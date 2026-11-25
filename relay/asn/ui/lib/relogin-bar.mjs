@@ -28,11 +28,12 @@ export const looksLikeLoginLost = msg => /\b401\b|登入已過期|請重新登�
 
 /**
  * 提醒條的狀態與觸發。觸發：收到清掉登入的事件、群組列表回報登入已失效、任何請求回 401、回到前景；平常每分鐘也看一次。
- * status：() => Promise<{signed_in}>；listen：(事件名, 回呼) => Promise；canSkipLogin：() => 這台有沒有節點金鑰
+ * status：() => Promise<{signed_in}>；hub：事件中心（可晚點用 attach 給）；canSkipLogin：() => 這台有沒有節點金鑰
  * 不取得登入狀態時（取不到）就不顯示，不吵人。
  */
-export function createReloginWatch({ status, listen, canSkipLogin, reactive = x => x, onSignedIn = () => {} }) {
+export function createReloginWatch({ status, hub = null, canSkipLogin, reactive = x => x, onSignedIn = () => {} }) {
   const st = reactive({ show: false })
+  let unsub = null
   let dismissed = false
   let wasSignedIn = null
   // 「登入有問題」：後台回報登入失效、事件、401 時成立。登入檔還在（signed_in 仍是 true）時也要維持，
@@ -70,9 +71,16 @@ export function createReloginWatch({ status, listen, canSkipLogin, reactive = x 
     noteError: e => (looksLikeLoginLost(e?.message ?? e) ? refresh({ force: true }) : Promise.resolve(st.show)),
     /** 回到前景（手機不能只在開 App 時查一次） */
     onForeground: () => refresh(),
-    /** 掛上事件；收不到事件不影響其他觸發 */
+    /** 掛上事件（重複呼叫先退訂舊的）；收不到事件不影響其他觸發 */
+    attach(h) {
+      try { unsub?.() } catch { /* 退訂失敗不影響 */ }
+      unsub = null
+      try { unsub = h?.subscribe(AUTH_LOST_EVENT, () => { void onLost() }) ?? null } catch { /* 沒有事件通道（測試、舊殼） */ }
+      return unsub
+    },
+    /** 第一次查登入狀態；有給 hub 就順便掛上事件 */
     start() {
-      try { void Promise.resolve(listen(AUTH_LOST_EVENT, () => { void onLost() })).catch(() => {}) } catch { /* 沒有事件通道（測試、舊殼） */ }
+      if (hub) this.attach(hub)
       return refresh()
     },
   }

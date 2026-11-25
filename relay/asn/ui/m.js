@@ -169,7 +169,7 @@ async function startLogin(key) {
 const cancelLogin = () => { void authApi.cancel(); login.phase = 'idle' }
 // 「需要重新登入」提醒條（#1764）：和電腦版同一個元件、同一份文字、同一套判斷（lib/relogin-bar.mjs）。
 // 收到清掉登入的事件、群組列表回報登入失效、後台回 401、App 回到前景時都立刻再查，平常每分鐘也看一次；不能只在開 App 時查一次
-const reloginWatch = createReloginWatch({ status: () => authApi.status(), listen, canSkipLogin: () => info.can_skip_login === true, reactive })
+const reloginWatch = createReloginWatch({ status: () => authApi.status(), canSkipLogin: () => info.can_skip_login === true, reactive })
 const reloginBar = reloginWatch.st
 const dismissReloginBar = reloginWatch.dismiss
 // 按「登入」走現有的登入畫面（同一組登入鈕）；有金鑰的手機可以按「先不要」回名單
@@ -280,6 +280,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     log: m => console.info('[ASN]', m),
   })
   bindRustEvents(core.hub)   // Rust 事件從 core 訂閱（#2038）
+  reloginWatch.attach(core.hub)   // 登入被清掉的事件（#2038 PR-3）
   setLocalArchiver((f, a) => core.setLocalArchived(f, a))   // 後台沒有的舊好友封存時改記在本機
   const sync = () => { const s = core.snapshot(); friends.value = s.friends; conn.value = s.conn; nodeOrder.value = s.nodeOrder; nodeNames.value = s.nodeNames ?? {}; nodeFacts.value = s.nodeFacts ?? {}; for (const f of s.friends) refreshLast(f.id) }
   const pushLog = id => { logs[id] = core.viewOf(id) }

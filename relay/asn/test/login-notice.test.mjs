@@ -41,7 +41,7 @@ test('接線守門：登入畫面只在這台有金鑰時講收發信照常；�
   const list = read('ui/list.html'), lj = read('ui/list.js')
   // 提醒條抽成共用元件（#1764）：電腦與手機同一份，樣式與文字在 ui/lib/relogin-bar.mjs；細部守門在 relogin-bar.test.mjs
   assert.match(list, /<relogin-bar variant="desk" :show="reloginBar\.show" @login="goLogin" @dismiss="dismissReloginBar">/)
-  assert.match(lj, /createReloginWatch\(\{ status: \(\) => authApi\.status\(\), listen, canSkipLogin: \(\) => info\.can_skip_login === true/)
+  assert.match(lj, /createReloginWatch\(\{ status: \(\) => authApi\.status\(\), canSkipLogin: \(\) => info\.can_skip_login === true/)
   assert.match(lj, /setInterval\(\(\) => void reloginWatch\.refresh\(\), 60_000\)/)
   assert.match(read('ui/lib/relogin-bar.mjs'), /if \(nowIn && !troubled\) dismissed = false/, '登入後又掉才會再提醒')
   const panel = read('ui/lib/login-panel.mjs')
