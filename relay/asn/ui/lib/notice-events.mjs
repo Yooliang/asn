@@ -2,7 +2,7 @@
 // 全部從事件中心（hub）訂閱，回傳取消函式；事件內容（payload）由 hub 直接交給函式。
 // 注意：term-req-update、window-spool 兩種 Rust 有送、前端沒人接，這裡不接（#2332 處理中）。
 
-/** 收到邀請連結（asn://invite/<碼>）：只認非空字串，其餘忽略。 */
+/** 收到邀請連結（asn://invite/<碼>）：原樣交給 onCode，碼是否有效的檢查在 onCode（onInviteCode）裡做。 */
 export const watchInvite = (hub, onCode) => hub.subscribe('asn:invite', code => onCode(code))
 
 /** 正在聽的歌變了：開關關著就一律清成空字串；歌名一律轉字串。 */
