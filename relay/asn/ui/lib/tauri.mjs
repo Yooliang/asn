@@ -1,5 +1,6 @@
 // Tauri 前端小橋：invoke／事件。錯誤一律包成 Error(字串)，讓 AsnCore 用 e.message 處理。
 import { shownPhotos } from './photo.mjs'
+import { createWindowHub as makeWindowHub } from './event-hub.mjs'
 const T = globalThis.__TAURI__
 
 // 出口失敗寫記錄（#2106）：只記指令名與原文（限長），不記 args（可能含信件內容、路徑、金鑰）。
@@ -40,6 +41,12 @@ export const openLink = url => (T?.core?.invoke ? invoke('open_link', { url }) :
 export const listen = (evt, fn) => T.event.listen(evt, e => fn(e.payload))
 export const emit = (evt, payload) => T.event.emit(evt, payload)
 export const ctl = op => invoke('win_ctl', { op })
+// ---------- 事件中心的接法（#2038）：listen／emit／emitTo 注入事件中心的唯一一處；F3 的主機接縫（host.mjs）做好後只改這裡 ----------
+const hubTransport = () => ({ listen, emit, emitTo: (label, evt, payload) => T.event.emitTo(label, evt, payload) })
+// 沒有 AsnCore 的視窗（chat、panel、setup-progress…）用：只有 hub＋Rust 橋，不跑收信輪詢
+export const createWindowHub = () => makeWindowHub({ ...hubTransport(), log: m => console.info('[ASN]', m) })
+// AsnCore 的 hub：先建好、這裡再把 Rust 事件的橋接上
+export const bindRustEvents = hub => hub.attachRust(hubTransport().listen)
 // 附件快取清空了（換帳號、登入、登出）：這個視窗記著的大圖也丟掉（#1493）
 if (T?.event) void listen('attach-cache-cleared', () => shownPhotos.clear()).catch(() => {})
 
@@ -498,9 +505,10 @@ export const onReport = cb => {
 // 原生外框：html 加 frame-native，樣式把自畫的標題列、邊框與拖邊緣的把手藏起來
 export const applyFrame = native => document.documentElement.classList.toggle('frame-native', native === true)
 // 每扇視窗載入時問一次現在是哪種，之後設定頁一改就會收到 asn:frame
-export async function initFrame() {
+export async function initFrame(hub = createWindowHub()) {
   try { applyFrame(await invoke('frame_native')) } catch { /* 問不到就維持自訂 */ }
-  await listen('asn:frame', native => applyFrame(native))
+  hub.on('asn:frame', native => applyFrame(native))
+  await hub.ready()
 }
 // 自訂外框的八個拖邊緣調整大小的把手
 export const RESIZE_DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']

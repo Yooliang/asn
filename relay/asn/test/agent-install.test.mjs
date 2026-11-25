@@ -142,7 +142,7 @@ test('接線守門：七個操作都有接、按鈕與確認窗在同一個畫�
     // #1860 PR-C：設備詳情拿掉帳號區（安裝入口原本在那裡，且總開關 AGENT_INSTALL_UI 一直是關的），畫面暫時沒有入口；操作與樞紐留著，之後開旗標時再決定放哪
     assert.ok(!panel.includes(`act('${op}'`), `${op} 畫面不再有`)
   }
-  assert.match(list, /void listen\('agent-setup', e => agentInstall\.onEvent\(e\)\)/)
+  assert.match(list, /core\.on\('agent-setup', e => agentInstall\.onEvent\(e\)\)/)   // #2038：從事件中心訂閱，不直接 listen
   assert.match(list, /install: installView\(agentInstall\.state\)/)
   for (const t of Object.values(INSTALL_TEXT)) assert.doesNotMatch(t, /agent|setup|install|asn_|https?:/i, t)
 })

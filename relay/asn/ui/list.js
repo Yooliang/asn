@@ -57,7 +57,7 @@ import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.m
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { plainMessage, termRemoteErrorText } from './lib/plain-errors.mjs'
 import { patchWithFallback } from './lib/settings-save.mjs'
-import { RESIZE_DIRS, authApi, autostartApi, deviceReplaceApi, bridgeApi, cliLoginApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, autostartApi, bindRustEvents, deviceReplaceApi, bridgeApi, cliLoginApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
@@ -363,6 +363,7 @@ const core = new AsnCore({
   pollMs: info.poll_ms, rosterMs: info.roster_ms,
   log: m => console.info('[ASN]', m),
 })
+bindRustEvents(core.hub)   // Rust 事件從 core 訂閱（#2038）；橋只在有人訂閱時才向 Tauri 註冊
 
 // ---------- 群組（真人好友與群組）：群組在名單的「群組」分頁，點進去在對話分頁（整合）或對話視窗（分開）聊 ----------
 // 群組對話用「假夥伴」接上既有的對話窗：id 是 room:<群組代號>。發言、讀取、同意／拒絕都走 Rust 指令並帶本人簽章
@@ -1361,7 +1362,8 @@ if (ui.mode === 'merged') await windowApi.mainLayout(true, sizes.merged.w, sizes
 await listen('term-being-viewed', list => { beingViewed.value = Array.isArray(list) ? list : [] })
 await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms('bell'); refreshLaunchersOnBell() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
-await listen('asn:open', c => void openChat(c.cid))   // 提示被點了
+core.on('asn:open', c => void openChat(c.cid))   // 提示被點了
+await core.ready()   // 以前是 await listen(...)：事件註冊完才往下走
 
 watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddClaude, autoCheck, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
 // #2162⓪：先展開讀進來的舊內容，這版不認得的欄位（手機版 mobilePrefs／lastChat／navTab、新版新增的欄位）原樣保留；下面列的欄位每次都明確帶值，會蓋過舊值
@@ -1980,7 +1982,7 @@ const app = createApp({
       onDone: (ok, node) => { if (!ok) return; void accounts.refreshRoster(); if (node && node !== info.node) void accounts.loadReports([node]) },
     })
     onBeforeUnmount(() => reloginFlow.stop())
-    void listen('agent-setup', e => agentInstall.onEvent(e))   // listen 已經把事件裡的內容（payload）直接交給函式
+    core.on('agent-setup', e => agentInstall.onEvent(e))   // hub 已經把事件裡的內容（payload）直接交給函式
     // ---------- 新手引導卡（#1605）：這台電腦一個視窗也沒有時，取代「還沒有視窗」的空白字 ----------
     // 狀態全沿用既有偵測（ai_cli_detect 的 cliTools＋本機帳號），規則在 lib/new-computer-guide.mjs
     const guideHidden = ref(loadGuideHidden())
