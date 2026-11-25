@@ -15,8 +15,9 @@ export const opProgressProbeSource = ({ mode, want }) => `(async () => {
   const opener = await find(phone ? '.m-head-more, .m-plate' : '.actionbar .abtn[aria-label="管理"], .mbtn[data-slot="more"]');
   if (!opener) return { ok: false, why: '找不到管理夥伴的入口' };
   opener.click();
-  const item = await find(phone ? '.m-ops-item:not(.off)' : '.ab-ops button:not(.off)', '關閉視窗');
-  if (!item) return { ok: false, why: '管理選單裡找不到能按的「關閉視窗」' };
+  const label = want === 'agents' ? '換班接手' : '關閉視窗';   // #1908：換班接手等子代理時的進度行
+  const item = await find(phone ? '.m-ops-item:not(.off)' : '.ab-ops button:not(.off)', label);
+  if (!item) return { ok: false, why: '管理選單裡找不到能按的「' + label + '」' };
   item.click();
   const ok = await find(phone ? '.m-ops-panel .m-btn-big' : '.dlg .partner-actions button:last-child');
   if (!ok) return { ok: false, why: '找不到確認鈕' };
@@ -34,6 +35,16 @@ export const opProgressProbeSource = ({ mode, want }) => `(async () => {
   const text = () => (document.querySelector(boxSel)?.textContent ?? '').replace(/\\s+/g, ' ').trim();
   if (/先關掉（照常進行）/.test(document.body.textContent)) return { ok: false, why: '畫面上不該再有「先關掉（照常進行）」' };
   const btns = () => [...document.querySelectorAll(boxSel + ' button')].map(b => b.textContent.trim());
+  if (want === 'agents') {
+    // #1908：電腦端回報 stage:agents:2 → 同一條狀態列寫「等 2 個子代理做完」，沒有按鈕、不擋畫面、不露出階段代號
+    let t2 = '';
+    for (let i = 0; i < 80; i++) { t2 = text(); if (/子代理做完/.test(t2)) break; await sleep(100) }
+    if (!/等 2 個子代理做完/.test(t2)) return { ok: false, why: '換班等子代理時應寫「等 2 個子代理做完」：' + t2 };
+    if (/stage|agents/.test(t2)) return { ok: false, why: '畫面不該露出階段代號：' + t2 };
+    if (btns().length) return { ok: false, why: '等子代理時狀態列不放按鈕：' + btns().join('、') };
+    if (blocker()) return { ok: false, why: '等子代理時不該有擋畫面的框' };
+    return { ok: true, why: '' };
+  }
   if (want === 'working') {
     if (!/正在/.test(text())) return { ok: false, why: '進行中應寫「正在…」：' + text() };
     if (btns().length) return { ok: false, why: '進行中不需要任何按鈕：' + btns().join('、') };
@@ -61,10 +72,11 @@ const STATUS = {
   working: { id: 'op-1', status: 'pending' },
   done: { id: 'op-1', status: 'ok' },
   failed: { id: 'op-1', status: 'failed', detail: '找不到這個視窗' },
+  agents: { id: 'op-1', status: 'taken', detail: 'stage:agents:2' },
 }
 const SKINS = [['', 'aero'], ['modern', 'modern'], ['line', 'line']]
 const scenarios = []
-for (const want of ['working', 'done', 'failed']) {
+for (const want of ['working', 'done', 'failed', 'agents']) {
   for (const [skin, label] of SKINS) {
     const s = skin ? { skin } : {}
     scenarios.push(

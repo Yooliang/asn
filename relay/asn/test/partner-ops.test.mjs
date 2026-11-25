@@ -175,6 +175,35 @@ test('換班接手的進度：請前任寫交接 → 關閉前任視窗 → 開�
   assert.equal(HANDOVER_GIVE_UP_MS > 10 * 60 * 1000, true)
 })
 
+test('換班接手等子代理（#1908）：寫「等 N 個子代理做完」；拿不到件數寫「等它把手上的工作做完」；等待期間不被當成逾時', () => {
+  const t0 = 1_000_000
+  const at = (detail, now = t0 + 1000) => progressView({ status: 'taken', detail }, { op: 'handover', sentAt: t0, now })
+  assert.equal(at('stage:agents:3').text, '等 3 個子代理做完…（第 1／3 步）')
+  assert.equal(at('stage:agents:1').text, '等 1 個子代理做完…（第 1／3 步）')
+  assert.equal(at('stage:agents').text, '等它把手上的工作做完…（第 1／3 步）', '沒帶件數不猜數字')
+  assert.equal(at('stage:agents:0').text, '等它把手上的工作做完…（第 1／3 步）', '件數 0 不是「等 0 個」')
+  assert.deepEqual(Object.keys(at('stage:agents:3')).sort(), ['done', 'phase', 'text'], '只有一行字、沒有按鈕')
+  // 電腦端最多等 3 小時；畫面的放棄上限要比它長，不能先自己宣告失敗
+  assert.equal(at('stage:agents:3', t0 + 2 * 60 * 60 * 1000).done, false, '等 2 小時還在等')
+  assert.equal(HANDOVER_GIVE_UP_MS > 3 * 60 * 60 * 1000, true)
+})
+
+test('換班接手等子代理（#1908）：寫出已經等了多久；超過 15 分鐘同一行加「按關閉視窗放行」的提示，只放文字', () => {
+  const t0 = 1_000_000
+  const min = m => m * 60 * 1000
+  const at = (detail, m) => progressView({ status: 'taken', detail }, { op: 'handover', sentAt: t0, now: t0 + min(m) })
+  assert.equal(at('stage:agents:2', 0.5).text, '等 2 個子代理做完…（第 1／3 步）', '不到 1 分鐘不寫已等多久')
+  assert.equal(at('stage:agents:2', 2).text, '等 2 個子代理做完…（第 1／3 步，已等 2 分鐘）')
+  assert.equal(at('stage:agents:2', 14.9).text, '等 2 個子代理做完…（第 1／3 步，已等 14 分鐘）', '14 分多還沒到提示門檻')
+  assert.equal(at('stage:agents:2', 25).text, '等 2 個子代理做完…（第 1／3 步，已等 25 分鐘）；可以到工作管理員按『關閉視窗』放行')
+  assert.equal(at('stage:agents', 25).text, '等它把手上的工作做完…（第 1／3 步，已等 25 分鐘）；可以到工作管理員按『關閉視窗』放行')
+  assert.equal(at('stage:agents:1', 65).text, '等 1 個子代理做完…（第 1／3 步，已等 1 小時 5 分鐘）；可以到工作管理員按『關閉視窗』放行')
+  assert.equal(at('stage:agents:1', 120).text.includes('已等 2 小時）'), true)
+  assert.deepEqual(Object.keys(at('stage:agents:2', 25)).sort(), ['done', 'phase', 'text'], '只有一行字、沒有按鈕')
+  // 寫交接中（還沒進等子代理）不加已等多久
+  assert.equal(at('stage:handoff', 25).text, '請前任寫交接中…（第 1／3 步）')
+})
+
 test('錯誤翻成中文：後台代碼、沒登入、斷線、舊後台；看不懂的給通用句，不洩漏英文', () => {
   assert.match(opErrorText('partner_op HTTP 409 busy'), /進行中/)
   assert.match(opErrorText('partner_op HTTP 403 protected'), /ASN 通知/)

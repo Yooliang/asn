@@ -122,7 +122,7 @@ fn read_status(status: &Path, sid: &str, now_ms: u64) -> Option<Value> {
 }
 
 /// `sessions`＝Claude 的 sessions 資料夾；`status`＝~/.asn/status
-pub(super) fn query_with(sessions: &Path, status: &Path, name: &str, is_alive: impl Fn(u32) -> bool, now_ms: u64) -> Value {
+pub(crate) fn query_with(sessions: &Path, status: &Path, name: &str, is_alive: impl Fn(u32) -> bool, now_ms: u64) -> Value {
     if name.is_empty() {
         return json!({ "ok": false, "reason": "缺少名字" });
     }

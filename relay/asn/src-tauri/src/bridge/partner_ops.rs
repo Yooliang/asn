@@ -36,6 +36,8 @@ pub(crate) const DETAIL_MAX: usize = 500;
 pub(crate) const RESULT_MAX_BYTES: usize = 4096;
 pub(crate) const CONSENT_OFF: &str = super::launcher::TERM_NO_CONSENT; // 與 asn終端的閘門共用同一句
 pub(crate) const HANDOFF_SUBDIR: &str = "交接";
+/// 換班接手等前任寫完交接的上限（#1908）。畫面端的放棄上限（ui/lib/partner-ops.mjs 的 HANDOVER_GIVE_UP_MS）必須比它長
+pub(crate) const HANDOFF_WAIT_MS: u64 = 3 * 60 * 60 * 1000;
 /// ACP 工作者（收發室自己跑的背景工作者）只支援詳情、重開、換班接手；其他操作與 Claude 以外的夥伴一律回這句
 pub(crate) const UNSUPPORTED: &str = "這類夥伴不支援這個操作";
 const PROTECTED: &str = "ASN 通知與 ASN 自己的視窗不能操作";
@@ -45,9 +47,9 @@ const CHAIN_MAX: usize = 12;
 /// 等外掛回報時，狀態檔一直讀到「寫到一半」多久以內不算外掛沒了（#472）
 const TORN_READ_GRACE_MS: u64 = 2_000;
 
-/// 請前任寫交接的信
+/// 請前任寫交接的信：第一行固定（位置與回覆語），之後是先等子代理、排程寫進交接的要求（#1908）
 pub(crate) fn ask_handoff_text(path: &Path) -> String {
-    format!("要換手了：請把交接寫到 {}，寫完回覆『交接完成』。", path.display())
+    format!("要換手了：請把交接寫到 {}，寫完回覆『交接完成』。\n{}", path.display(), handoff_wait::HANDOFF_ASK_RULES)
 }
 
 /// 換班接手的第一句話：先讀前任最後一段對話紀錄（從最後往前看）和交接檔；沒寫完交接就明說；使用者補了話換行附上「前任交代：…」
@@ -59,6 +61,7 @@ pub(crate) fn handover_prompt(name: &str, note: &str, transcript: Option<&Path>,
     if !complete {
         s.push_str("\n注意：前任沒有寫完交接，上面的交接檔可能不存在或不完整，請以對話紀錄為主。");
     }
+    s.push_str("\n交接檔裡若列有只存在前任視窗裡的排程（CronCreate 這類），第一件事先把它們排回去，再做別的。");
     let note = note.trim();
     if !note.is_empty() {
         s.push_str("\n前任交代：");
@@ -121,6 +124,16 @@ pub(crate) trait OpsEnv: Send + Sync {
     /// 等前任寫完交接檔的最長時間與輪詢間隔
     fn handoff_wait_ms(&self) -> u64;
     fn handoff_poll_ms(&self) -> u64;
+    /// 單調時鐘（毫秒，只能拿來算經過多久）：等交接的逾時與通知間隔都用它，測試換成假時鐘、不真的睡
+    fn mono_ms(&self) -> u64 {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+    }
+    /// 等前任太久：通知擁有者（後台 waiting_notice，kind=handoff_wait）。`agents`＝還在跑的子代理件數（不知道就 None）、`minutes`＝已等分鐘。
+    /// 回 Ok(說明) 或 Err(原因)，都只寫 log；舊後台不認得（400／404）算 Ok
+    fn handoff_wait_notice(&self, _window: &str, _agents: Option<usize>, _minutes: u64) -> Result<String, String> {
+        Ok(String::new())
+    }
     /// pi 視窗的登記檔與控制檔所在的使用者家目錄（測試換成暫存資料夾）
     fn pi_home(&self) -> PathBuf {
         crate::identity::home_dir()
@@ -208,10 +221,21 @@ impl OpsEnv for SystemOpsEnv {
         let _ = crate::rt::block_on(self.relay.api("partner_op_progress", Some(json!({ "id": op_id, "detail": detail }))));
     }
     fn handoff_wait_ms(&self) -> u64 {
-        10 * 60 * 1000
+        // #1908：前任手上的子代理可能要跑很久，不設短逾時；3 小時是「真的卡死」的出口，到了也不會自動關舊視窗（只回報失敗）
+        HANDOFF_WAIT_MS
     }
     fn handoff_poll_ms(&self) -> u64 {
         2_000
+    }
+    fn handoff_wait_notice(&self, window: &str, agents: Option<usize>, minutes: u64) -> Result<String, String> {
+        // detail＝已等分鐘、tool＝子代理件數，都只送純數字（後台也只收純數字）
+        let body = json!({ "window": window, "kind": "handoff_wait", "detail": minutes.to_string(), "tool": agents.map(|n| n.to_string()) });
+        match crate::rt::block_on(self.relay.api_status("waiting_notice", body)) {
+            Ok((200, v)) => Ok(format!("notify={}", v.get("notify").and_then(Value::as_str).unwrap_or(""))),
+            Ok((status @ (400 | 404), _)) => Ok(format!("後台回 {status}，舊後台不認得這個種類，只留本機紀錄")),
+            Ok((status, _)) => Err(format!("後台回 {status}")),
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -396,6 +420,8 @@ pub(crate) struct PartnerOps {
     warned: AtomicBool,
     seen: Mutex<HashSet<String>>,
     inflight: Mutex<HashSet<String>>,
+    /// 正在等前任寫交接的視窗（小寫名字）：這時本人按「關閉」要放行，才有「先關掉」的出口（#1908）
+    handing: Mutex<HashSet<String>>,
     /// 從信件來的 /指令：信件編號 → 是否已做完（做完才可以重 ack；做到一半的信再看到不能再執行）
     cmds: Mutex<std::collections::HashMap<String, bool>>,
     /// 收發室管理的 ACP 工作者（沒載入 ACP 引擎＝None）
@@ -425,6 +451,7 @@ impl PartnerOps {
             warned: AtomicBool::new(false),
             seen: Mutex::new(HashSet::new()),
             inflight: Mutex::new(HashSet::new()),
+            handing: Mutex::new(HashSet::new()),
             cmds: Mutex::new(std::collections::HashMap::new()),
             acp: Mutex::new(None),
             grok_home: Mutex::new(None),
@@ -888,14 +915,19 @@ impl PartnerOps {
         tokio::spawn(async move {
             // 同一個視窗同時只處理一個操作
             let key = op.name.to_lowercase();
-            if !me.inflight.lock().unwrap().insert(key.clone()) {
+            let first = me.inflight.lock().unwrap().insert(key.clone());
+            // 換班正在等前任寫交接時，本人按「關閉」放行（卡死的出口，#1908）；其他操作照舊一次一件
+            let may_close_now = !first && me.close_allowed_during_handoff(&op.op, &key);
+            if !first && !may_close_now {
                 let r = failed("這個視窗正在處理上一個操作，請稍後再試");
                 me.finish(&op, r).await;
                 return;
             }
             let (m2, o2) = (me.clone(), op.clone());
             let r = tokio::task::spawn_blocking(move || m2.execute(&o2)).await.unwrap_or_else(|e| failed(format!("背景工作失敗：{e}")));
-            me.inflight.lock().unwrap().remove(&key);
+            if first {
+                me.inflight.lock().unwrap().remove(&key);
+            }
             me.finish(&op, r).await;
         });
     }
@@ -1693,22 +1725,22 @@ impl PartnerOps {
         }
         let transcript = find_transcript(&self.dirs.projects, &t.session_id).map(|(p, _)| p);
         // 1. 請前任寫交接，等檔案出現且大小穩定
+        // #1908：交接檔寫完之前不關舊視窗。請求送不進去、等不到、等的時候視窗被關了，都直接回報失敗，舊視窗原樣留著
         self.stage(op, "handoff");
-        let mut complete = false;
-        match self.env.tell(&t.name, &ask_handoff_text(&path)) {
-            Ok(()) => {
-                let mut last: Option<u64> = None;
-                complete = switch::wait_until(self.env.os(), self.env.handoff_wait_ms(), self.env.handoff_poll_ms(), || match std::fs::metadata(&path) {
-                    Ok(m) if m.is_file() && m.len() > 0 => {
-                        let same = last == Some(m.len());
-                        last = Some(m.len());
-                        same
-                    }
-                    _ => false,
-                });
-            }
-            Err(e) => self.log.line(&format!("partner_op handover: cannot ask {} to write handoff: {}", clean(&t.name, 40), clean(&e, 120))),
+        let _handing = handoff_wait::HandingGuard::new(&self.handing, &t.name);
+        if let Err(e) = self.env.tell(&t.name, &ask_handoff_text(&path)) {
+            self.log.line(&format!("partner_op handover: cannot ask {} to write handoff: {}", clean(&t.name, 40), clean(&e, 120)));
+            return failed(handoff_wait::fail_text("沒能請它寫交接（訊息送不進那個視窗）"));
         }
+        match self.wait_for_handoff(op, &t, &path) {
+            handoff_wait::HandoffWait::Written => {}
+            handoff_wait::HandoffWait::WindowGone => return failed(format!("舊視窗在等交接的時候被關掉了，{}", handoff_wait::FAIL_NEXT_GONE)),
+            handoff_wait::HandoffWait::TimedOut => {
+                self.log.line(&format!("partner_op handover: {} did not finish the handoff in time, old window left open (path {})", clean(&t.name, 40), path.display()));
+                return failed(handoff_wait::fail_text("等了很久（最長 3 小時），交接還沒寫完"));
+            }
+        }
+        let complete = true;
         // 2. 等待期間視窗可能已經變了：重新確認還是同一個
         let t2 = match self.find_target(&t.name) {
             Ok(x) if x.pid == t.pid && x.session_id == t.session_id => x,
@@ -1845,6 +1877,7 @@ fn first_cwd(path: &Path) -> Option<String> {
 
 mod compact;
 mod dup;
+mod handoff_wait;
 
 #[cfg(test)]
 mod tests;
