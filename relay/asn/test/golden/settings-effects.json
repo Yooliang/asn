@@ -1275,30 +1275,7 @@
    "label": "LINE 風格",
    "nth": 1,
    "input": "點選",
-   "calls": [
-    {
-     "cmd": "snap_max_set",
-     "args": {
-      "dpr": 1,
-      "h": 36,
-      "w": 46,
-      "x": 807,
-      "y": 13
-     },
-     "err": "command snap_max_set not found"
-    },
-    {
-     "cmd": "snap_max_set",
-     "args": {
-      "dpr": 1,
-      "h": 36,
-      "w": 46,
-      "x": 807,
-      "y": 13
-     },
-     "err": "command snap_max_set not found"
-    }
-   ],
+   "calls": [],
    "prefs": [
     {
      "from": null,
@@ -1339,30 +1316,7 @@
    "label": "現代",
    "nth": 1,
    "input": "點選",
-   "calls": [
-    {
-     "cmd": "snap_max_set",
-     "args": {
-      "dpr": 1,
-      "h": 36,
-      "w": 46,
-      "x": 807,
-      "y": 13
-     },
-     "err": "command snap_max_set not found"
-    },
-    {
-     "cmd": "snap_max_set",
-     "args": {
-      "dpr": 1,
-      "h": 36,
-      "w": 46,
-      "x": 807,
-      "y": 13
-     },
-     "err": "command snap_max_set not found"
-    }
-   ],
+   "calls": [],
    "prefs": [
     {
      "from": null,

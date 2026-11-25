@@ -213,7 +213,9 @@ export const baselineMe = (initialMe, baseCalls) => {
 }
 // 背景底噪：不操作也會一直呼叫的指令（輪詢）。同一個「指令＋參數」，前「底噪次數＋1」次不算這次操作的效果（容許計時誤差 1 次），超出的才留下
 // 固定的底噪：名單視窗自己輪詢（local_windows、term_list）與寫畫面記錄（ui_log）；次數看計時與有幾個指令被假後台拒絕，每次不同，跟使用者的操作無關
-export const NOISE_CMDS = ['local_windows', 'term_list', 'ui_log']
+// snap_max_set／snap_max_clear：自畫放大鈕把自己的位置回報給 Rust（#1788），換外觀時跟著版面重量，是版面幾何、不是設定的效果；
+// 有沒有這兩個指令只看放大鈕存不存在，放進來免得 #1788 進出 main 時 golden 跟著變
+export const NOISE_CMDS = ['local_windows', 'term_list', 'ui_log', 'snap_max_set', 'snap_max_clear']
 export const dropNoise = (calls0, baseCalls) => {
   const calls = calls0.filter(c => !NOISE_CMDS.includes(c.cmd))
   const key = c => c.cmd + '|' + JSON.stringify(c.args)
