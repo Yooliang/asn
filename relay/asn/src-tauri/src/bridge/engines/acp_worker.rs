@@ -2,7 +2,7 @@
 //! 對應 engines/acp-worker.mjs。不知道仲介與橋，只透過事件通道（已轉交／失敗／回覆）與 Notifier（寄授權詢問／登入通知）跟外面講話。
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
-use super::acp_policy::{category_label, decide, inside_agy_scratch, is_network_error, redact, upstream_5xx, Req, Verdict, WorkerError};
+use super::acp_policy::{category_label, decide, inside_agy_scratch, is_network_error, redact, upstream_5xx, Permissions, Req, Verdict, WorkerError};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -272,6 +272,9 @@ struct St {
     auth_retry_at: u64,
     /// 已經做過「等 10 秒自動再試一次」的信編號（上限幾十筆）。核心延遲補送同一則時不再內部重試，免得一次補送實際送出兩次（#1670）
     net_retried: HashSet<String>,
+    /// 重開／換班接手時依目前開關重算出的權限（只有「開新夥伴」開出的 Gemini 會有）；有值就蓋過設定裡的 permissions
+    perms: Option<Permissions>,
+    perm_source: Option<PermSource>,
 }
 
 pub struct WorkerInit {
@@ -289,6 +292,10 @@ pub struct WorkerInit {
     /// 機器工作資料夾：「這封開始處理了」的記號放這裡（channel_turns，#828）
     pub work_dir: std::path::PathBuf,
 }
+
+/// 依目前設定重算權限的來源：只有「開新夥伴」開出的 Gemini 有（add_partner 設、改名時沿用）；重開、換班接手時呼叫。
+/// 沒有（agents.json 手寫的、Grok、接手的）＝權限永遠照 cfg
+pub type PermSource = Arc<dyn Fn() -> Permissions + Send + Sync>;
 
 pub struct Worker {
     i: WorkerInit,
@@ -322,6 +329,8 @@ impl Worker {
                 model: i.cfg.model.clone(),
                 auth_retry_at: 0,
                 net_retried: HashSet::new(),
+                perms: None,
+                perm_source: None,
             }),
             i,
             start_lock: tokio::sync::Mutex::new(()),
@@ -333,11 +342,15 @@ impl Worker {
     }
     /// 啟動驅動用的設定：模型換成目前實際要用的（切換過模型就是新的）
     fn cfg_now(&self) -> Arc<WorkerCfg> {
-        let model = self.st.lock().unwrap().model.clone();
-        if model == self.i.cfg.model {
+        let (model, perms) = {
+            let s = self.st.lock().unwrap();
+            (s.model.clone(), s.perms.clone())
+        };
+        if model == self.i.cfg.model && perms.is_none() {
             return self.i.cfg.clone();
         }
-        Arc::new(WorkerCfg { model, ..(*self.i.cfg).clone() })
+        let base = (*self.i.cfg).clone();
+        Arc::new(WorkerCfg { model, permissions: perms.unwrap_or_else(|| base.permissions.clone()), ..base })
     }
     /// 實際生效的模型：有指定就是它；沒指定時用 agent 自己說的目前模型（還不知道回空字串）
     pub fn effective_model(&self) -> String {
@@ -450,7 +463,8 @@ impl Worker {
 
     // ---- 驅動 ----
     fn base_full(&self) -> bool {
-        self.i.cfg.protocol == "agy-stream" && self.i.cfg.permissions.rule("execute") == Verdict::Allow
+        let cfg = self.cfg_now();
+        cfg.protocol == "agy-stream" && cfg.permissions.rule("execute") == Verdict::Allow
     }
 
     async fn ensure_driver(self: &Arc<Self>, full_access: bool) -> Result<Arc<dyn Driver>, WorkerError> {
@@ -642,7 +656,7 @@ impl Worker {
     }
 
     async fn run_turn(self: &Arc<Self>, job: &Job) -> Result<TurnResult, WorkerError> {
-        let cfg = self.i.cfg.clone();
+        let cfg = self.cfg_now();
         self.st.lock().unwrap().turn_grant.clear();
         let mut d = self.ensure_driver(self.base_full()).await?;
         let first = {
@@ -985,7 +999,7 @@ impl Guard for WorkerGuard {
         let me = self.0.clone();
         Box::pin(async move {
             let job = me.st.lock().unwrap().running_job.clone();
-            let (mut verdict, reason) = decide(&me.i.cfg.permissions, &info, &me.i.cfg.cwd);
+            let (mut verdict, reason) = decide(&me.cfg_now().permissions, &info, &me.i.cfg.cwd);
             if verdict == Verdict::Ask && me.st.lock().unwrap().turn_grant.contains(&info.category) {
                 verdict = Verdict::Allow;
             }
@@ -1002,7 +1016,7 @@ impl Guard for WorkerGuard {
         if c == "internal" || c == "read" {
             return Ok(());
         }
-        let cfg = &me.i.cfg;
+        let cfg = &me.cfg_now();
         if c == "execute" {
             // 指令不問就會被 agy 自己拒絕（實測）；若有指令真的執行成功了而政策不是 allow，那是 agy 行為變了 → 中止
             let granted = cfg.permissions.rule("execute") == Verdict::Allow || me.st.lock().unwrap().turn_grant.contains("execute") || full_access;
