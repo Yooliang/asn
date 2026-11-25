@@ -1,6 +1,6 @@
 // 夥伴卡在要人處理的框上太久（todo-next-162）：驗證收發室送來的內容。
 // 節點一律取自金鑰；這裡只收視窗名、種類、選擇框的問題和選項。
-const KINDS = new Set(["permission", "input", "other", "login", "forward_stuck", "forward_stuck_manual", "stuck_prompt"]);
+const KINDS = new Set(["permission", "input", "other", "login", "forward_stuck", "forward_stuck_manual", "stuck_prompt", "handoff_wait"]);
 // 收發室轉交連續被擋（#2146 ③）：detail 只收固定的原因代號、tool 只收次數（1～2 位數字），不收任何自由文字
 const STUCK_REASONS = new Set(["frame", "no_id", "missing_fields", "recipient_conflict", "wrong_to", "head_mismatch", "not_in_flight", "record_unreadable"]);
 const WINDOW_MAX = 60;
@@ -25,6 +25,12 @@ export function parseWaitingNotice(body: unknown): WaitingNotice | null {
     const reason = typeof b.detail === "string" && STUCK_REASONS.has(b.detail) ? b.detail : null;
     const count = typeof b.tool === "string" && /^[0-9]{1,2}$/.test(b.tool) ? b.tool : null;
     return { window, kind: b.kind, detail: reason, tool: count };
+  }
+  // 換班接手等前任的子代理太久（#1908）：detail＝已等分鐘（1～4 位數字）、tool＝子代理件數（1～3 位數字），都只收純數字
+  if (b.kind === "handoff_wait") {
+    const minutes = typeof b.detail === "string" && /^[0-9]{1,4}$/.test(b.detail) ? b.detail : null;
+    const agents = typeof b.tool === "string" && /^[0-9]{1,3}$/.test(b.tool) ? b.tool : null;
+    return { window, kind: b.kind, detail: minutes, tool: agents };
   }
   // 卡在確認框超過 5 分鐘（#2256）：電腦端擷取的那一段畫面，換行留著、其他控制字元換成空白，最多 600 字；工具名不收
   if (b.kind === "stuck_prompt") {

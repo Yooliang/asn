@@ -220,5 +220,49 @@ test('實跑（pglite）：查進度——要簽章、只回自己租戶、逾�
   await db.close?.()
 })
 
+// #1908：換班等前任的子代理時，階段代號可以帶件數（stage:agents:3）；套上新 migration 後新名字 asn_relay_partner_op_progress 照收
+const sql1908 = fs.readFileSync(new URL('../supabase/migrations/20261125400000_partner_op_progress_agents_count.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+
+test('靜態（#1908）：階段代號可帶 1～3 位件數，權限照舊只給 service_role', () => {
+  assert.match(sql1908, /\^stage:\[a-z\]\{1,20\}\(:\[0-9\]\{1,3\}\)\?\$/)
+  assert.match(sql1908, /security definer\nset search_path to ''/)
+  assert.match(sql1908, /revoke all on function public\.asn_relay_partner_op_progress\(text, uuid, text\) from public, anon, authenticated;/)
+  assert.match(sql1908, /grant execute on function public\.asn_relay_partner_op_progress\(text, uuid, text\) to service_role;/)
+})
+
+test('實跑（pglite，#1908）：stage:agents:N 收下，其他帶數字的怪格式照擋', { skip }, async () => {
+  const { db, op, one, q } = await boot()
+  await db.exec(sql1908)
+  const a = await op({ op: 'handover' })
+  await one(`select public.irori_relay_partner_op_pending('H') r`)
+  const prog = (node, id, d) => one('select public.asn_relay_partner_op_progress($1,$2,$3) r', [node, id, d]).then(x => x.r)
+  assert.equal((await prog('H', a.id, 'stage:agents:3')).ok, true)
+  assert.deepEqual((await q('select detail from relay.partner_ops where id = $1', [a.id]))[0], { detail: 'stage:agents:3' })
+  for (const bad of ['stage:agents:', 'stage:agents:1234', 'stage:agents:-1', 'stage:agents:3:4', 'stage:3', 'stage:agents:3x']) {
+    assert.equal((await prog('H', a.id, bad)).error, 'bad_request', bad)
+  }
+  assert.equal((await prog('C', a.id, 'stage:agents:1')).error, 'not_found', '別台不能改')
+  assert.equal((await prog('H', a.id, 'stage:handoff')).ok, true, '不帶件數的舊格式照收')
+})
+
+// 回復檔（#1908）：階段代號又只收不帶件數的格式，已有的舊格式不受影響
+const down1908 = fs.readFileSync(new URL('../supabase/sql/rollback/20261125400000_partner_op_progress_agents_count_down.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+
+test('靜態＋實跑（#1908 回復檔）：套用回復檔後 stage:agents:N 被擋、stage:handoff 照收；權限照舊只給 service_role', { skip }, async () => {
+  assert.match(down1908, /\^stage:\[a-z\]\{1,20\}\$/)
+  assert.doesNotMatch(down1908, /\(:\[0-9\]/)
+  assert.match(down1908, /revoke all on function public\.asn_relay_partner_op_progress\(text, uuid, text\) from public, anon, authenticated;/)
+  assert.match(down1908, /grant execute on function public\.asn_relay_partner_op_progress\(text, uuid, text\) to service_role;/)
+  const { db, op, one } = await boot()
+  await db.exec(sql1908)
+  await db.exec(down1908)
+  const a = await op({ op: 'handover' })
+  await one(`select public.irori_relay_partner_op_pending('H') r`)
+  const prog = (d) => one('select public.asn_relay_partner_op_progress($1,$2,$3) r', ['H', a.id, d]).then(x => x.r)
+  assert.equal((await prog('stage:agents:3')).error, 'bad_request', '回復後不收帶件數的')
+  assert.equal((await prog('stage:agents')).ok, true)
+  assert.equal((await prog('stage:handoff')).ok, true)
+})
+
 // 全部測試都登記完才掛收尾（檔案前面若有 top-level await，太早掛會在測試開跑前就執行）
 closeAtEnd()
