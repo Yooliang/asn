@@ -56,8 +56,10 @@ test('接線守門：小窗頁聽兩種事件、先要快照、取消走既有�
   const js = read('ui/setup-progress.js'), html = read('ui/setup-progress.html')
   assert.match(js, /setupProgressApi\.snapshot\(\)/)
   assert.match(read('ui/lib/tauri.mjs'), /invoke\('setup_progress_snapshot'\)/)   // 指令名在出口
-  assert.match(js, /listen\('agent-setup', apply\)/)
-  assert.match(js, /listen\('agent-setup-remote', apply\)/)
+  assert.match(js, /hub\.on\('agent-setup', apply\)/)
+  assert.match(js, /hub\.on\('agent-setup-remote', apply\)/)
+  assert.match(js, /createWindowHub\(\)/, '小窗沒有 AsnCore，用輕量事件中心（#2038）')
+  assert.doesNotMatch(js, /\blisten\(/, '畫面檔不再直接 listen（#2038）')
   assert.match(js, /setupProgressApi\.cancel\(\)/)
   assert.match(read('ui/lib/tauri.mjs'), /invoke\('agent_setup_cancel'\)/)
   assert.match(html, /@click="cancel"/)

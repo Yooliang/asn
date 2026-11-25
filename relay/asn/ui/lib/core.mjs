@@ -3,6 +3,7 @@
 //   transport: { list(), inbox(), ack(ids), send(payload), avatar?(node), partnerAvatar?(partnerId), setAvatar?(dataUrl|null), sendAttachment?(payload), history?(node, agent, partnerId) }
 //   store:     { load() → 物件|null, save(物件) }
 //   isChatVisible(id) → Promise<boolean>：該好友的對話視窗是否開著且沒最小化
+import { createEventHub } from './event-hub.mjs'
 import { PARTNER_ID_RE, isAvatarDataUrl, partnerAvatarKey } from './avatar.mjs'
 import { renamedInfo } from './rename.mjs'
 import { asnByNode } from './presence.mjs'
@@ -83,7 +84,7 @@ export class AsnCore {
   #lastStatusAt = null   // 上次寄出狀態查詢完成的時間（this.now()）
   #polledAt = new Map()  // 訊息 id → 上次被查的時間（年齡分級用）
   #onVisible = null
-  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, isActive = () => typeof document === 'undefined' || document.visibilityState !== 'hidden', now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], backlogAfterMs = 0, stepMs = STEP_MS }) {
+  constructor({ transport, store, selfNode, windowName, isChatVisible = async () => false, isActive = () => typeof document === 'undefined' || document.visibilityState !== 'hidden', now = () => Date.now(), log = () => {}, pollMs = 120_000, rosterMs = 60_000, localMs = 2_000, soonGapMs = 1_000, statusPollMs = STATUS_POLL_MS, aliases = [], backlogAfterMs = 0, stepMs = STEP_MS, hub = null }) {
     // 讀取類的呼叫一律加逾時（寄信、寄檔另有自己的流程，不在這裡限時）。收信（inbox、ack）可能一次要走好幾個名字，給兩倍時間
     const guarded = { ...transport }
     for (const k of ['list', 'inbox', 'ack', 'sentStatus', 'avatar', 'partnerAvatar', 'history', 'readSync']) {
@@ -107,7 +108,7 @@ export class AsnCore {
     this.itemFails = new Map() // 信件 id → 處理失敗次數
     this.rosterLoaded = false
     this.contextWatch = createContextWatch()   // 上下文升破 90％的提醒記錄（只在記憶體）
-    this.handlers = {}
+    this.hub = hub ?? createEventHub({ log: m => this.log(m) })   // 訂閱與扇出都委派給事件中心（#2038）；Rust 事件的橋由 tauri.mjs 的 bindRustEvents 接上
     this.timers = []
     this.pulling = false
     this.again = false
@@ -127,8 +128,9 @@ export class AsnCore {
     this.olderExtra = new Map()    // 好友 id → 往上載入而多顯示的列數（畫面顯示 = 最近 VIEW_BASE + 這個數字）
   }
 
-  on(evt, fn) { (this.handlers[evt] ??= []).push(fn); return this }
-  emit(evt, arg) { for (const fn of this.handlers[evt] ?? []) { try { fn(arg) } catch (e) { this.log(`handler ${evt}: ${e.message}`) } } }
+  on(evt, fn) { this.hub.subscribe(evt, fn); return this }
+  emit(evt, arg) { this.hub.emit(evt, arg) }
+  ready() { return this.hub.ready() }   // 已訂閱的 Rust 事件都註冊完（取代以前的 await listen(...)）
 
   // ---------- 啟動／停止 ----------
   async start() {
