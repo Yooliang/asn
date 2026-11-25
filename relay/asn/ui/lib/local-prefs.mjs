@@ -2,7 +2,7 @@
 // localStorage 只放「每台電腦各自的小偏好」（例如這台用哪套外觀、這台關掉了哪張引導卡）；
 // 要跨裝置同步、要可靠保存的設定，一律走共用設定層（lib/tauri.mjs 的 store／settings_patch），不要放這裡。
 // 存不進去（私密模式、被擋）就當沒存，讀不到就回 null，絕不丟錯出去；
-// 但傳進來的鍵不在清單裡是程式寫錯，會立刻丟錯。新增鍵必須同時改這份清單與 test/local-storage-guard.test.mjs 的那一份，兩邊不同守門就紅。
+// 但傳進來的鍵不在清單裡是程式寫錯，會立刻丟錯。這份是唯一來源（測試不再抄第二份）；新增鍵必須同時在 docs/設定值清單.md 登記 file.local.<鍵>，沒登記守門（test/settings-list.test.mjs）就紅。
 // storage 參數只給測試與既有函式注入假的存放區用；不給就用 globalThis.localStorage。
 export const LOCAL_KEYS = ['asnSkin', 'asnCloudNodes', 'asnNewComputerGuideHidden', 'asnUpdateTestUrl']
 
