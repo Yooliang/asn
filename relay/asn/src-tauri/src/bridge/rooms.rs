@@ -266,7 +266,7 @@ impl HeldStore {
             .iter()
             .map(|h| serde_json::json!({ "room_id": h.room_id, "room_name": h.room_name, "member": h.member, "seq": h.seq, "due": h.due, "delay_ms": h.delay_ms, "wake": { "rank": h.wake.rank, "total": h.wake.total, "before": h.wake.before }, "fails": h.fails, "held_at": h.held_at }))
             .collect();
-        crate::write_atomic(&self.file, &serde_json::to_string(&arr).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+        crate::settings::atomic::write(&self.file, serde_json::to_string(&arr).map_err(|e| e.to_string())?.as_bytes(), crate::settings::atomic::STATE).map_err(|e| e.to_string())
     }
     /// 加入並存檔；存檔失敗回錯誤（呼叫端不可前進游標）
     pub fn add(&mut self, h: Held) -> Result<(), String> {
@@ -318,7 +318,7 @@ impl Cursors {
     pub fn set(&mut self, key: &str, v: u64) -> Result<(), String> {
         self.map.insert(key.to_string(), v);
         let text = serde_json::to_string(&self.map).map_err(|e| e.to_string())?;
-        crate::write_atomic(&self.file, &text).map_err(|e| e.to_string())
+        crate::settings::atomic::write(&self.file, text.as_bytes(), crate::settings::atomic::STATE).map_err(|e| e.to_string())
     }
     #[cfg(test)]
     pub fn all(&self) -> &BTreeMap<String, u64> {

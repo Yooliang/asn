@@ -66,7 +66,7 @@ pub fn save(work_dir: &Path, email: &str, windows: &[Value], now_ms: i64) -> Res
     }
     let w: Vec<&Value> = windows.iter().take(MAX_WINDOWS).collect();
     let text = json!({ "email": email, "windows": w, "at": iso_secs(now_ms) }).to_string();
-    crate::write_atomic(&path(work_dir), &text).map_err(|e| e.to_string())
+    crate::settings::atomic::write(&path(work_dir), text.as_bytes(), crate::settings::atomic::STATE).map_err(|e| e.to_string())
 }
 
 fn clean_window(w: &Value, now_ms: i64) -> Option<Value> {

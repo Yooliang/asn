@@ -390,7 +390,7 @@ pub fn note_user_quit(work_dir: &Path) {
     if work_dir.as_os_str().is_empty() {
         return;
     }
-    let _ = crate::write_atomic(&work_dir.join(QUIT_MARK), "1");
+    let _ = crate::settings::atomic::write(&work_dir.join(QUIT_MARK), b"1", crate::settings::atomic::STATE);
 }
 
 /// 畫面讀結果。沒有檔案或壞了回 null
@@ -510,7 +510,7 @@ impl Deps for RealDeps {
     }
     fn report(&self, status: &Status) {
         if let Ok(text) = serde_json::to_string(status) {
-            let _ = crate::write_atomic(&self.data_dir.join(STATUS_FILE), &text);
+            let _ = crate::settings::atomic::write(&self.data_dir.join(STATUS_FILE), text.as_bytes(), crate::settings::atomic::STATE);
         }
     }
 }

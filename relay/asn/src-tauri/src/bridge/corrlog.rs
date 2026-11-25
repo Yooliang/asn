@@ -362,7 +362,7 @@ impl CorrLog {
             let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
             let Ok(merged) = self.rotate(pid, text, ms) else { return };
             let out = format!("{}\n\n{}", header_line(pid, name), merged);
-            if crate::write_atomic(&target, &out).is_err() {
+            if crate::settings::atomic::write(&target, out.as_bytes(), crate::settings::atomic::STATE).is_err() {
                 return;
             }
             for (_, p) in &srcs {
@@ -399,7 +399,7 @@ impl CorrLog {
             Some(h) => format!("{h}\n\n{text}"),
             None => text,
         };
-        crate::write_atomic(&file, &text).map_err(|e| format!("存不了往來記錄 {}：{e}", file.display()))
+        crate::settings::atomic::write(&file, text.as_bytes(), crate::settings::atomic::STATE).map_err(|e| format!("存不了往來記錄 {}：{e}", file.display()))
     }
 
     /// 超過 1 MB 或 200 筆：舊的整段先寫進 archive，活檔只留最近的
@@ -422,7 +422,7 @@ impl CorrLog {
         // 同一秒內再次輪替就接在同一個封存檔後面（不另開檔）
         let arch = self.dir.join("archive").join(format!("{}-{}.md", safe_name(stem), stamp_compact(now_ms)));
         let old = format!("{}{old}", read_existing(&arch)?);
-        crate::write_atomic(&arch, &old).map_err(|e| format!("存不了往來記錄封存 {}：{e}", arch.display()))?;
+        crate::settings::atomic::write(&arch, old.as_bytes(), crate::settings::atomic::STATE).map_err(|e| format!("存不了往來記錄封存 {}：{e}", arch.display()))?;
         Ok(live)
     }
 }
