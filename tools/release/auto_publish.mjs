@@ -264,7 +264,7 @@ function makePost(opts, deps, alerts, getRef = () => null) {
     try { r = deps.asnCli(['send', '--room', opts.room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
     if (r.status !== 0) {
       deps.log(`貼群組失敗：${asnCliFail(r)}`)
-      if (!noAlert) alerts.raise('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
+      if (!noAlert) alerts.raiseAppend('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
     } else if (!noAlert) alerts.resolve('post-failed')
   }
 }

@@ -1050,3 +1050,17 @@ test('#2345 同一版電腦版與 Linux 都沒貼成：兩則原文都在同一�
   assert.equal(res.code, 0)
   assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
 })
+
+test('#2345 先留下電腦版補貼原文，之後別的回報貼群組也失敗：兩段原文都在、仍是 active（makePost 不蓋掉）', async () => {
+  const e = env({ desktopRows: [row('v0.2.99', 222)], linuxRows: [row('linux-v0.2.99', 333)] })
+  await publishWithPostFailed(e)
+  assert.ok(alertOf(e).alerts['post-failed'].message.includes('【發版完成】v0.2.99'))
+  e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' }) // Linux 演練失敗 → 失敗回報
+  postFails(e) // 回報也貼不出去
+  e.clock.t = T0 + 120_000
+  await runOnce(opts, e.deps)
+  const a = alertOf(e).alerts['post-failed']
+  assert.equal(a.status, 'active')
+  assert.ok(a.message.includes('【發版完成】v0.2.99'), '電腦版要補貼的原文還在')
+  assert.ok(a.message.includes('linux@0.2.99'), 'Linux 失敗回報原文也在')
+})
