@@ -118,6 +118,10 @@ pub trait Runner {
     fn alive(&self, _pid: u32) -> bool {
         true
     }
+    /// 本機正在跑的 `wezterm-gui` 程序與命令列（#2309 重開 ASN 後認回看畫面的 GUI）。預設沒有
+    fn gui_procs(&self) -> Vec<(u32, Vec<String>)> {
+        Vec::new()
+    }
     fn sleep(&self, d: Duration);
     /// 這個平台查得到「看畫面的 GUI 的視窗出現了沒」。查不到（Linux：X11／Wayland 沒有可靠的方法）就不等視窗，
     /// 活過最短時間就算開好了。預設＝查得到（測試的假 runner 照舊）
@@ -253,6 +257,10 @@ impl Runner for RealRunner {
 
     fn alive(&self, pid: u32) -> bool {
         crate::heartbeat::pid_alive(pid)
+    }
+
+    fn gui_procs(&self) -> Vec<(u32, Vec<String>)> {
+        crate::bridge::procscan::cmdlines_of_exe("wezterm-gui")
     }
 
     fn check_process_table(&self, mux: u32) -> Result<(), String> {
