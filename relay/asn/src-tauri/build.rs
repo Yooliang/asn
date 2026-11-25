@@ -19,7 +19,15 @@ fn ensure_wezterm_placeholders() {
     }
 }
 
+include!("build_guard.rs");
+
 fn main() {
+    println!("cargo:rerun-if-env-changed=ASN_SHIPPING_BUILD");
+    println!("cargo:rerun-if-changed=build_guard.rs");
+    let hooks = std::env::var_os("CARGO_FEATURE_TEST_HOOKS").is_some();
+    if let Some(msg) = shipping_with_hooks_error(std::env::var("ASN_SHIPPING_BUILD").ok().as_deref(), hooks) {
+        panic!("{msg}");
+    }
     #[cfg(feature = "gui")]
     {
         ensure_wezterm_placeholders();

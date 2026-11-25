@@ -3508,7 +3508,7 @@ pub fn run() {
     }
     // 端到端測試用：--shot 模式下假裝已登入（只連本機假後端；正式執行沒有這條路）
     if shot.is_some() {
-        if let Some(email) = crate::envc::get("ASN_SHOT_LOGIN") {
+        if let Some(email) = crate::flags::test_var("ASN_SHOT_LOGIN") {
             if !email.trim().is_empty() {
                 auth_state.seed_shot_session(email.trim());
             }
