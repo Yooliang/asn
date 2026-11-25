@@ -32,3 +32,16 @@ test('冒煙：LINE、現代各三種版面 × 1.25／1.5／2 三種縮放都有
   }
   assert.ok(d.some(s => s.probe.dragRegion.skin === 'aero'))
 })
+
+test('小視窗（登入、設定／指引、開機引導）：標題列後面直接接 .pane 的，標題列改回 40px 高的一條可拖；對話視窗走 .mbar', () => {
+  for (const skin of ['line', 'modern']) {
+    const css = read(`ui/${skin}.css`)
+    assert.ok(css.includes(`:root[data-skin="${skin}"] .titlebar:has(+ .pane){position:relative;top:auto;left:auto;right:auto;height:40px;flex:none}`), `${skin} 小視窗標題列`)
+    assert.ok(css.includes(`:root[data-skin="${skin}"] .titlebar:has(+ .pane) .t-btns{height:40px}`))
+  }
+  for (const f of ['login', 'panel', 'onboard']) assert.match(read(`ui/${f}.html`), /<header class="titlebar" data-tauri-drag-region>\s*[\s\S]*?<\/header>\s*<div class="pane /, `${f}.html：標題列後面直接接 .pane`)
+  const d = SCENARIOS.filter(s => s.probe?.dragRegion)
+  for (const skin of ['line', 'modern']) for (const win of ['login', 'panel', 'onboard', 'chat']) for (const dpr of [1.25, 1.5, 2]) {
+    assert.ok(d.some(s => s.name === `drag-${skin}-win-${win}-${String(dpr).replace('.', '_')}`), `${skin} ${win} ${dpr}`)
+  }
+})

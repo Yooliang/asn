@@ -41,6 +41,15 @@ export const dragRegionProbeSource = p => `(async () => {
 
   if (Math.abs(devicePixelRatio - P.dpr) > 0.001) return { ok: false, why: '縮放沒有套上：要 ' + P.dpr + '，實際 ' + devicePixelRatio };
 
+  // 名單以外的視窗外觀從 localStorage 讀（冒煙的假資料只管名單），這裡直接把 <html data-skin> 切過去，跟別的視窗改外觀時的做法一樣（skin-boot.js）
+  if (P.layout === 'small' || P.layout === 'chat') { document.documentElement.setAttribute('data-skin', P.skin); await sleep(600) }
+  // 獨立對話視窗的資料是名單視窗用事件推來的（asn:state）：冒煙沒有名單視窗，這裡自己推一份最小的夥伴與自己
+  if (P.layout === 'chat') {
+    const snap = { friends: [{ id: 'P/demo', nick: 'demo', status: 'online', hue: 205, psm: '', kind: 'claude', node: 'P', online: true }], me: { nick: '測試機', status: 'online', psm: '' }, ui: {}, selfNode: 'P', windowName: '測試機' };
+    for (const fn of ((globalThis.__smokeListeners || {})['asn:state'] || [])) fn({ event: 'asn:state', payload: snap });
+    await sleep(800);
+  }
+
   // ---- Aero：什麼都不能變 ----
   if (P.skin === 'aero') {
     const extra = [...document.querySelectorAll('[data-tauri-drag-region]')].filter(e => !e.classList.contains('titlebar') && e.getAttribute('data-tauri-drag-region') !== 'false');   // false＝明確擋掉，本來就不是拖曳區
@@ -72,7 +81,9 @@ export const dragRegionProbeSource = p => `(async () => {
   const regions = [];
   const want = (label, sel) => { const el = [...document.querySelectorAll(sel)].find(vis); if (!el) throw new Error('找不到' + label + '（' + sel + '）'); regions.push([label, el]) };
   const line = P.skin === 'line';
-  if (P.layout === 'narrowList') want('名單頂端', line ? '.list-pane > .me' : '.list-pane > .top-tabs');
+  if (P.layout === 'small') want('標題列', '.titlebar');   // 登入、設定／指引、開機引導（#2302）
+  else if (P.layout === 'chat') want('對話標題列', '.mbar');   // 獨立的對話視窗 chat.html
+  else if (P.layout === 'narrowList') want('名單頂端', line ? '.list-pane > .me' : '.list-pane > .top-tabs');
   else if (P.layout === 'wide') { want('對話標題列', '.chat-area .mbar'); want('名單頂端', line ? '.list-pane > .me' : '.list-pane > .top-tabs') }
   else { want('對話標題列', '.chat-area .mbar'); if (!line) want('分頁列', '.chat-area .tabbar') }
   for (const [label, el] of regions) {
@@ -124,13 +135,34 @@ const make = (skin, layout, dpr, extra = {}) => ({
   state: skin === 'line' ? LINE_STATE : skin === 'modern' ? MODERN_STATE : AERO_STATE,
   ready: skin === 'line' ? '#app.win .chat-area .compose-main' : '#app.win .actionbar',
   probe: { dragRegion: { skin, layout, dpr, ...extra } },
-  ...(extra.paint ? { shot: `drag-${skin}-${layout}.png` } : {}),
+  ...(extra.paint && process.env.ASN_DRAG_SHOTS ? { shot: `drag-${skin}-${layout}.png` } : {}),   // 截圖只有要看拖曳區時才存（設 ASN_DRAG_SHOTS=1），不然會擠進 ui-shots 的情境分組
 })
+
+// 其他視窗（#2302）：登入、設定／指引（panel）、開機引導（onboard）、獨立的對話視窗（chat）。都是 500×640。
+const WINDOWS = {
+  login: { page: 'login.html', layout: 'small', state: { signedIn: false, needsLogin: true } },
+  panel: { page: 'panel.html', layout: 'small', state: { signedIn: true } },
+  onboard: { page: 'onboard.html', layout: 'small', state: { signedIn: true, onboard: true } },
+  chat: { page: 'chat.html?id=P%2Fdemo', layout: 'chat', state: { signedIn: true, bar: 'offline', chatMsgs: true, lineMsgs: true } },
+}
+const makeWin = (skin, win, dpr, extra = {}) => {
+  const w = WINDOWS[win]
+  return {
+    name: `drag-${skin}-win-${win}-${String(dpr).replace('.', '_')}`,
+    page: w.page, width: 500, height: 640, dpr,
+    state: { ...w.state, skin },
+    ready: '#app.win',
+    probe: { dragRegion: { skin, layout: w.layout, dpr, ...extra } },
+    ...(extra.paint && process.env.ASN_DRAG_SHOTS ? { shot: `drag-${skin}-win-${win}.png` } : {}),
+  }
+}
 
 const DPRS = [1.25, 1.5, 2]
 const SCENARIOS = [
   ...['line', 'modern'].flatMap(skin => ['wide', 'narrow', 'narrowList'].flatMap(layout => DPRS.map(dpr => make(skin, layout, dpr, dpr === 1.25 ? { paint: true } : {})))),
   make('aero', 'wide', 1.5),
+  ...['line', 'modern'].flatMap(skin => Object.keys(WINDOWS).flatMap(win => DPRS.map(dpr => makeWin(skin, win, dpr, dpr === 1.25 ? { paint: true } : {})))),
+  ...Object.keys(WINDOWS).map(win => makeWin('aero', win, 1.5)),
 ]
 
 export default {

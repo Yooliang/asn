@@ -427,6 +427,9 @@
 /* 自己的卡片（.me，style.css 是 z-index:50）原本蓋在標題列（45）上面：名單視窗（分離模式、窄到只剩名單）右上角的三顆鈕被卡片蓋住點不到。
    降到 44：還是在名單內容之上（大頭貼選單照樣浮出），但三顆鈕與上緣縮放把手（50）都在它上面（#2302） */
 :root[data-skin="line"] .list-pane > .me{z-index:44}
+/* 小視窗（登入、設定／指引、開機引導；標題列後面直接接一整塊 .pane）沒有對話標題列可拖：標題列改回排在內容上面的一條 40px 高、整條可拖，三顆鈕靠右（#2302） */
+:root[data-skin="line"] .titlebar:has(+ .pane){position:relative;top:auto;left:auto;right:auto;height:40px;flex:none}
+:root[data-skin="line"] .titlebar:has(+ .pane) .t-btns{height:40px}
 :root[data-skin="line"] .tb{width:46px;height:36px;border:0;border-radius:0;background:transparent;box-shadow:none;color:#4a4f57;filter:none}
 :root[data-skin="line"] .tb svg{display:none}
 :root[data-skin="line"] .tb::before{content:"";width:12px;height:12px;background:currentColor;
