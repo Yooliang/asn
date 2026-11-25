@@ -125,12 +125,12 @@ pub static FLAGS: &[Flag] = &[
     internal("ASN_SPECS", "—", "視窗擷取清單（設給內嵌 PowerShell）", &["wins.rs"]),
     internal("ASN_DIR", "—", "視窗擷取輸出資料夾（設給內嵌 PowerShell）", &["wins.rs"]),
     // ---- CI、除錯 -------------------------------------------------------------------
-    Flag::new(Kind::Ci, "ASN_SHOT_TOAST_LENIENT", None, "關（設 1 開）", "發版流程設：提示視窗截圖疑似空白只警告", &["wins.rs"], Pin::Na),
-    Flag::new(Kind::Debug, "ASN_ASKPASS_PIPE", None, "正式管道名（只有除錯建置讀）", "測試用管道名（要有測試前綴）", &["askpass/pipe.rs"], Pin::Na),
+    Flag::new(Kind::Ci, "ASN_SHOT_TOAST_LENIENT", None, "關（設 1 開）", "發版流程設：提示視窗截圖疑似空白只警告（3b：發版 e2e 要用它，等 PR-3b 建好 e2e 專用建置再改走 test_var）", &["wins.rs"], Pin::Na),
+    Flag::new(Kind::Debug, "ASN_ASKPASS_PIPE", None, "正式管道名（只有測試、除錯或 test-hooks 建置讀）", "測試用管道名（要有測試前綴）", &["askpass/pipe.rs"], Pin::Na),
     // ---- 測試與手動驗證 ----------------------------------------------------------------
-    test("ASN_CODEX_SCRIPT", old!("CODEX_SCRIPT"), "用 codex", "用一支 node 腳本取代 codex（測試用）", &["bridge/engines/codex.rs"]),
+    test("ASN_CODEX_SCRIPT", old!("CODEX_SCRIPT"), "用 codex", "用一支 node 腳本取代 codex（測試用，Rust 端經 test_var 讀；JS 端 relay/machine 也讀，這一張不改）", &["bridge/engines/codex.rs"]),
     test("ASN_MOCK_BIN_DIR", old!("ASN_MOCK_BIN_DIR"), "走真實 PATH 與家目錄", "假執行檔資料夾；設了就不看真實安裝位置（測試用）", &["agent_tools/detect.rs", "agent_tools/mod.rs"]),
-    test("ASN_SHOT_LOGIN", old!("ASN_SHOT_LOGIN"), "不動", "--shot 截圖模式假裝已登入（端到端測試用）", &["lib.rs"]),
+    test("ASN_SHOT_LOGIN", old!("ASN_SHOT_LOGIN"), "不動", "--shot 截圖模式假裝已登入（端到端測試用；3b：發版 e2e 要用它，等 PR-3b 建好 e2e 專用建置再改走 test_var）", &["lib.rs"]),
     test("ASN_UPDATE_GOLDEN", None, "只比對（CI 禁止重寫）", "重寫黃金檔", &["golden_util.rs"]),
     test("ASN_REGEN_SCREENS", None, "不重產", "重產前端畫面清單檔", &["launch/screen_catalog.rs"]),
     test("ASN_MANUAL_TEST", None, "略過", "手動真機測試放行", &["launch/console.rs", "launch/switch.rs"]),
