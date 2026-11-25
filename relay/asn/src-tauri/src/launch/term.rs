@@ -1420,6 +1420,55 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         v.is_some_and(|v| self.runner.started_ms(v.pid) == Some(v.started_ms))
     }
 
+    /// 重開 ASN 後，認回還開著的看畫面 GUI（#2309）：viewers 只存記憶體，重開後是空的，
+    /// 原本的 `wezterm-gui connect` 視窗卻還在。掃一次本機的 wezterm-gui，命令列對得上這個 ASN 的服務與名單上的夥伴，
+    /// 就照原本的方式（編號＋建立時間）登記回去，之後 `viewing`／`unview` 照舊運作。對不上的維持現狀、寫一行 log。
+    /// 回（名單上開在服務裡的夥伴數, 認回幾個）；前者是 0 表示名單還沒接回來，呼叫端可以晚點再試
+    pub fn adopt_viewers(&self) -> (usize, usize) {
+        if !self.use_mux {
+            return (0, 0);
+        }
+        let config = match self.dir().and_then(|d| self.mux_handle(&d, BTreeMap::new()).map(|m| m.paths.config.clone())) {
+            Ok(c) => c,
+            Err(e) => {
+                view_log(&format!("mux-view adopt 讀不到終端服務：{e}"));
+                return (0, 0);
+            }
+        };
+        let (known, already): (Vec<(String, String)>, Vec<String>) = {
+            let g = self.inner.lock().unwrap();
+            (
+                g.sessions.iter().filter(|s| s.window.mux).map(|s| (s.id.clone(), s.workspace.clone())).collect(),
+                g.viewers.iter().map(|v| v.id.clone()).collect(),
+            )
+        };
+        if known.is_empty() {
+            return (0, 0);
+        }
+        let procs: Vec<super::viewer_adopt::GuiProc> = self
+            .runner
+            .gui_procs()
+            .into_iter()
+            .filter_map(|(pid, cmdline)| self.runner.started_ms(pid).map(|started_ms| super::viewer_adopt::GuiProc { pid, started_ms, cmdline }))
+            .collect();
+        let plan = super::viewer_adopt::plan(&procs, &config, &known, &already);
+        let mut g = self.inner.lock().unwrap();
+        let mut n = 0;
+        for f in &plan.found {
+            if g.viewers.iter().any(|v| v.id == f.id) {
+                continue;
+            }
+            g.viewers.push(Viewer { id: f.id.clone(), pid: f.pid, started_ms: f.started_ms, starting: false });
+            view_log(&format!("mux-view adopt id={} pid={} 認回還開著的畫面", f.id, f.pid));
+            n += 1;
+        }
+        // 沒有 wezterm-gui 在跑是常態（夥伴都在背景），不寫；有掃到卻沒收的才留一行
+        for s in &plan.skipped {
+            view_log(&format!("mux-view adopt 沒收：{s}"));
+        }
+        (known.len(), n)
+    }
+
     /// 共用 mux 的現況，給掛掉監看用（`mux_watch`）：mux 現在活不活（程序編號＋建立時間）、裡面有哪些夥伴（名字）、
     /// ASN 自己停 mux 的記號。沒開 mux 模式、或找不到 WezTerm 就回 None（不監看）
     /// 用了終端服務、這一輪卻看不到它的狀態（mux_snapshot 回 None）時的原因；沒用終端服務回 None（監看不用報）
@@ -3320,6 +3369,36 @@ pub fn start_background_partner_watch(terms: std::sync::Arc<LiveTerms>) {
     }
 }
 
+/// 認回重開前就開著的看畫面 GUI（#2309）的重試次數與間隔：夥伴名單接回要一小段時間，名單空的時候先等
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+const ADOPT_VIEWER_TRIES: u32 = 24;
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+const ADOPT_VIEWER_EVERY_SECS: u64 = 5;
+
+/// 啟動後在背景掃一次還開著的看畫面 GUI 並登記回去，不擋啟動；名單接回來（有夥伴）之後掃一次就結束
+#[cfg(feature = "gui")]
+pub fn start_viewer_adopt(terms: std::sync::Arc<LiveTerms>) {
+    if std::env::args().any(|a| a == "--shot") || !terms.use_mux {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("asn-adopt-viewers".into()).spawn(move || {
+        for _ in 0..ADOPT_VIEWER_TRIES {
+            let (known, n) = terms.adopt_viewers();
+            if known > 0 {
+                if n > 0 {
+                    elog!("重開後認回 {n} 個還開著的終端畫面");
+                }
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(ADOPT_VIEWER_EVERY_SECS));
+        }
+        view_log("mux-view adopt 等不到夥伴名單，這次不認回");
+    });
+    if let Err(e) = spawned {
+        elog!("認回終端畫面的執行緒開不了（不影響啟動）：{e}");
+    }
+}
+
 /// 空記憶體（位元組）；讀不到回 None
 #[cfg(all(feature = "gui", windows))]
 pub(crate) fn free_memory_bytes() -> Option<u64> {
@@ -4444,6 +4523,8 @@ mod tests {
         on_spawn: RefCell<Option<Box<dyn Fn(usize)>>>,
         /// 看畫面的 GUI 的視窗已經出現（真＝一問就有）
         window_up: RefCell<bool>,
+        /// 假 runner 回報的本機 wezterm-gui 程序（pid, 命令列）
+        gui_procs: RefCell<Vec<(u32, Vec<String>)>>,
     }
 
     fn default_list_clients_json() -> String {
@@ -4475,6 +4556,7 @@ mod tests {
             proc_dead: RefCell::new(false),
             on_spawn: RefCell::new(None),
             window_up: RefCell::new(false),
+            gui_procs: RefCell::new(Vec::new()),
         }
     }
 
@@ -4570,6 +4652,9 @@ mod tests {
         }
         fn window_up(&self, _pid: u32) -> bool {
             *self.inner.window_up.borrow()
+        }
+        fn gui_procs(&self) -> Vec<(u32, Vec<String>)> {
+            self.inner.gui_procs.borrow().clone()
         }
         fn alive(&self, _pid: u32) -> bool {
             !*self.inner.proc_dead.borrow()
@@ -7424,6 +7509,49 @@ mod tests {
             assert!(rig.svc.viewing(&id));
             assert!(rig.runner.killed().is_empty());
             assert_eq!(kill_panes(&rig.runner), 0);
+        }
+
+        /// 假的 wezterm-gui 程序：命令列照 `view_args` 的樣子
+        fn gui_cmdline(config: &Path, workspace: &str) -> Vec<String> {
+            let mut c = vec!["C:\\W\\wezterm-gui.exe".to_string()];
+            c.extend(view_args(config, workspace));
+            c
+        }
+
+        /// #2309：只重開 ASN（整台沒重開機）時，viewers 清空、GUI 還在；掃描要把它找回來，viewing 回真
+        #[test]
+        fn _2309_重開_asn_後認回還開著的看畫面_gui() {
+            let (rig, paths) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.view(&id).unwrap();
+            assert!(rig.svc.viewing(&id), "重開前有登記");
+            // 重開 ASN：記憶體裡的登記沒了，但 GUI 程序還在
+            rig.svc.inner.lock().unwrap().viewers.clear();
+            assert!(!rig.svc.viewing(&id), "重開後登記是空的");
+            *rig.runner.inner.gui_procs.borrow_mut() = vec![(77, gui_cmdline(&paths.config, &format!("asn-{id}")))];
+            let (known, n) = rig.svc.adopt_viewers();
+            assert_eq!((known, n), (1, 1));
+            assert!(rig.svc.viewing(&id), "認回後 viewing 為真（hidden 會記成 false）");
+            // 再掃一次不會重複登記
+            assert_eq!(rig.svc.adopt_viewers(), (1, 0));
+            assert_eq!(rig.svc.inner.lock().unwrap().viewers.len(), 1);
+            // 後續關窗偵測照原本機制：unview 會結束認回的那個程序
+            rig.svc.unview(&id).unwrap();
+            assert_eq!(rig.runner.killed(), vec![77]);
+            assert!(!rig.svc.viewing(&id));
+        }
+
+        #[test]
+        fn _2309_別的設定檔或_domain_的_gui_不認回() {
+            let (rig, paths) = mux_rig();
+            let id = open_partner(&rig);
+            let mut other_domain = gui_cmdline(&paths.config, &format!("asn-{id}"));
+            let k = other_domain.iter().position(|a| a == "asn").unwrap();
+            other_domain[k] = "別人".into();
+            let other_cfg = gui_cmdline(Path::new("C:\\Users\\x\\.wezterm.lua"), &format!("asn-{id}"));
+            *rig.runner.inner.gui_procs.borrow_mut() = vec![(70, other_domain), (71, other_cfg), (72, vec!["wezterm-gui.exe".into(), "start".into()])];
+            assert_eq!(rig.svc.adopt_viewers(), (1, 0));
+            assert!(!rig.svc.viewing(&id));
         }
 
         #[test]

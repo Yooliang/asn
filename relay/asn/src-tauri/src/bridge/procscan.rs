@@ -395,6 +395,12 @@ pub fn system_table() -> Vec<ProcInfo> {
     imp::table()
 }
 
+/// 本機上執行檔名（不含副檔名）是 `stem` 的程序與它們的命令列（#2309 認回看畫面的 GUI 用）。
+/// 讀不到命令列的程序略過；Linux 只看同一個使用者的程序
+pub fn cmdlines_of_exe(stem: &str) -> Vec<(u32, Vec<String>)> {
+    imp::cmdlines_of_exe(stem)
+}
+
 /// 掃本機（真實程序）；開關沒開回空
 pub fn scan_system() -> Vec<ProcAgent> {
     if !enabled() {
@@ -428,6 +434,30 @@ mod imp {
 
     /// uid 讀不到時用的值：沒有程序屬於它，等於一個代理都不列（寧可漏列，不把別人的程序送出去）
     const NO_OWNER: u32 = u32::MAX;
+
+    pub fn cmdlines_of_exe(stem: &str) -> Vec<(u32, Vec<String>)> {
+        let root = Path::new("/proc");
+        let me = std::fs::metadata(root.join("self")).map(|m| m.uid()).unwrap_or(NO_OWNER);
+        let mut out = vec![];
+        let Ok(rd) = std::fs::read_dir(root) else { return out };
+        for e in rd.flatten() {
+            let Some(pid) = e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else { continue };
+            let dir = e.path();
+            if !std::fs::metadata(&dir).is_ok_and(|m| m.uid() == me) {
+                continue;
+            }
+            let comm = std::fs::read_to_string(dir.join("comm")).unwrap_or_default();
+            if super::exe_stem(comm.trim()) != stem {
+                continue;
+            }
+            let Ok(raw) = std::fs::read(dir.join("cmdline")) else { continue };
+            let args: Vec<String> = raw.split(|b| *b == 0).filter(|s| !s.is_empty()).map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+            if !args.is_empty() {
+                out.push((pid, args));
+            }
+        }
+        out
+    }
 
     pub fn table() -> Vec<ProcInfo> {
         let root = Path::new("/proc");
@@ -526,6 +556,32 @@ mod imp {
                 let exe = String::from_utf16_lossy(&e.szExeFile[..n]);
                 let cmdline = if is_candidate_exe(&exe) { read_cmdline(e.th32ProcessID).map(|c| split_cmdline(&c)).unwrap_or_default() } else { vec![] };
                 out.push(ProcInfo { pid: e.th32ProcessID, ppid: e.th32ParentProcessID, exe, cmdline, start_secs: None, light: false });
+                ok = Process32NextW(snap, &mut e);
+            }
+            CloseHandle(snap);
+        }
+        out
+    }
+
+    /// 執行檔名（不含副檔名）是 `stem` 的程序與命令列；讀不到命令列的略過
+    pub fn cmdlines_of_exe(stem: &str) -> Vec<(u32, Vec<String>)> {
+        let mut out = vec![];
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap == INVALID_HANDLE_VALUE {
+                return out;
+            }
+            let mut e: PROCESSENTRY32W = std::mem::zeroed();
+            e.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+            let mut ok = Process32FirstW(snap, &mut e);
+            while ok != 0 {
+                let n = e.szExeFile.iter().position(|c| *c == 0).unwrap_or(e.szExeFile.len());
+                let exe = String::from_utf16_lossy(&e.szExeFile[..n]);
+                if super::exe_stem(&exe) == stem {
+                    if let Some(c) = read_cmdline(e.th32ProcessID) {
+                        out.push((e.th32ProcessID, split_cmdline(&c)));
+                    }
+                }
                 ok = Process32NextW(snap, &mut e);
             }
             CloseHandle(snap);
