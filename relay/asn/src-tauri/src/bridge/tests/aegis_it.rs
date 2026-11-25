@@ -24,7 +24,8 @@ struct AState {
     /// (內文結尾, 成員, 依序的回應)；內文結尾空字串＝這個成員的所有問題
     scripts: Vec<(String, String, Vec<(u16, Value)>)>,
     members: Value,
-    delay_ms: u64,
+    /// true＝問題收到後先不回答，等測試放行（設回 false）才回；比固定延遲穩：機器再忙，答案也不會自己先回來（#2297）
+    hold: bool,
 }
 
 struct FakeAegis {
@@ -56,7 +57,6 @@ fn aegis_conn(mut c: std::net::TcpStream, st: Arc<Mutex<AState>>) {
     let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
     let body: Value = serde_json::from_slice(&buf[head_end..(head_end + len).min(buf.len())]).unwrap_or(Value::Null);
     let path = head.lines().next().unwrap_or("").split(' ').nth(1).unwrap_or("").to_string();
-    let delay = st.lock().unwrap().delay_ms;
     let (code, out) = if path.starts_with("/api/v1/members") {
         (200, st.lock().unwrap().members.clone())
     } else if path == "/api/v1/agent-chat/ask" {
@@ -72,8 +72,10 @@ fn aegis_conn(mut c: std::net::TcpStream, st: Arc<Mutex<AState>>) {
                 let list = &s.scripts[i].2;
                 let (h, j) = list[n.min(list.len()) - 1].clone();
                 drop(s);
-                if delay > 0 {
-                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                // 輪詢上限 60 秒只是防測試掛死（測試自己 30 秒就會判逾時）
+                let t0 = std::time::Instant::now();
+                while st.lock().unwrap().hold && t0.elapsed() < std::time::Duration::from_secs(60) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
                 (h, j)
             }
@@ -303,12 +305,13 @@ async fn ack_時機_寄回成功才_ack_等答案時不_ack() {
     let (members, allow, retry) = vec_cfg();
     let mut h = aboot(members, &[("ASN_AEGIS_ALLOW", &allow), ("ASN_AEGIS_RETRY_MS", &retry)]).await;
     h.ag.script("", "alpha", vec![(200, json!({"answer": "慢答案", "status": "success"}))]);
-    h.ag.st.lock().unwrap().delay_ms = 700;
+    h.ag.st.lock().unwrap().hold = true;
     h.put_pull(mail(1, json!({"to_agent": "阿爾法"}))).await;
     h.wait("問出去了", |h| h.ag.asks().len() == 1).await;
     h.settle(300).await;
     assert!(h.fr.acked().is_empty() && h.fr.sent().is_empty(), "答案還沒回來：不 ack、沒寄信");
     assert!(h.core.log.has("forwarded id="));
+    h.ag.st.lock().unwrap().hold = false; // 放行答案
     h.wait("寄回並 ack", |h| !h.fr.acked().is_empty()).await;
     assert_eq!(h.fr.sent().len(), 1);
     assert_eq!(h.fr.acked(), vec![uid(1)]);
