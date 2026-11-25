@@ -10,17 +10,15 @@ use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 
-/// 測試用管道名稱的前綴。只有除錯版（含 cargo test）才認 `ASN_ASKPASS_PIPE` 這個覆寫，且名稱必須以此開頭
+/// 測試用管道名稱的前綴。只有測試編譯、除錯建置、帶 `test-hooks` 的建置才認 `ASN_ASKPASS_PIPE` 這個覆寫（經 `flags::test_var`），且名稱必須以此開頭
 pub const TEST_PREFIX: &str = "asn-askpass-test-";
 
 /// 管道名稱（不含 `\\.\pipe\`）
 pub fn pipe_name() -> String {
-    #[cfg(debug_assertions)]
-    {
-        if let Ok(n) = std::env::var("ASN_ASKPASS_PIPE") {
-            if n.starts_with(TEST_PREFIX) && n.len() < 100 && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-                return n;
-            }
+    // 只有測試編譯、除錯建置、帶 test-hooks 的建置才讀得到（正式建置回 None），名稱還要過前綴與字元檢查
+    if let Some(n) = crate::flags::test_var("ASN_ASKPASS_PIPE") {
+        if n.starts_with(TEST_PREFIX) && n.len() < 100 && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return n;
         }
     }
     let sid = user_id_string().unwrap_or_default();

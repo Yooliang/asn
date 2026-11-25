@@ -84,7 +84,8 @@ pub struct CodexBin {
 /// 找到 codex 執行檔。測試用：ASN_CODEX_SCRIPT（舊名 IRORI_CODEX_SCRIPT）指向一支 node 腳本時，用 node 跑它來取代 codex。
 /// Windows 的 npm 安裝只有 codex.cmd 外殼（不能直接 spawn），所以改成「node + 套件裡的 bin/codex.js」
 pub fn resolve_codex(env: &[(String, String)]) -> CodexBin {
-    if let Some(s) = env_get(env, "ASN_CODEX_SCRIPT").filter(|s| !s.is_empty()) {
+    let script = crate::flags::test_var_from("ASN_CODEX_SCRIPT", &|k| env.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)).map(|(_, v)| v.clone()));
+    if let Some(s) = script.filter(|s| !s.is_empty()) {
         return CodexBin { command: "node".into(), pre: vec![s] };
     }
     if let Some(b) = env_get(env, "ASN_CODEX_BIN").filter(|s| !s.is_empty()) {
