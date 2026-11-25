@@ -442,6 +442,7 @@ export const bridgeApi = {
   setPermPhone: on => invoke('bridge_set_perm_phone', { on }),
   setMobileView: on => invoke('bridge_set_mobile_view', { on }),
   setRemoteInput: on => invoke('bridge_set_remote_input', { on }),
+  setGeminiFullAccess: on => invoke('bridge_set_gemini_full_access', { on }),
   setScreenWatch: on => invoke('bridge_set_screen_watch', { on }),
   setUnaddressedTo: name => invoke('bridge_set_unaddressed_to', { name }),
   takeover: () => invoke('bridge_takeover', { confirmed: true }),
