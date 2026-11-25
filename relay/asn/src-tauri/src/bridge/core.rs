@@ -184,10 +184,10 @@ impl Config {
             forward_timeout_ms: env_u64("ASN_FORWARD_TIMEOUT_MS", 120_000),
             upstream_retry_ms: upstream_retry::DELAYED_RETRY_MS,
             one_per_turn: crate::envc::get("ASN_FORWARD_ONE_PER_TURN").map(|v| v.trim() != "0").unwrap_or(true),
-            // 新變數沒有舊環境名稱，不走 envc 的新舊名對照
-            wait_alert: std::env::var("ASN_WAIT_ALERT").is_ok_and(|v| v.trim() == "1"),
+            // 新變數沒有舊環境名稱，不走 envc 的新舊名對照；改走登記表的型別化讀取（值 trim 後剛好 "1" 才開，#2163）
+            wait_alert: crate::flags::on_exact_1("ASN_WAIT_ALERT"),
             forward_exact: super::worker::forward_exact_enabled(),
-            forward_exact_unverified: std::env::var("ASN_FORWARD_EXACT_UNVERIFIED").is_ok_and(|v| v.trim() == "1"),
+            forward_exact_unverified: crate::flags::on_exact_1("ASN_FORWARD_EXACT_UNVERIFIED"),
             forward_hook,
             pull_backoff_ms: vec![5_000, 10_000, 20_000, 40_000, 60_000],
             claude_bin: std::env::var("CLAUDE_BIN").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| crate::agent_tools::resolve_binary("claude").map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|| "claude".into())),

@@ -176,7 +176,8 @@ impl OpsEnv for SystemOpsEnv {
     }
     fn mod_wait_ms(&self) -> u64 {
         // 視窗忙碌時外掛會排隊等閒置：預設最多等 10 分鐘；環境變數 ASN_MOD_WAIT_MS（毫秒，1 秒到 1 小時）可調
-        std::env::var("ASN_MOD_WAIT_MS").ok().and_then(|v| v.trim().parse::<u64>().ok()).filter(|v| (1_000..=3_600_000).contains(v)).unwrap_or(600_000)
+        // 預設值與範圍（600000、1000～3600000）寫在登記表（flags/table.rs），這裡只讀
+        crate::flags::ms("ASN_MOD_WAIT_MS")
     }
     fn mod_probe_ms(&self) -> u64 {
         15_000

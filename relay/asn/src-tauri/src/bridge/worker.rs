@@ -101,8 +101,8 @@ pub const EXACT_PROMPT_NOTE: &str = "(A2) 橋接指令的第二行若不是 <<<M
 
 /// 原文替換模式有沒有開（ASN_FORWARD_EXACT=1）
 pub fn forward_exact_enabled() -> bool {
-    // 新變數沒有舊環境名稱，不走 envc 的新舊名對照
-    std::env::var("ASN_FORWARD_EXACT").is_ok_and(|v| v.trim() == "1")
+    // 新變數沒有舊環境名稱，不走 envc 的新舊名對照；改走登記表的型別化讀取（值 trim 後剛好 "1" 才開，#2163）
+    crate::flags::on_exact_1("ASN_FORWARD_EXACT")
 }
 
 /// 送進 worker 的橋接指令

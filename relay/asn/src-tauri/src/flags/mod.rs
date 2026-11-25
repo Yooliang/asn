@@ -12,13 +12,28 @@
 //! 前端旗標（`ui/` 底下的 `AGENT_INSTALL_UI` 等）不在這裡，留給 #2163 的 PR-4。
 #![cfg_attr(not(test), allow(dead_code, unused_imports))]
 
+mod read;
 mod table;
 #[cfg(test)]
 mod scan;
 #[cfg(test)]
+mod read_tests;
+#[cfg(test)]
 mod tests;
 
+pub use read::{ms, ms_from, on_exact_1, on_exact_1_from};
 pub use table::{DYNAMIC_OK, FLAGS, NOT_ENV};
+
+/// 型別化讀取的規格（#2163 PR-2a）：登記了才能用 [`read`] 裡對應的讀取函式，預設值與範圍從這裡拿。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Typed {
+    /// 沒有型別化讀取（呼叫端照舊自己讀）
+    None,
+    /// 開關：值 `trim()` 之後**剛好等於 "1"** 才算開，其他（含 "true"、"2"、空字串）一律關。見 [`on_exact_1`]
+    Exact1,
+    /// 毫秒數：`trim()` 後解析成 u64，落在 `[min, max]` 才採用，否則用 `default`。見 [`ms`]
+    Ms { default: u64, min: u64, max: u64 },
+}
 
 /// 分類
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -75,6 +90,8 @@ pub struct Flag {
     /// 讀（或設）它的檔案，相對 `src/`
     pub readers: &'static [&'static str],
     pub pin: Pin,
+    /// 型別化讀取規格；沒有就是 [`Typed::None`]
+    pub typed: Typed,
 }
 
 impl Flag {
@@ -87,7 +104,12 @@ impl Flag {
         readers: &'static [&'static str],
         pin: Pin,
     ) -> Flag {
-        Flag { name, legacy, kind, secret: false, default, purpose, readers, pin }
+        Flag { name, legacy, kind, secret: false, default, purpose, readers, pin, typed: Typed::None }
+    }
+
+    /// 指定型別化讀取規格
+    pub const fn typed(self, typed: Typed) -> Flag {
+        Flag { typed, ..self }
     }
 
     /// 標成機密
