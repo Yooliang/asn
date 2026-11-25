@@ -13,7 +13,7 @@ mod caller;
 mod quota_cmd;
 mod claude_usage_cmd;
 mod gemini_quota_cmd;
-mod env;
+pub(crate) mod env;
 mod forward_gate_cmd;
 mod recv;
 mod confirm;

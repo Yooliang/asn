@@ -28,6 +28,7 @@ mod datadir;
 mod test_guard;   // 測試隔離守衛：測試碰到真的 ASN 資料夾／mux 就 panic（只在測試編譯）
 mod device_login;
 mod envc;
+mod flags;        // 環境變數登記表與守門（#2163）：只登記，不改任何讀取行為
 #[cfg(all(desktop, feature = "gui"))]
 mod first_run;   // 新裝電腦的預設值（#1617）：只在全新安裝的第一次啟動套用
 mod heartbeat;
