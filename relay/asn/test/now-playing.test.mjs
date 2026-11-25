@@ -36,7 +36,8 @@ test('介面接線：存檔值進 me 存檔、開關交給 set_now_playing、歌
   const js = read('ui/list.js')
   assert.match(js, /showNowPlaying = ref\(normalizeNowPlaying\(savedMe\.showNowPlaying\)\)/)
   assert.match(js, /trayApi\.setNowPlaying\(on\)/)
-  assert.match(js, /listen\('asn:now-playing'/)
+  assert.match(js, /watchNowPlaying\(core\.hub,/)   // 改走事件中心（#2038 PR-4）；事件名由 notice-events.mjs 訂閱
+  assert.match(read('ui/lib/notice-events.mjs'), /hub\.subscribe\('asn:now-playing'/)
   assert.match(js, /case 'now-playing': showNowPlaying\.value = value === true/)
   assert.match(js, /showNowPlaying: showNowPlaying\.value/)
   assert.match(read('ui/list.html'), /class="me-np" v-if="nowPlayingText"/)

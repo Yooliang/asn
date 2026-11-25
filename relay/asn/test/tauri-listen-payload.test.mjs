@@ -19,7 +19,8 @@ test('真的 listen：回呼拿到的是事件內容本身，不是整個事件'
 test('list.js 每個 listen 回呼都不再讀 .payload', () => {
   const src = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   const calls = [...src.matchAll(/listen\('([^']+)',\s*(\w+)\s*=>([^\n]*)/g)]
-  assert.ok(calls.length >= 5, `list.js 找到的 listen 數不對（${calls.length}），檢查規則可能失效`)
+  // 剩下沒搬進 hub 的 listen 數（PR-4 搬走 now-playing 等後剩 3；之後每搬一批要跟著降，降到 0 就可以刪這個測試）
+  assert.ok(calls.length >= 3,`list.js 找到的 listen 數不對（${calls.length}），檢查規則可能失效`)
   const bad = calls
     .filter(([, , arg, rest]) => rest.replace(/\/\/.*$/, '').includes(`${arg}.payload`))
     .map(([, evt]) => evt)
