@@ -15,7 +15,7 @@ pub(crate) mod claude_screen;
 pub(crate) mod screen_catalog;
 pub(crate) mod perm_risk;
 #[cfg(desktop)]
-mod screen_watch;
+pub(crate) mod screen_watch;
 mod resume;
 pub(crate) mod opening;
 pub(crate) mod live_process;
