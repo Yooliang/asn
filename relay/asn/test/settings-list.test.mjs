@@ -23,7 +23,9 @@ import { normalizeNowPlaying } from '../ui/lib/now-playing.mjs'
 import { AI_WAKE_LIMIT_DEFAULT } from '../ui/lib/ai-wake-limit.mjs'
 import { LAUNCH_INSTALL_BTN } from '../ui/lib/flags.mjs'
 import { RESUME_WAIT_MS, ASN_RESTART_WAIT_MS } from '../ui/lib/task-manager.mjs'
-import { COLS, bridgeDefault, checkList, colOf, diffOps, dropRow, editRow, fmtErrors, parseList, parsePlatform, rustConst, scanOpLiterals } from './settings-list-check.mjs'
+import { LOCAL_KEYS } from '../ui/lib/local-prefs.mjs'
+import { LAUNCH_PREFS_FIELDS, ME_FIELDS_DESKTOP, ME_FIELDS_MOBILE, ME_FIELDS_PENDING, ONBOARD_FIELDS } from '../ui/lib/storage-keys.mjs'
+import { COLS, bridgeDefault, checkList, colOf, diffOps, dropRow, editRow, fmtErrors, parseList, parsePlatform, rustConst, rustDocs, scanOpLiterals } from './settings-list-check.mjs'
 
 export { parseList }
 
@@ -33,6 +35,7 @@ const readFile = rel => { const f = new URL(rel, ROOT); return fs.existsSync(f) 
 
 const doc = fs.readFileSync(DOC, 'utf8')
 const BRIDGE = 'src-tauri/src/bridge/mod.rs'
+const DOCS_RS = 'src-tauri/src/settings/docs.rs'
 
 // 預設值要比對的項目：cell 是對「預設值」欄的要求；code 是「程式裡真的有這個預設」的證據（檔案＋正規式）。
 // 比不了的列，在清單的預設值欄標〔人工：原因〕（見檢查核心）。
@@ -84,8 +87,23 @@ const defaults = () => {
     // 工作管理員重啟後的等待時間，清單寫的秒數要等於常數
     { token: 'tm-open', includes: [`最多等 ${RESUME_WAIT_MS / 1000} 秒`, `最多等 ${ASN_RESTART_WAIT_MS / 1000} 秒`] },
     { token: 'flag.LOG_REPORT_ROOM', startsWith: '空白', code: [['src-tauri/src/log_report.rs', /pub const RECIPIENT_ROOM: &str = "";/]] },
+    // 內部存檔欄位（十三）：能從程式取到的預設比對，其餘在清單標〔人工：原因〕
+    { token: 'file.me.autoAddClaude', startsWith: '開', code: [['ui/list.js', /const autoAddClaude = ref\(true\)/]] },
+    { token: 'file.pi-auto.auto', startsWith: '允許自動安裝＝開', code: [[DOCS_RS, /PiAutoDoc \{ auto: true, done: false/]] },
+    { token: 'file.bridge.enabled', startsWith: '檔案裡預設關', code: [[DOCS_RS, /enabled: false,\s*allow_takeover: false/]] },
   ]
 }
+
+// 存檔欄位的標準答案（#1853 第 2 張）：
+//  - 各設定檔（bridge、voice…）的欄位：直接解析 Rust 的 docs.rs，不用前端抄的那份（前端那份由 storage-keys.test.mjs 對齊 Rust）
+//  - asn-me.json（me）：Rust 不宣告欄位，以前端存檔那一行為準（常數由 prefs-keys.test.mjs 對原始碼鎖住）
+//  - localStorage（local）：唯一來源是 local-prefs.mjs 的 LOCAL_KEYS
+const filesTruth = (docsRs = readFile(DOCS_RS)) => ({
+  ...Object.fromEntries(Object.entries(rustDocs(docsRs)).map(([name, fields]) => [name, name === 'launch-prefs' ? LAUNCH_PREFS_FIELDS : fields])),
+  me: [...new Set([...ME_FIELDS_DESKTOP, ...ME_FIELDS_MOBILE, ...ME_FIELDS_PENDING])].sort(),
+  onboard: ONBOARD_FIELDS,
+  local: LOCAL_KEYS,
+})
 
 const truth = () => ({
   ops: SETTING_OPS,
@@ -94,6 +112,7 @@ const truth = () => ({
   prefs: { keys: [...new Set([...Object.keys(DEFAULT_PREFS), ...Object.keys(normalizePrefs({}))])], defaults: normalizePrefs({}), skinLabel: SKIN_LABEL[normalizePrefs({}).skin] },
   flags: { AGENT_INSTALL_UI },
   defaults: defaults(),
+  files: filesTruth(),
   readFile,
 })
 
@@ -236,4 +255,62 @@ test('還原驗證：#2163 環境變數節、#2321 前端旗標節（表頭不�
   assert.equal(parseList(extra).length, parseList(doc).length)
   assert.equal(kinds(extra).has('dup'), false)
   assert.ok(parseList(doc).every(r => !r.tokens.some(t => t.startsWith('ASN_'))), '環境變數節的名稱不能被解析成設定標記')
+})
+
+// ---- 存檔欄位層（#1853 第 2 張）----
+// 拿掉清單裡的一個標記（標記在別的設定列的第一欄，不是單獨一列）
+const withoutToken = (text, tok) => {
+  const row = parseList(text).find(r => r.tokens.includes(tok))
+  assert.ok(row, `清單裡找不到 ${tok}`)
+  const lines = text.split('\n')
+  lines[row.line - 1] = lines[row.line - 1].replace(` \`${tok}\``, '')   // 只動表格那一列（說明文字裡也會提到標記）
+  return lines.join('\n')
+}
+
+test('#1853 存檔欄位：標準答案取得到（Rust 具名 Doc、asn-me.json、localStorage 都有東西）', () => {
+  const f = T.files
+  assert.deepEqual(f.bridge.length, 13)
+  assert.deepEqual(f.voice, ['tts_voice', 'tts_auto', 'stt_lang', 'stt_model'])
+  assert.ok(f.me.includes('autoAddClaude') && f.me.includes('navTab') && f.me.includes('pendingDeviceName'))
+  assert.deepEqual([...f.local], [...LOCAL_KEYS])
+  assert.ok(Object.keys(f).length >= 11)
+})
+
+test('還原驗證：清單少登記一個存檔欄位（程式有、清單沒有）→ file-missing', () => {
+  assert.ok(kinds(withoutToken(doc, 'file.bridge.compact_handoff_n')).has('file-missing'))   // 在別的設定列的第一欄
+  assert.ok(kinds(withoutToken(doc, 'file.me.skin')).has('file-missing'))
+  assert.ok(kinds(dropRow(doc, 'file.me.session')).has('file-missing'))                          // 內部存檔欄位那一節整列
+  assert.ok(kinds(withoutToken(doc, 'file.local.asnSkin')).has('file-missing'))
+})
+
+test('還原驗證：LOCAL_KEYS 加一個鍵卻沒登記 → file-missing', () => {
+  const t = { ...T, files: { ...T.files, local: [...LOCAL_KEYS, 'asnNewThing'] } }
+  assert.ok(kinds(doc, t).has('file-missing'))
+  assert.equal(kinds(doc, { ...T, files: { ...T.files, local: [...LOCAL_KEYS] } }).has('file-missing'), false)
+})
+
+test('還原驗證：Rust 端改一個鍵名／多一個／少一個欄位 → 清單跟著變紅（改名後舊標記變成多出來的）', () => {
+  const rs = readFile(DOCS_RS)
+  const renamed = rs.replace('pub compact_handoff_n: u32', 'pub compact_handoff_count: u32')
+  assert.notEqual(renamed, rs)
+  const k = kinds(doc, { ...T, files: filesTruth(renamed) })
+  assert.ok(k.has('file-missing') && k.has('file-extra'))
+  const added = rs.replace('pub remote_allow_install: bool,', 'pub remote_allow_install: bool,\n        pub brand_new_field: bool,')
+  assert.ok(kinds(doc, { ...T, files: filesTruth(added) }).has('file-missing'))
+  const removed = rs.replace(/\n\s*pub tts_auto: bool,/, '')
+  assert.notEqual(removed, rs)
+  assert.ok(kinds(doc, { ...T, files: filesTruth(removed) }).has('file-extra'))
+})
+
+test('還原驗證：清單寫了程式沒有的存檔欄位（反方向）→ file-extra', () => {
+  assert.ok(kinds(doc.replace('| `file.bridge.enabled` |', '| `file.bridge.enabled` `file.bridge.ghost` |')).has('file-extra'))
+  assert.ok(kinds(doc.replace('| `file.onboard.done` |', '| `file.onboard.done` `file.nofile.x` |')).has('file-extra'))
+})
+
+test('還原驗證：rustDocs 解析 docs.rs（欄位、檔名、不含 extra）', () => {
+  const d = rustDocs(readFile(DOCS_RS))
+  assert.deepEqual(d['pi-auto'], ['auto', 'done'])
+  assert.deepEqual(d['launch-prefs'], [])
+  assert.ok(d.settings.includes('window_name') && !d.settings.includes('extra'))
+  assert.equal(Object.keys(d).length, 8)
 })

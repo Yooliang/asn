@@ -110,6 +110,52 @@ export const bridgeDefault = (text, field) => {
   return f ? f[1] : null
 }
 
+// 從 Rust 設定層（settings/docs.rs）原始碼取出每個 Doc 型別的欄位：{ 檔名: [欄位…] }。
+// 檔名＝`impl Doc for X` 裡的 `const NAME`；欄位＝`pub struct X { … }` 裡的 `pub 名字:`（`extra` 不算，那是收不認得欄位的）。
+// 這是「解析原始碼」的做法：不必編譯 Rust 就能對齊，記憶體吃緊的機器也跑得動。
+export function rustDocs(text) {
+  const src = String(text ?? '').replace(/\r\n/g, '\n')
+  const out = {}
+  for (const m of src.matchAll(/impl(?:<[^>]*>)?\s+Doc for (\w+)\s*\{\s*const NAME:\s*&'static str\s*=\s*"([^"]+)"/g)) {
+    const body = new RegExp(`pub struct ${m[1]}\\s*\\{([\\s\\S]*?)\\n    \\}`).exec(src)
+    if (!body) throw new Error(`rustDocs：找不到 ${m[1]} 的欄位宣告`)
+    out[m[2]] = [...body[1].matchAll(/^\s*pub\s+(\w+)\s*:/gm)].map(x => x[1]).filter(k => k !== 'extra')
+  }
+  return out
+}
+
+// 兩份鍵名清單的差異：回傳 { kind, msg } 陣列（左邊＝標準答案、右邊＝被檢查的）
+export function diffKeys(label, truthKeys, otherKeys) {
+  const a = new Set(truthKeys)
+  const b = new Set(otherKeys)
+  const errs = []
+  for (const k of a) if (!b.has(k)) errs.push({ kind: 'keys-missing', msg: `${label}：少了 ${k}` })
+  for (const k of b) if (!a.has(k)) errs.push({ kind: 'keys-extra', msg: `${label}：多了 ${k}` })
+  return errs
+}
+
+// 從原始碼取出 `const f = { … }; void patchWithFallback` 的頂層欄位名（`...deviceFieldsToSave(devPrefs)` 展開成 deviceFields）
+export const topFields = (src, startRe, deviceFields) => {
+  const m = startRe.exec(src)
+  if (!m) throw new Error(`找不到存檔欄位那一行：${startRe}`)
+  let i = src.indexOf('{', m.index + m[0].length - 1)
+  let depth = 0, cur = ''
+  const part = []
+  for (; i < src.length; i++) {
+    const ch = src[i]
+    if ('{[('.includes(ch)) { if (depth++ === 0) continue }
+    if ('}])'.includes(ch)) { if (--depth === 0) { part.push(cur); break } }
+    if (ch === ',' && depth === 1) { part.push(cur); cur = ''; continue }
+    cur += ch
+  }
+  return part.map(s => s.trim()).filter(Boolean).flatMap(s => {
+    if (s.startsWith('...deviceFieldsToSave')) return deviceFields
+    const name = /^([A-Za-z_$][\w$]*)\s*(:|$)/.exec(s)
+    if (!name) throw new Error(`看不懂的存檔欄位：${s.slice(0, 40)}`)
+    return [name[1]]
+  }).sort()
+}
+
 const pass = (spec, cell) => {
   const bad = []
   if (spec.startsWith !== undefined && !cell.startsWith(spec.startsWith)) bad.push(`要以「${spec.startsWith}」開頭`)
@@ -141,7 +187,7 @@ export function checkList(text, truth) {
   const ops = new Set(truth.ops)
   const have = new Set(allTokens)
   for (const op of truth.ops) if (!have.has(op)) err('op-missing', `設定值清單缺指令 ${op}（新增設定要一起登記）`, null, op)
-  const prefixed = /^(prefs|cat|flag|app)\./
+  const prefixed = /^(prefs|cat|flag|app|file)\./
   for (const t of allTokens.filter(x => !prefixed.test(x))) if (!ops.has(t)) err('op-extra', `設定值清單寫了程式已經沒有的指令 ${t}`, rowOf(t), t)
 
   // 3 手機偏好雙向＋預設
@@ -173,6 +219,12 @@ export function checkList(text, truth) {
     if (!r) { err('flag', `設定值清單缺旗標 ${name}`, null, `flag.${name}`); continue }
     if (!colOf(r, '預設值').includes(`目前：${on ? '開' : '關'}`)) err('flag', `旗標 ${name} 目前值跟清單不一致（翻旗標要改清單）`, r, `flag.${name}`)
   }
+
+  // 5b 存檔欄位（file.<檔>.<鍵>）雙向：程式實際存的每個欄位都要登記；清單寫了、程式卻沒有的也紅。
+  // truth.files＝{ 檔名: [鍵…] }（asn-me.json 叫 me、localStorage 叫 local，見測試）
+  const wantFile = new Set(Object.entries(truth.files ?? {}).flatMap(([doc, keys]) => keys.map(k => `file.${doc}.${k}`)))
+  for (const t of wantFile) if (!have.has(t)) err('file-missing', `設定值清單缺存檔欄位 ${t}（新增存檔欄位要一起登記）`, null, t)
+  for (const t of tokensOf('file.')) if (!wantFile.has(t)) err('file-extra', `設定值清單寫了程式已經沒有的存檔欄位 ${t}`, rowOf(t), t)
 
   // 6 預設值：跟程式比對；比不了的要標〔人工：原因〕；沒有預設的寫「不適用」
   const checked = new Set()

@@ -1,6 +1,6 @@
 // #2162 ⑧：localStorage 只准經過 ui/lib/local-prefs.mjs（允許清單＋try/catch），其他檔不准直接用。
 // 明列例外：skin-boot.js 是不經打包的純腳本（畫面出來前就要套外觀，不能 import），保留內嵌的 localStorage.getItem('asnSkin')。
-// 新增鍵：local-prefs.mjs 的 LOCAL_KEYS 與下面 KEYS 要一起改（兩邊不同就紅），這樣新增會被審到。
+// 新增鍵：改 local-prefs.mjs 的 LOCAL_KEYS，並在 docs/設定值清單.md 登記 file.local.<鍵>（沒登記守門就紅），這樣新增會被審到。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -14,12 +14,13 @@ const rel = f => path.relative(UI, f).split(path.sep).join('/')
 const files = walk(UI).filter(f => /\.(m?js|html)$/.test(f)).filter(f => !/(^|\/)vendor\//.test(rel(f)))
 const src = f => fs.readFileSync(f, 'utf8')
 
-// 允許清單：與 ui/lib/local-prefs.mjs 的 LOCAL_KEYS 各抄一份
-const KEYS = ['asnSkin', 'asnCloudNodes', 'asnNewComputerGuideHidden', 'asnUpdateTestUrl']
+// 允許清單的唯一來源是 ui/lib/local-prefs.mjs 的 LOCAL_KEYS（#1853 第 2 張：原本這裡與 prefs-keys.test.mjs 各抄一份，合成同一份）。
+// 新增鍵時「會被審到」改由 settings-list.test.mjs 負責：LOCAL_KEYS 多一個鍵，docs/設定值清單.md 沒登記 file.local.<鍵> 就紅。
 const EXCEPTIONS = ['lib/local-prefs.mjs', 'skin-boot.js']
 
-test('local-prefs 的鍵清單與測試抄的那份完全一樣', () => {
-  assert.deepEqual([...LOCAL_KEYS], KEYS)
+test('local-prefs 的鍵清單：沒有重複、都是 asn 開頭的字串', () => {
+  assert.equal(new Set(LOCAL_KEYS).size, LOCAL_KEYS.length)
+  assert.ok(LOCAL_KEYS.length >= 4 && LOCAL_KEYS.every(k => /^asn[A-Z]\w+$/.test(k)))
 })
 
 test('ui/ 底下除 local-prefs.mjs 與 skin-boot.js 外，不准出現 localStorage／sessionStorage／indexedDB', () => {
