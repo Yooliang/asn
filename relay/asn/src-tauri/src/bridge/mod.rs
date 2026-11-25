@@ -601,7 +601,7 @@ impl Manager {
         })?;
         // Linux 剛打開、而且找不到終端程式：馬上在背景去取（一天內失敗過就照退避不連網），畫面才有狀態可以顯示
         if on && !cfg!(windows) {
-            let (env_wez, env_mux) = (std::env::var(crate::launch::win_term::ENV_WEZTERM).ok(), std::env::var(crate::launch::win_term::ENV_MUX).ok());
+            let (env_wez, env_mux) = (crate::flags::switch_raw(crate::launch::win_term::ENV_WEZTERM), crate::flags::switch_raw(crate::launch::win_term::ENV_MUX));
             let found = crate::launch::wezterm::locate(&crate::launch::wezterm::RealFs).is_ok();
             if crate::launch::wezterm_fetch::should_fetch(true, env_wez.as_deref(), env_mux.as_deref(), found) {
                 crate::launch::wezterm_fetch::spawn_background(false);

@@ -31,7 +31,7 @@ pub(crate) fn switches_from(wezterm: Option<&str>, mux: Option<&str>) -> (bool, 
     switches_on(cfg!(windows), wezterm, mux)
 }
 
-fn switches_on(windows: bool, wezterm: Option<&str>, mux: Option<&str>) -> (bool, bool) {
+pub(crate) fn switches_on(windows: bool, wezterm: Option<&str>, mux: Option<&str>) -> (bool, bool) {
     if !windows {
         let wez = wezterm == Some("1");
         return (wez, wez && mux == Some("1"));
