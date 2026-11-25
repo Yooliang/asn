@@ -611,7 +611,7 @@ export const SettingsPanel = {
           <label class="chk"><input type="checkbox" :checked="st.bridge.remoteInput" :disabled="st.bridge.busy" @change="act('bridge-remote-input', $event.target.checked)" aria-label="允許遠端在這台打字" /><span>允許遠端在這台打字</span></label>
           <small>你登入的其他設備可以直接在這台電腦的夥伴視窗打字，不會再跳出確認；紅條會顯示誰在打字，你隨時可以按「結束」。關掉後，別台就不能在這台打字，看畫面不受影響。</small>
           <label class="chk"><input type="checkbox" :checked="st.bridge.geminiFullAccess" :disabled="st.bridge.busy" @change="act('bridge-gemini-full-access', $event.target.checked)" aria-label="Gemini 背景工作者可以寫檔和執行指令" /><span>Gemini 背景工作者可以寫檔和執行指令</span></label>
-          <small>讓 Gemini 能寫檔和執行指令。寫檔限在它的工作資料夾；執行指令可能動到資料夾以外的地方。改了之後，已經在跑的 Gemini 要重啟才會生效。</small>
+          <small>讓 Gemini 能寫檔和執行指令。寫到工作資料夾以外時，ASN 會中止那一輪，但那一次可能已經寫出去；執行指令可能動到資料夾以外的地方。切換後，正在跑的 Gemini 會馬上重開套用。</small>
           <label>沒指定收件人的信交給
             <input class="set-sel" type="text" maxlength="100" :value="st.bridge.unaddressedTo" :disabled="st.bridge.busy" placeholder="留空＝交給我本人" @change="act('bridge-unaddressed', $event.target.value)" aria-label="沒指定收件人的信交給哪個視窗" />
           </label>

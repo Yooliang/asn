@@ -649,11 +649,24 @@ impl Manager {
         Ok(self.status())
     }
 
-    /// 打開／關閉「Gemini 背景工作者可以寫檔和執行指令」（#2348）。只存檔：每次開、重啟 Gemini 時才重讀，已在跑的要重啟才生效
+    /// 打開／關閉「Gemini 背景工作者可以寫檔和執行指令」（#2348）。存檔後，「開新夥伴」開出、正在跑的 Gemini 馬上依新開關重開
+    /// （正在處理的那一輪會中止；agents.json 手寫的、Grok 不動）。橋沒在跑就只存檔，之後開、重啟時才讀
     pub fn set_gemini_full_access(&self, on: bool) -> Result<Status, String> {
         update_settings(&self.data_dir, |s| {
             s.gemini_full_access = on;
         })?;
+        let running = self.inner.lock().unwrap().running.as_ref().map(|r| (r.engines.clone(), r.log.clone()));
+        if let Some((Some(engines), log)) = running {
+            if let Some(admin) = engines.acp_admin() {
+                let (done, failed) = admin.apply_gemini_toggle();
+                if !done.is_empty() {
+                    log.line(&format!("gemini_full_access={on}：已依新設定重開 {}", done.join("、")));
+                }
+                for (name, why) in failed {
+                    log.line(&format!("gemini_full_access={on}：{name} 沒能重開（{why}），請手動重開"));
+                }
+            }
+        }
         Ok(self.status())
     }
 

@@ -3245,7 +3245,7 @@ fn bridge_set_remote_input(m: State<'_, bridge::Manager>, on: bool) -> Result<br
     m.set_remote_input(on)
 }
 
-/// 打開／關閉「Gemini 背景工作者可以寫檔和執行指令」（預設關，#2348）。只存檔；已在跑的 Gemini 要重啟才生效
+/// 打開／關閉「Gemini 背景工作者可以寫檔和執行指令」（預設關，#2348）。存檔後，正在跑的（開新夥伴開出的）Gemini 馬上重開套用
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]

@@ -9,7 +9,7 @@ const panel = read('../ui/lib/settings-panel.mjs'), list = read('../ui/list.js')
 
 test('設定頁：有勾選與完整說明，動作有登記', () => {
   assert.match(panel, /:checked="st\.bridge\.geminiFullAccess" :disabled="st\.bridge\.busy" @change="act\('bridge-gemini-full-access', \$event\.target\.checked\)" aria-label="Gemini 背景工作者可以寫檔和執行指令"/)
-  assert.ok(panel.includes('讓 Gemini 能寫檔和執行指令。寫檔限在它的工作資料夾；執行指令可能動到資料夾以外的地方。改了之後，已經在跑的 Gemini 要重啟才會生效。'))
+  assert.ok(panel.includes('讓 Gemini 能寫檔和執行指令。寫到工作資料夾以外時，ASN 會中止那一輪，但那一次可能已經寫出去；執行指令可能動到資料夾以外的地方。切換後，正在跑的 Gemini 會馬上重開套用。'))
   assert.ok(SETTING_OPS.includes('bridge-gemini-full-access'))
 })
 
