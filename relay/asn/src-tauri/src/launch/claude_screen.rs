@@ -95,7 +95,7 @@ fn is_login_time_limit(line: &str) -> bool {
     LOGIN_TIME_LIMIT_HEADS.iter().any(|h| rest.starts_with(h))
 }
 /// 額度用完那一句（#2335）：「You've hit your <名稱> limit」，後面接「 · resets <時間>」之類。名稱最多兩個詞，也可以沒有
-const USAGE_LIMIT_HEAD: &str = "You've hit your ";
+const USAGE_LIMIT: &str = "You've hit your ";
 const USAGE_NAME_MAX_CHARS: usize = 24;
 const USAGE_NAME_MAX_WORDS: usize = 2;
 /// claude 2.1.331 執行檔內嵌的額度名稱（空字串＝「You've hit your limit」）。名單外的名稱要後面真的帶「· resets」才算
@@ -679,7 +679,7 @@ fn indent_of(line: &str) -> usize {
 
 /// 「You've hit your <名稱> limit」開頭的訊息才回名稱。limit 後面只能沒有字，或接「·」
 fn usage_limit_name(body: &str) -> Option<&str> {
-    let rest = body.strip_prefix(USAGE_LIMIT_HEAD)?;
+    let rest = body.strip_prefix(USAGE_LIMIT)?;
     let (name, tail) = match rest.strip_prefix("limit") {
         Some(tail) => ("", tail),
         None => rest.split_once(" limit")?,
