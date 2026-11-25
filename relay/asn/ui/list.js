@@ -1365,7 +1365,7 @@ window.addEventListener('resize', () => {
 if (ui.mode === 'merged') await windowApi.mainLayout(true, sizes.merged.w, sizes.merged.h, true)
 
 watchBeingViewed(core.hub, list => { beingViewed.value = list })   // #2038 PR-4
-await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms('bell'); refreshLaunchersOnBell() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
+core.on('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms('bell'); refreshLaunchersOnBell() })   // #2038 PR-5；Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 core.on('asn:open', c => void openChat(c.cid))   // 提示被點了
 await core.ready()   // 以前是 await listen(...)：事件註冊完才往下走
@@ -2048,7 +2048,7 @@ const app = createApp({
     onBeforeUnmount(offAccountEvents)
     if (!info.shot) {
       setInterval(() => void accounts.pollIncoming(), ACCT_INCOMING_POLL_MS)
-      void listen('relay-bell', () => void accounts.pollIncoming())
+      core.hub.on('relay-bell', () => void accounts.pollIncoming())
     }
     // 有人要求切換這台的帳號：把視窗叫到前面，讓使用者看得到確認框
     watch(() => accounts.state.incoming.length, n => { if (n) void shellApi.showMain().catch(() => {}) })

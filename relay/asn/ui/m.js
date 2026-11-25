@@ -305,7 +305,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     if (plan.banner) { banner.value = plan.banner; clearTimeout(bannerTimer); bannerTimer = setTimeout(() => { banner.value = null }, plan.banner.ms ?? BANNER_MS) }
   })
   startCallPoll({ anyCall: () => callOn.value, pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
-  await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void roomsHook.refresh?.() })   // Rust 端的門鈴（前景時有效）
+  core.on('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void roomsHook.refresh?.() })   // #2038 PR-5；Rust 端的門鈴（前景時有效）；原本就不等註冊完成，維持不等
   watchAndroidUpdateProgress(core.hub, { upd, withProgress })   // 只有「下載中」才套用（#2038 PR-2）
   upd.enabled = bridge?.selfUpdateEnabled() === true
   setInterval(() => { if (shouldAutoCheck(upd, prefs)) void checkUpdate() }, UPDATE_CHECK_MS)
@@ -1463,7 +1463,7 @@ const app = createApp({
     watch(() => nav.sheet, s => { if (s !== 'secret' && sec.cur) secClose() })
     document.addEventListener('visibilitychange', () => { void checkSecrets() })
     setInterval(() => { void checkSecrets() }, SECRET_POLL_MS)
-    void listen('relay-bell', () => { void checkSecrets() })
+    core.hub.on('relay-bell', () => { void checkSecrets() })
     // ---------- 手機回答權限框（#853）：電腦上的夥伴在問權限，跳出全文和選項，按一個就送那個數字
     // 全文只給本人看（不寫儲存、不進紀錄、不放系統通知）；沒登入或後台還沒部署就靜默略過；門鈴沒有內容
     const pq = reactive({ cur: null, armed: false, busy: false, error: '', waiting: false, result: null })
@@ -1548,7 +1548,7 @@ const app = createApp({
     watch(() => nav.sheet, s => { if (s !== 'permreq' && pq.cur) pqClose() })
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { pqWatchStart(); pqAutoArm() } else { pqWatchStop(); clearTimeout(pqAutoTimer); pqAutoTimer = 0 } void checkPermReqs() })
     setInterval(() => { void checkPermReqs() }, PQ_POLL_MS)
-    void listen('relay-bell', () => { void checkPermReqs() })
+    core.hub.on('relay-bell', () => { void checkPermReqs() })
     // ---------- 電腦要往終端送字／代答提問（#285、#296）：跳出確認面板，本人按確認或拒絕；桌面才能建立請求，手機只能決定 ----------
     // 預覽文字只給本人看（不寫儲存、不進 console）；沒登入或後台還沒部署就靜默略過；通知只敲門鈴，不帶內容
     const tq = reactive({ cur: null, choice: null, error: '', busy: false, left: 0 })
@@ -1581,7 +1581,7 @@ const app = createApp({
     watch(() => nav.sheet, s => { if (s !== 'termreq' && tq.cur) tqClose() })
     document.addEventListener('visibilitychange', () => { void checkTermReqs() })
     setInterval(() => { void checkTermReqs() }, TQ_POLL_MS)
-    void listen('relay-bell', () => { void checkTermReqs() })
+    core.hub.on('relay-bell', () => { void checkTermReqs() })
     // 名單第三行「最後一句話」：本機有記錄就用；沒有的（例如剛裝）向後台補一次往來（每位最多一次、依畫面順序、慢慢來、整個執行期有上限），補到的記錄存在本機當快取
     const lastOf = id => lastMap[id] ?? ''
     const backfillTried = new Set()
