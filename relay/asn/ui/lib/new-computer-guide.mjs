@@ -1,7 +1,8 @@
 // 「這台電腦還沒有 AI 夥伴，選一個開始」新手引導卡（#1605）的純邏輯：什麼時候出現、四家各給什麼動作、要說的話。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。狀態一律沿用既有判斷（device-state.mjs 的 vendorState／installAction），不另寫偵測。
 // 電腦版（list.js）與手機版（m.js）用同一份：電腦版看本機偵測，手機版看那台電腦的設備卡狀態。
-import { AGENT_INSTALL_UI, STATE, installAction, vendorState } from './device-state.mjs'
+import { STATE, installAction, vendorState } from './device-state.mjs'
+import { AGENT_INSTALL_UI } from './flags.mjs'
 import { normalizeSearchQuery } from './search.mjs'
 import { getLocal, removeLocal, setLocal } from './local-prefs.mjs'
 

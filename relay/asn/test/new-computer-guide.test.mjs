@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { GUIDE_HIDDEN_KEY, GUIDE_TEXT, GUIDE_VENDORS, guideApplies, guideReshowVisible, guideRows, guideVisible, loadGuideHidden, localVendorStates, saveGuideHidden, singleFlight } from '../ui/lib/new-computer-guide.mjs'
 import { STATE } from '../ui/lib/device-state.mjs'
+import { AGENT_INSTALL_UI } from '../ui/lib/flags.mjs'
 import { REASON } from '../ui/lib/mobile-launch.mjs'
 import { INSTALL_TEXT } from '../ui/lib/agent-install.mjs'
 
@@ -95,6 +96,7 @@ test('偵測還沒回來：四列都是正在檢查、沒有按鈕', () => {
 
 test('安裝入口（AGENT_INSTALL_UI）開了、而且裝得動：沒裝的 Claude 給「安裝並登入」；關著或裝不動就是說明', () => {
   const st = all({})
+  assert.equal(AGENT_INSTALL_UI, false, '旗標（ui/lib/flags.mjs）預設關')
   assert.equal(view(guideRows({ states: st })), 'claude:- codex:- gemini:- grok:-', '入口預設關')
   const on = guideRows({ states: st, installUi: true, installAvail: { grok: true } })
   assert.equal(on[0].action, 'install', 'Claude 本機裝得動（installAction local）')

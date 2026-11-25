@@ -2,12 +2,8 @@
 // 真正的下載、驗簽章、安裝都在後端 ai_cli_install（已驗過的流程）；這裡只決定「鈕出不出現」與「確認、進度、結果」三段畫面。
 // 其他家（Codex、Gemini、Grok、pi）完全不放鈕，另開單（Codex、Gemini 也接上）。
 
-/**
- * 入口旗標：預設關，一般使用者看不到（旗標關＝畫面上沒有這顆鈕，不是灰掉）。
- * 擁有者在家用機跑完一次安裝與一次更新之後，另開小 PR 改成 true。與 AGENT_INSTALL_UI（設備頁的「安裝並登入」）互不相干。
- */
-export const LAUNCH_INSTALL_BTN = false
-
+// 入口旗標 LAUNCH_INSTALL_BTN 在 ./flags.mjs（預設關；擁有者在家用機跑完一次安裝與一次更新之後，另開小 PR 改成 true）
+import { LAUNCH_INSTALL_BTN } from './flags.mjs'
 export const TOOL_INSTALL_TEXT = Object.freeze({
   install: '進行安裝',
   update: '進行更新',

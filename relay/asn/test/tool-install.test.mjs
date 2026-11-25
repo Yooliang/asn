@@ -2,7 +2,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { LAUNCH_INSTALL_BTN, TOOL_INSTALL_TEXT, createToolInstall, installBtnKind, installRowView } from '../ui/lib/tool-install.mjs'
+import { AGENT_INSTALL_UI, LAUNCH_INSTALL_BTN } from '../ui/lib/flags.mjs'
+import { TOOL_INSTALL_TEXT, createToolInstall, installBtnKind, installRowView } from '../ui/lib/tool-install.mjs'
 import { SETTING_OPS } from '../ui/lib/settings-panel.mjs'
 
 const rd = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -108,9 +109,10 @@ test('#1548 ⑤ 接線：命令名、動作登記、不動 AGENT_INSTALL_UI、�
   for (const op of ['launch-install-ask', 'launch-install-yes', 'launch-install-no']) assert.ok(SETTING_OPS.includes(op), op)
   assert.match(rd('ui/lib/tauri.mjs'), /cliInstall: toolId => invoke\('ai_cli_install', \{ toolId \}\)/)
   const js = rd('ui/list.js')
-  assert.match(js, /LAUNCH_INSTALL_BTN === true \|\| globalThis\.__smokeLaunchInstallBtn === true/)
+  assert.match(js, /import \{[^}]*launchInstallOn[^}]*\} from '\.\/lib\/flags\.mjs'/, 'list.js 的開關來自 flags.mjs')
+  assert.match(rd('ui/lib/flags.mjs'), /LAUNCH_INSTALL_BTN === true \|\| globalThis\.__smokeLaunchInstallBtn === true/, '冒煙掛勾行為不變')
   assert.match(js, /case 'launch-install-yes': await toolInstall\.confirm\(\)/)
-  assert.match(rd('ui/lib/device-state.mjs'), /export const AGENT_INSTALL_UI = false/)
+  assert.equal(AGENT_INSTALL_UI, false)
   const css = rd('ui/style.css')
   assert.match(css, /\.launch-tools \.launch-act\{flex:none;margin-left:auto\}/)
   assert.doesNotMatch(css, /launch-install-btns/, '確認的兩顆鈕改用共用元件（取消在左、同意在右），舊的排版規則已刪')
