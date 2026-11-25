@@ -3605,7 +3605,7 @@ pub fn screen_watch_set_user_off(off: bool) {
 
 #[cfg(feature = "gui")]
 fn screen_watch_required() -> Result<(), String> {
-    super::screen_watch::require_enabled(std::env::var(super::screen_watch::ENV_SCREEN_WATCH).ok().as_deref())
+    super::screen_watch::require_enabled(crate::flags::switch_raw(super::screen_watch::ENV_SCREEN_WATCH).as_deref())
 }
 
 /// 傳到手機的權限框。夥伴畫面不離開電腦的唯一例外（#853）：只有這個框的文字和選項，只給 `perm_remote` 用
@@ -3653,14 +3653,14 @@ pub fn partner_notices() -> Vec<PartnerNotice> {
 /// 非 Windows 沒設 ASN_SCREEN_WATCH=1 就是沒跑，就算設定頁的開關顯示開著
 #[cfg(feature = "gui")]
 pub fn screen_watch_active() -> bool {
-    super::screen_watch::require_enabled(std::env::var(super::screen_watch::ENV_SCREEN_WATCH).ok().as_deref()).is_ok()
+    super::screen_watch::require_enabled(crate::flags::switch_raw(super::screen_watch::ENV_SCREEN_WATCH).as_deref()).is_ok()
 }
 
 /// 背景讀 Claude 夥伴視窗的畫面，判斷卡在哪（todo-next-162）。Windows 預設開；只標狀態與提醒本人，沒有按鈕，也不送字
 #[cfg(feature = "gui")]
 pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
     use super::screen_watch::{match_sessions, pace_of, Schedule, ENV_SCREEN_WATCH, TICK_MS};
-    if !super::screen_watch::enabled(std::env::var(ENV_SCREEN_WATCH).ok().as_deref()) || std::env::args().any(|a| a == "--shot") {
+    if !super::screen_watch::enabled(crate::flags::switch_raw(ENV_SCREEN_WATCH).as_deref()) || std::env::args().any(|a| a == "--shot") {
         return;
     }
     let sessions_dir = crate::identity::home_dir().join(".claude").join("sessions");
@@ -3789,7 +3789,7 @@ fn live_with(data_dir: &Path, mux_base: Option<PathBuf>, background: bool) -> Li
     svc.set_agy_args(Box::new(crate::gemini_session::live_args));
     // B2b 開關：Windows 預設開在共用的 mux 裡（0.2.4），ASN_TERM_MUX=0 才關。啟動時讀一次（要在 reclaim 之前，認領 mux 的列要看它）
     // #611：mux 建立在 WezTerm 開窗之上——ASN_TERM_WEZTERM 關著時 mux 無效（關係定義在 win_term::switches_from）
-    let (env_wez, env_mux) = (std::env::var(super::win_term::ENV_WEZTERM).ok(), std::env::var(super::win_term::ENV_MUX).ok());
+    let (env_wez, env_mux) = (crate::flags::switch_raw(super::win_term::ENV_WEZTERM), crate::flags::switch_raw(super::win_term::ENV_MUX));
     // Linux 等其他平台：預設關，本人在設定頁打開、而且 PATH 上找得到 wezterm 才開（0.2.9）
     let (wez, mux) = if cfg!(windows) {
         super::win_term::switches_from(env_wez.as_deref(), env_mux.as_deref())
@@ -3803,7 +3803,7 @@ fn live_with(data_dir: &Path, mux_base: Option<PathBuf>, background: bool) -> Li
         super::win_term::unix_switches(env_wez.as_deref(), env_mux.as_deref(), user_on, found)
     };
     // #868：設定頁的「伺服器終端」開關。環境變數 0 優先；使用者關掉了就不用。啟動時讀一次，執行中不變（改了要重開 ASN 才生效，已開著的夥伴不會被搬）
-    let (wanted, locked) = super::win_term::term_server_wanted(std::env::var(super::win_term::ENV_MUX).ok().as_deref(), crate::bridge::read_settings(data_dir).term_server_off);
+    let (wanted, locked) = super::win_term::term_server_wanted(crate::flags::switch_raw(super::win_term::ENV_MUX).as_deref(), crate::bridge::read_settings(data_dir).term_server_off);
     let mux = mux && wanted;
     // 畫面只寫「已由系統設定固定」；細節（是哪個環境變數）放這裡，給想查的人看（#868）
     if locked {

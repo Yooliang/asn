@@ -175,6 +175,7 @@ fn pinned_value(name: &str, bridge: &crate::bridge::core::Config, aegis: &crate:
         "ASN_WAIT_ALERT" => bridge.wait_alert.to_string(),
         "ASN_FORWARD_EXACT_UNVERIFIED" => bridge.forward_exact_unverified.to_string(),
         "ASN_FORWARD_EXACT" => crate::bridge::worker::forward_exact_enabled().to_string(),
+        "ASN_MOD_WAIT_MS" => super::ms("ASN_MOD_WAIT_MS").to_string(),
         "ASN_AEGIS_URL" => aegis.url.clone(),
         "ASN_AEGIS_FROM_MEMBER" => aegis.from_member.clone(),
         "ASN_AEGIS_ALLOW" => aegis.allow.join(","),

@@ -1,6 +1,6 @@
 //! 登記表本體：程式裡出現的每個 `ASN_*` 名字一列。欄位說明見 [`super::Flag`]。
 //! 新增環境變數時，在這裡加一列（守門測試會逼）；舊名要登記在 `envc::PAIRS`，兩邊測試會對。
-use super::{Flag, Kind, Pin};
+use super::{Flag, Kind, Pin, Typed};
 
 macro_rules! old {
     ($s:literal) => {
@@ -88,10 +88,10 @@ pub static FLAGS: &[Flag] = &[
     prod("ASN_CODEX_ALLOW_FULL_ACCESS", old!("CODEX_ALLOW_FULL_ACCESS"), "關（設 1 才放行）", "放行「完全存取」模式的 Codex 視窗", &["bridge/engines/codex.rs"], NO_ENGINE),
     prod("ASN_CODEX_REPLY_NOTE", old!("CODEX_REPLY_NOTE"), "開（設 0 關）", "回信加註", &["bridge/engines/codex.rs"], NO_ENGINE),
     prod("ASN_CODEX_SKIP_VERSION_CHECK", old!("CODEX_SKIP_VERSION_CHECK"), "關（設 1 略過）", "略過 Codex 最低版本檢查", &["bridge/engines/codex.rs"], NO_ENGINE),
-    prod("ASN_WAIT_ALERT", None, "關（設 1 開）", "夥伴卡在輸入框超過兩分鐘就通知本人（實驗）", &["bridge/core.rs"], Pin::Value("false")),
-    prod("ASN_FORWARD_EXACT", None, "關（設 1 開）", "轉交內容與原信逐字相同（實驗）", &["bridge/worker.rs"], Pin::Value("false")),
-    prod("ASN_FORWARD_EXACT_UNVERIFIED", None, "關（設 1 開）", "沒有自我測試時，開發機強制生效", &["bridge/core.rs"], Pin::Value("false")),
-    prod("ASN_MOD_WAIT_MS", None, "600000（限 1 秒到 1 小時）", "外掛等視窗閒置的上限（毫秒）", &["bridge/partner_ops.rs"], NEEDS_APP),
+    prod("ASN_WAIT_ALERT", None, "關（設 1 開）", "夥伴卡在輸入框超過兩分鐘就通知本人（實驗）", &["bridge/core.rs"], Pin::Value("false")).typed(Typed::Exact1),
+    prod("ASN_FORWARD_EXACT", None, "關（設 1 開）", "轉交內容與原信逐字相同（實驗）", &["bridge/worker.rs"], Pin::Value("false")).typed(Typed::Exact1),
+    prod("ASN_FORWARD_EXACT_UNVERIFIED", None, "關（設 1 開）", "沒有自我測試時，開發機強制生效", &["bridge/core.rs"], Pin::Value("false")).typed(Typed::Exact1),
+    prod("ASN_MOD_WAIT_MS", None, "600000（限 1 秒到 1 小時）", "外掛等視窗閒置的上限（毫秒）", &["bridge/partner_ops.rs"], Pin::Value("600000")).typed(Typed::Ms { default: 600_000, min: 1_000, max: 3_600_000 }),
     // ---- 電腦版主程式、帳號、資料夾 ----------------------------------------------------
     prod("ASN_HOME", old!("HOME"), "~/.asn（再找舊 ~/.irori-relay）", "使用者資料夾；設了就不做舊資料夾遷移", &["home.rs", "launch/pi_setup.rs"], LOGIC),
     prod("ASN_DATA", old!("ASN_DATA"), "%APPDATA%\\tw.yooliang.asn", "電腦版資料夾；設了就不套新裝預設值（開發或測試覆蓋）", &["lib.rs", "first_run.rs"], LOGIC),
@@ -110,11 +110,12 @@ pub static FLAGS: &[Flag] = &[
     prod("ASN_RECV_HEARTBEAT_MS", old!("RECV_HEARTBEAT_MS"), "30000", "收信心跳（毫秒）", &["heartbeat.rs"], Pin::Value("30000")),
     prod("ASN_RECV_STALE_MS", old!("RECV_STALE_MS"), "90000", "心跳過期（毫秒）", &["heartbeat.rs"], Pin::Value("90000")),
     prod("ASN_PULL_BACKOFF_MS", old!("PULL_BACKOFF_MS"), "5000,10000,20000,40000,60000", "收信失敗退避（逗號分隔毫秒）", &["cli/env.rs"], Pin::Value("5000,10000,20000,40000,60000")),
+    // 等 #1470（節點金鑰預設改加密）合併再動：它會改 secret_file.rs 的同一段讀法，這張先不碰，避免衝突（#2163 PR-2b 刻意略過）
     prod("ASN_SEAL_NODE_KEY", None, "關（設 1 加密、0 不加密）", "Windows 節點金鑰是否加密存放（過渡期開關）", &["secret_file.rs"], Pin::Value("false")),
-    prod("ASN_TERM_WEZTERM", None, "Windows 開、其他平台關（設 0 關、1 開）", "是否用自帶 WezTerm 開視窗（名字定義在 win_term.rs 的常數，term.rs、bridge/mod.rs 經常數讀）", &["launch/win_term.rs"], Pin::Value("Windows 開、其他平台關")),
-    prod("ASN_TERM_MUX", None, "Windows 開、其他平台關（設 0 關、1 開）", "共用終端服務（mux）開關（名字定義在 win_term.rs 的常數，term.rs、bridge/mod.rs 經常數讀）", &["launch/win_term.rs"], Pin::Value("Windows 開、其他平台關")),
-    prod("ASN_SCREEN_WATCH", None, "Windows 開、其他平台關（設 0 關、1 開）", "讀夥伴畫面判斷卡在哪（名字定義在 screen_watch.rs 的常數）", &["launch/screen_watch.rs"], Pin::Value("Windows 開、其他平台關")),
-    prod("ASN_WEZTERM_DIR", None, "內建或安裝位置", "指定 WezTerm 資料夾（部署覆蓋，測試也用）", &["launch/wezterm.rs"], LOGIC),
+    prod("ASN_TERM_WEZTERM", None, "Windows 開、其他平台關（設 0 關、1 開）", "是否用自帶 WezTerm 開視窗（名字定義在 win_term.rs 的常數，term.rs、bridge/mod.rs 經常數讀）", &["launch/win_term.rs"], Pin::Value("Windows 開、其他平台關")).typed(Typed::PlatformSwitch),
+    prod("ASN_TERM_MUX", None, "Windows 開、其他平台關（設 0 關、1 開）", "共用終端服務（mux）開關（名字定義在 win_term.rs 的常數，term.rs、bridge/mod.rs 經常數讀）", &["launch/win_term.rs"], Pin::Value("Windows 開、其他平台關")).typed(Typed::PlatformSwitch),
+    prod("ASN_SCREEN_WATCH", None, "Windows 開、其他平台關（設 0 關、1 開）", "讀夥伴畫面判斷卡在哪（名字定義在 screen_watch.rs 的常數）", &["launch/screen_watch.rs"], Pin::Value("Windows 開、其他平台關")).typed(Typed::PlatformSwitch),
+    prod("ASN_WEZTERM_DIR", None, "內建或安裝位置", "指定 WezTerm 資料夾（部署覆蓋，測試也用）", &["launch/wezterm.rs"], LOGIC).typed(Typed::Path),
     // ---- 內部傳遞 -------------------------------------------------------------------
     internal("ASN_LAUNCH_ARGS", "—", "開視窗的參數（父程序設給啟動腳本）", &["launch/local.rs"]).with_legacy(old!("LAUNCH_ARGS")),
     internal("ASN_LAUNCH_DIR", "—", "開視窗的工作目錄（父程序設給啟動腳本）", &["launch/local.rs"]).with_legacy(old!("LAUNCH_DIR")),
@@ -124,12 +125,12 @@ pub static FLAGS: &[Flag] = &[
     internal("ASN_SPECS", "—", "視窗擷取清單（設給內嵌 PowerShell）", &["wins.rs"]),
     internal("ASN_DIR", "—", "視窗擷取輸出資料夾（設給內嵌 PowerShell）", &["wins.rs"]),
     // ---- CI、除錯 -------------------------------------------------------------------
-    Flag::new(Kind::Ci, "ASN_SHOT_TOAST_LENIENT", None, "關（設 1 開）", "發版流程設：提示視窗截圖疑似空白只警告", &["wins.rs"], Pin::Na),
-    Flag::new(Kind::Debug, "ASN_ASKPASS_PIPE", None, "正式管道名（只有除錯建置讀）", "測試用管道名（要有測試前綴）", &["askpass/pipe.rs"], Pin::Na),
+    Flag::new(Kind::Ci, "ASN_SHOT_TOAST_LENIENT", None, "關（設 1 開）", "發版流程設：提示視窗截圖疑似空白只警告（3b：發版 e2e 要用它，等 PR-3b 建好 e2e 專用建置再改走 test_var）", &["wins.rs"], Pin::Na),
+    Flag::new(Kind::Debug, "ASN_ASKPASS_PIPE", None, "正式管道名（只有測試、除錯或 test-hooks 建置讀）", "測試用管道名（要有測試前綴）", &["askpass/pipe.rs"], Pin::Na),
     // ---- 測試與手動驗證 ----------------------------------------------------------------
-    test("ASN_CODEX_SCRIPT", old!("CODEX_SCRIPT"), "用 codex", "用一支 node 腳本取代 codex（測試用）", &["bridge/engines/codex.rs"]),
+    test("ASN_CODEX_SCRIPT", old!("CODEX_SCRIPT"), "用 codex", "用一支 node 腳本取代 codex（測試用，Rust 端經 test_var 讀；JS 端 relay/machine 也讀，這一張不改）", &["bridge/engines/codex.rs"]),
     test("ASN_MOCK_BIN_DIR", old!("ASN_MOCK_BIN_DIR"), "走真實 PATH 與家目錄", "假執行檔資料夾；設了就不看真實安裝位置（測試用）", &["agent_tools/detect.rs", "agent_tools/mod.rs"]),
-    test("ASN_SHOT_LOGIN", old!("ASN_SHOT_LOGIN"), "不動", "--shot 截圖模式假裝已登入（端到端測試用）", &["lib.rs"]),
+    test("ASN_SHOT_LOGIN", old!("ASN_SHOT_LOGIN"), "不動", "--shot 截圖模式假裝已登入（端到端測試用；3b：發版 e2e 要用它，等 PR-3b 建好 e2e 專用建置再改走 test_var）", &["lib.rs"]),
     test("ASN_UPDATE_GOLDEN", None, "只比對（CI 禁止重寫）", "重寫黃金檔", &["golden_util.rs"]),
     test("ASN_REGEN_SCREENS", None, "不重產", "重產前端畫面清單檔", &["launch/screen_catalog.rs"]),
     test("ASN_MANUAL_TEST", None, "略過", "手動真機測試放行", &["launch/console.rs", "launch/switch.rs"]),
