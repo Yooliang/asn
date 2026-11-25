@@ -2,6 +2,7 @@
 // 電腦才有的功能（內建收發室、開 Claude 視窗、密碼小幫手、用量、系統匣、多視窗）手機沒有，這個檔案也不叫它們。
 // 打開 App 才收信：前景時照電腦版的節奏輪詢，加上門鈴一響就拉；回到前景時立刻拉一次（推播留給第二期）。
 import { AsnCore } from './lib/core.mjs'
+import { watchInvite } from './lib/notice-events.mjs'
 import { getLocal } from './lib/local-prefs.mjs'
 import { plainMessage } from './lib/plain-errors.mjs'
 import { patchWithFallback } from './lib/settings-save.mjs'
@@ -466,7 +467,7 @@ const app = createApp({
     const onInviteCode = code => { if (typeof code === 'string' && code && screen.value === 'main') groupFlow.openJoin(code) }
     if (screen.value === 'main') {
       setInterval(() => { if (document.visibilityState === 'visible') void refreshRooms() }, ROOM_POLL_MS)
-      void listen('asn:invite', onInviteCode)
+      watchInvite(core.hub, onInviteCode)   // #2038 PR-4：改走事件中心
       void mobileStateApi.invitePending().then(onInviteCode).catch(() => { /* 出口已留警告記錄；沒帶邀請碼進來照常使用 */ })
       void refreshRooms()
     }

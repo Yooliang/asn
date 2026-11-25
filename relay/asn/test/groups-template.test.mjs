@@ -74,7 +74,7 @@ test('入口：手機群組分組永遠顯示並有建立／加入；電腦「�
   assert.match(l, /@group-menu="op => openGroupMenu\(t\.id, op\)"/); assert.match(l, /<group-sheet :flow="groupFlow">/)
   const mj = read('ui', 'm.js'); const lj = read('ui', 'list.js')
   assert.match(mj, /chatGroupItems\(f\)/); assert.match(read('ui', 'lib', 'actionbar.mjs'), /label: '邀請別人加入'/, '手機的邀請項目由共用的 chatGroupItems 提供（#1421）'); assert.match(sheet + chatpane, /邀請別人加入/)
-  assert.match(lj, /listen\('asn:invite'/); assert.match(mj, /listen\('asn:invite'/)
+  assert.match(lj, /watchInvite\(core\.hub, onInviteCode\)/); assert.match(mj, /watchInvite\(core\.hub, onInviteCode\)/)
 })
 
 test('簽章動作只走 relay_group／帶簽章的讀寫指令；Rust 端指令都有註冊', () => {

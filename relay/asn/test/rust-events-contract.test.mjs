@@ -33,6 +33,7 @@ export function emittedNames(files) {
 const rustNames = emittedNames(walk(SRC))
 const tableNames = new Set(Object.keys(RUST_EVENTS))
 // Rust 送了前端還沒人接的（不刪 Rust，本版不改 Rust；之後另開單決定刪或接上）
+// term-req-update、window-spool：#2332 處理中（PR-4 只登記、不新增接收者）
 const NO_LISTENER_OK = new Set(['window-spool', 'term-req-update', 'term-view-remote-input-stalled'])
 
 test('Rust 送的每個事件都在事件表裡（新增事件要先登記）', () => {

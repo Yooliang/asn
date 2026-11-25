@@ -94,6 +94,7 @@ import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { watchUpdateProgress } from './lib/progress-events.mjs'
 import { watchAccountEvents } from './lib/account-events.mjs'
+import { watchInvite, watchNowPlaying, watchBeingViewed } from './lib/notice-events.mjs'
 import { createCallBeats } from './lib/call-beats.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
 import { isCallActive } from './lib/call-session.mjs'
@@ -1198,7 +1199,8 @@ const groupFlow = createGroupFlow({
 })
 // 邀請連結一鍵開啟（asn://invite/<碼>）：Rust 端收到後通知；啟動前就收到的用 invite_pending 補取
 const onInviteCode = code => { if (typeof code === 'string' && code) { void shellApi.showMain().catch(() => {}); groupFlow.openJoin(code) } }
-await listen('asn:invite', onInviteCode)
+watchInvite(core.hub, onInviteCode)   // #2038 PR-4：改走事件中心
+await core.hub.ready()   // 先等註冊完再補取啟動前的邀請（跟以前 await listen 一樣）
 void linkApi.invitePending().then(onInviteCode).catch(e => console.warn('[ASN] 讀不到啟動前的邀請', String(e?.message ?? e)))
 
 // ---------- 「通知」大分頁（方案 A）：系統通知不進名單、也不開成一般對話分頁 ----------
@@ -1362,7 +1364,7 @@ window.addEventListener('resize', () => {
 })
 if (ui.mode === 'merged') await windowApi.mainLayout(true, sizes.merged.w, sizes.merged.h, true)
 
-await listen('term-being-viewed', list => { beingViewed.value = Array.isArray(list) ? list : [] })
+watchBeingViewed(core.hub, list => { beingViewed.value = list })   // #2038 PR-4
 await listen('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms('bell'); refreshLaunchersOnBell() })   // Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 core.on('asn:open', c => void openChat(c.cid))   // 提示被點了
@@ -1377,7 +1379,7 @@ watch(() => totalUnread(friends.value), n => { void trayApi.setUnread(n).catch((
 // 在線狀態：狀態下拉與個人訊息交給 Rust 端回報（每 60 秒一次，改了立刻送；後台沒部署就靜默不送）
 watch(() => [me.status, me.psm], () => { void trayApi.setPresence(me.status, me.psm ?? '').catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ }) }, { immediate: true })
 // 正在聽的歌：開關交給 Rust 端（關著不讀不送）；歌變了 Rust 端推 asn:now-playing，自己的名單頭顯示
-await listen('asn:now-playing', p => { nowPlaying.value = showNowPlaying.value ? String(p ?? '') : '' })   // listen 已經把 payload 拆好交過來
+watchNowPlaying(core.hub, { isOn: () => showNowPlaying.value, setText: t => { nowPlaying.value = t } })   // #2038 PR-4：hub 已經把 payload 拆好交過來
 watch(showNowPlaying, on => {
   if (!on) nowPlaying.value = ''
   void trayApi.setNowPlaying(on).then(t => { nowPlaying.value = on ? String(t ?? '') : '' }).catch(() => { /* 常呼叫：失敗時出口 invoke 已記一行並去重，這裡不再多記，免得洗記錄 */ })
