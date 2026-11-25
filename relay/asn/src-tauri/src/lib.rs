@@ -289,6 +289,7 @@ pub fn read_settings_name(data_dir: &Path) -> Option<String> {
     // 走共用設定層（#2162）；合不合法在 NamesDoc::normalize 判斷
     settings::load_in::<settings::NamesDoc>(data_dir).value.window_name
 }
+/// 只剩 bridge/core.rs 使用，待 #2232 E 一起刪除
 pub fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
     settings::atomic::write(path, text.as_bytes(), settings::atomic::STATE)
 }
@@ -2672,7 +2673,7 @@ fn capture_ui_ready(app: State<'_, App>, tag: String) -> Result<(), String> {
     if safe.is_empty() {
         return Err("標記名稱不合格".into());
     }
-    write_atomic(&dir.join(format!("{safe}.ok")), "1").map_err(|e| e.to_string())
+    settings::atomic::write(&dir.join(format!("{safe}.ok")), b"1", settings::atomic::STATE).map_err(|e| e.to_string())
 }
 
 /// `--shot` 模式：前端錯誤印到 stderr，方便 shot.mjs 除錯。
@@ -4047,11 +4048,11 @@ mod tests {
     fn 設定檔讀寫_壞檔或不合格就當沒設() {
         let d = tempfile::tempdir().unwrap();
         assert_eq!(read_settings_name(d.path()), None);
-        write_atomic(&d.path().join("settings.json"), r#"{"window_name":"我的ASN"}"#).unwrap();
+        crate::settings::atomic::write(&d.path().join("settings.json"), r#"{"window_name":"我的ASN"}"#.as_bytes(), crate::settings::atomic::STATE).unwrap();
         assert_eq!(read_settings_name(d.path()).as_deref(), Some("我的ASN"));
-        write_atomic(&d.path().join("settings.json"), r#"{"window_name":" bad"}"#).unwrap();
+        crate::settings::atomic::write(&d.path().join("settings.json"), r#"{"window_name":" bad"}"#.as_bytes(), crate::settings::atomic::STATE).unwrap();
         assert_eq!(read_settings_name(d.path()), None);
-        write_atomic(&d.path().join("settings.json"), "{壞掉").unwrap();
+        crate::settings::atomic::write(&d.path().join("settings.json"), "{壞掉".as_bytes(), crate::settings::atomic::STATE).unwrap();
         assert_eq!(read_settings_name(d.path()), None);
     }
 

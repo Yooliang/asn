@@ -43,7 +43,7 @@ impl LoginAlerts {
     pub fn save(&self, file: &Path) -> Result<(), String> {
         let mut told: Vec<&String> = self.told.iter().collect();
         told.sort();
-        crate::write_atomic(file, &json!({ "told": told, "last_sent": self.last_sent }).to_string()).map_err(|e| e.to_string())
+        crate::settings::atomic::write(file, json!({ "told": told, "last_sent": self.last_sent }).to_string().as_bytes(), crate::settings::atomic::STATE).map_err(|e| e.to_string())
     }
 
     /// `current`＝這一輪停在登入畫面的視窗名。回傳該通知的

@@ -83,7 +83,7 @@ pub fn read_adopted(file: &std::path::Path) -> Vec<(String, String, String)> {
 
 fn write_adopted(file: &std::path::Path, list: &[(String, String, String)]) -> std::io::Result<()> {
     let arr: Vec<Value> = list.iter().map(|(n, s, c)| json!({ "name": n, "session_id": s, "cwd": c })).collect();
-    crate::write_atomic(file, &json!({ "version": 1, "adopted": arr }).to_string())
+    crate::settings::atomic::write(file, json!({ "version": 1, "adopted": arr }).to_string().as_bytes(), crate::settings::atomic::SETTINGS)
 }
 
 /// 接手名冊裡某一筆改名（對話編號與資料夾不變）
