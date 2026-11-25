@@ -220,6 +220,20 @@ export function makeAlerts(opts, deps) {
         save({ ...cur, [cause]: next })
       } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
     },
+    // 累加版 raise（#2345）：同類已有 active 告警時，把這一行接在原訊息後面（同一行不重複），不蓋掉前一筆；沒有就新建。
+    // 用在同一版電腦版與 Linux 都沒貼成，兩個平台的補貼原文都要留。ref 取最新一筆，--ack-alert 一次清全部
+    raiseAppend(cause, reason, line, ref = null) {
+      try {
+        const cur = load().alerts
+        const old = cur[cause]
+        if (old && old.status === 'active' && old.reason === reason) {
+          const lines = String(old.message).split('\n')
+          if (!lines.includes(line)) this.raise(cause, reason, `${old.message}\n${line}`, ref)
+          return
+        }
+        this.raise(cause, reason, line, ref)
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
     resolve(cause) {
       try {
         const cur = load().alerts
@@ -441,10 +455,11 @@ export async function runOnce(opts, deps) {
     const out = finish(r.status === 0, `local_sign_publish 結束碼 ${r.status}，細節看 auto-publish.log`)
     // 正式發佈成功但群組沒貼成（#2345）：子程序結束碼是 0，只能靠 stdout 的固定標記得知。發佈結果照記成功（不暫停發佈），
     // 另外留 post-failed 告警讓人補貼。放在 finish 之後：finish 若貼出別的訊息成功會 resolve post-failed，不能把這筆清掉；
-    // 之後只有 --ack <平台@版號>、--ack-alert post-failed、或下一次真的貼成功才會清
+    // 之後只有 --ack-alert post-failed（一次清全部）、或下一次真的貼成功才會清；已發佈的版本不是失敗類，--ack 不收。
+    // 同一版電腦版與 Linux 都沒貼成時用累加寫入，兩個平台的原文都保留
     if (r.status === 0 && d.action === 'publish') {
       const pf = parsePostFailedMarker(r.stdout)
-      if (pf) alerts.raise('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
+      if (pf) alerts.raiseAppend('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
     }
     return out
   } finally {

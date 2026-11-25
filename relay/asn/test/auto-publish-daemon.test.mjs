@@ -1036,3 +1036,17 @@ test('#2345 標記解析：格式壞、不是字串都當沒有', () => {
   assert.equal(parsePostFailedMarker('ASN_POST_FAILED_V1 {"text":1}'), null)
   assert.equal(parsePostFailedMarker(undefined), null)
 })
+
+test('#2345 同一版電腦版與 Linux 都沒貼成：兩則原文都在同一筆 active 告警裡，同一則不重複', async () => {
+  const e = env({ desktopRows: [row('v0.2.99', 222)], linuxRows: [row('linux-v0.2.99', 333)] })
+  e.deps.spawn = (bin, args) => ({ status: 0, stdout: args.includes('--dry-run') ? 'ok' : markerOut(args.includes('linux') ? '【Linux 版發版完成】v0.2.99' : '【發版完成】v0.2.99'), stderr: '' })
+  for (let i = 0; i < 4; i++) { e.clock.t = T0 + i * 120_000; await runOnce(opts, e.deps) }
+  const a = alertOf(e).alerts['post-failed']
+  assert.equal(a.status, 'active')
+  assert.ok(a.message.includes('desktop@0.2.99') && a.message.includes('【發版完成】v0.2.99'), '電腦版原文')
+  assert.ok(a.message.includes('linux@0.2.99') && a.message.includes('【Linux 版發版完成】v0.2.99'), 'Linux 原文')
+  assert.equal(a.message.split('【發版完成】').length, 2, '同一則不重複')
+  const res = await runCommand(parseArgs(['--ack-alert', 'post-failed', '--state', STATE]), e.deps)
+  assert.equal(res.code, 0)
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
+})
