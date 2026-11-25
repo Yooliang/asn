@@ -40,7 +40,7 @@ import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
 import { copyText, createGroupApi, memberFriendId, roomHue, roomInitial } from './lib/groups.mjs'
-import { createRoomHub } from './lib/room-hub.mjs'
+import { createCardGate, createRoomHub } from './lib/room-hub.mjs'
 import { createRoomPollCounter } from './lib/room-poll-counter.mjs'
 import { isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
@@ -432,13 +432,17 @@ const meAv = computed(() => selfAvatarSrc({ selfNode: info.node, windowName: inf
 core.on('state', sync)
 core.on('log', pushLog)
 // 重抓群組列表，並更新開著的群組對話的新訊息與待主持人確認的卡片
+const cardGate = createCardGate({ counter: roomPollCounter })
 async function refreshRooms(why = 'other') {
   roomPollCounter.hit(`list:refreshRooms:${why}`)
   await hub.refresh()
+  // 確認卡片只對看得見的與有變動的群組重抓（#2161 F3）：計時器只看可見的；門鈴看可見＋列有變動的；啟動等其他情況全打
+  const cardIds = await cardGate(why, [...openedRooms], { rowOf: id => hub.rowOf(roomIdOf(id)), isVisible: id => chatShownId(id) })
   for (const id of openedRooms) {
     const rid = roomIdOf(id)
     if (!hub.raw(rid)) continue
-    await hub.read(rid); await hub.loadCards(rid, 'refreshRooms')
+    await hub.read(rid)
+    if (cardIds.has(id)) await hub.loadCards(rid, 'refreshRooms')
     pushLog(id)
   }
   sync()
