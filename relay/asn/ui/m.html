@@ -832,13 +832,44 @@
       </section>
     </div>
     <!-- 確認電腦的指紋：名字、指紋都只用文字節點顯示 -->
-    <div class="m-ops" v-if="vp.method && vp.cur && !vp.sheet" @click.self="closeMethodSheet">
+    <div class="m-ops" v-if="vp.method && vp.cur && !vp.sheet && fs.phase === 'idle'" @click.self="closeMethodSheet">
       <section class="m-ops-panel" role="dialog" aria-modal="true" :aria-label="peerSheetTitle">
         <h2 class="m-ops-h">{{ peerSheetTitle }}</h2>
         <p class="m-note m-peer-body">{{ KNOWN_TEXT.methodBody }}</p>
-        <button type="button" class="m-btn m-btn-big" :disabled="vp.busy" @click="scanPeer">{{ KNOWN_TEXT.scanButton }}</button>
+        <button type="button" class="m-btn m-btn-big m-fps-go" :disabled="vp.busy" @click="fpShowStart">{{ KNOWN_TEXT.scanButton }}</button>
         <button type="button" class="m-btn" :disabled="vp.busy" @click="methodPickInstead">{{ KNOWN_TEXT.scanFallback }}</button>
         <button type="button" class="m-btn m-ops-cancel" :disabled="vp.busy" @click="closeMethodSheet">{{ KNOWN_TEXT.cancel }}</button>
+      </section>
+    </div>
+    <!-- #1863：請那台電腦自動跳出 QR Code（等待中、出現了、沒有回應、電腦端取消、要更新）；字都在 fp-show.mjs，只用文字節點 -->
+    <div class="m-ops" v-if="vp.method && vp.cur && !vp.sheet && fs.phase !== 'idle'">
+      <section :class="['m-ops-panel', 'm-fps', 'm-fps-' + fs.phase]" role="dialog" aria-modal="true" :aria-label="peerSheetTitle">
+        <h2 class="m-ops-h">{{ peerSheetTitle }}</h2>
+        <template v-if="fs.phase === 'wait'">
+          <span class="m-fps-spin" aria-hidden="true"></span>
+          <p class="m-note m-peer-body m-fps-msg" role="status">{{ FP_SHOW_TEXT.wait }}</p>
+          <p class="m-fps-sub" v-if="fs.note" role="status">{{ fs.note }}</p>
+          <p class="m-fps-sub">{{ FP_SHOW_TEXT.waitNote }}</p>
+          <button type="button" class="m-btn m-ops-cancel" @click="fpShowEnd">{{ FP_SHOW_TEXT.cancel }}</button>
+        </template>
+        <template v-else-if="fs.phase === 'shown'">
+          <p class="m-note m-peer-body m-fps-msg" role="status">{{ FP_SHOW_TEXT.shown }}</p>
+          <div class="m-fps-row">
+            <button type="button" class="m-btn m-btn-big m-fps-scan" :disabled="vp.busy" @click="fpShowScan">{{ KNOWN_TEXT.scanButton }}</button>
+            <button type="button" class="m-btn m-ops-cancel" :disabled="vp.busy" @click="fpShowEnd">{{ FP_SHOW_TEXT.cancel }}</button>
+          </div>
+        </template>
+        <template v-else-if="fs.phase === 'noreply'">
+          <p class="m-note m-peer-body m-fps-msg" role="alert"><b>{{ FP_SHOW_TEXT.noReplyHead }}</b><br>{{ FP_SHOW_TEXT.noReplyBody }}</p>
+          <div class="m-fps-row">
+            <button type="button" class="m-btn m-btn-big m-fps-retry" @click="fpShowRetry">{{ FP_SHOW_TEXT.retry }}</button>
+            <button type="button" class="m-btn m-ops-cancel" @click="fpShowEnd">{{ FP_SHOW_TEXT.cancel }}</button>
+          </div>
+        </template>
+        <template v-else>
+          <p class="m-note m-peer-body m-fps-msg" role="alert">{{ fs.phase === 'pc_cancelled' ? FP_SHOW_TEXT.pcCancelled : FP_SHOW_TEXT.old }}</p>
+          <button type="button" class="m-btn m-ops-cancel" @click="fpShowEnd">{{ FP_SHOW_TEXT.ok }}</button>
+        </template>
       </section>
     </div>
     <div class="m-ops" v-if="vp.sheet && vp.cur && vp.ch" @click.self="closePeerSheet">

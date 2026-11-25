@@ -36,6 +36,7 @@ import { ACCT_ACTIONS, handleAcctAction, requireSignedFlag } from "../_shared/ac
 import { handleQuotaRead, handleQuotaShare, QUOTA_READ_ACTION, QUOTA_SHARE_ACTIONS } from "../_shared/quota_read.ts";
 import { handleTermReqAction, TERM_REQ_ACTIONS, TERM_REQ_SIGNED_ACTIONS } from "../_shared/term_request.ts";
 import { handlePermReqAction, PERM_REQ_ACTIONS, PERM_REQ_SIGNED_ACTIONS } from "../_shared/perm_request.ts";
+import { FP_SHOW_ACTIONS, FP_SHOW_SIGNED_ACTIONS, handleFpShowAction } from "../_shared/fp_show.ts";
 import { handleReport, handleReportGet } from "../_shared/report.ts";
 import { DEVICE_PAIR_ACTIONS, DEVICE_PAIR_SIGNED_ACTIONS, handleDevicePairAction } from "../_shared/device_pair.ts";
 import { handleTermViewAction, TERM_VIEW_ACTIONS, TERM_VIEW_SIGNED_ACTIONS } from "../_shared/term_view_ctl.ts";
@@ -875,6 +876,14 @@ async function handle(req: Request): Promise<Response> {
     const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
     const signedPerm = PERM_REQ_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
     const r = await handlePermReqAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring, onCreated: (id) => signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "confirm", me.id, id)) }, me, action, params, signedPerm);
+    return json(r.status, r.body);
+  }
+  // 手機請電腦顯示指紋（見 _shared/fp_show.ts）：手機用本人簽章請求、查狀態、結束（沒簽章一律 403）；電腦用節點金鑰領取與回報
+  if (action && FP_SHOW_ACTIONS.has(action)) {
+    const raw = req.method === "POST" ? await req.json().catch(() => null) : null;
+    const params = { ...Object.fromEntries(url.searchParams), ...(raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) };
+    const signedFp = FP_SHOW_SIGNED_ACTIONS.has(action) ? await signedUserId(accountDeps.verifyJwt, req.headers.get(SIGN_HEADER)) : null;
+    const r = await handleFpShowAction({ rpc: async (fn, args) => await db.rpc(fn, args), ring }, me, action, params, signedFp);
     return json(r.status, r.body);
   }
   // 設備配對（見 _shared/device_pair.ts）：上傳公鑰用節點金鑰，其他都要本人簽章
