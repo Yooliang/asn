@@ -84,7 +84,7 @@ test('設定頁：外掛狀態由 claude_mod_report 帶進來、事件會更新�
   await old.refresh()
   assert.equal(old.state.mod, null, '舊版 Rust 沒這個指令就不顯示')
   assert.match(read('ui/lib/settings-panel.mjs'), /aria-label="Claude 外掛" v-if="modLine\(st\.accounts && st\.accounts\.mod\)"/)
-  assert.match(read('ui/list.js'), /listen\('claude-mod-status'/)
+  assert.match(read('ui/lib/account-events.mjs'), /subscribe\('claude-mod-status'/)
   const lib = read('src-tauri/src/lib.rs')
   assert.ok(lib.includes('claude_mod::claude_mod_report') && lib.includes('claude_mod::claude_mod_check'))
   assert.ok(!/claude_mod_auto_(get|set)|claude_mod::claude_mod_status/.test(lib + read('ui/list.js') + read('ui/onboard.js')), '打勾框用的指令已拿掉')

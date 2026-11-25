@@ -48,7 +48,8 @@ export const createWindowHub = () => makeWindowHub({ ...hubTransport(), log: m =
 // AsnCore 的 hub：先建好、這裡再把 Rust 事件的橋接上
 export const bindRustEvents = hub => hub.attachRust(hubTransport().listen)
 // 附件快取清空了（換帳號、登入、登出）：這個視窗記著的大圖也丟掉（#1493）
-if (T?.event) void listen('attach-cache-cleared', () => shownPhotos.clear()).catch(() => {})
+// 模組一載入就訂（每個載入 tauri.mjs 的視窗都會註冊，包括沒有 AsnCore 的子視窗）；用這個視窗自己的 hub，橋接失敗只記一行
+if (T?.event) createWindowHub().subscribe('attach-cache-cleared', () => shownPhotos.clear())
 
 // 給 AsnCore 的 transport：HTTP 與金鑰都在 Rust 端，這裡拿不到金鑰
 export const transport = {
