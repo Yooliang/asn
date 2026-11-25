@@ -871,6 +871,7 @@ mod tests {
         c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         c
     }
+    #[cfg_attr(windows, allow(dead_code))]
     fn alive(pid: u32) -> bool {
         #[cfg(windows)]
         {
@@ -883,18 +884,74 @@ mod tests {
         }
     }
 
+    /// 記住測試啟動的那一個子程序，之後問「它是不是真的結束了」。
+    /// 只用 PID 查（tasklist）不可靠（#2311）：Windows 會立刻把剛釋出的 PID 配給別的新程序，
+    /// 全套高並行時（大量測試同時開程序）查到的是別人，就誤判成「還沒死」。
+    /// 所以在 `on_spawn` 那一刻（PID 一定還是這個子程序的）就開一個程序控制代碼，之後看這個控制代碼有沒有訊號，
+    /// 與 PID 後來被誰用掉無關。正式程式已在回傳前 kill 並 wait，所以回傳後立刻檢查、不輪詢（輪詢會掩蓋沒等它結束的退步）。
+    struct Spawned {
+        pid: std::sync::atomic::AtomicU32,
+        #[cfg(windows)]
+        handle: std::sync::atomic::AtomicUsize,
+    }
+    impl Spawned {
+        fn new() -> Self {
+            Spawned {
+                pid: std::sync::atomic::AtomicU32::new(0),
+                #[cfg(windows)]
+                handle: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+        fn on_spawn(&self, p: u32) {
+            self.pid.store(p, Ordering::SeqCst);
+            #[cfg(windows)]
+            unsafe {
+                use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+                let h = OpenProcess(PROCESS_SYNCHRONIZE, 0, p);
+                assert!(!h.is_null(), "要能開啟剛啟動的子程序");
+                self.handle.store(h as usize, Ordering::SeqCst);
+            }
+        }
+        fn pid(&self) -> u32 {
+            self.pid.load(Ordering::SeqCst)
+        }
+        fn gone(&self) -> bool {
+            #[cfg(windows)]
+            unsafe {
+                use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+                use windows_sys::Win32::System::Threading::WaitForSingleObject;
+                let h = self.handle.load(Ordering::SeqCst);
+                assert!(h != 0, "on_spawn 沒被呼叫");
+                WaitForSingleObject(h as _, 0) == WAIT_OBJECT_0
+            }
+            #[cfg(not(windows))]
+            {
+                !alive(self.pid())
+            }
+        }
+    }
+    #[cfg(windows)]
+    impl Drop for Spawned {
+        fn drop(&mut self) {
+            let h = self.handle.load(Ordering::SeqCst);
+            if h != 0 {
+                unsafe { windows_sys::Win32::Foundation::CloseHandle(h as _) };
+            }
+        }
+    }
+
     #[tokio::test]
     async fn 子程序逾時_只結束那一個程序_很快就回() {
         let n = tokio::sync::Notify::new();
-        let pid = std::sync::atomic::AtomicU32::new(0);
+        let sp = Spawned::new();
         let t0 = std::time::Instant::now();
-        let e = run_with_deadline(sleeper(), Duration::from_millis(400), &n, |p| pid.store(p, Ordering::SeqCst)).await.unwrap_err();
+        let e = run_with_deadline(sleeper(), Duration::from_millis(400), &n, |p| sp.on_spawn(p)).await.unwrap_err();
         assert_eq!(e, "辨識逾時");
         // 假程式睡 40 秒；上限放寬到 30 秒容納機器忙碌時的啟動與排程延遲。逾時機制若失效，要等滿 40 秒才會回，仍會紅
         assert!(t0.elapsed() < Duration::from_secs(30), "不能等到睡醒：{:?}", t0.elapsed());
-        let pid = pid.load(Ordering::SeqCst);
+        let pid = sp.pid();
         assert!(pid != 0 && pid != std::process::id());
-        assert!(!alive(pid), "逾時後那個子程序要真的結束");
+        assert!(sp.gone(), "逾時後那個子程序要真的結束");
     }
 
     #[tokio::test]
@@ -906,26 +963,26 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(300)).await;
             n2.notify_one();
         });
-        let pid = std::sync::atomic::AtomicU32::new(0);
+        let sp = Spawned::new();
         let t0 = std::time::Instant::now();
-        let e = run_with_deadline(sleeper(), Duration::from_secs(30), &n, |p| pid.store(p, Ordering::SeqCst)).await.unwrap_err();
+        let e = run_with_deadline(sleeper(), Duration::from_secs(30), &n, |p| sp.on_spawn(p)).await.unwrap_err();
         kicker.abort();
         assert_eq!(e, "已取消");
         // 逾時設 30 秒、假程式睡 40 秒；取消機制失效時會變成「辨識逾時」而不是「已取消」，上面那句就會紅
         assert!(t0.elapsed() < Duration::from_secs(25));
-        assert!(!alive(pid.load(Ordering::SeqCst)));
+        assert!(sp.gone(), "取消後那個子程序要真的結束");
     }
 
     #[tokio::test]
     async fn 先取消_後才開始等_也立刻取消() {
         let n = tokio::sync::Notify::new();
         request_cancel(&n); // 通知發生在 run_with_deadline 開始等之前
-        let pid = std::sync::atomic::AtomicU32::new(0);
+        let sp = Spawned::new();
         let t0 = std::time::Instant::now();
-        let e = run_with_deadline(sleeper(), Duration::from_secs(30), &n, |p| pid.store(p, Ordering::SeqCst)).await.unwrap_err();
+        let e = run_with_deadline(sleeper(), Duration::from_secs(30), &n, |p| sp.on_spawn(p)).await.unwrap_err();
         assert_eq!(e, "已取消");
         assert!(t0.elapsed() < Duration::from_secs(25), "不能等到逾時：{:?}", t0.elapsed());
-        assert!(!alive(pid.load(Ordering::SeqCst)));
+        assert!(sp.gone());
         // 許可只用一次：第二次不再被取消（用很短的逾時確認走的是逾時）
         let e = run_with_deadline(sleeper(), Duration::from_millis(300), &n, |_| {}).await.unwrap_err();
         assert_eq!(e, "辨識逾時");
