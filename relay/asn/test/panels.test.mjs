@@ -9,7 +9,18 @@ import { GUIDES } from '../ui/lib/guides.mjs'
 import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
 import { closeAllChatTabs, closeChatTab, closeOtherChatTabs, moveChatTab, normalizePinned, openChatTab, orderTabs, toggleChatPin } from '../ui/lib/ctabs.mjs'
 
+import { Window } from 'happy-dom'
+
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+
+// #1763 T5：電腦端畫面檔（list.html、panel.html、style.css）改成「解析成 DOM 再查」，不再用正規表示式／indexOf 在原始碼字串裡找。
+// 模板裡的 v-if／v-for／@click 等都是一般屬性，用選擇器可以直接查；樣式用 getComputedStyle 看實際算出的結果。
+// （list.js、panel.js 是入口檔、Rust 是另一種語言，沒有東西可渲染，仍留字串守門。）
+const loadDoc = (file) => {
+  const win = new Window({ url: 'http://localhost/' })
+  win.document.documentElement.innerHTML = read(file).replace(/^<!doctype[^>]*>/i, '')
+  return { win, doc: win.document }
+}
 
 test('分頁 id：指引、設定各一個固定 id，不會撞到好友 id', () => {
   assert.deepEqual(PANEL_KINDS, ['guide', 'setting'])
@@ -99,20 +110,29 @@ test('守門（樞紐）：openPanel 兩種模式都有、大小記在 asn-me.js
   // 設定一變就把快照推給設定視窗（只在分離模式）
   assert.ok(hub.includes("if (ui.mode === 'split') emit('asn:settings', settingsState.value)") && hub.includes('watch(settingsState, pushSettings, { deep: true })'))
   // 分頁列、右鍵選單
-  const html = read('ui/list.html')
-  assert.ok(html.includes('v-for="t in tabItems"') && html.includes('v-if="!chatTabMenuPanel"'), '面板分頁沒有「固定分頁」選項')
-  assert.ok(html.includes("v-for=\"k in PANEL_KINDS\"") && html.includes('ui.active === panelTabId(k)'))
+  const { doc } = loadDoc('ui/list.html')
+  assert.ok(doc.querySelector('[v-for="t in tabItems"].ctab'), '分頁列一個分頁一格')
+  const pin = doc.querySelector('[v-if="!chatTabMenuPanel"]')
+  assert.ok(pin && pin.querySelector('button[role=menuitem]'), '面板分頁沒有「固定分頁」選項（固定鈕只在不是面板分頁時才顯示）')
+  const tpl = doc.querySelector('template[v-for="k in PANEL_KINDS"]')
+  assert.ok(tpl, '每種面板各一個窗格（v-for 走 PANEL_KINDS）')
+  const pane = (tpl.content ?? tpl).querySelector('.pane.panel-pane')
+  assert.ok(pane && pane.getAttribute('v-if').includes('ui.active === panelTabId(k)'), '每種面板各有一個窗格，只在它的分頁作用中時顯示')
   assert.ok(hub.includes('const mergedTabs = computed(() => tabItems.value.filter(t => !t.panel))'), '面板分頁沒有對話窗')
 })
 
 test('守門（獨立視窗）：panel.html／panel.js 有自訂外框、標題、可移動與調整大小，並回報大小', () => {
-  const html = read('ui/panel.html'), js = read('ui/panel.js')
-  assert.ok(html.includes('data-tauri-drag-region') && html.includes("ctl('close')") && html.includes("ctl('min')") && html.includes("ctl('max')"), '自訂標題列：可拖、最小化最大化關閉')
-  assert.ok(html.includes('RESIZE_DIRS') && html.includes('resizeFrom(d)'), '拖邊緣調整大小')
+  const { doc } = loadDoc('ui/panel.html'), js = read('ui/panel.js')
+  const bar = doc.querySelector('header.titlebar[data-tauri-drag-region]')
+  assert.ok(bar, '自訂標題列可以拖')
+  const btns = Object.fromEntries([...bar.querySelectorAll('button.tb')].map(b => [b.getAttribute('aria-label'), b.getAttribute('@click')]))
+  assert.deepEqual(btns, { 最小化: "ctl('min')", 最大化: "ctl('max')", 關閉: "ctl('close')" }, '自訂標題列：最小化、最大化、關閉各一顆')
+  const rz = doc.querySelector('i.rz[v-for="d in RESIZE_DIRS"]')
+  assert.ok(rz && rz.getAttribute('@mousedown.left.prevent') === 'resizeFrom(d)', '拖邊緣調整大小')
   assert.ok(js.includes('await initFrame()'), '外框跟著設定（自訂／原生）')
   assert.ok(js.includes("emit('asn:set', { op: 'panel-size'") && js.includes("emit('asn:cmd', { op: 'panel-hello', kind })"))
   assert.ok(js.includes("listen('asn:panel'") && js.includes("PANEL_KINDS.includes(q) ? q : 'guide'"))
-  assert.ok(!/v-html/.test(html))
+  assert.equal(doc.querySelectorAll('[v-html]').length, 0, '不用 v-html')
 })
 
 test('守門（Rust）：open_panel／close_panels 有註冊、只認兩種視窗、外框設定與截圖涵蓋', () => {
@@ -127,13 +147,21 @@ test('守門（Rust）：open_panel／close_panels 有註冊、只認兩種視�
 })
 
 test('守門（樣式）：分頁圖示與面板版面的 CSS 都在', () => {
-  const css = read('ui/style.css')
-  assert.ok(/\.pane\.panel-pane\{[^}]*overflow-y:auto/.test(css))
-  assert.ok(css.includes('.ctab .panel-ic'))
+  const win = new Window({ url: 'http://localhost/' })
+  const doc = win.document
+  const style = doc.createElement('style'); style.textContent = read('ui/style.css'); doc.head.appendChild(style)
+  doc.body.innerHTML = '<div class="pane panel-pane"></div><div class="ctab"><svg class="panel-ic"></svg></div><div class="pane"></div>'
+  const pane = win.getComputedStyle(doc.querySelector('.pane.panel-pane'))
+  assert.equal(pane.overflowY, 'auto', '面板窗格可以捲動')
+  assert.equal(win.getComputedStyle(doc.querySelectorAll('.pane')[1]).overflowY === 'auto', false, '一般窗格不受影響（規則只套在 panel-pane）')
+  const ic = win.getComputedStyle(doc.querySelector('.ctab .panel-ic'))
+  assert.equal(ic.width, '14px', '分頁上的面板圖示有固定大小')
+  assert.equal(ic.height, '14px')
 })
 
 test('「開始」頁籤只在完全沒有分頁時出現：開了設定或指引分頁也要收掉（跟開對話一樣）', async () => {
-  const fs = await import('node:fs')
-  const html = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
-  assert.match(html, /class="ctab home" v-if="!tabItems\.length"/)
+  const { doc } = loadDoc('ui/list.html')
+  const homes = doc.querySelectorAll('.ctab.home')
+  assert.equal(homes.length, 1)
+  assert.equal(homes[0].getAttribute('v-if'), '!tabItems.length', '只在沒有任何分頁（對話、設定、指引都算）時出現')
 })
