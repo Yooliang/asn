@@ -1,6 +1,6 @@
 //! 登記表本體：程式裡出現的每個 `ASN_*` 名字一列。欄位說明見 [`super::Flag`]。
 //! 新增環境變數時，在這裡加一列（守門測試會逼）；舊名要登記在 `envc::PAIRS`，兩邊測試會對。
-use super::{Flag, Kind, Pin};
+use super::{Flag, Kind, Pin, Typed};
 
 macro_rules! old {
     ($s:literal) => {
@@ -88,10 +88,10 @@ pub static FLAGS: &[Flag] = &[
     prod("ASN_CODEX_ALLOW_FULL_ACCESS", old!("CODEX_ALLOW_FULL_ACCESS"), "關（設 1 才放行）", "放行「完全存取」模式的 Codex 視窗", &["bridge/engines/codex.rs"], NO_ENGINE),
     prod("ASN_CODEX_REPLY_NOTE", old!("CODEX_REPLY_NOTE"), "開（設 0 關）", "回信加註", &["bridge/engines/codex.rs"], NO_ENGINE),
     prod("ASN_CODEX_SKIP_VERSION_CHECK", old!("CODEX_SKIP_VERSION_CHECK"), "關（設 1 略過）", "略過 Codex 最低版本檢查", &["bridge/engines/codex.rs"], NO_ENGINE),
-    prod("ASN_WAIT_ALERT", None, "關（設 1 開）", "夥伴卡在輸入框超過兩分鐘就通知本人（實驗）", &["bridge/core.rs"], Pin::Value("false")),
-    prod("ASN_FORWARD_EXACT", None, "關（設 1 開）", "轉交內容與原信逐字相同（實驗）", &["bridge/worker.rs"], Pin::Value("false")),
-    prod("ASN_FORWARD_EXACT_UNVERIFIED", None, "關（設 1 開）", "沒有自我測試時，開發機強制生效", &["bridge/core.rs"], Pin::Value("false")),
-    prod("ASN_MOD_WAIT_MS", None, "600000（限 1 秒到 1 小時）", "外掛等視窗閒置的上限（毫秒）", &["bridge/partner_ops.rs"], NEEDS_APP),
+    prod("ASN_WAIT_ALERT", None, "關（設 1 開）", "夥伴卡在輸入框超過兩分鐘就通知本人（實驗）", &["bridge/core.rs"], Pin::Value("false")).typed(Typed::Exact1),
+    prod("ASN_FORWARD_EXACT", None, "關（設 1 開）", "轉交內容與原信逐字相同（實驗）", &["bridge/worker.rs"], Pin::Value("false")).typed(Typed::Exact1),
+    prod("ASN_FORWARD_EXACT_UNVERIFIED", None, "關（設 1 開）", "沒有自我測試時，開發機強制生效", &["bridge/core.rs"], Pin::Value("false")).typed(Typed::Exact1),
+    prod("ASN_MOD_WAIT_MS", None, "600000（限 1 秒到 1 小時）", "外掛等視窗閒置的上限（毫秒）", &["bridge/partner_ops.rs"], Pin::Value("600000")).typed(Typed::Ms { default: 600_000, min: 1_000, max: 3_600_000 }),
     // ---- 電腦版主程式、帳號、資料夾 ----------------------------------------------------
     prod("ASN_HOME", old!("HOME"), "~/.asn（再找舊 ~/.irori-relay）", "使用者資料夾；設了就不做舊資料夾遷移", &["home.rs", "launch/pi_setup.rs"], LOGIC),
     prod("ASN_DATA", old!("ASN_DATA"), "%APPDATA%\\tw.yooliang.asn", "電腦版資料夾；設了就不套新裝預設值（開發或測試覆蓋）", &["lib.rs", "first_run.rs"], LOGIC),
