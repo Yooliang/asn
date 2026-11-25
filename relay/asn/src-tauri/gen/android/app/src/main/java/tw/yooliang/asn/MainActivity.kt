@@ -31,6 +31,7 @@ class MainActivity : TauriActivity() {
     w.post { w.evaluateJavascript("window.__asnFgEvent && window.__asnFgEvent($fg)", null) }
   }
   val callVoice: CallVoice by lazy { CallVoice(this) }
+  val readAloud: ReadAloud by lazy { ReadAloud(this) }   // 念出訊息（喇叭鈕、自動念）；與通話各用各的語音引擎
 
   // 麥克風權限的回答（通話第一次使用時才問）
   override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -57,6 +58,7 @@ class MainActivity : TauriActivity() {
     try {
       fgEvent(false)
       callVoice.onBackground()
+      readAloud.onBackground()
     } finally {
       super.onStop()
     }

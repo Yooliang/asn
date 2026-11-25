@@ -20,7 +20,7 @@ import { topFields as topFieldsOf } from './settings-list-check.mjs'
 const UI = fileURLToPath(new URL('../ui', import.meta.url))
 const read = f => fs.readFileSync(path.join(UI, f), 'utf8')
 
-const MOBILE_PREFS = ['vibrateMsg', 'vibrateNudge', 'autoUpdate', 'push', 'skin', 'chatPins']
+const MOBILE_PREFS = ['vibrateMsg', 'vibrateNudge', 'autoUpdate', 'push', 'skin', 'chatPins', 'voice']
 const NOTIFY = ['toast', 'msg', 'nudge', 'file']
 // 存檔欄位名單搬到 ui/lib/storage-keys.mjs（設定值清單守門也用同一份）；這裡負責把它們對到前端原始碼
 const DEVICE_FIELDS = [...ME_DEVICE_FIELDS]

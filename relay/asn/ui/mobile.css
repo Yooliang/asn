@@ -559,3 +559,6 @@ html,body.m-body{background:linear-gradient(to bottom,rgba(255,255,255,0) 0,#fff
 @media (prefers-reduced-motion:reduce){.m-fps-spin{animation:none}}
 .m-fps-row{display:flex;gap:8px;flex-wrap:wrap}
 .m-fps-row>.m-btn{flex:1 1 auto}
+/* 念出訊息的喇叭鈕（#2304）：圖示維持小小一顆不撐高那一行，用看不見的外圈把手指點得到的範圍放大 */
+.m-chat .spk{position:relative}
+.m-chat .spk::after{content:"";position:absolute;inset:-12px -10px}
