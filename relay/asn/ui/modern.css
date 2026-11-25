@@ -172,7 +172,10 @@
 :root[data-skin="modern"] .titlebar{position:absolute;z-index:45;top:0;left:0;right:0;height:10px;padding:0;gap:0;background:transparent}
 :root[data-skin="modern"] .titlebar .t-icon,
 :root[data-skin="modern"] .titlebar .t-text{display:none}
-:root[data-skin="modern"] .t-btns{position:absolute;top:0;right:0;gap:0;height:60px;align-items:center}
+:root[data-skin="modern"] .t-btns{position:absolute;top:0;right:0;gap:0;height:60px;align-items:center;pointer-events:none}   /* 容器讓點擊穿過，下面的對話標題列才拖得動；只有三顆鈕本身接點擊（#2302） */
+:root[data-skin="modern"] .t-btns .tb{pointer-events:auto}
+/* 自己的卡片（.me，style.css 是 z-index:50）原本蓋在標題列（45）上面，降到 44：三顆鈕與上緣縮放把手（50）都在它上面，大頭貼選單照樣浮在名單內容之上（#2302） */
+:root[data-skin="modern"] .list-pane > .me{z-index:44}
 :root[data-skin="modern"] .tb{width:46px;height:36px;border:0;border-radius:0;background:transparent;box-shadow:none;color:#4a4f57;filter:none}
 :root[data-skin="modern"] .tb svg{display:none}
 :root[data-skin="modern"] .tb::before{content:"";width:12px;height:12px;background:currentColor;

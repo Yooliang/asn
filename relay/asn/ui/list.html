@@ -28,10 +28,10 @@
   <div class="viewed-bar" :class="{ 'viewed-bar-input': v.input }" v-for="v in beingViewed" :key="v.id" role="alert"><span v-if="v.input">⚠ 「{{ v.who }}」正在這台的夥伴「{{ v.window }}」打字，可以回答權限框。如果不是你，請馬上按結束。</span><span v-else>「{{ v.who }}」正在看夥伴「{{ v.window }}」的畫面。如果不是你，請按結束。</span><button class="aero-btn" type="button" @click="stopBeingViewed(v.id)">結束</button></div>
   <div class="shell" :class="[{ merged: ui.mode === 'merged' }, paneOnly ? 'only-' + paneOnly : '']">
   <div class="pane list-pane">
-    <div class="me">
+    <div class="me" :data-tauri-drag-region="skin === 'line' ? 'deep' : null"><!-- 只有 LINE 的自己卡片在名單最上面；現代外觀的在最下面，不當拖曳區（#2302） -->
       <div class="me-av">
         <button class="dp me-dp" type="button" :class="'st-' + me.status" :style="{ '--h': 205 }" :disabled="avBusy" aria-label="點一下換大頭貼" data-tip="點一下換大頭貼" @click="avMenu = false; avFile.click()" @contextmenu.prevent="avMenu = !avMenu"><span><img :src="meAv" alt="我的大頭貼"></span></button>
-        <ul class="av-menu" v-if="avMenu" role="menu" @click.stop>
+        <ul class="av-menu" v-if="avMenu" role="menu" data-tauri-drag-region="false" @click.stop>
           <li><button type="button" role="menuitem" @click="avMenu = false; avFile.click()">換大頭貼…</button></li>
           <li><button type="button" role="menuitem" :disabled="!selfHasUpload" @click="avMenu = false; removeAvatar()">改回自動產生</button></li>
         </ul>
@@ -66,7 +66,7 @@
       <button class="aero-btn upd-btn" type="button" v-if="upd.phase !== 'installing'" @click.stop="installUpdate">{{ upd.phase === 'failed' ? '重試' : '更新' }}</button>
     </div>
     <!-- 四個大分頁（0.2.18，和手機同樣的字、同樣的順序）：夥伴／對話／設定／通知（#1429）。左邊直排的設備頁籤只在「夥伴」裡 -->
-    <nav class="top-tabs" role="tablist" aria-label="大分頁">
+    <nav class="top-tabs" role="tablist" aria-label="大分頁" :data-tauri-drag-region="skin === 'line' || skin === 'modern' ? 'deep' : null">
       <button v-for="t in (skin === 'line' ? TOP_TABS_LINE : TOP_TABS)" :key="t.key" class="ttab" :class="['ttab-' + t.key, { on: top === t.key }]" type="button" role="tab" :aria-selected="top === t.key" :aria-label="t.key === 'notice' && noticeUnreadN ? t.label + '（' + noticeUnreadN + ' 則未讀）' : t.label" :title="skin === 'line' ? t.label : null" @click="goTop(t.key)">
         <line-icon class="ttab-ic" v-if="skin === 'line'" :name="t.key" :size="22"></line-icon>
         <span>{{ t.label }}</span>
@@ -246,7 +246,7 @@
     </div>
   </div>
   <section class="chat-area" v-if="ui.mode === 'merged'" aria-label="對話">
-    <div class="tabbar" role="tablist" aria-label="開著的對話">
+    <div class="tabbar" role="tablist" aria-label="開著的對話" :data-tauri-drag-region="skin === 'line' || skin === 'modern' ? 'deep' : null">
       <button class="pane-back" type="button" v-if="paneOnly === 'chat'" :aria-label="ui.active === NOTICE_TAB ? '返回通知' : '返回名單'" :title="ui.active === NOTICE_TAB ? '返回通知' : '返回名單'" @click="backToList"><span aria-hidden="true">‹</span> {{ ui.active === NOTICE_TAB ? '通知' : '名單' }}</button>
       <div class="ctab home" v-if="!tabItems.length" :class="{ on: view === 'home' }" role="tab" :aria-selected="view === 'home'"><img src="img/logo.svg" alt="" width="14" height="14"><span class="ctab-name">開始</span></div>
       <div v-for="t in tabItems" :key="t.id" class="ctab" draggable="true" :class="[{ on: view === 'chat' && t.id === ui.active, pinned: isChatTabPinned(t.id), 'panel-tab': t.panel }, tabDragClass(t.id)]" role="tab" :aria-selected="view === 'chat' && t.id === ui.active" :title="plain(t.nick)" :aria-label="plain(t.nick)" @click="activateTab(t.id)" @contextmenu.prevent="openChatTabMenu(t.id, $event)" @auxclick.middle.prevent="!isChatTabPinned(t.id) && closeChatTab(t.id)" @dragstart="onTabDragStart(t.id, $event)" @dragend="onTabDragEnd" @dragover="onTabDragOver(t.id, $event)" @drop="onTabDrop(t.id, $event)">

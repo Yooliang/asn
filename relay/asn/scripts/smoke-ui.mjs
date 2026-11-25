@@ -214,7 +214,7 @@ async function runScenario(cdp, sc, base) {
   })
   await S('Runtime.addBinding', { name: '__smokeInput' })
   await S('Runtime.enable'); await S('Log.enable'); await S('Page.enable')
-  await S('Emulation.setDeviceMetricsOverride', { width: sc.width ?? (sc.page.startsWith('m.html') ? 412 : 1100), height: sc.height ?? 800, deviceScaleFactor: 1, mobile: sc.page.startsWith('m.html') })
+  await S('Emulation.setDeviceMetricsOverride', { width: sc.width ?? (sc.page.startsWith('m.html') ? 412 : 1100), height: sc.height ?? 800, deviceScaleFactor: sc.dpr ?? 1, mobile: sc.page.startsWith('m.html') })   // 情境帶 dpr（#2302）：模擬 125%／150%／200% 縮放
   // 情境帶 reducedMotion（#1592）：用偵錯協定把「減少動態」開起來，交替動畫停住、畫面固定，截圖才每次一樣
   // 沒帶的情境也要明確設成 no-preference，免得 runner 上的 Chrome 預設回報 reduce 讓動畫檢查全部讀到 none
   await S('Emulation.setEmulatedMedia', motionMedia(sc))
@@ -238,11 +238,11 @@ async function runScenario(cdp, sc, base) {
   // 情境帶 widen：探測完把視窗放寬到那個寬度，再確認自動收起沒有寫進設定（大頭貼欄恢復展開）
   if (check.ok && !probeWhy && sc.widen) {
     try {
-      await S('Emulation.setDeviceMetricsOverride', { width: sc.widen, height: sc.height ?? 800, deviceScaleFactor: 1, mobile: false })
+      await S('Emulation.setDeviceMetricsOverride', { width: sc.widen, height: sc.height ?? 800, deviceScaleFactor: sc.dpr ?? 1, mobile: false })
       const v = (await S('Runtime.evaluate', { expression: mpaneWidenProbeSource(), awaitPromise: true, returnByValue: true })).result.value
       if (!v?.ok) probeWhy = v?.why || '放寬後沒有回結果'
     } catch (e) { probeWhy = `放寬後執行失敗：${e.message}` }
-    await S('Emulation.setDeviceMetricsOverride', { width: sc.width, height: sc.height ?? 800, deviceScaleFactor: 1, mobile: false })
+    await S('Emulation.setDeviceMetricsOverride', { width: sc.width, height: sc.height ?? 800, deviceScaleFactor: sc.dpr ?? 1, mobile: false })
     // 放寬後等版面穩定（#1974：取代固定睡 0.3 秒）；等不到就算這個情境失敗
     if (!probeWhy) { try { await settle('放寬視窗後版面穩定') } catch (e) { probeWhy = e.message } }
   }

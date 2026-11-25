@@ -300,12 +300,12 @@
 :root[data-skin="line"] .mbar-back{flex:none;display:grid;place-items:center;width:36px;height:36px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--fg);cursor:pointer}
 :root[data-skin="line"] .mbar-back:hover{background:var(--ls-hover)}
 :root[data-skin="line"] .mbar-back:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-:root[data-skin="line"] .mbar-plate,:root[data-skin="line"] .mbar-plate.is-offline{grid-column:auto;flex:1 1 auto;justify-content:flex-start;padding:0 4px;border:0;border-radius:0;background:transparent;box-shadow:none}
+:root[data-skin="line"] .mbar-plate,:root[data-skin="line"] .mbar-plate.is-offline{grid-column:auto;flex:0 1 auto;justify-content:flex-start;padding:0 4px;border:0;border-radius:0;background:transparent;box-shadow:none}
 :root[data-skin="line"] .mbar-plate .mbar-av{display:none}
 :root[data-skin="line"] .mbar-name{font-size:16px;font-weight:700}
 :root[data-skin="line"] .mbar-plate.is-room .mbar-sub{display:none}
 :root[data-skin="line"] .mbar-count{flex:none;font-size:13px;color:var(--muted)}
-:root[data-skin="line"] .mbar-acts{grid-column:auto;flex:none;gap:4px}
+:root[data-skin="line"] .mbar-acts{grid-column:auto;flex:none;gap:4px;margin-left:auto}   /* 名牌只佔它自己的寬度、空白留給拖曳（#2302）；按鈕區靠右 */
 :root[data-skin="line"] .mbtn{border:0;background:transparent;color:var(--fg)}
 :root[data-skin="line"] .mbtn:hover{background:var(--ls-hover)}
 :root[data-skin="line"] .mbtn.mbtn-offline{border:1px solid var(--line);background:var(--panel)}
@@ -422,7 +422,11 @@
 :root[data-skin="line"] .titlebar{position:absolute;z-index:45;top:0;left:0;right:0;height:10px;padding:0;gap:0;background:transparent}
 :root[data-skin="line"] .titlebar .t-icon,
 :root[data-skin="line"] .titlebar .t-text{display:none}
-:root[data-skin="line"] .t-btns{position:absolute;top:0;right:0;gap:0;height:60px;align-items:center}
+:root[data-skin="line"] .t-btns{position:absolute;top:0;right:0;gap:0;height:60px;align-items:center;pointer-events:none}   /* 容器讓點擊穿過，下面的對話標題列才拖得動；只有三顆鈕本身接點擊（#2302） */
+:root[data-skin="line"] .t-btns .tb{pointer-events:auto}
+/* 自己的卡片（.me，style.css 是 z-index:50）原本蓋在標題列（45）上面：名單視窗（分離模式、窄到只剩名單）右上角的三顆鈕被卡片蓋住點不到。
+   降到 44：還是在名單內容之上（大頭貼選單照樣浮出），但三顆鈕與上緣縮放把手（50）都在它上面（#2302） */
+:root[data-skin="line"] .list-pane > .me{z-index:44}
 :root[data-skin="line"] .tb{width:46px;height:36px;border:0;border-radius:0;background:transparent;box-shadow:none;color:#4a4f57;filter:none}
 :root[data-skin="line"] .tb svg{display:none}
 :root[data-skin="line"] .tb::before{content:"";width:12px;height:12px;background:currentColor;

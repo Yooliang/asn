@@ -685,16 +685,16 @@ export const ActionBar = {
     </div>
   </asn-dialog>
 </div>
-<div class="mbar" v-if="showBar" role="toolbar" aria-label="對話標頭">
+<div class="mbar" v-if="showBar" role="toolbar" aria-label="對話標頭" :data-tauri-drag-region="skin === 'line' || skin === 'modern' ? 'deep' : null">
   <button class="mbar-back" type="button" v-if="skin === 'line' && showBack" aria-label="返回名單" title="返回名單" @click="$emit('back')"><line-icon name="back" :size="22"></line-icon></button>
-  <div class="mbar-plate" :class="{ 'is-offline': plate.offline, 'is-room': plate.room }" role="group" :aria-label="plate.aria">
+  <div class="mbar-plate" :class="{ 'is-offline': plate.offline, 'is-room': plate.room }" role="group" :aria-label="plate.aria" data-tauri-drag-region="false">
     <asn-avatar class="mbar-av" v-if="!plate.room" :src="avatar" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar>
     <span class="mbar-av mbar-room" v-else aria-hidden="true">{{ plate.initial }}</span>
     <b class="mbar-name">{{ plate.name }}</b>
     <small class="mbar-sub" v-if="plate.sub"><template v-if="skin === 'line' && plate.busy">{{ plate.machine }}{{ plate.machine ? '・' : '' }}<span class="l-busy">{{ plate.state }}</span></template><template v-else>{{ plate.sub }}</template></small>
     <small class="mbar-count" v-if="skin === 'line' && isRoom && friend.psm">{{ friend.psm }}</small>
   </div>
-  <div class="mbar-acts">
+  <div class="mbar-acts" data-tauri-drag-region="false">
     <button class="mbtn" type="button" data-slot="term" v-if="termReady" :class="{ on: termOn }" :aria-pressed="String(termOn)" :aria-label="termBtn.label" :title="termTip" @click="onWindow">
       <line-icon :name="termOn ? 'msg' : 'term'"></line-icon>
     </button>

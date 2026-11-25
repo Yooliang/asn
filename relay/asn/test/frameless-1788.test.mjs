@@ -13,7 +13,8 @@ for (const skin of ['line', 'modern']) {
     assert.ok(css.includes(`${sel('.titlebar .t-icon')},\n${sel('.titlebar .t-text')}{display:none}`), '標題列文字沒藏起來')
   })
   test(`${skin}：三顆鈕在右上角，46×36，在 60px 高的標題列裡垂直置中`, () => {
-    assert.ok(css.includes(`${sel('.t-btns')}{position:absolute;top:0;right:0;gap:0;height:60px;align-items:center}`), '三顆鈕沒有釘在右上角')
+    assert.ok(css.includes(`${sel('.t-btns')}{position:absolute;top:0;right:0;gap:0;height:60px;align-items:center;pointer-events:none}`), '三顆鈕沒有釘在右上角（容器讓點擊穿過，標題列才拖得動，#2302）')
+    assert.ok(css.includes(`${sel('.t-btns .tb')}{pointer-events:auto}`), '三顆鈕本身要接點擊')
     assert.ok(css.includes(`${sel('.tb')}{width:46px;height:36px;`), '鈕不是 46×36')
   })
   test(`${skin}：對話標題列與分頁列右側留白，不被三顆鈕蓋住`, () => {
