@@ -625,11 +625,11 @@ test('#2003c resolveStatePath：相對路徑以啟動目錄解析並留說明；
 
 test('#2003c 運行手冊存在、涵蓋關鍵字，且手冊裡每個 --參數 parseArgs 都認得', () => {
   const doc = fs.readFileSync(new URL('../../../docs/release/自動發佈運行手冊.md', import.meta.url), 'utf8')
-  for (const k of ['--seed', '--yes', '--ack', '--dry-run-only', '備援']) assert.ok(doc.includes(k), `手冊要提到 ${k}`)
+  for (const k of ['--seed', '--yes', '--ack', '--ack-alert', '--dry-run-only', '備援']) assert.ok(doc.includes(k), `手冊要提到 ${k}`)
   const flags = [...new Set(doc.match(/--[a-z][a-z-]*/g))]
-  const needsVal = new Set(['--interval', '--state', '--room', '--seed', '--seed-desktop', '--seed-linux', '--ack'])
+  const needsVal = new Set(['--interval', '--state', '--room', '--seed', '--seed-desktop', '--seed-linux', '--ack', '--ack-alert'])
   for (const f of flags) {
-    const o = parseArgs(needsVal.has(f) ? [f, f === '--interval' ? '120' : 'x'] : [f])
+    const o = parseArgs(needsVal.has(f) ? [f, f === '--interval' ? '120' : f === '--ack-alert' ? 'post-failed' : 'x'] : [f])
     assert.equal(o.error, null, `手冊提到的 ${f} 程式要認得：${o.error}`)
   }
 })
@@ -916,4 +916,71 @@ test('#2229 雜檔刪不掉、或有清單外改動而停下：都寫 prep-faile
   assert.equal(x.reason, '工作樹有其他未提交的改動，不自動清理')
   assert.equal(x.status, 'active')
   assert.ok(x.message.includes('還沒發佈'))
+})
+
+// ---- #2287 --ack 一併清同版告警、--ack-alert、post-failed 寫明原文與版本 ----
+const seedAlerts = (e, alerts) => e.fsMap.set(ALERT, JSON.stringify({ updatedAt: 'x', alerts }))
+const act = (cause, ref) => ({ cause, reason: cause, message: 'm', ref, firstAt: 'a', lastAt: 'a', count: 1, status: 'active' })
+const failedState = () => seededState({ done: { 'desktop@0.2.44': { result: 'seeded' }, 'linux@0.2.44': { result: 'seeded' }, 'desktop@0.2.45': { result: 'dryrun-failed', at: 'x', runId: '1' }, 'desktop@0.2.46': { result: 'dryrun-failed', at: 'x', runId: '2' } } })
+
+test('#2287 --ack 成功：同 ref 的告警一起 resolve，其他 ref 不動', async () => {
+  const e = env({ files: { [STATE]: JSON.stringify(failedState()) } })
+  seedAlerts(e, { 'post-failed': act('post-failed', 'desktop@0.2.45'), 'prep-failed': act('prep-failed', 'desktop@0.2.46（v0.2.46）'), 'gh-failed': act('gh-failed', null) })
+  const r = await runCommand(parseArgs(['--ack', 'desktop@0.2.45', '--state', STATE]), e.deps)
+  assert.equal(r.code, 0)
+  const a = alertOf(e).alerts
+  assert.equal(a['post-failed'].status, 'resolved')
+  assert.ok(a['post-failed'].resolvedAt)
+  assert.equal(a['prep-failed'].status, 'active')
+  assert.equal(a['gh-failed'].status, 'active')
+})
+
+test('#2287 --ack 失敗（找不到紀錄）：告警不動', async () => {
+  const e = env({ files: { [STATE]: JSON.stringify(failedState()) } })
+  seedAlerts(e, { 'post-failed': act('post-failed', 'desktop@9.9.9') })
+  assert.notEqual((await runCommand(parseArgs(['--ack', 'desktop@9.9.9', '--state', STATE]), e.deps)).code, 0)
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+})
+
+test('#2287 --ack-alert：只清指定類別；未知類別報錯；不能和 --ack／--seed 同給', async () => {
+  const e = env()
+  seedAlerts(e, { 'post-failed': act('post-failed', 'desktop@0.2.45'), 'gh-failed': act('gh-failed', null) })
+  const o = parseArgs(['--ack-alert', 'post-failed', '--state', STATE])
+  assert.equal(o.error, null)
+  assert.equal((await runCommand(o, e.deps)).code, 0)
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
+  assert.equal(alertOf(e).alerts['gh-failed'].status, 'active')
+  assert.match(parseArgs(['--ack-alert', 'nope']).error, /不認得的告警類別/)
+  assert.match(parseArgs(['--ack-alert', 'post-failed', '--ack', 'desktop@0.2.45']).error, /不能和/)
+  assert.match(parseArgs(['--ack-alert', 'post-failed', '--seed', '0.2.44']).error, /不能和/)
+})
+
+test('#2287 --ack-alert 取鎖同 --ack：鎖被佔用就拒絕、不動告警；沒有 active 告警時不報錯', async () => {
+  const busy = env({ files: { [LOCK]: lk(777) }, alive: [777] })
+  seedAlerts(busy, { 'post-failed': act('post-failed', 'x@1.0.0') })
+  assert.equal((await runCommand(parseArgs(['--ack-alert', 'post-failed', '--state', STATE]), busy.deps)).code, 3)
+  assert.equal(alertOf(busy).alerts['post-failed'].status, 'active')
+  const none = env()
+  assert.equal((await runCommand(parseArgs(['--ack-alert', 'post-failed', '--state', STATE]), none.deps)).code, 0)
+})
+
+test('#2287 post-failed：message 含沒送出的通知原文，ref 是當時處理的平台@版號（不是 null）', async () => {
+  const e = env({ desktopRows: [row('v0.2.45')] })
+  postFails(e)
+  e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' }) // dry-run 失敗 → 貼群組
+  await runOnce(opts, e.deps)
+  const a = alertOf(e).alerts['post-failed']
+  assert.equal(a.ref, 'desktop@0.2.45')
+  assert.ok(a.message.includes('desktop@0.2.45'), '原文含版本')
+  assert.ok(a.message.includes('不會自動重試'), '原文整句都在')
+})
+
+test('#2287 決定階段就貼的回報（發版 CI 失敗）貼群組失敗：ref 帶平台@版號，不是 null（舊程式 ref 為 null）', async () => {
+  const e = env({ desktopRows: [row('v0.2.45', 111, { conclusion: 'failure' })] })
+  postFails(e)
+  const r = await runOnce(opts, e.deps)
+  assert.equal(r.outcome, 'report')
+  const a = alertOf(e).alerts['post-failed']
+  assert.equal(a.ref, 'desktop@0.2.45')
+  assert.ok(a.message.includes('desktop@0.2.45'))
 })

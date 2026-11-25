@@ -1,7 +1,7 @@
 // 自動發佈常駐程式（#1980、#2003）：輪詢發版 run，全綠就依序跑 local_sign_publish（先 dry-run 再正式）。
 // 運行手冊（第一次上線、--seed、--ack、各檔案用途、回報訊息怎麼處理、怎麼停止）：docs/release/自動發佈運行手冊.md
 // 用法：node tools/release/auto_publish.mjs [--once] [--interval 120] [--state <檔>] [--room <群組代號>] [--dry-run-only]
-//   播種：--seed <版號>（或 --seed-desktop／--seed-linux）--yes；人工確認一筆失敗：--ack <平台@版號>
+//   播種：--seed <版號>（或 --seed-desktop／--seed-linux）--yes；人工確認一筆失敗：--ack <平台@版號>（同版告警一起清）；人工清一類告警：--ack-alert <類別>
 // 判斷規則全在 auto_publish_core.mjs；這支只負責呼叫端：取鎖、讀 gh、準備工作樹、跑子程序、存 state、貼群組。
 // 所有相對路徑與子程序（git、gh、node）都以 repo 根目錄為基準，不受啟動目錄影響；--state 給相對路徑則以啟動目錄解析成絕對路徑。
 // 必須在專用 worktree 內執行，不可在主 checkout。不用 gh run watch（它會每 3 秒查一次、燒光 API 額度）。
@@ -29,8 +29,11 @@ export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
 // gh 連續失敗（含 403 rate limit）超過這段時間就貼一次群組
 export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 
+// 告警檔裡會出現的類別（--ack-alert 只認這些）
+export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed']
+
 export function parseArgs(argv) {
-  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, yes: false, error: null }
+  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, error: null }
   for (let i = 0; i < argv.length && !o.error; i++) {
     const a = argv[i]
     const val = () => { const v = argv[++i]; if (v === undefined || v.startsWith('--')) { o.error = `${a} 後面要有值`; return null } return v }
@@ -43,10 +46,15 @@ export function parseArgs(argv) {
     else if (a === '--seed-desktop') o.seedDesktop = val()
     else if (a === '--seed-linux') o.seedLinux = val()
     else if (a === '--ack') o.ack = val()
+    else if (a === '--ack-alert') o.ackAlert = val()
     else if (a === '--yes') o.yes = true
     else o.error = `不認得的參數：${a}`
   }
   if (!o.error && o.ack && (o.seedDesktop || o.seedLinux)) o.error = '--ack 和 --seed 不能同時給'
+  if (!o.error && o.ackAlert !== null) {
+    if (o.ack || o.seedDesktop || o.seedLinux) o.error = '--ack-alert 不能和 --ack、--seed 同時給'
+    else if (!ALERT_CAUSES.includes(o.ackAlert)) o.error = `不認得的告警類別：${o.ackAlert}（可用：${ALERT_CAUSES.join('、')}）`
+  }
   return o
 }
 
@@ -219,6 +227,17 @@ export function makeAlerts(opts, deps) {
         save({ ...cur, [cause]: { ...cur[cause], status: 'resolved', resolvedAt: new Date(deps.now()).toISOString() } })
       } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
     },
+    // 人工 --ack <平台@版號>：ref 是這個 key（或 `<key>（<tag>）` 這種帶標籤寫法）的 active 告警一起 resolve，其他 ref 不動；回傳清掉幾筆
+    resolveByRef(key) {
+      try {
+        const cur = load().alerts
+        const hit = Object.keys(cur).filter((c) => cur[c]?.status === 'active' && typeof cur[c].ref === 'string' && (cur[c].ref === key || cur[c].ref.startsWith(`${key}（`)))
+        if (!hit.length) return 0
+        const at = new Date(deps.now()).toISOString()
+        save({ ...cur, ...Object.fromEntries(hit.map((c) => [c, { ...cur[c], status: 'resolved', resolvedAt: at }])) })
+        return hit.length
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`); return 0 }
+    },
   }
 }
 
@@ -380,6 +399,8 @@ export async function runOnce(opts, deps) {
       log(`回報：${d.message}`)
       if (d.result === 'unseeded') log('提示：請先執行 --seed <版號> 播種')
       save(d.state)
+      // 這一類回報在決定階段就貼，下面 ref 還沒指派；不先帶上的話貼群組失敗的告警 ref 會是 null（#2287）
+      if (d.key) ref = d.key
       post(d.message)
       return { outcome: 'report' }
     }
@@ -393,10 +414,11 @@ export async function runOnce(opts, deps) {
       if (r.report) post(r.report)
       return { outcome: ok ? d.action : `${d.action}-failed`, key: d.key }
     }
-    ref = `${d.key}（${d.tag}）`
+    ref = d.key
+    const refLabel = `${d.key}（${d.tag}）`
     const prep = prepareWorktree(deps)
     if (!prep.ok) {
-      alerts.raise('prep-failed', prep.cat, `${ref} 還沒發佈：${prep.cat}。處理好之後會自動重試`, ref)
+      alerts.raise('prep-failed', prep.cat, `${refLabel} 還沒發佈：${prep.cat}。處理好之後會自動重試`, ref)
       // 準備階段失敗（還沒開始發佈）：不記進 done，清掉 inflight，下一輪再試；同一類別只貼一次
       log(`工作樹準備失敗：${prep.why}`)
       d.state.inflight = null
@@ -449,7 +471,18 @@ export async function runCommand(opts, deps) {
       try { next = acknowledge(st, opts.ack, deps.now()) } catch (e) { return { code: 1, msg: e.message } }
       atomicWrite(deps, opts.state, JSON.stringify(next, null, 2))
       deps.log(`--ack：pid ${deps.pid} 清除 ${opts.ack}，原結果 ${before}，時間 ${new Date(deps.now()).toISOString()}`)
-      return { code: 0, msg: `已確認 ${opts.ack}` }
+      const n = makeAlerts(opts, deps).resolveByRef(opts.ack)
+      return { code: 0, msg: `已確認 ${opts.ack}${n ? `，同版的 ${n} 筆告警一併清除` : ''}` }
+    }
+    if (opts.ackAlert) {
+      if (!ALERT_CAUSES.includes(opts.ackAlert)) return { code: 2, msg: `不認得的告警類別：${opts.ackAlert}` }
+      const alerts = makeAlerts(opts, deps)
+      let active = false
+      try { active = JSON.parse(deps.readFile(alertPathOf(opts))).alerts?.[opts.ackAlert]?.status === 'active' } catch { /* 沒有告警檔＝沒東西可清 */ }
+      if (!active) return { code: 0, msg: `${opts.ackAlert} 目前沒有需要清的告警` }
+      alerts.resolve(opts.ackAlert)
+      deps.log(`--ack-alert：pid ${deps.pid} 清除告警 ${opts.ackAlert}，時間 ${new Date(deps.now()).toISOString()}`)
+      return { code: 0, msg: `已清除告警 ${opts.ackAlert}` }
     }
     if (deps.exists(opts.state)) return { code: 2, msg: 'state 檔已存在，不可播種（--seed 只能在 state 不存在時用）' }
     // 起點合理性檢查：先顯示兩平台最新成功的版號，再對照線上 latest.json，低於線上版或讀不到都拒絕
@@ -540,7 +573,7 @@ async function main() {
   opts.state = rs.state
   const deps = realDeps(opts)
   if (rs.note) deps.log(rs.note)
-  if (opts.ack || opts.seedDesktop || opts.seedLinux) {
+  if (opts.ack || opts.ackAlert || opts.seedDesktop || opts.seedLinux) {
     const r = await runCommand(opts, deps)
     ;(r.code === 0 ? console.log : console.error)(r.msg)
     process.exit(r.code)
