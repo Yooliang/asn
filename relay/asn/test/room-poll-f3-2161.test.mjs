@@ -141,3 +141,23 @@ test('(f) 新訊息到達後走一般讀取；之後的補查間隔從那次讀�
   tick(100_000); await hub.read('g1')        // 滿 300 秒
   assert.equal(reads().length, n + 2)
 })
+
+test('(g) timer 那一輪沒打到的群組不覆寫快照：之後門鈴看得出變化（asn真 一審 2）', async () => {
+  const gate = createCardGate()
+  await gateRun(gate, 'start', IDS, snap(), new Set())
+  // 計時器那一輪：g3 的 lastSeq 變了（新確認卡片），但 g3 不可見、沒被打到
+  assert.deepEqual(await gateRun(gate, 'timer', IDS, snap(3, 3, 4), new Set(['g1'])), ['g1'])
+  // 之後門鈴：g3 的列還是新的，要被看出有變動並打到（快照不能被計時器那一輪吃掉）
+  assert.deepEqual(await gateRun(gate, 'bell', IDS, snap(3, 3, 4), new Set(['g1'])), ['g1', 'g3'])
+  // 打過之後快照才更新，不重複打
+  assert.deepEqual(await gateRun(gate, 'bell', IDS, snap(3, 3, 4), new Set(['g1'])), ['g1'])
+})
+
+test('(h) list.js：切到已開過的群組分頁時 activateTab 也 loadCards（asn真 一審 1）', async () => {
+  const fs = await import('node:fs')
+  const src = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
+  const line = src.split(/\r?\n/).find(l => l.startsWith('const activateTab ='))
+  assert.ok(line, '找得到 activateTab')
+  assert.match(line, /hub\.read\(roomIdOf\(id\)\)/)
+  assert.match(line, /hub\.loadCards\(roomIdOf\(id\),\s*'activateTab'\)/)
+})

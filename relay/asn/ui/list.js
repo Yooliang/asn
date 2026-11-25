@@ -1333,7 +1333,7 @@ const sendAttachTo = async (id, item, caption, done) => {
   if (typeof done === 'function') done({ ok: r.ok !== false, error: r.error ?? '' })
   return r
 }
-const activateTab = id => { ui.active = id; core.markRead(id); sync(); if (isRoomChat(id) && openedRooms.has(id)) void hub.read(roomIdOf(id)).then(() => { pushLog(id); sync() }) }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過；切到群組分頁＝現在看著它，有未讀就標已讀
+const activateTab = id => { ui.active = id; core.markRead(id); sync(); if (isRoomChat(id) && openedRooms.has(id)) { void hub.read(roomIdOf(id)).then(() => { pushLog(id); sync() }); void hub.loadCards(roomIdOf(id), 'activateTab') } }   // 指引、設定的分頁 id 不是好友，markRead 會直接略過；切到群組分頁＝現在看著它，有未讀就標已讀
 const closeOneChatTab = id => { Object.assign(ui, closeChatTab(ui, id)); if (ui.active) core.markRead(ui.active); sync() }
 const applyChatTabClose = patch => { Object.assign(ui, patch); if (ui.active) core.markRead(ui.active); sync() }
 

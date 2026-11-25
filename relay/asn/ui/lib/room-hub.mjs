@@ -33,8 +33,13 @@ export function createCardGate({ counter = null } = {}) {
       if (all || (await Promise.resolve().then(() => isVisible(id)).catch(() => false)) === true || (why === 'bell' && changed)) out.add(id)
       else counter?.hit('cards:skippedBackground', id)
     }
-    const next = new Map()
-    for (const id of ids) { const row = rowOf(id); if (row) next.set(id, { lastSeq: row.lastSeq, unread: row.unread }) }
+    // 快照＝『上次真的重抓確認清單時』的列狀態：沒打到的群組不覆寫，否則計時器那一輪會把變化吃掉、門鈴就看不出來（asn真 一審）
+    const next = new Map(prev)
+    for (const id of ids) {
+      const row = rowOf(id)
+      if (row && out.has(id)) next.set(id, { lastSeq: row.lastSeq, unread: row.unread })
+      else if (!row) next.delete(id)
+    }
     prev = next
     return out
   }
