@@ -75,7 +75,8 @@ async function sha256Hex(s: string): Promise<string> {
 // 手機推播（#797）：沒設秘密 FCM_SERVICE_ACCOUNT 就是 null，一律安靜不送（也不影響寄信）。見 _shared/push_ctl.ts
 const fcm = createFcm({ get: (k) => Deno.env.get(k) });
 
-// Doorbell: broadcast carries no mail content. payload 預設 {}（既有呼叫端不變）；回報匯流排（#2161）帶 { kind, node }，同樣不含內容。舊客戶端只看 event=bell。
+// Doorbell: broadcast carries no mail content. payload 預設 {}（既有呼叫端不變）；回報匯流排（#2161）帶 { kind, node }，同樣不含內容。寄信帶 { kind: "mail" }、名單變動帶 { kind: "roster" }（#2161 B1，用戶端據此少抓群組清單）；
+// 群組發言、邀請、確認卡片維持不帶種類。舊客戶端只看 event=bell。
 // Also write the Firebase RTDB bell node b/<hash> = { at } (pointer only, see docs/relay/SIGNAL.md): devices that listen to it
 // pull /updates only when it changes. No-op when IRORI_FIREBASE_DB_URL / IRORI_FIREBASE_SA are not both set; failures only log.
 async function ring(topic: string, payload: Record<string, unknown> = {}) {
@@ -361,7 +362,7 @@ async function handle(req: Request): Promise<Response> {
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });
     // 名單有變（忙碌／閒置／說明）：資料庫回同帳號其他設備的門鈴（已做 2 秒頻率限制），敲一下讓它們立刻重拉名單。舊資料庫沒這個鍵＝不敲
-    for (const t of rosterBellTopics(data)) await ring(t);
+    for (const t of rosterBellTopics(data)) await ring(t, { kind: "roster" });
     // 機器橋把本機 launcher.json 的摘要（profile 名、cwd 白名單、每小時上限）附在名單一起回報；沒帶 launcher 欄位就不動
     if ("launcher" in b) {
       const l = sanitizeLauncher(b.launcher);
@@ -787,7 +788,7 @@ async function handle(req: Request): Promise<Response> {
     // 補綁＋核對：綁失敗、附件在檢查後過期、或另一個同時送來的請求先綁好，都看實際結果；有缺只回報（信已寄出，仍是 200）
     const missing = await reconcileAttachments({ rpc }, me.id, att.ids, sent.id);
     // 回信寄給人代號時會扇出給這個帳號所有在線的 ASN，每台的門鈴都敲
-    for (const t of bellTopicsOf(sent)) await ring(t);
+    for (const t of bellTopicsOf(sent)) await ring(t, { kind: "mail" });
     // 寄給本人（回傳有 fanout 的那條路）：手機 App 關著時推一則固定文字。收件人由伺服器端用這封信查，背景跑，失敗不影響寄信
     if (typeof (sent as { fanout?: unknown }).fanout === "number") signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "owner_mail", me.id, sent.id));
     await touchActive(rpc, me.id, str(b.from_agent));   // 最後活動時間（#397）：背景寫入，失敗不影響寄信

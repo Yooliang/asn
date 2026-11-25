@@ -3898,8 +3898,8 @@ pub fn run() {
                             // 依門鈴種類分流（bell::ring_actions）：沒有 kind 的舊門鈴照舊叫醒全部，回報門鈴只通知回報
                             for act in bell::ring_actions(ring) {
                                 match act {
-                                    bell::BellAction::EmitBell => {
-                                        let _ = h.emit("relay-bell", ());
+                                    bell::BellAction::EmitBell(kind) => {
+                                        let _ = h.emit("relay-bell", serde_json::json!({ "kind": kind }));
                                     }
                                     bell::BellAction::EmitReport { kind, node } => {
                                         let _ = h.emit("relay-report-bell", serde_json::json!({ "kind": kind, "node": node }));

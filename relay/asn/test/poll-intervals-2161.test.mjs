@@ -46,7 +46,7 @@ test('接線：relay-bell 觸發 refreshLaunchers 必須經節流（shouldRefres
   const m = js.match(/function refreshLaunchersOnBell\(\) \{[\s\S]*?\n\}/)
   assert.ok(m, '有 refreshLaunchersOnBell')
   assert.ok(m[0].includes('shouldRefreshOnBell(launchersBellAt, now)') && m[0].includes('launchersBellAt = now') && m[0].includes('refreshLaunchers()'))
-  assert.match(js, /core\.on\('relay-bell', \(\) => \{[^\n]*refreshLaunchersOnBell\(\)/)
+  assert.match(js, /core\.on\('relay-bell', p => \{[^\n]*refreshLaunchersOnBell\(\)/)
   // 反向斷言：先確認這行存在（上一條），否則「找不到就算通過」會假綠
   assert.ok(/core\.on\('relay-bell'/.test(js), '門鈴接收處必須存在，否則下面的反向斷言恆真')
   assert.ok(!/core\.on\('relay-bell'[^\n]*[^n]refreshLaunchers\(\)/.test(js), 'relay-bell 不能直接呼叫 refreshLaunchers')

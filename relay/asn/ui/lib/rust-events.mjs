@@ -26,7 +26,7 @@ export const RUST_EVENTS = Object.freeze({
   'auth-signed-out': { scope: 'all', platform: 'both', shape: '無' },
   'attach-cache-cleared': { scope: 'all', platform: 'both', shape: '無' },
   // 門鈴
-  'relay-bell': { scope: 'all', platform: 'both', shape: '無' },
+  'relay-bell': { scope: 'all', platform: 'both', shape: '{kind}（mail／roster 等；沒帶種類＝null）' },
   'relay-report-bell': { scope: 'all', platform: 'both', shape: '{kind,node}' },
   // 終端
   'term-being-viewed': { scope: 'all', platform: 'desktop', shape: '陣列' },

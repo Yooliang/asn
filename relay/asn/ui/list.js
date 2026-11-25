@@ -41,6 +41,7 @@ import { createGroupFlow } from './lib/group-flow.mjs'
 import { copyText, createGroupApi, memberFriendId, roomHue, roomInitial } from './lib/groups.mjs'
 import { createCardGate, createRoomHub } from './lib/room-hub.mjs'
 import { createRoomPollCounter } from './lib/room-poll-counter.mjs'
+import { createRoomBellGate } from './lib/bell-rooms.mjs'
 import { isRoomChat, roomChatId, roomIdOf, roomPseudoFriend } from './lib/mobile-rooms.mjs'
 import { avatarFor, avatarSrc, isAvatarDataUrl, removeAvatarUpload, uploadAvatarFile, selfAvatarSrc } from './lib/avatar.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
@@ -437,8 +438,11 @@ core.on('state', sync)
 core.on('log', pushLog)
 // 重抓群組列表，並更新開著的群組對話的新訊息與待主持人確認的卡片
 const cardGate = createCardGate({ counter: roomPollCounter })
+// 哪一聲門鈴要重抓群組清單（#2161 B1）：私信跳過、名單節流、其他照舊
+const roomBells = createRoomBellGate({ refresh: () => void refreshRooms('bell'), counter: roomPollCounter })
 async function refreshRooms(why = 'other') {
   roomPollCounter.hit(`list:refreshRooms:${why}`)
+  roomBells.noteRefresh()
   await hub.refresh()
   // 確認卡片只對看得見的與有變動的群組重抓（#2161 F3）：計時器只看可見的；門鈴看可見＋列有變動的；啟動等其他情況全打
   const cardIds = await cardGate(why, [...openedRooms], { rowOf: id => hub.rowOf(roomIdOf(id)), isVisible: id => chatShownId(id) })
@@ -1365,7 +1369,7 @@ window.addEventListener('resize', () => {
 if (ui.mode === 'merged') await windowApi.mainLayout(true, sizes.merged.w, sizes.merged.h, true)
 
 watchBeingViewed(core.hub, list => { beingViewed.value = list })   // #2038 PR-4
-core.on('relay-bell', () => { void core.pull('bell'); core.refreshRosterSoon(); void refreshRooms('bell'); refreshLaunchersOnBell() })   // #2038 PR-5；Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
+core.on('relay-bell', p => { void core.pull('bell'); core.refreshRosterSoon(); roomBells.ring(p); refreshLaunchersOnBell() })   // #2038 PR-5；Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 core.on('asn:open', c => void openChat(c.cid))   // 提示被點了
 await core.ready()   // 以前是 await listen(...)：事件註冊完才往下走
