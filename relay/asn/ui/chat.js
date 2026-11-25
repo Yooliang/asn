@@ -11,7 +11,7 @@ import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { CALL_BEAT_MS } from './lib/call-beats.mjs'
-import { RESIZE_DIRS, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, termViewApi, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, createWindowHub, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 // 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
 installUiLog({ source: 'chat' })
@@ -33,7 +33,7 @@ const app = createApp({
     const avatars = ref({})   // 各設備上傳的大頭貼（節點 → data URL），由樞紐推送
     const friendAv = computed(() => (f.value ? avatarSrc(f.value, { avatars: avatars.value }) : ''))
     const meAv = computed(() => selfAvatarSrc({ selfNode: snap.value?.selfNode ?? '', windowName: snap.value?.windowName ?? '', avatars: avatars.value }))
-    const voice = createVoiceUi({ invoke, listen, createMic, createAudio: browserAudio, reactive })   // 念出訊息＋語音輸入（金鑰與辨識都在 Rust 端）
+    const voice = createVoiceUi({ invoke, hub: createWindowHub(), createMic, createAudio: browserAudio, reactive })   // 念出訊息＋語音輸入（金鑰與辨識都在 Rust 端）
     listen('asn:avatars', a => { avatars.value = a ?? {} })
     listen('asn:state', s => { snap.value = s })
     listen('asn:log', p => { if (p.id === id) log.value = p.log })
