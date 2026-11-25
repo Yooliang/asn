@@ -151,8 +151,7 @@ export function vendorState({ isSelf = false, rep = null, accounts = [], install
   return { state: STATE.LOGGED_OUT, text: STATE_TEXT[STATE.LOGGED_OUT] }
 }
 
-/** 「安裝並登入 Claude Code」的畫面入口（電腦版按鈕、允許從手機安裝的勾選、手機版按鈕）。完整真機流程沒跑過前不給一般使用者按；跑過再改成 true */
-export const AGENT_INSTALL_UI = false
+// 安裝入口旗標 AGENT_INSTALL_UI 搬到 ./flags.mjs（#2163 PR-4）
 
 /**
  * 這家 AI 在這台設備上有沒有「安裝並登入」可以按（0.2.2 只有 Claude）。

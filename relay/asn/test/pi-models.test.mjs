@@ -1,6 +1,7 @@
 // #351 開新夥伴「經 pi」：廠牌→提供者、能不能經 pi、模型清單、開 pi 參數。資料形狀照 asn西川 #748 的 pi 1.4.0 實測。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { PI_VIA_READY } from '../ui/lib/flags.mjs'
 import { VENDOR_PI_PROVIDER, PI_ONLY_VENDORS, cleanPiModels, piChoiceFor, piOnlyVendorRows, piLaunchArgs } from '../ui/lib/pi-models.mjs'
 
 const MODELS = [
@@ -71,6 +72,8 @@ test('接線（#351）：經 pi 開新夥伴一律用 pi 的啟動設定，帶 p
   assert.ok(submit.includes("profile: 'pi'") && submit.includes('pi_provider: viaPi.provider') && submit.includes('pi_model: viaPi.model'), '帶 pi_provider／pi_model')
   assert.ok(submit.includes("throw new Error('pi 的模型清單裡沒有這個模型"), '清單外不送')
   assert.ok(js.includes('if (Date.now() - piInfo.at < 60_000) return'), '60 秒內不重查')
+  assert.equal(PI_VIA_READY, true, '旗標值在 ui/lib/flags.mjs')
+  assert.ok(!js.includes('const PI_VIA_READY'), '旗標不在 list.js 宣告')
   assert.ok(js.includes('piReady: PI_VIA_READY && piChoice.value.ok'), 'runOptions 的 piReady 看 pi 自己回答的狀態')
   assert.ok(html.includes('v-model="partnerDlg.piModel"') && html.includes('v-for="m in piChoice.models"'), '第 2 頁列 pi 的模型')
 })

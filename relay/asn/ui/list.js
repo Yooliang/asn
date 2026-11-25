@@ -20,7 +20,8 @@ import { isAboutUrl } from './lib/about-info.mjs'
 import { PANEL_KINDS, isPanelTab, normalizePanelSize, panelItem, panelTabId, panelTabItem, panelTitle, splitTabs } from './lib/panels.mjs'
 import { AsnDialog } from './lib/dialog.mjs'
 import { toolStatusView } from './lib/tool-status.mjs'
-import { LAUNCH_INSTALL_BTN, createToolInstall, installRowView } from './lib/tool-install.mjs'
+import { createToolInstall, installRowView } from './lib/tool-install.mjs'
+import { PI_VIA_READY, launchInstallOn } from './lib/flags.mjs'
 import { SETTING_CATS, catSummary, normalizeCatKey } from './lib/settings-cats.mjs'
 import { DIMS, groupOptions, loadDims, pageTabs, withTabDim } from './lib/dims.mjs'
 import { activityRound, withActivity } from './lib/activity.mjs'
@@ -643,8 +644,7 @@ const refreshCliStatus = async (force = false) => {
   finally { cliStatusBusy.value = false }
   if (cliStatusAgain) { cliStatusAgain = false; await refreshCliStatus(true) }
 }
-// Claude 那一列的「進行安裝／進行更新」（#1548 ⑤）：旗標預設關；冒煙探測用 __smokeLaunchInstallBtn 注入開啟（只在假後台設，正式環境沒有）
-const launchInstallOn = () => LAUNCH_INSTALL_BTN === true || globalThis.__smokeLaunchInstallBtn === true
+// Claude 那一列的「進行安裝／進行更新」（#1548 ⑤）：旗標與冒煙掛勾 __smokeLaunchInstallBtn 都在 lib/flags.mjs 的 launchInstallOn
 const toolInstall = createToolInstall({
   reactive,
   install: id => transport.cliInstall(id),
@@ -673,9 +673,7 @@ async function loadPiInfo() {
 const dlgRemote = computed(() => !!partnerDlg.node && partnerDlg.node !== info.node)
 const dlgRemoteLauncher = computed(() => (dlgRemote.value ? remoteLaunchers.value[partnerDlg.node] ?? null : null))
 const piChoice = computed(() => (dlgRemote.value ? launchPiChoice(dlgRow.value, dlgRemoteLauncher.value) : piChoiceFor(dlgRow.value?.id, piInfo.models, piInfo.providers)))
-// pi 是通道不是廠牌，最後不列在廠牌裡；但「經 pi」要等後端能帶提供者與模型開 pi（0.1.90 後續）才能選，
-// 在那之前先留著 pi 這一列，不然使用者完全開不了 pi 夥伴（小東 #737）
-const PI_VIA_READY = true
+// 「經 pi」是否就緒的旗標 PI_VIA_READY 在 lib/flags.mjs（含原本的說明）
 // 只能經 pi 的廠牌（#351）：這台的 pi 列得到它的模型才出現，運行只有「經 pi」能選；遠端開 pi 帶模型還沒做，所以只在選這台時加
 const piOnlyRows = computed(() => (PI_VIA_READY && partnerDlg.node === info.node
   ? piOnlyVendorRows(piInfo.models, piInfo.providers).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', installed: cliInstalled(cliTools.value, 'pi'), modeLabel: '用 asn終端（pi shell）開', installHint: '這台電腦沒偵測到 pi', channels: PI_ONLY_CHANNELS }))

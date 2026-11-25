@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import { INSTALL_TEXT, createAgentInstall, installButton, installView, resultKind } from '../ui/lib/agent-install.mjs'
 import { applyEvent, initialView } from '../ui/lib/setup-progress.mjs'
 import { SETTING_OPS } from '../ui/lib/settings-panel.mjs'
+import { AGENT_INSTALL_UI } from '../ui/lib/flags.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const plain = o => JSON.parse(JSON.stringify(o))
@@ -149,7 +150,8 @@ test('接線守門：七個操作都有接、按鈕與確認窗在同一個畫�
 test('入口預設關：旗標仍是關，電腦版設定頁（設備詳情拿掉帳號區後）沒有任何地方讀 st.install', () => {
   const panel = read('ui/lib/settings-panel.mjs')
   assert.ok(!panel.includes('AGENT_INSTALL_UI') && !panel.includes('st.install'), '電腦設定頁不再有安裝入口（#1860）')
-  assert.match(read('ui/lib/device-state.mjs'), /export const AGENT_INSTALL_UI = false/)
+  assert.equal(AGENT_INSTALL_UI, false, '旗標值在 ui/lib/flags.mjs，預設關')
+  assert.doesNotMatch(read('ui/lib/device-state.mjs'), /export const AGENT_INSTALL_UI/, '旗標已搬到 flags.mjs，device-state 不再宣告')
 })
 
 test('電腦上按的那一輪也用右下角小窗；已有一輪在跑就不去動它的小窗', () => {
