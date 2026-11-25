@@ -1337,3 +1337,15 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .m-dv-sech{margin:14px 0 6px;font-size:var(--fs-3)}
 .m-dv-sech:first-child{margin-top:4px}
 .m-dv-actions{flex-wrap:wrap}
+/* 手機正在核對這台電腦（#1863）：自動跳出的 QR Code 視窗，三套外觀共用 */
+.fps{display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--sp-2,8px);padding:8px 4px 4px}
+.fps-h{margin:4px 0 0;font-size:18px;font-weight:700;color:var(--fg)}
+.fps-body{margin:0;color:var(--fg)}
+.fps-qr{display:flex;justify-content:center;min-height:120px;padding:4px 0}
+.fps-qr .fp-qr{background:#fff}
+.fps-fp{margin:0;font-family:Consolas,"Cascadia Mono",monospace;font-size:14px;letter-spacing:.04em;color:var(--fg)}
+.fps-left{margin:0;font-size:13px;color:var(--muted,#6b7785)}
+.fps-err{margin:0;color:var(--danger,#b3261e)}
+.fps-act{margin-top:6px}
+/* 現代、LINE 外觀沒有標題列，右上角三顆鈕（高 60px）浮在內容上：標題往下讓開，不被鈕蓋住 */
+:root[data-skin="modern"] .fps,:root[data-skin="line"] .fps{padding-top:48px}

@@ -199,7 +199,9 @@ test('list.js 第三批：已搬的指令不再直接 invoke、走具名出口�
   const moved = ['relay_log_paths', 'term_viewed_stop', 'device_own_fingerprint', 'device_own_fingerprint_qr', 'device_known_list', 'device_known_login_ok', 'device_known_forget', 'invite_pending',
     'set_tray_unread', 'set_presence', 'set_now_playing', 'ads_fetch', 'term_remote_offer_answer', 'term_remote_offer_send', 'term_remote_withdraw', 'term_remote_pending', 'term_view_active', 'open_url', 'open_link']
   for (const c of moved) assert.ok(!s.includes("invoke('" + c + "'"), `${c} 還在 list.js 直接呼叫`)
-  for (const api of ['logViewApi.relayLogPaths(', 'knownDeviceApi.list()', 'knownDeviceApi.setLoginOk(', 'knownDeviceApi.forget(', 'knownDeviceApi.ownFingerprintQr()', 'termRemoteApi.offerSend(', 'termRemoteApi.withdraw(', 'termRemoteApi.pending()',
+  // 指紋 QR Code 從設定頁搬到自動跳出的視窗（#1863）：panel.js 走同一個出口
+  assert.ok(src(path.join(UI, 'panel.js')).includes('knownDeviceApi.ownFingerprintQr()'), 'knownDeviceApi.ownFingerprintQr()（panel.js）')
+  for (const api of ['logViewApi.relayLogPaths(', 'knownDeviceApi.list()', 'knownDeviceApi.setLoginOk(', 'knownDeviceApi.forget(', 'termRemoteApi.offerSend(', 'termRemoteApi.withdraw(', 'termRemoteApi.pending()',
     'termRemoteApi.viewActive(', 'linkApi.openLink(', 'linkApi.openUrl(', 'linkApi.invitePending()', 'trayApi.setUnread(', 'trayApi.setPresence(', 'trayApi.setNowPlaying(', 'trayApi.adsFetch()', 'termRemoteErrorText(']) assert.ok(s.includes(api), api)
   assert.deepEqual([...s.matchAll(/(?<![\w.$])invoke\('([a-z_]+)'/g)].map(x => x[1]), [])   // ⑫ 起 ai_cli_login 也搬走了，list.js 不再有直接 invoke
   const ex = src(path.join(UI, 'lib/tauri.mjs'))

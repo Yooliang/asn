@@ -1,4 +1,5 @@
-// 電腦版設定頁的指紋 QR code：資料驗證、畫圖計畫、畫到 canvas（用假的 2d 內容）、只用 canvas 不用 v-html
+// 這台指紋的 QR Code：資料驗證、畫圖計畫、畫到 canvas（用假的 2d 內容）、只用 canvas 不用 v-html。
+// #1863 起只在「手機要核對時自動跳出的視窗」（panel.js 的 fpshow）顯示，設定頁的「QR Code」分頁拿掉了
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -14,10 +15,10 @@ function rows21() {
   return g.map(r => r.join(''))
 }
 
-test('文字：照規格、繁體中文', () => {
-  assert.equal(QR_TEXT.show, '顯示 QR code')
-  assert.equal(QR_TEXT.note, '用手機的「確認指紋 → 掃 QR code」掃這個')
-  for (const t of Object.values(QR_TEXT)) assert.doesNotMatch(t.replace(/QR code/g, ''), /[A-Za-z]{3,}/, t)
+test('文字：繁體中文，產品名寫 QR Code', () => {
+  assert.deepEqual(Object.keys(QR_TEXT).sort(), ['alt', 'failed'], '設定頁的顯示／收起／說明字已經不用')
+  assert.equal(QR_TEXT.alt, '這台電腦的指紋 QR Code')
+  for (const t of Object.values(QR_TEXT)) assert.doesNotMatch(t.replace(/QR Code/g, ''), /[A-Za-z]{3,}/, t)
   assert.equal(MODULE_PX, 4)
   assert.ok(QUIET >= 4, '留白至少 4 格')
 })
@@ -42,6 +43,7 @@ test('畫圖計畫：四周留白、每格 4 像素；深色格的座標對；�
   assert.deepEqual(p.dark[0], [QUIET * MODULE_PX, QUIET * MODULE_PX], '左上角第一格緊貼留白')
   assert.ok(p.dark.every(([x, y]) => x >= QUIET * MODULE_PX && y >= QUIET * MODULE_PX && x < p.side - QUIET * MODULE_PX && y < p.side - QUIET * MODULE_PX), '深色格都在留白裡面')
   assert.equal(drawPlan({ size: 20, rows: [] }), null)
+  assert.equal(drawPlan({ size: 21, rows: rows21() }, 6).side, (21 + QUIET * 2) * 6, '跳出的視窗畫大一點')
 })
 
 test('paint：先白底、再畫深色格；用的是 2d 內容的矩形，不產生圖片網址', () => {
@@ -56,23 +58,23 @@ test('paint：先白底、再畫深色格；用的是 2d 內容的矩形，不�
   assert.deepEqual(ops[3], ['rect', QUIET * MODULE_PX, QUIET * MODULE_PX, MODULE_PX, MODULE_PX])
 })
 
-test('設定頁與樞紐：顯示 QR code 的按鈕在指紋旁、只用 canvas（沒有 v-html）、操作登記、Rust 命令只叫唯讀的那個', () => {
-  assert.ok(SETTING_OPS.includes('known-qr'))
+test('守門（#1863）：設定頁不再有 QR Code 分頁，樞紐也沒有 known-qr', () => {
+  assert.ok(!SETTING_OPS.includes('known-qr'), '設定操作清單不再有 known-qr')
   const panel = read('../ui/lib/settings-panel.mjs')
-  assert.ok(!panel.includes('aria-label="認得的電腦"'), '舊的卡片已併進設備詳情')
-  const card = panel.slice(panel.indexOf("<div class=\"dv-cards\" v-else-if=\"view === 'qr'"), panel.indexOf("<div :class=\"['dv-body'")) + panel.slice(panel.indexOf('<details class="dv-removed"'), panel.indexOf('</details>', panel.indexOf('<details class="dv-removed"')))
-  assert.ok(panel.indexOf('<details class="dv-removed"') >= 0, '找得到「已移除的設備」區塊（找不到時上面的 slice 是空字串，測試會變成永遠綠）')
-  assert.match(card, /view === 'qr' && curDev\.self[\s\S]*KNOWN\.ownFp\(st\.known\.ownFp\)/, 'QR Code 鈕展開的卡片裡寫指紋')
-  assert.match(panel, /if \(v === 'qr' && !\(props\.st\.known && props\.st\.known\.qr\)\) act\('known-qr', true\)/, '按 QR Code 才產生')
-  assert.match(panel, /if \(view\.value === 'qr' && props\.st\.known && props\.st\.known\.qr\) act\('known-qr', false\)/, '離開這一頁就收掉')
-  assert.match(card, /<fp-qr-canvas v-if="st\.known\.qr" :qr="st\.known\.qr"><\/fp-qr-canvas>/)
-  assert.match(card, /\{\{ QR_TEXT\.note \}\}/)
-  assert.doesNotMatch(card + read('../ui/lib/fp-qr.mjs').replace(/^\s*\/\/.*$/gm, ''), /v-html|innerHTML|toDataURL|insertAdjacentHTML/)
-  assert.match(read('../ui/lib/fp-qr.mjs'), /<canvas /)
+  assert.doesNotMatch(panel, /setView\('qr'\)|view === 'qr'|known-qr|fp-qr-canvas|FpQrCanvas|QR_TEXT/, '設定頁不再有 QR Code 分頁與畫布')
+  assert.doesNotMatch(panel, />QR Code</, '設備頁上方那排沒有「QR Code」鈕')
   const list = read('../ui/list.js')
-  assert.match(list, /case 'known-qr': await toggleOwnQr\(value === true\); break/)
-  assert.match(list, /knownDeviceApi\.ownFingerprintQr\(\)/)
-  assert.match(list, /ownFp: known\.ownFp, qr: known\.qr \}/)
+  assert.doesNotMatch(list, /toggleOwnQr|known-qr|known\.qr|ownFingerprintQr/, '名單視窗不再產生 QR')
+})
+
+test('跳出的視窗：只用 canvas（沒有 v-html）、QR 向本機要、Rust 命令內容是這台的節點與完整指紋', () => {
+  const html = read('../ui/panel.html')
+  const sec = html.slice(html.indexOf('<section class="fps"'), html.indexOf('</section>', html.indexOf('<section class="fps"')))
+  assert.ok(sec.length > 0, '找得到 fpshow 區塊（找不到時 slice 是空字串，測試會變成永遠綠）')
+  assert.match(sec, /<fp-qr-canvas v-if="fps\.qr" :qr="fps\.qr"/)
+  assert.doesNotMatch(sec + read('../ui/lib/fp-qr.mjs').replace(/^\s*\/\/.*$/gm, ''), /v-html|innerHTML|toDataURL|insertAdjacentHTML/)
+  assert.match(read('../ui/lib/fp-qr.mjs'), /<canvas /)
+  assert.match(read('../ui/panel.js'), /knownDeviceApi\.ownFingerprintQr\(\)/)
   const lib = read('../src-tauri/src/lib.rs')
   const own = lib.slice(lib.indexOf('async fn device_own_fingerprint_qr('), lib.indexOf('async fn device_own_fingerprint_qr(') + 500).split('\n}\n')[0]
   assert.match(own, /fp_scan::qr_rows\(&app\.node, &device_id::fingerprint\(&k\.public_b64\(\)\)\)/, '內容是這台的節點與完整指紋')

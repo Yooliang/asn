@@ -8,7 +8,6 @@ import { DeviceIdentity, IDENTITY_TEXT } from './device-identity.mjs'
 import { ACTION_TEXT } from './device-order.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { NAME_MAX, deviceNameError, joinKnown, removedDevices, shortFp } from './device-known.mjs'
-import { FpQrCanvas, QR_TEXT } from './fp-qr.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
 import { SKINS, SKIN_LABEL } from './skin.mjs'
@@ -41,11 +40,11 @@ export const SETTING_OPS = [
   'quota-source', 'quota-refresh', 'quota-mm-add', 'quota-mm-remove', 'quota-share', 'quota-unshare', 'quota-copy', 'quota-close', 'quota-cancel',
   'notify', 'now-playing', 'skin', 'frame', 'mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim',
   'voice-save', 'voice-install', 'acct-allow-switch', 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close', 'row-switch', 'device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore',
-  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'replace-pick', 'replace-do', 'replace-keep', 'known-qr', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view', 'tm-restart-ask', 'tm-restart-cancel', 'tm-restart-confirm',
+  'closeTo', 'autostart', 'guard', 'guard-resume', 'open-link', 'open-guide', 'open-update', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'tm-handover', 'known-forget', 'device-rename', 'device-rename-clear', 'replace-pick', 'replace-do', 'replace-keep', 'known-login-ok', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy', 'autoCheck', 'check-update', 'releases-retry', 'usage-refresh', 'launch-max', 'launch-cwd-add', 'launch-cwd-remove', 'launch-cwd-suggest', 'launch-recheck', 'launch-install-ask', 'launch-install-yes', 'launch-install-no', 'pi-setup-ask', 'pi-setup-install', 'pi-setup-cancel', 'pi-setup-remove', 'avatar-remove', 'pi-login', 'open-ui-log', 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view', 'tm-restart-ask', 'tm-restart-cancel', 'tm-restart-confirm',
 ]
 
 export const SettingsPanel = {
-  components: { ...UI_KIT, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpQrCanvas, FpMark, DeviceIdentity, TaskTree },
+  components: { ...UI_KIT, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpMark, DeviceIdentity, TaskTree },
   props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -62,18 +61,19 @@ export const SettingsPanel = {
     // 列表含自動隱藏的設備（淡色、標「已隱藏」）；永久移除的不在列表，收在底部的「已移除的設備」
     const devs = computed(() => visibleRows(allDevs.value))
     const curDev = computed(() => devs.value.find(d => d.key === picked.value) ?? null)
-    const view = ref('info')   // 選了某台之後看哪一頁：info＝詳情（預設）、tasks＝工作管理員、qr＝QR Code（帳號不在設備頁，只在設定的「帳號」頁，#1860）
+    // 選了某台之後看哪一頁：info＝詳情（預設）、tasks＝工作管理員（帳號不在設備頁，只在設定的「帳號」頁，#1860）。
+    // 以前這排還有「QR Code」：手機要核對時這台會自動跳出 QR Code 視窗（#1863），設定頁不再放
+    const view = ref('info')
     const openInfo = key => { picked.value = key; view.value = 'info'; askRemove.value = false; renaming.value = false }
     // 工作管理員：只有這台電腦有；進來才開始每 5 秒更新，離開（返回、換頁、關掉設定）就停（樞紐收到 tm-close）
     const openTasks = key => { picked.value = key; view.value = 'tasks'; askRemove.value = false; renaming.value = false; act('tm-open') }
     const backToList = () => { leaveView(); picked.value = ''; view.value = 'info'; askRemove.value = false; renaming.value = false }
-    // 離開目前這一頁要收的東西：工作管理員停止更新、QR 收起來、改名輸入清掉
+    // 離開目前這一頁要收的東西：工作管理員停止更新、改名輸入清掉
     const leaveView = () => {
       if (view.value === 'tasks') act('tm-close')
-      if (view.value === 'qr' && props.st.known && props.st.known.qr) act('known-qr', false)
       if (renaming.value) act('device-rename-clear')
     }
-    // 設備頁上方那排按鈕：工作管理員、詳情、QR Code、改名、帳號；按下才展開對應的內容
+    // 設備頁上方那排按鈕：工作管理員、詳情；按下才展開對應的內容
     const setView = v => {
       if (v === view.value) return
       leaveView()
@@ -81,7 +81,6 @@ export const SettingsPanel = {
       view.value = v
       renaming.value = false
       if (v === 'tasks') act('tm-open')
-      if (v === 'qr' && !(props.st.known && props.st.known.qr)) act('known-qr', true)
     }
     onBeforeUnmount(() => leaveView())
     // 停在工作管理員時這台電腦從清單消失：退回清單並停掉每 5 秒更新
@@ -202,7 +201,7 @@ export const SettingsPanel = {
       mmOpen.value = false
     }
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
-    return { LAUNCH_MAX_NOTE, TM, openTasks, KNOWN, deskFpMark, QR_TEXT, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
+    return { LAUNCH_MAX_NOTE, TM, openTasks, KNOWN, deskFpMark, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
       accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
       fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       rp, REPLACE_TEXT, cat, catIcon, ROSTER_TEXT, usedOnText, DESK_RELOGIN_TEXT, switchTargets, devs, curDev, askRemove, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
@@ -405,7 +404,6 @@ export const SettingsPanel = {
             <div class="dv-tabs" role="group" aria-label="這台設備的內容">
               <asn-button class="dv-tasks" v-if="curDev.self && st.taskMgr" :aria-pressed="view === 'tasks'" @click="setView('tasks')">{{ TM.entry }}</asn-button>
               <asn-button :aria-pressed="view === 'info'" @click="setView('info')">詳情</asn-button>
-              <asn-button v-if="curDev.self && st.known && st.known.ownFp" :aria-pressed="view === 'qr'" @click="setView('qr')">QR Code</asn-button>
             </div>
             <div class="tm" v-if="view === 'tasks' && st.taskMgr">
               <p class="tm-warn" v-if="st.taskMgr.dupBanner" role="alert">{{ st.taskMgr.dupBanner }}</p>
@@ -431,16 +429,6 @@ export const SettingsPanel = {
                   <asn-button state="danger" class="tm-confirm" :disabled="st.taskMgr.confirm.busy" @click="act('tm-confirm')">{{ st.taskMgr.confirm.busy ? TM.stopping : st.taskMgr.confirm.ok }}</asn-button>
                 </asn-actions>
               </asn-dialog>
-            </div>
-            <div class="dv-cards" v-else-if="view === 'qr' && curDev.self && st.known && st.known.ownFp">
-              <div class="set-card">
-                <h3 class="set-h">QR Code</h3>
-                <div class="dv-qr">
-                  <fp-qr-canvas v-if="st.known.qr" :qr="st.known.qr"></fp-qr-canvas>
-                  <div><p class="dv-qr-fp">{{ KNOWN.ownFp(st.known.ownFp) }}</p><small>{{ QR_TEXT.note }}</small></div>
-                </div>
-                <p class="pair-warn" v-if="st.known.error" role="alert">{{ st.known.error }}</p>
-              </div>
             </div>
             <div class="dv-cards" v-else>
               <div class="set-card">
