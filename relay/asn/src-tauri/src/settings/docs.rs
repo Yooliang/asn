@@ -321,7 +321,7 @@ mod launch_bridge {
         Ok(v.as_str().unwrap_or("").trim().to_string())
     }
 
-    /// bridge.json：收發室設定，13 個布林／字串／數字欄位（逐欄容錯：型別不對就是該欄預設，其餘照讀）。
+    /// bridge.json：收發室設定，14 個布林／字串／數字欄位（逐欄容錯：型別不對就是該欄預設，其餘照讀）。
     /// `enabled` 在檔案裡照存，但讀回給呼叫端一律當 true（內建收發室固定開啟，見 `bridge::read_settings`）。
     #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
     #[serde(default)]
@@ -352,6 +352,8 @@ mod launch_bridge {
         pub compact_handoff_off: bool,
         #[serde(deserialize_with = "lenient_n")]
         pub compact_handoff_n: u32,
+        #[serde(deserialize_with = "lenient")]
+        pub gemini_full_access: bool,
         #[serde(flatten)]
         pub extra: Map<String, Value>,
     }
@@ -372,6 +374,7 @@ mod launch_bridge {
                 remote_input_off: false,
                 compact_handoff_off: false,
                 compact_handoff_n: default_n(),
+                gemini_full_access: false,
                 extra: Map::new(),
             }
         }

@@ -72,11 +72,13 @@ pub struct BridgeSettings {
     pub compact_handoff_off: bool,
     /// 壓縮幾次自動交接（2～10）。檔案缺這欄＝3；讀進來一律夾在 2～10
     pub compact_handoff_n: u32,
+    /// 讓背景模式的 Gemini 夥伴能寫檔和執行指令（#2348）。預設關，所以記「開」。只影響之後新開或重啟的 Gemini；其他模型不受影響
+    pub gemini_full_access: bool,
 }
 
 impl Default for BridgeSettings {
     fn default() -> Self {
-        BridgeSettings { enabled: false, allow_takeover: false, allow_remote_launch: false, unaddressed_to: String::new(), auto_resume_off: false, term_server_off: false, term_server_on: false, screen_watch_off: false, perm_phone_off: false, mobile_view_off: false, remote_input_off: false, compact_handoff_off: false, compact_handoff_n: compact::N_DEFAULT }
+        BridgeSettings { enabled: false, allow_takeover: false, allow_remote_launch: false, unaddressed_to: String::new(), auto_resume_off: false, term_server_off: false, term_server_on: false, screen_watch_off: false, perm_phone_off: false, mobile_view_off: false, remote_input_off: false, compact_handoff_off: false, compact_handoff_n: compact::N_DEFAULT, gemini_full_access: false }
     }
 }
 
@@ -118,9 +120,9 @@ pub fn read_settings(data_dir: &Path) -> BridgeSettings {
     doc_to_settings(&crate::settings::peek_in::<crate::settings::BridgeDoc>(data_dir).value)
 }
 fn doc_to_settings(d: &crate::settings::BridgeDoc) -> BridgeSettings {
-    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: d.allow_takeover, allow_remote_launch: d.allow_remote_launch, unaddressed_to: d.unaddressed_to.clone(), auto_resume_off: d.auto_resume_off, term_server_off: d.term_server_off, term_server_on: d.term_server_on, screen_watch_off: d.screen_watch_off, perm_phone_off: d.perm_phone_off, mobile_view_off: d.mobile_view_off, remote_input_off: d.remote_input_off, compact_handoff_off: d.compact_handoff_off, compact_handoff_n: compact::clamp_n(Some(i64::from(d.compact_handoff_n))) }
+    BridgeSettings { enabled: true /* 固定開啟：內建收發室不可關閉（舊設定檔裡的 false 一律忽略） */, allow_takeover: d.allow_takeover, allow_remote_launch: d.allow_remote_launch, unaddressed_to: d.unaddressed_to.clone(), auto_resume_off: d.auto_resume_off, term_server_off: d.term_server_off, term_server_on: d.term_server_on, screen_watch_off: d.screen_watch_off, perm_phone_off: d.perm_phone_off, mobile_view_off: d.mobile_view_off, remote_input_off: d.remote_input_off, compact_handoff_off: d.compact_handoff_off, compact_handoff_n: compact::clamp_n(Some(i64::from(d.compact_handoff_n))), gemini_full_access: d.gemini_full_access }
 }
-/// 只動這 13 個欄位，檔裡不認得的欄位（較新版本寫的）原樣留著
+/// 只動這 14 個欄位，檔裡不認得的欄位（較新版本寫的）原樣留著
 fn apply_settings(d: &mut crate::settings::BridgeDoc, s: &BridgeSettings) {
     d.enabled = s.enabled;
     d.allow_takeover = s.allow_takeover;
@@ -135,6 +137,7 @@ fn apply_settings(d: &mut crate::settings::BridgeDoc, s: &BridgeSettings) {
     d.remote_input_off = s.remote_input_off;
     d.compact_handoff_off = s.compact_handoff_off;
     d.compact_handoff_n = compact::clamp_n(Some(i64::from(s.compact_handoff_n)));
+    d.gemini_full_access = s.gemini_full_access;
 }
 /// 持鎖「讀、改、寫」（一律重讀原檔）：兩處同時改不同欄位不會互相蓋掉。**這是唯一會動 bridge.json 的路徑**；
 /// 檔案是壞的就先搬成 `.bad-` 再寫。寫不進去回固定的白話句（系統原文只進 log）
@@ -146,7 +149,7 @@ pub fn update_settings(data_dir: &Path, f: impl FnOnce(&mut BridgeSettings)) -> 
     })
     .map_err(|e| e.to_string())
 }
-/// 整份寫入（轉接用，保留舊簽章）：只換這 13 個欄位，不認得的欄位照留。新程式請用 [`update_settings`]，免得拿舊值蓋掉別處剛改的欄位
+/// 整份寫入（轉接用，保留舊簽章）：只換這 14 個欄位，不認得的欄位照留。新程式請用 [`update_settings`]，免得拿舊值蓋掉別處剛改的欄位
 pub fn write_settings(data_dir: &Path, s: BridgeSettings) -> Result<(), String> {
     update_settings(data_dir, |cur| *cur = s)
 }
@@ -473,6 +476,8 @@ pub struct Status {
     pub mobile_view: bool,
     /// 設定：允許遠端在這台打字（設定頁的開關現在的值，預設開；#1745）
     pub remote_input: bool,
+    /// 設定：Gemini 背景工作者可以寫檔和執行指令（設定頁的開關現在的值，預設關；#2348）
+    pub gemini_full_access: bool,
     /// 設定：沒指定收件人的信交給哪個視窗（空＝交給本人）
     pub unaddressed_to: String,
     pub error: Option<String>,
@@ -517,7 +522,7 @@ impl Manager {
         let s = read_settings(&self.data_dir);
         let g = self.inner.lock().unwrap();
         let fetch = term_fetch_status();
-        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, compact_handoff: !s.compact_handoff_off, compact_handoff_n: s.compact_handoff_n, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, remote_input: !s.remote_input_off, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_why: crate::launch::term::mux_off_reason(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
+        Status { enabled: s.enabled, running: g.running.is_some(), legacy: g.running.is_none() && self.legacy(), takeover_allowed: s.allow_takeover, remote_launch: s.allow_remote_launch, auto_resume: !s.auto_resume_off, compact_handoff: !s.compact_handoff_off, compact_handoff_n: s.compact_handoff_n, screen_watch: !s.screen_watch_off, perm_phone: !s.perm_phone_off, mobile_view: !s.mobile_view_off, remote_input: !s.remote_input_off, gemini_full_access: s.gemini_full_access, term_server: if cfg!(windows) { !s.term_server_off } else { s.term_server_on }, term_server_supported: term_server_supported(), term_server_missing: !term_server_supported(), term_fetch: fetch.state.to_string(), term_fetch_kind: fetch.kind.to_string(), term_fetch_detail: fetch.detail.clone(), key_protection: crate::keystore::protection_label_cached(&self.data_dir).to_string(), term_server_active: crate::launch::win_term::term_server_active(), term_server_why: crate::launch::term::mux_off_reason(), term_server_locked: crate::launch::win_term::term_server_locked(), term_server_background: crate::launch::term::background_partners_cached(), unaddressed_to: s.unaddressed_to, error: g.error.clone() }
     }
 
     fn try_start(&self) {
@@ -641,6 +646,27 @@ impl Manager {
         update_settings(&self.data_dir, |s| {
             s.remote_input_off = !on;
         })?;
+        Ok(self.status())
+    }
+
+    /// 打開／關閉「Gemini 背景工作者可以寫檔和執行指令」（#2348）。存檔後，「開新夥伴」開出、正在跑的 Gemini 馬上依新開關重開
+    /// （正在處理的那一輪會中止；agents.json 手寫的、Grok 不動）。橋沒在跑就只存檔，之後開、重啟時才讀
+    pub fn set_gemini_full_access(&self, on: bool) -> Result<Status, String> {
+        update_settings(&self.data_dir, |s| {
+            s.gemini_full_access = on;
+        })?;
+        let running = self.inner.lock().unwrap().running.as_ref().map(|r| (r.engines.clone(), r.log.clone()));
+        if let Some((Some(engines), log)) = running {
+            if let Some(admin) = engines.acp_admin() {
+                let (done, failed) = admin.apply_gemini_toggle();
+                if !done.is_empty() {
+                    log.line(&format!("gemini_full_access={on}：已依新設定重開 {}", done.join("、")));
+                }
+                for (name, why) in failed {
+                    log.line(&format!("gemini_full_access={on}：{name} 沒能重開（{why}），請手動重開"));
+                }
+            }
+        }
         Ok(self.status())
     }
 

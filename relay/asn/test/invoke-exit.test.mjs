@@ -120,7 +120,7 @@ test('設定頁出口：指令名與參數形狀不變', async () => {
   await m.autostartApi.supported(); await m.autostartApi.get(); await m.autostartApi.blocked(); await m.autostartApi.set(true)
   await m.bridgeApi.status(); await m.bridgeApi.setRemoteLaunch(true); await m.bridgeApi.setAutoResume(false); await m.bridgeApi.setCompactHandoff(true, 4)
   await m.bridgeApi.setTermServer(true); await m.bridgeApi.retryTermFetch(); await m.bridgeApi.setPermPhone(true); await m.bridgeApi.setMobileView(false)
-  await m.bridgeApi.setRemoteInput(true); await m.bridgeApi.setScreenWatch(true); await m.bridgeApi.setUnaddressedTo('x'); await m.bridgeApi.takeover()
+  await m.bridgeApi.setRemoteInput(true); await m.bridgeApi.setGeminiFullAccess(true); await m.bridgeApi.setScreenWatch(true); await m.bridgeApi.setUnaddressedTo('x'); await m.bridgeApi.takeover()
   await m.updateApi.check(); await m.updateApi.install(); await m.updateApi.remoteStatus(); await m.updateApi.remoteRequest('N1')
   await m.logViewApi.openMachineLogDir()
   await m.voiceApi.ttsVoices(); await m.voiceApi.sttStatus(); await m.voiceApi.cfgGet(); await m.voiceApi.cfgSet({ a: 1 })
@@ -130,7 +130,7 @@ test('設定頁出口：指令名與參數形狀不變', async () => {
     ['autostart_supported', undefined], ['autostart_get', undefined], ['autostart_blocked', undefined], ['autostart_set', { on: true }],
     ['bridge_status', undefined], ['bridge_set_remote_launch', { on: true }], ['bridge_set_auto_resume', { on: false }], ['bridge_set_compact_handoff', { on: true, n: 4 }],
     ['bridge_set_term_server', { on: true }], ['bridge_retry_term_fetch', undefined], ['bridge_set_perm_phone', { on: true }], ['bridge_set_mobile_view', { on: false }],
-    ['bridge_set_remote_input', { on: true }], ['bridge_set_screen_watch', { on: true }], ['bridge_set_unaddressed_to', { name: 'x' }], ['bridge_takeover', { confirmed: true }],
+    ['bridge_set_remote_input', { on: true }], ['bridge_set_gemini_full_access', { on: true }], ['bridge_set_screen_watch', { on: true }], ['bridge_set_unaddressed_to', { name: 'x' }], ['bridge_takeover', { confirmed: true }],
     ['update_check', undefined], ['update_install', undefined], ['update_remote_status', undefined], ['update_remote_request', { node: 'N1' }],
     ['open_machine_log_dir', undefined],
     ['tts_voices', undefined], ['stt_status', undefined], ['voice_cfg_get', undefined], ['voice_cfg_set', { cfg: { a: 1 } }],

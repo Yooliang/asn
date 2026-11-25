@@ -84,11 +84,12 @@ impl Store {
 impl Worker {
     pub fn snapshot(&self) -> WorkerSnapshot {
         let cfg = &self.i.cfg;
+        let perms = self.cfg_now().permissions.clone();
         let (d, status) = {
             let s = self.st.lock().unwrap();
             (s.driver.clone(), s.health.name())
         };
-        let rule = |c: &'static str| (c, cfg.permissions.rule(c).name());
+        let rule = |c: &'static str| (c, perms.rule(c).name());
         WorkerSnapshot {
             name: cfg.name.clone(),
             protocol: cfg.protocol.clone(),
@@ -234,14 +235,64 @@ impl Worker {
         }
     }
 
-    /// 重開：結束驅動程序，讓收發室重新啟動它；對話編號留著，能接續就接續。回被結束的 pid（本來就沒在跑 0）
+    /// 重開：結束驅動程序，讓收發室重新啟動它；對話編號留著，能接續就接續。回被結束的 pid（本來就沒在跑 0）。
+    /// 「開新夥伴」開出的 Gemini 會先依目前的「可寫檔和執行指令」開關重算權限
     pub fn admin_restart(self: &Arc<Self>) -> Result<u32, String> {
         let (pid, d) = self.take_driver_for_admin()?;
         if let Some(d) = d {
             d.stop();
         }
+        self.refresh_perms();
         self.log(format!("遠端管理：重開（結束程序 pid={pid}）"));
         self.revive_after_admin_stop();
+        self.warm();
+        Ok(pid)
+    }
+
+    /// 設這位的權限重算來源（只有「開新夥伴」開出的 Gemini 才設）
+    pub fn set_perm_source(&self, f: Option<super::PermSource>) {
+        self.st.lock().unwrap().perm_source = f;
+    }
+    pub fn perm_source(&self) -> Option<super::PermSource> {
+        self.st.lock().unwrap().perm_source.clone()
+    }
+    /// 這位的權限跟著本機開關走嗎
+    pub fn follows_toggle(&self) -> bool {
+        self.st.lock().unwrap().perm_source.is_some()
+    }
+
+    /// 依目前開關重算權限（沒有來源＝不動）。寫檔或執行指令的規則變了，下一則訊息重送開場說明，讓它知道新權限
+    fn refresh_perms(&self) {
+        let Some(src) = self.perm_source() else { return };
+        let next = src();
+        let prev = self.cfg_now();
+        let changed = ["write", "execute"].iter().any(|c| prev.permissions.rule(c) != next.rule(c));
+        let mut s = self.st.lock().unwrap();
+        s.perms = Some(next);
+        if changed {
+            s.need_preamble = true;
+        }
+    }
+
+    /// 開關切換後馬上套用：不管有沒有在處理信件，結束驅動程序（那一輪會中止），依新開關重算權限後重開。
+    /// 已被遠端「關閉」的只更新權限，不替它開機（之後「重開」會用新權限）。回被結束的 pid
+    pub fn admin_apply_toggle(self: &Arc<Self>) -> Result<u32, String> {
+        let (pid, d, stopped) = {
+            let mut s = self.st.lock().unwrap();
+            if s.stopping {
+                return Err("這個工作者正在關閉".into());
+            }
+            let d = s.driver.take();
+            (d.as_ref().filter(|d| d.alive()).map(|d| d.pid()).unwrap_or(0), d, s.admin_stopped)
+        };
+        if let Some(d) = d {
+            d.stop();
+        }
+        self.refresh_perms();
+        if stopped {
+            return Ok(pid);
+        }
+        self.log(format!("開關切換：依新設定重開（結束程序 pid={pid}，正在跑的那一輪會中止）"));
         self.warm();
         Ok(pid)
     }
@@ -290,6 +341,7 @@ impl Worker {
         if let Some(d) = d {
             d.stop();
         }
+        self.refresh_perms();
         let saved = self.save_model(models_file, model);
         self.log(format!("遠端管理：切換模型為 {model}（結束程序 pid={pid}，帶同一段對話重開）"));
         self.revive_after_admin_stop();
@@ -320,6 +372,7 @@ impl Worker {
             d.stop();
         }
         self.i.store.clear(&self.i.cfg);
+        self.refresh_perms();
         {
             let mut s = self.st.lock().unwrap();
             s.need_preamble = true;

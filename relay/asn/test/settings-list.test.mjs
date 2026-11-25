@@ -75,6 +75,7 @@ const defaults = () => {
     bridgeOn('bridge-perm-phone', 'perm_phone_off'),
     bridgeOn('bridge-mobile-view', 'mobile_view_off'),
     bridgeOn('bridge-remote-input', 'remote_input_off'),
+    { token: 'bridge-gemini-full-access', startsWith: '關', code: [[BRIDGE, /impl Default for BridgeSettings[\s\S]*?\bgemini_full_access: false/]] },
     { ...bridgeOn('bridge-compact', 'compact_handoff_off'), includes: [`${rustConst(readFile('src-tauri/src/bridge/compact.rs'), 'N_DEFAULT')} 次`] },
     { token: 'bridge-unaddressed', startsWith: '空白', code: [[BRIDGE, /impl Default for BridgeSettings[\s\S]*?\bunaddressed_to: String::new\(\)/]] },
     // 設備順序、顯示、移除：存檔欄位讀進來都是 normalizeKeys，沒存過就是空陣列
@@ -269,7 +270,7 @@ const withoutToken = (text, tok) => {
 
 test('#1853 存檔欄位：標準答案取得到（Rust 具名 Doc、asn-me.json、localStorage 都有東西）', () => {
   const f = T.files
-  assert.deepEqual(f.bridge.length, 13)
+  assert.deepEqual(f.bridge.length, 14)
   assert.deepEqual(f.voice, ['tts_voice', 'tts_auto', 'stt_lang', 'stt_model'])
   assert.ok(f.me.includes('autoAddClaude') && f.me.includes('navTab') && f.me.includes('pendingDeviceName'))
   assert.deepEqual([...f.local], [...LOCAL_KEYS])

@@ -49,7 +49,7 @@ fn old_bridge(dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(dir)) else { return dflt };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return dflt };
     let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: true, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off"), remote_input_off: flag("remote_input_off"), compact_handoff_off: flag("compact_handoff_off"), compact_handoff_n: compact::clamp_n(v.get("compact_handoff_n").and_then(Value::as_i64)) }
+    BridgeSettings { enabled: true, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off"), remote_input_off: flag("remote_input_off"), compact_handoff_off: flag("compact_handoff_off"), compact_handoff_n: compact::clamp_n(v.get("compact_handoff_n").and_then(Value::as_i64)), gemini_full_access: flag("gemini_full_access") }
 }
 
 const BAD: &[&str] = &["", "{壞掉", "null", "5", "[1,2]", "\"字串\"", "true"];
@@ -60,7 +60,7 @@ fn bridge_cases() -> Vec<String> {
         [
             "{}",
             r#"{"enabled":false}"#,
-            r#"{"enabled":true,"allow_takeover":true,"allow_remote_launch":true,"unaddressed_to":"  T-丙  ","auto_resume_off":true,"term_server_off":true,"term_server_on":true,"screen_watch_off":true,"perm_phone_off":true,"mobile_view_off":true,"remote_input_off":true,"compact_handoff_off":true,"compact_handoff_n":7}"#,
+            r#"{"enabled":true,"allow_takeover":true,"allow_remote_launch":true,"unaddressed_to":"  T-丙  ","auto_resume_off":true,"term_server_off":true,"term_server_on":true,"screen_watch_off":true,"perm_phone_off":true,"mobile_view_off":true,"remote_input_off":true,"compact_handoff_off":true,"compact_handoff_n":7,"gemini_full_access":true}"#,
             r#"{"allow_remote_launch":"true","allow_takeover":1,"auto_resume_off":null,"term_server_off":[true]}"#,
             r#"{"unaddressed_to":5}"#,
             r#"{"unaddressed_to":null}"#,
@@ -127,8 +127,9 @@ fn bridge_預設值逐欄對照() {
         ("remote_input_off", d.remote_input_off.to_string(), s.remote_input_off.to_string()),
         ("compact_handoff_off", d.compact_handoff_off.to_string(), s.compact_handoff_off.to_string()),
         ("compact_handoff_n", d.compact_handoff_n.to_string(), s.compact_handoff_n.to_string()),
+        ("gemini_full_access", d.gemini_full_access.to_string(), s.gemini_full_access.to_string()),
     ];
-    assert_eq!(rows.len(), 13);
+    assert_eq!(rows.len(), 14);
     for (k, a, b) in rows {
         assert_eq!(a, b, "{k} 的預設值");
     }
