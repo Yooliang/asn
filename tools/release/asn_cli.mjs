@@ -32,3 +32,16 @@ export const asnCliFail = r => {
   const err = String(r?.stderr ?? '').trim()
   return `結束碼 ${r?.status}${err ? `：${err.slice(0, 300)}` : ''}`
 }
+
+// 發版子程序貼群組失敗的機器可讀標記（#2345）：發版本身成功、只有通知沒貼成，子程序結束碼仍是 0，
+// 常駐程式靠 stdout 裡這一行才知道要留 post-failed 告警。格式固定：標記字樣、一個空格、{"text":"要人工補貼的原文"}
+export const POST_FAILED_MARKER = 'ASN_POST_FAILED_V1'
+export const formatPostFailedMarker = text => `${POST_FAILED_MARKER} ${JSON.stringify({ text: String(text ?? '') })}`
+// 從子程序 stdout 找標記；回 { text } 或 null（找不到、格式壞都算沒有）
+export function parsePostFailedMarker(stdout) {
+  for (const line of String(stdout ?? '').split(/\r?\n/)) {
+    if (!line.startsWith(`${POST_FAILED_MARKER} `)) continue
+    try { const o = JSON.parse(line.slice(POST_FAILED_MARKER.length + 1)); if (o && typeof o.text === 'string') return { text: o.text } } catch { /* 格式壞視為沒有 */ }
+  }
+  return null
+}

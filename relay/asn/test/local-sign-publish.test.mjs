@@ -441,6 +441,7 @@ test('#2093 貼群組失敗（找不到呼叫者所屬的 Claude 視窗）：不
   const r = await localSignPublish(x.opts, x.deps)
   assert.equal(r.ok, true, r.error)
   assert.equal(r.postFailed, true)
+  assert.match(r.postFailedText, /發版完成/, '#2345 結果帶要人工補貼的原文')
   assert.equal(r.completed.length, 13)
   const k = kinds(x.w)
   assert.ok(k.includes('git commit') && k.includes('git push'), k.join(' > '))

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { runOnce, toRuns, parseArgs, checkWorktree, checkStartup, runCommand, realDeps, resolveStatePath, REPO_ROOT, acquireLock, WORKFLOWS, REQUIRED_DEPS, BLOCKED_NOTICE_MS, GH_FAIL_NOTICE_MS } from '../../../tools/release/auto_publish.mjs'
+import { formatPostFailedMarker, parsePostFailedMarker } from '../../../tools/release/asn_cli.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -983,4 +984,55 @@ test('#2287 決定階段就貼的回報（發版 CI 失敗）貼群組失敗：r
   const a = alertOf(e).alerts['post-failed']
   assert.equal(a.ref, 'desktop@0.2.45')
   assert.ok(a.message.includes('desktop@0.2.45'))
+})
+
+// ---- #2345 發佈成功但群組沒貼成：子程序結束碼 0，靠 stdout 標記留 active post-failed 告警 ----
+const markerOut = (text) => `...log...\n${formatPostFailedMarker(text)}\n`
+// 第一輪 dry-run 先過，第二輪才是正式發佈
+async function publishWithPostFailed(e, text = '【發版完成】v0.2.99：…') {
+  e.deps.spawn = (bin, args) => ({ status: 0, stdout: args.includes('--dry-run') ? 'ok' : markerOut(text), stderr: '' })
+  await runOnce(opts, e.deps)
+  return await runOnce(opts, e.deps)
+}
+
+test('#2345 發佈成功但群組沒貼成：留 active post-failed 告警，ref 是平台@版號、訊息含要補貼的原文，發佈仍記成功', async () => {
+  const e = env({ desktopRows: [row('v0.2.99', 222)] })
+  const r = await publishWithPostFailed(e)
+  assert.equal(r.outcome, 'publish')
+  const a = alertOf(e).alerts['post-failed']
+  assert.ok(a, '舊程式沒有任何 post-failed 告警')
+  assert.equal(a.status, 'active')
+  assert.equal(a.ref, 'desktop@0.2.99')
+  assert.ok(a.message.includes('【發版完成】v0.2.99'))
+  assert.equal(lastState(e.fsMap).done['desktop@0.2.99'].result, 'published')
+  assert.ok(!alertOf(e).alerts['ci-failed'], '不是會暫停發佈的失敗')
+})
+
+test('#2345 沒有標記（群組貼成功）：不留 post-failed 告警', async () => {
+  const e = env({ desktopRows: [row('v0.2.99', 222)] })
+  e.deps.spawn = () => ({ status: 0, stdout: 'done', stderr: '' })
+  await runOnce(opts, e.deps)
+  await runOnce(opts, e.deps)
+  assert.ok(!e.fsMap.has(ALERT) || alertOf(e).alerts['post-failed'] === undefined)
+})
+
+test('#2345 下一輪沒有要貼的東西：不會把這筆告警誤清掉；--ack-alert post-failed 才清', async () => {
+  const e = env({ desktopRows: [row('v0.2.99', 222)] })
+  await publishWithPostFailed(e)
+  e.deps.asnCli = () => ({ status: 0, stdout: '', stderr: '' })
+  e.clock.t = T0 + 120_000
+  const r = await runOnce(opts, e.deps)
+  assert.notEqual(r.outcome, 'publish')
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+  // 已發佈成功的版本不是失敗類，--ack 不收；清這筆告警走 --ack-alert post-failed
+  const res = await runCommand(parseArgs(['--ack-alert', 'post-failed', '--state', STATE]), e.deps)
+  assert.equal(res.code, 0)
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
+})
+
+test('#2345 標記解析：格式壞、不是字串都當沒有', () => {
+  assert.deepEqual(parsePostFailedMarker(markerOut('甲\n乙"丙')), { text: '甲\n乙"丙' })
+  assert.equal(parsePostFailedMarker('ASN_POST_FAILED_V1 {壞'), null)
+  assert.equal(parsePostFailedMarker('ASN_POST_FAILED_V1 {"text":1}'), null)
+  assert.equal(parsePostFailedMarker(undefined), null)
 })
