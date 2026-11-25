@@ -144,8 +144,11 @@ test('接線：每次重抓群組清單都先告訴 roomBells', () => {
 
 test('接線：後台只有寄信和名單兩處帶種類；群組那條路不帶', () => {
   const index = read('../../../supabase/functions/relay/index.ts')
-  assert.ok(index.includes('for (const t of rosterBellTopics(data)) await ring(t, { kind: "roster" });'))
-  assert.ok(index.includes('for (const t of bellTopicsOf(sent)) await ring(t, { kind: "mail" });'))
+  assert.ok(index.includes('const MAIL_BELL = { kind: "mail" };') && index.includes('const ROSTER_BELL = { kind: "roster" };'), '種類寫死在後台')
+  assert.ok(index.includes('for (const t of rosterBellTopics(data)) await ring(t, ROSTER_BELL);'))
+  assert.ok(index.includes('for (const t of bellTopicsOf(sent)) await ring(t, MAIL_BELL);'))
+  assert.equal(index.split('ring(t, MAIL_BELL)').length, 2, '寄信門鈴只有一處')
+  assert.equal(index.split('ring(t, ROSTER_BELL)').length, 2, '名單門鈴只有一處')
   const code = index.split(/\r?\n/).filter(l => !l.trim().startsWith('//')).join(' ')   // 註解裡提到種類不算
   assert.equal(code.split('kind: "roster"').length, 2, '名單種類只有一處')
   assert.equal(code.split('kind: "mail"').length, 2, '寄信種類只有一處')

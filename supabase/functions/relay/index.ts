@@ -79,6 +79,9 @@ const fcm = createFcm({ get: (k) => Deno.env.get(k) });
 // 群組發言、邀請、確認卡片維持不帶種類。舊客戶端只看 event=bell。
 // Also write the Firebase RTDB bell node b/<hash> = { at } (pointer only, see docs/relay/SIGNAL.md): devices that listen to it
 // pull /updates only when it changes. No-op when IRORI_FIREBASE_DB_URL / IRORI_FIREBASE_SA are not both set; failures only log.
+// 寫死在後台的門鈴種類，不取自用戶端的任何欄位
+const MAIL_BELL = { kind: "mail" };
+const ROSTER_BELL = { kind: "roster" };
 async function ring(topic: string, payload: Record<string, unknown> = {}) {
   try {
     const r = await fetch(`${SUPABASE_URL}/realtime/v1/api/broadcast`, {
@@ -362,7 +365,7 @@ async function handle(req: Request): Promise<Response> {
     if (data?.error === "forbidden") return json(403, { error: "forbidden" });
     if (data?.error) return json(400, { error: data.error });
     // 名單有變（忙碌／閒置／說明）：資料庫回同帳號其他設備的門鈴（已做 2 秒頻率限制），敲一下讓它們立刻重拉名單。舊資料庫沒這個鍵＝不敲
-    for (const t of rosterBellTopics(data)) await ring(t, { kind: "roster" });
+    for (const t of rosterBellTopics(data)) await ring(t, ROSTER_BELL);
     // 機器橋把本機 launcher.json 的摘要（profile 名、cwd 白名單、每小時上限）附在名單一起回報；沒帶 launcher 欄位就不動
     if ("launcher" in b) {
       const l = sanitizeLauncher(b.launcher);
@@ -788,7 +791,7 @@ async function handle(req: Request): Promise<Response> {
     // 補綁＋核對：綁失敗、附件在檢查後過期、或另一個同時送來的請求先綁好，都看實際結果；有缺只回報（信已寄出，仍是 200）
     const missing = await reconcileAttachments({ rpc }, me.id, att.ids, sent.id);
     // 回信寄給人代號時會扇出給這個帳號所有在線的 ASN，每台的門鈴都敲
-    for (const t of bellTopicsOf(sent)) await ring(t, { kind: "mail" });
+    for (const t of bellTopicsOf(sent)) await ring(t, MAIL_BELL);
     // 寄給本人（回傳有 fanout 的那條路）：手機 App 關著時推一則固定文字。收件人由伺服器端用這封信查，背景跑，失敗不影響寄信
     if (typeof (sent as { fanout?: unknown }).fanout === "number") signal.background(notifyPush({ rpc: async (fn, args) => await db.rpc(fn, args), fcm }, "owner_mail", me.id, sent.id));
     await touchActive(rpc, me.id, str(b.from_agent));   // 最後活動時間（#397）：背景寫入，失敗不影響寄信
