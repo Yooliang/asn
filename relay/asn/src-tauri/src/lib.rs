@@ -169,7 +169,7 @@ mod stt;
 mod tray;
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
-mod snap_max;   // 自畫放大鈕要有 Windows 11 分割版面（#1788）：放大鈕上方的透明子視窗＋最上層視窗回 HTMAXBUTTON
+mod snap_max;   // 自畫放大鈕要有 Windows 11 分割版面（#1788）：放大鈕上方的蓋板子視窗自己回 HTMAXBUTTON
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 pub mod guard;   // ASN 意外關閉時自動重開（工作排程每 5 分鐘跑 asn.exe --guard；預設關，todo-next-191 B1）

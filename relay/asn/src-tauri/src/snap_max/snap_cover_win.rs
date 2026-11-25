@@ -1,13 +1,16 @@
 //! Windows 專屬：放大鈕上方的透明子視窗（#1788）。全部只在建視窗的主執行緒上跑。
 //!
 //! 結構：最上層視窗（tao）→ 網頁容器（wry）→ WebView2 的子視窗（另一個行程）；網頁區的滑鼠訊息被最深的那層吃掉。
-//! 在最上層視窗底下、網頁上方放一扇和命中矩形同樣大小的同行程子視窗，它對 `WM_NCHITTEST` 回 `HTTRANSPARENT`，
-//! 讓命中測試越過另一個行程的 WebView2 子視窗、落回最上層視窗（回 `HTMAXBUTTON` 的是 `snap_win.rs`）。
+//! HTTRANSPARENT 只在同一執行緒的視窗之間往下傳，到不了最上層視窗，所以不穿透：
+//! 在網頁上方放一扇和命中矩形同樣大小的同行程子視窗，它自己對 `WM_NCHITTEST` 回 `HTMAXBUTTON`
+//! （Tauri 社群的做法），Windows 11 就會在滑過時顯示分割版面。
+//! 滑過、離開、按下、放開都在蓋板自己的視窗程序處理（`WM_NCMOUSEMOVE`／`WM_NCMOUSELEAVE`／`WM_NCLBUTTONDOWN`／`WM_NCLBUTTONUP`），
+//! 離開通知用 `TrackMouseEvent(TME_LEAVE | TME_NONCLIENT)` 追蹤；點擊（按下又放開）時對最上層視窗送最大化或還原。
 //!
 //! 命中矩形＝前端回報的鈕矩形，扣掉上緣調整大小的那一條（視窗沒最大化時）：鈕貼著視窗上緣，
 //! 不讓出來的話上緣那段拖邊縮放會被鈕吃掉。被扣掉的那條落到 tauri 的拖邊縮放子視窗（上緣回 HTTOP，邊框高度 SM_CYFRAME）。
-//! 蓋板、網頁容器、最上層視窗三處共用同一個命中矩形；鈕在畫面上的位置不動。
-use super::snap_hit::exclude_resize_border;
+//! 蓋板的大小就是命中矩形；鈕在畫面上的位置不動。
+use super::snap_hit::{hit_answer, needs_leave_tracking, nc_event, exclude_resize_border, Hit, NcMsg, HT_MAXBUTTON};
 use super::snap_win;
 use super::{clamp_to_client, PxRect};
 use std::ptr::{null, null_mut};
@@ -16,6 +19,7 @@ use tauri::AppHandle;
 use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -36,7 +40,8 @@ const fn utf16_const<const N: usize>(s: [u8; N]) -> [u16; N] {
 
 /// 照前端回報套用：Some＝建立或搬到這個位置；None＝清掉。
 /// 任何一步失敗都寫 log、收掉蓋板、不留狀態，下一次回報矩形時整個重來。
-pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>) {
+/// `dpr` 是前端回報的倍率，只寫進 debug log。
+pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>, dpr: f64) {
     let parent = parent as HWND;
     let existing = find(parent);
     let Some((raw, hit)) = rect.and_then(|r| client_clamped(parent, r)).and_then(|c| hit_rect(parent, c).map(|e| (c, e))) else {
@@ -78,7 +83,7 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
         log_fail("建立透明蓋板失敗", parent);
         return;
     }
-    // SAFETY: child 是剛建好的子視窗；只調整 Z 順序，不搬不改大小。
+    // SAFETY: child 是剛建好的子視窗；只調整 Z 順序（疊到最上面，WebView2 的視窗不能蓋過它），不搬不改大小。
     unsafe { SetWindowPos(child, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
     // SAFETY: parent 有效；parent_proc 的簽名符合 SUBCLASSPROC，不使用 dwRefData。
     if unsafe { SetWindowSubclass(parent, Some(parent_proc), SUBCLASS_ID, 0) } == 0 {
@@ -87,14 +92,9 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
         unsafe { DestroyWindow(child) };
         return;
     }
-    if snap_win::install(parent, app, label, raw, hit).is_err() {
-        // install 已把自己掛的 subclass 拿掉並寫了 log；這裡收掉蓋板與 parent_proc，讓下次重試
-        // SAFETY: child 與 parent 都是上面確認過有效的視窗。
-        unsafe {
-            DestroyWindow(child);
-            RemoveWindowSubclass(parent, Some(parent_proc), SUBCLASS_ID);
-        }
-    }
+    // 蓋板與 subclass 都成功才寫進狀態（失敗的路徑上面已經收掉並寫 log，不留狀態、下次重試）
+    snap_win::install(parent, app, label, raw, hit);
+    snap_win::log_installed(parent, raw, hit, dpr);
 }
 
 /// 收掉蓋板與全部 subclass 與狀態
@@ -206,14 +206,6 @@ unsafe extern "system" fn parent_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
             if !child.is_null() {
                 relayout(hwnd, child);
             }
-            snap_win::sync_containers(hwnd, false);
-            r
-        }
-        // 子視窗建好時（網頁容器晚建或被重建）補掛
-        WM_PARENTNOTIFY if (wparam & 0xFFFF) as u32 == WM_CREATE => {
-            // SAFETY: 轉交 subclass 鏈的下一個程序，參數原封不動。
-            let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
-            snap_win::sync_containers(hwnd, false);
             r
         }
         WM_NCDESTROY => {
@@ -228,14 +220,56 @@ unsafe extern "system" fn parent_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
     }
 }
 
-/// 永遠透明（HTTRANSPARENT＝-1）：這扇視窗不回答任何滑鼠命中
+/// 蓋板自己的視窗程序：命中放大鈕區域回 `HTMAXBUTTON`，並處理滑過、離開、按下、放開。
 ///
 /// # Safety
 /// 只能由系統以 WNDPROC 的約定呼叫（`RegisterClassExW` 註冊）。
 unsafe extern "system" fn cover_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if msg == WM_NCHITTEST {
-        return HTTRANSPARENT as LRESULT;
+    let nc = match msg {
+        WM_NCHITTEST => return on_hit_test(hwnd, lparam),
+        WM_NCMOUSEMOVE => Some(NcMsg::Move),
+        WM_NCMOUSELEAVE => Some(NcMsg::Leave),
+        WM_NCLBUTTONDOWN => Some(NcMsg::Down),
+        WM_NCLBUTTONUP => Some(NcMsg::Up),
+        _ => None,
+    };
+    if let Some(m) = nc {
+        // SAFETY: hwnd 是正在處理訊息的蓋板；只讀它的父視窗。
+        let top = unsafe { GetParent(hwnd) };
+        snap_win::log_first_nc(m, wparam);
+        if let Some(ev) = nc_event(m, wparam) {
+            if needs_leave_tracking(ev) {
+                // 要主動要求「離開」通知，否則收不到 WM_NCMOUSELEAVE
+                let mut t = TRACKMOUSEEVENT { cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE | TME_NONCLIENT, hwndTrack: hwnd, dwHoverTime: 0 };
+                // SAFETY: t 是區域變數且 cbSize 填對；hwndTrack 是目前正在處理訊息的蓋板。
+                if unsafe { TrackMouseEvent(&mut t) } == 0 {
+                    snap_win::log_win_fail("TrackMouseEvent 失敗，收不到非客戶區離開通知", hwnd);
+                }
+            }
+            if !top.is_null() {
+                snap_win::feed(top, ev);
+            }
+            // 按下與放開自己處理、不交給預設程序（預設會對 HTMAXBUTTON 進入自己的追蹤迴圈）；滑過與離開照常交回
+            if matches!(m, NcMsg::Down | NcMsg::Up) {
+                return 0;
+            }
+        }
     }
     // SAFETY: 轉交預設視窗程序，參數原封不動。
     unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+}
+
+/// WM_NCHITTEST：螢幕座標換成最上層視窗內容區座標，矩形內回 HTMAXBUTTON，否則交給預設程序
+fn on_hit_test(hwnd: HWND, lparam: LPARAM) -> LRESULT {
+    // SAFETY: hwnd 是正在處理訊息的蓋板；只讀它的父視窗。
+    let top = unsafe { GetParent(hwnd) };
+    let client = if top.is_null() { None } else { snap_win::client_xy(top, lparam) };
+    let rect = if top.is_null() { None } else { snap_win::rect_of(top) };
+    let hit = client.map(|(x, y)| hit_answer(rect, x, y)).unwrap_or(Hit::Pass);
+    snap_win::log_hit(lparam, client, if hit == Hit::MaxButton { "HTMAXBUTTON" } else { "預設" });
+    if hit == Hit::MaxButton {
+        return HT_MAXBUTTON as LRESULT;
+    }
+    // SAFETY: 轉交預設視窗程序，參數原封不動。
+    unsafe { DefWindowProcW(hwnd, WM_NCHITTEST, 0, lparam) }
 }

@@ -1,12 +1,12 @@
 //! 自畫的「放大」鈕要能跳出 Windows 11 的分割版面（Snap Layouts，#1788）。
 //!
-//! 做法是 Microsoft 文件建議的：最上層視窗的 `WM_NCHITTEST` 在放大鈕的矩形內回 `HTMAXBUTTON`，系統就把那一塊當成放大鈕，
-//! 滑過時顯示分割版面。網頁畫的鈕在 WebView2 的子視窗（另一個行程）裡，命中測試到不了最上層視窗，
-//! 所以放大鈕上方蓋一扇透明子視窗、wry 的網頁容器在矩形內也回 `HTTRANSPARENT`，讓命中測試落回最上層視窗
-//! （細節見 `snap_max/snap_win.rs`、`snap_max/snap_cover_win.rs`）。
-//! 滑過／按下／放開由最上層視窗的非客戶區滑鼠訊息接手，通知網頁換樣式，放開時由 Rust 端直接最大化／還原。
+//! 做法（Tauri 社群的做法）：放大鈕上方蓋一扇同執行緒的子視窗（蓋板），蓋板自己的 `WM_NCHITTEST` 回 `HTMAXBUTTON`，
+//! 系統就把那一塊當成放大鈕，滑過時顯示分割版面。不能用 `HTTRANSPARENT` 穿透：它只在同一執行緒的視窗之間往下傳，
+//! 網頁在 WebView2 的子視窗（另一個行程）裡，命中測試會停在那裡、到不了最上層視窗。
+//! 滑過／離開／按下／放開都由蓋板自己的非客戶區滑鼠訊息接手，通知網頁換樣式，點擊時由 Rust 端對最上層視窗送最大化／還原
+//! （細節見 `snap_max/snap_cover_win.rs`、`snap_max/snap_win.rs`）。
 //!
-//! 這個檔案放不依賴系統的部分（座標換算、狀態機），命中判斷在 `snap_max/snap_hit.rs`，Windows 專屬的視窗程序在 `snap_max/snap_win.rs`、`snap_max/snap_cover_win.rs`。
+//! 這個檔案放不依賴系統的部分（座標換算、狀態機），命中判斷在 `snap_max/snap_hit.rs`，Windows 專屬的視窗程序在 `snap_max/snap_cover_win.rs`、`snap_max/snap_win.rs`。
 //! 其他平台（Linux、macOS）：指令存在但什麼都不做，網頁的鈕照舊自己處理。
 
 mod snap_hit;
@@ -143,36 +143,36 @@ pub const EVENT: &str = "asn:snap-max";
 #[tauri::command]
 pub fn snap_max_set(window: tauri::Window, x: f64, y: f64, w: f64, h: f64, dpr: f64) -> Result<(), String> {
     let rect = css_to_px(CssRect { x, y, w, h }, dpr);
-    apply(window, rect)
+    apply(window, rect, dpr)
 }
 
 /// 外觀切換成原生外框、放大鈕不存在（Aero）、視窗要關：清掉子視窗，滑鼠訊息回到網頁
 #[cfg(feature = "gui")]
 #[tauri::command]
 pub fn snap_max_clear(window: tauri::Window) -> Result<(), String> {
-    apply(window, None)
+    apply(window, None, 0.0)
 }
 
 /// 切到原生外框時由 `wins::set_frame` 同步呼叫：不等前端清，免得那 50ms 把原生標題區誤判成放大鈕
 #[cfg(feature = "gui")]
 pub fn clear_now(w: &tauri::WebviewWindow) {
-    if let Err(e) = apply(w.as_ref().window(), None) {
+    if let Err(e) = apply(w.as_ref().window(), None, 0.0) {
         elog!("[snap] 切到原生外框時清不掉放大鈕分割版面：{e}");
     }
 }
 
 #[cfg(all(feature = "gui", windows))]
-fn apply(window: tauri::Window, rect: Option<PxRect>) -> Result<(), String> {
+fn apply(window: tauri::Window, rect: Option<PxRect>, dpr: f64) -> Result<(), String> {
     use tauri::Manager;
     let hwnd = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
     let app = window.app_handle().clone();
     let label = window.label().to_string();
     // 建立與調整子視窗一定要在建這扇視窗的執行緒上做
-    window.run_on_main_thread(move || snap_cover_win::apply(hwnd, app, label, rect)).map_err(|e| e.to_string())
+    window.run_on_main_thread(move || snap_cover_win::apply(hwnd, app, label, rect, dpr)).map_err(|e| e.to_string())
 }
 
 #[cfg(all(feature = "gui", not(windows)))]
-fn apply(_window: tauri::Window, _rect: Option<PxRect>) -> Result<(), String> {
+fn apply(_window: tauri::Window, _rect: Option<PxRect>, _dpr: f64) -> Result<(), String> {
     Ok(())
 }
 
@@ -293,6 +293,16 @@ mod tests {
         assert!(!step(r.state, Ev::Up).toggle);
         // 本來就閒置：不通知，避免每次改大小都發事件
         assert_eq!(reset_on_layout_change(BtnState::default()).notify, None);
+    }
+
+    #[test]
+    fn 進入再離開會發離開通知() {
+        let enter = step(BtnState::default(), Ev::Move);
+        assert_eq!(enter.notify, Some("hover"));
+        let leave = step(enter.state, Ev::Leave);
+        assert_eq!(leave.notify, Some("leave"), "離開要通知網頁清掉底色");
+        assert_eq!(leave.state, BtnState::default());
+        assert!(!leave.toggle);
     }
 
     #[test]

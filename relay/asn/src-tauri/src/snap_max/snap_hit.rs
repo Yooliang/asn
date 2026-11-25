@@ -5,36 +5,69 @@ use super::{Ev, PxRect};
 /// `WM_NCHITTEST` 的 `HTMAXBUTTON`；`WM_NC*` 滑鼠訊息的 wParam 就是命中碼
 pub const HT_MAXBUTTON: usize = 9;
 
-/// 收到 WM_NCHITTEST 的是哪一層視窗
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    /// wry 的網頁容器（WRY_WEBVIEW）
-    Container,
-    /// 最上層視窗
-    Top,
-}
-
-/// 對 WM_NCHITTEST 的回答
+/// 蓋板對 WM_NCHITTEST 的回答
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hit {
-    /// HTTRANSPARENT：這層當作不存在，交給底下的同執行緒視窗
-    Transparent,
     /// HTMAXBUTTON：這裡是放大鈕
     MaxButton,
-    /// 不處理，交給原本的視窗程序（維持 tao 的邊框縮放等）
+    /// 不在鈕上（或還沒回報矩形）：交給預設視窗程序
     Pass,
 }
 
-/// 命中判斷。`(x, y)` 是最上層視窗內容區座標（實體像素），`rect` 是鈕的矩形（尚未設定就是 None）。
-/// - 網頁容器：鈕的矩形內透明，其餘不處理
-/// - 最上層視窗：鈕的矩形內回放大鈕，其餘不處理
-pub fn hit_answer(role: Role, rect: Option<PxRect>, x: i32, y: i32) -> Hit {
-    let inside = rect.is_some_and(|r| r.contains(x, y));
-    match role {
-        Role::Container if inside => Hit::Transparent,
-        Role::Top if inside => Hit::MaxButton,
-        _ => Hit::Pass,
+/// 命中判斷。`(x, y)` 是最上層視窗內容區座標（實體像素），`rect` 是鈕的命中矩形（尚未設定就是 None）。
+/// 蓋板自己回答：矩形內回放大鈕，其餘不處理。
+pub fn hit_answer(rect: Option<PxRect>, x: i32, y: i32) -> Hit {
+    if rect.is_some_and(|r| r.contains(x, y)) {
+        Hit::MaxButton
+    } else {
+        Hit::Pass
     }
+}
+
+/// 蓋板收到的四種非客戶區滑鼠訊息
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NcMsg {
+    Move,
+    Leave,
+    Down,
+    Up,
+}
+
+/// 訊息 → 狀態機事件。按下與放開只有命中碼是放大鈕才處理（回 None＝交給預設程序）。
+pub fn nc_event(m: NcMsg, wparam: usize) -> Option<Ev> {
+    match m {
+        NcMsg::Move => Some(move_event(wparam)),
+        NcMsg::Leave => Some(Ev::Leave),
+        NcMsg::Down if wparam == HT_MAXBUTTON => Some(Ev::Down),
+        NcMsg::Up if wparam == HT_MAXBUTTON => Some(Ev::Up),
+        NcMsg::Down | NcMsg::Up => None,
+    }
+}
+
+/// 滑鼠在鈕上移動時要（重新）要求「離開」通知，否則收不到 WM_NCMOUSELEAVE
+pub fn needs_leave_tracking(ev: Ev) -> bool {
+    ev == Ev::Move
+}
+
+/// 點擊完成後要送給最上層視窗的系統命令
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SysCmd {
+    Maximize,
+    Restore,
+}
+
+/// 已經最大化就還原，否則最大化
+pub fn toggle_cmd(zoomed: bool) -> SysCmd {
+    if zoomed {
+        SysCmd::Restore
+    } else {
+        SysCmd::Maximize
+    }
+}
+
+/// debug log 的節流：同一種事件只記前 `limit` 次。`done` 是已經記過幾次
+pub fn log_first_n(done: u32, limit: u32) -> bool {
+    done < limit
 }
 
 /// 扣掉上緣調整大小的那一條：放大鈕貼著視窗上緣，整條上緣都要能拖邊縮放，所以命中矩形上方要讓出 `border` 像素。
@@ -45,47 +78,6 @@ pub fn exclude_resize_border(r: PxRect, maximized: bool, border: i32) -> Option<
     let top = if maximized || border <= 0 { r.top } else { r.top.max(border) };
     let out = PxRect { top, ..r };
     (out.width() > 0 && out.height() > 0).then_some(out)
-}
-
-/// 掛 subclass 失敗的原因；寫進 log 用，畫面不顯示
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InstallError {
-    /// 最上層視窗掛不上
-    TopSubclass,
-    /// 找不到網頁容器（WRY_WEBVIEW）：網頁還沒建好，或被重建中
-    NoContainer,
-    /// 找得到容器但一個都掛不上
-    ContainerSubclass,
-}
-
-impl InstallError {
-    pub fn text(self) -> &'static str {
-        match self {
-            InstallError::TopSubclass => "最上層視窗掛不上 subclass",
-            InstallError::NoContainer => "找不到網頁容器（WRY_WEBVIEW）",
-            InstallError::ContainerSubclass => "網頁容器掛不上 subclass",
-        }
-    }
-}
-
-/// 掛完 subclass 之後的裁決：只有 Ok 才能把狀態寫進 STATES；Err 要把已掛的拿掉、收掉蓋板，讓下次回報矩形時重試。
-/// `found` 是找到的容器數、`attached` 是其中掛成功的數量。
-pub fn install_verdict(top_ok: bool, found: usize, attached: usize) -> Result<(), InstallError> {
-    if !top_ok {
-        Err(InstallError::TopSubclass)
-    } else if found == 0 {
-        Err(InstallError::NoContainer)
-    } else if attached == 0 {
-        Err(InstallError::ContainerSubclass)
-    } else {
-        Ok(())
-    }
-}
-
-/// 找到的容器裡，哪些還沒掛上我們的 subclass（新建、或被重建後換了一個）。
-/// 以「實際有沒有掛」為準，不看記下的 hwnd：被毀掉的 hwnd 值可能被系統重用給新視窗。
-pub fn containers_to_attach(found: &[isize], is_attached: impl Fn(isize) -> bool) -> Vec<isize> {
-    found.iter().copied().filter(|&c| !is_attached(c)).collect()
 }
 
 /// 從 lParam 取出有號的 x、y（螢幕座標可能是負的，多螢幕在主螢幕左邊時）
@@ -113,20 +105,63 @@ mod tests {
     }
 
     #[test]
-    fn 最上層視窗只在鈕的矩形內回放大鈕() {
-        assert_eq!(hit_answer(Role::Top, btn(), 900, 0), Hit::MaxButton);
-        assert_eq!(hit_answer(Role::Top, btn(), 968, 53), Hit::MaxButton);
-        assert_eq!(hit_answer(Role::Top, btn(), 969, 10), Hit::Pass, "右邊界外交回原程序（邊框縮放）");
-        assert_eq!(hit_answer(Role::Top, btn(), 899, 10), Hit::Pass);
-        assert_eq!(hit_answer(Role::Top, btn(), 920, 54), Hit::Pass);
-        assert_eq!(hit_answer(Role::Top, None, 920, 10), Hit::Pass, "還沒回報矩形就不處理");
+    fn 蓋板在鈕的矩形內回放大鈕() {
+        assert_eq!(hit_answer(btn(), 900, 0), Hit::MaxButton);
+        assert_eq!(hit_answer(btn(), 968, 53), Hit::MaxButton);
+        assert_eq!(hit_answer(btn(), 969, 10), Hit::Pass, "右邊界外不回放大鈕");
+        assert_eq!(hit_answer(btn(), 899, 10), Hit::Pass);
+        assert_eq!(hit_answer(btn(), 920, 54), Hit::Pass);
+        assert_eq!(hit_answer(None, 920, 10), Hit::Pass, "還沒回報矩形就不處理");
     }
 
     #[test]
-    fn 網頁容器在鈕的矩形內透明_其餘不處理() {
-        assert_eq!(hit_answer(Role::Container, btn(), 920, 10), Hit::Transparent);
-        assert_eq!(hit_answer(Role::Container, btn(), 500, 300), Hit::Pass, "鈕以外網頁照常收滑鼠");
-        assert_eq!(hit_answer(Role::Container, None, 920, 10), Hit::Pass);
+    fn 蓋板的非客戶區訊息對應到狀態機事件() {
+        assert_eq!(nc_event(NcMsg::Move, HT_MAXBUTTON), Some(Ev::Move));
+        assert_eq!(nc_event(NcMsg::Move, 10), Some(Ev::Leave), "移到別的命中碼算離開");
+        assert_eq!(nc_event(NcMsg::Leave, 0), Some(Ev::Leave));
+        assert_eq!(nc_event(NcMsg::Down, HT_MAXBUTTON), Some(Ev::Down));
+        assert_eq!(nc_event(NcMsg::Up, HT_MAXBUTTON), Some(Ev::Up));
+        assert_eq!(nc_event(NcMsg::Down, 2), None, "不是放大鈕的按下不處理");
+        assert_eq!(nc_event(NcMsg::Up, 2), None);
+        assert!(needs_leave_tracking(Ev::Move));
+        assert!(!needs_leave_tracking(Ev::Down) && !needs_leave_tracking(Ev::Leave) && !needs_leave_tracking(Ev::Up));
+    }
+
+    #[test]
+    fn 按下拖出去再放開不算點擊() {
+        use super::super::{step, BtnState};
+        // 用蓋板實際收到的訊息順序：移入、按下、（拖出鈕外）離開、在別處放開（蓋板收不到放開；就算收到也不算）
+        let mut s = BtnState::default();
+        let mut toggled = false;
+        for m in [NcMsg::Move, NcMsg::Down, NcMsg::Leave, NcMsg::Up] {
+            let r = step(s, nc_event(m, HT_MAXBUTTON).unwrap());
+            s = r.state;
+            toggled |= r.toggle;
+        }
+        assert!(!toggled, "拖出去就取消按下，之後放開不能最大化");
+        assert_eq!(s, BtnState::default());
+        // 對照：不離開就是點擊
+        let mut s = BtnState::default();
+        let mut clicks = 0;
+        for m in [NcMsg::Move, NcMsg::Down, NcMsg::Up] {
+            let r = step(s, nc_event(m, HT_MAXBUTTON).unwrap());
+            s = r.state;
+            clicks += r.toggle as u32;
+        }
+        assert_eq!(clicks, 1);
+    }
+
+    #[test]
+    fn 點擊後依最大化狀態切換() {
+        assert_eq!(toggle_cmd(false), SysCmd::Maximize);
+        assert_eq!(toggle_cmd(true), SysCmd::Restore);
+    }
+
+    #[test]
+    fn debug_log_只記前_n_次() {
+        assert!(log_first_n(0, 3) && log_first_n(2, 3));
+        assert!(!log_first_n(3, 3) && !log_first_n(100, 3));
+        assert!(!log_first_n(0, 0));
     }
 
     fn top_btn() -> PxRect {
@@ -175,29 +210,6 @@ mod tests {
         assert_eq!(exclude_resize_border(top_btn(), false, -5), Some(top_btn()), "負值當 0");
         assert_eq!(exclude_resize_border(top_btn(), false, i32::MAX), None);
         assert_eq!(exclude_resize_border(PxRect { left: 5, top: 0, right: 5, bottom: 30 }, false, 0), None, "本來就沒面積");
-    }
-
-    #[test]
-    fn 掛_subclass_失敗不能算成功() {
-        assert_eq!(install_verdict(true, 1, 1), Ok(()));
-        assert_eq!(install_verdict(true, 3, 2), Ok(()), "部分容器掛成功就算數");
-        assert_eq!(install_verdict(false, 1, 1), Err(InstallError::TopSubclass), "最上層掛不上");
-        assert_eq!(install_verdict(true, 0, 0), Err(InstallError::NoContainer), "找不到容器");
-        assert_eq!(install_verdict(true, 2, 0), Err(InstallError::ContainerSubclass), "容器一個都掛不上");
-        for e in [InstallError::TopSubclass, InstallError::NoContainer, InstallError::ContainerSubclass] {
-            assert!(!e.text().is_empty(), "每種失敗都要有 log 文字");
-        }
-    }
-
-    #[test]
-    fn 容器被重建後只補掛沒掛過的() {
-        let attached = [10isize, 20];
-        let is = |c: isize| attached.contains(&c);
-        assert_eq!(containers_to_attach(&[10, 20], is), Vec::<isize>::new(), "都掛過就不動");
-        assert_eq!(containers_to_attach(&[10, 30], is), vec![30], "舊的 20 被毀、新的 30 要補掛");
-        assert_eq!(containers_to_attach(&[], is), Vec::<isize>::new());
-        // hwnd 值被重用：記錄裡有 20，但新視窗沒掛 → 以實際為準要補掛
-        assert_eq!(containers_to_attach(&[20], |_| false), vec![20]);
     }
 
     #[test]

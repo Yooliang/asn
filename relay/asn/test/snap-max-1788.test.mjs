@@ -97,12 +97,18 @@ test('分割版面只留一種做法：整個 src-tauri/src 與 ui 都沒有 ASN
   // 做法一的子視窗檔不能回來；snap_max 資料夾只留這三個檔
   const dir = new URL('../src-tauri/src/snap_max/', import.meta.url)
   assert.deepEqual(fs.readdirSync(dir).sort(), ['snap_cover_win.rs', 'snap_hit.rs', 'snap_win.rs'])
-  // 回 HTMAXBUTTON 的程式碼（不含註解）只能出現在 snap_hit.rs（判斷）與 snap_win.rs（最上層視窗程序）
+  // 回 HTMAXBUTTON 的程式碼（不含註解）只能出現在 snap_hit.rs（純函式）與 snap_cover_win.rs（蓋板自己的視窗程序）
   const hits = files.filter(u => u.pathname.endsWith('.rs') && /HT_?MAXBUTTON/.test(codeOnly(fs.readFileSync(u, 'utf8'))))
-  assert.deepEqual(hits.map(u => u.pathname.split('/').pop()).sort(), ['snap_hit.rs', 'snap_win.rs'])
+  assert.deepEqual(hits.map(u => u.pathname.split('/').pop()).sort(), ['snap_cover_win.rs', 'snap_hit.rs'])
   const rd = p => fs.readFileSync(new URL(`../src-tauri/src/${p}`, import.meta.url), 'utf8')
-  assert.ok(codeOnly(rd('snap_max/snap_cover_win.rs')).includes('HTTRANSPARENT'), '透明子視窗要回 HTTRANSPARENT')
-  assert.ok(!/HT_?MAXBUTTON/.test(codeOnly(rd('snap_max/snap_cover_win.rs'))), '透明子視窗不能自己回放大鈕')
+  assert.ok(/HT_MAXBUTTON/.test(codeOnly(rd('snap_max/snap_cover_win.rs'))), '蓋板要自己回 HTMAXBUTTON')
+  // HTTRANSPARENT 穿透走不通（到不了另一個行程的 WebView2 底下），也不准再掛網頁容器與最上層視窗的命中 subclass
+  for (const u of files.filter(u => u.pathname.endsWith('.rs') && u.pathname.includes('snap_max')))
+    assert.ok(!/HTTRANSPARENT|WRY_WEBVIEW/.test(codeOnly(fs.readFileSync(u, 'utf8'))), `${u.pathname} 又用回 HTTRANSPARENT／WRY_WEBVIEW 容器 subclass`)
+  const cover = codeOnly(rd('snap_max/snap_cover_win.rs'))
+  for (const m of ['WM_NCMOUSEMOVE', 'WM_NCMOUSELEAVE', 'WM_NCLBUTTONDOWN', 'WM_NCLBUTTONUP', 'TME_NONCLIENT'])
+    assert.ok(cover.includes(m), `蓋板要自己處理 ${m}`)
+  assert.ok(!/SetWindowSubclass|top_proc|container_proc/.test(codeOnly(rd('snap_max/snap_win.rs'))), '最上層視窗與網頁容器的命中 subclass 已拿掉')
 })
 
 test('每個 unsafe 區塊都有 SAFETY 說明', async () => {

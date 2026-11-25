@@ -1,5 +1,5 @@
-// #1788 自畫的放大鈕要有 Windows 11 分割版面：把放大鈕的位置回報給 Rust（它在鈕上蓋一塊透明子視窗回 HTMAXBUTTON），
-// 並接收 Rust 轉來的滑過／按下，換鈕的樣式（子視窗蓋住之後，網頁收不到這一塊的滑鼠）。
+// #1788 自畫的放大鈕要有 Windows 11 分割版面：把放大鈕的位置回報給 Rust（它在鈕上蓋一塊蓋板子視窗、自己回 HTMAXBUTTON），
+// 並接收 Rust 轉來的滑過／按下，換鈕的樣式（蓋板蓋住之後，網頁收不到這一塊的滑鼠）。
 // 沒有放大鈕的視窗（登入、導覽）、原生外框（鈕被藏起來）、非 Windows（Rust 端什麼都不做）都不會有副作用。
 export const SNAP_SELECTOR = '.t-btns .tb[data-snap-max]'
 export const SNAP_EVENT = 'asn:snap-max'
