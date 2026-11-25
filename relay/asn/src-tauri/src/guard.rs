@@ -162,7 +162,7 @@ pub fn read_relaunches(dir: &Path) -> Relaunches {
 }
 fn write_relaunches(dir: &Path, r: &Relaunches) {
     if let Ok(s) = serde_json::to_string(r) {
-        let _ = crate::write_atomic(&relaunch_path(dir), &s);
+        let _ = crate::settings::atomic::write(&relaunch_path(dir), s.as_bytes(), crate::settings::atomic::STATE);
     }
 }
 pub fn user_quit(dir: &Path) -> bool {
@@ -201,12 +201,12 @@ pub fn note_start(dir: &Path, pid: u32, now: u64) {
 }
 pub fn touch_alive(dir: &Path, pid: u32, now: u64) {
     if let Ok(s) = serde_json::to_string(&Alive { pid, t: now }) {
-        let _ = crate::write_atomic(&alive_path(dir), &s);
+        let _ = crate::settings::atomic::write(&alive_path(dir), s.as_bytes(), crate::settings::atomic::STATE);
     }
 }
 /// 正常結束（cleanup 會呼叫：結束、關視窗、更新安裝、登出關機）：守護看到就不重開
 pub fn note_user_quit(dir: &Path) {
-    let _ = crate::write_atomic(&quit_path(dir), "1");
+    let _ = crate::settings::atomic::write(&quit_path(dir), b"1", crate::settings::atomic::STATE);
 }
 /// 結束前的記號：一般結束寫「正常結束」記號；重新啟動（`relaunching`）不寫，
 /// 新程序沒起來時守護才會把 ASN 拉回來（#2204）
@@ -421,7 +421,7 @@ pub fn intended(dir: &Path) -> bool {
 }
 fn set_intent(dir: &Path, on: bool) {
     if on {
-        let _ = crate::write_atomic(&intent_path(dir), "1");
+        let _ = crate::settings::atomic::write(&intent_path(dir), b"1", crate::settings::atomic::STATE);
     } else {
         let _ = fs::remove_file(intent_path(dir));
     }
@@ -438,7 +438,7 @@ fn recorded_task_exe(dir: &Path) -> Option<PathBuf> {
 fn record_task_exe(dir: &Path, exe: Option<&Path>) {
     match exe {
         Some(e) => {
-            let _ = crate::write_atomic(&task_exe_path(dir), &e.display().to_string());
+            let _ = crate::settings::atomic::write(&task_exe_path(dir), e.display().to_string().as_bytes(), crate::settings::atomic::STATE);
         }
         None => {
             let _ = fs::remove_file(task_exe_path(dir));

@@ -172,7 +172,7 @@ impl Store {
             .map(|(k, (i, p, c))| (k.clone(), serde_json::json!({ "session_id": i, "protocol": p, "command": c, "updated": now_ms() })))
             .collect();
         let text = serde_json::json!({ "version": 1, "workers": workers }).to_string();
-        crate::write_atomic(&self.file, &text)
+        crate::settings::atomic::write(&self.file, text.as_bytes(), crate::settings::atomic::STATE)
     }
     /// 改名（遠端管理）：把對話編號從舊名搬到新名，寫檔成功才算數（失敗回原因、記憶體不變）。帳本裡沒有舊名＝錯誤
     pub fn rename(&self, from: &str, to: &str) -> Result<(), String> {

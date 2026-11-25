@@ -464,9 +464,10 @@ mod tests {
             for bad in ["std::fs::write(", "fs::write(", ".tmp\""] {
                 assert!(!prod.contains(bad), "{name}：還有 {bad}");
             }
-            // 名冊檔的另一處（FAIL_FILE 失敗紀錄，純狀態）本來就走 crate::write_atomic（STATE），不在這張改；名冊本身不准再走它
+            // 名冊檔與 FAIL_FILE 失敗紀錄（純狀態）都不准再走 crate::write_atomic 轉接（#2232 D 起失敗紀錄那一處也直接呼叫 atomic::write(STATE)）
             if name == "partner_queue" {
-                assert_eq!(prod.matches("crate::write_atomic(").count(), 1, "{name}：只剩失敗紀錄那一處走 STATE 包裝");
+                assert_eq!(prod.matches("crate::write_atomic(").count(), 0, "{name}：不准再走轉接函式");
+                assert_eq!(prod.matches("atomic::STATE").count(), 1, "{name}：只剩失敗紀錄那一處用 STATE");
             }
         }
     }

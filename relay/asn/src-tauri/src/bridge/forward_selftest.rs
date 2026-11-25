@@ -45,7 +45,7 @@ pub fn passed_for(dir: &Path, claude_version: &str, asn_version: &str) -> bool {
 }
 
 pub fn save_passed(dir: &Path, claude_version: &str, asn_version: &str, now_ms: u64) -> std::io::Result<()> {
-    crate::write_atomic(&dir.join(SELFTEST_FILE), &json!({ "claude": claude_version, "asn": asn_version, "passed_at": now_ms }).to_string())
+    crate::settings::atomic::write(&dir.join(SELFTEST_FILE), json!({ "claude": claude_version, "asn": asn_version, "passed_at": now_ms }).to_string().as_bytes(), crate::settings::atomic::STATE)
 }
 
 /// 要多開兩個 claude，空記憶體低於這個值就先不跑（比照讀畫面的規則）

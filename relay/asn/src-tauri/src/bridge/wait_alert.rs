@@ -59,7 +59,7 @@ impl WaitAlerts {
     }
 
     pub fn save(&self, file: &Path) -> Result<(), String> {
-        crate::write_atomic(file, &json!({ "told": self.told, "last_sent": self.last_sent }).to_string()).map_err(|e| e.to_string())
+        crate::settings::atomic::write(file, json!({ "told": self.told, "last_sent": self.last_sent }).to_string().as_bytes(), crate::settings::atomic::STATE).map_err(|e| e.to_string())
     }
 
     /// `waiting`＝這一輪正在等的視窗（不在裡面＝沒在等了）。回傳該通知的

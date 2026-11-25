@@ -400,7 +400,7 @@ pub fn auto_allowed(data_dir: &Path, now_ms: u64) -> bool {
 fn auto_record(data_dir: &Path, now_ms: u64) {
     let mut t = auto_times(data_dir, now_ms);
     t.push(now_ms);
-    let _ = crate::write_atomic(&auto_path(data_dir), &serde_json::to_string(&t).unwrap_or_default());
+    let _ = crate::settings::atomic::write(&auto_path(data_dir), serde_json::to_string(&t).unwrap_or_default().as_bytes(), crate::settings::atomic::STATE);
 }
 
 fn taken_path(data_dir: &Path) -> std::path::PathBuf {
@@ -421,7 +421,7 @@ fn taken_persist(data_dir: &Path) {
     if rows.is_empty() {
         let _ = std::fs::remove_file(taken_path(data_dir));
     } else {
-        let _ = crate::write_atomic(&taken_path(data_dir), &Value::Array(rows).to_string());
+        let _ = crate::settings::atomic::write(&taken_path(data_dir), Value::Array(rows).to_string().as_bytes(), crate::settings::atomic::STATE);
     }
 }
 /// 把存檔讀回記憶體（只收格式對、沒過期的），回傳讀回來的（編號, email, 發起端, 是否簽章）。已經在記憶體裡的編號不動。
