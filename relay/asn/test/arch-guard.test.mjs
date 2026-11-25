@@ -30,9 +30,10 @@ export const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/
 // 每條規則一個偵測器（好讓下面也能拿壞字餵進去，證明規則抓得到）
 export const DETECT = {
   android: (s) => /\bAsnAndroid\b/.test(s),
-  tauriGlobal: (s) => /\b__TAURI__\b/.test(s),
+  tauriGlobal: (s) => /\b__TAURI(?:_[A-Z]+)*__\b/.test(s),   // __TAURI__、__TAURI_INTERNALS__、__TAURI_IPC__ 都算
   storage: (s) => /\b(localStorage|sessionStorage)\b/.test(s),
-  document: (s) => /\bdocument\s*\./.test(s) || /\bdocument\s*\)/.test(s),
+  // document.x、document?.x、document[x]、f(document)、= document、{ document }／(document, ...)（把整個 document 傳出去）
+  document: (s) => /\bdocument\s*(?:\.|\?\.|\[|\))/.test(s) || /[=(,{:]\s*document\b(?![\w$])/.test(s),
   invoke: (s) => /(?<![\w.$])invoke\s*\(/.test(s),
   importsTauri: (s) => /from\s+['"][^'"]*\/tauri\.mjs['"]/.test(s),
   userAgent: (s) => /\bnavigator\s*\.\s*(userAgent|platform)\b/.test(s),
@@ -98,9 +99,23 @@ test('規則偵測器抓得到壞字、不會誤抓註解與一般字（守門�
     assert.equal(DETECT[rule](stripComments(`// ${code}`)), false, `${rule}：註解裡不算`)
     assert.equal(DETECT[rule](stripComments(`/* ${code} */`)), false, `${rule}：區塊註解裡不算`)
   }
+  // 各種變形寫法也要抓到（繞過 `document.` 與 `__TAURI__` 的寫法）
+  for (const code of ['const d = document', 'const el = document?.body', "document['body']", 'walk(document)', 'init(a, document)', 'const { body } = document', 'x = { document }']) assert.equal(DETECT.document(stripComments(code)), true, `document 變形要抓：${code}`)
+  for (const code of ['const documentTitle = 1', 'const a = mydocument.x', 'doc.document = 1', "const s = 'a document here'"]) assert.equal(DETECT.document(stripComments(code)), false, `不誤抓：${code}`)
+  for (const code of ['const T = globalThis.__TAURI_INTERNALS__', 'window.__TAURI_IPC__.x', "globalThis['__TAURI__']"]) assert.equal(DETECT.tauriGlobal(stripComments(code)), true, `__TAURI 變形要抓：${code}`)
+  assert.equal(DETECT.tauriGlobal(stripComments('const x = my__TAURI__thing')), false)
   assert.equal(DETECT.invoke(stripComments('transport.invoke(1)')), false, '物件的 invoke 方法不是直接呼叫')
   assert.equal(DETECT.document(stripComments('const documentTitle = 1')), false)
   assert.equal(DETECT.android(stripComments("const u = 'https://x.test/AsnAndroidDoc'")), false, '網址裡包在別的字裡不算')
+})
+
+test('掃描範圍：lib／parts／layouts／shells 底下不能有子目錄（readDir 不遞迴，子目錄裡的檔案會漏掃）', () => {
+  for (const sub of ['lib', 'parts', 'layouts', 'shells']) {
+    const dir = path.join(UI, sub)
+    if (!fs.existsSync(dir)) continue
+    const subdirs = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => `${sub}/${e.name}`)
+    assert.deepEqual(subdirs, [], `${sub}/ 出現子目錄：${subdirs.join('、')}。守門只掃一層，要放子目錄請先讓 readDir 改成遞迴`)
+  }
 })
 
 test('R1 功能層 lib：AsnAndroid 只在 mobile.mjs 與 mobile-confirm.mjs', () => checkRatchet('AsnAndroid', hits(lib, 'android'), LIB_ALLOW.android))

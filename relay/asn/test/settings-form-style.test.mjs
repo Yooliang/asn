@@ -79,7 +79,7 @@ test('勾選框不被 `.settings input` 的 flex:1／外框撐開：實際算出
     assert.equal(s.width, '16px')
     assert.equal(s.height, '16px')
     assert.equal(s.flexGrow, '0', '勾選框不 flex:1')
-    assert.ok(['0', '0px', ''].includes(s.borderTopWidth) || /^0/.test(s.borderTopWidth), `沒有外框，實際是 ${s.borderTopWidth}`)
+    assert.ok(['0', '0px'].includes(s.borderTopWidth), `沒有外框，實際是「${s.borderTopWidth}」（空字串＝樣式根本沒算出來，不算過關）`)
     // 對照：一般文字輸入框會 flex:1（通用規則真的有生效，所以勾選框的重置規則是必要的）
     const text = m.cs(probe(m, '<input type="text">'))
     assert.equal(text.flexGrow, '1', '通用規則讓輸入框 flex:1')
@@ -91,12 +91,19 @@ test('表單元件統一：下拉、文字輸入、多行輸入同一套外框',
   await withMount('look', undefined, (m) => {
     const els = [probe(m, '<select><option>a</option></select>'), probe(m, '<input type="text">'), probe(m, '<textarea></textarea>')]
     const want = m.cs(els[0])
+    // --line 的實際色：拿一個直接寫 border:1px solid var(--line) 的對照元素算出來（不寫死色碼，換主題也不用改測試）
+    const line = m.cs(probe(m, '<div style="border:1px solid var(--line)"></div>')).borderTopColor
+    assert.notEqual(line, '', '對照元素的 var(--line) 有解出顏色')
     for (const el of els) {
       const s = m.cs(el)
       assert.equal(s.borderTopWidth, '1px', `${el.tagName} 外框 1px`)
       assert.equal(s.borderTopStyle, 'solid', `${el.tagName} 實線外框`)
       assert.equal(s.borderTopLeftRadius, '4px', `${el.tagName} 圓角 4px`)
       assert.equal(s.borderTopLeftRadius, want.borderTopLeftRadius)
+      // border:1px solid var(--line) 要真的解出一個顏色，不是空字串（空字串＝變數沒解開或樣式沒套到）
+      assert.notEqual(s.borderTopColor, '', `${el.tagName} 外框顏色不能是空字串`)
+      assert.equal(s.borderTopColor, line, `${el.tagName} 外框顏色要解成 --line 的值（實際「${s.borderTopColor}」）`)
+      assert.equal(s.borderTopColor, want.borderTopColor, `${el.tagName} 外框顏色一致`)
     }
     // 勾選框、選項鈕不套這組外框（由 :not() 排除）
     assert.notEqual(m.cs(probe(m, '<input type="checkbox">')).borderTopLeftRadius, '4px')

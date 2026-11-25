@@ -152,8 +152,11 @@ test('設定表單：照目前的值顯示（選中項、勾選、數字、文�
   // 視窗與系統匣不再放任何命令列（寄信指令、密碼小幫手的設定指令）
   await withCat('window', undefined, (m) => {
     const win = seen(m)
+    assert.ok(win.includes('關閉視窗時'), '視窗與系統匣分類有渲染')
     assert.equal(m.find('code'), null)
-    assert.ok(!win.includes('寄信指令') && !win.includes('密碼小幫手') && !win.includes('asn-cli') && !win.includes('SSH_ASKPASS'))
+    // 查整份 HTML（含隱藏的屬性、data-*），不只看使用者看得到的字
+    const raw = m.container.innerHTML
+    for (const bad of ['寄信指令', '密碼小幫手', 'asn-cli', 'SSH_ASKPASS']) assert.ok(!raw.includes(bad) && !win.includes(bad), `視窗與系統匣不該出現「${bad}」`)
   })
   // 密碼小幫手收進「啟動設定」的進階（收合）
   await withCat('launch', undefined, (m) => {
@@ -175,7 +178,10 @@ test('設定表單：通知四個勾選照目前的值顯示', async () => {
 })
 
 test('設定表單：認不得的類別不顯示任何表單項目', async () => {
-  await withCat('nope', undefined, (m) => assert.equal(m.findAll('select,input,textarea,button').length, 0))
+  await withCat('nope', undefined, (m) => {
+    assert.ok(m.find('.settings'), '認不得的類別仍渲染設定外框（不是整個沒掛起來才查不到表單）')
+    assert.equal(m.findAll('select,input,textarea,button').length, 0)
+  })
 })
 
 test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住；元件裡 act 的每個 op 都在清單裡', () => {
@@ -247,12 +253,25 @@ test('電腦設定第一頁（真的渲染）——登入帳號資訊與我的�
     assert.ok(after(np, out), '登出鈕在第一頁所有項目之後')
     assert.equal(m.find('.settings').lastElementChild, out, '登出區塊自成一塊、在最下面')
   })
+  // 負向斷言（找不到）一定要先證明這一頁真的渲染了、而且用的選擇器在「該出現的那一頁」找得到，否則選擇器寫錯也會永遠過關
+  await withCat('cloud', undefined, (m) => {
+    assert.ok(m.find('.settings'), '雲端代理分類有渲染')
+    const cloud = m.find('.cloud-set')
+    assert.ok(cloud, '對照組：.cloud-set 在雲端代理分類找得到（下面設備頁的負向斷言用的就是這個選擇器）')
+    assert.equal(cloud.getAttribute('aria-label'), '雲端代理')
+    assert.equal(m.find('[aria-label="雲端代理"]'), cloud, '依 aria-label 也找得到同一塊')
+  })
   await withCat('devices', undefined, (m) => {
+    assert.ok(m.find('.settings'), '設備分類有渲染')
+    assert.ok(m.find('.dv-set') && m.container.textContent.includes('家用機'), '設備分類特有的內容（設備列表）在')
     assert.equal(m.find('.login-set'), null, '設備分類不再放登入狀態')
     assert.equal(m.find('.logout-set'), null, '設備分類不再放登出')
-    assert.equal(m.find('.cloud-invite, [aria-label="邀請雲端代理"]'), null, '雲端代理搬到自己一類，設備頁不再放')
+    assert.equal(m.find('.cloud-set'), null, '雲端代理搬到自己一類，設備頁不再放')
+    assert.equal(m.find('[aria-label="雲端代理"]'), null, '設備頁也沒有雲端代理的標籤')
   })
   await withCat('accounts', undefined, (m) => {
+    assert.ok(m.find('.settings'), '帳號分類有渲染')
+    assert.ok(m.find('.dv-acctpage'), '帳號分類特有的區塊在')
     assert.equal(m.find('.login-set'), null)
     assert.equal(m.find('.logout-set'), null)
   })
@@ -314,7 +333,7 @@ test('視窗與系統匣：「ASN 意外關閉時自動重新開啟」預設關�
   await withCat('window', st, async (m) => {
     const html = seen(m)
     assert.ok(html.includes('ASN 最近反覆被關閉，已暫停自動重開。') && html.includes('恢復自動重開'))
-    assert.ok(!/pid|AsnGuard|schtasks|排程名/.test(html), '畫面不出現程序代號或排程名')
+    assert.ok(!/pid|AsnGuard|schtasks|排程名/.test(m.container.innerHTML), '整份 HTML（含屬性）不出現程序代號或排程名')
     await m.trigger(m.findByText('恢復自動重開'), 'click')
     assert.deepEqual(m.emitted('act'), [['guard-resume', undefined]], '恢復鈕送出 guard-resume')
   })
