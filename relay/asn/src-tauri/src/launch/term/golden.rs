@@ -34,6 +34,8 @@ const FIXTURES: &[(&str, &str)] = fixtures![
     "claude-limit-menu-auto-armed.synthetic.txt",
     "claude-limit-menu-paid-first.synthetic.txt",
     "claude-limit-menu.real.txt",
+    "claude-limit-weekly-subagents.synthetic.txt",
+    "claude-limit-weekly.real.txt",
     "claude-login-expired.synthetic.txt",
     "claude-login-method.txt",
     "claude-lookalike-model-text.txt",

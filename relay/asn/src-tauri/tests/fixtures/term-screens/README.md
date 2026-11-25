@@ -76,6 +76,13 @@
 | claude-1799-echo-numbered-no-input.synthetic.txt | 回顯本身是 `❯ 1. …`，底部看不到輸入框 | 不是選單；游標後面接 ● 回覆 |
 | claude-1799-reply-list-table-idle.synthetic.txt | 同上，輸入框與狀態列都在 | 不是選單（舊程式本來就對，當護欄） |
 
+## #2335 加的
+
+| 檔案 | 內容 | 預期 |
+|---|---|---|
+| claude-limit-weekly-subagents.synthetic.txt | 週額度用完後面接子代理的結束通知再到輸入框。**合成**：「You've hit your weekly limit」兩行照單號逐字，其餘依單號描述補的 | 判成額度用完（只標狀態、不給按鈕） |
+| claude-limit-weekly.real.txt | 擁有者 11-25 的實機畫面，照截圖抄寫（#2343 的留言；個人內容、代號、請求編號已遮掉，右邊裁掉的地方用「…」）：額度行是工具呼叫底下的第二個 `⎿`，和輸入框之間隔著「Waiting for 1 background agent」與子代理失敗那一段 | 判成額度用完（只標狀態、不給按鈕） |
+
 ## #2256 加的
 
 | 檔案 | 內容 | 預期 |

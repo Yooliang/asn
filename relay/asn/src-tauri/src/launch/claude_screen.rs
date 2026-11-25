@@ -94,14 +94,27 @@ fn is_login_time_limit(line: &str) -> bool {
     let rest = lower.strip_prefix('⎿').unwrap_or(lower.as_str()).trim_start();
     LOGIN_TIME_LIMIT_HEADS.iter().any(|h| rest.starts_with(h))
 }
-const USAGE_LIMIT: &str = "You've hit your limit";
+/// 額度用完那一句（#2335）：「You've hit your <名稱> limit」，後面接「 · resets <時間>」之類。名稱最多兩個詞，也可以沒有
+const USAGE_LIMIT: &str = "You've hit your ";
+const USAGE_NAME_MAX_CHARS: usize = 24;
+const USAGE_NAME_MAX_WORDS: usize = 2;
+/// claude 2.1.331 執行檔內嵌的額度名稱（空字串＝「You've hit your limit」）。名單外的名稱要後面真的帶「· resets」才算
+const USAGE_KNOWN_NAMES: [&str; 9] = ["", "5-hour", "weekly", "session", "Opus", "Sonnet", "Fable", "usage credit", "monthly spend"];
+/// 快速模式的冷卻提示（會自己退回一般速度），不是帳號額度用完
+const USAGE_IGNORED_NAME: &str = "fast";
+/// 額度提示在輸入框上方往回看幾行：提示後面可能接著子代理的結束通知（#2335）
+const USAGE_LOOKBACK: usize = 30;
+/// 提示之後出現這些開頭的 ● 行不代表對話又往下走了：背景子代理、背景指令的結束通知
+const BACKGROUND_STATUS_HEADS: [&str; 2] = ["Agent \"", "Background command \""];
+/// 工具被收起來時的摘要行（「Read 1 file」「Ran 1 shell command」）：開頭字後面接數字
+const COLLAPSED_TOOL_HEADS: [&str; 5] = ["Read ", "Ran ", "Searched for ", "Listed ", "Called "];
 /// 額度用完的選單（#1512，claude 2.1.325）：標題、頁尾和兩個不花錢的選項都是 Claude 固定的字。
 /// 選項的順序因帳號而異（付費類可能排第一），所以認字、不認編號
 const USAGE_MENU_TITLE: &str = "What do you want to do?";
 const USAGE_MENU_FOOTER: &str = "Enter to confirm";
 const USAGE_STOP: &str = "Stop and wait for limit to reset";
 const USAGE_WAIT: &str = "Wait here, then continue automatically";
-/// 輸入框上方往回看幾行，找登入失效與額度訊息
+/// 畫面底部往回看幾行找登入失效；認不出輸入框時，找額度訊息也只看這麼多
 const NOTICE_LOOKBACK: usize = 8;
 /// 底部認不出的選單游標往上看幾行（真的選單底下可能還有預覽）
 const MENU_CURSOR_LOOKBACK: usize = 16;
@@ -632,27 +645,116 @@ fn is_rule(line: &str) -> bool {
     t.chars().next().is_some_and(is_line) && t.chars().last().is_some_and(is_line) && t.chars().filter(|c| is_line(*c)).count() >= MIN_RULE_CHARS
 }
 
-/// 輸入框還在，訊息又緊貼在它上方的 Claude 輸出行：只標狀態，不給按鈕
+/// 輸入框還在，上方有 Claude 的錯誤訊息：只標狀態，不給按鈕。兩種都有時，靠下面（較新）的算數
 fn notice_above_input(lines: &[&str]) -> Option<ClaudeScreen> {
     let start = lines.len().saturating_sub(NOTICE_LOOKBACK);
-    let notice = lines[start..].iter().rev().find_map(|l| {
-        let t = l.trim_start();
-        if is_login_time_limit(t) {
-            return Some(ClaudeScreenKind::Login);
+    let login = (start..lines.len()).rev().find(|&i| is_login_notice(lines[i]));
+    let usage = usage_notice_row(lines);
+    let kind = match (login, usage) {
+        (None, None) => return None,
+        _ if login > usage => ClaudeScreenKind::Login,
+        _ => ClaudeScreenKind::UsageLimit,
+    };
+    Some(screen(kind, "", Vec::new(), 0, None, None))
+}
+
+fn is_login_notice(line: &str) -> bool {
+    let t = line.trim_start();
+    is_login_time_limit(t) || (t.starts_with('⎿') && is_login_error(t.trim_start_matches(['●', '⎿', ' '])))
+}
+
+/// 還有效的額度提示在第幾行。這個判斷會讓人換帳號，所以寧可漏報：
+/// 要是 Claude 掛出來的錯誤行（不是對話或工具輸出裡引用的同一句話），而且之後對話沒有再往下走
+fn usage_notice_row(lines: &[&str]) -> Option<usize> {
+    // 輸入框：最底下那個「分隔線接 ❯」。框裡和框下面（狀態列、代理清單）的字都不看
+    let input = (1..lines.len()).rev().find(|&i| lines[i].trim_start().starts_with(CURSOR) && is_rule(lines[i - 1]));
+    let (end, lookback) = input.map_or((lines.len(), NOTICE_LOOKBACK), |i| (i - 1, USAGE_LOOKBACK));
+    let above = &lines[..end];
+    (end.saturating_sub(lookback)..end).rev().find(|&i| is_usage_error_row(above, i) && !conversation_moved_on(&above[i + 1..]))
+}
+
+fn indent_of(line: &str) -> usize {
+    line.chars().take_while(|c| c.is_whitespace()).count()
+}
+
+/// 「You've hit your <名稱> limit」開頭的訊息才回名稱。limit 後面只能沒有字，或接「·」
+fn usage_limit_name(body: &str) -> Option<&str> {
+    let rest = body.strip_prefix(USAGE_LIMIT)?;
+    let (name, tail) = match rest.strip_prefix("limit") {
+        Some(tail) => ("", tail),
+        None => rest.split_once(" limit")?,
+    };
+    let tail = tail.trim_start();
+    let detail = tail.strip_prefix('·').map(str::trim_start);
+    let plain = name.len() <= USAGE_NAME_MAX_CHARS
+        && name.split_whitespace().count() <= USAGE_NAME_MAX_WORDS
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '.' | '-'));
+    let known = USAGE_KNOWN_NAMES.contains(&name) && (tail.is_empty() || detail.is_some());
+    let has_reset = detail.is_some_and(|d| d.starts_with("resets "));
+    (plain && name != USAGE_IGNORED_NAME && (known || has_reset)).then_some(name)
+}
+
+/// 這一行是不是 Claude 自己掛出來的額度錯誤：
+/// - `⎿` 開頭、縮排不超過 2（引用在回覆、工具輸出裡的同一行縮排更深），而且不是某則 ● 訊息自己的內容，後面也沒有接著回覆內文
+/// - `●` 開頭的只認舊的「You've hit your limit」：新字樣沒有看過掛在 ● 上，● 開頭的多半是模型在引用
+fn is_usage_error_row(lines: &[&str], i: usize) -> bool {
+    let line = lines[i];
+    let t = line.trim_start();
+    if let Some(rest) = t.strip_prefix('⎿') {
+        return indent_of(line) <= 2 && usage_limit_name(rest.trim_start()).is_some() && !belongs_to_reply(lines, i) && !followed_by_reply_text(&lines[i + 1..]);
+    }
+    indent_of(line) == 0 && t.strip_prefix('●').and_then(|r| usage_limit_name(r.trim_start())) == Some("")
+}
+
+fn is_background_status(line: &str) -> bool {
+    let body = line.trim_start_matches(['●', '⏺', ' ']);
+    BACKGROUND_STATUS_HEADS.iter().any(|h| body.starts_with(h))
+}
+
+fn is_collapsed_tool_summary(line: &str) -> bool {
+    COLLAPSED_TOOL_HEADS.iter().any(|h| line.strip_prefix(h).is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit())))
+}
+
+/// 第 i 行的 `⎿` 是不是某則 ● 訊息自己的內容（工具的第一行輸出、模型回覆裡引用的字）。
+/// 往上找到訊息開頭（沒有縮排的行）：是 ● 而且中間沒有別的 `⎿` 或工具摘要，就算它的內容
+fn belongs_to_reply(lines: &[&str], i: usize) -> bool {
+    let mut nearest = None;
+    for line in lines[..i].iter().rev().filter(|l| !l.trim().is_empty()) {
+        let t = line.trim_start();
+        if indent_of(line) == 0 {
+            return t.starts_with(['●', '⏺']) && !is_background_status(t);
         }
-        if !(t.starts_with('●') || t.starts_with('⎿')) {
-            return None;
+        if t.starts_with('⎿') || is_collapsed_tool_summary(t) {
+            return false;
         }
-        let body = t.trim_start_matches(['●', '⎿', ' ']);
-        if body.starts_with(USAGE_LIMIT) {
-            Some(ClaudeScreenKind::UsageLimit)
-        } else if t.starts_with('⎿') && is_login_error(body) {
-            Some(ClaudeScreenKind::Login)
-        } else {
-            None
+        nearest.get_or_insert(*line);
+    }
+    // 訊息開頭捲出畫面：緊鄰的上一行像回覆內文（縮排不超過 4），當成回覆裡引用的
+    nearest.is_some_and(|l| indent_of(l) <= 4)
+}
+
+/// 錯誤訊息的續行縮排在 5 以上。接下來第一個縮排較淺的行如果是一般內文，代表那句話只是某段回覆中間的引用
+fn followed_by_reply_text(after: &[&str]) -> bool {
+    let next = after.iter().find(|l| !l.trim().is_empty() && indent_of(l) < 5);
+    next.is_some_and(|l| indent_of(l) > 0 && !l.trim_start().starts_with(['⎿', '✻', '✢', '✳', '✶', '✽', '○']))
+}
+
+/// 提示之後對話有沒有再往下走（額度恢復了，或換帳號後繼續做事）：
+/// 新的 ● 回覆或工具呼叫、本人送出新的提問、登入成功。斜線指令（/usage-credits 之類）不算
+fn conversation_moved_on(after: &[&str]) -> bool {
+    after.iter().any(|line| {
+        let t = line.trim_start();
+        if t.strip_prefix('⎿').is_some_and(|r| r.trim_start().starts_with("Login successful")) {
+            return true;
         }
-    })?;
-    Some(screen(notice, "", Vec::new(), 0, None, None))
+        if indent_of(line) != 0 {
+            return false;
+        }
+        if t.starts_with(['●', '⏺']) {
+            return !is_background_status(t);
+        }
+        t.strip_prefix([CURSOR, '>']).map(str::trim).is_some_and(|q| !q.is_empty() && !q.starts_with('/'))
+    })
 }
 
 fn screen(kind: ClaudeScreenKind, question: &str, options: Vec<ClaudeOption>, cursor: usize, allow_once: Option<u32>, deny: Option<u32>) -> ClaudeScreen {
@@ -1468,6 +1570,180 @@ Esc to cancel
         // 模型自己的回覆（引用這句話）不算
         assert_ne!(kind(&page("● Login reached its time limit · Please run /login")), Some(K::Login));
         assert_ne!(kind(&page("● 這句是「Failed to authenticate: this login reached its time limit」的意思")), Some(K::Login));
+    }
+
+    /// 一段對話底下接空的輸入框與狀態列
+    fn above_input(rows: &[&str]) -> String {
+        let rule = "─".repeat(40);
+        format!("{}\n\n{rule}\n❯ \n{rule}\n  ? for shortcuts\n", rows.join("\n"))
+    }
+
+    const WEEKLY: &str = "  ⎿  You've hit your weekly limit · resets Nov 26, 8pm (Asia/Taipei)";
+    const WEEKLY_HINT: &str = "     /usage-credits to finish what you're working on.";
+
+    #[test]
+    fn 單號2335_週額度用完_後面接子代理輸出_認得出來_只標狀態() {
+        let text = fixture!("claude-limit-weekly-subagents.synthetic").replace("\r\n", "\n");
+        let s = classify(&text).expect("要認得週額度用完");
+        assert_eq!((s.kind, status_code(s.kind)), (K::UsageLimit, "usage_limit"));
+        assert_eq!((s.allow_once, s.deny, s.options.len()), (None, None, 0));
+        // 前提：提示離底部超過舊的回看行數，不然這支測不到回看範圍
+        let lines: Vec<&str> = text.trim_end().lines().collect();
+        let at = lines.iter().position(|l| *l == WEEKLY).unwrap();
+        assert!(lines.len() - at > NOTICE_LOOKBACK + 4, "{}", lines.len() - at);
+    }
+
+    #[test]
+    fn 單號2335_擁有者實機畫面_認得出來_只標狀態() {
+        let text = fixture!("claude-limit-weekly.real").replace("\r\n", "\n");
+        // 前提：實機畫面的三個形狀都在，不然這支測的不是它
+        let lines: Vec<&str> = text.trim_end().lines().collect();
+        let at = lines.iter().position(|l| *l == WEEKLY).expect("要有額度那一行");
+        assert!(lines[at - 1].starts_with("  ⎿  sent id="), "額度行是工具呼叫底下的第二個 ⎿");
+        assert!(lines[at..].iter().any(|l| l.starts_with("✻ Waiting for 1 background agent")));
+        assert!(lines[at..].iter().any(|l| l.starts_with("● Agent \"") && l.contains("You've hit your weekly limit · resets")));
+        let s = classify(&text).expect("要認得週額度用完");
+        assert_eq!((s.kind, status_code(s.kind)), (K::UsageLimit, "usage_limit"));
+        assert_eq!((s.allow_once, s.deny, s.options.len()), (None, None, 0));
+        // 同一張畫面少掉額度那一行：子代理失敗那行也有同一句字，但不能靠它認
+        let without: Vec<&str> = lines.iter().enumerate().filter(|(i, _)| *i != at).map(|(_, l)| *l).collect();
+        assert_eq!(kind(&without.join("\n")), None);
+    }
+
+    #[test]
+    fn 單號2335_各種額度名稱與掛法都認得() {
+        for said in [
+            "You've hit your limit · resets 5pm (Asia/Taipei)",
+            "You've hit your weekly limit · resets Nov 26, 8pm (Asia/Taipei)",
+            "You've hit your weekly limit · resets Jan 2, 2027, 8:30pm (Asia/Taipei) · progress saved",
+            "You've hit your weekly limit",
+            "You've hit your session limit · resets 3pm",
+            "You've hit your 5-hour limit · resets 5pm (Asia/Taipei)",
+            "You've hit your Opus limit · resets 5pm (Asia/Taipei)",
+            "You've hit your Opus 4.1 limit · resets 5pm (Asia/Taipei)",
+            "You've hit your Sonnet limit",
+            "You've hit your Fable limit",
+            "You've hit your usage credit limit",
+            "You've hit your monthly spend limit · /usage-credits to raise it",
+            "You've hit your daily limit · resets 8:30pm (Asia/Taipei)",
+        ] {
+            let text = above_input(&["❯ 繼續", &format!("  ⎿  {said}"), WEEKLY_HINT]);
+            assert_eq!(kind(&text), Some(K::UsageLimit), "{text}");
+        }
+        for rows in [
+            // ⎿ 後面是不換行空白
+            vec!["❯ 繼續", "  ⎿ \u{a0}You've hit your weekly limit · resets 8pm"],
+            // 排程工作、工具摘要、前一個工具的結果後面
+            vec!["✻ Running scheduled task (Nov 14 3:51pm)", WEEKLY, WEEKLY_HINT],
+            vec!["● 我先讀檔。", "", "  Read 1 file", "", WEEKLY, WEEKLY_HINT],
+            vec!["● Bash(ls)", "  ⎿  a.txt", "", WEEKLY, WEEKLY_HINT],
+            // 掛在背景子代理的結束通知底下
+            vec!["● Agent \"查額度\" failed", WEEKLY],
+            // 提示就是畫面第一行
+            vec![WEEKLY, WEEKLY_HINT],
+            // 舊字樣掛在 ● 上
+            vec!["● You've hit your limit · resets 3pm (Asia/Taipei)", "  /upgrade to increase your usage limit."],
+        ] {
+            let text = above_input(&rows);
+            assert_eq!(kind(&text), Some(K::UsageLimit), "{text}");
+        }
+        // 選單選了「停下來等」之後：選單收掉、輸入框回來
+        let menu = limit_menu("claude-limit-menu.real.txt");
+        let kept: Vec<&str> = menu.lines().take_while(|l| !l.starts_with('─')).collect();
+        assert_eq!(kind(&above_input(&kept)), Some(K::UsageLimit), "{kept:?}");
+    }
+
+    #[test]
+    fn 單號2335_一般句子與別種限制_不算() {
+        for said in [
+            "You've hit your stride limit",
+            "You've hit your stride limit today",
+            "You've hit your weekly limits · resets 3pm",
+            "You've hit your weekly limit, so we wait",
+            "You've hit your limitless potential",
+            "You've hit your fast limit · resets in 2h",
+            "You've hit your very own weekly limit · resets 3pm",
+            "You've hit your src/weekly limit · resets 3pm",
+            "You've hit your abcdefghijklmnopqrstuvwxyz limit · resets 3pm",
+            "他說 You've hit your weekly limit · resets 3pm",
+        ] {
+            let text = above_input(&["❯ 繼續", &format!("  ⎿  {said}")]);
+            assert_eq!(kind(&text), None, "{text}");
+        }
+    }
+
+    #[test]
+    fn 單號2335_對話或工具輸出引用這句話_不算() {
+        // 前提：同一句話照 Claude 自己的掛法是認得的，下面的反例才有意義
+        assert_eq!(kind(&above_input(&["❯ 繼續", WEEKLY, WEEKLY_HINT])), Some(K::UsageLimit));
+        let said = "You've hit your weekly limit · resets Nov 26, 8pm (Asia/Taipei)";
+        let bullet = format!("● {said}");
+        let echo = format!("❯ 夥伴畫面寫 {said}");
+        let deep = format!("    {}", WEEKLY.trim_start());
+        let grep = format!("     fixtures/a.txt:2:{WEEKLY}");
+        let cat = format!("   {WEEKLY}");
+        let diff = format!("     +{WEEKLY}");
+        let cases: Vec<(&str, Vec<&str>)> = vec![
+            ("使用者提問裡貼這句話", vec![&echo]),
+            ("模型回覆以 ● 開頭引用", vec![&bullet, "", "✻ Baked for 5s · done"]),
+            ("回覆裡的程式碼區塊", vec!["● 畫面上是：", "", &deep, "", "✻ Baked for 5s · done"]),
+            ("回覆裡引用在最後一行", vec!["● 畫面上是：", "", WEEKLY, WEEKLY_HINT, "", "✻ Baked for 5s · done"]),
+            ("回覆中間引用、後面還有內文", vec!["❯ 貼給你看", WEEKLY, "  上面這句是額度用完的意思。"]),
+            ("回覆開頭捲出畫面", vec!["  上面那句是：", "", WEEKLY, "", "✻ Baked for 5s · done"]),
+            ("工具輸出第一行", vec!["● Bash(cat notes.txt)", WEEKLY, WEEKLY_HINT]),
+            ("工具指令折行後的輸出", vec!["● Bash(cd /x &&", "      cat notes.txt)", WEEKLY]),
+            ("grep 輸出", vec!["● Bash(grep -rn limit .)", "  ⎿  a.rs:97: const X", &grep]),
+            ("git diff 輸出", vec!["● Bash(git diff)", "  ⎿  diff --git a/x b/x", &diff]),
+            ("印出樣本檔", vec!["● Bash(cat screen.txt)", "  ⎿  ✻ Running", &cat]),
+            ("看這張單的內文", vec!["● Bash(gh issue view 2335)", "  ⎿  畫面上的字：", "     ```", &cat, "     ```"]),
+        ];
+        for (why, rows) in cases {
+            let text = above_input(&rows);
+            assert_eq!(kind(&text), None, "{why}\n{text}");
+        }
+        // 打在輸入框裡還沒送出
+        let rule = "─".repeat(40);
+        let typing = format!("● 好。\n\n{rule}\n❯ 看這個\n{WEEKLY}\n{rule}\n  ? for shortcuts\n");
+        assert_eq!(kind(&typing), None, "{typing}");
+    }
+
+    #[test]
+    fn 單號2335_提示之後對話又往下走_不算() {
+        let after = |rest: &[&str]| {
+            let mut rows = vec!["❯ 繼續", WEEKLY, WEEKLY_HINT, ""];
+            rows.extend_from_slice(rest);
+            above_input(&rows)
+        };
+        for (why, rest) in [
+            ("新的回覆", vec!["● 好，我接著做。"]),
+            ("新的工具呼叫", vec!["● Bash(ls)", "  ⎿  a.txt"]),
+            ("本人送出新的提問、正在想", vec!["❯ 換好帳號了，繼續", "", "✻ Thinking… (esc to interrupt)"]),
+            ("換帳號登入成功", vec!["❯ /login", "  ⎿  Login successful"]),
+            ("子代理通知之後有回覆", vec!["● Agent \"查額度\" completed", "", "● 結果整理如下。"]),
+        ] {
+            let text = after(&rest);
+            assert_eq!(kind(&text), None, "{why}\n{text}");
+        }
+        for (why, rest) in [
+            ("只有結束字樣", vec!["✻ Crunched for 0s · done"]),
+            ("背景子代理的通知", vec!["● Agent \"查額度\" completed"]),
+            ("背景指令的通知", vec!["● Background command \"build\" failed with exit code 1"]),
+            ("打了斜線指令", vec!["❯ /usage-credits", "  ⎿  Opening your options…"]),
+            ("再送一次又撞到", vec!["❯ 再試", WEEKLY, WEEKLY_HINT]),
+        ] {
+            let text = after(&rest);
+            assert_eq!(kind(&text), Some(K::UsageLimit), "{why}\n{text}");
+        }
+    }
+
+    #[test]
+    fn 單號2335_回看範圍有上限_和登入錯誤並存時看較新的() {
+        let mut rows = vec!["❯ 繼續", WEEKLY];
+        rows.extend(std::iter::repeat("").take(USAGE_LOOKBACK));
+        assert_eq!(kind(&above_input(&rows)), None, "太舊的提示不看");
+        let login = "  ⎿  Login expired · Please run /login";
+        assert_eq!(kind(&above_input(&["❯ 繼續", WEEKLY, login])), Some(K::Login));
+        assert_eq!(kind(&above_input(&["❯ 繼續", login, WEEKLY])), Some(K::UsageLimit));
     }
 
     #[test]
