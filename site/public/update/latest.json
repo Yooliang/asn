@@ -1,15 +1,11 @@
 {
-  "version": "0.2.101",
-  "notes": "- 新功能：Gemini 背景工作者可以寫檔和執行指令，需在設定裡自己打開（預設關閉）",
-  "pub_date": "2026-11-26T00:42:35.896Z",
+  "version": "0.2.102",
+  "notes": "- 改善：ASN 開出來的 Gemini、Grok 預設就能寫檔和執行指令，不用再到設定裡打開\n- 修正：Gemini 把文件存在自己的對話資料夾時，不會再被中止",
+  "pub_date": "2026-11-26T05:41:32.044Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBBdkxWZDJKK1N3aXQraXV1VlhzNHIzNjF1eXBCSk5OSWNRTmUvZ1F4OXJ4TFFwdHE0dXd5T1FISDF1WDVTd3BiUDlNR2Z4bUJrRkNkdXQ3YjExd0FzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjUzNzU1CWZpbGU6QVNOXzAuMi4xMDFfeDY0LXNldHVwLmV4ZQo4SU5UZnJXV2tMUkJZMEtNMGx1azZ4UDFNMnMvSlBtQnZHMGlBMmdxWDhsK253Ky9QRGdvdHExdk9wcGsvVnppcnM5NWd1VVk2VnArZU9iV1hpZE9DQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.101_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjU5WFROWkNKWjNrMnhYZjFnQXhHNEpKL0VvZTVuWmNMWEFNY0QzUytVQlVoVTM5SFdHeUVpQ3RtQUNtVVRyeHBSRDltNTlpVUd1Si9wbm44cDJrWEFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjU0MzIzCWZpbGU6QVNOXzAuMi4xMDFfYW1kNjQuQXBwSW1hZ2UKSkxtSXNZSU5GSDlpWHdHdU9EZDdIVis0ZFZXSHJyYkI4aTUzSEdVZGo5R3FUUjF6NnFPdzFlbUdvSlV5WGRBNDY4Wkp1ME5ZdnZhd2o4dGxEbWFxREE9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.101_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhjYTZndktPdlVUT3RqRkVaayt1bTJ4cDFpUHJ6WUhnbmZ2REl3N093Q1ltN2ZqTVRCUGhSYkRrNk53L3lseUU5REpyaHFRL1dSZE9KUFR3L085QkFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjcxNjkxCWZpbGU6QVNOXzAuMi4xMDJfeDY0LXNldHVwLmV4ZQpJMnlvN0l0WmptWkhUTVJ4dlQxTVNuQXBjVGRZckpoZ2ROMzBhWFZFRGZWRXJGUHZSZTBXdTJ2MVpjKzltMmdheWNFMjNVaklkb1p4cnp2Q1lpRzBBQT09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.102_x64-setup.exe"
     }
   }
 }
