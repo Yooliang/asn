@@ -74,3 +74,14 @@ Deno.test("#2381 整條路：Rust 送的每個 profile 的 engine 過了後台�
   assertEquals(stored.profiles.map((p) => p.engine), sent.profiles.map((p) => p.engine));
   assert(stored.profiles.every((p) => typeof p.engine === "string" && p.engine !== ""));
 });
+
+Deno.test("#2353 第③階段：指定型號只在那台電腦有回報 models 時才放行——Rust 摘要沒帶 models 時後台存下來也沒有（SQL 以此回 model_unsupported）", async () => {
+  const src = await Deno.readTextFile(LAUNCHER_RS);
+  const sent = summaryShapeFromRust(src, termProfilesFromRust(src));
+  const old = sanitizeLauncher(sent) as Record<string, unknown>;
+  assertEquals("models" in old, false, "舊電腦：沒有 models");
+  const withModels = sanitizeLauncher({ ...sent, models: [{ vendor: "claude", status: "ok", models: [{ id: "opus", name: "Opus" }] }] }) as Record<string, unknown>;
+  assert(Array.isArray(withModels.models), "新電腦：有 models 陣列");
+  const bad = sanitizeLauncher({ ...sent, models: [{ vendor: "claude", status: "ok", models: [{ id: "a b", name: "x" }] }] }) as Record<string, unknown>;
+  assert(Array.isArray(bad.models), "整理後仍是陣列（壞的那筆被丟掉，不是整份拒收）");
+});
