@@ -626,6 +626,28 @@ mod tests {
     }
 
     #[test]
+    fn 抽取_實機事件形狀_讀檔工具的路徑欄位首字大寫() {
+        let r = rig();
+        let bad = ps(&r.home.join(".ssh").join("id"));
+        let ok = ps(&r.work.join("test.txt"));
+        let step = |path: &str| json!({"event": "step_update", "step_update": {"step_index": 2, "state": "ACTIVE", "step_type": "tool", "tool_name": "read_file", "tool_info": {"name": "read_file", "parameters": {"Path": path}, "output": "1 lines, 59 bytes"}}});
+        for (path, want_block) in [(bad.as_str(), true), (ok.as_str(), false), ("~/.ssh/id", true), ("~/Desktop/a.txt", false)] {
+            let ev = step(path);
+            // 只給參數，或給整個事件，都要抽得到
+            for src in [ev.pointer("/step_update/tool_info/parameters").unwrap().clone(), ev.clone()] {
+                let got = extract_read_paths(&src);
+                assert!(got.iter().any(|g| g == path), "{path} 在 {got:?}");
+                assert_eq!(got.iter().any(|p| blocked(&r, p)), want_block, "{path}");
+            }
+        }
+        // 沒有分隔符的單純檔名，靠欄位名（不分大小寫）才抽得到
+        assert_eq!(extract_read_paths(&step("id_rsa").pointer("/step_update/tool_info/parameters").unwrap().clone()), vec!["id_rsa".to_string()]);
+        assert_eq!(ReadTool::of_agy("read_file"), ReadTool::Single);
+        // 內部控制步驟沒有路徑
+        assert!(extract_read_paths(&json!({"steps": [{"status": "done", "title": "整理"}]})).is_empty());
+    }
+
+    #[test]
     fn 上層資料夾_遞迴搜尋擋_列舉與單檔放行() {
         let r = rig();
         let up = [ps(&r.home), ps(r.home.parent().unwrap()), ps(&r.home.join(".config").parent().unwrap().to_path_buf())];
