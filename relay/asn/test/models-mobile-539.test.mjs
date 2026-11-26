@@ -52,9 +52,10 @@ test('開新夥伴選型號：只在這台、Claude 開成視窗、Gemini 內建
 
 test('開新夥伴接線：第 2 頁有型號下拉（預設不指定），本機開時帶 model', () => {
   const html = read('ui/list.html'), js = read('ui/list.js')
-  assert.match(html, /<label class="partner-model-pick" v-if="launchModel\.show">型號[\s\S]*?<option value="">不指定（照預設）<\/option>[\s\S]*?v-for="m in launchModel\.models"/)
-  assert.match(js, /launchModelChoices\(dlgRow\.value\?\.id, partnerRunChoice\.value, \{ local: partnerDlg\.node === info\.node, engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
-  assert.match(js, /\.\.\.\(launchModelPick\.value \? \{ model: launchModelPick\.value \} : \{\}\)/)
+  assert.match(html, /<label class="partner-model-pick" v-else-if="launchModel\.show">型號[\s\S]*?<option value="">不指定（照預設）<\/option>[\s\S]*?v-for="m in launchModel\.models"/)
+  assert.match(js, /launchModelChoices\(dlgRow\.value\?\.id, dlgAuto\.value\.run, \{ local: partnerDlg\.node === info\.node, engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
+  assert.match(js, /localLaunchRequest\(dlgAuto\.value, \{[^}]*model: launchModelPick\.value,/, '選了型號就帶進送出內容')
+  assert.match(read('ui/lib/auto-run.mjs'), /\.\.\.\(model \? \{ model \} : \{\}\)/, '有選才帶 model')
   assert.match(read('ui/lib/partner-ops-ui.mjs'), /<label class="op-field" v-if="op === 'model' && acpModels\.length">模型/)
   assert.match(read('src-tauri/src/launch/mod.rs'), /pub model: String,/)
 })

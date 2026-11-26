@@ -4,7 +4,6 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resetWhen } from '../ui/lib/account-quota.mjs'
-import { LAUNCH_DISPLAY_NOTE, launchRun, launchVendors } from '../ui/lib/mobile-launch.mjs'
 import { findProbe, loadProbes, withProbeScenarios, withProbeTables } from './smoke-registry.mjs'
 export { aboutProbeSource } from './smoke-probes/aboutCheck.mjs'
 export { barProbeSource } from './smoke-probes/bar.mjs'
@@ -418,12 +417,13 @@ const mcloudAcctList = (now = SMOKE_NOW) => ({ by: 'node', values: {
   G: { asn_online: false, reported_at: '', accounts: [] },
 }, fallback: null })
 export const MCLOUD_PROBE = { mcloud: true }
-// 手機「開新夥伴」第 2 步的運行選項：夥伴 → ＋ → 開新夥伴 → 選辦公室 → 下一步；412、360 寬與大字型（1.3 倍）各一張。
-// 辦公室回報的啟動設定只有 Claude；選項名稱、預設都要跟電腦版同一份目錄（model-catalog）算出來的一樣，並看得到「前台或背景」的說明
-const MLAUNCH_LAUNCHER = { profiles: [{ id: 'claude' }], cwd_allow: ['D:/work'] }
-const MLAUNCH_RUN = launchRun(launchVendors(MLAUNCH_LAUNCHER).find(v => v.id === 'claude'), MLAUNCH_LAUNCHER)
+// 手機「開新夥伴」第 2 步的廠牌卡（#2354）：夥伴 → ＋ → 開新夥伴 → 選辦公室 → 下一步；412、360 寬與大字型（1.3 倍）各一張。
+// 辦公室回報的啟動設定有 Claude、Gemini：卡片只寫名稱，右邊同一行放短標示（Gemini 無終端畫面；Grok、DeepSeek、MiniMax 尚未安裝，反灰不能選）；沒有「運行」。
+// 期待的字直接寫死（不從程式算出來，免得跟著程式一起錯）：名稱／標示／可不可選
+const MLAUNCH_LAUNCHER = { profiles: [{ id: 'claude' }, { id: 'gemini' }], cwd_allow: ['D:/work'] }
+export const MLAUNCH_CARDS = ['Claude//可', 'Gemini/無終端畫面/可', 'Grok/尚未安裝/灰', 'DeepSeek/尚未安裝/灰', 'MiniMax/尚未安裝/灰']
 export const MLAUNCH_PROBES = {
-  base: { mlaunch: true, big: false, labels: MLAUNCH_RUN.options.map(o => o.label), selected: MLAUNCH_RUN.options.find(o => o.key === MLAUNCH_RUN.selected)?.label ?? '', note: LAUNCH_DISPLAY_NOTE },
+  base: { mlaunch: true, big: false, cards: MLAUNCH_CARDS, selected: 'Claude' },
 }
 MLAUNCH_PROBES.big = { ...MLAUNCH_PROBES.base, big: true }
 // 手機「通知」分頁（#895，PR-H；0.2.18 起是固定的一格，#1429 起在最後）：四個頁籤固定「夥伴／對話／設定／通知」；通知分頁顯示系統通知對話（唯讀）、紅點在通知那一格。

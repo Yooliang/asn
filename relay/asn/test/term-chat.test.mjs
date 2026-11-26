@@ -166,6 +166,6 @@ test('接線：term_start 只在開新夥伴對話框選「ASN 開的終端」�
   assert.ok(tauri.includes("termStart: req => invoke('term_start', { req })"))
   assert.ok(!html.includes('openTermStart') && !html.includes('termStartDlg'), '沒有獨立的「在這台開終端」入口和對話框')
   const sub = js.slice(js.indexOf('async function submitPartnerDlg'), js.indexOf('async function pollLaunchResults'))
-  assert.ok(sub.includes("partnerRunChoice.value === 'term'") && sub.includes('partnerDlg.node === info.node') && sub.includes('TERM_WEZ_TOOLS.includes('), '只有本機、選終端、且是 Grok／Gemini 才走 term_start')
-  assert.ok(sub.indexOf('partnerCanRun.value') < sub.indexOf('submitTermViaDialog()'), '先檢查這個運行方式能不能選')
+  assert.ok(sub.includes("dlgAuto.value.run === 'term'") && sub.includes('partnerDlg.node === info.node') && sub.includes("['grok', 'agy'].includes("), '只有本機、自動開法是終端、且是 Grok／Gemini 才走 term_start')
+  assert.ok(sub.indexOf('partnerCanRun.value') < sub.indexOf('submitTermViaDialog()'), '先檢查這個開法現在能不能用')
 })

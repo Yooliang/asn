@@ -26,7 +26,8 @@ import { contextLabel } from './lib/context-usage.mjs'
 import { elevatedBadge } from './lib/elevated.mjs'
 import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, SCROLL_TERM_SELECTOR, inScrollableX, indicatorPos, pagerShift, PAGER_SETTLE_MS, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, sideloadLastText, buttonLabel, initialNav, opsNav, offlineNav, photoNav, tabLabel as tabLabelOf, secretNav, termReqNav, permReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { sharePhoto } from './lib/photo-inline.mjs'
-import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchRun, launchVendors, machinesByNode, pickedRun, progressView, launchInProgress } from './lib/mobile-launch.mjs'
+import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchVendorCards, machinesByNode, progressView, launchInProgress, remotePi } from './lib/mobile-launch.mjs'
+import { autoRunFor, loggedOutFromStates, vendorStatesOf } from './lib/auto-run.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { UI_KIT } from './lib/ui-kit.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
@@ -860,17 +861,18 @@ const app = createApp({
     const lchDevices = computed(() => launchDevices(friends.value, { selfNode: info.node, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, removed: devPrefs.deviceRemoved, ...lchCtx.value }))
     const lchElig = computed(() => (lch.node ? launchEligibility(lch.node, lchCtx.value) : { ok: false, reason: '' }))
     const lchChoices = computed(() => launchChoices(lchData.machines[lch.node]))
-    // 「模型」只列廠牌，「運行」四選一（D1 #421，跟電腦版同一套）：內建通道 ＞ 經 pi ＞ ASN 開的終端 ＞ 原生 CLI（只作說明）。不能選的反灰並寫原因
+    // 只選廠牌（#2354）：開法由 autoRunFor 自動決定（跟電腦版同一份），畫面上沒有「運行」。卡片右邊的短標示：尚未安裝／尚未登入（反灰、不能選）、無終端畫面
+    // 「尚未登入」只在讀過那台電腦、而且回報還新鮮的帳號回報時才標（不在這裡新增讀取；沒讀過就不標）；回報裡 Gemini 偵測不到登入，永遠不標
     const lchLauncher = computed(() => lchData.machines[lch.node]?.launcher ?? null)
-    const lchVendors = computed(() => launchVendors(lchLauncher.value))
+    const lchCardsOf = node => launchVendorCards(lchData.machines[node]?.launcher, { loggedOut: loggedOutFromStates(vendorStatesOf(acctAllDevs.value.find(d => d.key === node))) })
+    const lchVendors = computed(() => lchCardsOf(lch.node))
     const lchRow = computed(() => lchVendors.value.find(v => v.id === lch.vendor) ?? null)
-    const lchRun = computed(() => launchRun(lchRow.value, lchLauncher.value))
-    const lchRunKey = computed(() => pickedRun(lchRun.value, lch.run))
     // 經 pi（D2 #422）：那台回報的 pi 模型清單（要開放遠端管理）；預設第一個
     const lchPi = computed(() => launchPiChoice(lchRow.value, lchLauncher.value))
-    const lchReq = computed(() => buildLaunchRequest(lch, { run: lchRunKey.value, row: lchRow.value, launcher: lchLauncher.value }))
-    const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value, { run: lchRunKey.value, piOk: !!lchReq.value }) : ''))
-    function pickLaunchVendor(v) { Object.assign(lch, { vendor: v.id, profile: v.profileId, run: '', piModel: '' }) }
+    const lchAuto = computed(() => autoRunFor(lchRow.value, { local: false, piInstalled: remotePi(lchLauncher.value).installed, piReady: lchPi.value.ok, piWhy: lchPi.value.why }))
+    const lchReq = computed(() => buildLaunchRequest(lch, { run: lchAuto.value.run, row: lchRow.value, launcher: lchLauncher.value }))
+    const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value, { run: lchAuto.value.ok ? lchAuto.value.run : null, why: lchAuto.value.why, piOk: !!lchReq.value }) : ''))
+    function pickLaunchVendor(v) { if (v.disabled) return; Object.assign(lch, { vendor: v.id, profile: v.profileId, piModel: '' }) }
     async function loadLaunchers() {
       lchData.error = ''
       try { lchData.machines = machinesByNode(await mobileLaunchApi.launchers()); lchData.loaded = true } catch (e) { lchData.loaded = false; lchData.error = launchErrorText(e.message) }
@@ -879,8 +881,8 @@ const app = createApp({
       if (!launchEligibility(node, lchCtx.value).ok) return
       const c = launchChoices(lchData.machines[node])
       Object.assign(lch, { node, deviceLabel: lchDevices.value.find(d => d.key === node)?.label ?? '', error: '' })
-      const vs = launchVendors(lchData.machines[node]?.launcher)
-      if (!vs.some(v => v.id === lch.vendor)) { const v = vs[0]; Object.assign(lch, { vendor: v?.id ?? '', profile: v?.profileId ?? '', run: '', piModel: '' }) }
+      const vs = lchCardsOf(node).filter(v => !v.disabled)
+      if (!vs.some(v => v.id === lch.vendor)) { const v = vs[0]; Object.assign(lch, { vendor: v?.id ?? '', profile: v?.profileId ?? '', piModel: '' }) }
       if (!c.cwds.includes(lch.cwd)) lch.cwd = c.cwds[0] ?? ''
       if (!lch.name.trim()) lch.name = defaultPartnerName(friends.value, lch.profile)
     }
@@ -897,7 +899,7 @@ const app = createApp({
       void loadLaunchers().then(() => fourthNav.whenSettled()).then(() => {   // 從設備細部頁進來時，換頁要等導覽做完，才推第 2 步
         if (!node) return
         pickLaunchDevice(node)
-        const v = vendor ? launchVendors(lchData.machines[node]?.launcher).find(x => x.id === vendor) : null
+        const v = vendor ? lchCardsOf(node).find(x => x.id === vendor && !x.disabled) : null
         if (v) pickLaunchVendor(v)   // 新手引導卡：選好那一家
         nextLaunch()
       })   // 從某台電腦進來＝第 1 頁已選好，直接到第 2 頁
@@ -1765,7 +1767,7 @@ const app = createApp({
       avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideNode, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       SUB_LAPSED_TEXT, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLoginTargets, acctLoginPress, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, acctHead, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
-      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchRun, lchRunKey, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, LAUNCH_DISPLAY_NOTE, showDisplayNote, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
+      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchAuto, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, speakApi, readVoices, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,

@@ -33,5 +33,5 @@ test('cliInstalled／modelUiRow 讀得到真的偵測結果（pi 有裝＝true�
 test('守門：list.js 不准再直接讀偵測資料的 .installed（要走 cliInstalled）', () => {
   const js = read('ui/list.js')
   assert.doesNotMatch(js, /cliTools\.value(\.\w+|\[[^\]]+\])\?*\.installed/)
-  assert.equal((js.match(/cliInstalled\(cliTools\.value, 'pi'\)/g) ?? []).length, 2, '經 pi 的廠商列與運行選項兩處')
+  assert.equal((js.match(/cliInstalled\(cliTools\.value, 'pi'\)/g) ?? []).length, 3, '經 pi 的廠商列（有沒有裝、查得到登入狀態沒有）與自動開法，共三處（#2354 拿掉運行選項後）')
 })

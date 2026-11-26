@@ -55,7 +55,20 @@ export function piOnlyVendorRows(models, providers = {}) {
   return PI_ONLY_VENDORS.filter(v => piChoiceFor(v.id, models, providers).ok).map(v => ({ ...v, viaPiOnly: true }))
 }
 
-/** 按「開啟」時帶給後端的 pi 參數；提供者或模型不在這次查到的清單裡就回 null（不送） */
+/**
+ * 只能經 pi 的廠牌（DeepSeek、MiniMax）的可用狀態（廠牌卡的「尚未安裝」「尚未登入」標示用，#2354）。
+ * known：已經查到 pi 的模型清單（沒查到就是不知道，不標）。
+ * 回 { missing, loggedOut }：這版 pi 沒有這家提供者 → missing；pi 有、但沒登入這家（清單裡沒有它的模型）→ loggedOut
+ */
+export function piVendorState(vendorId, models, providers = {}, { known = false } = {}) {
+  if (!known) return { missing: false, loggedOut: false }
+  const c = piChoiceFor(vendorId, models, providers)
+  if (c.ok) return { missing: false, loggedOut: false }
+  const missing = providers?.[c.provider] === 'provider_not_found'
+  return { missing, loggedOut: !missing }
+}
+
+/** 按「開始」時帶給後端的 pi 參數；提供者或模型不在這次查到的清單裡就回 null（不送） */
 export function piLaunchArgs(vendorId, model, models, providers = {}) {
   const c = piChoiceFor(vendorId, models, providers)
   if (!c.ok || !c.models.some(m => m.model === model)) return null

@@ -116,5 +116,5 @@ test('本機 profile 的 engine：有回報就用回報的（含空字串）；�
   assert.equal(localProfileEngine('my-custom', null), '')
   assert.equal(localProfileEngine('my-custom', { profiles: [{ id: 'claude', engine: 'claude' }] }), '')
   const list = read('ui/list.js')
-  assert.match(list, /launchModelChoices\(dlgRow\.value\?\.id, partnerRunChoice\.value, \{ local: partnerDlg\.node === info\.node, engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
+  assert.match(list, /launchModelChoices\(dlgRow\.value\?\.id, dlgAuto\.value\.run, \{ local: partnerDlg\.node === info\.node, engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
 })

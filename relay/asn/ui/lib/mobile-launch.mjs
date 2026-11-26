@@ -3,8 +3,9 @@
 import { closedReasonOf, remoteModelRows, remoteTermProfile } from './partner-launch-ui.mjs'
 import { deviceFriends, isDeviceOnline, isDeviceRemoved } from './device-order.mjs'
 import { deviceNameOf, unnamedLabelOf } from './device-known.mjs'
-import { customRunOptions, runOptions, vendorRows } from './model-catalog.mjs'
-import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows } from './pi-models.mjs'
+import { MODEL_CATALOG, vendorRows } from './model-catalog.mjs'
+import { PI_ONLY_VENDORS, cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, piVendorState } from './pi-models.mjs'
+import { vendorCards } from './auto-run.mjs'
 
 export const REASON = {
   needLogin: '要先登入，才能替電腦開新夥伴',
@@ -55,15 +56,15 @@ export const FIRST_MAX = 4000
 
 // 還在開（送出後、還沒開好也還沒失敗）：關掉畫面也照常在背景追蹤，再進「開新夥伴」接著顯示進度
 export const launchInProgress = l => l?.phase === 'progress' && l.vphase !== 'done' && l.vphase !== 'failed'
-export const initialLaunch = () => ({ open: false, phase: 'form', node: '', deviceLabel: '', profile: '', vendor: '', run: '', piModel: '', cwd: '', name: '', first: '', error: '', busy: false, id: '', text: '', detail: '', friendId: '', since: 0 })
+export const initialLaunch = () => ({ open: false, phase: 'form', node: '', deviceLabel: '', profile: '', vendor: '', piModel: '', cwd: '', name: '', first: '', error: '', busy: false, id: '', text: '', detail: '', friendId: '', since: 0 })
 
 // 送出前的檢查：不能開的電腦、缺欄位、名字格式都擋在這裡（不送出）。回中文錯誤，通過回空字串
-// run：選到的運行（null＝這個模型在那台沒有能選的運行）；piOk：經 pi 時選的模型在那台的清單裡
-export function launchFormError(f, elig, { run = 'term', piOk = true } = {}) {
+// run：這個廠牌自動用的開法（autoRunFor，null＝現在沒有能用的開法，why 是原因）；piOk：經 pi 時選的模型在那台的清單裡
+export function launchFormError(f, elig, { run = 'term', piOk = true, why = '' } = {}) {
   if (!f.node) return '請先選一台電腦'
   if (!elig?.ok) return elig?.reason || REASON.unknown
   if (!f.profile) return '請選一個模型'
-  if (!run) return '這個模型在那台電腦沒有能用的開法'
+  if (!run) return why || '這個模型在那台電腦沒有能用的開法'
   if (run === 'pi' && !piOk) return '請選一個 pi 的模型'
   if (!f.cwd) return '請選工作資料夾'
   if (!NAME_RE.test(f.name.trim())) return '名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭'
@@ -71,17 +72,13 @@ export function launchFormError(f, elig, { run = 'term', piOk = true } = {}) {
   return ''
 }
 
-// ---- 運行四選一與經 pi（D1 #421、D2 #422）：跟電腦版開新夥伴同一套規則，資料都用那台電腦回報的啟動設定 ----
+// ---- 經 pi（D2 #422）與自動開法（#2354，autoRunFor）：跟電腦版開新夥伴同一套規則，資料都用那台電腦回報的啟動設定 ----
 // 那台要開放遠端管理（設定頁「允許我的其他設備替這台開新視窗」），名單回報才會帶它的 pi 模型清單（launcher.pi_models）
 export const PI_REMOTE_NO_LIST = '查不到那台的 pi 模型清單，請到那台電腦的設定打開「允許我的其他設備替這台開新視窗」'
 export const PI_REMOTE_NO_PI = '那台電腦沒有偵測到 pi'
 // 0.1.101 以前的電腦會略過選的模型、用 pi 自己的預設開（asn真 決定不加能力旗標，改成提醒＋開好時寫出實際模型）
 export const PI_REMOTE_VERSION_NOTE = '那台的 ASN 版本較舊時，會改用 pi 的預設模型開；開好後會寫出實際用的模型'
-// 手機遠端開窗時，前台或背景由那台電腦自己的設定決定（手機不送這個選項）；只有開在終端服務視窗的運行（asn終端兩種）才會有前台／背景之分
-export const LAUNCH_DISPLAY_NOTE = '會照那台電腦的設定，開在前台或背景'
-export const DISPLAY_NOTE_RUNS = ['term', 'pi']
-// 只能開在前台的模型（目錄上 foregroundOnly，例如 pi）不顯示：那台的設定管不到，說「前台或背景」不精確（西川 #1077 二審）
-export const showDisplayNote = (runKey, row = null) => DISPLAY_NOTE_RUNS.includes(runKey) && row?.foregroundOnly !== true
+// 手機遠端開窗時，前台或背景由那台電腦自己的設定決定（手機不送這個選項，畫面也不再說明，#2354）
 export const PI_ONLY_CHANNELS = { acp: { status: 'no', why: '不支援' }, pi: { status: 'ok', why: '只能用 asn終端（pi shell）開' }, term: { status: 'no', why: '只能用 asn終端（pi shell）開' } }
 
 // 那台的 pi：有沒有 pi 的啟動設定、回報了哪些模型
@@ -106,21 +103,28 @@ export function launchPiChoice(row, launcher) {
   return piChoiceFor(row?.id, pi.models)
 }
 
-// 「運行」四選一：acp通道 ＞ asn終端（pi shell）＞ asn終端（原生 cli）＞ 原始 cli 視窗（只作說明）。遠端開，Grok／Gemini 的自帶終端反灰（只能在那台開）
-export function launchRun(row, launcher) {
-  if (!row) return { options: [], selected: null }
-  if (!row.channels) return customRunOptions(row)   // 目錄上沒有的（自訂設定）：只看 mode（電腦版同一份）
-  const pc = launchPiChoice(row, launcher)
-  const r = runOptions(row, { local: false, piInstalled: remotePi(launcher).installed, piReady: pc.ok, remoteTerm: Boolean(remoteTermProfile(launcher, row)) })
-  // 經 pi 不能選時，原因用那台回報的（沒有 pi、沒開放遠端管理、沒登入那一家），比目錄的通用說明準確
-  const options = r.options.map(o => (o.key === 'pi' && !o.ok && row.channels?.pi?.status !== 'no' && pc.why ? { ...o, why: pc.why } : o))
-  return { options, selected: r.selected }
-}
-
-// 目前選的運行（使用者選過且還能選就用它，否則用預設）
-export function pickedRun(run, wanted) {
-  const cur = run.options.find(o => o.key === wanted && o.ok && o.key !== 'self')
-  return cur ? cur.key : run.selected
+/**
+ * 開新夥伴第 2 步的廠牌卡（別台電腦，手機與電腦版共用，#2354）：目錄上的每個廠牌都列，那台沒有的標「尚未安裝」（反灰、不能選）；
+ * 只能經 pi 的廠牌（DeepSeek、MiniMax）永遠列出：那台沒有 pi＝尚未安裝，有 pi 但沒登入這家（清單裡沒有它的模型）＝尚未登入。
+ * Codex 不在別台開放的範圍（後端擋下），遠端一律不列。目錄外的自訂設定照那台回報的列，不加標示。
+ * loggedOut：{ 廠牌 id: true }，由帳號回報判斷的「確定沒登入」（沒有新鮮回報就不要傳，不亂標）。
+ * 回 [{ ...廠牌列, installed, badge: { text, disabled }, disabled }]。
+ */
+export function launchVendorCards(launcher, { loggedOut = {} } = {}) {
+  const pi = remotePi(launcher)
+  const present = launchVendors(launcher)
+  const byId = new Map(present.map(v => [v.id, v]))
+  const listed = vendorRows(MODEL_CATALOG).filter(m => m.id !== 'codex').map(m => byId.get(m.id) ?? { ...m, installed: false })
+  const custom = present.filter(v => !v.viaPiOnly && !MODEL_CATALOG.some(m => m.id === v.id))
+  const piOut = {}
+  const piOnly = PI_ONLY_VENDORS.map(v => {
+    const row = byId.get(v.id)
+    if (row) return { ...row, installed: true }
+    const s = piVendorState(v.id, pi.models, {}, { known: pi.models.length > 0 })   // 那台沒回報模型清單＝不知道有沒有登入，不標
+    piOut[v.id] = s.loggedOut
+    return { ...v, viaPiOnly: true, profileId: 'pi', toolId: 'pi', label: v.label, mode: 'window', modeLabel: '', channels: PI_ONLY_CHANNELS, installed: pi.installed && !s.missing }
+  })
+  return vendorCards([...listed, ...custom, ...piOnly], { loggedOut: { ...loggedOut, ...piOut } })
 }
 
 // 送給 Rust 的內容（Rust、後台、那台電腦還會各檢查一次；指令內容一律不帶）。
