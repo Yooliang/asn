@@ -151,7 +151,8 @@ mod tests {
             }
             // agy 的真實行為：stdout 是清單、stderr 只有一行進度，結束碼 0
             Ok("agy") => {
-                print!("gemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\n");
+                // 測試框架會先在同一行印「test … ... 」，所以先換行
+                print!("\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\n");
                 eprintln!("Fetching available models...");
             }
             Ok("env") => println!("LEAK={}", std::env::var("SECRET_TOKEN_X").unwrap_or_else(|_| "none".into())),
