@@ -56,7 +56,7 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
         if let ModelPlan::Record(m) = &model_plan {
             crate::bridge::engines::acp_models::set(&work_dir.join(crate::bridge::engines::acp_models::MODELS_FILE), &req.name, m)?;
         }
-        enqueue_background(work_dir, &req.profile, &req.name, &launch_req.cwd)?;
+        enqueue_background(work_dir, &req.profile, &req.name, &launch_req.cwd, None)?;
         return Ok(json!({ "ok": true, "mode": "background", "queued": true }));
     }
 
@@ -152,7 +152,15 @@ pub(crate) fn launch_model_plan(engine: &str, background: bool, model: &str) -> 
 
 /// 把啟動參數裡原有的 `--model <值>`／`--model=<值>` 拿掉，最後補上 `--model <代號>`（profile 自己寫了 --model 也以這次選的為準）
 pub(crate) fn with_model_arg(args: &[String], model: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(args.len() + 2);
+    let mut out = strip_model_args(args);
+    out.push("--model".into());
+    out.push(model.to_string());
+    out
+}
+
+/// 拿掉啟動參數裡所有的 `--model <值>`／`--model=<值>`
+fn strip_model_args(args: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(args.len() + 1);
     let mut skip = false;
     for a in args {
         if skip {
@@ -168,10 +176,39 @@ pub(crate) fn with_model_arg(args: &[String], model: &str) -> Vec<String> {
         }
         out.push(a.clone());
     }
-    out.push("--model".into());
-    out.push(model.to_string());
     out
 }
+
+/// 遠端指定型號時的啟動參數（只有 Claude 視窗用）：先驗代號（統一規則，不信任後台已驗過）、再組參數。
+/// profile 自己寫的 `--model` 一律拿掉，最後補單一參數 `--model=<值>`，所以整串裡只會有一個 `--model`。
+/// 代號不合格、或不是明寫 claude 的 profile，一律回中文原因，不退回預設型號
+pub(crate) fn remote_model_args(engine: &str, args: &[String], model: &str) -> Result<Vec<String>, String> {
+    if !crate::model_id::valid_model_id(model) {
+        return Err(MODEL_BAD.into());
+    }
+    match engine {
+        "claude" => {
+            let mut out = strip_model_args(args);
+            out.push(format!("--model={model}"));
+            Ok(out)
+        }
+        "" => Err(MODEL_NO_ENGINE.into()),
+        _ => Err(MODEL_NO_VENDOR.into()),
+    }
+}
+
+/// 遠端開窗最後要執行的啟動參數：沒指定型號＝原樣交回；有指定＝照 [`remote_model_args`] 組（先驗再組，只剩一個 `--model=<值>`）。
+/// `start_remote_window` 一律經這個函式套型號（原始碼守門測試會確認）
+pub(crate) fn final_remote_args(engine: &str, args: &[String], model: Option<&str>) -> Result<Vec<String>, String> {
+    match model {
+        Some(m) => remote_model_args(engine, args, m),
+        None => Ok(args.to_vec()),
+    }
+}
+
+pub(crate) const MODEL_BAD: &str = "型號代號格式不對，請重新選一次";
+pub(crate) const MODEL_NO_ENGINE: &str = "這個啟動設定沒有寫明是哪一家，不能指定型號，請不要選型號再開一次";
+pub(crate) const MODEL_NO_VENDOR: &str = "這個廠牌開新夥伴時不能指定型號，請不要選型號再開一次";
 
 /// 遠端開窗怎麼開（#931）：把「放不放背景」跟「接不接續真實的對話」拆開。
 /// 以前一個 hidden 兩件事一起管（背景＝測試用＝不查對話檔），正式路徑要背景開又要接續對話，所以分成三個欄位。
@@ -201,10 +238,18 @@ impl RemoteShow {
 /// 這裡只做「自動信任資料夾 → 依本機設定組命令 → 開視窗」。指令只來自本機的 profile，遠端只決定 profile 名、名字與資料夾。
 /// show＝顯示方式與要不要接續對話（見 [`RemoteShow`]）。回傳視窗的 PID（自帶終端＝GUI；退路主控台＝承載的 PowerShell）。
 /// pi_args＝經 pi 的 --provider／--model（呼叫端已驗過格式與這台 pi 列得出來；只有 pi 的 profile 收）
-pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, name: &str, cwd: &str, show: RemoteShow, pi_args: &[String]) -> Result<u32, String> {
+/// model＝遠端指定的型號（沒指定＝None）：只有 Claude 視窗收，組成單一參數 `--model=<值>`（見 [`remote_model_args`]）；與 pi 的參數不並存
+pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, name: &str, cwd: &str, show: RemoteShow, pi_args: &[String], model: Option<&str>) -> Result<u32, String> {
     let prof = config.profiles.get(profile).ok_or_else(|| "沒有這個啟動設定".to_string())?;
     if !pi_args.is_empty() && prof.engine != "pi" {
         return Err("只有經 pi 開的夥伴能指定提供者與模型".into());
+    }
+    if let Some(m) = model {
+        if prof.engine == "pi" || !pi_args.is_empty() {
+            return Err("經 pi 開的夥伴請用 pi 的提供者與模型，不能另外指定型號".into());
+        }
+        // 先驗再開：型號用不上就整個不開（不先去信任資料夾）
+        remote_model_args(&prof.engine, &[], m)?;
     }
     // 沒寫 engine 的自訂 profile 與 Node 橋相同，視為 Claude（空 engine 的判斷在 pretrust 裡）
     super::pretrust::ensure_claude_cwd_trusted(&prof.engine, cwd);
@@ -217,6 +262,7 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
         let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
         return super::pi_term::open_pi_real(name, &command, &plan.args, &cwd, false, &plan.env).map(|o| o.pid);
     }
+    args = final_remote_args(&prof.engine, &args, model)?;
     // 同本機開窗：預設接續同名夥伴上一段對話（背景開也一樣）；只有測試用的隱藏視窗不查真實的對話檔
     if show.real_resume {
         super::resume::apply_resume_real(&mut args, &command, if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, name, &cwd.to_string_lossy())?;
@@ -266,12 +312,17 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn enqueue_background(work_dir: &Path, profile: &str, name: &str, cwd: &str) -> Result<(), String> {
+/// 排進背景夥伴的佇列。model＝遠端指定的型號（沒指定＝None，佇列項目就沒有這個鍵）：型號跟著項目走，工作者建立時優先採用
+pub(crate) fn enqueue_background(work_dir: &Path, profile: &str, name: &str, cwd: &str, model: Option<&str>) -> Result<(), String> {
     let file = work_dir.join("partner-queue.jsonl");
     if let Some(p) = file.parent() {
         std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
     }
-    let line = serde_json::to_string(&json!({ "profile": profile, "name": name, "cwd": cwd })).map_err(|e| e.to_string())?;
+    let mut item = json!({ "profile": profile, "name": name, "cwd": cwd });
+    if let Some(m) = model {
+        item["model"] = json!(m);
+    }
+    let line = serde_json::to_string(&item).map_err(|e| e.to_string())?;
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
@@ -986,6 +1037,70 @@ mod tests {
         assert_eq!(with_model_arg(&a, "haiku"), sv(&["--dangerously-skip-permissions", "-n", "小乙", "--remote-control", "小乙", "--model", "haiku"]));
         assert_eq!(with_model_arg(&sv(&["--model=opus", "-n", "x"]), "sonnet"), sv(&["-n", "x", "--model", "sonnet"]));
         assert_eq!(with_model_arg(&[], "sonnet"), sv(&["--model", "sonnet"]));
+    }
+
+    #[test]
+    fn 遠端型號參數_單一個_model_等號寫法_profile_自己寫的會拿掉() {
+        let a = sv(&["--dangerously-skip-permissions", "-n", "小乙", "--model", "opus", "--remote-control", "小乙", "--model=haiku"]);
+        let out = remote_model_args("claude", &a, "sonnet").unwrap();
+        assert_eq!(out, sv(&["--dangerously-skip-permissions", "-n", "小乙", "--remote-control", "小乙", "--model=sonnet"]));
+        assert_eq!(out.iter().filter(|x| x.as_str() == "--model" || x.starts_with("--model=")).count(), 1, "整串只會有一個 --model");
+        assert_eq!(remote_model_args("claude", &[], "opus[1m]").unwrap(), sv(&["--model=opus[1m]"]), "統一規則放行的寫法照帶");
+        assert_eq!(remote_model_args("claude", &sv(&["-n", "x"]), "anthropic/claude-sonnet-5-5").unwrap(), sv(&["-n", "x", "--model=anthropic/claude-sonnet-5-5"]));
+    }
+
+    #[test]
+    fn 遠端最終參數_帶型號剛好一個_model_等號_不帶型號原樣() {
+        let a = sv(&["-n", "小乙", "--model", "opus", "--remote-control", "--model=haiku", "小乙"]);
+        let out = final_remote_args("claude", &a, Some("sonnet")).unwrap();
+        let models: Vec<&String> = out.iter().filter(|x| x.as_str() == "--model" || x.starts_with("--model")).collect();
+        assert_eq!(models, vec!["--model=sonnet"], "剛好一個 --model=<值>，原本的兩種寫法都拿掉");
+        assert!(!out.iter().any(|x| x == "opus" || x == "--model=haiku"));
+        // 不帶型號：profile 自己的 --model 照舊
+        assert_eq!(final_remote_args("claude", &a, None).unwrap(), a);
+        assert_eq!(final_remote_args("codex", &a, None).unwrap(), a, "不帶型號不看廠牌");
+        assert_eq!(final_remote_args("codex", &a, Some("x")), Err(MODEL_NO_VENDOR.to_string()));
+    }
+
+    #[test]
+    fn start_remote_window_真的經_final_remote_args_套型號() {
+        let src = include_str!("local.rs").replace("\r\n", "\n");
+        let from = src.find("pub fn start_remote_window(").unwrap();
+        let body = &src[from..from + src[from..].find("\n}\n").unwrap()];
+        assert!(body.contains("args = final_remote_args(&prof.engine, &args, model)?"), "開窗前要用 final_remote_args 把型號套進最後的 argv");
+        let call = body.find("final_remote_args(").unwrap();
+        let spawn = body.find("start_window_split(").unwrap();
+        assert!(call < spawn, "套型號要在開窗之前");
+    }
+
+    #[test]
+    fn 遠端開窗_型號與_pi_參數不並存_型號驗不過或用不上就在開窗之前回錯() {
+        use super::super::profiles::Profile;
+        let prof = |engine: &str| Profile { label: "x".into(), command: "C:\\fake\\x.exe".into(), args: vec![], engine: engine.into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() };
+        let mut profiles = std::collections::HashMap::new();
+        for (id, engine) in [("claude", "claude"), ("pi", "pi"), ("custom", ""), ("cx", "codex")] {
+            profiles.insert(id.to_string(), prof(engine));
+        }
+        let cfg = super::super::config::LaunchConfig { profiles, cwd_allow: vec![], max_per_hour: 6 };
+        let show = RemoteShow::test_hidden();
+        let go = |id: &str, pi: &[String], model: Option<&str>| start_remote_window(&cfg, id, "n", ".", show, pi, model);
+        assert!(go("pi", &[], Some("opus")).unwrap_err().contains("不能另外指定型號"));
+        assert!(go("claude", &sv_wrap(&["--provider", "a", "--model", "b"]), Some("opus")).is_err(), "pi 參數只有 pi 收");
+        assert_eq!(go("claude", &[], Some("a b")).unwrap_err(), MODEL_BAD);
+        assert_eq!(go("claude", &[], Some("")).unwrap_err(), MODEL_BAD);
+        assert_eq!(go("custom", &[], Some("opus")).unwrap_err(), MODEL_NO_ENGINE);
+        assert_eq!(go("cx", &[], Some("opus")).unwrap_err(), MODEL_NO_VENDOR);
+    }
+
+    #[test]
+    fn 遠端型號參數_代號不合格或不是_claude_都回錯_不組參數() {
+        for bad in ["", " ", "a b", "--x", "-x", "../x", "a//b", "a/", "a;b", "a\nb", &"a".repeat(101)] {
+            assert_eq!(remote_model_args("claude", &sv(&["-n", "x"]), bad), Err(MODEL_BAD.to_string()), "{bad:?}");
+        }
+        assert_eq!(remote_model_args("", &[], "opus"), Err(MODEL_NO_ENGINE.to_string()), "沒寫 engine 的自訂 profile 不補");
+        for engine in ["pi", "acp", "codex", "fake"] {
+            assert_eq!(remote_model_args(engine, &[], "opus"), Err(MODEL_NO_VENDOR.to_string()), "{engine}");
+        }
     }
 
     fn decode(enc: &str) -> String {

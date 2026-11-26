@@ -576,6 +576,10 @@ struct FakeEnv {
     /// 排佇列時就失敗（缺執行檔、未授權資料夾…）
     enq_err: Option<String>,
     enqueued: Mutex<Vec<(String, String, String)>>,
+    /// 排佇列時帶進項目的型號（跟 enqueued 同一個順序）
+    enqueued_models: Mutex<Vec<Option<String>>>,
+    /// 假工作者啟動成功：引擎記進名冊後，把項目帶的型號記進 acp-models.json（真的工作者在驅動啟動成功時才寫）
+    bg_worker_records: bool,
     started: Mutex<Vec<(String, String, String)>>,
     /// start 時實際會執行的命令（取自本機設定，展開 {name} 後）
     commands: Mutex<Vec<(String, Vec<String>)>>,
@@ -585,6 +589,12 @@ struct FakeEnv {
     pi_list: Vec<(String, String)>,
     /// start 收到的 pi 參數
     pi_args: Mutex<Vec<Vec<String>>>,
+    /// start 收到的型號（#2353）
+    start_models: Mutex<Vec<Option<String>>>,
+    /// 這台 agy 列得出來的型號；None＝讀不到清單
+    agy_list: Option<Vec<String>>,
+    /// 設定裡多放一個沒寫 engine 的自訂視窗設定（id＝custom）
+    blank_engine: bool,
     /// asn終端（#931）：設定裡放 gemini／grok；同意、終端服務、CLI 偵測三個條件可隨時切換；start_term 收到的（工具, 名稱, 資料夾）
     term_profiles: bool,
     term_consent: std::sync::atomic::AtomicBool,
@@ -611,11 +621,16 @@ impl FakeEnv {
             bg_hold: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             enq_err: None,
             enqueued: Mutex::new(vec![]),
+            enqueued_models: Mutex::new(vec![]),
+            bg_worker_records: false,
             started: Mutex::new(vec![]),
             commands: Mutex::new(vec![]),
             live: vec![],
             pi_list: vec![],
             pi_args: Mutex::new(vec![]),
+            start_models: Mutex::new(vec![]),
+            agy_list: None,
+            blank_engine: false,
             term_profiles: false,
             term_consent: std::sync::atomic::AtomicBool::new(false),
             term_active: std::sync::atomic::AtomicBool::new(false),
@@ -651,6 +666,9 @@ impl LaunchEnv for FakeEnv {
             profiles.insert("grok".to_string(), Profile { label: "Grok（背景運行、內建通道）".into(), command: "C:\\fake\\grok.exe".into(), args: vec!["agent".into(), "stdio".into()], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
             profiles.insert("pi".to_string(), Profile { label: "pi（互動視窗）".into(), command: "C:\\fake\\pi.cmd".into(), args: vec![], engine: "pi".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
         }
+        if self.blank_engine {
+            profiles.insert("custom".to_string(), Profile { label: "自訂".into(), command: "C:\\fake\\custom.exe".into(), args: vec!["-n".into(), "{name}".into()], engine: String::new(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
+        }
         if self.term_profiles {
             profiles.insert("grok".to_string(), Profile { label: "Grok（背景運行、內建通道）".into(), command: "C:\\fake\\grok.exe".into(), args: vec!["agent".into(), "stdio".into()], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
             profiles.insert("gemini".to_string(), Profile { label: "Gemini（背景運行、內建通道）".into(), command: "C:\\fake\\agy.exe".into(), args: vec![], engine: "acp".into(), mode: LaunchMode::Background, disabled: false, disabled_reason: String::new() });
@@ -673,13 +691,15 @@ impl LaunchEnv for FakeEnv {
         }
         Ok("t-1".into())
     }
-    fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
+    fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, model: Option<&str>, work_dir: &Path) -> Result<(), String> {
         if let Some(e) = &self.enq_err {
             return Err(e.clone());
         }
         self.enqueued.lock().unwrap().push((profile.into(), name.into(), cwd.into()));
+        self.enqueued_models.lock().unwrap().push(model.map(String::from));
         if let Some(o) = self.bg_outcome.clone() {
             let (wd, name, profile, cwd) = (work_dir.to_path_buf(), name.to_string(), profile.to_string(), cwd.to_string());
+            let record = self.bg_worker_records.then(|| model.map(String::from)).flatten();
             let hold = self.bg_hold.clone();
             std::thread::spawn(move || {
                 while hold.load(std::sync::atomic::Ordering::SeqCst) {
@@ -687,7 +707,14 @@ impl LaunchEnv for FakeEnv {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 match o {
-                    Ok(()) => crate::bridge::engines::partner_queue::remember(&wd.join(crate::bridge::engines::partner_queue::PARTNERS_FILE), &name, &profile, &cwd),
+                    Ok(()) => {
+                        crate::bridge::engines::partner_queue::remember(&wd.join(crate::bridge::engines::partner_queue::PARTNERS_FILE), &name, &profile, &cwd);
+                        if let Some(m) = record {
+                            // 假工作者晚一點才啟動成功：報 ok 之後才記，驗證啟動端等得到
+                            std::thread::sleep(std::time::Duration::from_millis(60));
+                            let _ = crate::bridge::engines::acp_models::set(&wd.join(crate::bridge::engines::acp_models::MODELS_FILE), &name, &m);
+                        }
+                    }
                     Err(e) => crate::bridge::engines::partner_queue::record_failure(&wd, &name, &profile, &e),
                 }
             });
@@ -700,8 +727,15 @@ impl LaunchEnv for FakeEnv {
     fn pi_listed(&self, provider: &str, model: &str) -> bool {
         self.pi_list.iter().any(|(p, m)| p == provider && m == model)
     }
-    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
+    fn agy_model_listed(&self, model: &str) -> Result<bool, String> {
+        match &self.agy_list {
+            Some(l) => Ok(l.iter().any(|m| m == model)),
+            None => Err(launcher::AGY_LIST_UNREADABLE.into()),
+        }
+    }
+    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String], model: Option<&str>) -> Result<u32, String> {
         self.pi_args.lock().unwrap().push(pi_args.to_vec());
+        self.start_models.lock().unwrap().push(model.map(String::from));
         let (cmd, args, _) = build_spawn_spec(config, &LaunchReq { profile, name, cwd: cwd.to_string() })?;
         self.commands.lock().unwrap().push((cmd, args));
         self.started.lock().unwrap().push((profile.into(), name.into(), cwd.into()));
@@ -972,7 +1006,7 @@ async fn 遠端開視窗_取走_開視窗_出現在名單_回報_ok_名單附摘
     let last = rosters.last().unwrap();
     assert!(last["agents"].as_array().unwrap().iter().any(|a| a["name"] == "T-英雄-2"), "新視窗要出現在名單上");
     let cwd_norm = crate::launch::cwds::norm_path(&canonical_launch_cwd(&cwd.to_string_lossy()).unwrap().to_string_lossy()).unwrap();
-    assert_eq!(last["launcher"], json!({"profiles": [{"id": "claude", "label": "Claude（互動視窗）", "engine": "claude", "mode": "window"}], "cwd_allow": [cwd_norm], "max_per_hour": 6}));
+    assert_eq!(last["launcher"], json!({"profiles": [{"id": "claude", "label": "Claude（互動視窗）", "engine": "claude", "mode": "window"}], "cwd_allow": [cwd_norm], "max_per_hour": 6, "launch_model": true}));
     // 開放中：原因要送 null（才會清掉後台舊值），平台照送
     assert_eq!(last["launch_closed_reason"], Value::Null);
     assert_eq!(last["platform"], json!(crate::relay::platform_name()));
@@ -1310,8 +1344,10 @@ fn 守門_啟動請求的處理程式不讀任何指令類欄位() {
         }
     }
     // 開視窗只收這四個值，加上經 pi 的 --provider／--model（只由 remote_pi_args 組：格式驗過、而且這台 pi 列得出來）
-    assert!(body.contains("env.start(&cfg2, &p2, &n2, &c2, &pi_args)"));
+    assert!(body.contains("env.start(&cfg2, &p2, &n2, &c2, &pi_args, model_arg.as_deref())"));
     assert!(body.contains("me0.remote_pi_args(&l0, is_pi)") && body.contains("crate::launch::pi_models::model_args(&p, &m)?"));
+    // 型號一律先過統一規則再用（remote_model_field → valid_model_id），不能另寫一份規則
+    assert!(body.contains("crate::model_id::valid_model_id(s)") && body.contains("remote_model_plan(&l1, &pid1, p,"));
 }
 
 // ---- 真的開一個（隱藏的）視窗：假視窗程式是測試執行檔自己 ----------------------------------------------------
@@ -1354,8 +1390,8 @@ async fn 遠端開視窗_真的開一個隱藏視窗_假視窗程式登記成_se
         fn config(&self, _f: bool) -> Result<LaunchConfig, String> {
             Ok(self.cfg.clone())
         }
-        fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
-            let pid = crate::launch::local::start_remote_window(config, profile, name, cwd, crate::launch::local::RemoteShow::test_hidden(), pi_args)?;
+        fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String], model: Option<&str>) -> Result<u32, String> {
+            let pid = crate::launch::local::start_remote_window(config, profile, name, cwd, crate::launch::local::RemoteShow::test_hidden(), pi_args, model)?;
             self.pids.lock().unwrap().push(pid);
             // 模擬開窗那端慢（整套並行吃緊時 CIM 查詢會拖很久）：假視窗在這段時間內已登記完。拿掉旗標等待、改回固定短壽命就會紅
             std::thread::sleep(std::time::Duration::from_secs(6));
@@ -1633,4 +1669,286 @@ async fn 群組順位_等接回逾_12_小時還沒回來_排隊的訊息才放�
     h.core.tick(T0 + 12 * 3_600_000 + 61_000).await;
     assert_eq!(held_file(&h).as_array().unwrap().len(), 0, "逾 12 小時：照原本的做法略過、不再排著");
     assert!(fwd(&h.said()).is_empty());
+}
+
+// ---- 遠端開窗指定型號（#2353 第③階段）-------------------------------------------------------------------
+
+/// 設定裡有 Claude、自訂（沒寫 engine）、pi、Grok 與 Gemini 背景；這台 agy 列得出 gemini-3.8-flash；pi 列得出兩組
+fn model_env(s: &Path, p: &Path, f: impl FnOnce(&mut FakeEnv)) -> Arc<FakeEnv> {
+    FakeEnv::with(s, p, |e| {
+        e.extra_profiles = true;
+        e.term_profiles = true;
+        e.blank_engine = true;
+        e.agy_list = Some(vec!["gemini-3.8-flash".into()]);
+        e.pi_list = vec![("openrouter".into(), "meta/llama-3:free".into()), ("minimax".into(), "MiniMax-M3.1-Flash".into())];
+        f(e);
+    })
+}
+fn models_file(h: &H) -> std::path::PathBuf {
+    h.work.path().join(crate::bridge::engines::acp_models::MODELS_FILE)
+}
+
+#[tokio::test]
+async fn 遠端指定型號_claude_視窗帶進_start_並回報_model_used_沒指定時回報內容與以前逐字相同() {
+    let mut l = lharness(|s, p| model_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "T-型號", &cwd, json!({"model": "opus[1m]"})));
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&l.h).is_empty()).await;
+    let r = results(&l.h);
+    assert_eq!(r[0]["status"], "ok");
+    assert_eq!(r[0]["model_used"], "opus[1m]", "回報實際傳進去的型號");
+    assert_eq!(*l.env.start_models.lock().unwrap(), vec![Some("opus[1m]".to_string())]);
+    let _ = l.rx.recv().await;
+    // 日誌只記型號代號
+    let log = std::fs::read_to_string(l.h.work.path().join("launch.log")).unwrap();
+    assert!(log.contains("\"model\":\"opus[1m]\""), "{log}");
+
+    // 沒指定：start 收到 None、結果裡沒有 model_used 這個鍵（跟以前送出的內容逐字相同）
+    let mut o = lharness(|s, p| model_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    let cwd = o.proj.path().to_path_buf();
+    o.h.fr.st.lock().unwrap().launches.push(lreq(1, "T-型號", &cwd, json!({"model": null})));
+    o.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&o.h).is_empty()).await;
+    assert_eq!(results(&o.h), vec![json!({"id": uid(1), "status": "ok", "detail": "T-型號 已開啟"})]);
+    assert_eq!(*o.env.start_models.lock().unwrap(), vec![None]);
+    let _ = o.rx.recv().await;
+}
+
+#[tokio::test]
+async fn 遠端指定型號_用不上一律明確回_failed_不開窗不排佇列不寫型號記錄() {
+    let cases: Vec<(&str, Value, String)> = vec![
+        ("claude", json!({"model": "a b"}), crate::launch::local::MODEL_BAD.into()),
+        ("claude", json!({"model": "--dangerously-skip-permissions"}), crate::launch::local::MODEL_BAD.into()),
+        ("claude", json!({"model": "a/../b"}), crate::launch::local::MODEL_BAD.into()),
+        ("claude", json!({"model": ""}), crate::launch::local::MODEL_BAD.into()),
+        ("claude", json!({"model": 5}), crate::launch::local::MODEL_BAD.into()),
+        ("custom", json!({"model": "opus"}), crate::launch::local::MODEL_NO_ENGINE.into()),
+        ("grok", json!({"model": "grok-4.7"}), launcher::MODEL_BG_UNSUPPORTED.into()),
+        ("pi", json!({"model": "opus"}), launcher::MODEL_WITH_PI.into()),
+        ("claude", json!({"model": "opus", "pi_provider": "minimax", "pi_model": "MiniMax-M3.1-Flash"}), launcher::MODEL_WITH_PI.into()),
+        ("gemini", json!({"model": "no-such-model"}), "這台電腦的 agy 沒有「no-such-model」".into()),
+        ("gemini", json!({"model": "a/b"}), launcher::MODEL_BG_FORMAT.into()),
+    ];
+    for (profile, extra, want) in cases {
+        let mut x = extra.clone();
+        x["profile"] = json!(profile);
+        let mut l = lharness(|s, p| model_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+        let cwd = l.proj.path().to_path_buf();
+        l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, x));
+        l.h.core.pull("bell", T0).await;
+        let r = results(&l.h);
+        assert_eq!(r.len(), 1, "{extra}");
+        assert_eq!(r[0]["status"], "failed", "{profile} {extra}");
+        assert!(r[0]["detail"].as_str().unwrap().contains(&want), "{profile} {extra} → {}", r[0]["detail"]);
+        assert!(r[0].get("model_used").is_none(), "失敗不回報型號");
+        assert!(l.env.started.lock().unwrap().is_empty() && l.env.enqueued.lock().unwrap().is_empty(), "{profile} {extra}");
+        assert!(!models_file(&l.h).exists(), "{profile} {extra}：不能留下型號記錄");
+        assert!(!l.h.work.path().join("launch-history.json").exists(), "沒開就不計入每小時次數");
+    }
+    // 這台 agy 的清單讀不到：不放行沒核對過的型號
+    let mut l = lharness(|s, p| model_env(s, p, |e| e.agy_list = None), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+    l.h.core.pull("bell", T0).await;
+    assert_eq!(results(&l.h)[0]["detail"], launcher::AGY_LIST_UNREADABLE);
+    assert!(l.env.enqueued.lock().unwrap().is_empty() && !models_file(&l.h).exists());
+}
+
+#[tokio::test]
+async fn 遠端指定型號_asn終端一律拒絕_帶_null_不影響() {
+    let mut l = lharness(|s, p| term_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    {
+        let mut st = l.h.fr.st.lock().unwrap();
+        st.launches.push(lreq(1, "T-終端1", &cwd, json!({"profile": "gemini-term", "model": "gemini-3.8-flash"})));
+        st.launches.push(lreq(2, "T-終端2", &cwd, json!({"profile": "grok-term", "model": "a b"})));
+        st.launches.push(lreq(3, "T-終端3", &cwd, json!({"profile": "gemini-term", "model": ""})));
+    }
+    l.h.core.pull("bell", T0).await;
+    let r = results(&l.h);
+    assert_eq!(r.len(), 3);
+    assert!(r.iter().all(|x| x["status"] == "failed" && x["detail"] == launcher::MODEL_TERM), "{r:?}");
+    assert!(l.env.term_started.lock().unwrap().is_empty(), "一個都不能開");
+    // model 是 null（舊版手機、沒指定）：照舊開得起來
+    l.h.fr.st.lock().unwrap().launches.push(lreq(4, "T-終端4", &cwd, json!({"profile": "gemini-term", "model": null})));
+    l.h.core.pull("bell", T0 + 1).await;
+    assert_eq!(results(&l.h)[3]["status"], "ok");
+}
+
+#[tokio::test]
+async fn 遠端開_pi_帶斜線與冒號的型號_照舊兩段送_回報_提供者斜線型號() {
+    let mut l = lharness(|s, p| model_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小皮", &cwd, json!({"profile": "pi", "pi_provider": "openrouter", "pi_model": "meta/llama-3:free"})));
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&l.h).is_empty()).await;
+    let r = results(&l.h);
+    assert_eq!(r[0]["status"], "ok");
+    assert_eq!(r[0]["model_used"], "openrouter/meta/llama-3:free");
+    assert_eq!(l.env.pi_args.lock().unwrap()[0], vec!["--provider", "openrouter", "--model", "meta/llama-3:free"]);
+    assert_eq!(*l.env.start_models.lock().unwrap(), vec![None], "pi 不帶單一的 --model=");
+    let _ = l.rx.recv().await;
+    // pi 沒指定型號：不回報型號（不猜預設）
+    let mut o = lharness(|s, p| model_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    let cwd = o.proj.path().to_path_buf();
+    o.h.fr.st.lock().unwrap().launches.push(lreq(1, "小皮", &cwd, json!({"profile": "pi"})));
+    o.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&o.h).is_empty()).await;
+    assert!(results(&o.h)[0].get("model_used").is_none());
+    let _ = o.rx.recv().await;
+}
+
+#[tokio::test]
+async fn 遠端指定型號_gemini_背景夥伴_型號放進佇列項目_啟動端不寫檔_工作者記下後才回報_model_used() {
+    let mut l = lharness(
+        |s, p| {
+            model_env(s, p, |e| {
+                e.bg_outcome = Some(Ok(()));
+                e.bg_worker_records = true;
+                e.bg_hold.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+        },
+        (30_000, 60_000, 20),
+    )
+    .await;
+    crate::bridge::engines::acp_models::set(&models_file(&l.h), "小格", "gemini-old").unwrap();
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+    l.h.core.pull("bell", T0).await;
+    // 排進去了、型號跟著項目走；工作者還沒啟動成功之前，acp-models.json 一個字都沒動
+    assert_eq!(*l.env.enqueued_models.lock().unwrap(), vec![Some("gemini-3.8-flash".to_string())]);
+    let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap();
+    assert_eq!(m.get("小格").map(String::as_str), Some("gemini-old"), "排入佇列後、工作者啟動前不能寫型號記錄");
+    assert!(results(&l.h).is_empty());
+    l.env.bg_hold.store(false, std::sync::atomic::Ordering::SeqCst);
+    wait_until(|| !results(&l.h).is_empty()).await;
+    let r = results(&l.h);
+    assert_eq!((r[0]["status"].as_str(), r[0]["model_used"].as_str()), (Some("ok"), Some("gemini-3.8-flash")));
+    let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap();
+    assert_eq!(m.get("小格").map(String::as_str), Some("gemini-3.8-flash"), "工作者啟動成功後才記");
+    let _ = l.rx.recv().await;
+}
+
+#[tokio::test]
+async fn 遠端指定型號_gemini_背景夥伴_拿不到工作者實際用的型號_照常_ok_但不帶_model_used() {
+    // 工作者沒記下型號（沒啟動成功）：寬限時間到了照常回 ok，但不能拿請求值頂替；原本的記錄不動
+    let mut l = lharness(|s, p| model_env(s, p, |e| e.bg_outcome = Some(Ok(()))), (30_000, 400, 20)).await;
+    crate::bridge::engines::acp_models::set(&models_file(&l.h), "小格", "gemini-old").unwrap();
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&l.h).is_empty()).await;
+    let r = results(&l.h);
+    assert_eq!(r[0]["status"], "ok");
+    assert!(r[0].get("model_used").is_none(), "拿不到實際值就不帶：{}", r[0]);
+    let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap();
+    assert_eq!(m.get("小格").map(String::as_str), Some("gemini-old"));
+    let _ = l.rx.recv().await;
+}
+
+#[tokio::test]
+async fn 遠端指定型號_同名夥伴原本就記著同一個型號_這次工作者沒啟動成功_不帶_model_used() {
+    let mut l = lharness(|s, p| model_env(s, p, |e| e.bg_outcome = Some(Ok(()))), (30_000, 400, 20)).await;
+    crate::bridge::engines::acp_models::set(&models_file(&l.h), "小格", "gemini-3.8-flash").unwrap();
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&l.h).is_empty()).await;
+    let r = results(&l.h);
+    assert_eq!(r[0]["status"], "ok");
+    assert!(r[0].get("model_used").is_none(), "舊值剛好相同：分不出是不是這次寫的，不能帶：{}", r[0]);
+    let _ = l.rx.recv().await;
+}
+
+#[test]
+fn 工作者記下的型號跟請求不同_或沒記_都不算確認() {
+    let d = tempfile::tempdir().unwrap();
+    assert_eq!(launcher::confirmed_bg_model(d.path(), "小格", "m-1"), None, "沒有檔案");
+    let f = d.path().join(crate::bridge::engines::acp_models::MODELS_FILE);
+    crate::bridge::engines::acp_models::set(&f, "小格", "m-old").unwrap();
+    assert_eq!(launcher::confirmed_bg_model(d.path(), "小格", "m-1"), None, "舊的別的值不能頂替");
+    crate::bridge::engines::acp_models::set(&f, "小格", "m-1").unwrap();
+    assert_eq!(launcher::confirmed_bg_model(d.path(), "小格", "m-1").as_deref(), Some("m-1"));
+}
+
+#[tokio::test]
+async fn 遠端指定型號_排佇列失敗不留記錄_也不蓋掉同名夥伴先前記下的型號() {
+    let mut l = lharness(|s, p| model_env(s, p, |e| e.enq_err = Some("這台電腦找不到「agy」的執行檔".into())), (30_000, 60_000, 20)).await;
+    crate::bridge::engines::acp_models::set(&models_file(&l.h), "小格", "gemini-old").unwrap();
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+    l.h.core.pull("bell", T0).await;
+    assert_eq!(results(&l.h)[0]["status"], "failed");
+    let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap();
+    assert_eq!(m.get("小格").map(String::as_str), Some("gemini-old"), "排佇列失敗：原本的記錄不能被蓋掉");
+    // 沒有先前記錄的名字：失敗後檔案裡也不會有它
+    l.h.fr.st.lock().unwrap().launches.push(lreq(2, "小乙", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+    l.h.core.pull("bell", T0 + 1).await;
+    let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap();
+    assert!(!m.contains_key("小乙"));
+}
+
+#[tokio::test]
+async fn 遠端指定型號_引擎消化時失敗_型號記錄維持寫入前的樣子() {
+    for prev in [Some("gemini-old"), None] {
+        let mut l = lharness(|s, p| model_env(s, p, |e| e.bg_outcome = Some(Err("已經有叫「小格」的工作者".into()))), (30_000, 60_000, 20)).await;
+        if let Some(p) = prev {
+            crate::bridge::engines::acp_models::set(&models_file(&l.h), "小格", p).unwrap();
+        }
+        let cwd = l.proj.path().to_path_buf();
+        l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+        l.h.core.pull("bell", T0).await;
+        wait_until(|| !results(&l.h).is_empty()).await;
+        let r = results(&l.h);
+        assert_eq!(r[0]["status"], "failed");
+        assert!(r[0].get("model_used").is_none());
+        let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap_or_default();
+        assert_eq!(m.get("小格").map(String::as_str), prev, "失敗後記錄回到原樣");
+    }
+}
+
+#[tokio::test]
+async fn 名單摘要帶_launch_model_旗標() {
+    let mut l = lharness(|s, p| model_env(s, p, |_| {}), (30_000, 60_000, 20)).await;
+    l.h.core.refresh_roster(T0).await;
+    let launcher = l.h.fr.rosters().last().unwrap()["launcher"].clone();
+    assert_eq!(launcher["launch_model"], json!(true));
+    assert!(launcher["profiles"].is_array() && launcher["cwd_allow"].is_array(), "其他欄位照舊");
+}
+
+#[test]
+fn 遠端型號_純函式_各_profile_的分流() {
+    let prof = |engine: &str, mode: LaunchMode| Profile { label: "x".into(), command: "c".into(), args: vec![], engine: engine.into(), mode, disabled: false, disabled_reason: String::new() };
+    let listed = |m: &str| Ok::<bool, String>(m == "g-1");
+    let plan = |l: Value, id: &str, p: &Profile| launcher::remote_model_plan(&l, id, p, &listed);
+    use launcher::RemoteModel as R;
+    assert_eq!(plan(json!({}), "claude", &prof("claude", LaunchMode::Window)), Ok(R::None));
+    assert_eq!(plan(json!({"model": null}), "claude", &prof("claude", LaunchMode::Window)), Ok(R::None));
+    assert_eq!(plan(json!({"model": "opus"}), "claude", &prof("claude", LaunchMode::Window)), Ok(R::Arg("opus".into())));
+    assert_eq!(plan(json!({"model": "g-1"}), "gemini", &prof("acp", LaunchMode::Background)), Ok(R::Record("g-1".into())));
+    assert!(plan(json!({"model": "g-2"}), "gemini", &prof("acp", LaunchMode::Background)).is_err());
+    assert_eq!(plan(json!({"model": "x"}), "grok", &prof("acp", LaunchMode::Background)), Err(launcher::MODEL_BG_UNSUPPORTED.to_string()));
+    assert_eq!(plan(json!({"model": "x"}), "my-custom-bg", &prof("acp", LaunchMode::Background)), Err(launcher::MODEL_BG_UNSUPPORTED.to_string()));
+    assert!(!launcher::MODEL_BG_UNSUPPORTED.contains("Grok"), "自訂的背景 profile 也會看到這句，不能點名 Grok");
+    assert_eq!(plan(json!({"model": "x"}), "pi", &prof("pi", LaunchMode::Window)), Err(launcher::MODEL_WITH_PI.to_string()));
+    assert_eq!(plan(json!({"model": "x"}), "codex", &prof("codex", LaunchMode::Window)), Err(crate::launch::local::MODEL_NO_VENDOR.to_string()));
+    // 統一規則的向量：不合格的一律回錯
+    let v: Value = serde_json::from_str(include_str!("../../../../../shared/test-vectors/model-id.json")).unwrap();
+    for bad in v["invalid"].as_array().unwrap() {
+        assert!(plan(json!({"model": bad}), "claude", &prof("claude", LaunchMode::Window)).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn 守門_啟動端不寫型號記錄_型號只放佇列項目由工作者啟動成功後寫() {
+    let src = crate::settings::src_scan::prod_source(include_str!("../launcher.rs")).to_string();
+    assert!(!src.contains("acp_models::set(") && !src.contains("record_background_model") && !src.contains("restore_background_model"), "啟動端（launcher）不能寫 acp-models.json");
+    let begin = src.split("async fn begin(self: &Arc<Self>").nth(1).unwrap().split("async fn begin_term").next().unwrap();
+    assert!(begin.contains("m2.as_deref()"), "型號要帶進 enqueue_background");
+    // 工作者端：啟動成功（ensure_driver 的 r? 之後）才記
+    let w = crate::settings::src_scan::prod_source(include_str!("../engines/acp_worker.rs")).to_string();
+    let ens = w.split("let r = d.start().await;").nth(1).unwrap();
+    let (ok, rec) = (ens.find("r?;").unwrap(), ens.find("self.record_started_model();").unwrap());
+    assert!(ok < rec, "型號要在驅動啟動成功之後才記");
 }

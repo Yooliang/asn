@@ -20,6 +20,8 @@ pub struct Req {
     pub profile: String,
     pub name: String,
     pub cwd: String,
+    /// 遠端指定的型號（佇列項目帶的；沒有＝None）。工作者建立時優先採用，等它真的用這個型號啟動成功才記進 acp-models.json
+    pub model: Option<String>,
 }
 
 /// 驗證要用的本機環境（測試換成假的）
@@ -75,7 +77,12 @@ pub fn binary_exists(command: &str) -> bool {
 pub fn parse_line(line: &str) -> Result<Req, String> {
     let v: Value = serde_json::from_str(line).map_err(|_| format!("請求讀不懂（不是合法的 JSON）：{}", line.chars().take(80).collect::<String>()))?;
     let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::trim).unwrap_or("").to_string();
-    let r = Req { profile: s("profile"), name: s("name"), cwd: s("cwd") };
+    let model = match v.get("model") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(m)) if super::acp_models::valid_model(m) => Some(m.clone()),
+        Some(_) => return Err("請求裡的型號格式不對".into()),
+    };
+    let r = Req { profile: s("profile"), name: s("name"), cwd: s("cwd"), model };
     if r.profile.is_empty() || r.name.is_empty() || r.cwd.is_empty() {
         return Err("請求缺少模型、名字或工作資料夾".into());
     }
@@ -127,7 +134,11 @@ pub fn build_cfg(env: &dyn QueueEnv, req: &Req, work_dir: &Path) -> Result<Worke
         "roster_engine": roster, "label": prof.label,
         "permissions": permissions_for(&req.profile),
     });
-    let (cfg, _warnings) = normalize_worker(&raw, work_dir, 0).map_err(|e| format!("工作者設定不合法：{e}"))?;
+    let (mut cfg, _warnings) = normalize_worker(&raw, work_dir, 0).map_err(|e| format!("工作者設定不合法：{e}"))?;
+    // 項目帶了型號就用項目的（建工作者時不再被 acp-models.json 蓋掉，見 acp.rs 的 make_worker_with）
+    if let Some(m) = &req.model {
+        cfg.model = m.clone();
+    }
     Ok(cfg)
 }
 
@@ -315,7 +326,162 @@ mod tests {
     }
 
     fn req(profile: &str, name: &str, cwd: &Path) -> Req {
-        Req { profile: profile.into(), name: name.into(), cwd: cwd.to_string_lossy().into() }
+        Req { profile: profile.into(), name: name.into(), cwd: cwd.to_string_lossy().into(), model: None }
+    }
+
+    // ---- #2353 第③階段：型號放進佇列項目，工作者啟動成功才記進 acp-models.json ----
+
+    fn queue_line_model(profile: &str, name: &str, cwd: &Path, model: &str) -> String {
+        json!({ "profile": profile, "name": name, "cwd": cwd.to_string_lossy(), "model": model }).to_string()
+    }
+
+    /// 測試用驅動：start 可以先卡住（hold）、可以失敗（fail）；建驅動時把拿到的型號記下來
+    struct ModelDriver {
+        a: crate::bridge::engines::acp_worker::DriverArgs,
+        alive: AtomicBool,
+        hold: Arc<AtomicBool>,
+        fail: bool,
+    }
+    impl crate::bridge::engines::acp_worker::Driver for ModelDriver {
+        fn full_access(&self) -> bool {
+            self.a.full_access
+        }
+        fn session_id(&self) -> String {
+            "model-session".into()
+        }
+        fn resume_lost(&self) -> bool {
+            false
+        }
+        fn alive(&self) -> bool {
+            self.alive.load(Ordering::SeqCst)
+        }
+        fn touch(&self) {}
+        fn start(&self) -> crate::bridge::engines::BoxFut<'_, Result<(), crate::bridge::engines::acp_policy::WorkerError>> {
+            Box::pin(async move {
+                while self.hold.load(Ordering::SeqCst) {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                if self.fail {
+                    return Err(crate::bridge::engines::acp_policy::WorkerError::new("crash", "測試：起不來"));
+                }
+                Ok(())
+            })
+        }
+        fn turn(&self, _text: String, _t: u64, _m: u64) -> crate::bridge::engines::BoxFut<'_, Result<crate::bridge::engines::acp_worker::TurnResult, crate::bridge::engines::acp_policy::WorkerError>> {
+            Box::pin(async { Err(crate::bridge::engines::acp_policy::WorkerError::new("stopped", "測試")) })
+        }
+        fn stop(&self) {
+            self.alive.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// 回 (引擎, 每次建驅動時拿到的型號)
+    fn model_engine(work: &Path, env: &Arc<FakeEnv>, hold: Arc<AtomicBool>, fail: bool) -> (AcpEngine, Arc<Mutex<Vec<String>>>) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        std::mem::forget(rx);
+        let ctx = EngineCtx {
+            log: Arc::new(|_| {}),
+            work_dir: work.to_path_buf(),
+            home: work.to_path_buf(),
+            agents_file: work.join("agents.json"),
+            env: Arc::new(std::env::vars().collect()),
+            events: tx,
+            notify: Arc::new(|_| {}),
+            pids: PidBook::new(work),
+            data_dir: None,
+            handoff_dir: None,
+        };
+        let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+        let s2 = seen.clone();
+        let md: crate::bridge::engines::acp_worker::MakeDriver = Arc::new(move |a| {
+            s2.lock().unwrap().push(a.cfg.model.clone());
+            Arc::new(ModelDriver { a, alive: AtomicBool::new(true), hold: hold.clone(), fail })
+        });
+        let eng = AcpEngine::new(ctx, Some(md));
+        eng.set_queue_env(env.clone());
+        eng.start();
+        (eng, seen)
+    }
+
+    async fn wait_for(f: impl Fn() -> bool) {
+        for _ in 0..200 {
+            if f() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("條件在 4 秒內沒達成");
+    }
+
+    fn models_of(work: &Path) -> HashMap<String, String> {
+        crate::bridge::engines::acp_models::read(&work.join(crate::bridge::engines::acp_models::MODELS_FILE)).unwrap_or_default()
+    }
+
+    #[test]
+    fn 佇列項目的型號_讀得進來_格式不對整行回錯_沒帶就是_none() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(parse_line(&queue_line_model("gemini", "小雙", d.path(), "gemini-3.8-flash")).unwrap().model.as_deref(), Some("gemini-3.8-flash"));
+        assert_eq!(parse_line(&queue_line("gemini", "小雙", d.path())).unwrap().model, None);
+        assert_eq!(parse_line(&json!({ "profile": "gemini", "name": "小雙", "cwd": "c", "model": null }).to_string()).unwrap().model, None);
+        for bad in [json!(5), json!("a b"), json!("-x"), json!("")] {
+            assert!(parse_line(&json!({ "profile": "gemini", "name": "小雙", "cwd": "c", "model": bad }).to_string()).is_err(), "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn 佇列項目帶型號_工作者建立時就用它_acp_models_存著別的值也以項目為準_啟動成功後才寫入() {
+        let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let env = env_for(cwd.path());
+        crate::bridge::engines::acp_models::set(&work.path().join(crate::bridge::engines::acp_models::MODELS_FILE), "小雙", "gemini-old").unwrap();
+        let hold = Arc::new(AtomicBool::new(true));
+        let (eng, seen) = model_engine(work.path(), &env, hold.clone(), false);
+        std::fs::write(work.path().join(QUEUE_FILE), format!("{}\n", queue_line_model("gemini", "小雙", cwd.path(), "gemini-3.8-flash"))).unwrap();
+        eng.poll();
+        wait_for(|| !seen.lock().unwrap().is_empty()).await;
+        assert_eq!(*seen.lock().unwrap(), vec!["gemini-3.8-flash".to_string()], "工作者建立時用項目的型號，不是 acp-models.json 的舊值");
+        // 驅動還沒啟動成功：記錄不能先寫
+        assert_eq!(models_of(work.path()).get("小雙").map(String::as_str), Some("gemini-old"));
+        hold.store(false, Ordering::SeqCst);
+        wait_for(|| models_of(work.path()).get("小雙").map(String::as_str) == Some("gemini-3.8-flash")).await;
+        eng.stop();
+    }
+
+    #[tokio::test]
+    async fn 工作者啟動失敗_acp_models_不變_原本有值就是原值_原本沒檔就不會冒出來() {
+        for prev in [Some("gemini-old"), None] {
+            let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+            let env = env_for(cwd.path());
+            let file = work.path().join(crate::bridge::engines::acp_models::MODELS_FILE);
+            if let Some(p) = prev {
+                crate::bridge::engines::acp_models::set(&file, "小雙", p).unwrap();
+            }
+            let (eng, seen) = model_engine(work.path(), &env, Arc::new(AtomicBool::new(false)), true);
+            std::fs::write(work.path().join(QUEUE_FILE), format!("{}\n", queue_line_model("gemini", "小雙", cwd.path(), "gemini-3.8-flash"))).unwrap();
+            eng.poll();
+            wait_for(|| !seen.lock().unwrap().is_empty()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            assert_eq!(models_of(work.path()).get("小雙").map(String::as_str), prev, "啟動失敗不寫");
+            assert!(prev.is_some() || !file.exists(), "原本沒檔就不會冒出檔案");
+            eng.stop();
+        }
+    }
+
+    #[tokio::test]
+    async fn 佇列項目沒帶型號_照舊讀_acp_models_也不會新寫() {
+        let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let env = env_for(cwd.path());
+        let file = work.path().join(crate::bridge::engines::acp_models::MODELS_FILE);
+        crate::bridge::engines::acp_models::set(&file, "小雙", "gemini-old").unwrap();
+        crate::bridge::engines::acp_models::set(&file, "小乙", "gemini-other").unwrap();
+        let (eng, seen) = model_engine(work.path(), &env, Arc::new(AtomicBool::new(false)), false);
+        std::fs::write(work.path().join(QUEUE_FILE), format!("{}\n", queue_line("gemini", "小雙", cwd.path()))).unwrap();
+        eng.poll();
+        wait_for(|| !seen.lock().unwrap().is_empty()).await;
+        assert_eq!(*seen.lock().unwrap(), vec!["gemini-old".to_string()], "沒帶型號：照 acp-models.json 記下的");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let m = models_of(work.path());
+        assert_eq!((m.get("小雙").map(String::as_str), m.get("小乙").map(String::as_str)), (Some("gemini-old"), Some("gemini-other")));
+        eng.stop();
     }
 
     fn queue_line(profile: &str, name: &str, cwd: &Path) -> String {

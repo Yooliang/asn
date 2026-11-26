@@ -14,7 +14,9 @@
 //!   Codex 暫不開放：尚未實機驗證。
 //! - asn終端（原生 cli）：`gemini-term`（agy）、`grok-term`（grok）兩個固定 id（#931）。摘要只在「同意遠端開視窗、終端服務在用、
 //!   本機偵測得到那個 CLI」三者都成立時才帶；執行前再驗一次同樣三件事，加上既有的名字／重名／資料夾白名單／每小時上限。
-//!   遠端只能給 profile、名稱、資料夾（不收模型、第一句話）；指令來自本機設定。
+//!   遠端只能給 profile、名稱、資料夾（不收模型、型號、第一句話）；指令來自本機設定。
+//! - 遠端指定型號（`model`，#2353）：先驗統一規則再用；Claude 視窗帶單一參數 `--model=<值>`、Gemini 背景夥伴核對 agy 清單後把型號放進佇列項目，工作者建立時優先採用，
+//!   用它啟動成功後才記進 acp-models.json；pi 改用 pi 的欄位、asn終端、Grok、沒寫引擎的自訂設定一律明確拒絕，不退回預設型號。開好後把實際採用的型號隨結果回報。
 use super::core::BridgeLog;
 use crate::launch::config::{check_launch, load_launch_config_from, Bootstrap, LaunchConfig, LaunchReq};
 use crate::launch::profiles::{LaunchMode, Profile};
@@ -28,11 +30,18 @@ use tokio::sync::mpsc;
 
 const HOUR_MS: u64 = 3_600_000;
 const MAX_CWD: usize = 50;
+/// 背景夥伴開出來後，最多再等這麼久讓工作者記下實際用的型號
+const BG_MODEL_GRACE_MS: u64 = 10_000;
 pub const TRUST_HINT: &str = "視窗已開，但 30 秒內沒出現在名單上：可能卡在 Claude 第一次的確認畫面（例如「是否信任這個資料夾」）。請到 ASN 打開這個夥伴的終端，看清楚後自己選（直接按 Enter 會選到預設的「No, exit」）";
 pub const NO_CONFIG: &str = "這台電腦還沒有可用的啟動設定";
 pub const PI_HINT: &str = "pi 視窗已開，但 30 秒內沒出現在名單上：pi 可能在問要不要信任這個資料夾，或要登入、選模型，請到那台電腦選一次；也可能是 pi 的 ASN 擴充沒載入";
 pub const BG_HINT: &str = "背景夥伴已排入，但 30 秒內還沒開出來：請確認這台電腦的 ASN 還在執行；稍後會自動補上結果";
 pub const TERM_EXTRA: &str = "asn終端只收名稱與資料夾，不支援指定模型或第一句話";
+pub const MODEL_TERM: &str = "asn終端不能指定型號，請不要選型號再開一次";
+pub const MODEL_WITH_PI: &str = "經 pi 開的夥伴請用 pi 的提供者與模型，不能另外指定型號";
+pub const MODEL_BG_UNSUPPORTED: &str = "這個背景夥伴開新夥伴時還不能指定型號，請不要選型號再開一次";
+pub const MODEL_BG_FORMAT: &str = "這個型號代號背景夥伴還不能用（只能用英數與 . _ -），請換一個";
+pub const AGY_LIST_UNREADABLE: &str = "這台電腦現在讀不到 agy 的型號清單，請稍後再試";
 pub const TERM_NO_CONSENT: &str = "這台電腦沒有開啟「允許我的其他設備替這台開新視窗」";
 pub const TERM_NO_SERVICE: &str = "這台電腦的 asn終端服務目前沒有在使用";
 pub const NO_REMOTE_PROFILE: &str = "沒有可以從遠端開啟的設定（目前支援 Claude、pi、Grok、Gemini）";
@@ -59,8 +68,14 @@ pub struct Launched {
 pub trait LaunchEnv: Send + Sync {
     /// fresh＝要最新的（執行前的再驗一次）；false 可用快取（名單回報每分鐘一次）
     fn config(&self, fresh: bool) -> Result<LaunchConfig, String>;
-    /// 開視窗：回外層視窗的 PID。config／profile／name／cwd 都已驗過；pi_args＝經 pi 的 --provider／--model（已驗過，沒帶就是空）
-    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String>;
+    /// 開視窗：回外層視窗的 PID。config／profile／name／cwd 都已驗過；pi_args＝經 pi 的 --provider／--model（已驗過，沒帶就是空）；
+    /// model＝遠端指定的 Claude 視窗型號（#2353，已驗過；沒指定就是 None，與 pi_args 不並存）
+    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String], model: Option<&str>) -> Result<u32, String>;
+    /// 這台電腦的 agy 現在列得出這個型號嗎（遠端開 Gemini 背景夥伴帶型號，#2353）：Ok(false)＝清單讀到了但沒有；
+    /// Err＝讀不到清單（沒裝、沒登入、第一次還沒讀完）。預設讀不到＝拒絕，不放行沒核對過的型號
+    fn agy_model_listed(&self, _model: &str) -> Result<bool, String> {
+        Err(AGY_LIST_UNREADABLE.into())
+    }
     /// 這台電腦上有沒有同名而且還活著的夥伴視窗（#654）：名單快取之外再即時查一次（程序編號、啟動時間都核對），
     /// 擋住「名單還沒更新、視窗還沒上線」時遠端又開出第二個同名視窗。預設沒有（測試用的環境不用查）
     fn live_window(&self, _engine: &str, _name: &str) -> bool {
@@ -70,8 +85,9 @@ pub trait LaunchEnv: Send + Sync {
     fn pi_listed(&self, _provider: &str, _model: &str) -> bool {
         false
     }
-    /// 背景工作者：再驗一次（授權資料夾、名字、執行檔）後排進佇列，由引擎消化。work_dir＝橋的工作資料夾
-    fn enqueue_background(&self, _config: &LaunchConfig, _profile: &str, _name: &str, _cwd: &str, _work_dir: &Path) -> Result<(), String> {
+    /// 背景工作者：再驗一次（授權資料夾、名字、執行檔）後排進佇列，由引擎消化。work_dir＝橋的工作資料夾。
+    /// model＝遠端指定的型號：跟著佇列項目走，工作者建立時優先採用（這裡不寫 acp-models.json）
+    fn enqueue_background(&self, _config: &LaunchConfig, _profile: &str, _name: &str, _cwd: &str, _model: Option<&str>, _work_dir: &Path) -> Result<(), String> {
         Err("這台電腦不能開背景夥伴".into())
     }
     /// 各家 CLI 的型號清單（#2353 摘要的 `models`）：JSON 陣列，已套回報上限、不含原因原文；不等探測。
@@ -193,6 +209,63 @@ pub fn remote_pi_args(l: &Value, is_pi: bool, listed: &dyn Fn(&str, &str) -> boo
     Ok(args)
 }
 
+/// 遠端指定的型號怎麼用（#2353 第③階段）
+#[derive(Debug, Clone, PartialEq)]
+pub enum RemoteModel {
+    /// 沒指定：行為跟以前完全相同
+    None,
+    /// Claude 視窗：開窗時帶單一參數 `--model=<值>`
+    Arg(String),
+    /// Gemini（agy）背景夥伴：型號放進佇列項目，工作者建起來時優先採用；工作者用它啟動成功才記進 acp-models.json
+    Record(String),
+}
+
+/// 請求裡的 `model`：沒帶或 null＝沒指定；帶了就一定要是字串且符合統一規則，不合格回錯（不丟掉、不改成預設型號）
+pub fn remote_model_field(l: &Value) -> Result<Option<String>, String> {
+    match l.get("model") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if crate::model_id::valid_model_id(s) => Ok(Some(s.clone())),
+        Some(_) => Err(crate::launch::local::MODEL_BAD.into()),
+    }
+}
+
+/// 遠端指定型號 → 怎麼用。先驗格式（統一規則，不信任後台已驗過）、再依 profile 分流：
+/// pi 與 `pi_*` 欄位不並存；Claude 視窗（明寫 engine）→ Arg；Gemini 背景（先核對 agy 清單）→ Record；
+/// Grok、沒寫 engine 的自訂 profile、其他廠牌 → 回中文原因，不退回預設型號。
+/// agy_listed＝這台 agy 列不列得出這個型號（Err＝讀不到清單）
+pub fn remote_model_plan(l: &Value, profile_id: &str, p: &Profile, agy_listed: &dyn Fn(&str) -> Result<bool, String>) -> Result<RemoteModel, String> {
+    let Some(m) = remote_model_field(l)? else { return Ok(RemoteModel::None) };
+    let has = |k: &str| l.get(k).is_some_and(|v| !v.is_null() && v.as_str().is_none_or(|x| !x.trim().is_empty()));
+    if p.engine == "pi" || has("pi_provider") || has("pi_model") {
+        return Err(MODEL_WITH_PI.into());
+    }
+    if p.mode == LaunchMode::Background {
+        if profile_id != "gemini" {
+            return Err(MODEL_BG_UNSUPPORTED.into());
+        }
+        // acp-models.json 載入時會濾掉不合窄規則的代號，所以先擋下，不讓它被無聲丟掉
+        if !bg_model_valid(&m) {
+            return Err(MODEL_BG_FORMAT.into());
+        }
+        return match agy_listed(&m)? {
+            true => Ok(RemoteModel::Record(m)),
+            false => Err(format!("這台電腦的 agy 沒有「{m}」這個型號（可能清單剛換過），請重新選一次")),
+        };
+    }
+    crate::launch::local::remote_model_args(&p.engine, &[], &m)?;
+    Ok(RemoteModel::Arg(m))
+}
+
+fn bg_model_valid(m: &str) -> bool {
+    super::engines::acp_models::valid_model(m)
+}
+
+/// 工作者啟動成功後記在 acp-models.json 的型號，且跟請求指定的一致才算（舊的別的值不算）；沒有就 None
+pub fn confirmed_bg_model(work_dir: &Path, name: &str, model: &str) -> Option<String> {
+    let rec = super::engines::acp_models::read(&work_dir.join(super::engines::acp_models::MODELS_FILE)).ok()?;
+    rec.get(name).filter(|m| m.as_str() == model).cloned()
+}
+
 /// 給仲介的摘要：不含指令內容。profile 排序固定（claude 在最前）
 pub fn summary(cfg: &LaunchConfig) -> Value {
     let mut ids: Vec<&String> = cfg.profiles.keys().collect();
@@ -257,11 +330,17 @@ impl LaunchEnv for SystemEnv {
         *self.cache.lock().unwrap() = Some((std::time::Instant::now(), consent, r.clone()));
         r
     }
-    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String]) -> Result<u32, String> {
+    fn agy_model_listed(&self, model: &str) -> Result<bool, String> {
+        use crate::agent_tools::models::{snapshot, Vendor};
+        // 讀快取、不等：使用者能選到這個型號，代表清單早就回報過；清單讀不到（沒裝、沒登入、還在第一次讀取）就拒絕，不放行沒核對過的
+        let v = snapshot(Vendor::Gemini);
+        agy_listed(v.status, v.models.iter().map(|m| m.id.as_str()), model)
+    }
+    fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String], model: Option<&str>) -> Result<u32, String> {
         // 背景與否照這台的設定（#931）：這台存了「開新夥伴的顯示方式＝背景」就背景，其餘看有沒有在用共用終端服務（在用＝背景）；服務沒在用一律前台。遠端不能選
         let pref = crate::launch::prefs::launch_display_pref(&self.data_dir);
         let bg = crate::launch::win_term::remote_hidden(pref.as_deref(), crate::launch::win_term::term_server_active());
-        crate::launch::local::start_remote_window(config, profile, name, cwd, crate::launch::local::RemoteShow::real(bg), pi_args)
+        crate::launch::local::start_remote_window(config, profile, name, cwd, crate::launch::local::RemoteShow::real(bg), pi_args, model)
     }
     fn live_window(&self, engine: &str, name: &str) -> bool {
         crate::launch::console::live_partner_pid(engine, name).is_some()
@@ -269,13 +348,13 @@ impl LaunchEnv for SystemEnv {
     fn pi_listed(&self, provider: &str, model: &str) -> bool {
         crate::launch::pi_models::models_real(false).iter().any(|m| m.provider == provider && m.model == model)
     }
-    fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
+    fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, model: Option<&str>, work_dir: &Path) -> Result<(), String> {
         // 遠端同意過的資料夾（開著的視窗、最近用過…）要讓消化端也認得：和本機開新夥伴一樣記進啟動偏好的白名單（消化端會再驗一次）
         let known = crate::launch::config::canonical_launch_cwd(cwd).ok().is_some_and(|c| crate::launch::config::load_launch_config().is_ok_and(|l| l.cwd_allow.contains(&c)));
         if !known {
             let _ = crate::launch::cwds::add_to_prefs_allow(&self.data_dir, cwd);
         }
-        queue_background(&pq::SystemQueueEnv { data_dir: Some(self.data_dir.clone()) }, profile, name, cwd, work_dir)
+        queue_background(&pq::SystemQueueEnv { data_dir: Some(self.data_dir.clone()) }, profile, name, cwd, model, work_dir)
     }
     fn models(&self) -> Value {
         crate::agent_tools::models::report_value()
@@ -307,11 +386,20 @@ impl LaunchEnv for SystemEnv {
     }
 }
 
+/// agy 型號清單核對（吃快照的純函式，讓清單沒有或讀不到的情況可以直接測）：
+/// 狀態不是 Ok＝讀不到清單，回錯誤；清單裡沒有這個型號回 false
+pub(crate) fn agy_listed<'a>(status: crate::agent_tools::models::Status, ids: impl IntoIterator<Item = &'a str>, model: &str) -> Result<bool, String> {
+    if status != crate::agent_tools::models::Status::Ok {
+        return Err(AGY_LIST_UNREADABLE.into());
+    }
+    Ok(ids.into_iter().any(|id| id == model))
+}
+
 /// 排進佇列前用消化端同一套規則先驗一次（授權資料夾、名字、執行檔），不通過就當場回中文原因；通過才附加一行
-pub fn queue_background(env: &dyn pq::QueueEnv, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
-    let req = pq::Req { profile: profile.into(), name: name.into(), cwd: cwd.into() };
+pub fn queue_background(env: &dyn pq::QueueEnv, profile: &str, name: &str, cwd: &str, model: Option<&str>, work_dir: &Path) -> Result<(), String> {
+    let req = pq::Req { profile: profile.into(), name: name.into(), cwd: cwd.into(), model: model.map(String::from) };
     pq::build_cfg(env, &req, work_dir)?;
-    crate::launch::local::enqueue_background(work_dir, profile, name, cwd)
+    crate::launch::local::enqueue_background(work_dir, profile, name, cwd, model)
 }
 
 // ---- 流程 ------------------------------------------------------------------------------------------------
@@ -358,6 +446,8 @@ impl Launcher {
             Ok(c) => {
                 *self.warned.lock().unwrap() = String::new();
                 let mut s = summary(&c);
+                s["launch_model"] = json!(true);
+                // 能力旗標（#2353 第③階段）：這個版本的電腦端認得 launch 的 `model`；後台依它判斷要不要放行指定型號
                 // 有 pi 的啟動設定：多帶這台 pi 能用的模型，手機與別台電腦的「切換模型」才有下拉選單（#443／#444；舊後台會丟掉這個欄位）
                 if c.profiles.values().any(|p| p.engine == "pi") {
                     let models = crate::launch::pi_models::summary_models();
@@ -405,17 +495,32 @@ impl Launcher {
     }
     fn record(&self, l: &Value, status: &str, detail: &str) {
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-        let line = json!({ "at": now_ms(), "id": s("id"), "by": s("requested_by"), "profile": s("profile"), "name": s("name"), "cwd": s("cwd"), "status": status, "detail": detail });
+        // 日誌只記型號代號（通過統一規則的才記），不記完整請求
+        let model = remote_model_field(l).ok().flatten();
+        let mut line = json!({ "at": now_ms(), "id": s("id"), "by": s("requested_by"), "profile": s("profile"), "name": s("name"), "cwd": s("cwd"), "status": status, "detail": detail });
+        if let Some(m) = &model {
+            line["model"] = json!(m);
+        }
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(self.work_dir.join("launch.log")) {
             use std::io::Write;
             let _ = writeln!(f, "{line}");
         }
-        self.log.line(&format!("launch {} name={} profile={} -> {status}{}", s("id"), s("name"), s("profile"), if detail.is_empty() { String::new() } else { format!(" ({detail})") }));
+        self.log.line(&format!("launch {} name={} profile={}{} -> {status}{}", s("id"), s("name"), s("profile"), model.map(|m| format!(" model={m}")).unwrap_or_default(), if detail.is_empty() { String::new() } else { format!(" ({detail})") }));
     }
     async fn report(&self, l: &Value, status: &str, detail: &str) {
+        self.report_used(l, status, detail, None).await
+    }
+    /// 回報結果；used＝實際採用的型號（Claude 是實際傳進 CLI 的 --model= 值、pi 是實際組成參數的 提供者/模型、背景夥伴是工作者啟動成功後記下的值；
+    /// 沒指定型號或拿不到實際值就是 None，不猜預設型號、不拿請求值頂替）。
+    /// 沒有就不帶 `model_used` 這個鍵，跟以前送出的內容完全相同；舊後台不認得這個鍵會忽略
+    async fn report_used(&self, l: &Value, status: &str, detail: &str, used: Option<&str>) {
         self.record(l, status, detail);
         let id = l.get("id").and_then(Value::as_str).unwrap_or("");
-        if let Err(e) = self.relay.api("launch_result", Some(json!({ "id": id, "status": status, "detail": detail }))).await {
+        let mut body = json!({ "id": id, "status": status, "detail": detail });
+        if let Some(u) = used.filter(|u| crate::model_id::valid_model_id(u)) {
+            body["model_used"] = json!(u);
+        }
+        if let Err(e) = self.relay.api("launch_result", Some(body)).await {
             self.log.line(&format!("launch_result failed id={id}: {e}"));
         }
     }
@@ -508,12 +613,40 @@ impl Launcher {
             }
         }
         let (is_bg, is_pi) = cfg.profiles.get(&profile).map(|p| (p.mode == LaunchMode::Background, p.engine == "pi")).unwrap_or((false, false));
+        // 遠端指定的型號（#2353）：先驗再用；用不上就明確回錯，不退回預設型號。agy 清單在快取裡讀，仍放背景執行緒
+        let (me1, l1, prof1, pid1) = (self.clone(), l.clone(), cfg.profiles.get(&profile).cloned(), profile.clone());
+        let model_plan = match tokio::task::spawn_blocking(move || match &prof1 {
+            Some(p) => remote_model_plan(&l1, &pid1, p, &|m| me1.env.agy_model_listed(m)),
+            None => Err("沒有這個啟動設定".to_string()),
+        })
+        .await
+        .map_err(|e| format!("背景工作失敗：{e}"))
+        .and_then(|r| r)
+        {
+            Ok(p) => p,
+            Err(why) => return self.report(&l, "failed", &why).await,
+        };
         // 查這台 pi 的模型清單會開外部程序（有快取），放背景執行緒
         let me0 = self.clone();
         let l0 = l.clone();
         let pi_args = match tokio::task::spawn_blocking(move || me0.remote_pi_args(&l0, is_pi)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r) {
             Ok(a) => a,
             Err(why) => return self.report(&l, "failed", &why).await,
+        };
+        // 開好之後回報的實際型號：Claude 是實際傳進 CLI 的 --model= 值；pi 是實際組成參數的 提供者/模型（不合統一規則就不帶）；
+        // 背景夥伴（agy）要等工作者啟動成功後回報，這裡先不帶（見 wait_for_background）；沒指定就不帶
+        let used: Option<String> = match &model_plan {
+            RemoteModel::Arg(m) => Some(m.clone()),
+            RemoteModel::Record(_) => None,
+            RemoteModel::None => (pi_args.len() == 4).then(|| format!("{}/{}", pi_args[1], pi_args[3])).filter(|u| crate::model_id::valid_model_id(u)),
+        };
+        let model_arg = match &model_plan {
+            RemoteModel::Arg(m) => Some(m.clone()),
+            _ => None,
+        };
+        let bg_model = match &model_plan {
+            RemoteModel::Record(m) => Some(m.clone()),
+            _ => None,
         };
         let mut h = self.read_history();
         h.push(now_ms());
@@ -525,7 +658,10 @@ impl Launcher {
         if is_bg {
             let since = now_ms();
             let wd = self.work_dir.clone();
-            let queued = tokio::task::spawn_blocking(move || env.enqueue_background(&cfg2, &p2, &n2, &c2, &wd)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
+            // 排入之前就先看一次：記錄裡這個名字的舊值已經等於請求的型號，事後從檔案分不出是不是這次工作者寫的，就不回報 model_used
+            let stale = bg_model.as_deref().is_some_and(|m| confirmed_bg_model(&self.work_dir, &name, m).is_some());
+            let m2 = bg_model.clone();
+            let queued = tokio::task::spawn_blocking(move || env.enqueue_background(&cfg2, &p2, &n2, &c2, m2.as_deref(), &wd)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
             if let Err(e) = queued {
                 self.inflight.lock().unwrap().remove(&lower);
                 return self.report(&l, "failed", &format!("開不起來：{e}")).await;
@@ -533,12 +669,12 @@ impl Launcher {
             self.record(&l, "queued", "");
             let me = self.clone();
             tokio::spawn(async move {
-                me.wait_for_background(l, since).await;
+                me.wait_for_background(l, since, bg_model, stale).await;
                 me.inflight.lock().unwrap().remove(&lower);
             });
             return;
         }
-        let started = tokio::task::spawn_blocking(move || env.start(&cfg2, &p2, &n2, &c2, &pi_args)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
+        let started = tokio::task::spawn_blocking(move || env.start(&cfg2, &p2, &n2, &c2, &pi_args, model_arg.as_deref())).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
         let pid = match started {
             Ok(p) => p,
             Err(e) => {
@@ -549,7 +685,7 @@ impl Launcher {
         self.record(&l, "spawned", &format!("pid={pid}"));
         let me = self.clone();
         tokio::spawn(async move {
-            me.wait_for_window(l, if is_pi { PI_HINT } else { TRUST_HINT }).await;
+            me.wait_for_window(l, if is_pi { PI_HINT } else { TRUST_HINT }, used).await;
             me.inflight.lock().unwrap().remove(&lower);
         });
     }
@@ -560,6 +696,10 @@ impl Launcher {
         let present = |k: &str| l.get(k).is_some_and(|v| !v.is_null() && v.as_str().is_none_or(|x| !x.trim().is_empty()));
         if present("pi_provider") || present("pi_model") || present("first_message") {
             return self.report(&l, "failed", TERM_EXTRA).await;
+        }
+        // 指定型號：asn終端沒有型號入口，一律拒絕（不管格式合不合格、也不管是不是空字串）
+        if l.get("model").is_some_and(|v| !v.is_null()) {
+            return self.report(&l, "failed", MODEL_TERM).await;
         }
         let (me0, cfg0) = (self.clone(), cfg.clone());
         if let Err(why) = tokio::task::spawn_blocking(move || me0.term_gate(&cfg0, tool)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r) {
@@ -587,7 +727,7 @@ impl Launcher {
         }
     }
 
-    async fn wait_for_window(&self, l: Value, hint: &str) {
+    async fn wait_for_window(&self, l: Value, hint: &str, used: Option<String>) {
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let name = s("name");
         let t0 = std::time::Instant::now();
@@ -595,7 +735,7 @@ impl Launcher {
         while t0.elapsed().as_millis() < self.late_ms as u128 {
             tokio::time::sleep(std::time::Duration::from_millis(self.poll_ms)).await;
             if (self.names)().map(|n| n.iter().any(|x| *x == name)).unwrap_or(false) {
-                self.report(&l, "ok", &format!("{name} 已開啟")).await;
+                self.report_used(&l, "ok", &format!("{name} 已開啟"), used.as_deref()).await;
                 let first = l.get("first_message").and_then(Value::as_str).map(str::trim).filter(|m| !m.is_empty()).map(String::from);
                 let _ = self.tx.send(Launched { id: s("id"), requested_by: s("requested_by"), name, first_message: first });
                 return;
@@ -604,14 +744,17 @@ impl Launcher {
                 unconfirmed = true;
                 // 讀畫面看到卡在信任資料夾／略過權限同意：講清楚要本人到終端自己選（不代按）；讀不到維持原句
                 let detail = crate::launch::stuck_notice::with_screen(&name, self.env.screen_code(&name), hint);
-                self.report(&l, "unconfirmed", &detail).await;
+                self.report_used(&l, "unconfirmed", &detail, used.as_deref()).await;
             }
         }
         self.record(&l, "gave-up", &format!("{} 分鐘內都沒出現在名單上", self.late_ms / 60_000));
     }
 
     /// 背景夥伴：等引擎消化佇列。記進名冊＝開出來了（回 ok、通知核心刷新名單與送第一句話）；引擎記了失敗＝回中文原因
-    async fn wait_for_background(&self, l: Value, since: u64) {
+    /// model＝請求指定的型號：開好後不直接拿請求值回報，而是等工作者啟動成功記進 acp-models.json 的值（見 [`confirmed_bg_model`]），
+    /// 寬限時間內等不到就照常回報 ok、不帶 model_used。失敗不碰 acp-models.json（工作者沒啟動成功就沒寫過）
+    /// stale＝排入前記錄裡就已經是這個型號：分不出是不是這次寫的，一律不帶 model_used
+    async fn wait_for_background(&self, l: Value, since: u64, model: Option<String>, stale: bool) {
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let name = s("name");
         let t0 = std::time::Instant::now();
@@ -620,7 +763,15 @@ impl Launcher {
             tokio::time::sleep(std::time::Duration::from_millis(self.poll_ms)).await;
             match pq::find_outcome(&self.work_dir, &name, since) {
                 Some(Ok(())) => {
-                    self.report(&l, "ok", &format!("{name} 已開啟")).await;
+                    let used = match &model {
+                        Some(_) if stale => {
+                            self.log.line(&format!("launcher: 背景夥伴 {name} 記錄裡原本就是這個型號，分不出是不是這次寫的，回報不帶 model_used"));
+                            None
+                        }
+                        Some(m) => self.await_bg_model(&name, m).await,
+                        None => None,
+                    };
+                    self.report_used(&l, "ok", &format!("{name} 已開啟"), used.as_deref()).await;
                     let first = l.get("first_message").and_then(Value::as_str).map(str::trim).filter(|m| !m.is_empty()).map(String::from);
                     let _ = self.tx.send(Launched { id: s("id"), requested_by: s("requested_by"), name, first_message: first });
                     return;
@@ -634,6 +785,23 @@ impl Launcher {
             }
         }
         self.record(&l, "gave-up", &format!("{} 分鐘內背景夥伴都沒開出來", self.late_ms / 60_000));
+    }
+
+    /// 工作者開出來後，等它用指定型號啟動成功（它會把型號記進 acp-models.json）。最多等 BG_MODEL_GRACE_MS；
+    /// 等到就回工作者記下的值，等不到回 None（不拿請求值頂替）
+    async fn await_bg_model(&self, name: &str, model: &str) -> Option<String> {
+        let t0 = std::time::Instant::now();
+        let grace = self.late_ms.min(BG_MODEL_GRACE_MS) as u128;
+        loop {
+            if let Some(m) = confirmed_bg_model(&self.work_dir, name, model) {
+                return Some(m);
+            }
+            if t0.elapsed().as_millis() >= grace {
+                self.log.line(&format!("launcher: 背景夥伴 {name} 沒在時限內記下型號 {model}，回報不帶 model_used"));
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(self.poll_ms)).await;
+        }
     }
 }
 
@@ -838,18 +1006,69 @@ mod tests {
         let cwd_s = cwd.path().to_string_lossy().to_string();
         let queue = work.path().join(pq::QUEUE_FILE);
         let no_bin = FakeQ { allow: cwd.path().to_path_buf(), bin: false };
-        let e = queue_background(&no_bin, "grok", "小格", &cwd_s, work.path()).unwrap_err();
+        let e = queue_background(&no_bin, "grok", "小格", &cwd_s, None, work.path()).unwrap_err();
         assert!(e.contains("這台電腦找不到「grok」") && e.contains("請先安裝"), "{e}");
-        let e = queue_background(&ok, "grok", "小格", &other.path().to_string_lossy(), work.path()).unwrap_err();
+        let e = queue_background(&ok, "grok", "小格", &other.path().to_string_lossy(), None, work.path()).unwrap_err();
         assert!(e.contains("不在允許清單"), "{e}");
-        assert!(queue_background(&ok, "grok", "-壞", &cwd_s, work.path()).unwrap_err().contains("視窗名格式不對"));
-        assert!(queue_background(&ok, "claude", "小格", &cwd_s, work.path()).unwrap_err().contains("不是內建通道"));
-        assert!(queue_background(&ok, "nope", "小格", &cwd_s, work.path()).unwrap_err().contains("沒有這個啟動設定"));
+        assert!(queue_background(&ok, "grok", "-壞", &cwd_s, None, work.path()).unwrap_err().contains("視窗名格式不對"));
+        assert!(queue_background(&ok, "claude", "小格", &cwd_s, None, work.path()).unwrap_err().contains("不是內建通道"));
+        assert!(queue_background(&ok, "nope", "小格", &cwd_s, None, work.path()).unwrap_err().contains("沒有這個啟動設定"));
         assert!(!queue.exists(), "驗不過一行都不能寫進佇列");
-        queue_background(&ok, "grok", "小格", &cwd_s, work.path()).unwrap();
+        queue_background(&ok, "grok", "小格", &cwd_s, None, work.path()).unwrap();
         let text = std::fs::read_to_string(&queue).unwrap();
         let v: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!((v["profile"].as_str(), v["name"].as_str()), (Some("grok"), Some("小格")));
+        assert!(v.get("model").is_none(), "沒指定型號時佇列那一行不能有 model 這個鍵");
         let _ = d;
+    }
+
+    #[test]
+    fn 排進佇列_型號寫進那一行_消化端_parse_line_讀得回同一個型號() {
+        let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let ok = FakeQ { allow: cwd.path().to_path_buf(), bin: true };
+        let cwd_s = cwd.path().to_string_lossy().to_string();
+        let queue = work.path().join(pq::QUEUE_FILE);
+        queue_background(&ok, "grok", "小格", &cwd_s, Some("grok-4.1-fast"), work.path()).unwrap();
+        queue_background(&ok, "grok", "小格二", &cwd_s, None, work.path()).unwrap();
+        let text = std::fs::read_to_string(&queue).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        let with = pq::parse_line(lines[0]).unwrap();
+        assert_eq!(with.model.as_deref(), Some("grok-4.1-fast"), "寫的一端帶了型號，讀的一端要讀得回");
+        assert_eq!(with.name, "小格");
+        let without = pq::parse_line(lines[1]).unwrap();
+        assert_eq!(without.model, None, "沒帶型號就讀回 None");
+        let v: Value = serde_json::from_str(lines[1]).unwrap();
+        assert!(v.get("model").is_none());
+    }
+
+    #[test]
+    fn agy_清單核對_不是_ok_讀不到_清單沒有回_false_有才放行() {
+        use crate::agent_tools::models::Status;
+        for st in [Status::Unavailable, Status::Error, Status::Pending] {
+            assert_eq!(agy_listed(st, ["gemini-3-pro"], "gemini-3-pro").unwrap_err(), AGY_LIST_UNREADABLE, "{st:?} 要回讀不到，就算清單裡有也一樣");
+        }
+        assert_eq!(agy_listed(Status::Ok, ["a", "b"], "gemini-3-pro"), Ok(false), "清單沒有這個型號不能放行");
+        assert_eq!(agy_listed(Status::Ok, ["a", "gemini-3-pro"], "gemini-3-pro"), Ok(true));
+        assert_eq!(agy_listed(Status::Ok, Vec::<&str>::new(), "x"), Ok(false));
+    }
+
+    /// SystemEnv 的轉傳不能在測試裡開真視窗、寫真佇列，用原始碼守門：型號要原樣傳下去，agy 核對要經 agy_listed
+    #[test]
+    fn system_env_轉傳型號_開窗_排佇列_agy_核對_都原樣經過() {
+        let src = include_str!("launcher.rs").replace("\r\n", "\n");
+        let imp = &src[src.find("impl LaunchEnv for SystemEnv").unwrap()..];
+        let imp = &imp[..imp.find("\n}\n").unwrap()];
+        let fn_body = |sig: &str| -> String {
+            let from = imp.find(sig).unwrap_or_else(|| panic!("找不到 {sig}"));
+            let rest = &imp[from..];
+            rest[..rest.find("\n    }\n").unwrap()].to_string()
+        };
+        let start = fn_body("fn start(&self, config");
+        assert!(start.contains("RemoteShow::real(bg), pi_args, model)"), "SystemEnv::start 要把 model 原樣傳給 start_remote_window：{start}");
+        let enq = fn_body("fn enqueue_background(&self");
+        assert!(enq.contains("profile, name, cwd, model, work_dir)"), "SystemEnv::enqueue_background 要把 model 原樣傳給 queue_background：{enq}");
+        let agy = fn_body("fn agy_model_listed(&self");
+        assert!(agy.contains("agy_listed(v.status, v.models.iter().map(|m| m.id.as_str()), model)"), "SystemEnv::agy_model_listed 要經 agy_listed 核對：{agy}");
     }
 }

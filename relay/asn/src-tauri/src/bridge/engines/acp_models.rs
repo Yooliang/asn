@@ -44,8 +44,17 @@ fn write(file: &Path, models: &HashMap<String, String>) -> Result<(), String> {
     crate::settings::atomic::write(file, json!({ "version": 1, "models": map }).to_string().as_bytes(), crate::settings::atomic::SETTINGS).map_err(|e| format!("記不下選好的模型（{}）：{e}", file.display()))
 }
 
+/// 行程內的寫入鎖：讀、改、寫整段包在裡面，兩個寫入者（本機切換型號、遠端開窗記型號、開新夥伴記型號、移除、改名）同時來也不會互相蓋掉。
+/// 全行程只有一把（不分檔案）：寫入很少、很短，不值得分檔案鎖。鎖被別的執行緒 panic 弄髒時照用（資料以檔案為準）
+static WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn lock() -> std::sync::MutexGuard<'static, ()> {
+    WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 記下某個工作者選好的模型（原本的檔案壞了就從空的重寫）
 pub fn set(file: &Path, name: &str, model: &str) -> Result<(), String> {
+    let _g = lock();
     let mut m = read(file).unwrap_or_default();
     m.insert(name.to_string(), model.to_string());
     write(file, &m)
@@ -53,6 +62,7 @@ pub fn set(file: &Path, name: &str, model: &str) -> Result<(), String> {
 
 /// 移除夥伴時一併刪掉它記下的模型，免得同名的新夥伴繼承到舊模型
 pub fn remove(file: &Path, name: &str) -> Result<(), String> {
+    let _g = lock();
     let mut m = read(file).unwrap_or_default();
     if m.remove(name).is_none() {
         return Ok(());
@@ -62,6 +72,7 @@ pub fn remove(file: &Path, name: &str) -> Result<(), String> {
 
 /// 改名時把記下的模型搬到新名字（沒記過＝什麼都不做；檔案壞了當沒有，同啟動時）
 pub fn rename(file: &Path, from: &str, to: &str) -> Result<(), String> {
+    let _g = lock();
     let mut m = read(file).unwrap_or_default();
     let Some(model) = m.remove(from) else { return Ok(()) };
     m.insert(to.to_string(), model);
@@ -125,6 +136,37 @@ mod tests {
         rename(&f, "甲", "乙").unwrap();
         let m = read(&f).unwrap();
         assert_eq!((m.get("乙").map(String::as_str), m.contains_key("甲"), m.get("丙").map(String::as_str)), (Some("grok-4.6"), false, Some("grok-4.7")));
+    }
+
+    #[test]
+    fn 並行寫入_不同名字同時記_每個名字都在() {
+        // 沒有鎖時，讀改寫會互相蓋掉：32 條執行緒 × 每條 8 個名字、各自同時開跑，最後一定掉名字
+        const THREADS: usize = 32;
+        const PER: usize = 8;
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(MODELS_FILE);
+        let go = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
+        let hs: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let (f, go) = (f.clone(), go.clone());
+                std::thread::spawn(move || {
+                    go.wait();
+                    for i in 0..PER {
+                        set(&f, &format!("夥伴{t}-{i}"), &format!("m-{t}-{i}")).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in hs {
+            h.join().unwrap();
+        }
+        let m = read(&f).unwrap();
+        assert_eq!(m.len(), THREADS * PER, "有名字被蓋掉了");
+        for t in 0..THREADS {
+            for i in 0..PER {
+                assert_eq!(m[&format!("夥伴{t}-{i}")], format!("m-{t}-{i}"));
+            }
+        }
     }
 
     #[test]
