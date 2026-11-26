@@ -342,13 +342,8 @@ impl AcpEngine {
         std::fs::create_dir_all(&cfg.cwd).map_err(|e| format!("工作資料夾建不起來（{}）：{e}", cfg.cwd.display()))?;
         let name = cfg.name.clone();
         let (protocol, cwd) = (cfg.protocol.clone(), cfg.cwd.display().to_string());
-        // 「開新夥伴」開出的 Gemini：重開、換班接手、開關切換時依目前開關重算權限（來源和 build_cfg 同一個）
-        let perm_source: Option<super::acp_worker::PermSource> = (cfg.roster_engine == "gemini").then(|| {
-            let (env, cwd) = (self.queue_env.lock().unwrap().clone(), cfg.cwd.clone());
-            Arc::new(move || super::acp_policy::normalize_permissions(Some(&super::partner_queue::permissions_for("gemini", env.gemini_full_access())), &cwd).0) as super::acp_worker::PermSource
-        });
+        // 權限在 build_cfg 時就固定（Gemini 一律放行寫檔與執行指令），重開、換班接手、換模型都沿用同一份 cfg，不需另外重算
         let w = self.make_worker(Arc::new(cfg), store);
-        w.set_perm_source(perm_source);
         self.workers.lock().unwrap().push((name.clone(), w.clone()));
         w.start();
         self.ctx.log(format!("acp: 動態啟動工作者 {name}（protocol={protocol} cwd={cwd}）"));

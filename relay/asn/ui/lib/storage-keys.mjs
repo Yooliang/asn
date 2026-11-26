@@ -26,7 +26,7 @@ export const LAUNCH_PREFS_FIELDS = Object.freeze(['cwdAllow', 'launchDisplay', '
 export const DOC_FIELDS = Object.freeze({
   'acct-prefs': ['remote_trust_own', 'remote_trust_signed', 'remote_allow_switch'],
   'agent-setup-prefs': ['remote_allow_install'],
-  bridge: ['enabled', 'allow_takeover', 'allow_remote_launch', 'unaddressed_to', 'auto_resume_off', 'term_server_off', 'term_server_on', 'screen_watch_off', 'perm_phone_off', 'mobile_view_off', 'remote_input_off', 'compact_handoff_off', 'compact_handoff_n', 'gemini_full_access'],
+  bridge: ['enabled', 'allow_takeover', 'allow_remote_launch', 'unaddressed_to', 'auto_resume_off', 'term_server_off', 'term_server_on', 'screen_watch_off', 'perm_phone_off', 'mobile_view_off', 'remote_input_off', 'compact_handoff_off', 'compact_handoff_n'],
   'launch-prefs': [],
   'pi-auto': ['auto', 'done'],
   'quota-readers': ['grok', 'agy', 'minimax', 'extra_claude', 'extra_claude_refresh'],

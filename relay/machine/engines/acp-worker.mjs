@@ -2,7 +2,7 @@
 // 不知道仲介與橋，只透過注入的 handlers（onSent／onFail／onReply）與 notify（寄授權詢問／登入通知）跟外面講話。
 import { askText } from './acp-approvals.mjs'
 import { WorkerError } from './acp-errors.mjs'
-import { categoryLabel, decide, redact } from './acp-policy.mjs'
+import { agyBrainDir, categoryLabel, decide, insideAgyConvDir, redact } from './acp-policy.mjs'
 
 const MAX_REPLY_CHARS = 18_000     // 仲介單封上限 20000 字
 const OWNER_NOTICE_COOLDOWN_MS = 3_600_000
@@ -87,7 +87,10 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
       const granted = policy.rules.execute === 'allow' || turnGrant.has('execute') || driver?.fullAccess
       return info.state === 'DONE' && !granted ? { ok: false, reason: '指令被執行了，但這個工作者不允許執行指令' } : { ok: true }
     }
-    const d = decide(policy, info, cfg.cwd)
+    // agy 自己的對話資料夾（brain/<編號>/ 底下，不含 .system_generated）不受白名單資料夾限制，但仍照寫入的政策（#2351）
+    const d = c === 'write' && cfg.protocol === 'agy-stream' && insideAgyConvDir(info.paths ?? [], agyBrainDir(env), cfg.cwd)
+      ? { verdict: policy.rules.write, reason: `寫入 agy 自己的對話資料夾，寫入的政策是 ${policy.rules.write}` }
+      : decide(policy, info, cfg.cwd)
     if (d.verdict === 'allow' || (d.verdict === 'ask' && turnGrant.has(c))) return { ok: true }
     return { ok: false, reason: `${categoryLabel(c)}不被允許：${d.reason}` }
   }

@@ -2,7 +2,7 @@
 //! 對應 engines/acp-worker.mjs。不知道仲介與橋，只透過事件通道（已轉交／失敗／回覆）與 Notifier（寄授權詢問／登入通知）跟外面講話。
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
-use super::acp_policy::{category_label, decide, inside_agy_scratch, is_network_error, redact, upstream_5xx, Permissions, Req, Verdict, WorkerError};
+use super::acp_policy::{category_label, decide, inside_agy_conv_dir, is_network_error, redact, upstream_5xx, Req, Verdict, WorkerError};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -70,8 +70,8 @@ pub trait Guard: Send + Sync {
     /// 標準 ACP：agent 送來權限請求時（可等人）
     fn ask_permission(&self, info: Req) -> BoxFut<'static, bool>;
     /// agy 原生：只能事後絆線。state＝步驟狀態（ACTIVE／DONE…）；full_access＝這個驅動是用放行旗標啟動的；
-    /// scratch＝agy 目前這段對話自己的暫存資料夾（#608，寫在這裡面不受白名單資料夾限制，但仍照寫入的政策）
-    fn check_tool(&self, info: &Req, state: &str, full_access: bool, scratch: Option<&std::path::Path>) -> Result<(), String>;
+    /// brain＝agy 存各段對話資料夾的地方（#608、#2351）；寫在 `brain/<編號>/` 底下（不含 .system_generated）不受白名單資料夾限制，但仍照寫入的政策
+    fn check_tool(&self, info: &Req, state: &str, full_access: bool, brain: Option<&std::path::Path>) -> Result<(), String>;
 }
 
 pub trait Driver: Send + Sync {
@@ -272,9 +272,6 @@ struct St {
     auth_retry_at: u64,
     /// 已經做過「等 10 秒自動再試一次」的信編號（上限幾十筆）。核心延遲補送同一則時不再內部重試，免得一次補送實際送出兩次（#1670）
     net_retried: HashSet<String>,
-    /// 重開／換班接手時依目前開關重算出的權限（只有「開新夥伴」開出的 Gemini 會有）；有值就蓋過設定裡的 permissions
-    perms: Option<Permissions>,
-    perm_source: Option<PermSource>,
 }
 
 pub struct WorkerInit {
@@ -292,10 +289,6 @@ pub struct WorkerInit {
     /// 機器工作資料夾：「這封開始處理了」的記號放這裡（channel_turns，#828）
     pub work_dir: std::path::PathBuf,
 }
-
-/// 依目前設定重算權限的來源：只有「開新夥伴」開出的 Gemini 有（add_partner 設、改名時沿用）；重開、換班接手時呼叫。
-/// 沒有（agents.json 手寫的、Grok、接手的）＝權限永遠照 cfg
-pub type PermSource = Arc<dyn Fn() -> Permissions + Send + Sync>;
 
 pub struct Worker {
     i: WorkerInit,
@@ -329,8 +322,6 @@ impl Worker {
                 model: i.cfg.model.clone(),
                 auth_retry_at: 0,
                 net_retried: HashSet::new(),
-                perms: None,
-                perm_source: None,
             }),
             i,
             start_lock: tokio::sync::Mutex::new(()),
@@ -342,15 +333,11 @@ impl Worker {
     }
     /// 啟動驅動用的設定：模型換成目前實際要用的（切換過模型就是新的）
     fn cfg_now(&self) -> Arc<WorkerCfg> {
-        let (model, perms) = {
-            let s = self.st.lock().unwrap();
-            (s.model.clone(), s.perms.clone())
-        };
-        if model == self.i.cfg.model && perms.is_none() {
+        let model = self.st.lock().unwrap().model.clone();
+        if model == self.i.cfg.model {
             return self.i.cfg.clone();
         }
-        let base = (*self.i.cfg).clone();
-        Arc::new(WorkerCfg { model, permissions: perms.unwrap_or_else(|| base.permissions.clone()), ..base })
+        Arc::new(WorkerCfg { model, ..(*self.i.cfg).clone() })
     }
     /// 實際生效的模型：有指定就是它；沒指定時用 agent 自己說的目前模型（還不知道回空字串）
     pub fn effective_model(&self) -> String {
@@ -1010,7 +997,7 @@ impl Guard for WorkerGuard {
             verdict == Verdict::Allow
         })
     }
-    fn check_tool(&self, info: &Req, state: &str, full_access: bool, scratch: Option<&std::path::Path>) -> Result<(), String> {
+    fn check_tool(&self, info: &Req, state: &str, full_access: bool, brain: Option<&std::path::Path>) -> Result<(), String> {
         let me = &self.0;
         let c = info.category.as_str();
         if c == "internal" || c == "read" {
@@ -1022,9 +1009,9 @@ impl Guard for WorkerGuard {
             let granted = cfg.permissions.rule("execute") == Verdict::Allow || me.st.lock().unwrap().turn_grant.contains("execute") || full_access;
             return if state == "DONE" && !granted { Err("指令被執行了，但這個工作者不允許執行指令".into()) } else { Ok(()) };
         }
-        let (v, reason) = if c == "write" && scratch.is_some_and(|s| inside_agy_scratch(&info.paths, s, &cfg.cwd)) {
+        let (v, reason) = if c == "write" && brain.is_some_and(|b| inside_agy_conv_dir(&info.paths, b, &cfg.cwd)) {
             let v = cfg.permissions.rule("write");
-            (v, format!("寫入這段對話自己的暫存資料夾，寫入的政策是 {}", v.name()))
+            (v, format!("寫入 agy 自己的對話資料夾，寫入的政策是 {}", v.name()))
         } else {
             decide(&cfg.permissions, info, &cfg.cwd)
         };

@@ -49,7 +49,7 @@ fn old_bridge(dir: &Path) -> BridgeSettings {
     let Ok(text) = std::fs::read_to_string(settings_path(dir)) else { return dflt };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return dflt };
     let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
-    BridgeSettings { enabled: true, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off"), remote_input_off: flag("remote_input_off"), compact_handoff_off: flag("compact_handoff_off"), compact_handoff_n: compact::clamp_n(v.get("compact_handoff_n").and_then(Value::as_i64)), gemini_full_access: flag("gemini_full_access") }
+    BridgeSettings { enabled: true, allow_takeover: flag("allow_takeover"), allow_remote_launch: flag("allow_remote_launch"), unaddressed_to: v.get("unaddressed_to").and_then(Value::as_str).unwrap_or("").trim().to_string(), auto_resume_off: flag("auto_resume_off"), term_server_off: flag("term_server_off"), term_server_on: flag("term_server_on"), screen_watch_off: flag("screen_watch_off"), perm_phone_off: flag("perm_phone_off"), mobile_view_off: flag("mobile_view_off"), remote_input_off: flag("remote_input_off"), compact_handoff_off: flag("compact_handoff_off"), compact_handoff_n: compact::clamp_n(v.get("compact_handoff_n").and_then(Value::as_i64)) }
 }
 
 const BAD: &[&str] = &["", "{壞掉", "null", "5", "[1,2]", "\"字串\"", "true"];
@@ -127,9 +127,8 @@ fn bridge_預設值逐欄對照() {
         ("remote_input_off", d.remote_input_off.to_string(), s.remote_input_off.to_string()),
         ("compact_handoff_off", d.compact_handoff_off.to_string(), s.compact_handoff_off.to_string()),
         ("compact_handoff_n", d.compact_handoff_n.to_string(), s.compact_handoff_n.to_string()),
-        ("gemini_full_access", d.gemini_full_access.to_string(), s.gemini_full_access.to_string()),
     ];
-    assert_eq!(rows.len(), 14);
+    assert_eq!(rows.len(), 13);
     for (k, a, b) in rows {
         assert_eq!(a, b, "{k} 的預設值");
     }

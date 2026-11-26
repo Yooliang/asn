@@ -227,7 +227,7 @@ pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String)
     (rule, format!("{}的政策是 {}", category_label(&req.category), rule.name()))
 }
 
-// ---- agy 自己這段對話的暫存資料夾（#608）----
+// ---- agy 自己各段對話的資料夾（#608、#2351）----
 
 /// agy 用的使用者資料夾：它的環境裡的 USERPROFILE，再來 HOME，都沒有就用這台電腦的
 pub fn agy_user_home(env: &[(String, String)]) -> PathBuf {
@@ -235,13 +235,14 @@ pub fn agy_user_home(env: &[(String, String)]) -> PathBuf {
     get("USERPROFILE").or_else(|| get("HOME")).unwrap_or_else(crate::identity::home_dir)
 }
 
-/// 這段對話的 scratch：`<家>/.gemini/antigravity-cli/brain/<對話編號>/scratch`。
-/// 對話編號空著或不像編號（只收英數與 -、_）就沒有，免得拼出 `..` 之類跑到別處
-pub fn agy_scratch(user_home: &Path, sid: &str) -> Option<PathBuf> {
-    if sid.is_empty() || sid.len() > 100 || !sid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-        return None;
-    }
-    Some(user_home.join(".gemini").join("antigravity-cli").join("brain").join(sid).join("scratch"))
+/// agy 存各段對話資料夾的地方：`<家>/.gemini/antigravity-cli/brain`
+pub fn agy_brain(user_home: &Path) -> PathBuf {
+    user_home.join(".gemini").join("antigravity-cli").join("brain")
+}
+
+/// 對話編號長得像編號（英數與 -、_，最多 100 字）才算，免得拼出 `..` 之類跑到別處
+pub fn valid_conv_id(sid: &str) -> bool {
+    !sid.is_empty() && sid.len() <= 100 && sid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// 解析成實際位置：最深一層存在的上層用 canonicalize 解開捷徑與 junction，還不存在的部分接在後面（resolve 已去掉 `.`、`..`）
@@ -262,21 +263,24 @@ pub fn real_path(base: &Path, p: &str) -> Option<PathBuf> {
     }
 }
 
-/// 寫入的路徑解析成實際位置後，是不是都在這段對話的 scratch 裡。
-/// scratch 一定要已經存在，而且它和上面的對話資料夾都不能是捷徑或 junction（實際位置要等於 brain 的實際位置接上 `<編號>/scratch`）
-pub fn inside_agy_scratch(paths: &[String], scratch: &Path, base: &Path) -> bool {
-    let (Some(sid_dir), Some(brain)) = (scratch.parent(), scratch.parent().and_then(Path::parent)) else { return false };
-    let (Ok(real_scratch), Ok(real_brain), Some(sid)) = (std::fs::canonicalize(scratch), std::fs::canonicalize(brain), sid_dir.file_name()) else { return false };
-    if norm(&real_scratch) != norm(&real_brain.join(sid).join("scratch")) {
-        return false;
-    }
-    let root = norm(&real_scratch);
-    let root = root.trim_end_matches('/');
+/// 寫入的路徑解析成實際位置後，是不是都在 brain 底下「某一段對話的資料夾」裡的檔：`brain/<合法編號>/<檔>`（含 scratch）。
+/// 為什麼不只限 scratch、也不只限目前這段：agy 會把分析檔寫在對話資料夾本身，換班或重開後的新一段也要能改舊段寫的文件。
+/// 不算：直接寫在 `brain/` 底下的檔、對話資料夾本身、任一段的 `.system_generated/`（agy 自己的內部資料）、brain 以外的地方。
+/// brain 一定要已經存在；路徑先解開捷徑與 junction 再比，所以經捷徑跳出 brain（或跳進 `.system_generated`）的一律不算
+pub fn inside_agy_conv_dir(paths: &[String], brain: &Path, base: &Path) -> bool {
+    let Ok(real_brain) = std::fs::canonicalize(brain) else { return false };
+    let root = norm(&real_brain);
+    let prefix = format!("{}/", root.trim_end_matches('/'));
     !paths.is_empty()
-        && paths.iter().all(|p| match real_path(base, p) {
-            Some(r) => norm(&r).starts_with(&format!("{root}/")),
-            None => false,
-        })
+        && paths.iter().all(|p| {
+            let Some(r) = real_path(base, p) else { return false };
+            let n = norm(&r);
+            let Some(rest) = n.strip_prefix(&prefix) else { return false };
+            let mut parts = rest.split('/');
+            let (Some(id), Some(first)) = (parts.next(), parts.next()) else { return false };
+            // Windows 會吃掉名字尾巴的點與空白（`.system_generated.` 開到同一個資料夾），先去掉再比
+            let first = first.trim_end_matches(['.', ' ']);
+            valid_conv_id(id) && !first.is_empty() && !first.eq_ignore_ascii_case(".system_generated")        })
 }
 
 /// 使用者資料夾底下放登入資料、金鑰、對話記錄的地方：寫到這些地方算真的越權，整輪中止，不給它換位置再試（#608）
@@ -719,13 +723,14 @@ mod tests {
     }
 
     #[test]
-    fn agy_scratch_對話編號空著或不像編號就沒有() {
+    fn 對話編號空著或不像編號就不合法() {
+        for bad in ["", "..", ".", "a/b", r"a\b", "a b", ".system_generated"] {
+            assert!(!valid_conv_id(bad), "{bad}");
+        }
+        assert!(!valid_conv_id(&"a".repeat(101)));
+        assert!(valid_conv_id("abc-1_2"));
         let h = Path::new("/u");
-        assert_eq!(agy_scratch(h, ""), None);
-        assert_eq!(agy_scratch(h, ".."), None);
-        assert_eq!(agy_scratch(h, "a/b"), None);
-        assert_eq!(agy_scratch(h, r"a\b"), None);
-        assert_eq!(agy_scratch(h, "abc-1_2"), Some(h.join(".gemini").join("antigravity-cli").join("brain").join("abc-1_2").join("scratch")));
+        assert_eq!(agy_brain(h), h.join(".gemini").join("antigravity-cli").join("brain"));
     }
 
     #[test]
@@ -736,21 +741,36 @@ mod tests {
     }
 
     #[test]
-    fn inside_agy_scratch_只認目前對話的_scratch_其他位置與跳出去的都不算() {
+    fn inside_agy_conv_dir_任一段對話資料夾裡的檔放行_系統目錄_brain_本身_外面都不算() {
         let d = tempfile::tempdir().unwrap();
-        let sc = agy_scratch(d.path(), "c1").unwrap();
+        let brain = agy_brain(d.path());
         let base = d.path();
-        // scratch 還不存在：不放行
-        assert!(!inside_agy_scratch(&[s(&sc.join("a.md"))], &sc, base));
-        std::fs::create_dir_all(&sc).unwrap();
-        std::fs::create_dir_all(sc.parent().unwrap().join(".system_generated")).unwrap();
-        assert!(inside_agy_scratch(&[s(&sc.join("a.md")), s(&sc.join("sub").join("b.md"))], &sc, base));
-        assert!(!inside_agy_scratch(&[], &sc, base), "沒帶路徑不放行");
-        assert!(!inside_agy_scratch(&[s(&sc)], &sc, base), "scratch 本身不是裡面的檔");
-        assert!(!inside_agy_scratch(&[s(&sc.join("..").join(".system_generated").join("x"))], &sc, base));
-        assert!(!inside_agy_scratch(&[s(&sc.join("a.md")), s(&d.path().join("x"))], &sc, base), "有一個在外面就不行");
-        // 相對路徑以工作資料夾為準，不是 scratch
-        assert!(!inside_agy_scratch(&["a.md".into()], &sc, base));
+        let c1 = brain.join("c1");
+        // brain 還不存在：不放行
+        assert!(!inside_agy_conv_dir(&[s(&c1.join("x.md"))], &brain, base));
+        std::fs::create_dir_all(c1.join("scratch")).unwrap();
+        std::fs::create_dir_all(c1.join(".system_generated")).unwrap();
+        std::fs::create_dir_all(brain.join("c2")).unwrap();
+        // 對話資料夾裡的檔、scratch 裡的檔、更深的檔
+        assert!(inside_agy_conv_dir(&[s(&c1.join("x.md"))], &brain, base));
+        assert!(inside_agy_conv_dir(&[s(&c1.join("scratch").join("a.md")), s(&c1.join("sub").join("b.md"))], &brain, base));
+        // 別段對話（換班接手後改舊段寫的文件）；還沒建出來的編號也一樣
+        assert!(inside_agy_conv_dir(&[s(&brain.join("c2").join("old.md"))], &brain, base));
+        assert!(inside_agy_conv_dir(&[s(&brain.join("c3").join("new.md"))], &brain, base));
+        assert!(!inside_agy_conv_dir(&[], &brain, base), "沒帶路徑不放行");
+        assert!(!inside_agy_conv_dir(&[s(&brain.join("x.md"))], &brain, base), "直接寫在 brain 底下不算");
+        assert!(!inside_agy_conv_dir(&[s(&brain)], &brain, base), "brain 本身不算");
+        assert!(!inside_agy_conv_dir(&[s(&c1)], &brain, base), "對話資料夾本身不是裡面的檔");
+        for sys in [".system_generated", ".SYSTEM_GENERATED", ".system_generated."] {
+            assert!(!inside_agy_conv_dir(&[s(&c1.join(sys).join("x"))], &brain, base), "{sys}");
+            assert!(!inside_agy_conv_dir(&[s(&brain.join("c2").join(sys).join("x"))], &brain, base), "別段的 {sys}");
+        }
+        assert!(!inside_agy_conv_dir(&[s(&c1.join("scratch").join("..").join(".system_generated").join("x"))], &brain, base), "用 .. 繞進去");
+        assert!(!inside_agy_conv_dir(&[s(&brain.join("a b").join("x.md"))], &brain, base), "編號格式不對");
+        assert!(!inside_agy_conv_dir(&[s(&d.path().join(".gemini").join("oauth_creds.json"))], &brain, base), "brain 以外的 .gemini");
+        assert!(!inside_agy_conv_dir(&[s(&c1.join("a.md")), s(&d.path().join("x"))], &brain, base), "有一個在外面就不行");
+        // 相對路徑以工作資料夾為準，不是 brain
+        assert!(!inside_agy_conv_dir(&["a.md".into()], &brain, base));
     }
 
     #[cfg(windows)]
@@ -761,23 +781,26 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn inside_agy_scratch_經過_junction_跳出去的不算_scratch_本身是_junction_也不算() {
+    fn inside_agy_conv_dir_經過_junction_跳出去的不算_對話資料夾本身是_junction_也不算() {
         let d = tempfile::tempdir().unwrap();
         let out = d.path().join("elsewhere");
         std::fs::create_dir_all(&out).unwrap();
-        let sc = agy_scratch(d.path(), "c1").unwrap();
-        std::fs::create_dir_all(&sc).unwrap();
-        junction(&sc.join("j"), &out);
-        assert!(!inside_agy_scratch(&[s(&sc.join("j").join("x.txt"))], &sc, d.path()));
+        let brain = agy_brain(d.path());
+        let c1 = brain.join("c1");
+        std::fs::create_dir_all(&c1).unwrap();
+        junction(&c1.join("j"), &out);
+        assert!(!inside_agy_conv_dir(&[s(&c1.join("j").join("x.txt"))], &brain, d.path()));
         std::fs::write(out.join("e.txt"), "x").unwrap();
-        assert!(!inside_agy_scratch(&[s(&sc.join("j").join("e.txt"))], &sc, d.path()), "已經存在的檔也一樣");
-        // scratch 自己是 junction（指到別處）：整個不放行
-        let sc2 = agy_scratch(d.path(), "c2").unwrap();
-        std::fs::create_dir_all(sc2.parent().unwrap()).unwrap();
-        junction(&sc2, &out);
-        assert!(!inside_agy_scratch(&[s(&sc2.join("x.txt"))], &sc2, d.path()));
-        // 對照：正常的 scratch 放行（證明上面不是因為別的原因失敗）
-        assert!(inside_agy_scratch(&[s(&sc.join("x.txt"))], &sc, d.path()));
+        assert!(!inside_agy_conv_dir(&[s(&c1.join("j").join("e.txt"))], &brain, d.path()), "已經存在的檔也一樣");
+        // 對話資料夾自己是 junction（指到別處）：不放行
+        junction(&brain.join("c2"), &out);
+        assert!(!inside_agy_conv_dir(&[s(&brain.join("c2").join("x.txt"))], &brain, d.path()));
+        // 對話資料夾裡的 junction 指進別段的 .system_generated：也不放行
+        std::fs::create_dir_all(brain.join("c3").join(".system_generated")).unwrap();
+        junction(&c1.join("k"), &brain.join("c3").join(".system_generated"));
+        assert!(!inside_agy_conv_dir(&[s(&c1.join("k").join("x.txt"))], &brain, d.path()));
+        // 對照：正常的對話資料夾放行（證明上面不是因為別的原因失敗）
+        assert!(inside_agy_conv_dir(&[s(&c1.join("x.txt"))], &brain, d.path()));
     }
 
     #[test]

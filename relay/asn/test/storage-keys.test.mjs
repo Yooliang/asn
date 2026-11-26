@@ -41,7 +41,7 @@ test('解析 Rust 的底線：extra 不算欄位、八個設定檔都解析得�
   const d = rustDocs(read(DOCS_RS))
   assert.equal(Object.keys(d).length, 8)
   for (const f of Object.values(d)) assert.ok(!f.includes('extra'))
-  assert.equal(d.bridge.length, 14)
+  assert.equal(d.bridge.length, 13)
 })
 
 test('語音設定檔：前端預設設定的欄位 ＝ Rust VoiceDoc 的欄位', () => {

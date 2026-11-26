@@ -352,8 +352,6 @@ mod launch_bridge {
         pub compact_handoff_off: bool,
         #[serde(deserialize_with = "lenient_n")]
         pub compact_handoff_n: u32,
-        #[serde(deserialize_with = "lenient")]
-        pub gemini_full_access: bool,
         #[serde(flatten)]
         pub extra: Map<String, Value>,
     }
@@ -374,7 +372,6 @@ mod launch_bridge {
                 remote_input_off: false,
                 compact_handoff_off: false,
                 compact_handoff_n: default_n(),
-                gemini_full_access: false,
                 extra: Map::new(),
             }
         }

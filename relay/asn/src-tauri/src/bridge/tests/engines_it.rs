@@ -741,7 +741,7 @@ async fn agy_寫到放登入資料的地方_不給換位置_直接中止() {
 }
 
 #[tokio::test]
-async fn agy_目前這段對話的_scratch_可寫_同一段對話的其他地方與別段對話的_scratch_不行() {
+async fn agy_任一段對話的資料夾可寫_系統目錄_brain_本身與登入資料不行() {
     let uh = agy_home();
     let up = uh.path().display().to_string();
     let gate = WriteGate::new();
@@ -755,19 +755,23 @@ async fn agy_目前這段對話的_scratch_可寫_同一段對話的其他地方
     std::fs::create_dir_all(&scratch).unwrap();
     std::fs::create_dir_all(brain.join(&sid).join(".system_generated")).unwrap();
     std::fs::create_dir_all(brain.join("conv-other").join("scratch")).unwrap();
-    let ok = scratch.join("pr_comment.md");
-    gate.open(&ok);
-    h.put_pull(to_agent(2, "Gemini", &format!("@@WRITE {}", ok.display()))).await;
-    h.wait("寫進 scratch", |h| h.bodies().len() == 2).await;
-    assert!(h.bodies()[1].contains("已寫入"), "{}", h.bodies()[1]);
-    assert!(ok.exists());
-    // 同一段對話的 .system_generated、別段對話的 scratch：在 ~/.gemini 底下，直接中止
-    for (i, bad) in [brain.join(&sid).join(".system_generated").join("x.txt"), brain.join("conv-other").join("scratch").join("x.txt")].iter().enumerate() {
+    // 放行：scratch、這段對話資料夾本身的檔（分析檔）、別段對話的資料夾（換班後改舊段寫的文件）
+    let oks = [scratch.join("pr_comment.md"), brain.join(&sid).join("analysis.md"), brain.join("conv-other").join("old.md")];
+    for (i, ok) in oks.iter().enumerate() {
+        gate.open(ok);
+        h.put_pull(to_agent(2 + i as u32, "Gemini", &format!("@@WRITE {}", ok.display()))).await;
+        h.wait("寫進對話資料夾", |h| h.bodies().len() == 2 + i).await;
+        assert!(h.bodies()[1 + i].contains("已寫入"), "{}", h.bodies()[1 + i]);
+        assert!(ok.exists(), "{}", ok.display());
+    }
+    // 中止：任一段的 .system_generated、直接寫在 brain 底下、~/.gemini 的登入資料
+    let bads = [brain.join(&sid).join(".system_generated").join("x.txt"), brain.join("conv-other").join(".system_generated").join("x.txt"), brain.join("x.txt"), uh.path().join(".gemini").join("oauth_creds.json")];
+    for (i, bad) in bads.iter().enumerate() {
         let n = h.bodies().len();
-        h.put_pull(to_agent(3 + i as u32, "Gemini", &format!("@@WRITE {}", bad.display()))).await;
+        h.put_pull(to_agent(10 + i as u32, "Gemini", &format!("@@WRITE {}", bad.display()))).await;
         h.wait("被擋", |h| h.bodies().len() > n).await;
         assert!(h.bodies()[n].contains("想做不被允許的事"), "{}", h.bodies()[n]);
-        gate.killed_before_write(bad, "scratch 以外的位置").await;
+        gate.killed_before_write(bad, "對話資料夾以外的位置").await;
     }
 }
 
