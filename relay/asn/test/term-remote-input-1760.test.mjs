@@ -24,24 +24,28 @@ globalThis.Terminal = class {
   dispose() { this.disposed = true }
 }
 globalThis.document ??= { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' }
+import { rigHub } from './helpers/rig-hub.mjs'
 const { RemoteInput, INPUT_TEXT } = await import('../ui/lib/term-remote-input.mjs')
 const { FRAME_EVENT, END_EVENT } = await import('../ui/lib/term-remote.mjs')
 
 const tick = (ms = 0) => new Promise(r => setTimeout(r, ms))
 const until = async (fn, what) => { for (let i = 0; i < 200 && !fn(); i++) await tick(); assert.ok(fn(), what) }
 
-/** 假介面：每次 start 回 i1、i2…；listen 立刻註冊完 */
+/** 假介面：每次 start 回 i1、i2…；事件走真的事件中心（#2038 PR-6），底層 listen 立刻註冊完。
+ *  handlers[事件]：底層有人掛著才有值（呼叫就是推一個事件進去）；沒人掛著是 undefined */
+const hubOf = new WeakMap()
 function fakeApi() {
-  const handlers = {}, calls = []
+  const rh = rigHub(), calls = []
+  const handlers = new Proxy({}, { get: (_, evt) => (rh.liveCount(String(evt)) > 0 ? payload => rh.fire(String(evt), payload) : undefined) })
   let n = 0
   const api = {
-    listen: async (event, fn) => { handlers[event] = fn; return () => { if (handlers[event] === fn) delete handlers[event] } },
     start: async () => { calls.push('start'); return { id: 'i' + ++n, expires_s: Math.floor(Date.now() / 1000) + 600 } },
     stop: async id => { calls.push('stop:' + id) },
     send: async () => {},
     pause: async () => {},
   }
-  return { api, handlers, calls }
+  hubOf.set(api, rh)
+  return { api, handlers, calls, rh }
 }
 
 const allUnmounts = []
@@ -50,7 +54,7 @@ test.after(() => { for (const f of allUnmounts) f() })   // 收掉每一格，�
 function mount(api, props = {}) {
   hooks.mounted.length = 0; hooks.unmount.length = 0; watchers.length = 0; terms.length = 0
   const events = []
-  const p = { api, node: 'H', name: '小乙', machine: '家用機', active: true, snap: null, barInline: true, ...props }
+  const p = { api, eventHub: hubOf.get(api).hub, node: 'H', name: '小乙', machine: '家用機', active: true, snap: null, barInline: true, ...props }
   const st = RemoteInput.setup(p, { emit: (name, payload) => events.push([name, payload]) })
   st.host.value = { isConnected: true, addEventListener() {}, removeEventListener() {} }
   for (const f of hooks.mounted) f()
@@ -158,6 +162,7 @@ test('#1760-3：active 變 false 時照結束流程收掉（通知那台結束�
   await until(() => v.st.phase.value === 'waiting', '連上')
   v.st.sendLine('排著的一句')
   v.events.length = 0
+  assert.equal(typeof f.handlers[FRAME_EVENT], 'function', '解除前先確認真的掛著（不然「已解除」是空集合恆真）')
   v.p.active = false; flush()
   assert.equal(v.st.phase.value, 'ended')
   assert.ok(f.calls.includes('stop:i1'), '通知那台結束')

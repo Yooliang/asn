@@ -44,6 +44,7 @@ export function sendError(e) {
 export const RemoteInput = {
   props: {
     api: { type: Object, required: true },        // lib/tauri.mjs 的 remoteInputApi
+    eventHub: { type: Object, required: true },   // 事件中心（#2038）：收畫面、收結束都走它
     node: { type: String, required: true },
     name: { type: String, required: true },
     machine: { type: String, default: '' },
@@ -148,6 +149,7 @@ export const RemoteInput = {
       phase.value = 'starting'; note.value = ''; soon.value = false; warn.value = ''; lastDropped = 0
       try {
         const Terminal = await loadXterm()
+        if (!current()) return   // xterm 載入期間已卸載或又重新發起：不訂閱，免得訂閱沒人解除（asn真 一審）
         // 有最後一幅畫面（snap）：先建 xterm、把原文寫進去，等連上那台的這段保留原本的彩色畫面（#1762）。沒有就照舊，連上了才建
         if (props.snap !== null) {
           await nextTick()
@@ -158,20 +160,19 @@ export const RemoteInput = {
           wireTerm()
           term.write(frameToWrite({ text: props.snap }))
         }
-        // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）
-        // 註冊完時這一次已作廢（收掉、重新發起、active 變 false）：自己註冊的馬上解除，不動新一次的
-        const offF = await props.api.listen(FRAME_EVENT, f => {
+        // 事件走事件中心（#2038）：訂閱同步回傳取消函式，立刻存起來，cleanup 隨時能取消（作廢的由橋的世代號擋）。
+        // 底層監聽註冊完（ready）之前不能發起，不然發起後馬上到的第一幅會掉
+        offFrame = props.eventHub.subscribe(FRAME_EVENT, f => {
           if (!f) return
           if (!id) { pendingFrame = f; return }   // start 還沒回來、不知道這次的 id：先留著，回來後比對 id 再補畫
           if (f.id !== id) return
           if (!term) { pendingFrame = f; return }
           drawFrame(f)
         })
-        if (!current()) { offF?.(); return }
-        offFrame = offF
-        const offE = await props.api.listen(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
-        if (!current()) { offE?.(); return }
-        offEnd = offE
+        offEnd = props.eventHub.subscribe(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
+        // 註冊失敗會丟錯，接到下面的 catch → inputStartError；等的期間已經卸載／換了一次就不管結果（不印、不 finish 已卸載的元件）
+        try { await props.eventHub.readyFor([FRAME_EVENT, END_EVENT]) } catch (e) { if (!current()) return; throw e }
+        if (!current()) return
         // 手機的 start 先等本人確認（生物辨識）：確認回來時這個畫面已經收掉就不送（電腦版不看第四個參數）
         const r = await props.api.start(props.node, props.name, props.machine, { wanted: current })
         // 這次已經開始了才作廢：要結束，不然那台會一直送到到期

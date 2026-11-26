@@ -1749,6 +1749,7 @@ const app = createApp({
     }
 
     return {
+      eventHub: core?.hub ?? null,   // 終端畫面的事件走這座（#2038 PR-6）；沒登入時 core 是 null，但終端元件只在登入後的對話頁才渲染
       itemIcon, isDangerItem, tabIcon, tabIconOf,
       mobileRemoteViewApi, mobileRemoteInputApi, selfNode: computed(() => info.node),   // 看別台電腦夥伴的終端（案 A：對話頁「訊息／終端」切換）、在下方輸入框打字（#1378）；發起先過生物辨識，不能用電腦版的 remoteViewApi／remoteInputApi
       onboard, onboardApi, finishOnboard, ONBOARD_TEXT, acct, sealNote, nameDraft, nameErr, commitName, wakeDraft, wakeErr, commitWake, AI_WAKE_LIMIT_LABEL, AI_WAKE_LIMIT_NOTE,

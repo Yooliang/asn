@@ -108,7 +108,7 @@ export class AsnCore {
     this.itemFails = new Map() // 信件 id → 處理失敗次數
     this.rosterLoaded = false
     this.contextWatch = createContextWatch()   // 上下文升破 90％的提醒記錄（只在記憶體）
-    this.hub = hub ?? createEventHub({ log: m => this.log(m) })   // 訂閱與扇出都委派給事件中心（#2038）；Rust 事件的橋由 tauri.mjs 的 bindRustEvents 接上
+    this.hub = hub ?? createEventHub({ log: m => this.log(m), warn: m => console.warn('[ASN]', m) })   // 訂閱與扇出都委派給事件中心（#2038）；Rust 事件的橋由 tauri.mjs 的 bindRustEvents 接上
     this.timers = []
     this.pulling = false
     this.again = false

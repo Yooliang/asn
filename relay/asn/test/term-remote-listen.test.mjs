@@ -1,7 +1,8 @@
-// 看別台終端（RemoteView）：listen 是非同步的，註冊完時那一次發起可能已經作廢（這一格收掉、或重新發起）。
-// 作廢的那一次註冊完的監聽要馬上解除，不能留著（asn真 #1069 的意見）。
+// 看別台終端（RemoteView）：事件中心的底層監聽註冊是非同步的，註冊完時那一次發起可能已經作廢（這一格收掉、或重新發起）。
+// 作廢的那一次註冊完的監聽要解除、也不能發起（asn真 #1069 的意見；#2038 PR-6 起改由事件中心的橋保證，這裡用真的事件中心＋延遲放行的假 listen 驗）
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { rigHub } from './helpers/rig-hub.mjs'
 
 // RemoteView 在模組載入時從 globalThis.Vue 取 ref／onMounted／onBeforeUnmount／nextTick：先放假的，再載入
 const hooks = { mounted: [], unmount: [] }
@@ -18,94 +19,80 @@ globalThis.Vue = {
 }
 globalThis.Terminal = class { attachCustomWheelEventHandler() {} open() {} write() {} dispose() {} }
 globalThis.document ??= { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' }
-const { RemoteView, listenWhile, FRAME_EVENT, END_EVENT } = await import('../ui/lib/term-remote.mjs')
+const { RemoteView, FRAME_EVENT, END_EVENT } = await import('../ui/lib/term-remote.mjs')
 
 const tick = () => new Promise(r => setTimeout(r, 0))
 
-/** 假介面：listen 要等測試放行才註冊完；記下誰還掛著 */
+/** 假介面（沒有 listen）＋延遲放行的事件中心：底層監聽要等測試放行才註冊完 */
 function fakeApi() {
-  const live = new Set(), pending = [], calls = []
+  const rh = rigHub({ gated: true }), calls = []
   const api = {
-    listen: (event, fn) => new Promise(resolve => pending.push(() => { const h = { event, fn }; live.add(h); resolve(() => live.delete(h)) })),
     start: async (...a) => { calls.push(['start', ...a]); return { id: 'v1', expires_s: Math.floor(Date.now() / 1000) + 600 } },
     stop: async id => { calls.push(['stop', id]) },
     pause: async () => {},
   }
-  const release = async () => { while (pending.length) { pending.shift()(); await tick() } }
-  return { api, live, pending, calls, release }
+  const release = async () => { await rh.release(); await tick() }
+  return { api, rh, calls, release }
 }
 
-function mount(api, extra = {}, emit = () => {}) {
+function mount(f, extra = {}, emit = () => {}) {
   hooks.mounted.length = 0; hooks.unmount.length = 0; watchers.length = 0
-  const st = RemoteView.setup({ api, node: 'H', name: '小乙', machine: '家用機', active: true, ...extra }, { emit })
+  const st = RemoteView.setup({ api: f.api, eventHub: f.rh.hub, node: 'H', name: '小乙', machine: '家用機', active: true, ...extra }, { emit })
   st.host.value = { isConnected: true }
-  for (const f of hooks.mounted) f()
-  return { st, unmount: () => { for (const f of hooks.unmount) f() } }
+  for (const fn of hooks.mounted) fn()
+  return { st, unmount: () => { for (const fn of hooks.unmount) fn() } }
 }
-
-test('listenWhile：註冊完時還算數就留著；已作廢就馬上解除、回 null', async () => {
-  const f = fakeApi()
-  let ok = true
-  const p = listenWhile(f.api, FRAME_EVENT, () => {}, () => ok)
-  ok = false
-  await f.release()
-  assert.equal(await p, null)
-  assert.equal(f.live.size, 0, '作廢的那一次不留監聽')
-  const q = listenWhile(f.api, END_EVENT, () => {}, () => true)
-  await f.release()
-  assert.equal(typeof (await q), 'function')
-  assert.equal(f.live.size, 1)
-})
 
 test('listen 故意延遲，期間把那一格收掉：之後 frame 與 end 兩個監聽都已經解除，也沒有發起', async () => {
   const f = fakeApi()
-  const v = mount(f.api)
+  const v = mount(f)
   await tick()
-  assert.equal(f.pending.length, 1, 'frame 監聽還沒註冊完')
+  assert.equal(f.rh.pendingGates(), 2, 'frame 與 end 兩個底層監聽都還沒註冊完（訂閱是同步的）')
+  assert.deepEqual([...f.rh.registered].sort(), [END_EVENT, FRAME_EVENT].sort())
   v.unmount()            // 這一格收掉
   await f.release()      // 之後 listen 才陸續註冊完
-  await tick()
-  assert.equal(f.live.size, 0, '兩個監聽都要解除，不能留著')
+  assert.equal(f.rh.liveTotal(), 0, '兩個監聽都要解除，不能留著')
+  assert.equal(f.rh.state.offs, 2, '晚到的兩個都被取消（不是根本沒註冊）')
   assert.ok(!f.calls.some(c => c[0] === 'start'), '收掉了就不發起')
 })
 
 test('frame 註冊完、end 還在等時收掉：兩個都解除', async () => {
   const f = fakeApi()
-  const v = mount(f.api)
+  const v = mount(f)
   await tick()
-  f.pending.shift()()    // frame 註冊完
+  f.rh.take(1)()         // frame 註冊完
   await tick()
-  assert.equal(f.live.size, 1)
+  assert.equal(f.rh.liveTotal(), 1, '先有一個掛著')
   v.unmount()
   await f.release()      // end 才註冊完
-  await tick()
-  assert.equal(f.live.size, 0)
+  assert.equal(f.rh.liveTotal(), 0)
+  assert.equal(f.rh.state.offs, 2)
   assert.ok(!f.calls.some(c => c[0] === 'start'))
 })
 
 test('重新發起時，舊那一次晚註冊完的監聽也解除；新的一次照常留兩個', async () => {
   const f = fakeApi()
-  const v = mount(f.api)
+  const v = mount(f)
   await tick()
-  const first = f.pending.shift()   // 舊那一次的 frame 監聽先卡著
+  const olds = f.rh.take(2)         // 舊那一次的兩個監聽先卡著
   v.st.again()                      // 重新發起
   await tick()
+  assert.equal(f.rh.pendingGates(), 2, '新的一次也訂了 frame 與 end')
   await f.release()                 // 新的一次註冊完
-  await tick()
-  first()                           // 舊的這時才註冊完
-  await tick()
-  assert.equal(f.live.size, 2, '只留新那一次的 frame 與 end')
-  assert.deepEqual([...f.live].map(h => h.event).sort(), [END_EVENT, FRAME_EVENT].sort())
+  olds()                            // 舊的這時才註冊完
+  await f.rh.hub.ready(); await tick()
+  assert.equal(f.rh.liveTotal(), 2, '只留新那一次的 frame 與 end')
+  assert.equal(f.rh.liveCount(FRAME_EVENT), 1)
+  assert.equal(f.rh.liveCount(END_EVENT), 1)
   v.unmount()
-  assert.equal(f.live.size, 0, '收掉時全部解除')
+  assert.equal(f.rh.liveTotal(), 0, '收掉時全部解除')
 })
 
-/** 開到「正在看」：放行 listen、等發起、對 frame 監聽推一幅 */
+/** 開到「正在看」：放行監聽、等發起、推一幅畫面 */
 async function watching(f, v) {
   for (let i = 0; i < 40 && v.st.phase.value !== 'watching'; i++) {
-    await f.release(); await tick()
-    const h = [...f.live].find(x => x.event === FRAME_EVENT)
-    if (h && f.calls.some(c => c[0] === 'start')) h.fn({ id: 'v1', text: '測試通過', meta: { cols: 120, rows: 40 } })
+    await f.release()
+    if (f.rh.liveCount(FRAME_EVENT) > 0 && f.calls.some(c => c[0] === 'start')) f.rh.fire(FRAME_EVENT, { id: 'v1', text: '測試通過', meta: { cols: 120, rows: 40 } })
   }
   assert.equal(v.st.phase.value, 'watching', '收到第一幅後進到正在看')
   flush()
@@ -114,7 +101,7 @@ async function watching(f, v) {
 
 test('電腦版（barInline false）：狀態事件跟著等待→正在看走，卸載後發 null（狀態列不殘留）', async () => {
   const f = fakeApi(), seen = []
-  const v = mount(f.api, { barInline: false }, (name, payload) => { if (name === 'status') seen.push(payload) })
+  const v = mount(f, { barInline: false }, (name, payload) => { if (name === 'status') seen.push(payload) })
   assert.equal(seen[0]?.level, 'ask', '一開始就是等待')
   await watching(f, v)
   // #1865：正在看（可以送出打字）不再佔狀態列；看的是哪台哪位寫在輸入框提示字
@@ -126,7 +113,7 @@ test('電腦版（barInline false）：狀態事件跟著等待→正在看走�
 
 test('手機（barInline 預設 true）：不發 status 事件，也不在卸載時發', async () => {
   const f = fakeApi(), seen = []
-  const v = mount(f.api, { barInline: true }, name => { seen.push(name) })
+  const v = mount(f, { barInline: true }, name => { seen.push(name) })
   await watching(f, v)
   v.unmount()
   assert.ok(!seen.includes('status'), '手機不該有 status 事件：' + seen.join(','))

@@ -3,6 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { createTermViewSession } from '../ui/lib/term-view.mjs'
+import { rigHub } from './helpers/rig-hub.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(['..', ...p].join('/'), import.meta.url), 'utf8')
 
@@ -12,16 +13,18 @@ test('前端 API：pause 對應到 term_view_set，帶觀看編號與旗標', ()
 })
 
 test('工作階段：開好後把觀看編號交給 onOpened（隱藏中開好的要補送暫停）', async () => {
-  const opened = []
+  const opened = [], lost = []
   const s = createTermViewSession({
+    onLost: r => lost.push(r),
     open: async () => 5,
     close: async () => {},
-    listen: async () => () => {},
+    hub: rigHub().hub,
     createTerm: async () => ({ resize() {}, write() {}, dispose() {} }),
     onOpened: id => opened.push(id),
   })
   await s.start()
   assert.deepEqual(opened, [5])
+  assert.deepEqual(lost, [])
   assert.equal(s.viewId(), 5)
   s.stop()
 })

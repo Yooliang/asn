@@ -119,9 +119,9 @@ test('#1029 收到的畫面直接是內容（lib/tauri.mjs 的 listen 已經拆�
   for (const f of ['../ui/lib/term-remote.mjs', '../ui/lib/term-remote-input.mjs']) {
     const code = read(f).replace(/^\s*\/\/.*$/gm, '')
     assert.ok(!code.includes('.payload'), `${f} 不能再讀 .payload（每一幅都會被丟掉，畫面一直停在「等」）`)
-    // 看畫面那支改經 listenWhile（作廢就解除），回呼的寫法一樣
-    assert.match(code, /listen(While\(props\.api, |\()FRAME_EVENT, f => \{/)
-    assert.match(code, /listen(While\(props\.api, |\()END_EVENT, e => \{ if \(e\?\.id === id\) finish\(e\.text \|\| ''\) \}/)
+    // 兩支都走事件中心（#2038 PR-6）：訂閱同步回傳取消函式，回呼的寫法一樣
+    assert.match(code, /eventHub\.subscribe\(FRAME_EVENT, f => \{/)
+    assert.match(code, /eventHub\.subscribe\(END_EVENT, e => \{ if \(e\?\.id === id\) finish\(e\.text \|\| ''\) \}/)
   }
 })
 

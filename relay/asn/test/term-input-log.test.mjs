@@ -2,6 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { rigHub } from './helpers/rig-hub.mjs'
 import { IME_RECENT_MS, createTermViewSession, imeTracker } from '../ui/lib/term-view.mjs'
 
 function fakeTextarea() {
@@ -26,15 +27,17 @@ test('輸入法組字：組字中、剛組完的那一筆算組字，過一下�
 })
 
 test('送字時帶上組字旗標，給 Rust 端記數量', async () => {
-  const sent = []
+  const sent = [], lost = []
   const s = createTermViewSession({
+    onLost: r => lost.push(r),
     open: async () => 7,
     close: async () => {},
-    listen: async () => () => {},
+    hub: rigHub().hub,
     createTerm: async () => ({ write() {}, resize() {}, dispose() {} }),
     sendInput: async (id, data, paste, ime) => { sent.push([id, data, paste, ime]) },
   })
   await s.start()
+  assert.deepEqual(lost, [], '工作階段沒有被吞進「讀不到」')
   s.input('我', false, true)
   s.input('a')
   await s.inputFlushed()

@@ -129,7 +129,7 @@ export function latestVisible(following, frozen = false) {
 
 /**
  * 一次觀看：開、收畫面、關。deps：
- *   open() → 觀看編號；close(編號)；listen(事件, fn) → 取消函式；
+ *   open() → 觀看編號；close(編號)；hub（事件中心：subscribe(事件, fn) → 取消函式、ready() → Promise）；
  *   createTerm({ cols, rows }) → { resize, write, dispose }（可以是 Promise）；onLost(原因)；onPainted(一幅，選填)；
  *   sendInput(編號, 字, 是不是貼上)（選填，沒給就只看）；onInputError({ message, lost_bytes })（選填）
  */
@@ -230,22 +230,20 @@ export function createTermViewSession(deps) {
   }
   const start = async () => {
     try {
-      const add = async (evt, fn) => {
-        const u = await deps.listen(evt, fn)
-        if (stopped) { u(); return }
-        unlisten.push(u)
-      }
-      await add(FRAME_EVENT, f => {
+      if (stopped) return
+      // 事件走事件中心（#2038）：訂閱同步回傳取消函式，stop() 隨時能取消；底層監聽註冊完（ready）才 open，開好前到的畫面才接得住
+      unlisten.push(deps.hub.subscribe(FRAME_EVENT, f => {
         if (viewId === null) early.set(f.view_id, f)
         else if (f.view_id === viewId) enqueue(f)
-      })
-      await add(INPUT_ERROR_EVENT, e => {
+      }))
+      unlisten.push(deps.hub.subscribe(INPUT_ERROR_EVENT, e => {
         if (viewId !== null && e.view_id === viewId) deps.onInputError?.({ message: String(e.message ?? ''), lost_bytes: Number(e.lost_bytes) || 0 })
-      })
-      await add(CLOSED_EVENT, c => {
+      }))
+      unlisten.push(deps.hub.subscribe(CLOSED_EVENT, c => {
         if (viewId === null) early.set(c.view_id, { closed: c.reason })
         else if (c.view_id === viewId) { console.info('[ASN] 終端畫面結束', c.reason); lost(c.reason) }
-      })
+      }))
+      await deps.hub.readyFor([FRAME_EVENT, INPUT_ERROR_EVENT, CLOSED_EVENT])   // 註冊失敗會丟錯，接到下面的 catch → lost（畫面上有提示，不是空畫面）
       if (stopped) return
       const id = await deps.open()
       if (stopped) { await deps.close(id); return }   // 開到一半就被關掉：不留著背景讀畫面
@@ -298,6 +296,7 @@ export const TermView = {
   name: 'TermView',
   props: {
     api: { type: Object, required: true },    // lib/tauri.mjs 的 termViewApi
+    eventHub: { type: Object, required: true },   // 事件中心（#2038）：收畫面、收結束、打字失敗都走它
     id: { type: String, default: '' },        // 終端編號（ASN 開的 grok、agy）
     name: { type: String, default: '' },      // 夥伴視窗名（Claude）
     active: { type: Boolean, default: true },   // 看不到時不讀窗格
@@ -431,7 +430,7 @@ export const TermView = {
       session = createTermViewSession({
         open: () => props.api.open(target),
         close: viewId => props.api.close(viewId),
-        listen: props.api.listen,
+        hub: props.eventHub,
         sendInput: props.api.input ? (viewId, data, paste, imeFlag) => props.api.input(viewId, data, paste, imeFlag) : undefined,
         onInputError: e => { inputError.value = e.lost_bytes ? `${plainMessage(e)}（有 ${e.lost_bytes} 位元組沒送出）` : plainMessage(e) },
         createTerm: async size => {
