@@ -235,6 +235,30 @@ test('接線：older／attach-done 的退訂在 done／finish 裡同步 off()（
   assert.ok(!/\bun\b\s*=|if \(un\)/.test(chat), '舊的 un 變數整段刪掉')
 })
 
+// 西川二審（#2361）指出拿掉這三行時其他測試仍全綠：chat.js 是頂層腳本，閉包單元測試跑不到，用原始碼接線守住
+test('接線：attach 等 readyFor 期間已逾時結束，就不送 asn:cmd（if (over) return 在 readyFor 與 emit 之間）', () => {
+  const chat = read('chat.js')
+  const iReady = chat.indexOf("await eventHub.readyFor(['asn:attach-done'])")
+  const iEmit = chat.indexOf("emit('asn:cmd', { op: 'attach'", iReady)
+  assert.ok(iReady >= 0 && iEmit >= 0, `兩段都要找得到：${iReady} ${iEmit}`)
+  assert.ok(/\bif \(over\) return\b/.test(chat.slice(iReady, iEmit)), 'readyFor 之後、送出之前要先看 over')
+})
+
+test('接線：older 等 readyFor 期間已逾時結束，就不送 asn:cmd（emit 包在 if (!over) 裡）', () => {
+  const chat = read('chat.js')
+  assert.ok(/if \(!over\) emit\('asn:cmd', \{ op: 'older'/.test(chat), 'older 的送出要包在 if (!over) 裡')
+})
+
+test('接線：list.js 的 asn:cmd 接收處後面緊接 await core.hub.ready()（第一扇對話視窗的 hello 不能比它早到）', () => {
+  const js = read('list.js').replace(/\r\n/g, '\n')   // Windows 簽出是 CRLF
+  const iOn = js.indexOf("core.hub.on('asn:cmd', async c => {")
+  assert.ok(iOn >= 0, '找得到 list.js 的 asn:cmd 接收處')
+  const iEnd = js.indexOf('\n})\n', iOn)
+  assert.ok(iEnd > iOn, '找得到接收處的結尾')
+  const next = js.slice(iEnd + 4).split('\n').find(l => l.trim() !== '')
+  assert.match(next ?? '', /^await core\.hub\.ready\(\)/, `接收處之後第一行要是 await core.hub.ready()，實際是：${next}`)
+})
+
 test('接線：panel 的視窗大小監聽掛在 await readyFor 之前（掛載到就緒之間調整大小不漏記）', () => {
   const js = read('panel.js')
   const iMounted = js.indexOf('onMounted(async () => {')
