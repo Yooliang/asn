@@ -48,8 +48,8 @@ test('事件表的每一種 Rust 都真的會送（表不放死事件）', () =>
 })
 
 test('掃描有抓到東西：事件數對得上表（掃描規則壞掉不會假綠）', () => {
-  assert.equal(rustNames.size, 26)
-  assert.equal(tableNames.size, 26)
+  assert.equal(rustNames.size, 27)
+  assert.equal(tableNames.size, 27)
   for (const must of ['agent-setup', 'asn:frame', 'auth-signed-out', 'attach-cache-cleared', 'term-view-remote-input-stalled', 'term-view-remote-end']) assert.ok(rustNames.has(must), `常數／間接送出的事件也要抓到：${must}`)
 })
 

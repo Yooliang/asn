@@ -10,15 +10,17 @@
 //! 透明子視窗（`run_on_main_thread` 建立）都在事件迴圈的主執行緒，符合條件。
 //! 滑過、按下、點擊由最上層視窗的 WM_NCMOUSEMOVE／WM_NCMOUSELEAVE／WM_NCLBUTTONDOWN／WM_NCLBUTTONUP 處理。
 //!
-//! 失敗一律寫 log（`elog!`，會進 ui.log）：掛不上 subclass、找不到網頁容器都不會寫進 `STATES`，
+//! 失敗一律寫 log（`snap_log`，會進 ui.log）：掛不上 subclass、找不到網頁容器都不會寫進 `STATES`，
 //! 由 `snap_cover_win.rs` 收掉蓋板，下一次前端回報矩形時重試。
 use super::snap_hit::{containers_to_attach, hit_answer, install_verdict, lparam_xy, move_event, Hit, InstallError, Role, HT_MAXBUTTON};
-use super::{reset_on_layout_change, step, BtnState, Ev, PxRect, Step, EVENT};
+use super::snap_log::{self, bump, near_rect, NEAR_PX};
+use super::{reset_on_layout_change, step, BtnState, Ev, PxRect, Step, SNAP_MAX_EVENT};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use tauri::{AppHandle, Emitter};
-use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT};
 use windows_sys::Win32::UI::Shell::{DefSubclassProc, GetWindowSubclass, RemoveWindowSubclass, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
@@ -54,10 +56,19 @@ pub fn install(top: HWND, app: AppHandle, label: String, raw: PxRect, rect: PxRe
     let found = find_containers(top);
     let attached = found.iter().filter(|&&c| attach_container(top, c)).count();
     if let Err(e) = install_verdict(top_ok, found.len(), attached) {
-        elog!("[snap] 放大鈕分割版面掛不上（{}），稍後回報矩形時重試；視窗={:#x} 容器數={} 掛成功={}", e.text(), top as usize, found.len(), attached);
+        snap_log::line(&format!("放大鈕分割版面掛不上（{}），稍後回報矩形時重試；視窗={:#x} 容器數={} 掛成功={}", e.text(), top as usize, found.len(), attached));
         detach(top, &found);
         return Err(e);
     }
+    // #2300 診斷：掛上成功時留下各層 hwnd、DPI、最上層視窗樣式
+    let containers: Vec<String> = found.iter().map(|&c| describe(c)).collect();
+    snap_log::line(&format!(
+        "掛上成功 標籤={label} 最上層=[{}] 容器數={} 掛成功={attached} 容器=[{}] 原矩形={raw:?} 命中矩形={rect:?} {}",
+        describe(top),
+        found.len(),
+        containers.join("; "),
+        style_text(top),
+    ));
     STATES.with(|s| s.borrow_mut().insert(top as isize, TopState { app, label, raw, rect, btn: BtnState::default() }));
     Ok(())
 }
@@ -93,7 +104,7 @@ pub fn sync_containers(top: HWND, log_missing: bool) {
     let found = find_containers(top);
     if found.is_empty() {
         if log_missing {
-            elog!("[snap] 找不到網頁容器（WRY_WEBVIEW），放大鈕分割版面暫時不完整；視窗={:#x}", top as usize);
+            snap_log::line(&format!("找不到網頁容器（WRY_WEBVIEW），放大鈕分割版面暫時不完整；視窗={:#x}", top as usize));
         }
         return;
     }
@@ -101,7 +112,7 @@ pub fn sync_containers(top: HWND, log_missing: bool) {
     let todo = containers_to_attach(&ids, |c| container_attached(c as HWND));
     for c in todo {
         if attach_container(top, c as HWND) {
-            elog!("[snap] 網頁容器被重建，已補掛 subclass；視窗={:#x} 容器={:#x}", top as usize, c);
+            snap_log::line(&format!("網頁容器被重建，已補掛 subclass；視窗={:#x} 容器=[{}]", top as usize, describe(c as HWND)));
         }
     }
 }
@@ -130,7 +141,102 @@ fn rect_of(top: HWND) -> Option<PxRect> {
 fn log_win_fail(what: &str, hwnd: HWND) {
     // SAFETY: GetLastError 只讀目前執行緒的錯誤碼，沒有前置條件。
     let code = unsafe { GetLastError() };
-    elog!("[snap] {what}：視窗={:#x} 錯誤碼={code}", hwnd as usize);
+    snap_log::line(&format!("{what}：視窗={:#x} 錯誤碼={code}", hwnd as usize));
+}
+
+fn class_of(h: HWND) -> String {
+    let mut buf = [0u16; 64];
+    // SAFETY: buf 長度就是傳進去的 nMaxCount；h 無效時回 0。
+    let n = unsafe { GetClassNameW(h, buf.as_mut_ptr(), buf.len() as i32) };
+    if n > 0 { String::from_utf16_lossy(&buf[..n as usize]) } else { "?".to_string() }
+}
+
+/// 診斷用：一個視窗的 hwnd、類別、DPI、螢幕矩形
+pub(super) fn describe(h: HWND) -> String {
+    // SAFETY: RECT 全零是合法初始值；GetWindowRect 失敗時維持全零。
+    let mut r: RECT = unsafe { std::mem::zeroed() };
+    // SAFETY: r 是區域變數；h 無效時回 FALSE。GetDpiForWindow 無效視窗回 0。
+    let (dpi, ok) = unsafe { (GetDpiForWindow(h), GetWindowRect(h, &mut r) != 0) };
+    let rect = if ok { format!("({},{})-({},{})", r.left, r.top, r.right, r.bottom) } else { "?".to_string() };
+    format!("hwnd={:#x} 類別={} DPI={dpi} 螢幕矩形={rect}", h as usize, class_of(h))
+}
+
+/// 診斷用：最上層視窗的樣式有沒有 WS_MAXIMIZEBOX 等
+fn style_text(top: HWND) -> String {
+    // SAFETY: 只讀視窗屬性。
+    let (style, ex) = unsafe { (GetWindowLongPtrW(top, GWL_STYLE) as u32, GetWindowLongPtrW(top, GWL_EXSTYLE) as u32) };
+    let has = |bit: u32| style & bit != 0;
+    // SAFETY: 只讀視窗狀態。
+    let (zoomed, visible) = unsafe { (IsZoomed(top) != 0, IsWindowVisible(top) != 0) };
+    format!(
+        "樣式={style:#x} MAXIMIZEBOX={} MINIMIZEBOX={} THICKFRAME={} CAPTION={} SYSMENU={} 擴充樣式={ex:#x} 已最大化={zoomed} 可見={visible}",
+        has(WS_MAXIMIZEBOX),
+        has(WS_MINIMIZEBOX),
+        has(WS_THICKFRAME),
+        has(WS_CAPTION),
+        has(WS_SYSMENU),
+    )
+}
+
+/// 診斷用：游標所在的螢幕點，WindowFromPoint 拿到哪一個視窗
+fn point_owner(sx: i32, sy: i32) -> String {
+    // SAFETY: WindowFromPoint 只查表；沒有視窗回空指標。
+    let h = unsafe { WindowFromPoint(POINT { x: sx, y: sy }) };
+    if h.is_null() { "無".to_string() } else { format!("hwnd={:#x} 類別={}", h as usize, class_of(h)) }
+}
+
+/// 診斷用：某一層收到 WM_NCHITTEST，而且點在鈕矩形附近時才記（節流）。
+/// `layer`＝"top"｜"container"；`answer`＝這一層最後回的值；`how`＝怎麼回的。
+#[allow(clippy::too_many_arguments)]
+pub(super) fn log_hit(layer: &'static str, hwnd: HWND, top: HWND, lparam: LPARAM, x: i32, y: i32, answer: LRESULT, how: &'static str) {
+    let rect = rect_of(top);
+    if !near_rect(rect, x, y, NEAR_PX) {
+        return;
+    }
+    bump(if layer == "top" { &snap_log::TOP_HITS } else { &snap_log::CONTAINER_HITS });
+    let (sx, sy) = lparam_xy(lparam);
+    snap_log::throttled(layer, &answer.to_string(), || {
+        format!(
+            "WM_NCHITTEST 層={layer} 回={answer}（{how}）視窗={:#x} 內容區座標=({x},{y}) 螢幕座標=({sx},{sy}) 放大鈕矩形={} WindowFromPoint=[{}] {}",
+            hwnd as usize,
+            rect_text(rect),
+            point_owner(sx, sy),
+            snap_log::counts(),
+        )
+    });
+}
+
+/// 診斷用：WM_NCMOUSEMOVE／WM_NCLBUTTONDOWN／UP，在鈕矩形附近才記（節流）
+fn log_nc(name: &'static str, hwnd: HWND, wparam: WPARAM, lparam: LPARAM) {
+    let Some((x, y)) = client_xy(hwnd, lparam) else { return };
+    let rect = rect_of(hwnd);
+    if !near_rect(rect, x, y, NEAR_PX) {
+        return;
+    }
+    snap_log::throttled(name, &wparam.to_string(), || {
+        format!(
+            "收到 WM_{name} 命中碼={wparam}（9＝放大鈕）視窗={:#x} 內容區座標=({x},{y}) 放大鈕矩形={} {}",
+            hwnd as usize,
+            rect_text(rect),
+            snap_log::counts(),
+        )
+    });
+}
+
+/// 診斷用：最上層視窗第一次對放大鈕回 HTMAXBUTTON 時，再記一次樣式（tao 之後可能改過）
+fn log_first_max_style(top: HWND) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static DONE: AtomicBool = AtomicBool::new(false);
+    if !DONE.swap(true, Ordering::Relaxed) {
+        snap_log::line(&format!("第一次對放大鈕回 HTMAXBUTTON 視窗={:#x} {}", top as usize, style_text(top)));
+    }
+}
+
+fn rect_text(r: Option<PxRect>) -> String {
+    match r {
+        Some(r) => format!("({},{})-({},{})", r.left, r.top, r.right, r.bottom),
+        None => "無".to_string(),
+    }
 }
 
 /// 把最上層與容器的 subclass 全部拿掉（本來就沒掛也沒關係）
@@ -198,13 +304,19 @@ unsafe extern "system" fn container_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
     match msg {
         WM_NCHITTEST => {
             let top = top as HWND;
-            if let Some((x, y)) = client_xy(top, lparam) {
+            let xy = client_xy(top, lparam);
+            if let Some((x, y)) = xy {
                 if hit_answer(Role::Container, rect_of(top), x, y) == Hit::Transparent {
+                    log_hit("container", hwnd, top, lparam, x, y, HTTRANSPARENT_RESULT, "自己回 HTTRANSPARENT");
                     return HTTRANSPARENT_RESULT;
                 }
             }
             // SAFETY: 轉交 subclass 鏈的下一個程序，參數原封不動。
-            unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+            let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+            if let Some((x, y)) = xy {
+                log_hit("container", hwnd, top, lparam, x, y, r, "交給下一層");
+            }
+            r
         }
         WM_NCDESTROY => {
             // SAFETY: 視窗要被毀了，先拿掉自己再交回；兩個呼叫都在視窗自己的執行緒。
@@ -225,15 +337,24 @@ unsafe extern "system" fn container_proc(hwnd: HWND, msg: u32, wparam: WPARAM, l
 unsafe extern "system" fn top_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, _data: usize) -> LRESULT {
     match msg {
         WM_NCHITTEST => {
-            if let Some((x, y)) = client_xy(hwnd, lparam) {
+            let xy = client_xy(hwnd, lparam);
+            if let Some((x, y)) = xy {
                 if hit_answer(Role::Top, rect_of(hwnd), x, y) == Hit::MaxButton {
+                    log_hit("top", hwnd, hwnd, lparam, x, y, HT_MAXBUTTON as LRESULT, "自己回 HTMAXBUTTON");
+                    log_first_max_style(hwnd);
                     return HT_MAXBUTTON as LRESULT;
                 }
             }
             // SAFETY: 轉交 subclass 鏈的下一個程序，參數原封不動。
-            unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+            let r = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+            if let Some((x, y)) = xy {
+                log_hit("top", hwnd, hwnd, lparam, x, y, r, "交給預設程序");
+            }
+            r
         }
         WM_NCMOUSEMOVE => {
+            bump(&snap_log::NC_MOVES);
+            log_nc("NCMOUSEMOVE", hwnd, wparam, lparam);
             let ev = move_event(wparam);
             if ev == Ev::Move {
                 // 要主動要求「離開」通知，否則收不到 WM_NCMOUSELEAVE
@@ -249,16 +370,20 @@ unsafe extern "system" fn top_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
         }
         WM_NCMOUSELEAVE => {
+            bump(&snap_log::NC_LEAVES);
+            snap_log::throttled("ncleave", "leave", || format!("收到 WM_NCMOUSELEAVE 視窗={:#x} {}", hwnd as usize, snap_log::counts()));
             feed(hwnd, Ev::Leave);
             // SAFETY: 轉交 subclass 鏈的下一個程序，參數原封不動。
             unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
         }
         // 按下與放開自己處理、不交給預設程序（預設會對 HTMAXBUTTON 進入自己的追蹤迴圈）
         WM_NCLBUTTONDOWN if wparam == HT_MAXBUTTON => {
+            log_nc("NCLBUTTONDOWN", hwnd, wparam, lparam);
             feed(hwnd, Ev::Down);
             0
         }
         WM_NCLBUTTONUP if wparam == HT_MAXBUTTON => {
+            log_nc("NCLBUTTONUP", hwnd, wparam, lparam);
             feed(hwnd, Ev::Up);
             0
         }
@@ -291,8 +416,8 @@ fn run(top: HWND, f: impl FnOnce(BtnState) -> Step) {
     });
     let Some((r, app, label)) = out else { return };
     if let Some(n) = r.notify {
-        if let Err(e) = app.emit_to(label.as_str(), EVENT, n) {
-            elog!("[snap] 通知網頁放大鈕狀態失敗（{n}）：{e}");
+        if let Err(e) = app.emit_to(label.as_str(), SNAP_MAX_EVENT, n) {
+            snap_log::line(&format!("通知網頁放大鈕狀態失敗（{n}）：{e}"));
         }
     }
     if r.toggle {

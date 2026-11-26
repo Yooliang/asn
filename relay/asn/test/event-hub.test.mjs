@@ -108,8 +108,8 @@ test('broadcast／sendTo：走注入的 emit／emitTo；沒注入就什麼都不
   await createEventHub().broadcast('a', 1)
 })
 
-test('事件表：26 種、欄位齊、已搬的 4 種都在表裡', () => {
-  assert.equal(Object.keys(RUST_EVENTS).length, 26)
+test('事件表：27 種、欄位齊、已搬的 4 種都在表裡', () => {
+  assert.equal(Object.keys(RUST_EVENTS).length, 27)
   for (const [k, v] of Object.entries(RUST_EVENTS)) {
     assert.ok(['all', 'window'].includes(v.scope), k)
     assert.ok(['desktop', 'mobile', 'both'].includes(v.platform), k)

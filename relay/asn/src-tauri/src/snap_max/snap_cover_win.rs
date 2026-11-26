@@ -7,7 +7,8 @@
 //! 命中矩形＝前端回報的鈕矩形，扣掉上緣調整大小的那一條（視窗沒最大化時）：鈕貼著視窗上緣，
 //! 不讓出來的話上緣那段拖邊縮放會被鈕吃掉。被扣掉的那條落到 tauri 的拖邊縮放子視窗（上緣回 HTTOP，邊框高度 SM_CYFRAME）。
 //! 蓋板、網頁容器、最上層視窗三處共用同一個命中矩形；鈕在畫面上的位置不動。
-use super::snap_hit::exclude_resize_border;
+use super::snap_hit::{exclude_resize_border, lparam_xy};
+use super::snap_log::{self, bump};
 use super::snap_win;
 use super::{clamp_to_client, PxRect};
 use std::ptr::{null, null_mut};
@@ -20,7 +21,7 @@ use windows_sys::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWi
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
 /// 子視窗的類別名（UTF-16，結尾 0）
-const CLASS: [u16; 21] = utf16_const(*b"ASN_SNAP_MAX_BUTTON\0\0");
+const CLASS: [u16; 18] = utf16_const(*b"AsnSnapMaxButton\0\0");
 /// 掛在最上層視窗上的 subclass 編號（wry 用 WM_USER 系列的小數字，這個取遠一點避開）
 const SUBCLASS_ID: usize = 0x1788_0001;
 
@@ -38,7 +39,14 @@ const fn utf16_const<const N: usize>(s: [u8; N]) -> [u16; N] {
 /// 任何一步失敗都寫 log、收掉蓋板、不留狀態，下一次回報矩形時整個重來。
 pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>) {
     let parent = parent as HWND;
+    snap_log::bind(&app);
     let existing = find(parent);
+    // #2300 診斷：收到回報時，最上層視窗的 DPI 與換算結果（矩形變了才記）
+    snap_log::throttled("apply", &format!("{rect:?}"), || {
+        // SAFETY: 只讀視窗的 DPI；視窗無效回 0。
+        let dpi = unsafe { GetDpiForWindow(parent) };
+        format!("套用回報 視窗={:#x} 標籤={label} DPI={dpi}（倍率 {:.2}）實體像素矩形={rect:?} 邊框高度={} 蓋板已存在={}", parent as usize, dpi as f64 / 96.0, resize_border_px(parent), !existing.is_null())
+    });
     let Some((raw, hit)) = rect.and_then(|r| client_clamped(parent, r)).and_then(|c| hit_rect(parent, c).map(|e| (c, e))) else {
         clear(parent, existing);
         return;
@@ -51,7 +59,7 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
             return;
         }
         // 有蓋板卻沒有掛成功的狀態（不應該發生）：收掉重建
-        elog!("[snap] 蓋板存在但沒有安裝狀態，收掉重建；視窗={:#x}", parent as usize);
+        snap_log::line(&format!("蓋板存在但沒有安裝狀態，收掉重建；視窗={:#x}", parent as usize));
         clear(parent, existing);
     }
     if !register_class() {
@@ -94,6 +102,8 @@ pub fn apply(parent: isize, app: AppHandle, label: String, rect: Option<PxRect>)
             DestroyWindow(child);
             RemoveWindowSubclass(parent, Some(parent_proc), SUBCLASS_ID);
         }
+    } else {
+        snap_log::line(&format!("透明蓋板已建立 蓋板=[{}] 命中矩形={hit:?}", snap_win::describe(child)));
     }
 }
 
@@ -111,7 +121,7 @@ fn clear(parent: HWND, existing: HWND) {
 fn log_fail(what: &str, hwnd: HWND) {
     // SAFETY: GetLastError 只讀目前執行緒的錯誤碼，沒有前置條件。
     let code = unsafe { GetLastError() };
-    elog!("[snap] {what}：視窗={:#x} 錯誤碼={code}", hwnd as usize);
+    snap_log::line(&format!("{what}：視窗={:#x} 錯誤碼={code}", hwnd as usize));
 }
 
 fn find(parent: HWND) -> HWND {
@@ -234,6 +244,10 @@ unsafe extern "system" fn parent_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpar
 /// 只能由系統以 WNDPROC 的約定呼叫（`RegisterClassExW` 註冊）。
 unsafe extern "system" fn cover_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if msg == WM_NCHITTEST {
+        // #2300 診斷：蓋板只會在自己的矩形內收到命中測試，所以不必再過濾矩形
+        bump(&snap_log::COVER_HITS);
+        let (sx, sy) = lparam_xy(lparam);
+        snap_log::throttled("cover", "transparent", || format!("WM_NCHITTEST 層=蓋板 回=-1（HTTRANSPARENT）視窗={:#x} 螢幕座標=({sx},{sy}) {}", hwnd as usize, snap_log::counts()));
         return HTTRANSPARENT as LRESULT;
     }
     // SAFETY: 轉交預設視窗程序，參數原封不動。

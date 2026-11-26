@@ -10,6 +10,7 @@
 //! 其他平台（Linux、macOS）：指令存在但什麼都不做，網頁的鈕照舊自己處理。
 
 mod snap_hit;
+mod snap_log;   // #2300 診斷：命中記錄（節流純函式可在任何平台測試）
 #[cfg(windows)]
 mod snap_cover_win;
 #[cfg(windows)]
@@ -133,7 +134,7 @@ pub fn reset_on_layout_change(s: BtnState) -> Step {
 }
 
 /// 前端事件名；內容是上面的 notify 字串
-pub const EVENT: &str = "asn:snap-max";
+pub const SNAP_MAX_EVENT: &str = "asn:snap-max";
 
 // ---- Tauri 指令（只有電腦版有視窗） ----
 
@@ -142,7 +143,12 @@ pub const EVENT: &str = "asn:snap-max";
 #[cfg(feature = "gui")]
 #[tauri::command]
 pub fn snap_max_set(window: tauri::Window, x: f64, y: f64, w: f64, h: f64, dpr: f64) -> Result<(), String> {
+    use tauri::Manager;
     let rect = css_to_px(CssRect { x, y, w, h }, dpr);
+    // #2300 診斷：前端回報的 CSS 矩形、devicePixelRatio 與換算後的實體像素（只有數字變了才記）
+    snap_log::bind(window.app_handle());
+    let key = format!("{x:.2},{y:.2},{w:.2},{h:.2},{dpr:.4}");
+    snap_log::throttled("set", &key, || format!("前端回報 視窗={} css=({x:.2},{y:.2},{w:.2},{h:.2}) devicePixelRatio={dpr:.4} 換算實體像素={rect:?}", window.label()));
     apply(window, rect)
 }
 
@@ -156,8 +162,10 @@ pub fn snap_max_clear(window: tauri::Window) -> Result<(), String> {
 /// 切到原生外框時由 `wins::set_frame` 同步呼叫：不等前端清，免得那 50ms 把原生標題區誤判成放大鈕
 #[cfg(feature = "gui")]
 pub fn clear_now(w: &tauri::WebviewWindow) {
+    use tauri::Manager;
     if let Err(e) = apply(w.as_ref().window(), None) {
-        elog!("[snap] 切到原生外框時清不掉放大鈕分割版面：{e}");
+        snap_log::bind(w.app_handle());
+        snap_log::line(&format!("切到原生外框時清不掉放大鈕分割版面：{e}"));
     }
 }
 

@@ -96,7 +96,7 @@ test('分割版面只留一種做法：整個 src-tauri/src 與 ui 都沒有 ASN
   for (const u of files) assert.ok(!fs.readFileSync(u, 'utf8').includes('ASN_SNAP_MODE'), `${u.pathname} 還留著 ASN_SNAP_MODE`)
   // 做法一的子視窗檔不能回來；snap_max 資料夾只留這三個檔
   const dir = new URL('../src-tauri/src/snap_max/', import.meta.url)
-  assert.deepEqual(fs.readdirSync(dir).sort(), ['snap_cover_win.rs', 'snap_hit.rs', 'snap_win.rs'])
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['snap_cover_win.rs', 'snap_hit.rs', 'snap_log.rs', 'snap_win.rs'])
   // 回 HTMAXBUTTON 的程式碼（不含註解）只能出現在 snap_hit.rs（判斷）與 snap_win.rs（最上層視窗程序）
   const hits = files.filter(u => u.pathname.endsWith('.rs') && /HT_?MAXBUTTON/.test(codeOnly(fs.readFileSync(u, 'utf8'))))
   assert.deepEqual(hits.map(u => u.pathname.split('/').pop()).sort(), ['snap_hit.rs', 'snap_win.rs'])
