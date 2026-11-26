@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn 內嵌寫入改走統一寫入後每處的類別() {
-        let sites: [(&str, &str, &str, &str, usize); 31] = [
+        let sites: [(&str, &str, &str, &str, usize); 32] = [
             ("partner_queue 名冊 forget／rename", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, v.to_string()", "SETTINGS", 2),
             ("upstream_retry 補送名單", include_str!("../bridge/core/upstream_retry.rs"), "atomic::write(&file, t.as_bytes()", "QUEUE", 1),
             ("pi.rs 收件匣", include_str!("../bridge/engines/pi.rs"), "atomic::write(&target, body.as_bytes()", "QUEUE", 1),
@@ -421,7 +421,8 @@ mod tests {
             ("quota_core/merge 日誌截半", include_str!("../quota_core/merge.rs"), "atomic::write(p, keep.as_bytes()", "STATE", 1),
             // 2a 已改、這張順手把「名冊與補送」以外的同檔舊呼叫也釘住
             ("partner_queue 名冊 remember", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS", 1),
-            ("bridge/pending.rs", include_str!("../bridge/pending.rs"), "atomic::write(file,", "QUEUE", 1),
+            ("bridge/core.rs pending 存檔", include_str!("../bridge/core.rs"), "atomic::write(&self.pending_file(),", "QUEUE", 1),
+            ("bridge/core.rs room_redo 補送檔", include_str!("../bridge/core.rs"), "atomic::write(&f, Value::Object(m)", "STATE", 1),
             ("acct_remote outbox", include_str!("../acct_remote.rs"), "atomic::write(&outbox_path(", "QUEUE", 1),
         ];
         for (name, src, anchor, want, times) in sites {
