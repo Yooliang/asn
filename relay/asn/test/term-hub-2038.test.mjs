@@ -14,7 +14,15 @@ globalThis.Vue = {
   onMounted: fn => hooks.mounted.push(fn),
   onBeforeUnmount: fn => hooks.unmount.push(fn),
 }
-globalThis.Terminal = class { attachCustomWheelEventHandler() {} open() {} onData() {} write() {} dispose() {} }
+const xterms = []   // 元件建出來的假 xterm：記下寫了什麼
+globalThis.Terminal = class {
+  constructor() { this.writes = []; xterms.push(this) }
+  attachCustomWheelEventHandler() {}
+  open() {}
+  onData() {}
+  write(s) { this.writes.push(s) }
+  dispose() {}
+}
 globalThis.document ??= { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' }
 const { createTermViewSession } = await import('../ui/lib/term-view.mjs')
 const { RemoteView, FRAME_EVENT, END_EVENT } = await import('../ui/lib/term-remote.mjs')
@@ -110,6 +118,84 @@ test('順序守門：看別台、別台打字都要等底層註冊完才發起',
     assert.equal(r.calls.find(c => c.what === 'start').live, 2, '發起時兩個底層監聽都已經掛上')
     v.unmount()
   }
+})
+
+// 模擬 Rust：「發起」之後才開始送事件。底層監聽還沒註冊完就發起，這時送出的事件沒有人接、就丟了。
+// 這三條是 await ready() 被刪就會紅的守門：要驗的是事件真的到得了（畫出來或進 early），不是只看呼叫順序
+test('順序守門（本機畫面）：底層註冊慢，open 時 Rust 立刻送出的第一幅不會掉，進 early、開好後畫出來', async () => {
+  const rh = rigHub({ gated: true }), written = []
+  const s = createTermViewSession(sessionDeps(rh, {
+    open: async () => { rh.fire('term-view-frame', { view_id: 7, seq: 1, text: '第一幅', meta: { cols: 80, rows: 24 } }); return 7 },
+    createTerm: async () => ({ write: t => written.push(t), resize() {}, dispose() {} }),
+  }))
+  const started = s.start()
+  await tick(60)           // 底層註冊還在等
+  await rh.release()
+  await started; await s.flushed()
+  assert.equal(written.length, 1, '第一幅沒有掉')
+  assert.ok(written[0].includes('第一幅'))
+  s.stop()
+})
+
+test('順序守門（看別台）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「正在看」', async () => {
+  const rh = rigHub({ gated: true })
+  const api = {
+    start: async () => { setTimeout(() => rh.fire(FRAME_EVENT, { id: 'r1', text: '別台的畫面', meta: { cols: 80, rows: 24 } }), 30); return { id: 'r1', expires_s: Math.floor(Date.now() / 1000) + 600 } },
+    stop: async () => {}, pause: async () => {},
+  }
+  const v = mountComp(RemoteView, rh, api)
+  await tick(80)           // 底層註冊還在等；沒有 await ready() 的話這段時間內已經發起、畫面已經送出而且丟了
+  await rh.release()
+  await until(() => v.st.phase.value === 'watching', '收到畫面、進到正在看')
+  assert.ok(xterms.at(-1).writes.some(w => w.includes('別台的畫面')), '畫面真的寫進 xterm')
+  v.unmount()
+})
+
+test('順序守門（別台打字）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「可以打字」', async () => {
+  const rh = rigHub({ gated: true })
+  const api = {
+    start: async () => { setTimeout(() => rh.fire(FRAME_EVENT, { id: 'r1', text: '打字那台的畫面', meta: { cols: 80, rows: 24 } }), 30); return { id: 'r1', expires_s: Math.floor(Date.now() / 1000) + 600 } },
+    stop: async () => {}, send: async () => {}, pause: async () => {},
+  }
+  const v = mountComp(RemoteInput, rh, api)
+  await tick(80)
+  await rh.release()
+  await until(() => v.st.phase.value === 'typing', '收到畫面、進到可以打字')
+  assert.ok(xterms.at(-1).writes.some(w => w.includes('打字那台的畫面')), '畫面真的寫進 xterm')
+  v.unmount()
+})
+
+// ---------- 同一個 payload 物件給所有處理器：處理器不能就地改它 ----------
+// 查過的函式（都只讀不改）：term-view.mjs 的 frameToWrite、paint、enqueue、hist.frame（只存參照）、onPainted→followCursor、early 的 set／get、
+// input-error 與 closed 的處理器；term-remote.mjs 的畫面處理器（只讀 id／meta／text，另 emit 新物件）；term-remote-input.mjs 的 drawFrame、pendingFrame、droppedGrew。
+// 這條把它釘住：事件內容深度凍結，任何一處就地改（加／刪欄位、改 meta、排序）都會丟錯；同一幅送給兩個工作階段與兩個元件，全部照樣畫出來、內容原封不動
+const deepFreeze = o => { if (o && typeof o === 'object') { Object.values(o).forEach(deepFreeze); Object.freeze(o) } return o }
+
+test('同一事件兩個訂閱者：處理器不就地改事件內容，一個處理完不影響另一個', async () => {
+  const rh = rigHub(), lost = []
+  const written = [[], []]
+  const mk = i => createTermViewSession(sessionDeps(rh, {
+    onLost: r => lost.push(r),
+    createTerm: async () => ({ write: t => written[i].push(t), resize() {}, dispose() {} }),
+  }))
+  const s1 = mk(0), s2 = mk(1)
+  await Promise.all([s1.start(), s2.start()])
+  const ra = remoteApi(rh), rb = remoteApi(rh)
+  const v = mountComp(RemoteView, rh, ra.api), i = mountComp(RemoteInput, rh, rb.api)
+  await until(() => ra.calls.some(c => c.what === 'start') && rb.calls.some(c => c.what === 'start'), '兩個元件都發起了')
+  await until(() => xterms.length >= 2, '兩個元件的 xterm 都建好了')
+  const before = xterms.map(t => t.writes.length)
+  const termFrame = { view_id: 7, seq: 1, text: '甲\n乙', meta: { cols: 80, rows: 24, cursor_x: 1, cursor_y: 1 } }
+  const remoteFrame = { id: 'r1', text: '別台', meta: { cols: 80, rows: 24, cursor_x: 0, cursor_y: 0, keys_dropped: 0 } }
+  const copy = JSON.parse(JSON.stringify([termFrame, remoteFrame]))
+  rh.fire('term-view-frame', deepFreeze(termFrame))
+  rh.fire(FRAME_EVENT, deepFreeze(remoteFrame))
+  await Promise.all([s1.flushed(), s2.flushed()])
+  assert.ok(written[0].length === 1 && written[1].length === 1, '兩個工作階段都畫了同一幅')
+  assert.ok(xterms.slice(-2).every((t, k) => t.writes.length > before[xterms.length - 2 + k]), '兩個元件都畫了')
+  assert.deepEqual(lost, [], '沒有人因為改凍結的內容而丟錯（丟錯會被吞成「讀不到」）')
+  assert.deepEqual(JSON.parse(JSON.stringify([termFrame, remoteFrame])), copy, '內容原封不動')
+  v.unmount(); i.unmount(); s1.stop(); s2.stop()
 })
 
 // ---------- 開好前就到、結束後再到、重新發起 ----------
