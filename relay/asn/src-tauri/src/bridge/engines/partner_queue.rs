@@ -950,8 +950,15 @@ mod tests {
         std::fs::create_dir_all(brain.join("c1")).unwrap();
         assert!(read(&p(&brain.join("c1").join("notes.md"))).is_none());
         // 沒帶路徑：放行並記一行 log
-        assert!(run(vec![step(1, "read_file", json!({}))]).is_none());
-        assert!(logs.lock().unwrap().iter().any(|l| l.contains("沒有可辨識的路徑") && l.contains("read_file")), "{:?}", logs.lock().unwrap());
+        assert!(run(vec![step(1, "read_file", json!({"Weird": "plain-value"}))]).is_none());
+        assert!(logs.lock().unwrap().iter().any(|l| l.contains("警告") && l.contains("沒有可辨識的路徑") && l.contains("read_file") && l.contains("Weird") && !l.contains("plain-value")), "{:?}", logs.lock().unwrap());
+        // 不是讀取、寫入的工具：參數裡的路徑也判定（沒登記的、呼叫外部工具的、網路類收到本機檔案網址）
+        assert!(run(vec![step(1, "mystery_tool", json!({"path": p(&ssh)}))]).is_some());
+        assert!(run(vec![step(1, "call_mcp_tool", json!({"arguments": {"files": [p(&ssh)]}}))]).is_some());
+        let url = format!("file:///{}", p(&ssh).replace('\\', "/").trim_start_matches('/'));
+        assert!(run(vec![step(1, "read_url_content", json!({"Url": url}))]).is_some());
+        assert!(run(vec![step(1, "read_url_content", json!({"Url": "https://example.com/a"}))]).is_none());
+        assert!(run(vec![step(1, "update_steps", json!({"steps": [{"title": p(&ssh)}]}))]).is_none(), "登記過的純狀態更新不掃");
         // 指令照 execute 政策（這個工作者是 allow）：路徑寫在指令字串裡，不當讀取判定
         assert!(run(vec![step(1, "run_command", json!({"CommandLine": format!("Get-ChildItem -Force -Path '{}'", p(&ssh))}))]).is_none());
         // 沒登記的工具名：不中止，但記 log（只記工具名）；已登記的不記

@@ -1,8 +1,8 @@
 //! 讀取的敏感位置判定（#2356 PR-1，純函式）。
 //! 規則：背景夥伴可以讀這台電腦上的檔，但登入資料、金鑰、各 AI 工具的設定與對話記錄不行。
-//! 這一層只做「判定」，尚未接進 `decide`／`check_tool`；接線與開場說明另一輪處理。
+//! 判定本身是純函式；`acp_policy::decide`（標準 ACP）與 `acp_worker` 的 `check_tool`（agy）呼叫它。
 //! 敏感清單只定義在這個檔：寫入（`acp_policy::sensitive_write`）用 `SENSITIVE_HOME_DIRS`，讀取再加上 `EXTRA_HOME_PATHS` 與環境變數指定的位置。
-//! 比對的是路徑，不是邊界：執行指令不經這裡。
+//! 比對的是路徑，不是邊界：執行指令的內容不經這裡。已知限制：大小寫不分的檔案系統（例如 macOS 預設）上，只有 Windows 會把比對轉成小寫。
 #![allow(dead_code)]
 
 use super::acp_policy::{agy_brain, inside_agy_conv_dir, resolve, valid_conv_id};
@@ -15,7 +15,7 @@ use std::path::{Component, Path, PathBuf};
 pub const SENSITIVE_HOME_DIRS: [&str; 10] = [".gemini", ".ssh", crate::home::NEW_NAME, crate::home::LEGACY_NAME, ".claude", ".codex", ".pi", ".aws", ".config", ".gnupg"];
 
 /// 只有讀取才列的位置（相對於使用者資料夾，可以是檔案或資料夾）
-pub const EXTRA_HOME_PATHS: [&str; 13] = [
+pub const EXTRA_HOME_PATHS: [&str; 33] = [
     ".grok",
     ".claude.json",
     ".netrc",
@@ -24,19 +24,54 @@ pub const EXTRA_HOME_PATHS: [&str; 13] = [
     ".kube",
     ".azure",
     ".npmrc",
+    ".pgpass",
+    ".my.cnf",
+    ".pypirc",
+    ".m2/settings.xml",
+    ".bash_history",
+    ".zsh_history",
+    ".cursor",
+    ".codeium",
     "AppData/Roaming/Microsoft/Credentials",
     "AppData/Roaming/Microsoft/Protect",
+    "AppData/Roaming/Microsoft/Vault",
+    "AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine",
+    "AppData/Roaming/gcloud",
+    "AppData/Roaming/GitHub CLI",
+    "AppData/Roaming/Mozilla/Firefox",
+    "AppData/Roaming/Opera Software",
+    "AppData/Local/Microsoft/Credentials",
+    "AppData/Local/Microsoft/Vault",
     "AppData/Local/Google/Chrome/User Data",
     "AppData/Local/Microsoft/Edge/User Data",
+    "AppData/Local/BraveSoftware/Brave-Browser/User Data",
+    "AppData/Local/Vivaldi/User Data",
+    "AppData/Local/Opera Software",
+    "AppData/Local/Mozilla/Firefox",
     // 電腦版的應用資料夾
     concat!("AppData/Local/", "tw.yooliang.asn"),
 ];
 
+/// 檔名只寫前綴的位置：（資料夾, 檔名前綴），相對於使用者資料夾
+pub const PREFIX_HOME_FILES: [(&str, &str); 2] = [(".cargo", "credentials"), (".terraform.d", "credentials")];
+
 /// 環境變數指定的位置（絕對路徑才算）
-const ENV_ROOTS: [&str; 3] = ["CODEX_HOME", "PI_CODING_AGENT_DIR", "ASN_HOME"];
+const ENV_ROOTS: [&str; 6] = ["CODEX_HOME", "PI_CODING_AGENT_DIR", "ASN_HOME", "IRORI_HOME", "ASN_CLAUDE_HOME", "ASN_GROK_HOME"];
 
 /// 系統層：這個資料夾底下 `ssh_host_*_key` 樣式的檔
 const HOST_KEY_DIR: &str = "/etc/ssh";
+
+/// 系統層的單一檔案
+const SYSTEM_FILES: [&str; 2] = ["/etc/shadow", "/etc/gshadow"];
+
+/// 其他使用者的家目錄所在的資料夾（底下每個子資料夾都算別人的家，自己的家除外）；`/root` 另算
+const OTHER_HOME_PARENTS: [&str; 2] = ["/home", "/users"];
+
+/// 別人的家目錄資料夾裡，這幾個是共用的，不算別人的
+const SHARED_HOME_NAMES: [&str; 4] = ["public", "default", "default user", "all users"];
+
+/// 路徑字串長度上限：路徑類欄位超過就直接擋
+const MAX_PATH_LEN: usize = 4096;
 
 type Canon = fn(&Path) -> io::Result<PathBuf>;
 
@@ -73,11 +108,11 @@ pub enum ReadVerdict {
     Unresolvable,
 }
 
-/// 要算敏感根的家目錄：工作者環境裡的使用者資料夾（沒有就不算）＋這台電腦實際的使用者資料夾（real_home，測試傳 None）
+/// 要算敏感根的家目錄：工作者環境裡的 USERPROFILE 與 HOME（兩個都算，沒有就不算）＋這台電腦實際的使用者資料夾（real_home，測試傳 None）
 pub fn homes_from(env: &[(String, String)], real_home: Option<PathBuf>) -> Vec<PathBuf> {
     let get = |n: &str| env.iter().find(|(k, v)| k.eq_ignore_ascii_case(n) && !v.trim().is_empty()).map(|(_, v)| PathBuf::from(v));
-    let mut out: Vec<PathBuf> = get("USERPROFILE").or_else(|| get("HOME")).into_iter().collect();
-    if let Some(h) = real_home.filter(|h| !h.as_os_str().is_empty()) {
+    let mut out: Vec<PathBuf> = vec![];
+    for h in [get("USERPROFILE"), get("HOME"), real_home].into_iter().flatten().filter(|h| !h.as_os_str().is_empty()) {
         if !out.contains(&h) {
             out.push(h);
         }
@@ -85,10 +120,30 @@ pub fn homes_from(env: &[(String, String)], real_home: Option<PathBuf>) -> Vec<P
     out
 }
 
+/// 工作者建立時算敏感清單的正式做法（Worker::new 呼叫，測試也直接呼叫）：
+/// 家目錄＝環境裡的 USERPROFILE、HOME 加上這台電腦實際的；環境變數只帶名字不像金鑰的（展開變數與環境變數指定的位置用）
+pub fn roots_for_worker(env: &[(String, String)], real_home: PathBuf) -> SensitiveRoots {
+    let safe: Vec<(String, String)> = env
+        .iter()
+        .filter(|(k, _)| {
+            let u = k.to_uppercase();
+            !["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"].iter().any(|w| u.contains(w))
+        })
+        .cloned()
+        .collect();
+    SensitiveRoots::build(&homes_from(env, Some(real_home)), &safe)
+}
+
 /// 敏感根清單。啟動時算好（每個家目錄各算一次，字面與實際位置兩種形式），之後每次請求只比字串
 #[derive(Clone)]
 pub struct SensitiveRoots {
     roots: Vec<String>,
+    /// （資料夾, 檔名前綴）：資料夾底下檔名以前綴開頭的檔
+    prefix_files: Vec<(String, String)>,
+    /// 其他使用者的家目錄所在的資料夾（已正規化）
+    other_home_parents: Vec<String>,
+    /// 指向本機的主機名（小寫）：`\\<名>\C$\` 這種寫法轉回本機磁碟機
+    local_names: Vec<String>,
     homes: Vec<String>,
     home_paths: Vec<PathBuf>,
     brains: Vec<PathBuf>,
@@ -152,8 +207,36 @@ impl SensitiveRoots {
         for p in &paths {
             push_forms(&mut roots, p, canon);
         }
+        let mut prefix_files: Vec<(String, String)> = vec![];
+        for h in homes {
+            for (d, pre) in PREFIX_HOME_FILES {
+                let mut dirs: Vec<String> = vec![];
+                push_forms(&mut dirs, &h.join(d), canon);
+                for dir in dirs {
+                    if !prefix_files.iter().any(|(x, y)| *x == dir && y == pre) {
+                        prefix_files.push((dir, pre.to_string()));
+                    }
+                }
+            }
+        }
+        // 別人的家目錄：自己的家所在資料夾若叫 users／home，同一層其他資料夾都算別人的
+        let mut other_home_parents: Vec<String> = OTHER_HOME_PARENTS.iter().map(|s| s.to_string()).collect();
+        for h in &home_strs {
+            if let Some((parent, _)) = h.rsplit_once('/') {
+                if (parent.ends_with("/users") || parent.ends_with("/home") || parent == "users" || parent == "home") && !other_home_parents.iter().any(|p| p == parent) {
+                    other_home_parents.push(parent.to_string());
+                }
+            }
+        }
+        let mut local_names: Vec<String> = vec!["localhost".into(), "127.0.0.1".into()];
+        if let Some(n) = env.iter().find(|(k, v)| k.eq_ignore_ascii_case("COMPUTERNAME") && !v.trim().is_empty()) {
+            local_names.push(n.1.trim().to_lowercase());
+        }
         SensitiveRoots {
             roots,
+            prefix_files,
+            other_home_parents,
+            local_names,
             homes: home_strs,
             home_paths: homes.to_vec(),
             brains: homes.iter().map(|h| agy_brain(h)).collect(),
@@ -208,21 +291,34 @@ fn real_path_with(canon: Canon, abs: &Path) -> Option<PathBuf> {
 
 // ---- ① 展開 ----
 
-/// `file://`：剝掉前綴與 `localhost`，補掉 `/C:` 前面的斜線，並解開 `%XX`。不是 file 網址就原樣回傳
+/// `file:` 網址：解開 `%XX`、剝掉前綴與 `localhost`、補掉 `/C:` 前面的斜線；有別的主機名就當網路路徑 `//主機/…`。
+/// 不是 file 網址就原樣回傳。全程只用 `get` 與位元組比較，遇到多位元組字元不會 panic
 fn strip_file_url(s: &str) -> String {
-    let lower = s.to_ascii_lowercase();
-    if !lower.starts_with("file://") {
+    if !s.get(..5).is_some_and(|p| p.eq_ignore_ascii_case("file:")) {
         return s.to_string();
     }
-    let mut rest = &s["file://".len()..];
-    if rest.len() >= 10 && rest[..10].eq_ignore_ascii_case("localhost/") {
-        rest = &rest[9..];
+    let decoded = percent_decode(&s[5..]);
+    let mut rest: &str = &decoded;
+    let mut unc: Option<String> = None;
+    if let Some(after) = rest.strip_prefix("//") {
+        let end = after.find('/').unwrap_or(after.len());
+        let (host, path) = after.split_at(end);
+        let pb = path.as_bytes();
+        let admin_share = pb.len() >= 3 && pb[0] == b'/' && pb[1].is_ascii_alphabetic() && pb[2] == b'$';
+        if host.is_empty() || (host.eq_ignore_ascii_case("localhost") && !admin_share) {
+            rest = path;
+        } else {
+            unc = Some(format!("//{host}{path}"));
+        }
+    }
+    if let Some(u) = unc {
+        return u;
     }
     let b = rest.as_bytes();
     if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' {
         rest = &rest[1..];
     }
-    percent_decode(rest)
+    rest.to_string()
 }
 
 fn percent_decode(s: &str) -> String {
@@ -251,9 +347,18 @@ fn valid_var(name: &str) -> bool {
 fn expand_one(raw: &str, home: Option<&Path>, env: &[(String, String)]) -> (String, bool) {
     let chars: Vec<char> = raw.chars().collect();
     let lookup = |name: &str| -> Option<String> {
-        if name.eq_ignore_ascii_case("HOME") || name.eq_ignore_ascii_case("USERPROFILE") {
-            if let Some(h) = home {
-                return Some(h.to_string_lossy().into_owned());
+        if let Some(h) = home {
+            let hs = h.to_string_lossy();
+            if name.eq_ignore_ascii_case("HOME") || name.eq_ignore_ascii_case("USERPROFILE") {
+                return Some(hs.into_owned());
+            }
+            // 家目錄拆成磁碟機與其餘部分（沒有磁碟機的路徑，磁碟機是空的）
+            let split = if hs.as_bytes().get(1) == Some(&b':') && hs.get(..2).is_some() { 2 } else { 0 };
+            if name.eq_ignore_ascii_case("HOMEDRIVE") {
+                return Some(hs[..split].to_string());
+            }
+            if name.eq_ignore_ascii_case("HOMEPATH") {
+                return Some(hs[split..].to_string());
             }
         }
         env.iter().find(|(k, v)| k.eq_ignore_ascii_case(name) && !v.is_empty()).map(|(_, v)| v.clone())
@@ -347,9 +452,42 @@ fn is_drive(seg: &str) -> bool {
     b.len() == 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
 }
 
-/// Windows 會把名字尾巴的點與空白吃掉、並把第一個冒號後面當替代資料流：逐段去掉再比。
-/// 也把裝置前綴與指向本機的網路路徑（`\\localhost\C$\`）轉回一般盤符路徑。純字串處理，任何平台都能測
+/// Windows 路徑的寫法變體：逐段正規化成一般寫法，並把磁碟機前綴與指向本機的網路路徑轉回一般盤符路徑。
+/// 純字串處理，任何平台都能測
 pub fn win_clean(s: &str) -> String {
+    win_clean_with(s, &["localhost", "127.0.0.1"])
+}
+
+/// 兩個 `/` 開頭的路徑（網路路徑）：回傳（主機, 其餘）
+fn split_unc(t: &str) -> Option<(&str, &str)> {
+    let rest = t.strip_prefix("//")?;
+    Some(rest.split_once('/').unwrap_or((rest, "")))
+}
+
+/// 這個路徑是不是「看不出實際指向哪裡」的寫法：磁碟機以外的裝置前綴，或指向別台（或無法確認是本機）管理共用的網路路徑。
+/// 這類一律當解析不了。純字串判斷，任何平台都能測
+pub fn opaque_device_path(s: &str, local_names: &[String]) -> bool {
+    let t = s.replace('\\', "/");
+    let drive_after = |rest: &str| {
+        let b = rest.as_bytes();
+        b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b.len() == 2 || b[2] == b'/')
+    };
+    if let Some(rest) = t.strip_prefix("//?/") {
+        return !drive_after(rest);
+    }
+    if let Some(rest) = t.strip_prefix("//./") {
+        return !drive_after(rest);
+    }
+    if let Some((host, rest)) = split_unc(&t) {
+        let share = rest.split('/').next().unwrap_or("");
+        let admin_share = share.len() == 2 && share.as_bytes()[0].is_ascii_alphabetic() && share.ends_with('$');
+        let host_l = host.to_lowercase();
+        return admin_share && !local_names.iter().any(|n| *n == host_l);
+    }
+    false
+}
+
+fn win_clean_with(s: &str, hosts: &[&str]) -> String {
     let mut t = s.replace('\\', "/");
     for p in ["//?/", "//./"] {
         if let Some(rest) = t.strip_prefix(p) {
@@ -357,15 +495,12 @@ pub fn win_clean(s: &str) -> String {
             break;
         }
     }
-    let lower = t.to_ascii_lowercase();
-    for host in ["//localhost/", "//127.0.0.1/"] {
-        if lower.starts_with(host) {
-            let rest = &t[host.len()..];
+    if let Some((host, rest)) = split_unc(&t) {
+        if hosts.iter().any(|h| h.eq_ignore_ascii_case(host)) {
             let (first, tail) = rest.split_once('/').unwrap_or((rest, ""));
             if first.len() == 2 && first.as_bytes()[0].is_ascii_alphabetic() && first.ends_with('$') {
                 t = format!("{}:/{}", &first[..1], tail);
             }
-            break;
         }
     }
     let mut segs: Vec<String> = vec![];
@@ -410,7 +545,46 @@ fn hits(f: &str, tool: ReadTool, roots: &SensitiveRoots) -> bool {
             return true;
         }
     }
-    is_host_key(f) || (tool == ReadTool::Recursive && (f == HOST_KEY_DIR || is_ancestor_of(f, HOST_KEY_DIR)))
+    let recursive = tool == ReadTool::Recursive;
+    // 檔名前綴：資料夾底下以前綴開頭的檔
+    for (dir, pre) in &roots.prefix_files {
+        if f.rsplit_once('/').is_some_and(|(d, n)| d == dir && n.starts_with(pre.as_str())) || (recursive && (f == dir || is_ancestor_of(f, dir))) {
+            return true;
+        }
+    }
+    if is_host_key(f) || is_proc_environ(f) || SYSTEM_FILES.contains(&f) {
+        return true;
+    }
+    if recursive && (f == HOST_KEY_DIR || is_ancestor_of(f, HOST_KEY_DIR) || f == "/proc" || is_ancestor_of(f, "/proc") || f.strip_prefix("/proc/").is_some_and(|r| !r.contains('/')) || SYSTEM_FILES.iter().any(|s| is_ancestor_of(f, s))) {
+        return true;
+    }
+    other_home_hit(f, tool, roots)
+}
+
+/// `/proc/<編號>/environ`
+fn is_proc_environ(f: &str) -> bool {
+    f.strip_prefix("/proc/").and_then(|r| r.split_once('/')).is_some_and(|(pid, rest)| !pid.is_empty() && rest == "environ")
+}
+
+/// 別人的家目錄：`/root`，以及家目錄所在資料夾（`/home`、`C:\Users`…）底下不是自己家的子資料夾（共用的 Public 等不算）
+fn other_home_hit(f: &str, tool: ReadTool, roots: &SensitiveRoots) -> bool {
+    let recursive = tool == ReadTool::Recursive;
+    let mine = |p: &str| roots.homes.iter().any(|h| h == p);
+    if (f == "/root" || f.starts_with("/root/")) && !mine("/root") {
+        return true;
+    }
+    for parent in &roots.other_home_parents {
+        if recursive && (f == parent || is_ancestor_of(f, parent)) {
+            return true;
+        }
+        let Some(rest) = f.strip_prefix(&format!("{parent}/")) else { continue };
+        let name = rest.split('/').next().unwrap_or("");
+        let home = format!("{parent}/{name}");
+        if !name.is_empty() && !SHARED_HOME_NAMES.contains(&name) && !mine(&home) {
+            return true;
+        }
+    }
+    false
 }
 
 fn under_home(f: &str, roots: &SensitiveRoots) -> bool {
@@ -426,6 +600,20 @@ fn exempt_brain(f: &str, roots: &SensitiveRoots, base: &Path, tool: ReadTool) ->
                 forms.extend(real_path_with(roots.canon, b).map(|r| nstr(&r.to_string_lossy())));
                 forms.iter().any(|d| f == d || f.strip_prefix(&format!("{d}/")).is_some_and(valid_conv_id))
             })
+    })
+}
+
+/// 路徑段含萬用字元（`* ? [ {`）：回傳第一個萬用字元段之前的部分（沒有萬用字元回 None）。前面什麼都沒有就是根或目前資料夾
+fn wildcard_prefix(c: &str) -> Option<String> {
+    let segs: Vec<&str> = c.split(['/', '\\']).collect();
+    let i = segs.iter().position(|s| s.contains(['*', '?', '[', '{']))?;
+    let prefix = segs[..i].join("/");
+    Some(if prefix.is_empty() {
+        if c.starts_with(['/', '\\']) { "/".to_string() } else { ".".to_string() }
+    } else if prefix.len() == 2 && is_drive(&prefix) {
+        format!("{prefix}/")
+    } else {
+        prefix
     })
 }
 
@@ -447,11 +635,24 @@ pub fn read_verdict(path_raw: &str, ctx: &ReadCtx) -> ReadVerdict {
     if raw.is_empty() {
         return ReadVerdict::Allow;
     }
+    // 超長或含換行的路徑欄位：沒辦法逐段判定，偏向擋
+    if path_raw.len() > MAX_PATH_LEN || path_raw.contains(['\n', '\r', '\0']) {
+        return ReadVerdict::Unresolvable;
+    }
     let roots = ctx.roots;
+    let hosts: Vec<&str> = roots.local_names.iter().map(String::as_str).collect();
     let (cands, mut failed) = expand(&strip_file_url(raw), &roots.home_paths, &roots.env);
     let mut literals: Vec<String> = vec![];
-    for c in cands {
-        let c = if cfg!(windows) { win_clean(&c) } else { c };
+    for c0 in cands {
+        if cfg!(windows) && opaque_device_path(&c0, &roots.local_names) {
+            return ReadVerdict::Unresolvable;
+        }
+        let cleaned = if cfg!(windows) { win_clean_with(&c0, &hosts) } else { c0.clone() };
+        // 路徑段有萬用字元：取第一個萬用字元之前的部分，照遞迴搜尋判定
+        let (c, tool) = match wildcard_prefix(&cleaned) {
+            Some(p) => (p, ReadTool::Recursive),
+            None => (cleaned.clone(), ctx.tool),
+        };
         let joined = join_base(ctx.base, &c);
         let has_dotdot = joined.components().any(|x| matches!(x, Component::ParentDir));
         let folded = resolve(ctx.base, &c);
@@ -461,6 +662,12 @@ pub fn read_verdict(path_raw: &str, ctx: &ReadCtx) -> ReadVerdict {
         if let Ok(p) = &canon_joined {
             forms.push((nstr(&p.to_string_lossy()), true));
         }
+        // 展開後的原字串（沒做過任何清理）也直接解一次
+        if cleaned != c0 && wildcard_prefix(&c0).is_none() {
+            if let Ok(p) = (roots.canon)(&join_base(ctx.base, &c0)) {
+                forms.push((nstr(&p.to_string_lossy()), true));
+            }
+        }
         match real_path_with(roots.canon, &folded) {
             Some(p) => forms.push((nstr(&p.to_string_lossy()), !has_dotdot)),
             None => failed = true,
@@ -468,7 +675,7 @@ pub fn read_verdict(path_raw: &str, ctx: &ReadCtx) -> ReadVerdict {
         literals.push(nstr(&folded.to_string_lossy()));
         literals.push(nstr(&joined.to_string_lossy()));
         for (f, may_exempt) in &forms {
-            if hits(f, ctx.tool, roots) && !(*may_exempt && exempt_brain(f, roots, ctx.base, ctx.tool)) {
+            if hits(f, tool, roots) && !(*may_exempt && exempt_brain(f, roots, ctx.base, tool)) {
                 return ReadVerdict::Sensitive;
             }
         }
@@ -499,12 +706,20 @@ fn looks_like_path(s: &str) -> bool {
 fn walk(v: &Value, under_key: bool, out: &mut Vec<String>) {
     match v {
         Value::String(s) => {
-            if !s.trim().is_empty() && s.len() <= 4096 && !s.contains('\n') && (under_key || looks_like_path(s)) && !out.contains(s) {
+            // 路徑類欄位的字串一律收（超長、含換行的由判定那邊直接擋）；其他欄位要長得像路徑、而且是單行的短字串
+            let ordinary = s.len() <= MAX_PATH_LEN && !s.contains('\n') && looks_like_path(s);
+            if !s.trim().is_empty() && (under_key || ordinary) && !out.contains(s) {
                 out.push(s.clone());
             }
         }
         Value::Array(a) => a.iter().for_each(|x| walk(x, under_key, out)),
-        Value::Object(m) => m.iter().for_each(|(k, x)| walk(x, under_key || key_is_path(k), out)),
+        Value::Object(m) => m.iter().for_each(|(k, x)| {
+            // 指令與程式碼欄位是整段命令，不是路徑，路徑判定管不到（敏感清單不是邊界）
+            let l = k.to_lowercase();
+            if key_is_path(k) || !(l.contains("command") || l == "cmd" || l.contains("script")) {
+                walk(x, under_key || key_is_path(k), out)
+            }
+        }),
         _ => {}
     }
 }
@@ -512,8 +727,27 @@ fn walk(v: &Value, under_key: bool, out: &mut Vec<String>) {
 /// 讀取請求的參數 → 所有可能是路徑的字串：路徑類欄位名底下的字串（含陣列、巢狀），以及任何位置長得像路徑的字串
 pub fn extract_read_paths(params: &Value) -> Vec<String> {
     let mut out = vec![];
+    // 參數本身是一段 JSON 字串：先解開再抽
+    if let Value::String(s) = params {
+        if let Ok(inner @ (Value::Object(_) | Value::Array(_))) = serde_json::from_str::<Value>(s) {
+            walk(&inner, false, &mut out);
+            return out;
+        }
+    }
     walk(params, false, &mut out);
     out
+}
+
+/// 參數的最上層欄位名（只有名字、沒有值；寫 log 用）
+pub fn param_keys(params: &Value) -> Vec<String> {
+    match params {
+        Value::Object(m) => m.keys().cloned().collect(),
+        Value::String(s) => match serde_json::from_str::<Value>(s) {
+            Ok(Value::Object(m)) => m.keys().cloned().collect(),
+            _ => vec![],
+        },
+        _ => vec![],
+    }
 }
 
 #[cfg(test)]
@@ -770,7 +1004,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn 捷徑後面再接上一層_以實際走到的位置為準() {
+    fn 路徑形式變體_捷徑加相對段_unix() {
         let r = rig();
         std::fs::create_dir_all(r.home.join(".ssh").join("inner")).unwrap();
         std::fs::write(r.home.join(".ssh").join("secret"), "x").unwrap();
@@ -782,7 +1016,7 @@ mod tests {
     }
 
     #[test]
-    fn 折疊上層後落在敏感位置的寫法也擋() {
+    fn 路徑形式變體_相對段() {
         let r = rig();
         let p = format!("{}/nowhere/../../home/.ssh/secret", ps(&r.work));
         assert!(blocked(&r, &p));
@@ -842,7 +1076,7 @@ mod tests {
     fn 家目錄來源_工作者環境的與這台電腦實際的都要算() {
         let e = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
         let real = Some(PathBuf::from("/real"));
-        assert_eq!(homes_from(&e(&[("HOME", "/h"), ("UserProfile", "/p")]), real.clone()), vec![PathBuf::from("/p"), PathBuf::from("/real")]);
+        assert_eq!(homes_from(&e(&[("HOME", "/h"), ("UserProfile", "/p")]), real.clone()), vec![PathBuf::from("/p"), PathBuf::from("/h"), PathBuf::from("/real")], "USERPROFILE 與 HOME 兩個都算");
         assert_eq!(homes_from(&e(&[("HOME", "/h"), ("USERPROFILE", " ")]), real.clone()), vec![PathBuf::from("/h"), PathBuf::from("/real")]);
         assert_eq!(homes_from(&e(&[("HOME", "/real")]), real.clone()), vec![PathBuf::from("/real")], "同一個不重複");
         assert_eq!(homes_from(&[], real), vec![PathBuf::from("/real")], "環境沒有就只有實際的");
@@ -865,7 +1099,7 @@ mod tests {
     }
 
     #[test]
-    fn win_clean_逐段去尾端點空白與資料流_保留盤符與相對段() {
+    fn 路徑形式變體_純字串正規化() {
         assert_eq!(win_clean(r"C:\u\.ssh.\id"), "C:/u/.ssh/id");
         assert_eq!(win_clean(r"C:\u\.ssh \id. "), "C:/u/.ssh/id");
         assert_eq!(win_clean(r"C:\u\.ssh\id:stream"), "C:/u/.ssh/id");
@@ -880,7 +1114,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn 路徑形式變體_尾端點與空白() {
+    fn 路徑形式變體_windows甲() {
         let r = rig();
         let h = ps(&r.home);
         for p in [format!(r"{h}\.ssh.\id"), format!(r"{h}\.ssh \id"), format!(r"{h}\.ssh\id."), format!(r"{h}\.ssh\id "), format!(r"{h}\.SSH.\ID"), format!(r"{h}\.config. .\a")] {
@@ -894,7 +1128,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn 路徑形式變體_替代資料流() {
+    fn 路徑形式變體_windows乙() {
         let r = rig();
         let h = ps(&r.home);
         for p in [format!(r"{h}\.ssh\id:stream"), format!(r"{h}\.ssh\id::$DATA"), format!(r"{h}\.ssh::$INDEX_ALLOCATION"), format!(r"{h}\.ssh:x\id")] {
@@ -905,7 +1139,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn 路徑形式變體_裝置前綴與本機網路路徑() {
+    fn 路徑形式變體_windows丙() {
         let r = rig();
         let h = ps(&r.home);
         assert!(blocked(&r, &format!(r"\\?\{h}\.ssh\id")));
@@ -918,11 +1152,14 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn 目錄接合點指向敏感位置_windows() {
+    fn 捷徑指向敏感位置_windows() {
         let r = rig();
         std::fs::create_dir_all(r.home.join(".gemini")).unwrap();
         link(&r.work.join("innocent"), &r.home.join(".gemini"));
         assert!(blocked(&r, &ps(&r.work.join("innocent").join("oauth_creds.json"))));
-        assert!(blocked(&r, &format!(r"{}\innocent.\oauth_creds.json", ps(&r.work))), "接合點再加尾端點");
+        assert!(blocked(&r, &format!(r"{}\innocent.\oauth_creds.json", ps(&r.work))), "捷徑加路徑形式變體");
     }
 }
+
+#[cfg(test)]
+mod tests_form;

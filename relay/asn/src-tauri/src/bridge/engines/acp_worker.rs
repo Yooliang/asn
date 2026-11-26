@@ -2,8 +2,8 @@
 //! 對應 engines/acp-worker.mjs。不知道仲介與橋，只透過事件通道（已轉交／失敗／回覆）與 Notifier（寄授權詢問／登入通知）跟外面講話。
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
-use super::acp_policy::{category_label, decide, inside_agy_conv_dir, is_network_error, read_block_reason, redact, upstream_5xx, Req, Verdict, WorkerError, NO_READ_PATH_NOTE};
-use super::acp_sensitive::{homes_from, ReadVerdict, SensitiveRoots};
+use super::acp_policy::{category_label, decide, inside_agy_conv_dir, is_network_error, paths_block_reason, read_block_reason, redact, upstream_5xx, Req, Verdict, WorkerError, NO_READ_PATH_NOTE};
+use super::acp_sensitive::{homes_from, roots_for_worker, ReadVerdict, SensitiveRoots};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -347,17 +347,16 @@ impl Worker {
     pub fn new(mut i: WorkerInit) -> WorkerHandle {
         // 讀取的敏感位置清單：啟動時用兩個家目錄（工作者環境的、這台電腦實際的）算好，放進政策（#2356）。測試不碰真的使用者資料夾
         if i.cfg.permissions.sensitive.is_none() {
-            // 單元測試只認暫存資料夾底下的假家目錄、不帶環境變數，絕不去碰測試機上真的使用者資料夾
-            let (homes, env) = if cfg!(test) {
+            // 單元測試只認暫存資料夾底下的假家目錄、不帶環境變數，絕不去碰測試機上真的使用者資料夾；正式做法在 roots_for_worker（有自己的測試）
+            let roots = if cfg!(test) {
                 let tmp = std::env::temp_dir();
-                (homes_from(&i.env, None).into_iter().filter(|h| h.starts_with(&tmp)).collect::<Vec<_>>(), vec![])
+                let homes = homes_from(&i.env, None).into_iter().filter(|h| h.starts_with(&tmp)).collect::<Vec<_>>();
+                SensitiveRoots::build(&homes, &[])
             } else {
-                // 展開變數用：名字像金鑰的不帶進來
-                let env: Vec<(String, String)> = i.env.iter().filter(|(k, _)| !["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"].iter().any(|w| k.to_uppercase().contains(w))).cloned().collect();
-                (homes_from(&i.env, Some(crate::identity::home_dir())), env)
+                roots_for_worker(&i.env, crate::identity::home_dir())
             };
             let mut c = (*i.cfg).clone();
-            c.permissions.sensitive = Some(Arc::new(SensitiveRoots::build(&homes, &env)));
+            c.permissions.sensitive = Some(Arc::new(roots));
             i.cfg = Arc::new(c);
         }
         let need = i.store.get(&i.cfg).is_empty();
@@ -1102,15 +1101,26 @@ impl Guard for WorkerGuard {
     fn check_tool(&self, info: &Req, state: &str, full_access: bool, brain: Option<&std::path::Path>) -> Result<(), String> {
         let me = &self.0;
         let c = info.category.as_str();
+        let cfg = &me.cfg_now();
+        // 不是讀取、寫入的工具（執行、網路、沒登記的）：參數裡抽得到路徑就照讀取判定，命中整輪中止
+        if c != "read" && c != "write" && !info.scan_paths.is_empty() {
+            if let Some(roots) = &cfg.permissions.sensitive {
+                if let Some((v, why)) = paths_block_reason(roots, &info.scan_paths, info.read_tool, &cfg.cwd) {
+                    if v == ReadVerdict::Unresolvable {
+                        me.log(format!("讀取判定：工具 {} 路徑無法解析，偏向擋", info.tool));
+                    }
+                    return Err(format!("{}不被允許：{why}", category_label("read")));
+                }
+            }
+        }
         if c == "internal" {
             return Ok(());
         }
-        let cfg = &me.cfg_now();
         if c == "read" {
             // 讀取不看白名單資料夾，只擋敏感位置；agy 是事後才看到步驟，命中就整輪中止、不重導（D5）
             let Some(roots) = &cfg.permissions.sensitive else { return Ok(()) };
             if info.paths.is_empty() {
-                me.log(format!("{}（工具 {}）", NO_READ_PATH_NOTE, info.tool));
+                me.log(format!("警告：{}（工具 {}，欄位：{}）", NO_READ_PATH_NOTE, info.tool, info.param_keys.join("、")));
                 return Ok(());
             }
             return match read_block_reason(roots, info, &cfg.cwd) {

@@ -3,7 +3,7 @@
 //!   read 讀檔搜尋思考、write 寫刪搬、execute 執行指令、network 上網（預設都是 allow）；other 分不出類別（預設 deny）。
 //!   寫入以白名單資料夾（預設只有工作者自己的工作資料夾）為界；讀取不限資料夾，只擋敏感位置（登入資料、金鑰、各工具的設定，見 acp_sensitive.rs）。
 //!   執行指令沒有路徑可查，敏感位置清單不是邊界：邊界只靠 agents.json 的明寫設定（要完全封閉就把 execute 與 network 都設 deny）。
-use super::acp_sensitive::{extract_read_paths, read_verdict, ReadCtx, ReadTool, ReadVerdict, SensitiveRoots, SENSITIVE_HOME_DIRS};
+use super::acp_sensitive::{extract_read_paths, param_keys, read_verdict, ReadCtx, ReadTool, ReadVerdict, SensitiveRoots, SENSITIVE_HOME_DIRS};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -220,6 +220,10 @@ pub struct Req {
     pub tool: String,
     /// 讀取類才用：單檔、列舉或遞迴搜尋
     pub read_tool: ReadTool,
+    /// 不是讀取、寫入的請求：參數裡抽到的路徑（照讀取判定）
+    pub scan_paths: Vec<String>,
+    /// 參數的最上層欄位名（沒有值；沒抽到路徑時寫 log 用）
+    pub param_keys: Vec<String>,
 }
 
 /// 讀取沒有帶路徑時的提醒（寫進 log 的原因文字）
@@ -227,16 +231,32 @@ pub const NO_READ_PATH_NOTE: &str = "讀取請求沒有可辨識的路徑，無�
 
 /// 讀取請求逐一判定：回傳（擋下的原因）。沒有敏感位置清單（None）或沒有路徑時不擋
 pub fn read_block_reason(roots: &SensitiveRoots, req: &Req, base: &Path) -> Option<(ReadVerdict, String)> {
-    let ctx = ReadCtx { roots, base, tool: req.read_tool };
-    req.paths.iter().find_map(|p| match read_verdict(p, &ctx) {
-        ReadVerdict::Allow => None,
-        ReadVerdict::Sensitive => Some((ReadVerdict::Sensitive, format!("這個位置不能讀（登入資料、金鑰或設定）：{}", redact(p)))),
-        ReadVerdict::Unresolvable => Some((ReadVerdict::Unresolvable, format!("路徑無法解析，偏向不讀：{}", redact(p)))),
+    paths_block_reason(roots, &req.paths, req.read_tool, base)
+}
+
+/// 同 [`read_block_reason`]，路徑自己給（不是讀取類的工具，參數裡抽到的路徑也照讀取判定）
+pub fn paths_block_reason(roots: &SensitiveRoots, paths: &[String], tool: ReadTool, base: &Path) -> Option<(ReadVerdict, String)> {
+    let ctx = ReadCtx { roots, base, tool };
+    paths.iter().find_map(|p| {
+        let shown = redact(&clip(p, 160));
+        match read_verdict(p, &ctx) {
+            ReadVerdict::Allow => None,
+            ReadVerdict::Sensitive => Some((ReadVerdict::Sensitive, format!("這個位置不能讀（登入資料、金鑰或設定）：{shown}"))),
+            ReadVerdict::Unresolvable => Some((ReadVerdict::Unresolvable, format!("路徑無法解析，偏向不讀：{shown}"))),
+        }
     })
 }
 
-/// 回傳（決定, 原因）。內部控制一律放行；寫入有路徑在白名單外就拒絕；讀取不看白名單資料夾，只擋敏感位置（#2356）
+/// 回傳（決定, 原因）。內部控制一律放行；寫入有路徑在白名單外就拒絕；讀取不看白名單資料夾，只擋敏感位置（#2356）。
+/// 不是讀取、寫入的請求（執行、網路、分不出類別），參數裡抽得到路徑的也照讀取判定
 pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String) {
+    if req.category != "read" && req.category != "write" && !req.scan_paths.is_empty() {
+        if let Some(roots) = &policy.sensitive {
+            if let Some((_, why)) = paths_block_reason(roots, &req.scan_paths, req.read_tool, base) {
+                return (Verdict::Deny, why);
+            }
+        }
+    }
     if req.category == "internal" {
         return (Verdict::Allow, "內部控制".into());
     }
@@ -244,7 +264,7 @@ pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String)
     if req.category == "read" {
         if let Some(roots) = &policy.sensitive {
             if req.paths.is_empty() {
-                return (rule, format!("{}的政策是 {}（{NO_READ_PATH_NOTE}）", category_label(&req.category), rule.name()));
+                return (rule, format!("{}的政策是 {}（{NO_READ_PATH_NOTE}；欄位：{}）", category_label(&req.category), rule.name(), req.param_keys.join("、")));
             }
             if let Some((_, why)) = read_block_reason(roots, req, base) {
                 return (Verdict::Deny, why);
@@ -434,7 +454,9 @@ pub fn describe_acp_request(params: &Value) -> Req {
         "（沒有說明）".into()
     };
     let kind = tc.get("kind").and_then(Value::as_str).unwrap_or("");
-    Req { category: category.into(), paths, summary: format!("{}：{what}", category_label(category)), tool: kind.into(), read_tool: ReadTool::of_acp_kind(kind) }
+    let scan_paths = if category != "read" && category != "write" { tc.get("rawInput").map(extract_read_paths).unwrap_or_default() } else { vec![] };
+    let param_keys = tc.get("rawInput").map(param_keys).unwrap_or_default();
+    Req { category: category.into(), paths, summary: format!("{}：{what}", category_label(category)), tool: kind.into(), read_tool: ReadTool::of_acp_kind(kind), scan_paths, param_keys }
 }
 
 /// agy tool_info.parameters → 路徑與摘要
@@ -465,7 +487,10 @@ pub fn describe_agy_tool(tool_name: &str, parameters: Option<&Value>) -> Req {
     } else {
         clip(tool_name, 60)
     };
-    Req { category: category.into(), paths, summary: format!("{}：{what}", category_label(category)), tool: tool_name.into(), read_tool: ReadTool::of_agy(&tool_name.to_lowercase()) }
+    // 不是讀取、寫入的工具（含沒登記的、會呼叫外部工具的）：參數裡抽得到路徑就照讀取判定。登記過的純狀態更新不碰檔案，不掃
+    let scan_paths = if category != "read" && category != "write" && !(category == "internal" && is_registered_agy_tool(tool_name)) { parameters.map(extract_read_paths).unwrap_or_default() } else { vec![] };
+    let param_keys = parameters.map(param_keys).unwrap_or_default();
+    Req { category: category.into(), paths, summary: format!("{}：{what}", category_label(category)), tool: tool_name.into(), read_tool: ReadTool::of_agy(&tool_name.to_lowercase()), scan_paths, param_keys }
 }
 
 // ---- 錯誤分類 ----
@@ -712,6 +737,55 @@ mod tests {
     }
 
     #[test]
+    fn 敏感讀取_非讀寫類工具的參數路徑也判定() {
+        let d = tempfile::tempdir().unwrap();
+        let (home, work) = (d.path().join("home"), d.path().join("work"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        let (mut p, _) = normalize_permissions(None, &work);
+        p.sensitive = Some(Arc::new(SensitiveRoots::build(&[home.clone()], &[])));
+        let ssh = s(&home.join(".ssh").join("id"));
+        let ok = s(&work.join("a.txt"));
+        let url = |x: &str| {
+            let x = x.replace('\\', "/");
+            if x.starts_with('/') { format!("file://{x}") } else { format!("file:///{x}") }
+        };
+        let agy = |tool: &str, params: Value| decide(&p, &describe_agy_tool(tool, Some(&params)), &work).0;
+        // 沒登記的工具、會呼叫外部工具的工具：參數裡的路徑照讀取判定（包含巢狀）
+        assert_eq!(agy("mystery_tool", json!({"path": ssh})), Verdict::Deny);
+        assert_eq!(agy("mystery_tool", json!({"path": ok})), Verdict::Allow);
+        assert_eq!(agy("call_mcp_tool", json!({"arguments": {"files": [ok, ssh]}})), Verdict::Deny);
+        // 網路類工具收到本機檔案網址，也當讀取路徑；一般網址不受影響
+        assert_eq!(agy("read_url_content", json!({"Url": url(&ssh)})), Verdict::Deny);
+        assert_eq!(agy("open_browser_url", json!({"Url": url(&ssh)})), Verdict::Deny);
+        assert_eq!(agy("read_url_content", json!({"Url": "https://example.com/a/b?c=1"})), Verdict::Allow);
+        assert_eq!(agy("read_url_content", json!({"Url": url(&ok)})), Verdict::Allow);
+        // 指令欄位是整段命令，不當路徑；登記過的純狀態更新不掃
+        assert_eq!(agy("run_command", json!({"CommandLine": format!("Get-ChildItem '{ssh}'")})), Verdict::Allow);
+        assert_eq!(agy("update_steps", json!({"steps": [{"status": "done", "title": ssh}]})), Verdict::Allow);
+        // 但指令工具的路徑類欄位照判
+        assert_eq!(agy("run_command", json!({"CommandLine": "dir", "Cwd": ssh})), Verdict::Deny);
+        // 標準 ACP：執行與網路類的 rawInput 也一樣
+        let acp = |kind: &str, raw: Value| decide(&p, &describe_acp_request(&json!({"toolCall": {"kind": kind, "rawInput": raw}})), &work).0;
+        assert_eq!(acp("execute", json!({"command": "ls", "cwd": ssh})), Verdict::Deny);
+        assert_eq!(acp("fetch", json!({"url": url(&ssh)})), Verdict::Deny);
+        assert_eq!(acp("fetch", json!({"url": "https://example.com/a"})), Verdict::Allow);
+        assert_eq!(acp("execute", json!({"command": format!("cat {ssh}")})), Verdict::Allow);
+        // 讀取、寫入類的 paths 不另外掃：scan_paths 只給其他類別
+        assert!(describe_agy_tool("read_file", Some(&json!({"Path": ssh}))).scan_paths.is_empty());
+        assert!(describe_agy_tool("write_file", Some(&json!({"TargetFile": ok}))).scan_paths.is_empty());
+        // 參數本身是 JSON 字串：先解開
+        let r = describe_agy_tool("read_file", Some(&Value::String(json!({"Path": ssh}).to_string())));
+        assert_eq!(r.paths, vec![ssh.clone()]);
+        assert_eq!(decide(&p, &r, &work).0, Verdict::Deny);
+        // 沒帶路徑：原因裡記欄位名，不記值
+        let none = describe_agy_tool("read_file", Some(&json!({"Weird": "no path here"})));
+        let (v, why) = decide(&p, &none, &work);
+        assert_eq!(v, Verdict::Allow);
+        assert!(why.contains("Weird") && !why.contains("no path here"), "{why}");
+    }
+
+    #[test]
     fn 敏感讀取_請求描述_取出所有像路徑的字串與讀取類別() {
         let g = describe_agy_tool("read_file", Some(&json!({"Path": "C:\\fake\\a.txt", "Extra": ["~/b.txt"]})));
         assert_eq!((g.category.as_str(), g.tool.as_str(), g.read_tool), ("read", "read_file", ReadTool::Single));
@@ -922,7 +996,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn inside_agy_conv_dir_經過_junction_跳出去的不算_對話資料夾本身是_junction_也不算() {
+    fn inside_agy_conv_dir_經過捷徑跳出去的不算_對話資料夾本身是捷徑也不算() {
         let d = tempfile::tempdir().unwrap();
         let out = d.path().join("elsewhere");
         std::fs::create_dir_all(&out).unwrap();
@@ -960,7 +1034,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn sensitive_write_經過_junction_指進去的也算() {
+    fn sensitive_write_經過捷徑指進去的也算() {
         let d = tempfile::tempdir().unwrap();
         let h = d.path();
         std::fs::create_dir_all(h.join(".gemini")).unwrap();
