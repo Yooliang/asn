@@ -471,7 +471,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
   const r = await localSignPublish(opts, realDeps(repoRoot, env))
   if (r.ok && r.postFailed) {
     console.log('注意：群組沒貼成功，請自行通知（要貼的原文在上面的 log）')
-    console.log(formatPostFailedMarker(r.postFailedText)) // 給常駐程式留告警用（#2345）；發佈本身成功，結束碼不變
+    console.log(formatPostFailedMarker()) // 給常駐程式留告警用（#2345），標記不帶文字；發佈本身成功，結束碼不變
   }
   console.log(r.ok ? (r.dryRun ? '演練完成（沒有發布任何東西）' : `完成：v${opts.version}`) : `中止於第 ${r.failedStep} 步（${r.failedName}）`)
   return r.ok ? 0 : 1

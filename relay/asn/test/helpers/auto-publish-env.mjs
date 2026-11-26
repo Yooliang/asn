@@ -64,7 +64,7 @@ export const PENDING = path.join(path.dirname(STATE), 'post-pending.json')
 export const pendingOf = (e) => JSON.parse(e.fsMap.get(PENDING))
 export const postFails = (e) => { e.deps.asnCli = () => ({ status: 2, stdout: '', stderr: '拒絕：找不到呼叫者所屬的 Claude 視窗' }) }
 
-export const markerOut = (text) => `...log...\n${formatPostFailedMarker(text)}\n`
+export const markerOut = () => `...log...\n${formatPostFailedMarker()}\n`
 // 第一輪 dry-run 先過，第二輪才是正式發佈
 export async function publishWithPostFailed(e, text = '【發版完成】v0.2.99：…') {
   e.deps.spawn = (bin, args) => ({ status: 0, stdout: args.includes('--dry-run') ? 'ok' : markerOut(text), stderr: '' })

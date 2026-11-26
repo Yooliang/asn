@@ -2,6 +2,7 @@ import test, { mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { runOnce, runCommand, parseArgs, ALERT_CAUSES, WORKFLOWS } from '../../../tools/release/auto_publish.mjs'
 import { PENDING_PLATFORMS, PENDING_KINDS, isSemver, isCommit, isPlatform, isKind, validateItem, buildItem, enqueuePending, readPending, pendingPathOf, MAX_ITEM_BYTES, MAX_FILE_BYTES, MAX_ITEMS, MAX_ATTEMPTS, MAX_CLAIMED_BY, LAST_ERROR_MAX, LAST_ERROR_MAX_BYTES, LOCK_FUTURE_MS, PENDING_BAD_MESSAGE, PENDING_FULL_MESSAGE, PENDING_LOCK_BAD_MESSAGE, cleanLastError, isLastError } from '../../../tools/release/post_pending.mjs'
+import { POST_FAILED_FIXED } from '../../../tools/release/post_pending_rules.mjs'
 import { env, row, sha, short, opts, STATE, T0, lk, seededState, postFails, alertOf, lastState, pendingOf, PENDING, publishWithPostFailed, markerOut } from './helpers/auto-publish-env.mjs'
 
 const FIELDS = ['at', 'attempts', 'claimedAt', 'claimedBy', 'commit', 'createdAt', 'id', 'kind', 'lastError', 'platform', 'version']
@@ -280,7 +281,7 @@ test('#2345 ci-failed 回報貼群組失敗：佇列有一筆 kind=ci-failed，�
   assert.equal(it.platform, 'desktop')
   assert.equal(it.version, '0.2.99')
   assert.equal(it.commit, short(222))
-  assert.ok(alertOf(e).alerts['post-failed'].message.startsWith('通知群組失敗'))
+  assert.equal(alertOf(e).alerts['post-failed'].message, POST_FAILED_FIXED)
 })
 
 test('#2345 blocked 回報貼群組失敗：佇列有一筆 kind=blocked（Linux 那版，commit 取 Linux 的 run）', async () => {

@@ -1,5 +1,6 @@
 // 自動發佈常駐程式（#1980、#2003）：輪詢發版 run，全綠就依序跑 local_sign_publish（先 dry-run 再正式）。
 // 運行手冊（第一次上線、--seed、--ack、各檔案用途、回報訊息怎麼處理、怎麼停止）：docs/release/自動發佈運行手冊.md
+// 發版收尾補貼群組（發版視窗跑、從乾淨的 main 簽出）：node tools/release/auto_publish.mjs --post-pending [--state <檔>]
 // 用法：node tools/release/auto_publish.mjs [--once] [--interval 120] [--state <檔>] [--room <群組代號>] [--dry-run-only]
 //   播種：--seed <版號>（或 --seed-desktop／--seed-linux）--yes；人工確認一筆失敗：--ack <平台@版號>（同版告警一起清）；人工清一類告警：--ack-alert <類別>
 // 判斷規則全在 auto_publish_core.mjs；這支只負責呼叫端：取鎖、讀 gh、準備工作樹、跑子程序、存 state、貼群組。
@@ -13,6 +14,8 @@ import { spawnSync } from 'node:child_process'
 import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail, parsePostFailedMarker } from './asn_cli.mjs'
 import { enqueuePending } from './post_pending.mjs'
+import { POST_FAILED_FIXED, SEND_TIMEOUT_MS, READ_TIMEOUT_MS } from './post_pending_rules.mjs'
+import { runPostPending } from './post_pending_cmd.mjs'
 
 // 決定階段的回報裡，貼群組失敗時要另寫進待貼佇列的類別（其餘回報沒有版號與 commit）
 const PENDING_REPORT_KINDS = ['ci-failed', 'blocked']
@@ -38,7 +41,7 @@ export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad']
 
 export function parseArgs(argv) {
-  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, error: null }
+  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, postPending: false, error: null }
   for (let i = 0; i < argv.length && !o.error; i++) {
     const a = argv[i]
     const val = () => { const v = argv[++i]; if (v === undefined || v.startsWith('--')) { o.error = `${a} 後面要有值`; return null } return v }
@@ -53,7 +56,13 @@ export function parseArgs(argv) {
     else if (a === '--ack') o.ack = val()
     else if (a === '--ack-alert') o.ackAlert = val()
     else if (a === '--yes') o.yes = true
+    else if (a === '--post-pending') o.postPending = true
     else o.error = `不認得的參數：${a}`
+  }
+  // 代貼只讀自己的設定檔，不收命令列的群組代號，也不和其他子命令或常駐參數混用
+  if (!o.error && o.postPending) {
+    if (o.room !== null) o.error = '--post-pending 不接受 --room（群組代號只從代貼端自己的設定檔讀）'
+    else if (o.ack || o.ackAlert || o.seedDesktop || o.seedLinux || o.yes || o.once || o.dryRunOnly) o.error = '--post-pending 只能搭配 --state 使用'
   }
   if (!o.error && o.ack && (o.seedDesktop || o.seedLinux)) o.error = '--ack 和 --seed 不能同時給'
   if (!o.error && o.ackAlert !== null) {
@@ -234,6 +243,7 @@ export function makeAlerts(opts, deps) {
         if (old && old.status === 'active' && old.reason === reason) {
           const lines = String(old.message).split('\n')
           if (!lines.includes(line)) this.raise(cause, reason, `${old.message}\n${line}`, ref)
+          else if (ref && ref !== old.ref) this.raise(cause, reason, old.message, ref) // 同一句不重複，但 ref 仍取最新一筆
           return
         }
         this.raise(cause, reason, line, ref)
@@ -269,7 +279,7 @@ function makePost(opts, deps, alerts, getRef = () => null) {
     try { r = deps.asnCli(['send', '--room', opts.room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
     if (r.status !== 0) {
       deps.log(`貼群組失敗：${asnCliFail(r)}`)
-      if (!noAlert) alerts.raiseAppend('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
+      if (!noAlert) alerts.raiseAppend('post-failed', 'post-failed', POST_FAILED_FIXED, getRef())
       return false
     } else if (!noAlert) alerts.resolve('post-failed')
     return true
@@ -476,7 +486,7 @@ export async function runOnce(opts, deps) {
     if (r.status === 0 && d.action === 'publish') {
       const pf = parsePostFailedMarker(r.stdout)
       if (pf) {
-        alerts.raiseAppend('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
+        alerts.raiseAppend('post-failed', 'post-failed', POST_FAILED_FIXED, ref)
         // 同一筆另寫進待貼佇列（只放固定欄位）：版號取自決定階段的 key、commit 取自 gh 的 run 列表，都不從子程序輸出解析。
         // 寫失敗只記 log（enqueuePending 不丟例外），不影響發版結果
         const run = runs.find((x) => x.runId === String(d.runId))
@@ -619,6 +629,15 @@ async function main() {
   opts.state = rs.state
   const deps = realDeps(opts)
   if (rs.note) deps.log(rs.note)
+  if (opts.postPending) {
+    // 送出與讀群組各有逾時（認領逾時要大於它們的總和，見 post_pending_rules.mjs）
+    const sendCli = makeAsnCli({ timeoutMs: SEND_TIMEOUT_MS })
+    const readCli = makeAsnCli({ timeoutMs: READ_TIMEOUT_MS })
+    deps.asnCli = (args) => (args[0] === 'room' ? readCli(args) : sendCli(args))
+    const r = runPostPending(opts, deps)
+    for (const l of r.lines) (r.code === 0 ? console.log : console.error)(l)
+    process.exit(r.code)
+  }
   if (opts.ack || opts.ackAlert || opts.seedDesktop || opts.seedLinux) {
     const r = await runCommand(opts, deps)
     ;(r.code === 0 ? console.log : console.error)(r.msg)

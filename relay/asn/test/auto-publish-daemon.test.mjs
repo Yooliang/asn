@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { runOnce, toRuns, parseArgs, checkWorktree, checkStartup, runCommand, realDeps, resolveStatePath, REPO_ROOT, acquireLock, WORKFLOWS, REQUIRED_DEPS, BLOCKED_NOTICE_MS, GH_FAIL_NOTICE_MS } from '../../../tools/release/auto_publish.mjs'
 import { formatPostFailedMarker, parsePostFailedMarker } from '../../../tools/release/asn_cli.mjs'
+import { POST_FAILED_FIXED } from '../../../tools/release/post_pending_rules.mjs'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -658,7 +659,7 @@ test('#2229 貼群組失敗：寫告警檔（類別、一句人話、次數、�
   assert.equal(a.status, 'active')
   assert.equal(a.count, 1)
   assert.equal(a.firstAt, a.lastAt)
-  assert.ok(a.message.includes('通知群組失敗'))
+  assert.equal(a.message, POST_FAILED_FIXED)
   assert.ok(!JSON.stringify(a).includes('Claude 視窗'), '錯誤原文不進告警檔')
 })
 
@@ -965,15 +966,15 @@ test('#2287 --ack-alert 取鎖同 --ack：鎖被佔用就拒絕、不動告警�
   assert.equal((await runCommand(parseArgs(['--ack-alert', 'post-failed', '--state', STATE]), none.deps)).code, 0)
 })
 
-test('#2287 post-failed：message 含沒送出的通知原文，ref 是當時處理的平台@版號（不是 null）', async () => {
+test('#2287 post-failed：message 是固定句、不含通知原文，ref 是當時處理的平台@版號（不是 null）', async () => {
   const e = env({ desktopRows: [row('v0.2.45')] })
   postFails(e)
   e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' }) // dry-run 失敗 → 貼群組
   await runOnce(opts, e.deps)
   const a = alertOf(e).alerts['post-failed']
   assert.equal(a.ref, 'desktop@0.2.45')
-  assert.ok(a.message.includes('desktop@0.2.45'), '原文含版本')
-  assert.ok(a.message.includes('不會自動重試'), '原文整句都在')
+  assert.equal(a.message, POST_FAILED_FIXED)
+  assert.ok(!a.message.includes('desktop@0.2.45') && !a.message.includes('不會自動重試'), '不附通知原文')
 })
 
 test('#2287 決定階段就貼的回報（發版 CI 失敗）貼群組失敗：ref 帶平台@版號，不是 null（舊程式 ref 為 null）', async () => {
@@ -983,11 +984,11 @@ test('#2287 決定階段就貼的回報（發版 CI 失敗）貼群組失敗：r
   assert.equal(r.outcome, 'report')
   const a = alertOf(e).alerts['post-failed']
   assert.equal(a.ref, 'desktop@0.2.45')
-  assert.ok(a.message.includes('desktop@0.2.45'))
+  assert.equal(a.message, POST_FAILED_FIXED)
 })
 
 // ---- #2345 發佈成功但群組沒貼成：子程序結束碼 0，靠 stdout 標記留 active post-failed 告警 ----
-const markerOut = (text) => `...log...\n${formatPostFailedMarker(text)}\n`
+const markerOut = () => `...log...\n${formatPostFailedMarker()}\n`
 // 第一輪 dry-run 先過，第二輪才是正式發佈
 async function publishWithPostFailed(e, text = '【發版完成】v0.2.99：…') {
   e.deps.spawn = (bin, args) => ({ status: 0, stdout: args.includes('--dry-run') ? 'ok' : markerOut(text), stderr: '' })
@@ -1003,7 +1004,8 @@ test('#2345 發佈成功但群組沒貼成：留 active post-failed 告警，ref
   assert.ok(a, '舊程式沒有任何 post-failed 告警')
   assert.equal(a.status, 'active')
   assert.equal(a.ref, 'desktop@0.2.99')
-  assert.ok(a.message.includes('【發版完成】v0.2.99'))
+  assert.equal(a.message, POST_FAILED_FIXED)
+  assert.ok(!JSON.stringify(a).includes('【發版完成】'), '標記裡的文字不進告警')
   assert.equal(lastState(e.fsMap).done['desktop@0.2.99'].result, 'published')
   assert.ok(!alertOf(e).alerts['ci-failed'], '不是會暫停發佈的失敗')
 })
@@ -1030,10 +1032,13 @@ test('#2345 下一輪沒有要貼的東西：不會把這筆告警誤清掉；--
   assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
 })
 
-test('#2345 標記解析：格式壞、不是字串都當沒有', () => {
-  assert.deepEqual(parsePostFailedMarker(markerOut('甲\n乙"丙')), { text: '甲\n乙"丙' })
-  assert.equal(parsePostFailedMarker('ASN_POST_FAILED_V1 {壞'), null)
-  assert.equal(parsePostFailedMarker('ASN_POST_FAILED_V1 {"text":1}'), null)
+test('#2345 標記只表示沒貼成、不帶文字：新格式與舊格式都認，後面的內容一律丟掉', () => {
+  assert.equal(formatPostFailedMarker('任何字都不會進來'), 'ASN_POST_FAILED_V1')
+  assert.deepEqual(parsePostFailedMarker(markerOut()), { failed: true })
+  assert.deepEqual(parsePostFailedMarker('ASN_POST_FAILED_V1 {"text":"【發版完成】/kick @all"}'), { failed: true })
+  assert.ok(!('text' in parsePostFailedMarker('ASN_POST_FAILED_V1 {"text":"甲"}')))
+  assert.equal(parsePostFailedMarker('ASN_POST_FAILED_V1x'), null)
+  assert.equal(parsePostFailedMarker('前綴 ASN_POST_FAILED_V1'), null)
   assert.equal(parsePostFailedMarker(undefined), null)
 })
 
@@ -1043,24 +1048,22 @@ test('#2345 同一版電腦版與 Linux 都沒貼成：兩則原文都在同一�
   for (let i = 0; i < 4; i++) { e.clock.t = T0 + i * 120_000; await runOnce(opts, e.deps) }
   const a = alertOf(e).alerts['post-failed']
   assert.equal(a.status, 'active')
-  assert.ok(a.message.includes('desktop@0.2.99') && a.message.includes('【發版完成】v0.2.99'), '電腦版原文')
-  assert.ok(a.message.includes('linux@0.2.99') && a.message.includes('【Linux 版發版完成】v0.2.99'), 'Linux 原文')
-  assert.equal(a.message.split('【發版完成】').length, 2, '同一則不重複')
+  assert.equal(a.message, POST_FAILED_FIXED, '兩個平台都只有同一句固定句，不重複')
   const res = await runCommand(parseArgs(['--ack-alert', 'post-failed', '--state', STATE]), e.deps)
   assert.equal(res.code, 0)
   assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
 })
 
-test('#2345 先留下電腦版補貼原文，之後別的回報貼群組也失敗：兩段原文都在、仍是 active（makePost 不蓋掉）', async () => {
+test('#2345 先留下電腦版的 post-failed，之後別的回報貼群組也失敗：仍是 active、仍是同一句固定句（makePost 不蓋掉）', async () => {
   const e = env({ desktopRows: [row('v0.2.99', 222)], linuxRows: [row('linux-v0.2.99', 333)] })
   await publishWithPostFailed(e)
-  assert.ok(alertOf(e).alerts['post-failed'].message.includes('【發版完成】v0.2.99'))
+  assert.equal(alertOf(e).alerts['post-failed'].message, POST_FAILED_FIXED)
   e.deps.spawn = () => ({ status: 1, stdout: '', stderr: '' }) // Linux 演練失敗 → 失敗回報
   postFails(e) // 回報也貼不出去
   e.clock.t = T0 + 120_000
   await runOnce(opts, e.deps)
   const a = alertOf(e).alerts['post-failed']
   assert.equal(a.status, 'active')
-  assert.ok(a.message.includes('【發版完成】v0.2.99'), '電腦版要補貼的原文還在')
-  assert.ok(a.message.includes('linux@0.2.99'), 'Linux 失敗回報原文也在')
+  assert.equal(a.message, POST_FAILED_FIXED)
+  assert.equal(a.ref, 'linux@0.2.99', 'ref 取最新一筆')
 })

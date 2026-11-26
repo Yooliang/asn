@@ -140,7 +140,7 @@ export function readPending(opts, deps, warn = console.warn) {
   return { ok: true, items, rejected }
 }
 
-const stampOf = (deps) => new Date(deps.now()).toISOString().replace(/[:.]/g, '-')
+export const stampOf = (deps) => new Date(deps.now()).toISOString().replace(/[:.]/g, '-')
 
 export const PENDING_FULL_MESSAGE = '待貼佇列已滿，新的一筆沒有寫入，請人工處理佇列'
 export const PENDING_LOCK_BAD_MESSAGE = '待貼佇列的鎖檔不正常，已改名保留，請人工檢查'
@@ -148,7 +148,7 @@ export const pendingRejectedMessage = (n) => `待貼佇列有 ${n} 筆格式不�
 const raisePendingBad = (opts, deps, message) => makeAlerts(opts, deps).raise('pending-bad', 'pending-bad', message, 'post-pending')
 
 // 整個檔讀不懂：改名留存、留 pending-bad 告警、不覆寫
-function quarantine(opts, deps) {
+export function quarantine(opts, deps) {
   const p = pendingPathOf(opts)
   const to = `${p}.bad-${stampOf(deps)}`
   deps.rename(p, to)
@@ -157,7 +157,7 @@ function quarantine(opts, deps) {
 }
 
 // 只有部分筆不合格：不合格的另存成 .rejected-<時間>、留 pending-bad 告警（帶筆數），合格的留在佇列
-function saveRejected(opts, deps, rejected) {
+export function saveRejected(opts, deps, rejected) {
   const to = `${pendingPathOf(opts)}.rejected-${stampOf(deps)}`
   atomicWrite(deps, to, JSON.stringify({ v: 1, rejectedAt: new Date(deps.now()).toISOString(), items: rejected }, null, 2))
   deps.log(`待貼佇列有 ${rejected.length} 筆不合格，已另存為 ${to}`)
