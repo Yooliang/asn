@@ -58,7 +58,7 @@ fn 清單內每個位置都擋_本身與底下的檔() {
     }
     // 清單本身另外寫死一份：誰把項目拿掉，這裡會紅
     for d in [
-        ".gemini", ".ssh", ".asn", ".irori-relay", ".claude", ".codex", ".pi", ".aws", ".config", ".gnupg", ".grok", ".claude.json", ".netrc", ".git-credentials", ".docker", ".kube", ".azure", ".npmrc",
+        ".gemini", ".ssh", ".asn", crate::home::LEGACY_NAME, ".claude", ".codex", ".pi", ".aws", ".config", ".gnupg", ".grok", ".claude.json", ".netrc", ".git-credentials", ".docker", ".kube", ".azure", ".npmrc",
         "AppData/Roaming/Microsoft/Credentials", "AppData/Roaming/Microsoft/Protect", "AppData/Local/Google/Chrome/User Data", "AppData/Local/Microsoft/Edge/User Data", "AppData/Local/tw.yooliang.asn",
     ] {
         assert!(blocked(&r, &ps(&r.home.join(d).join("x"))), "{d}");
