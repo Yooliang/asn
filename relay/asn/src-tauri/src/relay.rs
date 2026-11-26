@@ -1289,7 +1289,7 @@ pub fn valid_launch_name(s: &str) -> bool {
     (1..=40).contains(&n) && s.chars().enumerate().all(|(i, c)| ok(c, i == 0))
 }
 
-/// 前端交來的開視窗請求 → 送給後台的 body。只放行 node／profile／name／cwd／first_message 五個欄位，加上經 pi 時的 pi_provider／pi_model（指令內容一律不帶），格式先在這裡擋
+/// 前端交來的開視窗請求 → 送給後台的 body。只放行 node／profile／name／cwd／first_message 五個欄位，加上經 pi 時的 pi_provider／pi_model、指定型號 model（指令內容一律不帶），格式先在這裡擋
 pub fn build_launch_body(raw: &Value) -> Result<Value, String> {
     let o = raw.as_object().ok_or("開視窗的內容格式不對")?;
     let s = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("");
@@ -1316,9 +1316,16 @@ pub fn build_launch_body(raw: &Value) -> Result<Value, String> {
         return Err("第一句話最多 4000 字".into());
     }
     let mut body = json!({ "node": node, "profile": profile, "name": name, "cwd": cwd, "first_message": first });
-    if let Some((provider, model)) = launch_pi_fields(o)? {
+    let pi = launch_pi_fields(o)?;
+    if let Some((provider, model)) = pi {
         body["pi_provider"] = json!(provider);
         body["pi_model"] = json!(model);
+    }
+    if let Some(model) = launch_model_field(o)? {
+        if pi.is_some() {
+            return Err("指定型號和 pi 的提供者、模型不能一起送".into());
+        }
+        body["model"] = json!(model);
     }
     Ok(body)
 }
@@ -1335,6 +1342,15 @@ fn launch_pi_fields(o: &serde_json::Map<String, Value>) -> Result<Option<(&str, 
         (None, None) => Ok(None),
         (Some(p), Some(m)) => Ok(Some((p, m))),
         _ => Err(BAD.to_string()),
+    }
+}
+
+/// 指定型號（#2353 第③階段）：null 或沒帶當成沒指定；給了就一定要是字串且符合統一型號規則，不合格回錯、不能丟掉
+fn launch_model_field(o: &serde_json::Map<String, Value>) -> Result<Option<&str>, String> {
+    match o.get("model") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if crate::model_id::valid_model_id(s) => Ok(Some(s.as_str())),
+        Some(_) => Err("型號格式不對".into()),
     }
 }
 
@@ -1981,6 +1997,14 @@ mod tests {
         v
     }
 
+    fn model_req(extra: Value) -> Value {
+        let mut v = json!({ "node": "H", "profile": "claude", "name": "a", "cwd": "c" });
+        for (k, x) in extra.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        v
+    }
+
     #[test]
     fn 遠端開視窗_合格的_pi_兩欄會帶進_body() {
         let b = build_launch_body(&pi_req(json!({ "pi_provider": "openai-codex", "pi_model": "anthropic/claude-sonnet-5-5" }))).unwrap();
@@ -2024,11 +2048,55 @@ mod tests {
     }
 
     #[test]
+    fn 遠端開視窗_指定型號會帶進_body_沒帶或_null_跟以前一樣() {
+        let b = build_launch_body(&model_req(json!({ "model": "claude-opus-5-5" }))).unwrap();
+        assert_eq!(b["model"], "claude-opus-5-5");
+        assert!(b.get("pi_provider").is_none() && b.get("pi_model").is_none());
+        let plain = build_launch_body(&model_req(json!({}))).unwrap();
+        let with_null = build_launch_body(&model_req(json!({ "model": null }))).unwrap();
+        assert_eq!(plain, with_null);
+        assert!(plain.get("model").is_none(), "沒指定型號就不帶這個鍵");
+        // 統一規則放行的寫法（含 / : [ ]）都帶得過去
+        for ok in ["opus[1m]", "anthropic/claude-sonnet-5-5", "a:b"] {
+            assert_eq!(build_launch_body(&model_req(json!({ "model": ok }))).unwrap()["model"], ok);
+        }
+    }
+
+    #[test]
+    fn 遠端開視窗_指定型號不合格或型別不對_都回錯不丟掉() {
+        for bad in [json!(5), json!({ "a": 1 }), json!(["x"]), json!(true), json!("")] {
+            assert_eq!(build_launch_body(&model_req(json!({ "model": bad.clone() }))).unwrap_err(), "型號格式不對", "{bad}");
+        }
+    }
+
+    #[test]
+    fn 遠端開視窗_指定型號照統一型號規則的向量放行或擋下() {
+        let vectors: Value = serde_json::from_str(include_str!("../../../shared/test-vectors/model-id.json")).unwrap();
+        let invalid = vectors["invalid"].as_array().unwrap();
+        assert!(invalid.len() >= 10);
+        for s in invalid {
+            assert!(build_launch_body(&model_req(json!({ "model": s }))).is_err(), "{s}");
+        }
+        for s in vectors["valid"].as_array().unwrap() {
+            assert!(build_launch_body(&model_req(json!({ "model": s }))).is_ok(), "{s}");
+        }
+    }
+
+    #[test]
     fn 遠端開視窗_手機畫面送出的請求經過_build_launch_body_仍帶_pi_欄位() {
         // 與前端 test/mobile-launch-pi.test.mjs 讀同一份：前端的 buildLaunchRequest 輸出必須等於這份 request
         let sample: Value = serde_json::from_str(include_str!("../../../shared/test-vectors/mobile-launch-pi-request.json")).unwrap();
         let b = build_launch_body(&sample["request"]).unwrap();
         assert_eq!(b, sample["request"], "手機送出的每個欄位（含 pi_provider、pi_model）都要原樣到後台");
+    }
+
+    #[test]
+    fn 遠端開視窗_指定型號與_pi_欄位不能一起送_pi_欄位也放行_斜線與冒號() {
+        let both = build_launch_body(&model_req(json!({ "profile": "pi", "model": "m", "pi_provider": "openrouter", "pi_model": "meta/llama-3:free" }))).unwrap_err();
+        assert!(both.contains("不能一起送"), "{both}");
+        let pi = build_launch_body(&model_req(json!({ "profile": "pi", "pi_provider": "openrouter", "pi_model": "meta/llama-3:free" }))).unwrap();
+        assert_eq!((pi["pi_provider"].as_str(), pi["pi_model"].as_str()), (Some("openrouter"), Some("meta/llama-3:free")));
+        assert!(pi.get("model").is_none());
     }
 
     #[test]

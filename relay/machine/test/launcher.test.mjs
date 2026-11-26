@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnTracked } from './spawn-tracked.mjs'
 import { fileURLToPath } from 'node:url'
-import { buildSpawn, canonicalLaunchCwd, check, childEnv, createLauncher, loadConfig, NAME_RE, PI_MODEL_UNSUPPORTED, quoteArg, summary, TRUST_HINT } from '../launcher.mjs'
+import { buildSpawn, canonicalLaunchCwd, check, childEnv, createLauncher, loadConfig, MODEL_UNSUPPORTED, NAME_RE, PI_MODEL_UNSUPPORTED, quoteArg, summary, TRUST_HINT } from '../launcher.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const MACHINE = path.join(here, '..')
@@ -194,6 +194,22 @@ test('流程：帶了經 pi 的提供者與模型（D2 #422）就拒絕，不用
     assert.deepEqual([by[uid(1)].status, by[uid(1)].detail], ['failed', PI_MODEL_UNSUPPORTED])
     assert.equal(by[uid(2)].status, 'ok')
     assert.equal(h.starts.length, 1)
+  } finally { h.done() }
+})
+
+test('流程：帶了指定型號（#2353）就拒絕並講白話，不開窗、不用預設型號；沒帶（或 null）照常', async () => {
+  const h = harness()
+  try {
+    h.push(req(1, { cwd: h.d, model: 'opus[1m]' }), req(4, { cwd: h.d, model: '' }), req(2, { cwd: h.d, model: null }), req(3, { cwd: h.d }))
+    await h.L.pull()
+    await waitFor(() => h.results.length === 4)
+    const by = Object.fromEntries(h.results.map(r => [r.id, r]))
+    assert.deepEqual([by[uid(1)].status, by[uid(1)].detail], ['failed', MODEL_UNSUPPORTED])
+    assert.deepEqual([by[uid(4)].status, by[uid(4)].detail], ['failed', MODEL_UNSUPPORTED], '空字串也算帶了')
+    assert.equal(by[uid(2)].status, 'ok')
+    assert.equal(by[uid(3)].status, 'ok')
+    assert.equal(h.starts.length, 2, '被拒絕的兩筆沒開窗')
+    assert.match(MODEL_UNSUPPORTED, /指定型號/)
   } finally { h.done() }
 })
 
