@@ -245,7 +245,7 @@ export const RemoteView = {
           emit('screen', { text: String(f.text ?? ''), cols: c > 0 ? c : 0 })
         })
         offEnd = props.eventHub.subscribe(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
-        await props.eventHub.ready()
+        await props.eventHub.readyFor([FRAME_EVENT, END_EVENT])   // 註冊失敗會丟錯，接到下面的 catch → startError
         if (!wanted()) return
         const r = await props.api.start(props.node, props.name, props.machine, { wanted })
         // 發起的時候這一格被收掉了（或又重新發起）：這次已經開始，要記得結束，不然那台會一直送到到期

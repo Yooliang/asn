@@ -243,7 +243,7 @@ export function createTermViewSession(deps) {
         if (viewId === null) early.set(c.view_id, { closed: c.reason })
         else if (c.view_id === viewId) { console.info('[ASN] 終端畫面結束', c.reason); lost(c.reason) }
       }))
-      await deps.hub.ready()
+      await deps.hub.readyFor([FRAME_EVENT, INPUT_ERROR_EVENT, CLOSED_EVENT])   // 註冊失敗會丟錯，接到下面的 catch → lost（畫面上有提示，不是空畫面）
       if (stopped) return
       const id = await deps.open()
       if (stopped) { await deps.close(id); return }   // 開到一半就被關掉：不留著背景讀畫面

@@ -149,6 +149,7 @@ export const RemoteInput = {
       phase.value = 'starting'; note.value = ''; soon.value = false; warn.value = ''; lastDropped = 0
       try {
         const Terminal = await loadXterm()
+        if (!current()) return   // xterm 載入期間已卸載或又重新發起：不訂閱，免得訂閱沒人解除（asn真 一審）
         // 有最後一幅畫面（snap）：先建 xterm、把原文寫進去，等連上那台的這段保留原本的彩色畫面（#1762）。沒有就照舊，連上了才建
         if (props.snap !== null) {
           await nextTick()
@@ -169,7 +170,7 @@ export const RemoteInput = {
           drawFrame(f)
         })
         offEnd = props.eventHub.subscribe(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
-        await props.eventHub.ready()
+        await props.eventHub.readyFor([FRAME_EVENT, END_EVENT])   // 註冊失敗會丟錯，接到下面的 catch → inputStartError
         if (!current()) return
         // 手機的 start 先等本人確認（生物辨識）：確認回來時這個畫面已經收掉就不送（電腦版不看第四個參數）
         const r = await props.api.start(props.node, props.name, props.machine, { wanted: current })

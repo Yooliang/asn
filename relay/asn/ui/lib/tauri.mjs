@@ -44,7 +44,7 @@ export const ctl = op => invoke('win_ctl', { op })
 // ---------- 事件中心的接法（#2038）：listen／emit／emitTo 注入事件中心的唯一一處；F3 的主機接縫（host.mjs）做好後只改這裡 ----------
 const hubTransport = () => ({ listen, emit, emitTo: (label, evt, payload) => T.event.emitTo(label, evt, payload) })
 // 沒有 AsnCore 的視窗（chat、panel、setup-progress…）用：只有 hub＋Rust 橋，不跑收信輪詢
-export const createWindowHub = () => makeWindowHub({ ...hubTransport(), log: m => console.info('[ASN]', m) })
+export const createWindowHub = () => makeWindowHub({ ...hubTransport(), log: m => console.info('[ASN]', m), warn: m => console.warn('[ASN]', m) })
 // AsnCore 的 hub：先建好、這裡再把 Rust 事件的橋接上
 export const bindRustEvents = hub => hub.attachRust(hubTransport().listen)
 // 附件快取清空了（換帳號、登入、登出）：這個視窗記著的大圖也丟掉（#1493）

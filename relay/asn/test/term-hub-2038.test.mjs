@@ -256,9 +256,11 @@ test('接線：三個 api 物件、手機兩個 api 不再帶 listen；終端畫
     assert.ok(!/api\.listen|deps\.listen|listenWhile/.test(code), `${f} 不再走 api.listen`)
     assert.ok(!/eventHub\?\./.test(code), `${f} 不用 ?.（缺 hub 要丟錯，不能靜默）`)
   }
-  assert.match(read('ui/lib/term-view.mjs'), /await deps\.hub\.ready\(\)/)
-  assert.match(read('ui/lib/term-remote.mjs'), /await props\.eventHub\.ready\(\)/)
-  assert.match(read('ui/lib/term-remote-input.mjs'), /await props\.eventHub\.ready\(\)/)
+  // 要用只等指定事件、註冊失敗會丟錯的版本（不是一定 resolve 的 ready）
+  assert.match(read('ui/lib/term-view.mjs'), /await deps\.hub\.readyFor\(\[FRAME_EVENT, INPUT_ERROR_EVENT, CLOSED_EVENT\]\)/)
+  assert.match(read('ui/lib/term-remote.mjs'), /await props\.eventHub\.readyFor\(\[FRAME_EVENT, END_EVENT\]\)/)
+  assert.match(read('ui/lib/term-remote-input.mjs'), /await props\.eventHub\.readyFor\(\[FRAME_EVENT, END_EVENT\]\)/)
+  for (const f of ['term-view', 'term-remote', 'term-remote-input']) assert.ok(!/\.ready\(\)/.test(read(`ui/lib/${f}.mjs`).replace(/^\s*\/\/.*$/gm, '')), `${f} 不用一定 resolve 的 ready()`)
 })
 
 test('接線：三個元件的 eventHub 是必填、chat-pane 的是選填並傳給三個標籤；三種視窗都有傳', () => {
@@ -275,14 +277,122 @@ test('接線：三個元件的 eventHub 是必填、chat-pane 的是選填並傳
   assert.match(read('ui/list.html'), /<term-view [^>]*:event-hub="eventHub"/)
   assert.match(read('ui/m.html'), /<chat-pane v-if="chatFriend"[^>]*:event-hub="eventHub"/)
   assert.match(read('ui/chat.html'), /<chat-pane [^>]*:event-hub="eventHub"/)
+  // 屬性之間要有空白：`:event-hub="eventHub":skin="skin"` 這種黏在一起的寫法瀏覽器雖然讀得過，但是壞習慣、容易被改壞
+  for (const f of ['list', 'm', 'chat']) {
+    const flat = read(`ui/${f}.html`).replace(/="[^"]*"/g, '=V')
+    for (const tag of flat.match(/<(chat-pane|term-view|remote-view|remote-input)\b[^>]*>/g) ?? []) assert.ok(!/=V[^\s>\/]/.test(tag), `${f}.html 的標籤屬性黏在一起：${tag.slice(0, 80)}`)
+  }
   assert.match(read('ui/list.js'), /eventHub: core\.hub,/)
   assert.match(read('ui/m.js'), /eventHub: core\?\.hub \?\? null,/)
 })
 
-test('接線：chat.js 一個視窗只建一座事件中心，語音和終端共用', () => {
+test('接線：chat.js 終端與語音共用同一座事件中心（tauri.mjs、initFrame 另有各自的，只訂不相干的事件）', () => {
   const chat = read('ui/chat.js')
-  assert.equal([...chat.matchAll(/createWindowHub\(\)/g)].length, 1)
+  assert.equal([...chat.matchAll(/createWindowHub\(\)/g)].length, 1, 'chat.js 自己只建一座')
   assert.match(chat, /const eventHub = createWindowHub\(\)/)
   assert.match(chat, /createVoiceUi\(\{ invoke, hub: eventHub,/)
   assert.match(chat, /termViewApi, eventHub,/)
+})
+
+// ---------- 一審修正（asn真）：訂閱殘留、註冊失敗不能無聲、兩個畫面各收各的 ----------
+test('別台打字：xterm 載入回來前就卸載，不留任何訂閱（對照：正常掛上有 2 個）', async () => {
+  const ctl = rigHub(), api0 = remoteApi(ctl)
+  const ok = mountComp(RemoteInput, ctl, api0.api)
+  await until(() => ctl.liveTotal() === 2, '正向：正常掛上後兩個底層監聽都在')
+  ok.unmount()
+  assert.equal(ctl.liveTotal(), 0)
+  const rh = rigHub(), r = remoteApi(rh)
+  const v = mountComp(RemoteInput, rh, r.api)
+  v.unmount()   // 同一個 tick：loadXterm 還沒回來
+  await tick(20)
+  assert.equal(rh.liveTotal(), 0, '作廢的那一次不能訂閱（訂了就沒人解除）')
+  assert.equal(r.calls.filter(c => c.what === 'start').length, 0, '也不能發起')
+})
+
+test('別台打字：start 還在等 xterm 時又來一次 start，舊的那次不留訂閱、一幅畫面只畫一次', async () => {
+  const rh = rigHub(), r = remoteApi(rh)
+  const v = mountComp(RemoteInput, rh, r.api)
+  void v.st.again()   // 第二次 start：第一次還在 await loadXterm
+  await until(() => r.calls.some(c => c.what === 'start'), '發起了')
+  await tick(20)
+  assert.equal(rh.liveTotal(), 2, '底層只有兩個（畫面、結束）')
+  await until(() => xterms.length > 0, 'xterm 建好了')
+  const t = xterms.at(-1), before = t.writes.length
+  rh.fire(FRAME_EVENT, { id: 'r1', text: '只畫一次', meta: { cols: 80, rows: 24 } })
+  await tick(10)
+  assert.equal(t.writes.length - before, 1, '一幅畫面只寫進 xterm 一次（舊的訂閱殘留會畫兩次）')
+  v.unmount()
+})
+
+test('底層註冊失敗：本機畫面走 lost、不 open（錯誤路徑不能變無聲）', async () => {
+  const warns = [], rh = rigHub({ failOn: ['term-view-closed'], warns }), lost = []
+  let opened = 0
+  const s = createTermViewSession(sessionDeps(rh, { onLost: r => lost.push(r), open: async () => { opened++; return 7 } }))
+  await s.start()
+  assert.equal(lost.length, 1, 'lost 被呼叫')
+  assert.equal(opened, 0, '不 open')
+  assert.ok(warns.some(m => m.includes('term-view-closed') && m.includes('failed')), '橋用 warn 記了一行')
+  assert.equal(rh.liveTotal(), 0, '失敗後已訂的也退乾淨')
+})
+
+test('底層註冊失敗：看別台、別台打字顯示原本的錯誤（phase=ended、有說明），不發起', async () => {
+  for (const Comp of [RemoteView, RemoteInput]) {
+    const rh = rigHub({ failOn: [END_EVENT] }), r = remoteApi(rh)
+    const v = mountComp(Comp, rh, r.api)
+    await until(() => v.st.phase.value === 'ended', '進到結束狀態')
+    assert.ok(String(v.st.note.value).length > 0, '畫面上有說明文字')
+    assert.equal(r.calls.filter(c => c.what === 'start').length, 0, '不發起')
+    assert.equal(rh.liveTotal(), 0)
+    v.unmount()
+  }
+})
+
+test('兩個終端畫面用不同 view_id：各自只收到自己那幅', async () => {
+  const rh = rigHub(), got = [[], []]
+  const mk = (i, id) => createTermViewSession(sessionDeps(rh, { open: async () => id, createTerm: async () => ({ write: t => got[i].push(t), resize() {}, dispose() {} }) }))
+  const a = mk(0, 11), b = mk(1, 12)
+  await Promise.all([a.start(), b.start()])
+  rh.fire('term-view-frame', { view_id: 11, seq: 1, text: 'AAAA', meta: { cols: 80, rows: 24 } })
+  rh.fire('term-view-frame', { view_id: 12, seq: 1, text: 'BBBB', meta: { cols: 80, rows: 24 } })
+  await Promise.all([a.flushed(), b.flushed()])
+  assert.equal(got[0].length, 1); assert.equal(got[1].length, 1)
+  assert.ok(got[0][0].includes('AAAA') && !got[0][0].includes('BBBB'))
+  assert.ok(got[1][0].includes('BBBB') && !got[1][0].includes('AAAA'))
+  a.stop(); b.stop()
+})
+
+test('一個訂閱者退訂後，另一個仍然收得到；全部退訂才取消底層', async () => {
+  const rh = rigHub(), got = [[], []]
+  const mk = (i, id) => createTermViewSession(sessionDeps(rh, { open: async () => id, createTerm: async () => ({ write: t => got[i].push(t), resize() {}, dispose() {} }) }))
+  const a = mk(0, 11), b = mk(1, 12)
+  await Promise.all([a.start(), b.start()])
+  assert.equal(rh.liveCount('term-view-frame'), 1, '正向：兩個訂閱者共用 1 個底層')
+  a.stop()
+  assert.equal(rh.liveCount('term-view-frame'), 1, 'A 退訂後底層還在')
+  rh.fire('term-view-frame', { view_id: 12, seq: 1, text: 'STILL-B', meta: { cols: 80, rows: 24 } })
+  await b.flushed()
+  assert.ok(got[1].some(w => w.includes('STILL-B')), 'B 仍收得到')
+  b.stop()
+  assert.equal(rh.liveCount('term-view-frame'), 0)
+})
+
+test('readyFor：空陣列、還沒訂閱的事件名都丟錯（不能把空集合當成已就緒）', async () => {
+  const rh = rigHub()
+  await assert.rejects(() => rh.hub.readyFor([]), /至少一個/)
+  await assert.rejects(() => rh.hub.readyFor(undefined), /至少一個/)
+  await assert.rejects(() => rh.hub.readyFor(['term-view-frame']), /還沒訂閱/)
+  const off = rh.hub.subscribe('term-view-frame', () => {})
+  await rh.hub.readyFor(['term-view-frame'])   // 正向：訂了、註冊成功就通過
+  await assert.rejects(() => rh.hub.readyFor(['term-view-frame', 'term-view-closed']), /還沒訂閱：term-view-closed/)
+  off()
+})
+
+test('ready()（不帶參數）：某個事件註冊失敗照樣 resolve；橋用 warn 記一行；正式視窗的 warn 是 console.warn', async () => {
+  const warns = [], rh = rigHub({ failOn: ['term-view-closed'], warns })
+  rh.hub.subscribe('term-view-closed', () => {}); rh.hub.subscribe('term-view-frame', () => {})
+  await rh.hub.ready()   // 不丟
+  assert.ok(warns.length === 1 && warns[0].includes('listen term-view-closed failed'), warns.join('|'))
+  await assert.rejects(() => rh.hub.readyFor(['term-view-frame', 'term-view-closed']), /term-view-closed（failed/)
+  assert.match(read('ui/lib/tauri.mjs'), /warn: m => console\.warn\('\[ASN\]', m\)/)
+  assert.match(read('ui/lib/core.mjs'), /warn: m => console\.warn\('\[ASN\]', m\)/)
 })

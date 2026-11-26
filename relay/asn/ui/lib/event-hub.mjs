@@ -7,9 +7,9 @@
 import { RUST_EVENTS } from './rust-events.mjs'
 import { createRustBridge } from './rust-bridge.mjs'
 
-export function createEventHub({ listen = null, emit = null, emitTo = null, events = RUST_EVENTS, log = () => {} } = {}) {
+export function createEventHub({ listen = null, emit = null, emitTo = null, events = RUST_EVENTS, log = () => {}, warn = log } = {}) {
   let handlers = new Map()   // 事件名 → 訂閱項陣列（不就地改，換新陣列，扇出到一半有人退訂也安全）
-  const bridge = createRustBridge({ listen, log, dispatch: (evt, arg) => hub.emit(evt, arg) })
+  const bridge = createRustBridge({ listen, log, warn, dispatch: (evt, arg) => hub.emit(evt, arg) })
   const hub = {
     // 訂閱；回傳取消函式（可重複呼叫）
     subscribe(evt, fn) {
@@ -48,10 +48,12 @@ export function createEventHub({ listen = null, emit = null, emitTo = null, even
     // 後接 listen（AsnCore 先建 hub，tauri.mjs 的 bindRustEvents 再綁）：已有人訂閱的事件現在補註冊
     attachRust: fn => bridge.attach(fn),
     ready: () => bridge.ready(),
+    // 只等指定事件、而且要求註冊成功；失敗或沒訂閱就 reject（終端畫面用，失敗要接回畫面上的錯誤提示）
+    readyFor: events => bridge.readyFor(events),
     dispose() { handlers = new Map(); bridge.dispose() },
   }
   return hub
 }
 
 // 沒有 AsnCore 的子視窗（chat、panel、setup-progress…）用的輕量 hub：只有 hub＋橋，不跑收信輪詢
-export const createWindowHub = ({ listen, emit = null, emitTo = null, events = RUST_EVENTS, log = () => {} }) => createEventHub({ listen, emit, emitTo, events, log })
+export const createWindowHub = ({ listen, emit = null, emitTo = null, events = RUST_EVENTS, log = () => {}, warn = log }) => createEventHub({ listen, emit, emitTo, events, log, warn })
