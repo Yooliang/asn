@@ -66,3 +66,11 @@ Deno.test("#1752 整條路：後台存下來的 *-term 項目，畫面認得它�
   assert(terms.length >= 2);
   for (const p of terms) assert(isTermProfile(p), `${p.id} 過了後台之後畫面要認得它是 asn終端`);
 });
+
+Deno.test("#2381 整條路：Rust 送的每個 profile 的 engine 過了後台都還在（claude、acp、pi、asn終端的工具名）", async () => {
+  const src = await Deno.readTextFile(LAUNCHER_RS);
+  const sent = summaryShapeFromRust(src, termProfilesFromRust(src));
+  const stored = sanitizeLauncher(sent) as { profiles: P[] };
+  assertEquals(stored.profiles.map((p) => p.engine), sent.profiles.map((p) => p.engine));
+  assert(stored.profiles.every((p) => typeof p.engine === "string" && p.engine !== ""));
+});

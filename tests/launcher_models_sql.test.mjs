@@ -1,0 +1,169 @@
+// #2353 第②階段 migration（20261126100000_launcher_models.sql）：asn_relay_set_launcher 多收 models，並建統一型號規則 relay.valid_model_id。
+// 實跑：pglite（CI 的 sql-tests 以 --require-pglite 跑；本機沒裝就略過）。
+import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+
+const FILE = '20261126100000_launcher_models.sql'
+const sql = fs.readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const down = fs.readFileSync(new URL(`../supabase/sql/rollback/${FILE.replace('.sql', '_down.sql')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const prev = fs.readFileSync(new URL('../supabase/migrations/20261028140000_launcher_pi_models.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const V = JSON.parse(fs.readFileSync(new URL('../relay/shared/test-vectors/model-id.json', import.meta.url), 'utf8'))
+
+const fnBody = (text, name) => { const m = new RegExp(`create or replace function ${name.replace('.', '\\.')}\\(.*?\\$function\\$;`, 's').exec(text); assert.ok(m, name); return m[0] }
+
+test('靜態：只換 asn_relay_set_launcher、建兩支 relay 函式、不 grant、含向量的 pattern', () => {
+  assert.match(sql, /create or replace function relay\.valid_model_id\(/)
+  assert.match(sql, /create or replace function relay\.sanitize_launcher_models\(/)
+  assert.match(sql, /create or replace function public\.asn_relay_set_launcher\(p_node text, p_launcher jsonb\)/)
+  assert.doesNotMatch(sql, /grant |alter table|drop /i)
+  assert.match(sql, /revoke all on function relay\.valid_model_id\(text\) from public;/)
+  assert.ok(sql.includes(V.pattern), '字元集要與共用向量檔的 pattern 逐字相同')
+  assert.match(sql, /octet_length\(\(p_launcher - 'pi_models' - 'models'\)::text\) > 16000/)
+  assert.match(sql, /<= 32000/)
+  assert.match(sql, /^begin;$/m); assert.match(sql, /^commit;$/m)
+  assert.match(down, /^begin;$/m); assert.match(down, /^commit;$/m)
+})
+
+test('靜態：down 的 set_launcher 與 20261028140000 的函式本體逐字相同', () => {
+  assert.equal(fnBody(down, 'public.asn_relay_set_launcher'), fnBody(prev, 'public.asn_relay_set_launcher'))
+})
+
+let PGlite = null
+PGlite = await fastPGlite() // 沒裝回 null（略過實跑）；其他錯誤照丟
+const skip = PGlite ? false : '沒有安裝 @electric-sql/pglite'
+
+async function setup(extra = sql) {
+  const db = track(new PGlite())
+  await db.exec(`create schema relay; create table relay.nodes(id text primary key, status text default 'active', can_invite boolean default false, can_roster boolean default true, launcher jsonb, launcher_at timestamptz);
+    insert into relay.nodes(id) values ('W');`)
+  await db.exec(prev) // 先裝舊版（跟正式庫現況一樣），再套新的
+  await db.exec(extra)
+  const set = async l => (await db.query('select public.asn_relay_set_launcher($1, $2::jsonb) r', ['W', l === null ? null : JSON.stringify(l)])).rows[0].r
+  const get = async () => (await db.query("select launcher from relay.nodes where id = 'W'")).rows[0].launcher
+  return { db, set, get }
+}
+const base = { profiles: [{ id: 'claude', label: 'Claude' }], cwd_allow: ['C:/x'] }
+const vend = (vendor, extra = {}) => ({ vendor, status: 'ok', models: [{ id: 'gpt-6-luna', name: 'GPT-6 Luna' }], ...extra })
+
+test('實跑：relay.valid_model_id 對共用向量逐筆答對', { skip }, async () => {
+  const { db } = await setup()
+  for (const s of V.valid) assert.equal((await db.query('select relay.valid_model_id($1) r', [s])).rows[0].r, true, JSON.stringify(s))
+  for (const s of V.invalid) assert.equal((await db.query('select relay.valid_model_id($1) r', [s])).rows[0].r, false, JSON.stringify(s))
+  assert.equal((await db.query('select relay.valid_model_id(null) r')).rows[0].r, false)
+})
+
+test('實跑：舊格式（沒有 models）輸出與以前完全相同', { skip }, async () => {
+  const { set, get } = await setup()
+  assert.deepEqual(await set(base), { ok: true })
+  assert.deepEqual(await get(), { profiles: base.profiles, cwd_allow: base.cwd_allow, max_per_hour: 6 })
+  assert.deepEqual(await set({ ...base, profiles: [{ id: '' }] }), { error: 'bad_request' })
+  assert.deepEqual(await set(null), { ok: true })
+  assert.equal(await get(), null)
+})
+
+test('實跑：16000 上限不算 models（20000 bytes 的 models 照樣存得進）；profiles 太大仍然拒收', { skip }, async () => {
+  const { set, get } = await setup()
+  const big = [vend('codex', { models: Array.from({ length: 200 }, (_, i) => ({ id: `m${i}`.padEnd(60, 'x'), name: 'N'.repeat(60) })) })]
+  assert.ok(JSON.stringify(big).length > 20000 && JSON.stringify(big).length < 32000)
+  assert.deepEqual(await set({ ...base, models: big }), { ok: true })
+  const got = await get()
+  assert.equal(got.models[0].models.length, 200)
+  const fat = { ...base, cwd_allow: Array.from({ length: 50 }, () => '中'.repeat(260)) } // 每個 780 bytes，合計超過 16000
+  assert.deepEqual(await set({ ...fat, models: [vend('codex')] }), { error: 'bad_request' })
+})
+
+test('實跑：models 超過 32000 bytes → 只丟 models，launcher 其餘照存', { skip }, async () => {
+  const { set, get } = await setup()
+  const huge = [vend('codex', { models: Array.from({ length: 200 }, (_, i) => ({ id: `m${i}`.padEnd(99, 'x'), name: 'N'.repeat(80) })) })]
+  assert.ok(JSON.stringify(huge).length > 32000)
+  assert.deepEqual(await set({ ...base, pi_models: [{ provider: 'a', model: 'b' }], models: huge }), { ok: true })
+  const got = await get()
+  assert.equal(got.models, undefined)
+  assert.deepEqual(got.profiles, base.profiles)
+  assert.deepEqual(got.pi_models, [{ provider: 'a', model: 'b' }])
+})
+
+test('實跑：不合格的家或筆被丟掉、其他照存；vendor 去重留先出現的；最多 8 家；每家最多 200 筆', { skip }, async () => {
+  const { set, get } = await setup()
+  await set({
+    ...base,
+    models: [
+      'x', 5, null, [],
+      vend('Bad'), vend('1x'), vend('x'.repeat(21)), vend('a b'),
+      vend('okv', { status: 'weird' }),
+      vend('okv', { stale: 'yes' }),
+      vend('okv', { code: 'rm -rf' }),
+      vend('okv', { age_s: -1 }), vend('okv', { age_s: 1.5 }),
+      vend('okv', { models: 'nope' }),
+      vend('claude', { id: 1 }),
+      { ...vend('codex'), models: [{ id: 'gpt-6', name: 'G6', path: 'C:/x', token: 't' }, { id: '-bad', name: 'x' }, { id: 'a/../b', name: 'x' }, { id: 'ok2', name: '' }, { id: 'ok3', name: 'N'.repeat(81) }, { id: 'ok4' }, 'z', { id: 'ok5', name: 'N'.repeat(80) }] },
+      vend('codex', { status: 'error' }),
+    ],
+  })
+  const got = (await get()).models
+  assert.deepEqual(got.map(v => v.vendor), ['claude', 'codex'], '壞的整家丟掉；okv 全部不合格；codex 重複只留先出現的')
+  assert.deepEqual(got[1].models, [{ id: 'gpt-6', name: 'G6' }, { id: 'ok5', name: 'N'.repeat(80) }], '壞筆丟掉、多餘欄位不收')
+  assert.equal(got[1].status, 'ok')
+  // 最多 8 家
+  const ten = Array.from({ length: 10 }, (_, i) => vend(`v${i}`))
+  await set({ ...base, models: ten })
+  assert.deepEqual((await get()).models.map(v => v.vendor), ['v0', 'v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7'])
+  // 每家最多 200 筆
+  await set({ ...base, models: [vend('pi', { models: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}`, name: `M${i}` })) })] })
+  assert.equal((await get()).models[0].models.length, 200)
+})
+
+test('實跑：status／code 列舉、stale 布林、age_s 非負整數；reason 被丟掉；缺的選填欄位不補', { skip }, async () => {
+  const { set, get } = await setup()
+  for (const status of ['ok', 'unavailable', 'error', 'pending']) {
+    await set({ ...base, models: [{ vendor: 'v', status, models: [] }] })
+    assert.deepEqual((await get()).models, [{ vendor: 'v', status, models: [] }])
+  }
+  for (const code of ['ok', 'not_installed', 'not_logged_in', 'timeout', 'too_large', 'parse_failed', 'spawn_failed', 'unsupported']) {
+    await set({ ...base, models: [{ vendor: 'v', status: 'unavailable', code, models: [] }] })
+    assert.equal((await get()).models[0].code, code)
+  }
+  await set({ ...base, models: [{ vendor: 'v', status: 'ok', stale: true, age_s: 1260, code: 'timeout', reason: '原文 C:\\Users\\x token=abc', models: [] }] })
+  assert.deepEqual((await get()).models, [{ vendor: 'v', status: 'ok', stale: true, code: 'timeout', age_s: 1260, models: [] }])
+  assert.ok(!JSON.stringify(await get()).includes('原文'), 'reason 不收')
+  await set({ ...base, models: [{ vendor: 'v', status: 'pending' }] })
+  assert.deepEqual((await get()).models, [{ vendor: 'v', status: 'pending', models: [] }])
+  await set({ ...base, models: [] })
+  assert.deepEqual((await get()).models, [], '有回報但沒有可用的：存空陣列')
+  await set({ ...base, models: 'x' })
+  assert.equal((await get()).models, undefined, '不是陣列：不存')
+})
+
+test('實跑：name 擋控制字元與常見格式字元', { skip }, async () => {
+  const { set, get } = await setup()
+  const names = ['a\u0001b', 'a\u007fb', 'a\u0085b', 'a\u200bb', 'a\u202eb', 'a\ufeffb', 'a\u00adb', 'a\u2066b', 'a\nb']
+  await set({ ...base, models: [vend('v', { models: [...names.map((n, i) => ({ id: `m${i}`, name: n })), { id: 'good', name: '中文 Name (v1)' }] })] })
+  assert.deepEqual((await get()).models[0].models, [{ id: 'good', name: '中文 Name (v1)' }])
+})
+
+test('實跑：型號代號對共用向量（經 models 與 pi_models）', { skip }, async () => {
+  const { set, get } = await setup()
+  await set({ ...base, models: [vend('v', { models: [...V.valid, ...V.invalid].map((id, i) => ({ id, name: `n${i}` })) })], pi_models: [...V.valid, ...V.invalid].map(id => ({ provider: id, model: id })) })
+  const got = await get()
+  assert.deepEqual(got.models[0].models.map(m => m.id), V.valid)
+  assert.deepEqual(got.pi_models.map(m => m.model), V.valid)
+})
+
+test('實跑：pi_models 的 a//b、a/.. 現在被丟掉', { skip }, async () => {
+  const { set, get } = await setup()
+  await set({ ...base, pi_models: [{ provider: 'a//b', model: 'x' }, { provider: 'p', model: 'a/..' }, { provider: 'openrouter', model: 'meta/llama-3' }] })
+  assert.deepEqual((await get()).pi_models, [{ provider: 'openrouter', model: 'meta/llama-3' }])
+})
+
+test('實跑：套用 down 之後行為回到 20261028140000，新函式消失', { skip }, async () => {
+  const { db, set, get } = await setup()
+  await db.exec(down)
+  await set({ ...base, models: [vend('codex')], pi_models: [{ provider: 'a', model: 'b' }] })
+  assert.deepEqual(await get(), { ...{ profiles: base.profiles, cwd_allow: base.cwd_allow, max_per_hour: 6 }, pi_models: [{ provider: 'a', model: 'b' }] }, '舊版不存 models')
+  const r = await db.query("select count(*)::int n from pg_proc p join pg_namespace s on s.oid = p.pronamespace where s.nspname = 'relay' and p.proname in ('valid_model_id', 'sanitize_launcher_models')")
+  assert.equal(r.rows[0].n, 0)
+})
+
+closeAtEnd()

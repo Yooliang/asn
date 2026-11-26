@@ -1,6 +1,6 @@
 // 執行：SUPABASE_URL=http://x SUPABASE_SERVICE_ROLE_KEY=x deno test -A supabase/functions/
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { handleNodeLaunchAction, LAUNCH_NAME_RE, type LaunchDeps, listLaunchers, parseLaunch, requestLaunch, sanitizeLauncher } from "./launch.ts";
+import { handleNodeLaunchAction, LAUNCH_NAME_RE, type LaunchDeps, listLaunchers, parseLaunch, requestLaunch, sanitizeLauncher, sanitizePiModels } from "./launch.ts";
 
 type Call = { fn: string; args: Record<string, unknown> };
 function fakeDeps(answer: (c: Call) => unknown = () => ({ id: "11111111-1111-1111-1111-111111111111", bell_topic: "bell-H" })) {
@@ -122,13 +122,104 @@ Deno.test("#1752 sanitizeLauncher：mode 只收 term／background／window，其
   const out = sanitizeLauncher(raw) as { profiles: Record<string, unknown>[] };
   assertEquals(out.profiles, [
     { id: "claude", label: "Claude" },
-    { id: "gemini-term", label: "Gemini（asn終端）", mode: "term" },
+    { id: "gemini-term", label: "Gemini（asn終端）", engine: "agy", mode: "term" },
     { id: "bg", label: "背景", mode: "background" },
     { id: "w", label: "視窗", mode: "window" },
     { id: "x", label: "亂來" },
     { id: "y", label: "非字串" },
   ]);
-  assert(!JSON.stringify(out).includes("engine"), "engine 與指令一樣不上雲");
+});
+
+Deno.test("#2381 sanitizeLauncher：profile 的 engine 只收小寫英數與 . _ -（最長 30），其餘丟掉；指令內容照舊不上雲", () => {
+  const raw = {
+    profiles: [
+      { id: "a", label: "A", engine: "claude", command: "powershell.exe" },
+      { id: "b", label: "B", engine: "acp" },
+      { id: "c", label: "C", engine: "pi" },
+      { id: "d", label: "D", engine: "codex" },
+      { id: "e", label: "E", engine: "agy", mode: "term" },
+      { id: "f", label: "F", engine: "Claude" },
+      { id: "g", label: "G", engine: "rm -rf" },
+      { id: "h", label: "H", engine: "-x" },
+      { id: "i", label: "I", engine: "x".repeat(31) },
+      { id: "j", label: "J", engine: 5 },
+      { id: "k", label: "K", engine: "" },
+    ],
+    cwd_allow: [],
+  };
+  const out = sanitizeLauncher(raw) as { profiles: Record<string, unknown>[] };
+  assertEquals(out.profiles.map((p) => p.engine), ["claude", "acp", "pi", "codex", "agy", undefined, undefined, undefined, undefined, undefined, undefined]);
+  assert(!JSON.stringify(out).includes("powershell"));
+});
+
+const MV = (vendor: string, extra: Record<string, unknown> = {}) => ({ vendor, status: "ok", models: [{ id: "gpt-6-luna", name: "GPT-6 Luna" }], ...extra });
+const launcherModels = (models: unknown) => (sanitizeLauncher({ profiles: [], cwd_allow: [], models }) as Record<string, unknown>).models as Record<string, unknown>[] | undefined;
+
+Deno.test("#2353 sanitizeModels：廠牌、status、code、stale、age_s 的白名單；reason 與其他欄位不收", () => {
+  const out = launcherModels([{ vendor: "gemini", status: "ok", stale: true, code: "timeout", age_s: 1260, reason: "原文 C:\\Users\\x", path: "C:/x", models: [{ id: "g1", name: "G1", extra: 1 }] }])!;
+  assertEquals(out, [{ vendor: "gemini", status: "ok", stale: true, code: "timeout", age_s: 1260, models: [{ id: "g1", name: "G1" }] }]);
+  assert(!JSON.stringify(out).includes("原文"));
+  for (const status of ["ok", "unavailable", "error", "pending"]) assertEquals(launcherModels([{ vendor: "v", status }])![0].status, status);
+  for (const code of ["ok", "not_installed", "not_logged_in", "timeout", "too_large", "parse_failed", "spawn_failed", "unsupported"]) assertEquals(launcherModels([{ vendor: "v", status: "error", code }])![0].code, code);
+  assertEquals(launcherModels([{ vendor: "v", status: "pending" }]), [{ vendor: "v", status: "pending", models: [] }]);
+  // 不合格的整家丟掉，其餘照存
+  const bad = [
+    "x", null, 5, [], MV("Bad"), MV("1x"), MV("x".repeat(21)), MV("a b"),
+    MV("a", { status: "weird" }), MV("a", { status: 3 }), MV("a", { stale: "yes" }), MV("a", { code: "rm -rf" }), MV("a", { code: 5 }),
+    MV("a", { age_s: -1 }), MV("a", { age_s: 1.5 }), MV("a", { age_s: "3" }), MV("a", { models: "nope" }),
+    MV("good"),
+  ];
+  assertEquals(launcherModels(bad)!.map((v) => v.vendor), ["good"]);
+});
+
+Deno.test("#2353 sanitizeModels：vendor 去重留先出現（且合格）的、最多 8 家、每家最多 200 筆", () => {
+  assertEquals(launcherModels([MV("codex", { status: "pending" }), MV("codex", { status: "ok" })])!.map((v) => v.status), ["pending"]);
+  assertEquals(launcherModels([MV("codex", { status: "weird" }), MV("codex", { status: "ok" })])!.map((v) => v.status), ["ok"], "不合格的不佔位");
+  assertEquals(launcherModels(Array.from({ length: 10 }, (_, i) => MV(`v${i}`)))!.length, 8);
+  const many = launcherModels([MV("pi", { models: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}`, name: `M${i}` })) })])!;
+  assertEquals((many[0].models as unknown[]).length, 200);
+});
+
+Deno.test("#2353 sanitizeModels：型號走統一規則；name 1～80 字、不含控制字元與格式字元；壞筆丟掉其他照存", () => {
+  const names = ["a\u0001b", "a\u007fb", "a\u0085b", "a\nb", "a\u200bb", "a\u202eb", "a\ufeffb", "a\u00adb", "a\u2066b", "a\u{e0041}b", "", "N".repeat(81)];
+  const models = [
+    { id: "-x", name: "x" }, { id: "a//b", name: "x" }, { id: "a/..", name: "x" }, { id: "a b", name: "x" }, { id: 5, name: "x" }, { id: "ok0" }, { id: "ok1", name: 3 }, "z", null,
+    ...names.map((n, i) => ({ id: `n${i}`, name: n })),
+    { id: "openrouter/meta/llama-3", name: "中文 Name (v1)" }, { id: "ok5", name: "N".repeat(80) },
+  ];
+  const out = launcherModels([MV("v", { models })])![0].models as { id: string }[];
+  assertEquals(out.map((m) => m.id), ["openrouter/meta/llama-3", "ok5"]);
+});
+
+Deno.test("#2353 sanitizeLauncher：models 緊湊序列化超過 24000 bytes 就丟掉整個 models，並 console.warn；其餘照存", () => {
+  const warns: unknown[][] = [];
+  const orig = console.warn;
+  console.warn = (...a: unknown[]) => { warns.push(a); };
+  try {
+    const huge = [MV("codex", { models: Array.from({ length: 200 }, (_, i) => ({ id: `m${i}`.padEnd(99, "x"), name: "N".repeat(80) })) })];
+    const out = sanitizeLauncher({ profiles: [{ id: "a", label: "A" }], cwd_allow: ["D:/x"], max_per_hour: 6, models: huge }) as Record<string, unknown>;
+    assertEquals("models" in out, false);
+    assertEquals(out.cwd_allow, ["D:/x"]);
+    assertEquals(warns.length, 1);
+    // 剛好不超過：留下
+    const fit = [MV("codex", { models: Array.from({ length: 100 }, (_, i) => ({ id: `m${i}`.padEnd(99, "x"), name: "N".repeat(80) })) })];
+    assert(new TextEncoder().encode(JSON.stringify(fit)).length < 24000);
+    assertEquals((sanitizeLauncher({ profiles: [], cwd_allow: [], models: fit }) as Record<string, unknown>).models, fit);
+    assertEquals(warns.length, 1);
+  } finally {
+    console.warn = orig;
+  }
+});
+
+Deno.test("#2353 sanitizeLauncher：沒帶 models 或不是陣列時輸出沒有該鍵；空陣列存空陣列（有回報但沒有可用的）", () => {
+  const base = { profiles: [], cwd_allow: [] };
+  assertEquals("models" in (sanitizeLauncher(base) as Record<string, unknown>), false);
+  assertEquals("models" in (sanitizeLauncher({ ...base, models: "x" }) as Record<string, unknown>), false);
+  assertEquals((sanitizeLauncher({ ...base, models: [] }) as Record<string, unknown>).models, []);
+});
+
+Deno.test("#2353 sanitizePiModels：改用統一型號規則，a//b、a/.. 被丟掉", () => {
+  assertEquals(sanitizePiModels([{ provider: "a//b", model: "x" }, { provider: "p", model: "a/.." }, { provider: "openrouter", model: "meta/llama-3" }]), [{ provider: "openrouter", model: "meta/llama-3" }]);
 });
 
 Deno.test("本人簽章：有簽章才帶 p_signed_user（launch、launchers）；沒簽章與以前完全相同（不多帶任何參數）", async () => {
