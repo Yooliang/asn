@@ -14,11 +14,12 @@
 mod parse;
 mod run;
 
-pub use parse::{parse_agy, parse_codex, parse_pi, valid_model_id, MAX_MODELS, MODEL_ID_PATTERN, REPORT_MAX_BYTES, REPORT_MAX_MODELS};
+pub use parse::{parse_agy, parse_codex, parse_pi, valid_model_id, MAX_MODELS, MODEL_ID_PATTERN, REPORT_FLOOR_BYTES, REPORT_MAX_BYTES, REPORT_MAX_MODELS};
 pub use run::{run, run_blocking, RunFail, Spawn};
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsString;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -110,7 +111,7 @@ impl Vendor {
 
 #[derive(Default)]
 pub struct ProbeCache {
-    slots: Mutex<HashMap<Vendor, (Instant, VendorModels)>>,
+    slots: Mutex<HashMap<Vendor, Slot>>,
     busy: Mutex<HashSet<Vendor>>,
 }
 
@@ -132,8 +133,15 @@ impl Drop for Claim {
     }
 }
 
-fn ttl_for(v: &VendorModels) -> Duration {
-    if v.status == Status::Ok {
+/// 快取的一格。`stale`＝這份清單是上次成功時讀到的，剛剛重查失敗、沿用舊的（所以要比照失敗只記 1 分鐘，很快再試）
+struct Slot {
+    at: Instant,
+    value: VendorModels,
+    stale: bool,
+}
+
+fn ttl_for(slot: &Slot) -> Duration {
+    if slot.value.status == Status::Ok && !slot.stale {
         OK_TTL
     } else {
         FAIL_TTL
@@ -141,13 +149,24 @@ fn ttl_for(v: &VendorModels) -> Duration {
 }
 
 impl ProbeCache {
+    /// 寫入一次探測結果。**失敗（Error）不蓋掉上次成功的清單**：格子裡已經有讀到型號的結果時，保留那份舊清單，
+    /// 狀態仍是 Ok，`reason` 註明「重查失敗，沿用上次的清單」與這次失敗的原因；下一次重查在 1 分鐘後
     pub fn put(&self, vendor: Vendor, value: VendorModels, now: Instant) {
-        self.slots.lock().unwrap_or_else(|e| e.into_inner()).insert(vendor, (now, value));
+        let mut g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        let slot = match g.get(&vendor) {
+            Some(old) if value.status == Status::Error && old.value.status == Status::Ok && !old.value.models.is_empty() => {
+                let mut kept = old.value.clone();
+                kept.reason = format!("重查失敗，沿用上次的清單（{}）", value.reason);
+                Slot { at: now, value: kept, stale: true }
+            }
+            _ => Slot { at: now, value, stale: false },
+        };
+        g.insert(vendor, slot);
     }
 
     fn lookup(&self, vendor: Vendor, now: Instant) -> Option<(VendorModels, bool)> {
         let g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
-        g.get(&vendor).map(|(at, v)| (v.clone(), now.saturating_duration_since(*at) < ttl_for(v)))
+        g.get(&vendor).map(|s| (s.value.clone(), now.saturating_duration_since(s.at) < ttl_for(s)))
     }
 
     /// 還新鮮的結果（過期或沒有＝None）
@@ -179,23 +198,35 @@ fn global() -> &'static ProbeCache {
 // 探測
 // ---------------------------------------------------------------------------------------------------------------------
 
-/// 子程序環境：共用白名單，再加這一家自己要的變數（名字完全相符，或以某字串開頭／結尾）
-fn child_env(exact: &[&str], prefixes: &[&str], suffixes: &[&str]) -> Vec<(String, String)> {
-    let vars: Vec<(String, String)> = std::env::vars().collect();
-    let extra: Vec<String> = vars
-        .iter()
-        .map(|(k, _)| k.clone())
-        .filter(|k| {
-            let u = k.to_uppercase();
-            exact.contains(&u.as_str()) || prefixes.iter().any(|p| u.starts_with(p)) || suffixes.iter().any(|s| u.ends_with(s))
-        })
-        .collect();
-    crate::bridge::engines::acp_clean_env(&vars, &extra)
+/// 目前這個程序的環境。用 `vars_os`：有非 UTF-8 的變數時不會 panic
+fn os_vars() -> Vec<(OsString, OsString)> {
+    std::env::vars_os().collect()
 }
 
-/// pi 要自己的設定位置（`PI_*`）與提供者的 API 金鑰環境變數，才列得出「已設好憑證」的型號；這是 pi 以前就吃的環境，沒有多帶
+/// 名字與值都是合法 UTF-8 的才留；轉不了的那一個變數略過（不整份丟掉）
+pub fn utf8_vars(vars: &[(OsString, OsString)]) -> Vec<(String, String)> {
+    vars.iter().filter_map(|(k, v)| Some((k.to_str()?.to_string(), v.to_str()?.to_string()))).collect()
+}
+
+/// pi 的子程序環境：**繼承整份環境**（AWS／GOOGLE／代理／nvm 等 pi 要用的都在），只用黑名單拿掉 ASN 自己的金鑰
+/// （ASN_RELAY_KEY、ASN_RELAY_ANON_KEY、IRORI_RELAY_KEY、IRORI_RELAY_ANON_KEY，不分大小寫）、繼承來的 CLAUDE*（除 CLAUDE_CONFIG_DIR）、
+/// NO_COLOR、WEZTERM_*。與開 pi 視窗用的是同一份規則（`launch::config::child_env_from`）
+pub fn pi_env_from(vars: &[(OsString, OsString)]) -> Vec<(String, String)> {
+    crate::launch::config::child_env_from(utf8_vars(vars).into_iter()).into_iter().collect()
+}
+
+/// agy 的子程序環境：與工作者原生通道列型號時相同的白名單（`acp_clean_env`，不帶任何金鑰類變數）
+pub fn agy_env_from(vars: &[(OsString, OsString)]) -> Vec<(String, String)> {
+    crate::bridge::engines::acp_clean_env(&utf8_vars(vars), &[])
+}
+
+/// Codex 的子程序環境：與其他 Codex 子程序相同（`codex_child_env`：繼承整份，黑名單擋金鑰與視窗識別，保留 CODEX_HOME）
+pub fn codex_env_from(vars: &[(OsString, OsString)]) -> Vec<(String, String)> {
+    crate::bridge::engines::codex_child_env(&utf8_vars(vars))
+}
+
 fn pi_env() -> Vec<(String, String)> {
-    child_env(&[], &["PI_"], &["_API_KEY"])
+    pi_env_from(&os_vars())
 }
 
 fn spawn_for(v: Vendor, args: &[&str], env: Vec<(String, String)>, merge_stderr: bool) -> Option<Spawn> {
@@ -222,8 +253,8 @@ pub async fn probe_uncached(v: Vendor) -> VendorModels {
     }
     let (args, env, merge): (&[&str], _, _) = match v {
         Vendor::Pi => (&["--list-models"], pi_env(), true),
-        Vendor::Gemini => (&["models"], child_env(&[], &[], &[]), false),
-        _ => (&["debug", "models"], child_env(&["CODEX_HOME"], &[], &[]), false),
+        Vendor::Gemini => (&["models"], agy_env_from(&os_vars()), false),
+        _ => (&["debug", "models"], codex_env_from(&os_vars()), false),
     };
     let Some(spec) = spawn_for(v, args, env, merge) else {
         return VendorModels::unavailable(v, format!("這台電腦找不到 {}", v.binary()));
@@ -251,8 +282,10 @@ pub async fn probe(v: Vendor, force: bool) -> VendorModels {
         }
     }
     let r = probe_uncached(v).await;
-    c.put(v, r.clone(), Instant::now());
-    r
+    let now = Instant::now();
+    c.put(v, r.clone(), now);
+    // 回快取裡的那份：重查失敗時是「沿用上次的清單」，不是空的失敗結果
+    c.lookup(v, now).map(|(kept, _)| kept).unwrap_or(r)
 }
 
 /// 只讀快取、不等：第一次回報不會卡住。過期或還沒有時在背景重查一次（同時只跑一個）
@@ -272,22 +305,41 @@ pub fn snapshot_all() -> Vec<VendorModels> {
     Vendor::ALL.iter().map(|v| snapshot(*v)).collect()
 }
 
-/// 回報前的精簡（R9）：每家最多 `REPORT_MAX_MODELS` 筆、全部合計最多 `REPORT_MAX_BYTES`。
-/// 超過就從後面截掉並在 reason 說明；一筆都放不下的那家改成 Error。這跟讀取上限（`STDOUT_CAP`）是兩件事
+/// 序列化成 JSON 後的位元組數（回報上限照這個算，不是只算代號加顯示名）
+fn json_len<T: Serialize>(t: &T) -> usize {
+    serde_json::to_vec(t).map(|b| b.len()).unwrap_or(usize::MAX / 8)
+}
+
+/// 回報前的精簡（R9）：每家最多 `REPORT_MAX_MODELS` 筆、全部合計序列化後的 JSON 最多 `REPORT_MAX_BYTES` 位元組。
+/// 超過就從後面截掉並在 reason 說明；一筆都放不下的那家改成 Error。每家有保底額度（`REPORT_FLOOR_BYTES`），
+/// 排在前面的不會把後面的吃光。這跟讀取上限（`STDOUT_CAP`）是兩件事
 pub fn limit_for_report(list: Vec<VendorModels>) -> Vec<VendorModels> {
-    let mut used = 0usize;
+    limit_with(list, REPORT_MAX_MODELS, REPORT_MAX_BYTES, REPORT_FLOOR_BYTES)
+}
+
+/// 截斷時 reason 會被換成較長的說明，先留這麼多位元組的餘裕
+const REASON_SLACK: usize = 160;
+
+fn limit_with(list: Vec<VendorModels>, max_models: usize, max_bytes: usize, floor: usize) -> Vec<VendorModels> {
+    // 每家的固定部分（欄位、reason、陣列逗號）與每筆型號序列化後的大小（含逗號）
+    let sizes: Vec<Vec<usize>> = list.iter().map(|v| v.models.iter().take(max_models).map(|m| json_len(m) + 1).collect()).collect();
+    let base = |v: &VendorModels| json_len(&VendorModels { models: vec![], ..v.clone() }) + REASON_SLACK + 1;
+    let mut used = 2 + list.iter().map(base).sum::<usize>();
+    let reserve_after: Vec<usize> = (0..list.len()).map(|i| sizes[i + 1..].iter().map(|s| s.iter().sum::<usize>().min(floor)).sum()).collect();
     list.into_iter()
-        .map(|mut v| {
+        .enumerate()
+        .map(|(i, mut v)| {
             let total = v.models.len();
-            let mut kept = Vec::new();
-            for m in std::mem::take(&mut v.models) {
-                let size = m.id.len() + m.name.len();
-                if kept.len() >= REPORT_MAX_MODELS || used + size > REPORT_MAX_BYTES {
+            let budget = max_bytes.saturating_sub(used + reserve_after[i]);
+            let (mut spent, mut kept) = (0usize, Vec::new());
+            for (m, size) in std::mem::take(&mut v.models).into_iter().zip(sizes[i].iter()) {
+                if spent + size > budget {
                     break;
                 }
-                used += size;
+                spent += size;
                 kept.push(m);
             }
+            used += spent;
             if kept.len() < total {
                 if kept.is_empty() {
                     v.status = Status::Error;
@@ -326,16 +378,37 @@ mod tests {
     }
 
     #[test]
-    fn 回報上限_合計位元組超過就截掉後面的_一筆都放不下的改成_error() {
-        // 每筆 2×90＝180 位元組、每家 50 筆＝9000；四家合計 36000 > 24000
+    fn 回報上限_照序列化後的_json_大小算_每家有保底_排最後的_pi_不會被吃光() {
+        // 每筆 id 90＋name 90 位元組、序列化後約 205；每家 50 筆約 10 KB，四家合計遠超 24000
         let all: Vec<VendorModels> = Vendor::ALL.iter().map(|v| many(*v, 50, 90)).collect();
         let r = limit_for_report(all);
-        let total: usize = r.iter().flat_map(|v| v.models.iter()).map(|m| m.id.len() + m.name.len()).sum();
-        assert!(total <= REPORT_MAX_BYTES, "{total}");
-        assert_eq!(r[0].models.len(), 50);
-        assert!(r[2].reason.contains("截斷"), "{}", r[2].reason);
-        assert_eq!((r[3].status, r[3].models.len()), (Status::Error, 0));
-        assert!(r[3].reason.contains("超過回報上限"));
+        let json = serde_json::to_vec(&r).unwrap().len();
+        assert!(json <= REPORT_MAX_BYTES, "序列化後 {json} 位元組超過上限");
+        assert!(r[1].models.len() < 50 && r[1].reason.contains("截斷"), "中間的被截（總額不夠）：{}", r[1].models.len());
+        let last = &r[3];
+        assert_eq!(last.status, Status::Ok, "pi 有保底額度，不會變 Error");
+        let floor_fit = REPORT_FLOOR_BYTES / 210;
+        assert!(last.models.len() >= floor_fit - 1, "pi 至少拿到保底的 {floor_fit} 筆上下，實得 {}", last.models.len());
+        assert!(last.reason.contains("截斷"), "{}", last.reason);
+    }
+
+    #[test]
+    fn 回報上限_只算代號與顯示名會低估_跳脫字元與欄位也要算進去() {
+        // 顯示名全是要跳脫的雙引號：位元組數是 name.len() 的兩倍
+        let q = VendorModels::from_list(Vendor::Codex, (0..40).map(|i| ModelEntry { id: format!("m{i}"), name: "\"".repeat(80) }).collect());
+        let raw: usize = q.models.iter().map(|m| m.id.len() + m.name.len()).sum();
+        let r = limit_with(vec![q], 50, 3_000, 0);
+        let json = serde_json::to_vec(&r).unwrap().len();
+        assert!(json <= 3_000, "序列化後 {json}（舊算法只算 {raw} 會放進太多）");
+        assert!(r[0].models.len() < 40);
+    }
+
+    #[test]
+    fn 回報上限_一筆都放不下的改成_error() {
+        let big = VendorModels::from_list(Vendor::Pi, vec![ModelEntry { id: "m".into(), name: "n".repeat(80) }]);
+        let r = limit_with(vec![big], 50, 100, 0);
+        assert_eq!((r[0].status, r[0].models.len()), (Status::Error, 0));
+        assert!(r[0].reason.contains("超過回報上限"));
     }
 
     fn leak() -> &'static ProbeCache {
@@ -402,6 +475,118 @@ mod tests {
         }));
         assert!(r.is_err());
         assert!(c.begin(Vendor::Codex, later).1.is_some(), "panic 後旗標放開，下一輪還會重查");
+    }
+
+    fn os(pairs: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
+        pairs.iter().map(|(k, v)| (OsString::from(k), OsString::from(v))).collect()
+    }
+    fn names(v: &[(String, String)]) -> Vec<String> {
+        let mut n: Vec<String> = v.iter().map(|(k, _)| k.to_uppercase()).collect();
+        n.sort();
+        n
+    }
+    /// 不是合法 UTF-8 的字串（Windows 是孤立的代理碼元，其他系統是 0xFF）
+    fn bad_os() -> OsString {
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            OsString::from_wide(&[0x61, 0xD800, 0x62])
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            OsString::from_vec(vec![b'a', 0xFF, b'b'])
+        }
+    }
+
+    const USER_ENV: [(&str, &str); 9] = [
+        ("PATH", "/bin"),
+        ("AWS_PROFILE", "p"),
+        ("GOOGLE_APPLICATION_CREDENTIALS", "g"),
+        ("HTTP_PROXY", "http://x"),
+        ("NO_PROXY", "localhost"),
+        ("NVM_DIR", "/n"),
+        ("NODE_EXTRA_CA_CERTS", "c"),
+        ("ANTHROPIC_API_KEY", "pi-provider-key"),
+        ("PI_CODING_AGENT_DIR", "d"),
+    ];
+
+    #[test]
+    fn pi_環境_繼承整份_只擋_asn_自己的金鑰() {
+        let mut vars = os(&USER_ENV);
+        vars.extend(os(&[("ASN_RELAY_KEY", "k"), ("asn_relay_anon_key", "a"), ("IRORI_RELAY_KEY", "k2"), ("Irori_Relay_Anon_Key", "a2")]));
+        let got = pi_env_from(&vars);
+        let n = names(&got);
+        for k in ["ASN_RELAY_KEY", "ASN_RELAY_ANON_KEY", "IRORI_RELAY_KEY", "IRORI_RELAY_ANON_KEY"] {
+            assert!(!n.contains(&k.to_string()), "{k} 不能傳給子程序：{n:?}");
+        }
+        for (k, v) in USER_ENV {
+            assert!(got.iter().any(|(gk, gv)| gk == k && gv == v), "{k} 應該照樣傳下去（AWS／代理／nvm／提供者金鑰是 pi 自己要讀的）：{n:?}");
+        }
+    }
+
+    #[test]
+    fn agy_與_codex_環境_各走既有規則() {
+        let mut vars = os(&USER_ENV);
+        vars.extend(os(&[("ASN_RELAY_KEY", "k"), ("OPENAI_API_KEY", "o"), ("CODEX_HOME", "/c"), ("CODEX_THREAD_ID", "t"), ("USERPROFILE", "C:/u")]));
+        let agy = names(&agy_env_from(&vars));
+        assert_eq!(agy, ["PATH", "USERPROFILE"], "agy＝acp_clean_env 白名單，與工作者原生通道相同");
+        let codex = codex_env_from(&vars);
+        let n = names(&codex);
+        assert!(n.contains(&"CODEX_HOME".into()) && n.contains(&"AWS_PROFILE".into()) && n.contains(&"HTTP_PROXY".into()), "{n:?}");
+        for k in ["ASN_RELAY_KEY", "OPENAI_API_KEY", "CODEX_THREAD_ID"] {
+            assert!(!n.contains(&k.to_string()), "{k} 不能傳給 Codex：{n:?}");
+        }
+    }
+
+    #[test]
+    fn 環境裡有非_utf8_的變數_不_panic_也不整份丟掉_只略過那一個() {
+        let mut vars = os(&[("PATH", "/bin"), ("AWS_PROFILE", "p"), ("HOME", "/h")]);
+        vars.push((OsString::from("BAD_VALUE"), bad_os()));
+        vars.push((bad_os(), OsString::from("v")));
+        vars.push((OsString::from("HTTP_PROXY"), OsString::from("http://x")));
+        assert!(bad_os().to_str().is_none(), "測試資料本身要不是 UTF-8");
+        let all = utf8_vars(&vars);
+        assert_eq!(all.len(), 4, "壞的兩個略過、其餘都在：{all:?}");
+        let pi = names(&pi_env_from(&vars));
+        assert!(pi.contains(&"AWS_PROFILE".into()) && pi.contains(&"HTTP_PROXY".into()) && !pi.contains(&"BAD_VALUE".into()), "{pi:?}");
+        assert!(names(&agy_env_from(&vars)).contains(&"PATH".into()));
+        assert!(names(&codex_env_from(&vars)).contains(&"HOME".into()));
+        // 真的環境也走 vars_os：不會 panic
+        let _ = (pi_env(), os_vars());
+    }
+
+    fn fail(v: Vendor, why: &str) -> VendorModels {
+        VendorModels::error(v, why)
+    }
+
+    #[test]
+    fn 重查失敗不蓋掉上次成功的清單_沿用舊的並註明_一分鐘後再試() {
+        let c = leak();
+        let t0 = Instant::now();
+        c.put(Vendor::Pi, ok(Vendor::Pi), t0);
+        let t1 = t0 + OK_TTL + Duration::from_secs(1);
+        c.put(Vendor::Pi, fail(Vendor::Pi, "pi 逾時沒有回應"), t1);
+        let (v, fresh) = c.lookup(Vendor::Pi, t1).unwrap();
+        assert_eq!((v.status, v.models.len()), (Status::Ok, 1), "舊清單還在");
+        assert!(v.reason.contains("重查失敗，沿用上次的清單") && v.reason.contains("逾時"), "{}", v.reason);
+        assert!(fresh);
+        assert!(c.fresh(Vendor::Pi, t1 + FAIL_TTL - Duration::from_secs(1)).is_some());
+        assert!(c.fresh(Vendor::Pi, t1 + FAIL_TTL + Duration::from_secs(1)).is_none(), "沿用舊清單也只記 1 分鐘，不能拖 10 分鐘");
+        // 連續失敗：仍沿用最初那份
+        c.put(Vendor::Pi, fail(Vendor::Pi, "第二次也壞了"), t1 + Duration::from_secs(120));
+        let (v, _) = c.lookup(Vendor::Pi, t1 + Duration::from_secs(120)).unwrap();
+        assert_eq!(v.models.len(), 1);
+        assert!(v.reason.contains("第二次") && !v.reason.contains("逾時"), "{}", v.reason);
+        // 之後成功就換成新的、不再標沿用
+        c.put(Vendor::Pi, ok(Vendor::Pi), t1 + Duration::from_secs(200));
+        assert_eq!(c.lookup(Vendor::Pi, t1 + Duration::from_secs(200)).unwrap().0.reason, "");
+        // 本來就沒有成功過的：照舊記失敗
+        c.put(Vendor::Codex, fail(Vendor::Codex, "壞了"), t0);
+        assert_eq!(c.lookup(Vendor::Codex, t0).unwrap().0.status, Status::Error);
+        // 沒裝（Unavailable）是真的結果，不當成失敗保留舊清單
+        c.put(Vendor::Pi, VendorModels::unavailable(Vendor::Pi, "這台電腦找不到 pi"), t1 + Duration::from_secs(300));
+        assert_eq!(c.lookup(Vendor::Pi, t1 + Duration::from_secs(300)).unwrap().0.status, Status::Unavailable);
     }
 
     #[test]

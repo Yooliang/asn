@@ -1,5 +1,5 @@
 {
-  "_說明": "#2353 R3：模型代號的統一格式。Rust（agent_tools/models）與前端（ui/lib/model-id.mjs）讀同一份向量，兩邊逐字相同。第②階段 SQL 與 Edge Function 也要抄同一條。",
+  "_說明": "#2353 R3：模型代號的統一格式。Rust（agent_tools/models）與前端（ui/lib/model-id.mjs）讀同一份向量，兩邊逐字相同。第②階段 SQL 與 Edge Function 也要抄同一條。注意：規則允許斜線，所以 a/../x、a//b、a/ 是合法代號——代號不可直接當路徑用，組路徑的地方要自己再檢查或編碼；../x、/abs、C:\\x、結尾換行則被規則擋掉。",
   "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\[\\]-]{0,99}$",
   "valid": [
     "a",
@@ -15,6 +15,10 @@
     "a:b",
     "a@b",
     "a+b",
+    "a/../x",
+    "a/../b",
+    "a//b",
+    "a/",
     "0abc",
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   ],
@@ -34,6 +38,15 @@
     "a`b",
     "a\"b",
     "a\nb",
+    "a\n",
+    "a\r\n",
+    "a/b\n",
+    "../x",
+    "..",
+    "C:\\x",
+    "a\\b",
+    "\\x",
+    "/abs",
     "a\tb",
     "中文",
     "a中",

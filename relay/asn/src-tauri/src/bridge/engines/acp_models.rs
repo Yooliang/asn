@@ -93,6 +93,7 @@ pub async fn agy_models(cfg: &super::acp_config::WorkerCfg, env: &[(String, Stri
         RunFail::Timeout => "列可選模型太久沒有回應".to_string(),
         RunFail::Spawn(m) => format!("列不出可選的模型：{m}"),
         RunFail::TooLarge => "列不出可選的模型：輸出太大".to_string(),
+        RunFail::Io(m) => format!("列不出可選的模型：讀輸出時出錯（{m}）"),
         RunFail::Exit(_) => "列不出可選的模型（可能要先在這台電腦登入 agy）".to_string(),
     })?;
     let list = parse_agy_models(&text);

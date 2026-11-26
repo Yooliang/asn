@@ -28,6 +28,8 @@ pub enum RunFail {
     TooLarge,
     /// 結束碼不是 0（None＝被訊號結束）
     Exit(Option<i32>),
+    /// 讀輸出讀到一半出了 IO 錯誤（不能當成讀完）
+    Io(String),
 }
 
 impl RunFail {
@@ -38,17 +40,22 @@ impl RunFail {
             RunFail::Timeout => format!("{what} 逾時沒有回應"),
             RunFail::TooLarge => format!("{what} 的輸出超過 {} 位元組上限", STDOUT_CAP),
             RunFail::Exit(c) => format!("{what} 結束碼 {}", c.map_or("無".to_string(), |c| c.to_string())),
+            RunFail::Io(e) => format!("{what} 的輸出讀到一半出錯：{e}"),
         }
     }
 }
 
-async fn read_capped(r: Option<impl AsyncRead + Unpin>, cap: usize, strict: bool) -> Result<Vec<u8>, RunFail> {
+/// 讀到 EOF 為止、最多留 `cap` 位元組。`strict`＝超過上限就回 TooLarge（否則讀掉丟棄）；
+/// `fail_on_err`＝讀到一半出 IO 錯誤就回 Io（不當成 EOF）。BrokenPipe 是 Windows 管線對端關閉時的正常 EOF
+async fn read_capped(r: Option<impl AsyncRead + Unpin>, cap: usize, strict: bool, fail_on_err: bool) -> Result<Vec<u8>, RunFail> {
     let Some(mut r) = r else { return Ok(Vec::new()) };
     let mut out = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
         match r.read(&mut buf).await {
-            Ok(0) | Err(_) => return Ok(out),
+            Ok(0) => return Ok(out),
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe || !fail_on_err => return Ok(out),
+            Err(e) => return Err(RunFail::Io(e.to_string())),
             Ok(n) => {
                 let room = cap.saturating_sub(out.len());
                 if n > room && strict {
@@ -60,7 +67,16 @@ async fn read_capped(r: Option<impl AsyncRead + Unpin>, cap: usize, strict: bool
     }
 }
 
-/// 跑一次指令，成功（結束碼 0）回文字。逾時或輸出過大時子程序隨 `kill_on_drop` 被結束
+/// 逾時、輸出過大、讀壞了：整棵程序樹都要結束（`orphans::kill_tree`，先收子孫、最後才收根；
+/// npm 的 .cmd 殼底下的 node 也一樣），不只殺直接子程序。這時 child 還握著程序代碼（沒被回收），pid 不會被別的程序拿去用
+async fn kill_whole_tree(child: &mut tokio::process::Child, pid: Option<u32>) {
+    if let Some(pid) = pid {
+        let _ = tokio::task::spawn_blocking(move || crate::bridge::orphans::kill_tree(pid)).await;
+    }
+    let _ = child.start_kill();
+}
+
+/// 跑一次指令，成功（結束碼 0）回文字。逾時、輸出過大、讀壞時整棵程序樹被結束（`kill_on_drop` 只是最後一道保險）
 pub async fn run(spec: Spawn, timeout: Duration) -> Result<String, RunFail> {
     use crate::nowin::NoWindow;
     let mut cmd = tokio::process::Command::new(&spec.program);
@@ -75,16 +91,28 @@ pub async fn run(spec: Spawn, timeout: Duration) -> Result<String, RunFail> {
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| RunFail::Spawn(e.to_string()))?;
+    let pid = child.id();
     let (so, se) = (child.stdout.take(), child.stderr.take());
-    let work = async {
-        // try_join：stdout 超過上限就馬上回，不等 stderr 與子程序
-        let (out, err) = tokio::try_join!(read_capped(so, STDOUT_CAP, true), read_capped(se, STDERR_CAP, false))?;
-        let status = child.wait().await.map_err(|e| RunFail::Spawn(e.to_string()))?;
-        Ok::<_, RunFail>((status, out, err))
+    let merge = spec.merge_stderr;
+    let result = {
+        let work = async {
+            // try_join：stdout 超過上限或讀壞了就馬上回，不等 stderr 與子程序
+            let (out, err) = tokio::try_join!(read_capped(so, STDOUT_CAP, true, true), read_capped(se, STDERR_CAP, false, merge))?;
+            let status = child.wait().await.map_err(|e| RunFail::Spawn(e.to_string()))?;
+            Ok::<_, RunFail>((status, out, err))
+        };
+        tokio::time::timeout(timeout, work).await
     };
-    let (status, out, err) = match tokio::time::timeout(timeout, work).await {
-        Err(_) => return Err(RunFail::Timeout),
-        Ok(r) => r?,
+    let (status, out, err) = match result {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            kill_whole_tree(&mut child, pid).await;
+            return Err(e);
+        }
+        Err(_) => {
+            kill_whole_tree(&mut child, pid).await;
+            return Err(RunFail::Timeout);
+        }
     };
     if !status.success() {
         return Err(RunFail::Exit(status.code()));
@@ -155,6 +183,24 @@ mod tests {
                 print!("\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\n");
                 eprintln!("Fetching available models...");
             }
+            // 再開一個脫離的孫程序（睡 60 秒），把孫程序的 pid 寫進 FAKE_PIDFILE，自己也睡著：模擬 npm 的 .cmd 殼底下還有 node
+            Ok("tree") => {
+                use crate::nowin::NoWindow;
+                let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+                c.no_window().args(["--exact", "agent_tools::models::run::tests::假子程序", "--nocapture", "--test-threads=1"])
+                    .env("FAKE_MODE", "hang")
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    c.creation_flags(0x0000_0008 | 0x0000_0200); // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                }
+                let g = c.spawn().unwrap();
+                std::fs::write(std::env::var("FAKE_PIDFILE").unwrap(), g.id().to_string()).unwrap();
+                std::thread::sleep(Duration::from_secs(60));
+            }
             Ok("env") => println!("LEAK={}", std::env::var("SECRET_TOKEN_X").unwrap_or_else(|_| "none".into())),
             _ => {}
         }
@@ -198,6 +244,56 @@ mod tests {
         let merged = run(s, Duration::from_secs(20)).await.unwrap();
         assert!(merged.contains("Fetching available models..."));
         assert_eq!(super::super::parse_agy(&merged).len(), 2, "就算 stderr 被接進來，進度那行也不會變成型號");
+    }
+
+    #[tokio::test]
+    async fn 逾時_整棵程序樹都結束_脫離的孫程序也不留() {
+        let path = std::env::temp_dir().join(format!("asn-2353-tree-{}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let mut s = me("tree");
+        s.env.push(("FAKE_PIDFILE".into(), path.to_string_lossy().into_owned()));
+        assert_eq!(run(s, Duration::from_secs(6)).await, Err(RunFail::Timeout));
+        let grand: u32 = std::fs::read_to_string(&path).expect("子程序在逾時前就該寫出孫程序的 pid").trim().parse().unwrap();
+        let alive = |p: u32| crate::bridge::orphans::process_table().contains_key(&p);
+        let mut gone = false;
+        for _ in 0..60 {
+            if !alive(grand) {
+                gone = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        // 收尾：只結束自己記下來的那個 pid（修正被拿掉時才會用到）
+        if !gone {
+            crate::bridge::orphans::kill_tree(grand);
+        }
+        let _ = std::fs::remove_file(&path);
+        assert!(gone, "逾時後孫程序 {grand} 還活著：只殺了直接子程序");
+    }
+
+    /// 先給一段資料、再出 IO 錯誤的讀取端
+    struct Boom(bool, std::io::ErrorKind);
+    impl AsyncRead for Boom {
+        fn poll_read(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+            if !self.0 {
+                self.0 = true;
+                buf.put_slice(b"partial");
+                std::task::Poll::Ready(Ok(()))
+            } else {
+                std::task::Poll::Ready(Err(std::io::Error::new(self.1, "讀到一半壞了")))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn stdout_讀到一半_io_錯誤_不算成功() {
+        let r = read_capped(Some(Boom(false, std::io::ErrorKind::InvalidData)), STDOUT_CAP, true, true).await;
+        assert!(matches!(r, Err(RunFail::Io(ref m)) if m.contains("壞了")), "{r:?}");
+        assert!(RunFail::Io("x".into()).reason("agy").contains("出錯"));
+        // 不要求失敗的那一路（stderr 不接進輸出時）照舊留已讀到的
+        assert_eq!(read_capped(Some(Boom(false, std::io::ErrorKind::InvalidData)), STDERR_CAP, false, false).await.unwrap(), b"partial");
+        // 管線對端關閉（BrokenPipe）是正常的 EOF
+        assert_eq!(read_capped(Some(Boom(false, std::io::ErrorKind::BrokenPipe)), STDOUT_CAP, true, true).await.unwrap(), b"partial");
     }
 
     #[tokio::test]

@@ -53,7 +53,8 @@ pub fn model_args(provider: &str, model: &str) -> Result<Vec<String>, String> {
 /// `pi --list-models` 的表格 → 模型列。第一行是標題；「No models matching」或空輸出＝空陣列；欄位不夠或名稱不安全的列丟掉。
 pub fn parse_models(text: &str) -> Vec<PiModel> {
     let mut out = Vec::new();
-    for line in text.lines() {
+    // 開頭的 UTF-8 BOM 要去掉，不然第一列的提供者名稱帶著 BOM 會被丟掉
+    for line in text.strip_prefix('\u{feff}').unwrap_or(text).lines() {
         let cols: Vec<&str> = line.split_whitespace().collect();
         if cols.len() < 6 || cols[0] == "provider" {
             continue;

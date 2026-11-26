@@ -7,23 +7,41 @@ use serde_json::Value;
 pub const MAX_MODELS: usize = 300;
 /// **回報上限**（R9）：精簡後要報出去的，每家最多幾筆
 pub const REPORT_MAX_MODELS: usize = 50;
-/// **回報上限**（R9）：所有家合計，代號與顯示名的位元組總和最多這麼多（與 pi_models 的 24000 同級，另外計算）
+/// **回報上限**（R9）：所有家合計，**序列化後的 JSON 大小**最多這麼多位元組（與 pi_models 的 24000 同級，另外計算）
 pub const REPORT_MAX_BYTES: usize = 24_000;
+/// 回報時每家的保底額度（位元組）：排在前面的家再多，也要替後面每家留這麼多（pi 排最後，不能被吃光）
+pub const REPORT_FLOOR_BYTES: usize = 3_000;
 /// 顯示名最多幾個字
 const NAME_MAX_CHARS: usize = 80;
 
 /// 模型代號的統一格式（#2353 R3）：英數開頭（不會被當成旗標）、其後只收 `. _ : / @ + [ ] -`、最多 100 字。
 /// 與前端 `ui/lib/model-id.mjs`、pi 的 SAFE 同一條；向量在 `relay/shared/test-vectors/model-id.json`，兩邊讀同一份。
 /// （SQL 與 Edge Function 在第②階段才改。）
+///
+/// **代號不可直接當路徑用**：規則允許 `/`，所以 `a/../x`、`a//b`、`a/` 都算合法代號；
+/// 要拿它組檔案路徑的地方必須自己再檢查（或編碼）。規則擋掉的是 `../x`、`/abs`、`C:\x`（開頭、反斜線）與換行。
 pub const MODEL_ID_PATTERN: &str = r"^[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]{0,99}$";
 
 pub fn valid_model_id(s: &str) -> bool {
     s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric()) && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '@' | '+' | '[' | ']' | '-'))
 }
 
-/// 顯示名：拿掉控制字元、頭尾空白、截斷；空的就用代號
+/// Unicode 的格式字元（類別 Cf）：雙向控制、零寬字元、BOM、軟連字號、語言標籤等，看不見卻會改變顯示
+pub fn is_format_char(c: char) -> bool {
+    matches!(c as u32,
+        0x00AD | 0x0600..=0x0605 | 0x061C | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2 | 0x180E
+        | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F | 0xFEFF | 0xFFF9..=0xFFFB
+        | 0x110BD | 0x110CD | 0x13430..=0x1343F | 0x1BCA0..=0x1BCA3 | 0x1D173..=0x1D17A | 0xE0001 | 0xE0020..=0xE007F)
+}
+
+/// 去掉開頭的 UTF-8 BOM
+fn strip_bom(s: &str) -> &str {
+    s.strip_prefix('\u{feff}').unwrap_or(s)
+}
+
+/// 顯示名：拿掉控制字元與格式字元（雙向、零寬）、頭尾空白、截斷；空的就用代號
 fn clean_name(raw: &str, id: &str) -> String {
-    let n: String = raw.chars().filter(|c| !c.is_control()).collect::<String>().trim().chars().take(NAME_MAX_CHARS).collect();
+    let n: String = raw.chars().filter(|c| !c.is_control() && !is_format_char(*c)).collect::<String>().trim().chars().take(NAME_MAX_CHARS).collect();
     if n.is_empty() {
         id.to_string()
     } else {
@@ -44,7 +62,7 @@ fn push_unique(out: &mut Vec<ModelEntry>, id: &str, name: &str) -> bool {
 /// `agy models`（stdout）：一行「代號<Tab>顯示名」；空行、沒有 Tab 的行（說明文字）略過；重複的代號只留第一個
 pub fn parse_agy(stdout: &str) -> Vec<ModelEntry> {
     let mut out = Vec::new();
-    for line in stdout.lines() {
+    for line in strip_bom(stdout).lines() {
         let Some((id, rest)) = line.split_once('\t') else { continue };        // 第二欄之後（若還有 Tab）不要
         let name = rest.split('\t').next().unwrap_or("");
         if !push_unique(&mut out, id.trim(), name) {
@@ -153,6 +171,32 @@ aegis         claude-sonnet-5-5           1M       128K     yes       yes   \n";
         assert_eq!(ids, ["aegis/aegis", "anthropic/claude-sonnet-5-5", "aegis/claude-sonnet-5-5"]);
         assert_eq!(m[1].name, "claude-sonnet-5-5");
         assert!(parse_pi("").is_empty() && parse_pi("No models matching \"x\"").is_empty());
+    }
+
+    #[test]
+    fn 輸出開頭有_bom_三家解析器都照樣讀得到第一筆() {
+        let agy = parse_agy("\u{feff}a-1\tName A\nb-2\tName B\n");
+        assert_eq!(agy.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a-1", "b-2"], "agy 第一筆的代號不能帶著 BOM 被丟掉");
+        // pi：BOM 後面直接是資料列（沒有標題行）也要讀到
+        let pi = parse_pi("\u{feff}anthropic     claude-sonnet-5-5           1M       128K     yes       yes   \n");
+        assert_eq!(pi.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["anthropic/claude-sonnet-5-5"]);
+        // pi：BOM 在標題行前面也一樣
+        let pi2 = parse_pi("\u{feff}provider      model                       context  max-out  thinking  images\nanthropic     m1           1M       128K     yes       yes   \n");
+        assert_eq!(pi2.len(), 1);
+        let codex = parse_codex("\u{feff}{\"models\":[{\"slug\":\"a\",\"visibility\":\"list\"}]}").unwrap();
+        assert_eq!(codex.len(), 1);
+    }
+
+    #[test]
+    fn 顯示名拿掉格式字元_雙向_零寬_bom_軟連字號() {
+        let raw = "A\u{202e}B\u{200b}C\u{200f}D\u{2066}E\u{feff}F\u{00ad}G\u{2060}H\u{e0041}I";
+        let m = parse_agy(&format!("x-1\t{raw}\n"));
+        assert_eq!(m[0].name, "ABCDEFGHI");
+        // 全是格式字元的顯示名＝空，改用代號
+        assert_eq!(parse_agy("x-2\t\u{200b}\u{202e}\n")[0].name, "x-2");
+        // 一般文字（含中日文、emoji）不受影響
+        assert_eq!(parse_agy("x-3\t繁體 モデル 🚀\n")[0].name, "繁體 モデル 🚀");
+        assert!(is_format_char('\u{200d}') && !is_format_char('a') && !is_format_char('中'));
     }
 
     #[test]
