@@ -37,6 +37,25 @@ export const dlswProbeSource = ({ kase, closed = false }) => `(async () => {
     const select = () => [...dlg.querySelectorAll('select[aria-label="模型"]')].find(vis) || null;
     const input = () => [...dlg.querySelectorAll('input[aria-label="模型"]')].find(vis) || null;
     const note = () => [...dlg.querySelectorAll('.partner-hint[aria-label="型號清單狀況"]')].find(vis) || null;
+    if (kase === 'agy-remote') {
+      // #2355 P4：工作者在別台（辦公室），清單讀那台回報的摘要（向後台問 launchers），不向本機讀
+      if (!(await waitFor(select, 60))) return fail('別台工作者的清單沒有出現（還是輸入框？）：' + (input() ? '輸入框' : '都沒有') + '／' + txt(note()));
+      if (calls('agent_models').length) return fail('工作者在別台，不該向本機讀清單：' + JSON.stringify(calls('agent_models')));
+      const o = [...select().options].map(x => x.textContent.trim());
+      if (o.length !== ${agyModels.length}) return fail('清單筆數不對：' + o.length);
+      if (note()) return fail('讀到清單不該有說明：' + txt(note()));
+      if (!closed) select().size = 9;
+      return { ok: true, why: '' };
+    }
+    if (kase === 'agy-remote-unavailable') {
+      if (!(await waitFor(note, 60))) return fail('讀不到時要有說明');
+      if (!txt(note()).includes('讀不到型號清單：Gemini 還沒登入（到那台電腦登入後再試）')) return fail('說明不對：' + txt(note()));
+      if (!txt(note()).includes('那台電腦約每 10 分鐘會自己更新一次清單')) return fail('要說明那台會定期更新：' + txt(note()));
+      if (!input() || select()) return fail('讀不到時應退回輸入框');
+      if (![...note().querySelectorAll('button')].some(b => txt(b) === '再查一次')) return fail('要有「再查一次」鈕');
+      if (calls('agent_models').length) return fail('工作者在別台，不該向本機讀清單');
+      return { ok: true, why: '' };
+    }
     const call = calls('agent_models')[0]?.[1];
     if (!call || call.vendor !== 'gemini' || call.force !== false) return fail('應向本機讀 gemini 的清單：' + JSON.stringify(call));
     if (kase === 'agy') {
@@ -75,10 +94,23 @@ export default {
     scene('list-switch-models-agy-unavailable', 'agy-unavailable', 'acp'),
     scene('list-switch-models-claude', 'claude', 'claude'),
     scene('list-switch-models-agy-closed', 'agy', 'acp', true),   // 收合版：實際畫面的下拉
+    // #2355 P4：工作者在別台（辦公室）：清單讀那台回報的摘要（向後台問 launchers），不向本機讀
+    scene('list-switch-models-agy-remote', 'agy-remote', 'acp'),
+    scene('list-switch-models-agy-remote-closed', 'agy-remote', 'acp', true),
+    scene('list-switch-models-agy-remote-unavailable', 'agy-remote-unavailable', 'acp'),
   ],
-  table: (scenario) => {
+  table: (scenario, t) => {
     const k = scenario.state?.dlsw
     if (!k) return undefined
+    if (k.startsWith('agy-remote')) {
+      const rg = k === 'agy-remote-unavailable' ? { vendor: 'gemini', status: 'unavailable', code: 'not_logged_in', models: [] } : { vendor: 'gemini', status: 'ok', models: agyModels }
+      return {
+        relay_list: { members: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', engine: 'gemini', cwd_label: 'demo' }] }] },
+        store_load: { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify({ winMode: 'merged', session: { v: 1, tabs: [{ id: 'Q/demo' }], active: { id: 'Q/demo' }, panel: { guide: '', setting: '' }, windows: [], panelWindows: [] } }) } },
+        relay_launchers: { machines: [{ node: 'Q', online: true, launcher: { profiles: [{ id: 'gemini', engine: 'acp', mode: 'background' }], cwd_allow: ['D:/work'], launch_model: true, models: [rg] } }] },
+        agent_models: { models: [] },
+      }
+    }
     const gem = k === 'agy-unavailable' ? { vendor: 'gemini', status: 'unavailable', code: 'not_logged_in', models: [] } : { vendor: 'gemini', status: 'ok', models: agyModels }
     return {
       agent_models: { by: 'vendor', values: { gemini: { models: [gem] } }, fallback: { models: [] } },

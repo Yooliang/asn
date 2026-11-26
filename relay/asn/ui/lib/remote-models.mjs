@@ -45,6 +45,21 @@ export const NONE_TEXT = '那台電腦的 ASN 版本較舊，不能選型號，�
 export const NONE_TEXT_LOCAL = '這台電腦讀不到型號清單'
 export const PENDING_TEXT = '正在讀取型號清單…'
 
+/**
+ * 別台電腦的清單是那台自己定期更新、再經後台回來的，手機與電腦版都沒辦法叫它馬上重讀（#2355 D5）：
+ * 所以按鈕叫「再查一次」（只是重新向後台問一次），並在說明裡講清楚為什麼不一定馬上有新的。
+ */
+export const REMOTE_RETRY_LABEL = '再查一次'
+export const LOCAL_RETRY_LABEL = '重新讀取'
+export const REMOTE_REFRESH_HINT = '那台電腦約每 10 分鐘會自己更新一次清單'
+
+/** 畫面狀態（modelState 的結果或 local-models 的讀取結果）加上「別台」才有的說明與按鈕文字；沒有「再查一次」可按的狀態不加說明 */
+export function remoteView(view) {
+  if (!view || typeof view !== 'object') return view
+  const retry = view.canRetry === true
+  return { ...view, note: retry ? [view.note, REMOTE_REFRESH_HINT].filter(Boolean).join('。') : view.note, retryLabel: retry ? REMOTE_RETRY_LABEL : '' }
+}
+
 const VENDOR_LABEL = Object.freeze({ claude: 'Claude', codex: 'Codex', gemini: 'Gemini', pi: 'pi', grok: 'Grok' })
 
 /**

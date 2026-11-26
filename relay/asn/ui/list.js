@@ -78,7 +78,8 @@ import { contextLabel } from './lib/context-usage.mjs'
 import { elevatedBadge } from './lib/elevated.mjs'
 import { NOTICE_CATS, NOTICE_CAT_ALL, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, NOTICE_ID, NOTICE_TAB, filterNoticeRows, isNoticeFriend, noticeRows, noticeTime, noticeUnreadCount, withoutNoticeItems, withoutNoticeTabs } from './lib/notice.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
-import { backgroundRestoreNoticeText, collectLaunchFailures, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
+import { backgroundRestoreNoticeText, collectLaunchFailures, collectLaunchModelUsed, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, launchOkNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
+import { launchModelView, pickedModel, remoteLaunchModelChoice } from './lib/remote-launch-models.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
@@ -89,9 +90,8 @@ import { PinDot } from './lib/pin-dot.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { launchModelChoices, vendorRows } from './lib/model-catalog.mjs'
 import { createModelLoader } from './lib/local-models.mjs'
-import { PENDING_TEXT } from './lib/remote-models.mjs'
 import { PI_ONLY_VENDORS, cleanPiModels, piChoiceFor, piLaunchArgs, piVendorState, providerStates } from './lib/pi-models.mjs'
-import { PI_ONLY_CHANNELS, PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchVendorCards, remotePi } from './lib/mobile-launch.mjs'
+import { MODEL_PICK_ERR, PI_ONLY_CHANNELS, PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchVendorCards, remotePi } from './lib/mobile-launch.mjs'
 import { autoRunFor, localLaunchRequest, loggedOutFromCli, loggedOutFromStates, vendorCards, vendorStatesOf } from './lib/auto-run.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
@@ -706,21 +706,28 @@ const dlgAuto = computed(() => autoRunFor(dlgRow.value, {
 // 第 2 頁「型號」（#539 之四）：這家有清單、開在這台才出現；預設＝不指定（照原本的開法）。清單跟「切換模型」同一份（switchModelsFor）
 // 只能經 pi 的廠牌（DeepSeek、MiniMax）同一格改成 pi 的模型清單（dlgPiPick）
 // #2355 P3：清單向本機讀（agent_models）。Claude 讀不到清單，放別名；別台電腦的下拉是 P4，這裡不出。讀取狀態與 pending 自動再問都在 local-models.mjs
+// #2355 P4：替別台開也有下拉。清單來自那台回報的摘要（remoteLaunchers[node].models），那台沒有回報 launch_model 就不出下拉、寫一句說明（remote-launch-models.mjs）；
+// 「再查一次」只是重新向後台問一次（那台會自己定期更新，沒辦法從這裡叫它重讀）
 const launchModelViews = ref({})
+const remoteModelViews = ref({})
 const modelLoader = createModelLoader({ fetch: a => transport.agentModels(a), vendorLabel: v => (v === 'gemini' ? 'Gemini' : v), onChange: (v, view) => { launchModelViews.value = { ...launchModelViews.value, [v]: view } } })
-const launchModelChoice = computed(() => launchModelChoices(dlgRow.value?.id, dlgAuto.value.run, { engine: localProfileEngine(partnerDlg.profile, remoteLaunchers.value[info.node]) }))
+const remoteModelLoader = createModelLoader({
+  where: 'remote', vendorLabel: v => (v === 'gemini' ? 'Gemini' : v),
+  fetch: async ({ force, retry }) => { if (force || retry) await refreshLaunchers(); return remoteLaunchers.value[partnerDlg.node] ?? null },
+  onChange: (v, view) => { remoteModelViews.value = { ...remoteModelViews.value, [v]: view } },
+})
 const launchModelOnThisPc = computed(() => partnerDlg.node === info.node)
+const launchModelChoice = computed(() => (launchModelOnThisPc.value
+  ? launchModelChoices(dlgRow.value?.id, dlgAuto.value.run, { engine: localProfileEngine(partnerDlg.profile, remoteLaunchers.value[info.node]) })
+  : remoteLaunchModelChoice(dlgRemoteLauncher.value, dlgRow.value, dlgAuto.value.run)))
 const launchModel = computed(() => {
   const c = launchModelChoice.value
-  if (!launchModelOnThisPc.value) return { ...c, show: false, note: '', canRetry: false }
-  if (c.kind !== 'list') return { ...c, canRetry: false }
-  const v = launchModelViews.value[c.vendor]
-  return { ...c, models: v?.models ?? [], note: v?.note ?? PENDING_TEXT, canRetry: Boolean(v?.canRetry) && !v?.loading }
+  return launchModelView(c, (launchModelOnThisPc.value ? launchModelViews : remoteModelViews).value[c.vendor])
 })
-watch(() => partnerDlg.open, () => { modelLoader.reset(); launchModelViews.value = {} })
-watch(() => [partnerDlg.open, partnerDlg.step, launchModelOnThisPc.value && launchModelChoice.value.kind === 'list' ? launchModelChoice.value.vendor : ''], ([open, step, vendor]) => { if (open && step === 2 && vendor) modelLoader.ensure(vendor) })
-function reloadLaunchModels() { const c = launchModelChoice.value; if (c.kind === 'list') void modelLoader.load(c.vendor, { force: true }) }
-const launchModelPick = computed(() => (launchModel.value.show && launchModel.value.models.some(m => m.id === partnerDlg.model) ? partnerDlg.model : ''))
+watch(() => [partnerDlg.open, partnerDlg.node], () => { modelLoader.reset(); remoteModelLoader.reset(); launchModelViews.value = {}; remoteModelViews.value = {} })
+watch(() => [partnerDlg.open, partnerDlg.step, partnerDlg.node, launchModelChoice.value.kind === 'list' ? launchModelChoice.value.vendor : ''], ([open, step, , vendor]) => { if (open && step === 2 && vendor) (launchModelOnThisPc.value ? modelLoader : remoteModelLoader).ensure(vendor) })
+function reloadLaunchModels() { const c = launchModelChoice.value; if (c.kind === 'list') void (launchModelOnThisPc.value ? modelLoader : remoteModelLoader).load(c.vendor, { force: true }) }
+const launchModelPick = computed(() => pickedModel(launchModel.value, partnerDlg.model))
 const dlgPiPick = computed(() => dlgAuto.value.run === 'pi' && piChoice.value.ok)
 const partnerCanRun = computed(() => dlgAuto.value.ok)
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
@@ -1090,10 +1097,12 @@ async function submitPartnerDlg() {
       } else if (opened?.note) showLaunchNotice({ title: '已改用一般視窗', body: opened.note })
     } else {
       // 經 pi：profile 一律 pi，帶那台清單裡的提供者與模型（不在清單裡就不送）；其他開法照舊
-      const body = remoteLaunchRequest({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name, cwd: partnerDlg.cwd, first: partnerDlg.firstMessage, piModel: partnerDlg.piModel }, { run: dlgAuto.value.run, row: dlgRow.value, launcher: dlgRemoteLauncher.value })
+      // 型號（#2355 P4）：選了卻已不在那台目前的清單裡（清單剛換）就請他重選，不偷偷改成不指定
+      if (partnerDlg.model && !launchModelPick.value) throw new Error(MODEL_PICK_ERR)
+      const body = remoteLaunchRequest({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name, cwd: partnerDlg.cwd, first: partnerDlg.firstMessage, piModel: partnerDlg.piModel }, { run: dlgAuto.value.run, row: dlgRow.value, launcher: dlgRemoteLauncher.value, model: launchModelPick.value })
       if (!body) throw new Error('那台的 pi 模型清單裡沒有這個模型，請重新選一次')
       const r = await transport.launch(body)
-      if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile }]
+      if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile, model: body.model ?? '' }]
     }
     Object.assign(launchPrefs, bumpRecentCwd(launchPrefs, partnerDlg.cwd))
     void saveLaunchPrefs()
@@ -1120,6 +1129,9 @@ async function pollLaunchResults() {
         console.info('[ASN] 開新夥伴失敗', fail.detail)
         showLaunchNotice(launchFailedNoticeText(fail.name, fail.detail))
       }
+      // 開好了而且那台回報了實際用的型號：告訴使用者（沒回報就不講型號，不拿選的值頂替）
+      for (const ok of collectLaunchModelUsed(body?.launches, trackSnap)) showLaunchNotice(launchOkNoticeText(ok.name, ok.modelUsed))
+      // 開好了而且那台回報了實際用的型號：告訴使用者（沒回報就不講型號，不拿選的值頂替）
       for (const row of body?.launches ?? []) {
         if (row.status === 'ok' || row.status === 'failed') {
           launchTrack.value = launchTrack.value.filter(t => t.id !== row.id)

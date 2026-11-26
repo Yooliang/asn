@@ -132,9 +132,9 @@ test('acpListVendor：只有這台的 Gemini 內建通道向本機讀；Grok、�
 test('接線：第 2 頁用本機清單，切換模型的對話框也讀 agent_models；寫死的清單已拿掉', () => {
   const list = read('ui/list.js'), html = read('ui/list.html'), cat = read('ui/lib/model-catalog.mjs')
   assert.match(list, /createModelLoader\(\{ fetch: a => transport\.agentModels\(a\)/)
-  assert.match(list, /modelLoader\.load\(c\.vendor, \{ force: true \}\)/, '重新讀取帶 force')
+  assert.match(list, /\(launchModelOnThisPc\.value \? modelLoader : remoteModelLoader\)\.load\(c\.vendor, \{ force: true \}\)/, '重新讀取帶 force（本機與別台各用自己的讀取器）')
   assert.match(html, /@click="reloadLaunchModels"/)
-  assert.match(read('ui/lib/partner-ops-ui.mjs'), /fetch: a => props\.api\.agentModels\(a\)/)
+  assert.match(read('ui/lib/partner-ops-ui.mjs'), /: a => props\.api\.agentModels\(a\)/)
   assert.doesNotMatch(cat, /GEMINI_MODELS|CLAUDE_MODELS/)
   assert.doesNotMatch(cat, /function launchModelChoices\([^)]*local/, 'launchModelChoices 不再有 local 條件')
 })

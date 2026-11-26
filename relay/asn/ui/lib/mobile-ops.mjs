@@ -29,32 +29,9 @@ export const opStep = op => OP_STEP[op] ?? ''
 // 詳情的結果留在選單裡看；其他動作送出後選單收起，進度顯示在對話頁頂端
 export const showsInSheet = op => op === 'info'
 
-// 手機沒有本機查詢（電腦版右鍵是問那台電腦現在能切哪些），所以只列常用的三個；實際能不能用以那台電腦的回報為準
-export const MODEL_NOTE = '手機查不到電腦實際可用的模型，這裡只列常用的幾個；電腦不支援的會回報失敗。'
-// 手機的切換模型清單：#2355 P3 只改電腦版，手機維持改版前的內容（領隊一審：手機不能有空窗）；手機改讀型號清單是 P4，到時整段刪掉。
-// 內容就是 P3 以前 model-catalog.mjs 的 CLAUDE_MODELS（只取 id、label）與 GEMINI_MODELS；test/fixtures/phone-models-before-2355.json 存改版前的原樣輸出。
-export const PHONE_CLAUDE_MODELS = Object.freeze([
-  { id: 'opus', label: 'Opus' },
-  { id: 'sonnet', label: 'Sonnet' },
-  { id: 'haiku', label: 'Haiku' },
-])
-export const PHONE_GEMINI_MODELS = Object.freeze([
-  { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
-  { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
-  { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
-  { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
-  { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
-  { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
-])
-export const phoneModels = (engine = 'claude') => {
-  switch (String(engine ?? '').toLowerCase()) {
-    case 'claude': return PHONE_CLAUDE_MODELS.map(m => ({ id: m.id, label: m.label }))
-    case 'gemini': return PHONE_GEMINI_MODELS.map(m => ({ id: m.id, label: m.label }))
-    default: return []
-  }
-}
-/** 手機內建通道工作者的清單（改版前：Gemini 有固定清單，Grok 等沒有＝輸入框）；給 acpSwitchChoices 的 list */
-export const phoneAcpList = friend => phoneModels(friend?.engine)
+// 手機的切換模型清單跟電腦版同一份（model-catalog.mjs 的 switchModelsFor）：Claude 沒有清單，只有別名（Fable、Opus、Sonnet、Haiku）；
+// Gemini 的清單讀那台電腦回報的摘要（m.js；remote-models.mjs 的 modelState）。這裡不再留手機自己的清單（#2355 P4）。
+export const MODEL_NOTE = '這幾個是 Claude 的別名，會自動指向最新版；那台電腦不支援的會回報失敗。'
 
 // 改名完成後，對話分頁要跳到新名字（同一位夥伴）。回新的 id；不是改名或沒完成就回空字串
 export const renamedChatId = (friend, op, input, view) => (op === 'rename' && view?.phase === 'done' ? friendId(friend.node, String(input?.newName ?? '').trim()) : '')

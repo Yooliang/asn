@@ -26,7 +26,7 @@ import { contextLabel } from './lib/context-usage.mjs'
 import { elevatedBadge } from './lib/elevated.mjs'
 import { BANNER_MS, DEFAULT_PREFS, TAB_LABEL, tabList, accountDisplayName, SWIPE_BLOCK_SELECTOR, SCROLL_TERM_SELECTOR, inScrollableX, indicatorPos, pagerShift, PAGER_SETTLE_MS, swipeLock, swipeStartOk, swipeTarget, tabIndex, tabNav, UPDATE_CHECK_MS, afterBind, androidBridge, bannerText, sideloadLastText, buttonLabel, initialNav, opsNav, offlineNav, photoNav, tabLabel as tabLabelOf, secretNav, termReqNav, permReqNav, initialUpdate, installOutcome, meNav, normalizeNav, normalizePrefs, notifyPlan, rosterGroups, savePhotoOnPhone, PTR_LOADING_H, PULL_TEXT, pullHeight, pullPhase, pullRatio, shouldAutoCheck, shouldRefreshOnRelease, totalUnread, BACKFILL_GAP_MS, backfillQueue, lastWords, updateCheckErrorText, withAvailable, withFailure, withProgress } from './lib/mobile.mjs'
 import { sharePhoto } from './lib/photo-inline.mjs'
-import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchVendorCards, machinesByNode, progressView, launchInProgress, remotePi } from './lib/mobile-launch.mjs'
+import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, modelUsedOf, appearedIn, appearedModel, buildLaunchRequest, initialLaunch, launchChoices, launchDevices, launchEligibility, launchErrorText, launchFormError, launchPiChoice, launchVendorCards, machinesByNode, progressView, launchInProgress, remotePi } from './lib/mobile-launch.mjs'
 import { autoRunFor, loggedOutFromStates, vendorStatesOf } from './lib/auto-run.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { UI_KIT } from './lib/ui-kit.mjs'
@@ -43,7 +43,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, normalizeLastChat, opLineNote, opStep, phoneAcpList, phoneModels, renamedChatId, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, normalizeLastChat, opLineNote, opStep, renamedChatId, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
 import { buildPartnerMenu } from './lib/partner-menu.mjs'
 import { headCallView } from './lib/head-call.mjs'
@@ -66,7 +66,10 @@ import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctHeadView, acctButtonDevic
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, deviceRowLine, pruneRemoved, removeDevice, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, canShowBackRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
-import { acpSwitchChoices, createOpRunner, makeOpRun, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
+import { acpListWhere, acpSwitchChoices, createOpRunner, makeOpRun, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
+import { createModelLoader } from './lib/local-models.mjs'
+import { launchModelView, pickedModel, remoteLaunchModelChoice } from './lib/remote-launch-models.mjs'
+import { switchModelsFor } from './lib/model-catalog.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
 import { NOTICE_ID, isMergedAway, isNoticeFriend, noticeGoRows } from './lib/notice.mjs'
@@ -870,9 +873,25 @@ const app = createApp({
     // 經 pi（D2 #422）：那台回報的 pi 模型清單（要開放遠端管理）；預設第一個
     const lchPi = computed(() => launchPiChoice(lchRow.value, lchLauncher.value))
     const lchAuto = computed(() => autoRunFor(lchRow.value, { local: false, piInstalled: remotePi(lchLauncher.value).installed, piReady: lchPi.value.ok, piWhy: lchPi.value.why }))
-    const lchReq = computed(() => buildLaunchRequest(lch, { run: lchAuto.value.run, row: lchRow.value, launcher: lchLauncher.value }))
-    const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value, { run: lchAuto.value.ok ? lchAuto.value.run : null, why: lchAuto.value.why, piOk: !!lchReq.value }) : ''))
-    function pickLaunchVendor(v) { if (v.disabled) return; Object.assign(lch, { vendor: v.id, profile: v.profileId, piModel: '' }) }
+    // 型號（#2355 P4）：清單是那台回報的摘要，跟電腦版同一份判斷（remote-launch-models.mjs）；那台沒有 launch_model 就不出下拉、寫一句說明。
+    // 「再查一次」只是重新向後台問一次（那台會自己定期更新，手機叫不動它重讀）
+    const lchModelViews = ref({})
+    const lchModelLoader = createModelLoader({
+      where: 'remote',
+      fetch: async ({ force, retry }) => {
+        if (force || retry) { await loadLaunchers(); if (!lchData.loaded) throw new Error(lchData.error || '查不到那台的設定') }
+        return lchLauncher.value
+      },
+      onChange: (v, view) => { lchModelViews.value = { ...lchModelViews.value, [v]: view } },
+    })
+    const lchModelChoice = computed(() => remoteLaunchModelChoice(lchLauncher.value, lchRow.value, lchAuto.value.run))
+    const lchModel = computed(() => launchModelView(lchModelChoice.value, lchModelViews.value[lchModelChoice.value.vendor]))
+    const lchModelPick = computed(() => pickedModel(lchModel.value, lch.model))
+    const reloadLchModels = () => { const c = lchModelChoice.value; if (c.kind === 'list') void lchModelLoader.load(c.vendor, { force: true }) }
+    const resetLchModels = () => { lchModelLoader.reset(); lchModelViews.value = {} }
+    const lchReq = computed(() => buildLaunchRequest(lch, { run: lchAuto.value.run, row: lchRow.value, launcher: lchLauncher.value, model: lchModelPick.value }))
+    const lchFormErr = computed(() => (lch.node ? launchFormError(lch, lchElig.value, { run: lchAuto.value.ok ? lchAuto.value.run : null, why: lchAuto.value.why, piOk: !!lchReq.value, modelOk: !lch.model || !!lchModelPick.value }) : ''))
+    function pickLaunchVendor(v) { if (v.disabled) return; Object.assign(lch, { vendor: v.id, profile: v.profileId, piModel: '', model: '' }) }
     async function loadLaunchers() {
       lchData.error = ''
       try { lchData.machines = machinesByNode(await mobileLaunchApi.launchers()); lchData.loaded = true } catch (e) { lchData.loaded = false; lchData.error = launchErrorText(e.message) }
@@ -880,9 +899,10 @@ const app = createApp({
     function pickLaunchDevice(node) {
       if (!launchEligibility(node, lchCtx.value).ok) return
       const c = launchChoices(lchData.machines[node])
+      if (node !== lch.node) { lch.model = ''; resetLchModels() }   // 換一台電腦：型號清單是那台自己的，舊的選擇與讀取結果都不留
       Object.assign(lch, { node, deviceLabel: lchDevices.value.find(d => d.key === node)?.label ?? '', error: '' })
       const vs = lchCardsOf(node).filter(v => !v.disabled)
-      if (!vs.some(v => v.id === lch.vendor)) { const v = vs[0]; Object.assign(lch, { vendor: v?.id ?? '', profile: v?.profileId ?? '', piModel: '' }) }
+      if (!vs.some(v => v.id === lch.vendor)) { const v = vs[0]; Object.assign(lch, { vendor: v?.id ?? '', profile: v?.profileId ?? '', piModel: '', model: '' }) }
       if (!c.cwds.includes(lch.cwd)) lch.cwd = c.cwds[0] ?? ''
       if (!lch.name.trim()) lch.name = defaultPartnerName(friends.value, lch.profile)
     }
@@ -895,6 +915,7 @@ const app = createApp({
       if (launchInProgress(lch) || (isLaunch && lch.phase === 'form')) { if (isLaunch) goTab(PAGE_TAB); else fourthNav.openPage(launchPage()); return }
       if (nav.sheet) return
       Object.assign(lch, initialLaunch(), { vphase: 'sending' })
+      resetLchModels()
       if (!fourthNav.openPage(launchPage())) return
       void loadLaunchers().then(() => fourthNav.whenSettled()).then(() => {   // 從設備細部頁進來時，換頁要等導覽做完，才推第 2 步
         if (!node) return
@@ -1270,16 +1291,20 @@ const app = createApp({
       // 結果出來時使用者已經不在那個畫面（離開了，或切到別的分頁）：跳一句提示；還在畫面上就照原本在畫面上顯示
       if (run === acctRunSeq && (token !== acctToken || nav.tab !== PAGE_TAB)) showToast(acctResultToast(v, { label, email }))
     }
+    // 第 2 步才去讀型號清單（切回第 1 步再回來不重讀；要重讀按「再查一次」）。放在這裡：廠牌卡要用到後面才宣告的 acctAllDevs，watch 一建立就會算一次
+    watch(() => [lchStep2.value, lch.node, lchModelChoice.value.kind === 'list' ? lchModelChoice.value.vendor : ''], ([step2, , vendor]) => { if (step2 && vendor) lchModelLoader.ensure(vendor) })
     const sleep = ms => new Promise(r => setTimeout(r, ms))
     async function trackLaunch(t) {
       const stop = Date.now() + LAUNCH_GIVE_UP_MS
+      let used = ''   // 那台回報的實際型號（model_used）：這一輪沒查到時沿用之前的，不拿選的值頂替
       while (lch.id === t.id && Date.now() < stop) {
         await sleep(LAUNCH_POLL_MS)
         let row = null
         try { row = ((await mobileLaunchApi.launchers([t.id]))?.launches ?? []).find(l => l.id === t.id) } catch { /* 下一輪再問 */ }
         if (row?.status === 'ok' || row?.status === 'unconfirmed') await core.refreshRoster()
+        used = modelUsedOf(row, used)
         const appeared = appearedIn(friends.value, t.node, t.name)
-        const v = progressView(row, appeared, t.name, appeared ? appearedModel(friends.value, t.node, t.name) : '')
+        const v = progressView(row, appeared, t.name, appeared ? appearedModel(friends.value, t.node, t.name) : '', { used, picked: t.model })
         if (lch.id !== t.id) return
         Object.assign(lch, { vphase: v.phase, text: v.text })
         if (appeared) {
@@ -1302,7 +1327,7 @@ const app = createApp({
         const r = await mobileLaunchApi.launch(body)
         if (!r?.id) throw new Error('送出失敗')
         Object.assign(lch, { phase: 'progress', id: r.id, since: Date.now(), friendId: '', detail: '', ...(({ phase, text }) => ({ vphase: phase, text }))(progressView(null, false)) })
-        void trackLaunch({ id: r.id, node: lch.node, name })
+        void trackLaunch({ id: r.id, node: lch.node, name, model: body.model ?? '' })
       } catch (e) { lch.error = launchErrorText(e.message) } finally { lch.busy = false }
     }
     // 開好了「開始對話」：收起內頁並直接切到對話分頁（對話分頁就是那一位，#1438）；不再多推「進那一則」的記錄，返回鍵不會多按一次（#1442）
@@ -1330,10 +1355,32 @@ const app = createApp({
     const opsRows = computed(() => buildPartnerMenu(opsFriend.value, opsCtx.value, 'phone'))   // 四個入口共用的組選單函式（#1559，lib/partner-menu.mjs）
     const opsView = computed(() => sharedWhy(opsRows.value))   // 同一個原因只在選單最上方寫一次
     const ops = reactive({ phase: 'menu', newName: '', note: '', ack: false, model: '', error: '', view: null })
-    const opsAcp = computed(() => acpSwitchChoices(opsFriend.value, { list: phoneAcpList(opsFriend.value) }))   // 內建通道工作者的型號清單（Gemini 有、Grok 沒有＝手動輸入）；手機維持改版前的固定清單，P4 才改讀型號清單（#2355）
+    // 內建通道工作者（Gemini）的型號清單（#2355 P4）：工作者在別台電腦，清單讀那台回報的摘要（跟電腦版同一個讀取器、同一套說法）；Grok 沒有清單＝手動輸入
+    const opsAcpWhere = computed(() => acpListWhere(opsFriend.value, { selfNode: info.node, canReadLocal: false, canReadRemote: true }))
+    const opsAcpViews = ref({})
+    const opsAcpLoader = createModelLoader({
+      where: 'remote',
+      fetch: async ({ force, retry }) => {
+        if (force || retry || !lchData.loaded) { await loadLaunchers(); if (!lchData.loaded) throw new Error(lchData.error || '查不到那台的設定') }
+        return lchData.machines[opsFriend.value?.node]?.launcher ?? null
+      },
+      onChange: (v, view) => { opsAcpViews.value = { ...opsAcpViews.value, [v]: view } },
+    })
+    const opsAcpView = computed(() => (opsAcpWhere.value ? opsAcpViews.value.gemini ?? null : null))
+    const opsAcp = computed(() => acpSwitchChoices(opsFriend.value, { list: opsAcpView.value?.models ?? [] }))
+    const opsAcpNote = computed(() => opsAcpView.value?.note ?? '')
+    const opsAcpCanRetry = computed(() => Boolean(opsAcpView.value?.canRetry) && !opsAcpView.value?.loading)
+    const opsAcpRetryLabel = computed(() => opsAcpView.value?.retryLabel || '再查一次')
+    const reloadOpsAcp = () => { if (opsAcpWhere.value) void opsAcpLoader.load('gemini', { force: true }) }
+    // 進到「切換模型」才去讀；離開（返回選單、收起）就丟掉結果，下次進來重讀。清單晚到時，預設選目前用的那個
+    watch(() => [ops.phase, opsFriend.value?.id, opsAcpWhere.value], ([phase, , where]) => {
+      if (phase === 'model' && where) opsAcpLoader.ensure('gemini')
+      else if (phase !== 'model') { opsAcpLoader.reset(); opsAcpViews.value = {} }
+    })
+    watch(() => opsAcp.value.models, models => { if (ops.phase === 'model' && models.length && !models.some(m => m.id === ops.model)) ops.model = opsAcp.value.selected })
     const opsText = computed(() => opDialogText(ops.phase, opsFriend.value?.agent || opsFriend.value?.nick || '', opsFriend.value?.device || '', dialogEngine(opsFriend.value), { hasList: opsAcp.value.models.length > 0 }))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (opsFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
-    const opsModels = phoneModels(), opsModelNote = MODEL_NOTE
+    const opsModels = switchModelsFor('claude'), opsModelNote = MODEL_NOTE   // Claude 只有別名（跟電腦版同一份：fable、opus、sonnet、haiku）
     const opsIsPi = computed(() => ['pi', 'acp'].includes(partnerEngine(opsFriend.value)))   // pi 與內建通道的工作者沒有固定的模型清單：改成輸入框（Claude 的常用清單對它們不適用）
     // pi 的模型下拉選單（#443／#444）：那台開放遠端管理時，啟動設定摘要會帶它的 pi 能用的模型；沒有就退回輸入框並說明
     const opsPiChoices = computed(() => {
@@ -1764,10 +1811,10 @@ const app = createApp({
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, reaccept, reacceptAsk, reacceptNo, reacceptYes, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, removedBlock, acctRowLine, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody, fs, FP_SHOW_TEXT, fpShowStart, fpShowRetry, fpShowEnd, fpShowScan,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, opsAcpNote, opsAcpCanRetry, opsAcpRetryLabel, reloadOpsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideNode, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       SUB_LAPSED_TEXT, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLoginTargets, acctLoginPress, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, acctHead, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
-      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchAuto, lchPi, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
+      lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchAuto, lchPi, lchModel, reloadLchModels, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, speakApi, readVoices, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,

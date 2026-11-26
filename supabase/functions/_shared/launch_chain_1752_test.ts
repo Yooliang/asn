@@ -2,11 +2,17 @@
 // 以前兩段各測各的：畫面的測試自己造帶 mode: 'term' 的假資料，後台把 mode 丟掉，所以畫面的過濾在真實資料上永遠不觸發。
 // 這支把兩段接起來，輸入的形狀由 relay/asn/src-tauri/src/bridge/launcher.rs 的 TERM_PROFILES 與 summary() 讀出來，不手寫一份剛好會過的資料。
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { sanitizeLauncher } from "./launch.ts";
+import { launchErrorText as backendErrorText, sanitizeLauncher } from "./launch.ts";
 // @ts-ignore 前端的純函式模組，沒有型別宣告
 import { remoteModelRows, remoteTermProfile } from "../../../relay/asn/ui/lib/partner-launch-ui.mjs";
 // @ts-ignore
 import { isTermProfile } from "../../../relay/asn/ui/lib/model-catalog.mjs";
+// @ts-ignore
+import { NONE_TEXT, modelState } from "../../../relay/asn/ui/lib/remote-models.mjs";
+// @ts-ignore
+import { launchModelView, remoteLaunchModelChoice } from "../../../relay/asn/ui/lib/remote-launch-models.mjs";
+// @ts-ignore
+import { CODE_TEXT as phoneErrorText, launchErrorText as phoneLaunchErrorText } from "../../../relay/asn/ui/lib/mobile-launch.mjs";
 
 const LAUNCHER_RS = new URL("../../../relay/asn/src-tauri/src/bridge/launcher.rs", import.meta.url);
 
@@ -84,4 +90,58 @@ Deno.test("#2353 第③階段：指定型號只在那台電腦有回報 models �
   assert(Array.isArray(withModels.models), "新電腦：有 models 陣列");
   const bad = sanitizeLauncher({ ...sent, models: [{ vendor: "claude", status: "ok", models: [{ id: "a b", name: "x" }] }] }) as Record<string, unknown>;
   assert(Array.isArray(bad.models), "整理後仍是陣列（壞的那筆被丟掉，不是整份拒收）");
+});
+
+// #2355 P4：launcher.models → 後台 sanitizeLauncher → 畫面 modelState／remoteLaunchModelChoice，整條路接得起來。
+// 輸入的形狀由 Rust 讀出來（launcher.rs 帶 launch_model、models；VendorModels 的欄位名），清單用 agy 的實機樣本，不手寫一份剛好會過的資料。
+const AGY_SAMPLE = new URL("../../../relay/asn/src-tauri/tests/fixtures/agy-models/sample.txt", import.meta.url);
+Deno.test("#2355 P4 整條路：Rust 摘要的 models、launch_model → 後台 sanitizeLauncher → 畫面型號下拉（Claude 別名、Gemini 讀清單；沒旗標或舊電腦不出下拉）", async () => {
+  const src = await Deno.readTextFile(LAUNCHER_RS);
+  assert(/s\["launch_model"\]\s*=\s*json!\(true\)/.test(src), "launcher.rs 不再帶 launch_model？這支測試要跟著 Rust 的形狀走");
+  assert(/s\["models"\]\s*=\s*models/.test(src), "launcher.rs 不再把 models 放進摘要？");
+  const agy = (await Deno.readTextFile(AGY_SAMPLE)).split(/\r?\n/).filter((l) => l.includes("\t")).map((l) => { const [id, name] = l.split("\t"); return { id: id.trim(), name: (name ?? "").trim() }; });
+  assert(agy.length > 3, "agy 實機樣本讀不到");
+  const sent = {
+    ...summaryShapeFromRust(src, termProfilesFromRust(src)),
+    launch_model: true,
+    models: [{ vendor: "gemini", status: "ok", models: agy }, { vendor: "claude", status: "unavailable", code: "unsupported", models: [] }],
+  };
+  const stored = sanitizeLauncher(sent) as Record<string, unknown>;
+  assert(stored && !("error" in stored));
+  assertEquals(stored.launch_model, true, "旗標過了後台還在");
+
+  // 畫面：Gemini（背景夥伴）下拉的清單＝樣本的每一筆，順序不變
+  const rows = remoteModelRows(stored) as { id: string; profileId: string }[];
+  const gem = rows.find((r) => r.id === "gemini")!;
+  const choice = remoteLaunchModelChoice(stored, gem, "acp");
+  assertEquals([choice.show, choice.kind, choice.vendor], [true, "list", "gemini"]);
+  const state = modelState(stored, "gemini", { where: "remote", narrow: true });
+  assertEquals(state.state, "ready");
+  assertEquals(state.models.map((m: { id: string }) => m.id), agy.filter((m) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/.test(m.id)).map((m) => m.id));
+  const view = launchModelView(choice, { ...state, loading: false });
+  assert(view.models.length > 3 && view.note === "");
+
+  // Claude 讀不到清單（unsupported），下拉用別名，不看清單
+  const claude = remoteLaunchModelChoice(stored, rows.find((r) => r.id === "claude")!, "term");
+  assertEquals([claude.show, claude.kind], [true, "aliases"]);
+  assertEquals(claude.models.map((m: { id: string }) => m.id), ["fable", "opus", "sonnet", "haiku"]);
+
+  // 沒帶 launch_model（舊電腦／舊版 ASN）：不出下拉，只有一句說明
+  const { launch_model: _drop, ...noFlag } = sent;
+  const old = sanitizeLauncher(noFlag) as Record<string, unknown>;
+  const oldRows = remoteModelRows(old) as { id: string; profileId: string }[];
+  const oldChoice = remoteLaunchModelChoice(old, oldRows.find((r) => r.id === "gemini")!, "acp");
+  assertEquals([oldChoice.show, oldChoice.note], [false, NONE_TEXT]);
+
+  // 完全沒有 models（更舊的電腦）：modelState 是 none
+  const { models: _m, ...noModels } = sent;
+  const none = sanitizeLauncher(noModels) as Record<string, unknown>;
+  assertEquals(modelState(none, "gemini", { where: "remote" }).state, "none");
+});
+
+Deno.test("#2355 P4：bad_model、model_unsupported 的中文，手機與電腦版（mobile-launch.mjs）跟後台 launch.ts 逐字相同", () => {
+  for (const code of ["bad_model", "model_unsupported"]) {
+    assertEquals((phoneErrorText as Record<string, string>)[code], backendErrorText(code), code);
+    assertEquals(phoneLaunchErrorText(`launch HTTP 400 ${code}`), backendErrorText(code), code);
+  }
 });
