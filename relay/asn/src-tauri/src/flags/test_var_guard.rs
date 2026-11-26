@@ -2,7 +2,7 @@
 //! 1. 只能用 `flags::test_var(…)`／`flags::test_var_from(…)` 讀，而且這兩個函式只能收這三種分類的名字；
 //! 2. 在正式碼（非測試編譯的部分）裡，名字（含舊名）的字串字面值只准出現在這兩個函式的第一個參數，
 //!    不能被 `std::env::var`、`envc::get`、`flags::ms`… 或任何別的讀法碰到；
-//! 3. 例外清單 [`EXEMPT`] 只放 PR-3b 才處理的兩個 SHOT 變數，要寫明理由。
+//! 3. 例外清單 [`EXEMPT`] 是空的（PR-3b 起），不准再加。
 //!
 //! 「測試編譯的部分」：整個檔案只在測試編譯（`tests/`、`*/tests.rs`、[`WHOLE_TEST_FILES`]），
 //! 或從第一個 `#[cfg(test)] mod …` 往後。測試碼裡直接讀環境變數照舊放行（它們只在測試編譯存在）。
@@ -11,11 +11,8 @@ use super::scan::stripped;
 use super::{find, Kind, FLAGS};
 use std::collections::BTreeMap;
 
-/// 例外：這兩個發版 e2e 還要在正式建置讀，要等 PR-3b 建好 e2e 專用建置才能收進 test_var。不准再加。
-pub const EXEMPT: &[(&str, &str)] = &[
-    ("ASN_SHOT_LOGIN", "3b：login-e2e-bind 在發版建置（release exe）上設它；PR-3b 建好 e2e 專用建置後改走 test_var"),
-    ("ASN_SHOT_TOAST_LENIENT", "3b：Windows 發版 npm test 對 release exe 設它；PR-3b 建好 e2e 專用建置後改走 test_var"),
-];
+/// 例外清單：PR-3b 之後是空的（SHOT 兩個變數已改走 test_var，發版 e2e 改用 test-hooks 版 exe）。不准再加。
+pub const EXEMPT: &[(&str, &str)] = &[];
 
 /// 整個檔案只在測試編譯才存在（由父模組用 `#[cfg(test)] mod` 宣告、或本身是測試輔助），檔名看不出來的
 const WHOLE_TEST_FILES: &[&str] = &["src/golden_util.rs", "src/test_guard.rs", "src/launch/term_live_mux.rs"];
@@ -78,9 +75,6 @@ pub fn check(files: &[(String, String)]) -> Vec<String> {
                     Some((n, Some(f))) if !is_test_kind(f.kind) => {
                         bad.push(format!("{file}:{line} flags::{func}({n}) 登記的分類是「{}」，test_var 只收測試／CI／除錯", f.kind.label()))
                     }
-                    Some((n, Some(_))) if EXEMPT.iter().any(|(e, _)| *e == n) => {
-                        bad.push(format!("{file}:{line} flags::{func}({n}) 是 PR-3b 才處理的例外變數，這一張不改"))
-                    }
                     _ => {}
                 }
             }
@@ -130,13 +124,12 @@ fn 守門_測試變數只能經_test_var_讀() {
 }
 
 #[test]
-fn 例外清單只有_3b_的兩個變數_且寫明理由() {
-    let names: Vec<&str> = EXEMPT.iter().map(|(n, _)| *n).collect();
-    assert_eq!(names, ["ASN_SHOT_LOGIN", "ASN_SHOT_TOAST_LENIENT"], "例外清單不准再加；新的測試變數一律走 flags::test_var");
-    for (n, why) in EXEMPT {
-        assert!(why.contains("3b"), "{n} 的例外理由要寫明是 3b 的事");
+fn 例外清單是空的_兩個_shot_變數也被守門納入() {
+    assert!(EXEMPT.is_empty(), "例外清單不准再加；新的測試變數一律走 flags::test_var：{EXEMPT:?}");
+    // 兩個 SHOT 變數要在「測試類」之列，才會被第二條規則（正式碼不准直接碰）掃到
+    for n in ["ASN_SHOT_LOGIN", "ASN_SHOT_TOAST_LENIENT"] {
         let f = find(n).unwrap_or_else(|| panic!("{n} 沒登記"));
-        assert!(f.purpose.contains("3b"), "{n} 的登記表用途欄要註記 3b");
+        assert!(is_test_kind(f.kind), "{n} 要登記成測試／CI／除錯分類");
     }
 }
 
@@ -191,8 +184,9 @@ mod selftest {
     }
 
     #[test]
-    fn 例外變數照舊可以直接讀_但不准塞進_test_var() {
-        assert!(run("src/x.rs", "fn a() { std::env::var(\"ASN_SHOT_TOAST_LENIENT\"); crate::envc::get(\"ASN_SHOT_LOGIN\"); }").is_empty());
-        assert_eq!(run("src/x.rs", "fn a() { crate::flags::test_var(\"ASN_SHOT_LOGIN\"); }").len(), 1);
+    fn shot_變數也只能經_test_var_讀() {
+        assert_eq!(run("src/x.rs", "fn a() { std::env::var(\"ASN_SHOT_TOAST_LENIENT\"); }").len(), 1);
+        assert_eq!(run("src/x.rs", "fn a() { crate::envc::get(\"ASN_SHOT_LOGIN\"); }").len(), 1);
+        assert!(run("src/x.rs", "fn a() { crate::flags::test_var(\"ASN_SHOT_LOGIN\"); crate::flags::test_var(\"ASN_SHOT_TOAST_LENIENT\"); }").is_empty());
     }
 }

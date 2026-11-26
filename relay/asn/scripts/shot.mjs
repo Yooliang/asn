@@ -16,6 +16,14 @@ import { demoUploadUrl, pngDataUrl } from '../test/png.mjs'
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 const releaseName = process.platform === 'win32' ? 'asn.exe' : 'asn'
 export const defaultExe = path.join(root, 'src-tauri', 'target', 'release', releaseName)
+// e2e 專用的 test-hooks 版 exe（#2163 PR-3b）：ASN_SHOT_LOGIN、ASN_SHOT_TOAST_LENIENT 只有這一份讀得到；正式版（上面那份）讀不到。
+// 由 scripts/build-hooks-exe.mjs 建，發版時只拿來跑這些 e2e，不進安裝檔
+export const hooksExe = path.join(root, 'src-tauri', 'target', 'e2e', releaseName)
+/** 需要 hooks 版的 e2e 該用哪一份 exe。ASN_E2E_REQUIRE_HOOKS=1（CI）時，hooks 版不在就不准略過，讓測試失敗而不是變成假綠 */
+export const hooksExeSkip = (env = process.env, exists = f => fs.existsSync(f)) =>
+  exists(hooksExe) || env.ASN_E2E_REQUIRE_HOOKS === '1' ? false : '先執行 node scripts/build-hooks-exe.mjs'
+/** Windows 發版 e2e 會設 ASN_SHOT_TOAST_LENIENT=1，這個變數只有 hooks 版讀得到，所以那時主情境也改用 hooks 版 */
+export const e2eMainExe = (env = process.env) => (env.ASN_SHOT_TOAST_LENIENT === '1' ? hooksExe : defaultExe)
 function scrotOnPath() {
   if (process.platform !== 'linux') return false
   try { return spawnSync('scrot', ['--version'], { stdio: 'ignore' }).status === 0 } catch { return false }

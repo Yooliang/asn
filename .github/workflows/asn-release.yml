@@ -179,6 +179,8 @@ jobs:
           ASN_E2E_KEEP: ${{ runner.temp }}/asn-e2e-keep
           # #2033：發版機上提示視窗截圖疑似空白只警告、不擋發版（只放寬 toast- 開頭的圖；對話視窗與其他斷言照擋）
           ASN_SHOT_TOAST_LENIENT: '1'
+          # 這個變數與 ASN_SHOT_LOGIN 只有 test-hooks 版 exe 讀得到（release-ci.mjs 建在 target/e2e）；找不到就要紅，不能略過
+          ASN_E2E_REQUIRE_HOOKS: '1'
         run: |
           set -euo pipefail
           npm test

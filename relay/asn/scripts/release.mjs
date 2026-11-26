@@ -40,7 +40,8 @@ const keyFile = path.join(keyDir, 'asn.key')
 const passFile = path.join(keyDir, 'asn.key.password')
 if (!fs.existsSync(keyFile)) fail(`找不到更新簽章私鑰：${keyFile}`)
 // 密碼檔只讀進子程序的環境變數（有就帶，沒有代表金鑰沒設密碼）；不印出
-const env = { ...process.env, TAURI_SIGNING_PRIVATE_KEY: keyFile }
+// ASN_SHIPPING_BUILD=1：build.rs 看到它又帶了 test-hooks feature 就在編譯期失敗（#2163 PR-3b）
+const env = { ...process.env, TAURI_SIGNING_PRIVATE_KEY: keyFile, ASN_SHIPPING_BUILD: '1' }
 if (fs.existsSync(passFile)) env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = fs.readFileSync(passFile, 'utf8').replace(/[\r\n]+$/, '')
 
 const run = (cmd, args, extra = {}) => {

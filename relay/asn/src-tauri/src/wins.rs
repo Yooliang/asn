@@ -620,7 +620,7 @@ const SHOT_RETRY_MAX_LENIENT: u32 = 8;
 
 /// 發版 workflow 設 `ASN_SHOT_TOAST_LENIENT=1` 時，提示視窗截圖疑似空白只警告（判斷在 test/shot-png.mjs 的 checkShot）
 fn shot_toast_lenient() -> bool {
-    std::env::var("ASN_SHOT_TOAST_LENIENT").is_ok_and(|v| v == "1")
+    crate::flags::test_var("ASN_SHOT_TOAST_LENIENT").is_some_and(|v| v == "1")
 }
 
 fn shot_retry_max(lenient: bool) -> u32 {
