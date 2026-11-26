@@ -649,7 +649,7 @@ pub fn read_verdict(path_raw: &str, ctx: &ReadCtx) -> ReadVerdict {
         return ReadVerdict::Unresolvable;
     }
     // 層數超過上限、還沒解開的巢狀 JSON 字串（抽取時原樣收進來的）：沒辦法判定，偏向擋
-    if json_container(raw).is_some() {
+    if container_like(raw) {
         return ReadVerdict::Unresolvable;
     }
     let roots = ctx.roots;
@@ -729,13 +729,6 @@ fn push_unique(out: &mut Vec<String>, s: &str) {
     }
 }
 
-/// 字串本身是一段 JSON 物件或陣列（前綴先篩，免得每個字串都去解析）
-pub(crate) fn json_container(s: &str) -> Option<Value> {
-    let t = s.trim_start();
-    if !t.starts_with(['{', '[']) { return None; }
-    serde_json::from_str::<Value>(s).ok().filter(|v| matches!(v, Value::Object(_) | Value::Array(_)))
-}
-
 fn walk(v: &Value, under_key: bool, out: &mut Vec<String>, depth: usize) {
     match v {
         Value::String(s) => {
@@ -746,6 +739,11 @@ fn walk(v: &Value, under_key: bool, out: &mut Vec<String>, depth: usize) {
                 } else {
                     push_unique(out, s);
                 }
+                return;
+            }
+            // 長得像 JSON 容器卻解不開（缺括號、多接文字、單引號、多重編碼…）：原樣收進來，判定那邊當解析不了
+            if container_like(s) {
+                push_unique(out, s);
                 return;
             }
             if under_key {
@@ -794,6 +792,8 @@ pub fn param_keys(params: &Value) -> Vec<String> {
 }
 
 mod fragments;
+mod jsonstr;
+use jsonstr::{container_like, json_container};
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

@@ -416,5 +416,74 @@ fn 抽取_巢狀_json_字串要解開_有層數上限() {
     // 陣列形式的 JSON 字串也解
     assert_eq!(extract_read_paths(&json!({"arguments": json!([bad.clone()]).to_string()})), vec![bad.clone()]);
     // 不是物件或陣列的字串照舊
-    assert!(extract_read_paths(&json!({"arguments": "{not json"})).is_empty());
+    // 解析失敗的 JSON 容器字串不再放行：見「路徑形式變體_容器字串解析失敗_*」
+    assert_eq!(extract_read_paths(&json!({"arguments": "{not json"})), vec!["{not json".to_string()]);
+}
+
+/// 容器字串解析失敗：抽得出來、判定回解析不了（路徑放在裡面也一樣）
+fn container_fail(r: &Rig, s: &str) {
+    let got = extract_read_paths(&json!({"arguments": s}));
+    assert_eq!(got, vec![s.to_string()], "{s}");
+    assert_eq!(verdict(r, &got[0], ReadTool::Single), ReadVerdict::Unresolvable, "{s}");
+}
+
+#[test]
+fn 路徑形式變體_容器字串解析失敗_缺結尾括號() {
+    let r = rig();
+    let p = ps(&r.home.join(".ssh").join("id")).replace('\\', "\\\\");
+    container_fail(&r, &format!("{{\"Path\": \"{p}\""));
+    container_fail(&r, &format!("[\"{p}\""));
+    container_fail(&r, "\u{feff}{\"Path\": \"id_rsa\"");
+}
+
+#[test]
+fn 路徑形式變體_容器字串解析失敗_後面多接文字() {
+    let r = rig();
+    let p = ps(&r.home.join(".ssh").join("id")).replace('\\', "\\\\");
+    container_fail(&r, &format!("{{\"Path\": \"{p}\"}} extra"));
+    container_fail(&r, &format!("[\"{p}\"] and more"));
+}
+
+#[test]
+fn 路徑形式變體_容器字串解析失敗_單引號鍵() {
+    let r = rig();
+    let p = ps(&r.home.join(".ssh").join("id"));
+    container_fail(&r, &format!("{{'Path': '{p}'}}"));
+    container_fail(&r, "{'Path': 'id_rsa'}");
+}
+
+#[test]
+fn 路徑形式變體_容器字串解析失敗_多重編碼() {
+    let r = rig();
+    let p = ps(&r.home.join(".ssh").join("id"));
+    // JSON 字串本身再被編碼成另一層字串
+    let once = json!({"Path": p}).to_string();
+    container_fail(&r, &json!(once).to_string());
+    container_fail(&r, &json!(json!(once).to_string()).to_string());
+    // 對照：解得開的照舊往裡面找、判成敏感；一般的引號字串不受影響
+    assert_eq!(extract_read_paths(&json!({"arguments": once})), vec![p]);
+    assert!(extract_read_paths(&json!({"arguments": "\"plain text\""})).is_empty());
+}
+
+#[test]
+fn 抽取_多行字串裡路徑中間有空白的那一行() {
+    let d = tempfile::tempdir().unwrap();
+    let (home, work) = (d.path().join("Jo Doe"), d.path().join("work"));
+    for p in [&home, &work] {
+        std::fs::create_dir_all(p).unwrap();
+    }
+    let roots = SensitiveRoots::build(&[home.clone()], &[]);
+    let v = |p: &str| read_verdict(p, &ReadCtx { roots: &roots, base: &work, tool: ReadTool::Single });
+    // 家目錄名稱帶空白：路徑本身有空白，仍要收得到、擋得住
+    let spaced = ps(&home.join(".ssh").join("id"));
+    assert!(spaced.contains("Jo Doe"));
+    let multi = format!("第一行有說明\nplease read {spaced} now\n結尾 line");
+    let got = extract_read_paths(&json!({"Message": multi}));
+    assert!(got.contains(&spaced), "{got:?}");
+    assert_eq!(v(&spaced), ReadVerdict::Sensitive);
+    // 路徑後面還接著別的字
+    let multi2 = "第一行\n~/.ssh/id extra\n結尾 line";
+    let got2 = extract_read_paths(&json!({"Message": multi2}));
+    assert!(got2.contains(&"~/.ssh/id".to_string()), "{got2:?}");
+    assert_eq!(v("~/.ssh/id"), ReadVerdict::Sensitive);
 }
