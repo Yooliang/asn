@@ -18,12 +18,17 @@ const NAME_MAX_CHARS: usize = 80;
 /// 與前端 `ui/lib/model-id.mjs`、pi 的 SAFE 同一條；向量在 `relay/shared/test-vectors/model-id.json`，兩邊讀同一份。
 /// （SQL 與 Edge Function 在第②階段才改。）
 ///
-/// **代號不可直接當路徑用**：規則允許 `/`，所以 `a/../x`、`a//b`、`a/` 都算合法代號；
-/// 要拿它組檔案路徑的地方必須自己再檢查（或編碼）。規則擋掉的是 `../x`、`/abs`、`C:\x`（開頭、反斜線）與換行。
+/// 字元集之外另加一條：以 `/` 切開後，每一段都不能是空字串、`.`、`..`
+/// （所以 `a/../x`、`a//b`、`a/`、`./a` 都不合法；`a.b/c.d`、`openrouter/meta/llama-3` 合法）。
+/// 前端 `ui/lib/model-id.mjs` 另寫一份同樣的分段檢查，兩邊讀同一份向量。
+/// 即使如此，要拿代號組檔案路徑的地方仍應自己再檢查（或編碼）。
 pub const MODEL_ID_PATTERN: &str = r"^[A-Za-z0-9][A-Za-z0-9._:/@+\[\]-]{0,99}$";
 
 pub fn valid_model_id(s: &str) -> bool {
-    s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric()) && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '@' | '+' | '[' | ']' | '-'))
+    s.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && s.len() <= 100
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '@' | '+' | '[' | ']' | '-'))
+        && s.split('/').all(|seg| !seg.is_empty() && seg != "." && seg != "..")
 }
 
 /// Unicode 的格式字元（類別 Cf）：雙向控制、零寬字元、BOM、軟連字號、語言標籤等，看不見卻會改變顯示
@@ -217,10 +222,15 @@ aegis         claude-sonnet-5-5           1M       128K     yes       yes   \n";
             let s = bad.as_str().unwrap();
             assert!(!valid_model_id(s), "應該不合法：{s:?}");
         }
-        // pi 現有的規則是同一條：兩邊對同一批輸入答案一樣
+        // pi 的 safe_name 只有字元集那條、沒有分段檢查：不含「空段／.／..」問題的輸入，兩邊答案一樣；
+        // 有路徑段問題的輸入，valid_model_id 一定不合法（safe_name 合法不代表 valid_model_id 合法）
         for s in v["valid"].as_array().unwrap().iter().chain(v["invalid"].as_array().unwrap()) {
             let s = s.as_str().unwrap();
-            assert_eq!(valid_model_id(s), crate::launch::pi_models::safe_name(s), "{s:?}");
+            if s.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..") {
+                assert!(!valid_model_id(s), "有空段、. 或 .. 的要不合法：{s:?}");
+            } else {
+                assert_eq!(valid_model_id(s), crate::launch::pi_models::safe_name(s), "{s:?}");
+            }
         }
     }
 
