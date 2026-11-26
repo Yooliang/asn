@@ -386,8 +386,8 @@ jobs:
       - name: 檢查電腦版（Windows）能編譯
         run: cargo check --locked --lib
 
-      - name: 跑 Windows 才有的測試（統一寫入重試、金鑰憑證守門）
-        run: "cargo test --locked --lib -j 2 -- settings:: quota_readers::"
+      - name: 跑 Windows 才有的測試（統一寫入重試、金鑰憑證守門、讀寫政策的路徑判定與接合點）
+        run: "cargo test --locked --lib -j 2 -- settings:: quota_readers:: bridge::engines::acp_"
 
       # #1860 F PR3：工作管理員「重啟終端服務」在 Windows 上用真的 mux 驗過一輪（取代測試機實按）。
       # 取得的是安裝檔用的同一份自建 release（版本與雜湊讀 wezterm-pins.json，驗建置來源證明要 gh）；放進 resources/wezterm（工作樹裡的占位檔會被換成真的，只在這台 runner 上）

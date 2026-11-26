@@ -122,17 +122,17 @@
   [
     "超長工具名_截 60",
     {
-      "category": "internal",
+      "category": "execute",
       "paths": [],
-      "summary": "internal：x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_to…"
+      "summary": "執行指令：x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_tool_x_to…"
     }
   ],
   [
     "無參數的未知工具名",
     {
-      "category": "internal",
+      "category": "execute",
       "paths": [],
-      "summary": "internal：think_about_it"
+      "summary": "執行指令：think_about_it"
     }
   ],
   [

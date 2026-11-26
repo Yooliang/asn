@@ -91,7 +91,8 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
     const c = info.category
     if (c === 'internal' || c === 'read') return { ok: true }
     if (c === 'execute') {
-      // 指令不問就會被 agy 自己拒絕（實測）；若有指令真的執行成功了而政策不是 allow，那是 agy 行為變了 → 中止
+      // 沒加放行旗標時，指令照樣會啟動（實測）：讀取在受限環境裡被擋，是 agy 的沙箱還是本機設定未確定，所以不能靠 agy 自己拒絕。
+      // 若有指令真的執行成功了而政策不是 allow，那是 agy 行為變了 → 中止
       const granted = policy.rules.execute === 'allow' || turnGrant.has('execute') || driver?.fullAccess
       return info.state === 'DONE' && !granted ? { ok: false, reason: '指令被執行了，但這個工作者不允許執行指令' } : { ok: true }
     }

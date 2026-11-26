@@ -17,7 +17,7 @@ fn fake(name: &str) -> String {
 
 /// 引擎子程序環境的來源：目前的環境變數（要有 PATH 才找得到 node）加上測試指定的；同名的以測試指定為準
 fn eenv(extra: &[(&str, &str)]) -> Vec<(String, String)> {
-    let mut v: Vec<(String, String)> = std::env::vars().filter(|(k, _)| !extra.iter().any(|(e, _)| e.eq_ignore_ascii_case(k)) && !k.to_uppercase().starts_with("FAKE_") && !k.to_uppercase().starts_with("IRORI_CODEX")).collect();
+    let mut v: Vec<(String, String)> = crate::bridge::engines::acp_sensitive::env_without_homes().into_iter().filter(|(k, _)| !extra.iter().any(|(e, _)| e.eq_ignore_ascii_case(k)) && !k.to_uppercase().starts_with("FAKE_") && !k.to_uppercase().starts_with("IRORI_CODEX")).collect();
     v.extend(extra.iter().map(|(k, val)| (k.to_string(), val.to_string())));
     v
 }
@@ -1538,7 +1538,7 @@ async fn acp_遠端管理_詳情_重開只結束記在帳本的程序且對話�
     let info = admin.info("Gemini").unwrap();
     assert_eq!((info["engine"].as_str(), info["model"].as_str(), info["kind"].as_str()), (Some("gemini"), Some("gemini-2.5-pro"), Some("acp")));
     assert_eq!((info["has_session"].clone(), info["load_session"].clone(), info["process_running"].clone()), (json!(true), json!(true), json!(true)));
-    assert_eq!(info["permissions"], json!({ "read": "allow", "write": "allow", "execute": "allow", "network": "allow" }), "預設開放讀寫執行（限工作資料夾）");
+    assert_eq!(info["permissions"], json!({ "read": "allow", "write": "allow", "execute": "allow", "network": "allow" }), "預設開放讀寫執行（讀取只擋敏感位置，寫檔限工作資料夾）");
     assert_eq!(info["cwd"].as_str().map(|c| c.ends_with("Gemini")), Some(true), "{info}");
     let before = std::fs::read_to_string(h.work.path().join("engine.pids")).unwrap();
     assert!(before.lines().any(|l| l.trim() == pid1.to_string()), "帳本記著這個 pid");
