@@ -1,15 +1,11 @@
 {
-  "version": "0.2.100",
-  "notes": "- 改善：收到私信或名單變動時，不再每次都重新讀取群組清單，閒置時更省流量\n- 改善：門鈴的接收方式整理進同一套事件處理，沒登入時也不會出錯",
-  "pub_date": "2026-11-25T19:11:03.794Z",
+  "version": "0.2.101",
+  "notes": "- 新功能：Gemini 背景工作者可以寫檔和執行指令，需在設定裡自己打開（預設關閉）",
+  "pub_date": "2026-11-26T00:42:35.896Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjhGL0FVL21abDhqcW1FZUR6WnhWaTVrenZRNXYveEFWNFNWamxYQU5jbzFSeHB5ZlJ1Mld3RXhFV1ljUXQ2b29BL1ZsVUtSWTI3VnBzcjJhSXRxeFEwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjMzODYzCWZpbGU6QVNOXzAuMi4xMDBfeDY0LXNldHVwLmV4ZQptME9hQVlXbnNWZ2I5NmZiMVZraXZaeWJZN1ZTT0NXaS8xdUsyNTRCeVlBUGhkbTFSWVI2NEt4NzhGeHhEVzhiRzFpeUY0VjdFUTRsZGVQajdwZk5Edz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.100_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhFMHBLd1BObXZhaDdaSnBqLzhMYW5HVFpvcUJ1SFVaVG84UUx1WUJIRU9pMHFNSEZWb3NCNS8zVnd6dFdxOU9sZ3k0MEtWNjBvblRmcmVjelhnWndjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjM0NDk2CWZpbGU6QVNOXzAuMi4xMDBfYW1kNjQuQXBwSW1hZ2UKeUpURWVoVVVBUlBxbE5oVGlHYlJUd2pyVzdNb0Y5WEpKYnpTNGVhaDVyd1ZEYlNKbWZjbW1rU0wremNMTGdMMFpnTGJZQkQyNHZ5YTVRbFJQQXd4QUE9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.100_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjBBdkxWZDJKK1N3aXQraXV1VlhzNHIzNjF1eXBCSk5OSWNRTmUvZ1F4OXJ4TFFwdHE0dXd5T1FISDF1WDVTd3BiUDlNR2Z4bUJrRkNkdXQ3YjExd0FzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjUzNzU1CWZpbGU6QVNOXzAuMi4xMDFfeDY0LXNldHVwLmV4ZQo4SU5UZnJXV2tMUkJZMEtNMGx1azZ4UDFNMnMvSlBtQnZHMGlBMmdxWDhsK253Ky9QRGdvdHExdk9wcGsvVnppcnM5NWd1VVk2VnArZU9iV1hpZE9DQT09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.101_x64-setup.exe"
     }
   }
 }
