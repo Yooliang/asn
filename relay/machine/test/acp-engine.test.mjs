@@ -456,3 +456,60 @@ test('acp：太久沒動靜——取消並中止，之後仍可用', async () =>
     assert.match(r.replies()[0], /醒著嗎/)
   } finally { await r.done() }
 })
+
+// ---- #2351：開場說明的指紋（帳本 acp-workers.json 每筆多一個 preamble_fp）-----------------------------------
+
+const ledgerOf = r => JSON.parse(fs.readFileSync(path.join(r.dir, 'acp-workers.json'), 'utf8'))
+const editLedger = (r, f) => {
+  const j = ledgerOf(r)
+  for (const w of Object.values(j.workers)) f(w)
+  fs.writeFileSync(path.join(r.dir, 'acp-workers.json'), JSON.stringify(j))
+}
+
+test('指紋：第一輪送開場說明並記下指紋；指紋相同（含橋重啟接回同一段對話）不再送', async () => {
+  const r = rig([agy()])
+  try {
+    r.mail(ID(1), 'one'); await r.waitReplies(1)
+    assert.match(r.replies()[0], /含說明/)
+    assert.match(ledgerOf(r).workers.Gemini.preamble_fp, /^[0-9a-f]{16}$/, '成功送出後記下指紋')
+    assert.equal(ledgerOf(r).version, 1, '版本不變')
+    r.restart()
+    r.mail(ID(2), 'two'); await r.waitReplies(2)
+    assert.doesNotMatch(r.replies()[1], /含說明/)
+  } finally { await r.done() }
+})
+
+test('指紋：舊帳本沒有指紋，橋重啟接回舊對話要重送一次、之後不再送（agy 與標準 ACP 都是）', async () => {
+  for (const make of [agy, acp]) {
+    const r = rig([make()])
+    try {
+      r.mail(ID(1), 'one'); await r.waitReplies(1)
+      r.engine.stop(); await sleep(100)
+      editLedger(r, w => { delete w.preamble_fp })   // 升級前的帳本
+      r.restart()
+      r.mail(ID(2), 'two'); await r.waitReplies(2)
+      assert.match(r.replies()[1], /含說明/, `${make.name}：有對話編號但指紋缺：重送`)
+      assert.match(ledgerOf(r).workers.Gemini.preamble_fp, /^[0-9a-f]{16}$/)
+      r.mail(ID(3), 'three'); await r.waitReplies(3)
+      assert.doesNotMatch(r.replies()[2], /含說明/, '重送過就不再送')
+    } finally { await r.done() }
+  }
+})
+
+test('指紋：開場說明的內容變了（指紋不同）就重送；送出失敗不記指紋', async () => {
+  const r = rig([agy()])
+  try {
+    r.mail(ID(1), 'one'); await r.waitReplies(1)
+    editLedger(r, w => { w.preamble_fp = '0123456789abcdef' })   // 上一版（例如還寫著「你目前是唯讀的」）送出的說明
+    r.restart()
+    r.mail(ID(2), 'two'); await r.waitReplies(2)
+    assert.match(r.replies()[1], /含說明/)
+    // 失敗的一輪：新對話（帳本清掉）第一輪就失敗，指紋不能被記下
+    r.engine.stop(); await sleep(100)
+    fs.rmSync(path.join(r.dir, 'acp-workers.json'))
+    r.restart()
+    r.mail(ID(3), '@@AUTH'); await r.waitFor(() => r.fails().length >= 1, '失敗')
+    const led = fs.existsSync(path.join(r.dir, 'acp-workers.json')) ? ledgerOf(r) : { workers: {} }
+    assert.ok(!led.workers.Gemini?.preamble_fp, `失敗不記指紋：${JSON.stringify(led)}`)
+  } finally { await r.done() }
+})

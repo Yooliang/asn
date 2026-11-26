@@ -757,4 +757,173 @@ mod tests {
             eng.stop();
         }
     }
+
+    // ---- #2351：開場說明的指紋。接回舊對話時，指紋缺或不同就重送，免得舊對話裡還留著「你目前是唯讀的」 ----
+
+    /// 會真的完成一輪（或照開關失敗）的假驅動：記下每一輪收到的文字
+    struct ScriptDriver {
+        texts: Arc<Mutex<Vec<String>>>,
+        fail: Arc<AtomicBool>,
+        alive: AtomicBool,
+    }
+    impl Driver for ScriptDriver {
+        fn session_id(&self) -> String {
+            "script-session".into()
+        }
+        fn resume_lost(&self) -> bool {
+            false
+        }
+        fn alive(&self) -> bool {
+            self.alive.load(Ordering::SeqCst)
+        }
+        fn touch(&self) {}
+        fn start(&self) -> crate::bridge::engines::BoxFut<'_, Result<(), WorkerError>> {
+            Box::pin(async { Ok(()) })
+        }
+        fn turn(&self, text: String, _t: u64, _m: u64) -> crate::bridge::engines::BoxFut<'_, Result<TurnResult, WorkerError>> {
+            self.texts.lock().unwrap().push(text);
+            let fail = self.fail.load(Ordering::SeqCst);
+            Box::pin(async move { if fail { Err(WorkerError::new("agent", "測試：這一輪失敗")) } else { Ok(TurnResult { text: "好".into(), denied: vec![] }) } })
+        }
+        fn stop(&self) {
+            self.alive.store(false, Ordering::SeqCst);
+        }
+    }
+
+    struct Script {
+        eng: AcpEngine,
+        texts: Arc<Mutex<Vec<String>>>,
+        fail: Arc<AtomicBool>,
+        n: usize,
+    }
+    impl Script {
+        /// 在同一個工作資料夾上起引擎（重起＝模擬 ASN 重開、讀回帳本與夥伴名冊）；夥伴由佇列開出
+        fn boot(work: &Path, env: &Arc<FakeEnv>) -> Script {
+            let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+            std::mem::forget(_rx);
+            let ctx = EngineCtx {
+                log: Arc::new(|_| {}),
+                work_dir: work.to_path_buf(),
+                home: work.to_path_buf(),
+                agents_file: work.join("agents.json"),
+                env: Arc::new(std::env::vars().collect()),
+                events: tx,
+                notify: Arc::new(|_| {}),
+                pids: PidBook::new(work),
+                data_dir: None,
+                handoff_dir: None,
+            };
+            let (texts, fail) = (Arc::new(Mutex::new(vec![])), Arc::new(AtomicBool::new(false)));
+            let (t2, f2) = (texts.clone(), fail.clone());
+            let md: MakeDriver = Arc::new(move |_a: DriverArgs| Arc::new(ScriptDriver { texts: t2.clone(), fail: f2.clone(), alive: AtomicBool::new(true) }));
+            let eng = AcpEngine::new(ctx, Some(md));
+            eng.set_queue_env(env.clone());
+            eng.start();
+            Script { eng, texts, fail, n: 0 }
+        }
+        /// 送一封信，等這一輪的驅動收到並收尾；回這一輪收到的完整文字
+        async fn mail(&mut self, body: &str) -> String {
+            self.n += 1;
+            self.eng.deliver(&format!("m{}", self.n), "小雙", &format!("[RELAY 來信] from=甲/乙 reply=no\n\n{body}")).unwrap();
+            for _ in 0..200 {
+                if self.texts.lock().unwrap().len() >= self.n {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await; // 讓收尾（記指紋）做完
+            self.texts.lock().unwrap().get(self.n - 1).cloned().expect("驅動沒收到這一輪")
+        }
+    }
+    const HAS_PREAMBLE: &str = "背景工作者";
+
+    fn ledger(work: &Path) -> Value {
+        serde_json::from_str(&std::fs::read_to_string(work.join("acp-workers.json")).unwrap()).unwrap()
+    }
+    fn edit_ledger(work: &Path, f: impl Fn(&mut serde_json::Map<String, Value>)) {
+        let mut v = ledger(work);
+        for (_, w) in v["workers"].as_object_mut().unwrap().iter_mut() {
+            f(w.as_object_mut().unwrap());
+        }
+        std::fs::write(work.join("acp-workers.json"), v.to_string()).unwrap();
+    }
+    async fn script_start(work: &Path, cwd: &Path) -> (Script, Arc<FakeEnv>) {
+        let env = env_for(cwd);
+        std::fs::write(work.join(QUEUE_FILE), format!("{}\n", queue_line("gemini", "小雙", cwd))).unwrap();
+        let s = Script::boot(work, &env);
+        s.eng.poll();
+        for _ in 0..100 {
+            if s.eng.acp_admin().is_some_and(|a| a.info("小雙").is_some()) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+        }
+        (s, env)
+    }
+    fn want_fp(env: &FakeEnv, cwd: &Path, work: &Path) -> String {
+        let cfg = build_cfg(env, &req("gemini", "小雙", cwd), work).unwrap();
+        crate::bridge::engines::acp_worker::preamble_fingerprint(&crate::bridge::engines::acp_worker::preamble_for(&cfg))
+    }
+
+    #[tokio::test]
+    async fn 指紋_第一輪送開場說明並記下_指紋相同就不再送() {
+        let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (mut s, env) = script_start(work.path(), cwd.path()).await;
+        assert!(s.mail("一").await.contains(HAS_PREAMBLE), "新對話要送");
+        assert_eq!(ledger(work.path())["workers"]["小雙"]["preamble_fp"], want_fp(&env, cwd.path(), work.path()), "成功送出後記下指紋");
+        assert!(!s.mail("二").await.contains(HAS_PREAMBLE), "指紋相同：不再送");
+        s.eng.stop();
+        // ASN 重開、接回同一段對話：指紋相同，照舊不送
+        let mut s2 = Script::boot(work.path(), &env);
+        assert!(!s2.mail("三").await.contains(HAS_PREAMBLE), "重開後指紋相同不送");
+        s2.eng.stop();
+    }
+
+    #[tokio::test]
+    async fn 指紋_舊帳本沒有指紋_重開後接回舊對話要重送一次_之後不再送() {
+        let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (mut s, env) = script_start(work.path(), cwd.path()).await;
+        s.mail("一").await;
+        s.eng.stop();
+        // 升級前的帳本：只有舊欄位
+        edit_ledger(work.path(), |w| {
+            w.remove("preamble_fp");
+        });
+        let mut s2 = Script::boot(work.path(), &env);
+        assert!(s2.mail("二").await.contains(HAS_PREAMBLE), "有對話編號但指紋缺：重送");
+        assert_eq!(ledger(work.path())["workers"]["小雙"]["preamble_fp"], want_fp(&env, cwd.path(), work.path()));
+        assert!(!s2.mail("三").await.contains(HAS_PREAMBLE), "重送過就不再送");
+        s2.eng.stop();
+    }
+
+    #[tokio::test]
+    async fn 指紋_開場說明的內容變了_重送() {
+        let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (mut s, env) = script_start(work.path(), cwd.path()).await;
+        s.mail("一").await;
+        s.eng.stop();
+        // 上一版（例如還寫著「你目前是唯讀的」）送出的說明，指紋跟這一版不同
+        edit_ledger(work.path(), |w| {
+            w.insert("preamble_fp".into(), json!("0123456789abcdef"));
+        });
+        let mut s2 = Script::boot(work.path(), &env);
+        let first = s2.mail("二").await;
+        assert!(first.contains(HAS_PREAMBLE) && !first.contains("你目前是唯讀的"), "{first}");
+        assert!(!s2.mail("三").await.contains(HAS_PREAMBLE));
+        s2.eng.stop();
+    }
+
+    #[tokio::test]
+    async fn 指紋_送出失敗不記指紋_下一輪還會送() {
+        let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let (mut s, env) = script_start(work.path(), cwd.path()).await;
+        s.fail.store(true, Ordering::SeqCst);
+        assert!(s.mail("一").await.contains(HAS_PREAMBLE));
+        let fp = ledger(work.path())["workers"]["小雙"]["preamble_fp"].as_str().unwrap_or("").to_string();
+        assert_eq!(fp, "", "這一輪失敗：不寫指紋");
+        s.fail.store(false, Ordering::SeqCst);
+        assert!(s.mail("二").await.contains(HAS_PREAMBLE), "上一輪沒送成：這一輪再送");
+        assert_eq!(ledger(work.path())["workers"]["小雙"]["preamble_fp"], want_fp(&env, cwd.path(), work.path()), "成功後才記");
+        s.eng.stop();
+    }
 }

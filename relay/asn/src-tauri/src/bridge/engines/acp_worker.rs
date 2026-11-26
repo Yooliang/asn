@@ -126,10 +126,22 @@ pub struct DriverArgs {
 }
 pub type MakeDriver = Arc<dyn Fn(DriverArgs) -> Arc<dyn Driver> + Send + Sync>;
 
-/// 每個工作者的 session id 存 WORK_DIR/acp-workers.json（重啟後 resume 同一段對話）。指令或協定換了就不沿用
+/// 開場說明全文的指紋（#2351）：FNV-1a 64 位元、十六進位。只用來比「上次送出的」跟「這次要送的」是不是同一份，不是安全用途；
+/// 自己寫而不用 DefaultHasher，是為了不同版本的編譯器算出同樣的值（算不同只會多重送一次，但沒必要）
+pub fn preamble_fingerprint(text: &str) -> String {
+    let h = text.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100000001b3));
+    format!("{h:016x}")
+}
+
+/// 帳本的一筆：對話編號、協定、指令，加上「上次送出的開場說明的指紋」（舊帳本沒有這欄＝空字串＝缺）
+type Entry = (String, String, String, String);
+
+/// 每個工作者的 session id 存 WORK_DIR/acp-workers.json（重啟後 resume 同一段對話）。指令或協定換了就不沿用。
+/// 每筆另存 `preamble_fp`（#2351）：上次成功送出的開場說明全文的指紋；接回舊對話時，指紋缺或跟這次要送的不同就重送開場說明，
+/// 免得舊對話裡還留著「你目前是唯讀的」之類過時的說明。檔案版本不變：多一個欄位，舊版用戶端讀檔時不認得就略過
 pub struct Store {
     file: std::path::PathBuf,
-    state: Mutex<HashMap<String, (String, String, String)>>, // name -> (session_id, protocol, command)
+    state: Mutex<HashMap<String, Entry>>, // name -> (session_id, protocol, command, preamble_fp)
     log: Log,
 }
 impl Store {
@@ -140,7 +152,7 @@ impl Store {
                 Ok(v) => {
                     for (k, s) in v.get("workers").and_then(|w| w.as_object()).into_iter().flatten() {
                         let g = |f: &str| s.get(f).and_then(|x| x.as_str()).unwrap_or("").to_string();
-                        state.insert(k.clone(), (g("session_id"), g("protocol"), g("command")));
+                        state.insert(k.clone(), (g("session_id"), g("protocol"), g("command"), g("preamble_fp")));
                     }
                 }
                 Err(e) => log(format!("acp-workers.json 讀不了，當作沒有：{e}")),
@@ -152,24 +164,44 @@ impl Store {
     }
     pub fn get(&self, cfg: &WorkerCfg) -> String {
         match self.state.lock().unwrap().get(&cfg.name) {
-            Some((id, p, c)) if *p == cfg.protocol && *c == cfg.command => id.clone(),
+            Some((id, p, c, _)) if *p == cfg.protocol && *c == cfg.command => id.clone(),
             _ => String::new(),
         }
     }
+    /// 上次成功送出的開場說明的指紋；沒有這一筆、指令或協定換了、舊帳本沒這欄，都是空字串（＝缺）
+    pub fn preamble_fp(&self, cfg: &WorkerCfg) -> String {
+        match self.state.lock().unwrap().get(&cfg.name) {
+            Some((_, p, c, fp)) if *p == cfg.protocol && *c == cfg.command => fp.clone(),
+            _ => String::new(),
+        }
+    }
+    /// 記對話編號。編號沒變（同協定、同指令）就保留指紋；換了新對話，指紋清空（新對話還沒收過開場說明）
     pub fn set(&self, cfg: &WorkerCfg, id: &str) {
         let mut g = self.state.lock().unwrap();
-        g.insert(cfg.name.clone(), (id.to_string(), cfg.protocol.clone(), cfg.command.clone()));
+        let fp = match g.get(&cfg.name) {
+            Some((old, p, c, fp)) if old == id && *p == cfg.protocol && *c == cfg.command => fp.clone(),
+            _ => String::new(),
+        };
+        g.insert(cfg.name.clone(), (id.to_string(), cfg.protocol.clone(), cfg.command.clone(), fp));
         self.persist(&g);
     }
-    fn persist(&self, g: &HashMap<String, (String, String, String)>) {
+    /// 開場說明成功送出後記下指紋。這個工作者在帳本裡沒有對話編號（沒有這一筆）就不記
+    pub fn set_preamble_fp(&self, cfg: &WorkerCfg, fp: &str) {
+        let mut g = self.state.lock().unwrap();
+        if let Some(e) = g.get_mut(&cfg.name).filter(|e| e.1 == cfg.protocol && e.2 == cfg.command && e.3 != fp) {
+            e.3 = fp.to_string();
+            self.persist(&g);
+        }
+    }
+    fn persist(&self, g: &HashMap<String, Entry>) {
         if let Err(e) = self.write(g) {
             (self.log)(format!("acp-workers.json 存不了：{e}"));
         }
     }
-    fn write(&self, g: &HashMap<String, (String, String, String)>) -> std::io::Result<()> {
+    fn write(&self, g: &HashMap<String, Entry>) -> std::io::Result<()> {
         let workers: serde_json::Map<String, serde_json::Value> = g
             .iter()
-            .map(|(k, (i, p, c))| (k.clone(), serde_json::json!({ "session_id": i, "protocol": p, "command": c, "updated": now_ms() })))
+            .map(|(k, (i, p, c, fp))| (k.clone(), serde_json::json!({ "session_id": i, "protocol": p, "command": c, "preamble_fp": fp, "updated": now_ms() })))
             .collect();
         let text = serde_json::json!({ "version": 1, "workers": workers }).to_string();
         crate::settings::atomic::write(&self.file, text.as_bytes(), crate::settings::atomic::STATE)
@@ -647,18 +679,28 @@ impl Worker {
         true
     }
 
+    /// 接回的舊對話裡，上次送出的開場說明跟這次要送的不一樣（指紋缺或不同）。帳本裡沒有對話編號＝新對話，那條路由 need_preamble 管
+    fn preamble_stale(&self, cfg: &WorkerCfg, want_fp: &str) -> bool {
+        !self.i.store.get(cfg).is_empty() && self.i.store.preamble_fp(cfg) != want_fp
+    }
+
     async fn run_turn(self: &Arc<Self>, job: &Job) -> Result<TurnResult, WorkerError> {
         let cfg = self.cfg_now();
         self.st.lock().unwrap().turn_grant.clear();
         let mut d = self.ensure_driver(self.base_full()).await?;
+        // 開場說明要不要送（#2351）：沒有接回的對話（need_preamble）照舊要送；接回舊對話時，帳本裡「上次送出的開場說明指紋」
+        // 缺（舊帳本）或跟這次要送的不同（權限、文案改了），也要重送，免得舊對話裡還留著「你目前是唯讀的」
+        let want_fp = preamble_fingerprint(&preamble_for(&cfg));
         let first = {
             let s = self.st.lock().unwrap();
             // ensure_driver 之後才判斷：resume 失敗會把它設回 true
-            if s.need_preamble { format!("{}{}", preamble_for(&cfg), s.handover.as_deref().map(|h| format!("{h}
+            if s.need_preamble || self.preamble_stale(&cfg, &want_fp) { format!("{}{}", preamble_for(&cfg), s.handover.as_deref().map(|h| format!("{h}
 
 ---
 ")).unwrap_or_default()) } else { String::new() }
         };
+        // 這一輪有沒有把開場說明送出去（後面幾條重送的路也算）：整輪成功才記指紋
+        let mut sent_preamble = !first.is_empty();
         let remember = |d: &Arc<dyn Driver>| {
             let id = d.session_id();
             if !id.is_empty() && id != self.i.store.get(&cfg) {
@@ -717,6 +759,7 @@ impl Worker {
                 d = self.ensure_driver(self.base_full()).await?;
                 // 新驅動接不回原本的對話（新對話不知道前情）而這一輪原本沒帶開場說明：補上，和「寫到不能寫的位置」同一個處理
                 let first = if first.is_empty() && d.resume_lost() { preamble_for(&cfg) } else { first.clone() };
+                sent_preamble |= !first.is_empty();
                 r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
                 remember(&d);
                 let still = r.as_ref().err().map(|e| e.code == "agent" && (is_network_error(&e.message) || upstream_5xx(&e.message).is_some())).unwrap_or(false);
@@ -748,7 +791,12 @@ impl Worker {
             d = self.ensure_driver(self.base_full()).await?;
             let note = redirect_note(&path, &cfg.cwd);
             // 接不回原本的對話（新對話不知道前情）：連同開場說明與原本的信一起送
-            let text = if d.resume_lost() { format!("{}{note}\n\n---\n{}", preamble_for(&cfg), job.text) } else { note };
+            let text = if d.resume_lost() {
+                sent_preamble = true;
+                format!("{}{note}\n\n---\n{}", preamble_for(&cfg), job.text)
+            } else {
+                note
+            };
             r = d.turn(text, cfg.turn_timeout_ms, cfg.turn_max_ms).await;
             remember(&d);
             self.log(if r.is_ok() { "換位置後完成" } else { "換位置後仍然失敗" });
@@ -799,6 +847,7 @@ impl Worker {
                     let s = self.st.lock().unwrap();
                     format!("{}{}", preamble_for(&cfg), s.handover.as_deref().map(|h| format!("{h}\n\n---\n")).unwrap_or_default())
                 };
+                sent_preamble = true;
                 r = d.turn(format!("{first}{}", job.text), cfg.turn_timeout_ms, cfg.turn_max_ms).await;
                 remember(&d);
                 let ok = r.is_ok();
@@ -824,6 +873,10 @@ impl Worker {
         let mut res = r?;
         if !conv_note.is_empty() {
             res.text.push_str(&conv_note);
+        }
+        // 成功送出開場說明才記指紋（失敗不記，下一輪還會再送）
+        if sent_preamble {
+            self.i.store.set_preamble_fp(&cfg, &want_fp);
         }
         {
             let mut s = self.st.lock().unwrap();

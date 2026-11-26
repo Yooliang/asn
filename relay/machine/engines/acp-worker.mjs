@@ -1,5 +1,6 @@
 // 一個 ACP 工作者：序列化的信件佇列＋長駐驅動（agy 原生或標準 ACP）＋權限政策＋問人授權＋健康狀態。
 // 不知道仲介與橋，只透過注入的 handlers（onSent／onFail／onReply）與 notify（寄授權詢問／登入通知）跟外面講話。
+import { createHash } from 'node:crypto'
 import { askText } from './acp-approvals.mjs'
 import { WorkerError } from './acp-errors.mjs'
 import { agyBrainDir, categoryLabel, decide, insideAgyConvDir, redact } from './acp-policy.mjs'
@@ -10,6 +11,9 @@ const REVIVE_AFTER_MS = 60_000
 const KEEPALIVE_MS = 20_000
 
 // agy 能寫檔時的補充（#2351；Rust 端 acp_worker.rs 的 AGY_DOCS_NOTE 同一句）：自己的對話資料夾（含之前幾段留下的文件）也可以存、可以改
+// 開場說明全文的指紋（#2351）：只用來比「上次送出的」跟「這次要送的」是不是同一份，不是安全用途
+export const preambleFingerprint = text => createHash('sha256').update(text).digest('hex').slice(0, 16)
+
 export const AGY_DOCS_NOTE = '你自己的對話資料夾（~/.gemini/antigravity-cli/brain/ 底下各段對話的資料夾，包括之前幾段留下的文件）也可以存、可以改；裡面的 .system_generated 不要碰。'
 
 export function preambleFor(cfg) {
@@ -163,12 +167,18 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
   async function runTurn(job) {
     turnGrant = new Set()
     let d = await ensureDriver()
-    const first = needPreamble ? preambleFor(cfg) : ''   // ensureDriver 之後才判斷：resume 失敗會把 needPreamble 設回 true
+    // 開場說明要不要送（#2351）：沒有接回的對話（needPreamble）照舊要送；接回舊對話時，帳本裡「上次送出的開場說明指紋」缺（舊帳本）
+    // 或跟這次要送的不同（權限、文案改了）也要重送，免得舊對話裡還留著「你目前是唯讀的」。ensureDriver 之後才判斷：resume 失敗會把 needPreamble 設回 true
+    const text = preambleFor(cfg)
+    const fp = preambleFingerprint(text)
+    const stale = !!store.get(name) && typeof store.fp === 'function' && store.fp(name) !== fp
+    const first = needPreamble || stale ? text : ''
     const opts = { timeoutMs: cfg.turnTimeoutMs, maxMs: cfg.turnMaxMs }
     const remember = () => { const id = d.sessionId(); if (id && id !== store.get(name)) store.set(name, id) }   // 失敗也記：下一輪才接得回同一段對話
     try {
       let res = await d.turn(first + job.text, opts)
       needPreamble = false
+      if (first) { remember(); store.setFp?.(name, fp) }   // 成功送出才記指紋（失敗走 finally 的 remember，不記指紋）
       // agy 的指令被它自己拒絕了，而政策是 ask：事後問人，同意就用放行模式重跑這一輪
       const execDenied = res.denied.filter(x => x.category === 'execute')
       if (execDenied.length && policy.rules.execute === 'ask' && d.supportsRetryWithGrant && !job.noReply) {

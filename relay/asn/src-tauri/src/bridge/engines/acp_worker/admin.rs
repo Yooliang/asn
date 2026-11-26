@@ -336,6 +336,54 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bridge::engines::acp_config::normalize_worker;
+    use crate::bridge::engines::acp_worker::{preamble_fingerprint, preamble_for};
+
+    fn cfg_of(command: &str) -> WorkerCfg {
+        normalize_worker(&serde_json::json!({"name": "A", "engine": "acp", "command": command, "protocol": "acp"}), std::path::Path::new("/wd"), 0).unwrap().0
+    }
+    fn open(file: &std::path::Path) -> Arc<Store> {
+        Store::open(file.to_path_buf(), Arc::new(|_| {}))
+    }
+
+    /// #2351：帳本多存「上次送出的開場說明的指紋」。舊帳本沒有這欄要讀得進來（＝缺），寫出去的檔仍有舊版用戶端要讀的欄位
+    #[test]
+    fn 帳本_舊格式沒有指紋讀得進來_新格式向後相容_換對話或換指令就清掉() {
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("acp-workers.json");
+        std::fs::write(&file, r#"{"version":1,"workers":{"A":{"session_id":"s1","protocol":"acp","command":"x","updated":1}}}"#).unwrap();
+        let (a, store) = (cfg_of("x"), open(&file));
+        assert_eq!((store.get(&a).as_str(), store.preamble_fp(&a).as_str()), ("s1", ""), "舊帳本：對話照讀、指紋缺");
+        store.set_preamble_fp(&a, "fp1");
+        assert_eq!(open(&file).preamble_fp(&a), "fp1", "重開後讀得回來");
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let w = &saved["workers"]["A"];
+        assert_eq!((saved["version"].clone(), w["session_id"].as_str(), w["protocol"].as_str(), w["command"].as_str(), w["preamble_fp"].as_str()), (serde_json::json!(1), Some("s1"), Some("acp"), Some("x"), Some("fp1")), "版本不變、舊欄位都在、只多一個欄位");
+        store.set(&a, "s1");
+        assert_eq!(store.preamble_fp(&a), "fp1", "編號沒變就保留指紋");
+        store.set(&a, "s2");
+        assert_eq!((store.get(&a).as_str(), store.preamble_fp(&a).as_str()), ("s2", ""), "換了新對話：新對話還沒收過開場說明");
+        store.set_preamble_fp(&a, "fp2");
+        assert_eq!(store.preamble_fp(&cfg_of("y")), "", "指令換了就不沿用");
+        store.set_preamble_fp(&cfg_of("y"), "fp3");
+        assert_eq!(store.preamble_fp(&a), "fp2", "指令不同的設定不能蓋掉別人的指紋");
+        store.clear(&a);
+        assert_eq!(store.preamble_fp(&a), "");
+        store.set_preamble_fp(&a, "fp4");
+        assert_eq!(store.preamble_fp(&a), "", "帳本裡沒有這一筆（還沒有對話編號）就不記");
+    }
+
+    #[test]
+    fn 指紋_同一份說明同一個值_權限或文字變了就不同() {
+        let (a, b) = (cfg_of("x"), cfg_of("x"));
+        let ro = WorkerCfg { permissions: crate::bridge::engines::acp_policy::normalize_permissions(Some(&serde_json::json!({"write": "deny", "execute": "deny"})), std::path::Path::new("/wd")).0, ..b.clone() };
+        let fp = |c: &WorkerCfg| preamble_fingerprint(&preamble_for(c));
+        assert_eq!(fp(&a), fp(&b));
+        assert_ne!(fp(&a), fp(&ro), "權限變了（唯讀）指紋就不同");
+        assert_eq!(fp(&a).len(), 16);
+        assert!(fp(&a).chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(preamble_fingerprint("你好"), preamble_fingerprint("你好。"), "文案差一個字也不同");
+    }
 
     #[test]
     fn 接班提示_說明沒有前任紀錄_使用者補的話附在後面_最多一千字() {

@@ -1863,6 +1863,48 @@ async fn acp_接手_專屬工作者載入既有對話_信接在同一段後面_�
     assert!(h.bodies()[1].contains("[第4輪]"), "{}", h.bodies()[1]);
 }
 
+/// #2351：升級前就接手的 Grok，帳本沒有開場說明的指紋；重開 ASN 接回同一段對話後，要重送一次開場說明（舊對話裡可能還寫著唯讀）
+#[tokio::test]
+async fn acp_接手的_grok_舊帳本沒有指紋_重啟後重送開場說明_之後不再送() {
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":2}"#).unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([grok_base()])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let cwd = h.work.path().join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap();
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    h.put_pull(to_agent(1, "grok-接手-專案", "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    let ledger = h.work.path().join("acp-workers.json");
+    let read = || serde_json::from_str::<Value>(&std::fs::read_to_string(&ledger).unwrap()).unwrap();
+    for _ in 0..100 {
+        if read()["workers"]["grok-接手-專案"]["preamble_fp"].as_str().is_some_and(|f| !f.is_empty()) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    let saved: Value = read();
+    assert!(saved["workers"]["grok-接手-專案"]["preamble_fp"].as_str().is_some_and(|f| f.len() == 16), "第一輪送出後記下指紋：{saved}\n{:?}\n{}", h.bodies(), h.log_text());
+    // 升級前的帳本：沒有指紋這一欄
+    let mut old = saved.clone();
+    for (_, w) in old["workers"].as_object_mut().unwrap().iter_mut() {
+        w.as_object_mut().unwrap().remove("preamble_fp");
+    }
+    std::fs::write(&ledger, old.to_string()).unwrap();
+    h.restart().await;
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    h.put_pull(to_agent(2, "grok-接手-專案", "二")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("[第4輪 含說明]"), "接回同一段對話但指紋缺：重送開場說明：{}", h.bodies()[1]);
+    h.put_pull(to_agent(3, "grok-接手-專案", "三")).await;
+    h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
+    assert!(h.bodies()[2].contains("[第5輪]") && !h.bodies()[2].contains("含說明"), "重送過就不再送：{}", h.bodies()[2]);
+}
+
 #[tokio::test]
 async fn acp_接手_載不進來就失敗_不偷偷開新對話_不留工作者_也不留紀錄() {
     let state = tempfile::tempdir().unwrap();
