@@ -88,7 +88,8 @@ function main() {
   const p = resolvePaths(opts)
   if (!opts.skipBuild) {
     // zig 在 PyPI 的 ziglang 套件裡：把它所在資料夾補進 PATH（已有 zig 就不動）
-    const env = { ...process.env, CARGO_TARGET_DIR: p.cargoTarget }
+    // 出貨建置：build.rs 看到 ASN_SHIPPING_BUILD 又帶了 test-hooks feature 就在編譯期失敗（#2163 PR-3b）
+    const env = { ...process.env, CARGO_TARGET_DIR: p.cargoTarget, ASN_SHIPPING_BUILD: '1' }
     if (spawnSync('zig', ['version'], { env }).status !== 0) {
       const dir = findPyZigDir()
       if (dir) env.PATH = dir + path.delimiter + (env.PATH || env.Path || '')

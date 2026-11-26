@@ -97,7 +97,7 @@ test('發版建置：tauri build 不帶 --features，環境變數設 ASN_SHIPPIN
   assert.equal(shippingEnv({ A: '1' }).ASN_SHIPPING_BUILD, '1')
   const ci = read('scripts/release-ci.mjs')
   assert.ok(ci.includes("shippingEnv(env))"), 'tauri build 要用 shippingEnv')
-  for (const f of ['scripts/release.mjs', 'scripts/release-android.mjs', 'scripts/release-play.mjs']) assert.match(read(f), /ASN_SHIPPING_BUILD: '1'/, f)
+  for (const f of ['scripts/release.mjs', 'scripts/release-android.mjs', 'scripts/release-play.mjs', 'scripts/build-linux-bridge.mjs']) assert.match(read(f), /ASN_SHIPPING_BUILD: '1'/, f)
 })
 
 test('hooks 版的建置參數：帶 test-hooks、與 tauri build 同一組 release 設定；環境絕不帶 ASN_SHIPPING_BUILD', () => {

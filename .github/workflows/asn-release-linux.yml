@@ -184,8 +184,6 @@ jobs:
           set -euo pipefail
           dbus-run-session -- sh -ec 'printf asn-ci | gnome-keyring-daemon --unlock --components=secrets >/dev/null; cargo test --locked --lib keystore::linux -- --ignored --test-threads=1'
 
-      # npm run build 用 tauri.nosign.conf.json（createUpdaterArtifacts=false，不產更新器檔與 .sig），Linux 只會有 deb 與 AppImage；
-      # 打包 AppImage 會從 GitHub 抓工具，外部服務 5xx／逾時才重試（最多 3 次），其他失敗照常紅
       # e2e 專用的 test-hooks 版（#2163 PR-3b）：要在正式建置之前建（正式建置會覆蓋 target/release/asn），放 target/e2e，絕不進安裝檔
       - name: 建 e2e 專用的 test-hooks 版
         run: |
@@ -193,6 +191,8 @@ jobs:
           node scripts/prep.mjs
           node scripts/build-hooks-exe.mjs
 
+      # npm run build 用 tauri.nosign.conf.json（createUpdaterArtifacts=false，不產更新器檔與 .sig），Linux 只會有 deb 與 AppImage；
+      # 打包 AppImage 會從 GitHub 抓工具，外部服務 5xx／逾時才重試（最多 3 次），其他失敗照常紅
       - name: 建置 deb 與 AppImage
         env:
           # build.rs 看到它又帶了 test-hooks feature 就在編譯期失敗

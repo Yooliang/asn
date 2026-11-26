@@ -639,14 +639,14 @@ jobs:
       - name: 安裝前端依賴
         run: npm ci
 
-      # 打包 AppImage 時 tauri 會從 GitHub 抓 AppRun 等工具：外部服務 5xx／逾時才重試，最多 3 次，其他失敗照常紅。
-      # 重試前清掉上一次留下的半套 AppImage 輸出與 tauri 的工具快取（下載到一半的檔會讓 linuxdeploy 壞掉）
       # e2e 專用的 test-hooks 版（#2163 PR-3b）：要在正式建置之前建（正式建置會覆蓋 target/release/asn），放 target/e2e
       - name: 建 e2e 專用的 test-hooks 版
         run: |
           node scripts/prep.mjs
           node scripts/build-hooks-exe.mjs
 
+      # 打包 AppImage 時 tauri 會從 GitHub 抓 AppRun 等工具：外部服務 5xx／逾時才重試，最多 3 次，其他失敗照常紅。
+      # 重試前清掉上一次留下的半套 AppImage 輸出與 tauri 的工具快取（下載到一半的檔會讓 linuxdeploy 壞掉）
       - name: 建置 deb 與 AppImage
         env:
           # build.rs 看到它又帶了 test-hooks feature 就在編譯期失敗
