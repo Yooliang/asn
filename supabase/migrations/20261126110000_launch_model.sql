@@ -4,7 +4,10 @@
 --   * model 與 pi 欄位（pi_provider、pi_model）不並存。
 --   * pi 的提供者與模型：兩欄一起有或一起沒有，各自走統一規則 relay.valid_model_id（取代原本只收英數與 . _ - 的窄規則）。
 --   * asn_relay_launch 新增 10 參數版（多 p_model，沒有預設值）。檢查：格式不合或與 pi 欄位並存回 bad_model；
---     目標電腦的 launcher 沒有 models 陣列回 model_unsupported（不准悄悄改用預設型號）。
+--     目標電腦的 launcher 沒有能力旗標 launch_model: true 回 model_unsupported（不准悄悄改用預設型號）。
+--     能力只看旗標，不看 models 陣列（models 可能因超量被丟掉；舊電腦也可能有 models 卻不會讀 model）。
+--   * asn_relay_set_launcher 的白名單多收 launch_model：只收布林值 true 或 false，其他型別丟掉；本體照 20261126100000，只多這個鍵。
+--     旗標由電腦端（第③階段 PR-2）在摘要送出；還沒送的電腦一律視為不支援。
 --   * 9 參數版改成呼叫 10 參數版（p_model 傳 null），兩條路只剩一份規則；7 參數版不動。
 --   * asn_relay_launch_pending 多回 model；不帶 model 時為 null，舊用戶端會略過。
 --   * asn_relay_launch_result 新增 5 參數版（多 p_model_used，沒有預設值）：值過 relay.valid_model_id 才存，不合格就不存，結果照收；
@@ -15,7 +18,13 @@
 -- 部署前用 pg_get_functiondef 比對正式庫現行定義：asn_relay_launch（9 參數，依據 20261123120000_online_window.sql）、
 --   asn_relay_launch_pending（依據 20261028160000_launch_pi_model.sql）、asn_relay_launchers（依據 20261123120000_online_window.sql）、
 --   asn_relay_launch_result（4 參數，依據 20261020000200_relay_functions.sql 的 irori_relay_launch_result 改名而來）。
--- 退回：supabase/sql/rollback/20261126110000_launch_model_down.sql
+--   asn_relay_set_launcher（依據 20261126100000_launcher_models.sql）。
+-- 部署前再確認三項：
+--   1. \dp relay.launches：service_role 沒有直接寫入這張表的權限（寫入只走 SECURITY DEFINER 函式）。
+--   2. 正式庫的 relay.launches 上沒有 repo 以外的 trigger 或約束。
+--   3. 現有 pi_provider、pi_model 的資料全部符合統一規則（relay.valid_model_id）。
+-- 約束是完整驗證（沒有 NOT VALID）：加約束時會鎖住整張 relay.launches 做驗證；表小，風險低。
+-- 退回：supabase/sql/rollback/20261126110000_launch_model_down.sql（先退 Edge，再退 SQL；兩階段都退時，先跑本階段的回退，再跑 20261126100000 的回退）
 begin;
 
 alter table relay.launches add column if not exists model text;
@@ -82,8 +91,8 @@ begin
      or (p_pi_provider is not null and not (relay.valid_model_id(p_pi_provider) and relay.valid_model_id(p_pi_model))) then
     return jsonb_build_object('error', 'bad_pi_model');
   end if;
-  -- 目標電腦沒有回報 models：不會用 model，一律明確回錯誤，不准悄悄改用預設型號
-  if p_model is not null and jsonb_typeof(v_l->'models') is distinct from 'array' then
+  -- 目標電腦沒有能力旗標 launch_model: true：不會用 model，一律明確回錯誤，不准悄悄改用預設型號
+  if p_model is not null and (v_l->'launch_model') is distinct from 'true'::jsonb then
     return jsonb_build_object('error', 'model_unsupported');
   end if;
   if exists (select 1 from relay.roster where node = p_node and lower(name) = lower(p_name) and seen_at > now() - relay.online_window())
@@ -203,6 +212,69 @@ begin
       order by created_at desc limit 30
     ) l;
   return jsonb_build_object('machines', v_mach, 'launches', v_recent);
+end;
+$function$;
+
+-- 啟動設定摘要：本體照 20261126100000_launcher_models.sql，只多一個能力旗標 launch_model（只收布林值 true／false，其他型別丟掉）
+create or replace function public.asn_relay_set_launcher(p_node text, p_launcher jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+declare v_pi jsonb; v_models jsonb; v_lm jsonb;
+begin
+  if not exists (select 1 from relay.nodes where id = p_node and status = 'active' and (can_invite or can_roster)) then
+    return jsonb_build_object('error', 'forbidden');
+  end if;
+  if p_launcher is not null and (
+       jsonb_typeof(p_launcher) <> 'object'
+    or jsonb_typeof(p_launcher->'profiles') is distinct from 'array'
+    or jsonb_typeof(p_launcher->'cwd_allow') is distinct from 'array'
+    or jsonb_array_length(p_launcher->'profiles') > 20
+    or jsonb_array_length(p_launcher->'cwd_allow') > 50
+    or octet_length((p_launcher - 'pi_models' - 'models')::text) > 16000
+    or exists (select 1 from jsonb_array_elements(p_launcher->'profiles') p
+               where jsonb_typeof(p->'id') is distinct from 'string' or char_length(p->>'id') not between 1 and 40
+                  or char_length(coalesce(p->>'label', '')) > 60)
+    or exists (select 1 from jsonb_array_elements(p_launcher->'cwd_allow') c
+               where jsonb_typeof(c) <> 'string' or char_length(c #>> '{}') not between 1 and 260)
+  ) then
+    return jsonb_build_object('error', 'bad_request');
+  end if;
+  -- pi_models：只留格式合格的 { provider, model }，最多 200 筆；沒有或不是陣列就不存
+  if p_launcher is not null and jsonb_typeof(p_launcher->'pi_models') = 'array' then
+    select jsonb_agg(jsonb_build_object('provider', e->>'provider', 'model', e->>'model') order by o) into v_pi
+      from (
+        select e, o from jsonb_array_elements(p_launcher->'pi_models') with ordinality as t(e, o)
+        where jsonb_typeof(e) = 'object'
+          and jsonb_typeof(e->'provider') = 'string' and jsonb_typeof(e->'model') = 'string'
+          and relay.valid_model_id(e->>'provider')
+          and relay.valid_model_id(e->>'model')
+        order by o limit 200
+      ) s;
+    if v_pi is not null and octet_length(v_pi::text) > 24000 then
+      v_pi := null;
+    end if;
+  end if;
+  -- models：本身另限 32000 bytes（jsonb::text），超過只丟 models；不是陣列就不存
+  if p_launcher is not null and jsonb_typeof(p_launcher->'models') = 'array'
+     and octet_length((p_launcher->'models')::text) <= 32000 then
+    v_models := relay.sanitize_launcher_models(p_launcher->'models');
+  end if;
+  -- launch_model：只收布林值 true 或 false
+  if p_launcher is not null and jsonb_typeof(p_launcher->'launch_model') = 'boolean' then
+    v_lm := p_launcher->'launch_model';
+  end if;
+  update relay.nodes set launcher = case when p_launcher is null then null else jsonb_build_object(
+      'profiles', p_launcher->'profiles', 'cwd_allow', p_launcher->'cwd_allow',
+      'max_per_hour', least(greatest(coalesce((p_launcher->>'max_per_hour')::int, 6), 1), 20))
+      || case when v_pi is null then '{}'::jsonb else jsonb_build_object('pi_models', v_pi) end
+      || case when v_models is null then '{}'::jsonb else jsonb_build_object('models', v_models) end
+      || case when v_lm is null then '{}'::jsonb else jsonb_build_object('launch_model', v_lm) end end,
+    launcher_at = now()
+  where id = p_node;
+  return jsonb_build_object('ok', true);
 end;
 $function$;
 

@@ -38,3 +38,12 @@ Deno.test("wire 樣本：包進完整 launcher 經 sanitizeLauncher，launcher.m
   const out = sanitizeLauncher({ profiles: [{ id: "claude", label: "Claude" }], cwd_allow: ["C:/x"], models }) as Record<string, unknown>;
   assertEquals(out.models, models);
 });
+
+Deno.test("launch_model 旗標：只收布林值 true／false，其他型別與沒給的都不進摘要", () => {
+  const base = { profiles: [{ id: "claude", label: "Claude" }], cwd_allow: ["C:/x"] };
+  const get = (v: unknown) => sanitizeLauncher({ ...base, launch_model: v } as never) as Record<string, unknown>;
+  assertEquals(get(true).launch_model, true);
+  assertEquals(get(false).launch_model, false);
+  for (const v of ["true", 1, 0, null, {}, [], "yes"]) assertEquals("launch_model" in get(v), false, JSON.stringify(v));
+  assertEquals("launch_model" in (sanitizeLauncher(base as never) as Record<string, unknown>), false);
+});

@@ -195,7 +195,9 @@ export function sanitizeLauncher(l: Json): Json | null | { error: string } {
   });
   const out: Json = { profiles, cwd_allow: l.cwd_allow };
   if (Number.isInteger(l.max_per_hour)) out.max_per_hour = l.max_per_hour;
-  const pi = sanitizePiModels(l.pi_models);
+  // 能力旗標：電腦端能依 launch 的 model 開窗才送 true；只收布林值，其他型別丟掉
+  if (typeof l.launch_model === "boolean") out.launch_model = l.launch_model;
+  const pi =sanitizePiModels(l.pi_models);
   if (pi && pi.length) out.pi_models = pi;
   const models = sanitizeModels(l.models);
   if (models) {
