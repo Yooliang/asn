@@ -79,7 +79,7 @@ begin
         continue when jsonb_typeof(m.x->'id') is distinct from 'string' or not relay.valid_model_id(m.x->>'id');
         continue when jsonb_typeof(m.x->'name') is distinct from 'string'
                    or char_length(m.x->>'name') not between 1 and 80
-                   -- 控制字元（Cc）＋全部格式字元（Cf）。Cf 的區間由 tools/gen-cf-ranges.mjs 產生，勿手改（tests/launcher_models_sql.test.mjs 會重跑比對）
+                   -- 控制字元（Cc）＋全部格式字元（Cf）。Cf 的區間由 tools/gen-cf-ranges.mjs 產生，勿手改；tests/launcher_models_sql.test.mjs 檢查最新一支 migration 的區間要涵蓋 Node 的 \p{Cf}，不夠時另寫新的 migration，不改已套用的檔
                    or (m.x->>'name') ~ '[\u0001-\u001f\u007f-\u009f\U000000ad\U00000600-\U00000605\U0000061c\U000006dd\U0000070f\U00000890-\U00000891\U000008e2\U0000180e\U0000200b-\U0000200f\U0000202a-\U0000202e\U00002060-\U00002064\U00002066-\U0000206f\U0000feff\U0000fff9-\U0000fffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020-\U000e007f]';
         v_list := v_list || jsonb_build_array(jsonb_build_object('id', m.x->>'id', 'name', m.x->>'name'));
         v_n := v_n + 1;
