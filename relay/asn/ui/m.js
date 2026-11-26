@@ -2,6 +2,8 @@
 // 電腦才有的功能（內建收發室、開 Claude 視窗、密碼小幫手、用量、系統匣、多視窗）手機沒有，這個檔案也不叫它們。
 // 打開 App 才收信：前景時照電腦版的節奏輪詢，加上門鈴一響就拉；回到前景時立刻拉一次（推播留給第二期）。
 import { AsnCore } from './lib/core.mjs'
+import { capsAndroid } from './shells/caps-android.mjs'
+export const caps = capsAndroid   // 這個入口的平台能力表（#1763 F1）；目前還沒有元件使用
 import { watchInvite } from './lib/notice-events.mjs'
 import { getLocal } from './lib/local-prefs.mjs'
 import { plainMessage } from './lib/plain-errors.mjs'
