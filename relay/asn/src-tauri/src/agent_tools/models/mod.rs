@@ -612,7 +612,9 @@ mod tests {
         assert_eq!(to_report_value(&limit_for_report(wire_sample())), wire_models(), "形狀改了：後台 sanitizeModels 與這份樣本要一起改");
     }
 
-    /// 後台 `sanitizeModels`（PR-B #2384）規則的鏡像：樣本與真的輸出都要整份被收下、原樣不變
+    /// 後台 `sanitizeModels`（PR-B #2384）規則的鏡像：樣本與真的輸出都要整份被收下、原樣不變。
+    /// 這只是 Rust 端的就近檢查；真的對照在 supabase/functions/_shared/launch_models_wire_test.ts（Edge）
+    /// 與 tests/launcher_models_sql.test.mjs（SQL）：它們讀同一份 wire 樣本，丟進真的整理函式。
     fn backend_accepts(v: &serde_json::Value) -> Result<(), String> {
         let arr = v.as_array().ok_or("models 不是陣列")?;
         if arr.len() > 8 {

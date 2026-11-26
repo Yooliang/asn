@@ -242,6 +242,17 @@ test('實跑：pi_models 的 a//b、a/.. 現在被丟掉', { skip }, async () =>
   assert.deepEqual((await get()).pi_models, [{ provider: 'openrouter', model: 'meta/llama-3' }])
 })
 
+const WIRE = JSON.parse(fs.readFileSync(new URL('../relay/shared/test-vectors/launcher-models-wire.json', import.meta.url), 'utf8'))
+
+test('實跑：Rust 的 wire 樣本經 relay.sanitize_launcher_models 與 asn_relay_set_launcher 後深度相等（SQL 一筆都不丟）', { skip }, async () => {
+  assert.equal(WIRE.models.length, 4)
+  const { db, set, get } = await setup()
+  const r = await db.query('select relay.sanitize_launcher_models($1::jsonb) r', [JSON.stringify(WIRE.models)])
+  assert.deepEqual(r.rows[0].r, WIRE.models)
+  assert.deepEqual(await set({ ...base, models: WIRE.models }), { ok: true })
+  assert.deepEqual((await get()).models, WIRE.models)
+})
+
 test('實跑：套用 down 之後行為回到 20261028140000，新函式消失', { skip }, async () => {
   const { db, set, get } = await setup()
   await db.exec(down)
