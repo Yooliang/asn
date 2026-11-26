@@ -2,11 +2,14 @@
 // 格式：{ v: 1, updatedAt, items: [ { id, kind, platform, version, commit, at, createdAt, attempts, lastError, claimedBy, claimedAt } ] }
 // 規則：
 //   - 每一筆只放上面這些固定欄位，型別固定；多出欄位、型別不對、單筆序列化超過 MAX_ITEM_BYTES 都整筆拒絕。
-//   - version 是三段數字；commit 是 8 位小寫 hex（寫入端由完整 SHA 取前 8 碼）；platform 只認 desktop、linux；kind 只認 PENDING_KINDS。
-//   - id ＝ 平台@版號#kind，同一筆重複寫入只留一筆。
+//   - version 是三段數字（每段最多 6 位）；commit 是 8 位小寫 hex（寫入端只收剛好 40 碼的 SHA、取前 8 碼）；platform 只認 desktop、linux；kind 只認 PENDING_KINDS。
+//   - at、createdAt、claimedAt 要與 new Date().toISOString() 往返一致；attempts 0～MAX_ATTEMPTS；claimedBy 0～MAX_CLAIMED_BY。
+//   - id ＝ 平台@版號#kind，同一筆重複寫入只留一筆；讀檔時同一個 id 只留第一筆。
 //   - 讀寫都在獨立的 post-pending.json.lock 內進行（不用 state.json.lock）；寫入走 atomicWrite。
-//   - 鎖檔時間戳在未來超過 LOCK_FUTURE_MS 視為壞鎖：改名留存並留 pending-bad 告警，再重新取鎖。
-//   - 檔案讀不懂或超過 MAX_FILE_BYTES 時改名成 post-pending.json.bad-<時間>、留 pending-bad 告警，不覆寫。
+//   - 鎖檔時間戳在未來超過 LOCK_FUTURE_MS、或內容讀不懂，視為壞鎖：改名留存並留 pending-bad 告警，再重新取鎖；改名後重讀隔離檔，與改名前讀到的不同就還原並放棄。
+//   - 整個檔讀不懂或超過 MAX_FILE_BYTES 時改名成 post-pending.json.bad-<時間>、留 pending-bad 告警，不覆寫。
+//   - 檔案讀得懂但有單筆不合格：合格的留下，不合格的另存 post-pending.json.rejected-<時間>，留 pending-bad 告警（帶筆數）。
+//   - 筆數超過 MAX_ITEMS 或檔案超過 MAX_FILE_BYTES：新的一筆不寫，留 pending-bad 告警。
 //   - 驗證失敗的 warn 只說哪個欄位不合格，不印內容。
 import path from 'node:path'
 import { atomicWrite, acquireLock, releaseLock, parseLock, makeAlerts } from './auto_publish.mjs'
@@ -26,17 +29,48 @@ export const LOCK_FUTURE_MS = 5 * 60 * 1000
 export const PENDING_FIELDS = ['at', 'attempts', 'claimedAt', 'claimedBy', 'commit', 'createdAt', 'id', 'kind', 'lastError', 'platform', 'version']
 
 // lastError：只寫進待貼檔給人排錯，不得出現在群組文案或 --post-pending 的輸出。
-// 只能是 null，或 ≤ LAST_ERROR_MAX 字、不含控制字元（C0、DEL、C1、行分隔 U+2028、段分隔 U+2029）的字串
+// 只能是 null，或同時符合下列三條的字串：
+//   - 碼點數 ≤ LAST_ERROR_MAX
+//   - 加上引號與跳脫後的 JSON 位元組數 ≤ LAST_ERROR_MAX_BYTES
+//   - 不含 Unicode 類別 Cc、Cf、Zl、Zp、Cs 的字元（含零寬、雙向控制、落單代理字元）；清洗時直接拿掉
 export const LAST_ERROR_MAX = 100
-const CONTROL_SRC = '[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]'
-const CONTROL_RE = new RegExp(CONTROL_SRC)
-const CONTROL_ALL_RE = new RegExp(CONTROL_SRC, 'g')
-export const cleanLastError = (s) => (typeof s === 'string' ? s.replace(CONTROL_ALL_RE, '').slice(0, LAST_ERROR_MAX) : null)
+export const LAST_ERROR_MAX_BYTES = 160
+const BAD_CHAR_SRC = '[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\p{Cs}]'
+const BAD_CHAR_RE = new RegExp(BAD_CHAR_SRC, 'u')
+const BAD_CHAR_ALL_RE = new RegExp(BAD_CHAR_SRC, 'gu')
+const jsonBytes = (s) => Buffer.byteLength(JSON.stringify(s), 'utf8')
+// 以完整碼點為單位截斷，字數與位元組數都不超過上限
+export function cleanLastError(s) {
+  if (typeof s !== 'string') return null
+  let out = ''
+  let count = 0
+  let bytes = 2
+  for (const ch of s.replace(BAD_CHAR_ALL_RE, '')) {
+    const b = jsonBytes(ch) - 2
+    if (count + 1 > LAST_ERROR_MAX || bytes + b > LAST_ERROR_MAX_BYTES) break
+    out += ch
+    count += 1
+    bytes += b
+  }
+  return out
+}
+export const isLastError = (s) => typeof s === 'string' && !BAD_CHAR_RE.test(s) && Array.from(s).length <= LAST_ERROR_MAX && jsonBytes(s) <= LAST_ERROR_MAX_BYTES
 
-const SEMVER_RE = /^\d+\.\d+\.\d+$/
+// 待貼佇列的筆數上限；超過就不再收新的
+export const MAX_ITEMS = 50
+export const MAX_ATTEMPTS = 1000
+export const MAX_CLAIMED_BY = 4294967295
+
+const SEMVER_RE = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/
 const COMMIT_RE = /^[0-9a-f]{8}$/
-const FULL_SHA_RE = /^[0-9a-f]{8,40}$/
+const FULL_SHA_RE = /^[0-9a-f]{40}$/
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/
+// 時間欄位：格式對、而且 new Date 往返後完全相同
+const isIso = (v) => {
+  if (typeof v !== 'string' || !ISO_RE.test(v)) return false
+  const t = Date.parse(v)
+  return Number.isFinite(t) && new Date(t).toISOString() === v
+}
 
 export const isSemver = (v) => typeof v === 'string' && SEMVER_RE.test(v)
 export const isCommit = (v) => typeof v === 'string' && COMMIT_RE.test(v)
@@ -56,12 +90,12 @@ export function checkItem(x) {
   if (!isSemver(x.version)) return { ok: false, field: 'version' }
   if (!isCommit(x.commit)) return { ok: false, field: 'commit' }
   if (x.id !== pendingId(x.platform, x.version, x.kind)) return { ok: false, field: 'id' }
-  if (typeof x.at !== 'string' || !ISO_RE.test(x.at)) return { ok: false, field: 'at' }
-  if (typeof x.createdAt !== 'string' || !ISO_RE.test(x.createdAt)) return { ok: false, field: 'createdAt' }
-  if (!Number.isInteger(x.attempts) || x.attempts < 0) return { ok: false, field: 'attempts' }
-  if (x.lastError !== null && !(typeof x.lastError === 'string' && x.lastError.length <= LAST_ERROR_MAX && !CONTROL_RE.test(x.lastError))) return { ok: false, field: 'lastError' }
-  if (x.claimedBy !== null && !Number.isInteger(x.claimedBy)) return { ok: false, field: 'claimedBy' }
-  if (x.claimedAt !== null && !(typeof x.claimedAt === 'string' && ISO_RE.test(x.claimedAt))) return { ok: false, field: 'claimedAt' }
+  if (!isIso(x.at)) return { ok: false, field: 'at' }
+  if (!isIso(x.createdAt)) return { ok: false, field: 'createdAt' }
+  if (!Number.isInteger(x.attempts) || x.attempts < 0 || x.attempts > MAX_ATTEMPTS) return { ok: false, field: 'attempts' }
+  if (x.lastError !== null && !isLastError(x.lastError)) return { ok: false, field: 'lastError' }
+  if (x.claimedBy !== null && !(Number.isInteger(x.claimedBy) && x.claimedBy >= 0 && x.claimedBy <= MAX_CLAIMED_BY)) return { ok: false, field: 'claimedBy' }
+  if (x.claimedAt !== null && !isIso(x.claimedAt)) return { ok: false, field: 'claimedAt' }
   if (Buffer.byteLength(JSON.stringify(x), 'utf8') > MAX_ITEM_BYTES) return { ok: false, field: 'size' }
   return { ok: true, item: { ...x } }
 }
@@ -76,50 +110,92 @@ export function validateItem(x, warn = console.warn) {
 // 由寫入端給的資料組一筆新項目（id、時間、計數由這裡補）；commit 給完整 SHA，取前 8 碼；格式不合格回 null 並 warn
 export function buildItem({ kind, platform, version, commit }, nowMs, warn = console.warn) {
   const iso = new Date(nowMs).toISOString()
-  const short = typeof commit === 'string' && FULL_SHA_RE.test(commit) ? commit.slice(0, 8) : commit
+  const short = typeof commit === 'string' && FULL_SHA_RE.test(commit) ? commit.slice(0, 8) : null
   return validateItem({ id: pendingId(platform, version, kind), kind, platform, version, commit: short, at: iso, createdAt: iso, attempts: 0, lastError: null, claimedBy: null, claimedAt: null }, warn)
 }
 
-// 讀佇列；回 { ok:true, items } 或 { ok:false, bad:true }（檔案讀不懂或太大，呼叫端要先處理壞檔）
+// 讀佇列；回 { ok:true, items, rejected } 或 { ok:false, bad:true }（整個檔讀不懂或太大，呼叫端要先處理壞檔）
+// rejected：檔案讀得懂、但驗證不合格的原始單筆；同一個 id 重複的只留第一筆
 export function readPending(opts, deps, warn = console.warn) {
   const p = pendingPathOf(opts)
-  if (!deps.exists(p)) return { ok: true, items: [] }
+  if (!deps.exists(p)) return { ok: true, items: [], rejected: [] }
   let doc
   try {
+    if (typeof deps.fileSize === 'function' && deps.fileSize(p) > MAX_FILE_BYTES) return { ok: false, bad: true }
     const text = deps.readFile(p)
     if (Buffer.byteLength(text, 'utf8') > MAX_FILE_BYTES) return { ok: false, bad: true }
     doc = JSON.parse(text)
   } catch { return { ok: false, bad: true } }
   if (!doc || typeof doc !== 'object' || doc.v !== 1 || !Array.isArray(doc.items)) return { ok: false, bad: true }
   const items = []
-  for (const x of doc.items) { const it = validateItem(x, warn); if (it) items.push(it) }
-  return { ok: true, items }
+  const rejected = []
+  const seen = new Set()
+  for (const x of doc.items) {
+    const it = validateItem(x, warn)
+    if (!it) { rejected.push(x); continue }
+    if (seen.has(it.id)) continue
+    seen.add(it.id)
+    items.push(it)
+  }
+  return { ok: true, items, rejected }
 }
 
 const stampOf = (deps) => new Date(deps.now()).toISOString().replace(/[:.]/g, '-')
 
-// 壞檔：改名留存、留 pending-bad 告警、不覆寫
+export const PENDING_FULL_MESSAGE = '待貼佇列已滿，新的一筆沒有寫入，請人工處理佇列'
+export const PENDING_LOCK_BAD_MESSAGE = '待貼佇列的鎖檔不正常，已改名保留，請人工檢查'
+export const pendingRejectedMessage = (n) => `待貼佇列有 ${n} 筆格式不合格，已另存到 .rejected 檔，其餘照留，請人工檢查`
+const raisePendingBad = (opts, deps, message) => makeAlerts(opts, deps).raise('pending-bad', 'pending-bad', message, 'post-pending')
+
+// 整個檔讀不懂：改名留存、留 pending-bad 告警、不覆寫
 function quarantine(opts, deps) {
   const p = pendingPathOf(opts)
   const to = `${p}.bad-${stampOf(deps)}`
   deps.rename(p, to)
   deps.log(`待貼佇列檔讀不懂或太大，已改名保留為 ${to}（沒有覆寫）`)
-  makeAlerts(opts, deps).raise('pending-bad', 'pending-bad', PENDING_BAD_MESSAGE, 'post-pending')
+  raisePendingBad(opts, deps, PENDING_BAD_MESSAGE)
 }
 
-// 取待貼鎖：沿用 acquireLock；鎖檔時間戳在未來超過 LOCK_FUTURE_MS 的先當壞鎖處理（只作用在待貼鎖，不影響 state 鎖）
+// 只有部分筆不合格：不合格的另存成 .rejected-<時間>、留 pending-bad 告警（帶筆數），合格的留在佇列
+function saveRejected(opts, deps, rejected) {
+  const to = `${pendingPathOf(opts)}.rejected-${stampOf(deps)}`
+  atomicWrite(deps, to, JSON.stringify({ v: 1, rejectedAt: new Date(deps.now()).toISOString(), items: rejected }, null, 2))
+  deps.log(`待貼佇列有 ${rejected.length} 筆不合格，已另存為 ${to}`)
+  raisePendingBad(opts, deps, pendingRejectedMessage(rejected.length))
+}
+
+// 壞鎖改名隔離：改名前記下讀到的內容，改名後重讀隔離檔比對；對不上代表搬到的是別人剛換上的鎖，要還原並放棄
+function quarantineLock(opts, deps, lockPath, seen, reason) {
+  const to = `${lockPath}.bad-${stampOf(deps)}`
+  try { deps.rename(lockPath, to) } catch (e) { return { got: false, why: `壞鎖改名失敗：${e.message}` } }
+  let moved = null
+  try { moved = deps.readFile(to) } catch { /* 讀不到當作不一致 */ }
+  if (moved !== seen) {
+    if (typeof moved === 'string') {
+      try { deps.createLock(lockPath, moved); deps.unlink(to) } catch (e) { deps.log(`搬到的不是壞鎖而是別人剛換上的鎖，且還原失敗（${to}）：${e.message}`) }
+    }
+    deps.log('待貼佇列的鎖在改名前被換成新的，已還原，這一輪放棄')
+    raisePendingBad(opts, deps, PENDING_LOCK_BAD_MESSAGE)
+    return { got: false, why: '壞鎖改名時鎖已被換成新的，已還原，這一輪放棄' }
+  }
+  deps.log(`待貼佇列的鎖檔${reason}，視為壞鎖，已改名為 ${to}`)
+  raisePendingBad(opts, deps, PENDING_LOCK_BAD_MESSAGE)
+  return null
+}
+
+// 取待貼鎖：沿用 acquireLock；鎖檔時間戳在未來超過 LOCK_FUTURE_MS、或內容讀不懂的先當壞鎖處理（只作用在待貼鎖，不影響 state 鎖）
 export function acquirePendingLock(opts, deps) {
   const lockPath = `${pendingPathOf(opts)}.lock`
   if (deps.exists(lockPath)) {
-    let ts = NaN
-    try { ts = parseLock(deps.readFile(lockPath)).ts } catch { /* 讀不到交給 acquireLock 處理 */ }
-    if (Number.isFinite(ts) && ts - deps.now() > LOCK_FUTURE_MS) {
-      const to = `${lockPath}.bad-${stampOf(deps)}`
-      try {
-        deps.rename(lockPath, to)
-        deps.log(`待貼佇列的鎖檔時間戳在未來，視為壞鎖，已改名為 ${to}`)
-        makeAlerts(opts, deps).raise('pending-bad', 'pending-bad', PENDING_BAD_MESSAGE, 'post-pending')
-      } catch (e) { return { got: false, why: `壞鎖改名失敗：${e.message}` } }
+    let text = null
+    try { text = deps.readFile(lockPath) } catch { /* 讀不到交給 acquireLock 處理 */ }
+    if (typeof text === 'string') {
+      const { pid, ts } = parseLock(text)
+      const unreadable = !Number.isFinite(pid) || !Number.isFinite(ts)
+      if (unreadable || ts - deps.now() > LOCK_FUTURE_MS) {
+        const failed = quarantineLock(opts, deps, lockPath, text, unreadable ? '內容讀不懂' : '時間戳在未來')
+        if (failed) return failed
+      }
     }
   }
   return { lockPath, ...acquireLock(lockPath, deps) }
@@ -136,10 +212,19 @@ export function enqueuePending(opts, deps, input) {
     if (!lock.got) { deps.log(`待貼佇列的鎖被佔用，這筆沒寫入：${lock.why ?? `pid ${lock.pid ?? '未知'}`}`); return { ok: false, why: 'locked' } }
     try {
       let cur = readPending(opts, deps, warn)
-      if (!cur.ok) { quarantine(opts, deps); cur = { ok: true, items: [] } }
-      const items = cur.items.some((x) => x.id === item.id) ? cur.items : [...cur.items, item]
-      const text = JSON.stringify({ v: 1, updatedAt: new Date(deps.now()).toISOString(), items }, null, 2)
-      if (Buffer.byteLength(text, 'utf8') > MAX_FILE_BYTES) { deps.log('待貼佇列已滿，這筆沒寫入'); return { ok: false, why: 'full' } }
+      if (!cur.ok) { quarantine(opts, deps); cur = { ok: true, items: [], rejected: [] } }
+      else if (cur.rejected.length > 0) saveRejected(opts, deps, cur.rejected)
+      const exists = cur.items.some((x) => x.id === item.id)
+      if (exists && cur.rejected.length === 0) return { ok: true, count: cur.items.length }
+      const items = exists ? cur.items : [...cur.items, item]
+      const render = (list) => JSON.stringify({ v: 1, updatedAt: new Date(deps.now()).toISOString(), items: list }, null, 2)
+      const text = render(items)
+      if (items.length > MAX_ITEMS || Buffer.byteLength(text, 'utf8') > MAX_FILE_BYTES) {
+        if (cur.rejected.length > 0) atomicWrite(deps, p, render(cur.items))
+        deps.log('待貼佇列已滿，這筆沒寫入')
+        raisePendingBad(opts, deps, PENDING_FULL_MESSAGE)
+        return { ok: false, why: 'full' }
+      }
       atomicWrite(deps, p, text)
       return { ok: true, count: items.length }
     } finally {

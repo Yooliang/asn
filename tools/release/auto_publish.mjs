@@ -583,6 +583,7 @@ export function realDeps(opts, repoRoot = REPO_ROOT) {
     now: () => Date.now(), pid: process.pid,
     exists: (p) => fs.existsSync(p),
     readFile: (p) => fs.readFileSync(p, 'utf8'),
+    fileSize: (p) => fs.statSync(p).size,
     writeFile: (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s) },
     rename: (a, b) => fs.renameSync(a, b),
     createLock: (p, s) => {

@@ -1,7 +1,7 @@
 import test, { mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { runOnce, runCommand, parseArgs, ALERT_CAUSES, WORKFLOWS } from '../../../tools/release/auto_publish.mjs'
-import { PENDING_PLATFORMS, PENDING_KINDS, isSemver, isCommit, isPlatform, isKind, validateItem, buildItem, enqueuePending, readPending, pendingPathOf, MAX_ITEM_BYTES, MAX_FILE_BYTES, LOCK_FUTURE_MS, PENDING_BAD_MESSAGE, cleanLastError } from '../../../tools/release/post_pending.mjs'
+import { PENDING_PLATFORMS, PENDING_KINDS, isSemver, isCommit, isPlatform, isKind, validateItem, buildItem, enqueuePending, readPending, pendingPathOf, MAX_ITEM_BYTES, MAX_FILE_BYTES, MAX_ITEMS, MAX_ATTEMPTS, MAX_CLAIMED_BY, LAST_ERROR_MAX, LAST_ERROR_MAX_BYTES, LOCK_FUTURE_MS, PENDING_BAD_MESSAGE, PENDING_FULL_MESSAGE, PENDING_LOCK_BAD_MESSAGE, cleanLastError, isLastError } from '../../../tools/release/post_pending.mjs'
 import { env, row, sha, short, opts, STATE, T0, lk, seededState, postFails, alertOf, lastState, pendingOf, PENDING, publishWithPostFailed, markerOut } from './helpers/auto-publish-env.mjs'
 
 const FIELDS = ['at', 'attempts', 'claimedAt', 'claimedBy', 'commit', 'createdAt', 'id', 'kind', 'lastError', 'platform', 'version']
@@ -192,14 +192,18 @@ test('#2345 型別不對的整筆拒絕（attempts 字串、claimedBy 字串、l
   m.mock.restore()
 })
 
-test('#2345 單筆序列化超過上限：整筆拒絕', () => {
+test('#2345 各欄位都取上限、lastError 取最大：整筆仍不超過單筆上限；版號任一段超過 6 位整筆拒絕', () => {
   const m = quiet()
-  const ok = buildItem({ kind: 'published', platform: 'linux', version: '0.2.99', commit: sha(3) }, T0)
-  assert.ok(Buffer.byteLength(JSON.stringify(ok)) < MAX_ITEM_BYTES)
-  m.mock.resetCalls()
-  const version = `${'1'.repeat(200)}.0.0`
-  assert.equal(validateItem({ ...ok, version, id: `linux@${version}#published` }), null, '各欄位都合格、只有總大小超過')
-  assert.ok(m.mock.calls.some((c) => /size/.test(c.arguments[0])))
+  const ok = buildItem({ kind: 'publish-failed', platform: 'desktop', version: '999999.999999.999999', commit: sha(3) }, T0)
+  assert.ok(ok)
+  const worst = { ...ok, attempts: MAX_ATTEMPTS, claimedBy: MAX_CLAIMED_BY, claimedAt: ok.at, lastError: cleanLastError('"'.repeat(300)) }
+  assert.ok(validateItem(worst), '各欄位取上限仍合格')
+  assert.ok(Buffer.byteLength(JSON.stringify(worst)) <= MAX_ITEM_BYTES)
+  for (const v of ['1234567.0.0', '0.1234567.0', '0.0.1234567']) {
+    m.mock.resetCalls()
+    assert.equal(validateItem({ ...ok, version: v, id: `desktop@${v}#publish-failed` }), null, v)
+    assert.ok(m.mock.calls.some((c) => /version/.test(c.arguments[0])))
+  }
   m.mock.restore()
 })
 
@@ -381,4 +385,130 @@ test('#2345 ci-failed 的 run 沒有 commit：不寫佇列，也不放寬驗證'
 
 test('#2345 STATE 路徑決定佇列位置：與 state 同資料夾', () => {
   assert.equal(pendingPathOf({ state: STATE }), PENDING)
+})
+
+// ---- 一審修正 ----
+const mk = (i, over = {}) => ({ ...buildItem({ kind: 'published', platform: 'desktop', version: `0.${i}.1`, commit: sha(i + 1) }, T0), ...over })
+const hasLoneSurrogate = (s) => /\p{Cs}/u.test(s)
+const cp = (n) => String.fromCodePoint(n)
+const input = { kind: 'published', platform: 'linux', version: '0.2.99', commit: sha(3) }
+
+test('#2345 lastError：零寬、雙向控制、軟連字號、落單代理字元都清掉；驗證端用同一套規則整筆拒絕', () => {
+  const m = quiet()
+  const bad = [0x200b, 0x200c, 0x200d, 0xfeff, 0x2060, 0x00ad, 0x202a, 0x202e, 0x2066, 0x2069, 0xd800, 0xdc00].map((c) => String.fromCharCode(c))
+  const ok = mk(1)
+  for (const b of bad) {
+    assert.equal(cleanLastError(`甲${b}乙`), '甲乙', `U+${b.charCodeAt(0).toString(16)}`)
+    assert.equal(isLastError(`甲${b}乙`), false)
+    assert.equal(validateItem({ ...ok, lastError: `甲${b}乙` }), null)
+  }
+  const lone = `a${String.fromCharCode(0xd83d)}b${String.fromCharCode(0xde00)}c`
+  assert.equal(cleanLastError(lone), 'abc')
+  assert.equal(cleanLastError(`a${cp(0x1f600)}b`), `a${cp(0x1f600)}b`, '成對的代理字元保留')
+  m.mock.restore()
+})
+
+test('#2345 lastError 截斷：100 個中文字不超過位元組上限；emoji 與代理對不會被切開；整筆不超過單筆上限', () => {
+  const zh = cleanLastError('漢'.repeat(100))
+  assert.ok(Array.from(zh).length <= LAST_ERROR_MAX)
+  assert.ok(Buffer.byteLength(JSON.stringify(zh)) <= LAST_ERROR_MAX_BYTES)
+  assert.equal(zh.length, 52)
+  const it = mk(1, { lastError: zh })
+  assert.ok(validateItem(it), '100 個中文字清洗後整筆合格')
+  assert.ok(Buffer.byteLength(JSON.stringify(it)) <= MAX_ITEM_BYTES)
+  const emo = cleanLastError(cp(0x1f600).repeat(100))
+  assert.equal(Array.from(emo).length, 39)
+  assert.ok(!hasLoneSurrogate(emo))
+  assert.ok(validateItem(mk(1, { lastError: emo })))
+  const edge = cleanLastError(`${'x'.repeat(99)}${cp(0x1f600)}${cp(0x1f600)}`)
+  assert.equal(Array.from(edge).length, 100)
+  assert.ok(edge.endsWith(cp(0x1f600)))
+  assert.ok(!hasLoneSurrogate(edge))
+  assert.equal(cleanLastError('x'.repeat(250)).length, 100)
+})
+
+test('#2345 輸入與欄位收緊：headSha 只收 40 碼；時間要往返一致；attempts、claimedBy 有上下界', () => {
+  const m = quiet()
+  assert.ok(buildItem({ ...input, commit: sha(3) }, T0))
+  for (const c of [short(3), `${sha(3)}0`, sha(3).slice(0, 39), 'A'.repeat(40), null]) assert.equal(buildItem({ ...input, commit: c }, T0), null, String(c))
+  const ok = mk(1)
+  for (const [f, v] of [['at', '2026-02-30T00:00:00.000Z'], ['at', '2026-11-21T10:00:00Z'], ['createdAt', '2026-13-01T00:00:00.000Z'], ['claimedAt', '2026-11-21T10:00:00.5Z'], ['attempts', MAX_ATTEMPTS + 1], ['attempts', -1], ['claimedBy', -1], ['claimedBy', MAX_CLAIMED_BY + 1]]) {
+    assert.equal(validateItem({ ...ok, [f]: v }), null, `${f}=${v}`)
+  }
+  assert.ok(validateItem({ ...ok, claimedBy: 0, claimedAt: ok.at, attempts: MAX_ATTEMPTS }))
+  m.mock.restore()
+})
+
+test('#2345 讀檔：同一個 id 只留第一筆；檔案大小用 stat 先擋，超過就不讀內容', () => {
+  const a = mk(1)
+  const e = env({ files: { [PENDING]: JSON.stringify({ v: 1, updatedAt: 'x', items: [a, { ...a, attempts: 5 }] }) } })
+  const r = readPending(opts, e.deps)
+  assert.equal(r.items.length, 1)
+  assert.equal(r.items[0].attempts, 0)
+  const e2 = env({ files: { [PENDING]: JSON.stringify({ v: 1, updatedAt: 'x', items: [] }) } })
+  let reads = 0
+  const rf = e2.deps.readFile
+  e2.deps.readFile = (p) => { if (p === PENDING) reads += 1; return rf(p) }
+  e2.deps.fileSize = () => MAX_FILE_BYTES + 1
+  assert.deepEqual(readPending(opts, e2.deps), { ok: false, bad: true })
+  assert.equal(reads, 0)
+})
+
+test('#2345 一筆合格、一筆不合格：合格的留在佇列，不合格的另存 .rejected 檔，pending-bad 告警帶筆數', () => {
+  const m = quiet()
+  const good = mk(1)
+  const badItem = { ...mk(2), commit: 'zz' }
+  const e = env({ files: { [PENDING]: JSON.stringify({ v: 1, updatedAt: 'x', items: [good, badItem] }) } })
+  const r = enqueuePending(opts, e.deps, input)
+  assert.equal(r.ok, true)
+  assert.deepEqual(pendingOf(e).items.map((x) => x.id), [good.id, 'linux@0.2.99#published'])
+  const rej = [...e.fsMap.keys()].filter((k) => k.startsWith(`${PENDING}.rejected-`))
+  assert.equal(rej.length, 1)
+  assert.deepEqual(JSON.parse(e.fsMap.get(rej[0])).items, [badItem])
+  assert.ok(![...e.fsMap.keys()].some((k) => k.startsWith(`${PENDING}.bad-`)), '整個檔沒有被改名')
+  const al = alertOf(e).alerts['pending-bad']
+  assert.equal(al.status, 'active')
+  assert.match(al.message, /1 筆/)
+  m.mock.restore()
+})
+
+test('#2345 佇列筆數滿了：新的一筆不寫、留 pending-bad 告警，原檔不動', () => {
+  const items = Array.from({ length: MAX_ITEMS }, (_, i) => mk(i))
+  const text = JSON.stringify({ v: 1, updatedAt: 'x', items })
+  const e = env({ files: { [PENDING]: text } })
+  const r = enqueuePending(opts, e.deps, input)
+  assert.deepEqual(r, { ok: false, why: 'full' })
+  assert.equal(e.fsMap.get(PENDING), text)
+  assert.equal(alertOf(e).alerts['pending-bad'].status, 'active')
+  assert.equal(alertOf(e).alerts['pending-bad'].message, PENDING_FULL_MESSAGE)
+  assert.ok(!e.fsMap.has(`${PENDING}.lock`))
+  const again = enqueuePending(opts, e.deps, { ...input, version: '0.0.1', platform: 'desktop', commit: sha(1) })
+  assert.equal(again.ok, true, '已在佇列裡的那筆重複寫入不算滿')
+})
+
+test('#2345 鎖檔內容讀不懂：改名隔離、留告警、之後可寫入', () => {
+  for (const content of ['', '亂碼', 'abc def']) {
+    const e = env({ files: { [`${PENDING}.lock`]: content } })
+    const r = enqueuePending(opts, e.deps, input)
+    assert.equal(r.ok, true, JSON.stringify(content))
+    const q = [...e.fsMap.keys()].filter((k) => k.startsWith(`${PENDING}.lock.bad-`))
+    assert.equal(q.length, 1)
+    assert.equal(e.fsMap.get(q[0]), content)
+    assert.equal(alertOf(e).alerts['pending-bad'].message, PENDING_LOCK_BAD_MESSAGE)
+    assert.equal(pendingOf(e).items.length, 1)
+  }
+})
+
+test('#2345 壞鎖改名前一刻被換成新的有效鎖：還原那把新鎖、放棄這一輪、留告警', () => {
+  const lock = `${PENDING}.lock`
+  const e = env({ files: { [lock]: lk(777, T0 + LOCK_FUTURE_MS + 60_000) }, alive: [777, 888] })
+  const rn = e.deps.rename
+  let swapped = false
+  e.deps.rename = (a, b) => { if (a === lock && !swapped) { swapped = true; e.fsMap.set(lock, lk(888, T0)) } rn(a, b) }
+  const r = enqueuePending(opts, e.deps, input)
+  assert.deepEqual(r, { ok: false, why: 'locked' })
+  assert.equal(e.fsMap.get(lock), lk(888, T0), '新鎖被還回原名')
+  assert.ok(![...e.fsMap.keys()].some((k) => k.startsWith(`${lock}.bad-`)), '沒有留下假的壞鎖檔')
+  assert.ok(!e.fsMap.has(PENDING))
+  assert.equal(alertOf(e).alerts['pending-bad'].status, 'active')
 })
