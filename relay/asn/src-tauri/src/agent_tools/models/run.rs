@@ -4,8 +4,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
-/// stdout 最多收這麼多位元組。Codex 的原始輸出約 262 KB（大半是 base_instructions），所以留 2 MiB
-pub const STDOUT_CAP: usize = 2 * 1024 * 1024;
+/// **讀取上限**：子程序 stdout 最多收這麼多位元組。Codex 的原始輸出約 262 KB（大半是 base_instructions），所以留 1 MiB。
+/// 這只管「讀進來」；解析、精簡後「回報出去」的上限是另一件事，見 `parse::REPORT_MAX_MODELS`／`REPORT_MAX_BYTES`，兩個不能混用
+pub const STDOUT_CAP: usize = 1024 * 1024;
 /// stderr 只留前這麼多位元組（pi 的表格可能印在 stderr，所以要留；超過的讀掉丟棄）
 const STDERR_CAP: usize = 256 * 1024;
 
@@ -140,6 +141,19 @@ mod tests {
                     }
                 }
             }
+            // 262 KB 等級的輸出（Codex 原始輸出的大小），要讀得完
+            Ok("k262") => {
+                let chunk = vec![b'x'; 1024];
+                let mut o = std::io::stdout();
+                for _ in 0..262 {
+                    o.write_all(&chunk).unwrap();
+                }
+            }
+            // agy 的真實行為：stdout 是清單、stderr 只有一行進度，結束碼 0
+            Ok("agy") => {
+                print!("gemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\n");
+                eprintln!("Fetching available models...");
+            }
             Ok("env") => println!("LEAK={}", std::env::var("SECRET_TOKEN_X").unwrap_or_else(|_| "none".into())),
             _ => {}
         }
@@ -164,6 +178,25 @@ mod tests {
         assert_eq!(run(me("hang"), Duration::from_millis(1500)).await, Err(RunFail::Timeout));
         assert!(t.elapsed() < Duration::from_secs(10), "逾時要馬上回來，不等子程序睡完");
         assert_eq!(run(me("big"), Duration::from_secs(30)).await, Err(RunFail::TooLarge));
+    }
+
+    #[tokio::test]
+    async fn 讀取上限放得下_262_kb_的_codex_等級輸出_但不是無限() {
+        let t = run(me("k262"), Duration::from_secs(20)).await.unwrap();
+        assert!(t.len() >= 262 * 1024, "{}", t.len());
+        assert!(STDOUT_CAP > 262 * 1024 * 3, "讀取上限要留足餘裕");
+    }
+
+    #[tokio::test]
+    async fn agy_stderr_有進度那一行_結束碼零_不算錯誤() {
+        let t = run(me("agy"), Duration::from_secs(20)).await.unwrap();
+        assert!(!t.contains("Fetching"), "stderr 不接進 stdout");
+        assert_eq!(super::super::parse_agy(&t).len(), 2);
+        let mut s = me("agy");
+        s.merge_stderr = true;
+        let merged = run(s, Duration::from_secs(20)).await.unwrap();
+        assert!(merged.contains("Fetching available models..."));
+        assert_eq!(super::super::parse_agy(&merged).len(), 2, "就算 stderr 被接進來，進度那行也不會變成型號");
     }
 
     #[tokio::test]

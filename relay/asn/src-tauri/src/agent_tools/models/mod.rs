@@ -14,7 +14,7 @@
 mod parse;
 mod run;
 
-pub use parse::{parse_agy, parse_codex, parse_pi, valid_model_id, MAX_MODELS, MODEL_ID_PATTERN};
+pub use parse::{parse_agy, parse_codex, parse_pi, valid_model_id, MAX_MODELS, MODEL_ID_PATTERN, REPORT_MAX_BYTES, REPORT_MAX_MODELS};
 pub use run::{run, run_blocking, RunFail, Spawn};
 
 use serde::Serialize;
@@ -272,9 +272,71 @@ pub fn snapshot_all() -> Vec<VendorModels> {
     Vendor::ALL.iter().map(|v| snapshot(*v)).collect()
 }
 
+/// 回報前的精簡（R9）：每家最多 `REPORT_MAX_MODELS` 筆、全部合計最多 `REPORT_MAX_BYTES`。
+/// 超過就從後面截掉並在 reason 說明；一筆都放不下的那家改成 Error。這跟讀取上限（`STDOUT_CAP`）是兩件事
+pub fn limit_for_report(list: Vec<VendorModels>) -> Vec<VendorModels> {
+    let mut used = 0usize;
+    list.into_iter()
+        .map(|mut v| {
+            let total = v.models.len();
+            let mut kept = Vec::new();
+            for m in std::mem::take(&mut v.models) {
+                let size = m.id.len() + m.name.len();
+                if kept.len() >= REPORT_MAX_MODELS || used + size > REPORT_MAX_BYTES {
+                    break;
+                }
+                used += size;
+                kept.push(m);
+            }
+            if kept.len() < total {
+                if kept.is_empty() {
+                    v.status = Status::Error;
+                    v.reason = format!("超過回報上限，{total} 筆都放不下");
+                } else {
+                    v.reason = format!("回報時截斷：只留前 {} 筆（共 {total} 筆）", kept.len());
+                }
+            }
+            v.models = kept;
+            v
+        })
+        .collect()
+}
+
+/// 要放進回報的四家快取摘要（不等、已套回報上限）
+pub fn report_snapshot() -> Vec<VendorModels> {
+    limit_for_report(snapshot_all())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn many(v: Vendor, n: usize, width: usize) -> VendorModels {
+        let models = (0..n).map(|i| ModelEntry { id: format!("{i:0>w$}", w = width), name: "n".repeat(width) }).collect();
+        VendorModels::from_list(v, models)
+    }
+
+    #[test]
+    fn 回報上限_每家五十筆_超過截斷並說明_跟讀取上限是兩回事() {
+        let r = limit_for_report(vec![many(Vendor::Codex, 60, 5), many(Vendor::Gemini, 10, 5)]);
+        assert_eq!((r[0].models.len(), r[0].status), (REPORT_MAX_MODELS, Status::Ok));
+        assert!(r[0].reason.contains("截斷") && r[0].reason.contains("60"), "{}", r[0].reason);
+        assert!(r[1].models.len() == 10 && r[1].reason.is_empty(), "沒超過的不動");
+        assert_ne!(REPORT_MAX_BYTES, run::STDOUT_CAP, "回報上限與讀取上限各自獨立");
+    }
+
+    #[test]
+    fn 回報上限_合計位元組超過就截掉後面的_一筆都放不下的改成_error() {
+        // 每筆 2×90＝180 位元組、每家 50 筆＝9000；四家合計 36000 > 24000
+        let all: Vec<VendorModels> = Vendor::ALL.iter().map(|v| many(*v, 50, 90)).collect();
+        let r = limit_for_report(all);
+        let total: usize = r.iter().flat_map(|v| v.models.iter()).map(|m| m.id.len() + m.name.len()).sum();
+        assert!(total <= REPORT_MAX_BYTES, "{total}");
+        assert_eq!(r[0].models.len(), 50);
+        assert!(r[2].reason.contains("截斷"), "{}", r[2].reason);
+        assert_eq!((r[3].status, r[3].models.len()), (Status::Error, 0));
+        assert!(r[3].reason.contains("超過回報上限"));
+    }
 
     fn leak() -> &'static ProbeCache {
         Box::leak(Box::default())

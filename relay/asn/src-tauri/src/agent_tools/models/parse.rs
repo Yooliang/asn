@@ -3,8 +3,12 @@
 use super::ModelEntry;
 use serde_json::Value;
 
-/// 每家最多留幾筆
+/// 解析時每家最多留幾筆（讀進來之後的上限；讀取上限在 `run::STDOUT_CAP`，回報上限在下面兩個）
 pub const MAX_MODELS: usize = 300;
+/// **回報上限**（R9）：精簡後要報出去的，每家最多幾筆
+pub const REPORT_MAX_MODELS: usize = 50;
+/// **回報上限**（R9）：所有家合計，代號與顯示名的位元組總和最多這麼多（與 pi_models 的 24000 同級，另外計算）
+pub const REPORT_MAX_BYTES: usize = 24_000;
 /// 顯示名最多幾個字
 const NAME_MAX_CHARS: usize = 80;
 
@@ -41,8 +45,7 @@ fn push_unique(out: &mut Vec<ModelEntry>, id: &str, name: &str) -> bool {
 pub fn parse_agy(stdout: &str) -> Vec<ModelEntry> {
     let mut out = Vec::new();
     for line in stdout.lines() {
-        let Some((id, rest)) = line.split_once('\t') else { continue };
-        // 第二欄之後（若還有 Tab）不要
+        let Some((id, rest)) = line.split_once('\t') else { continue };        // 第二欄之後（若還有 Tab）不要
         let name = rest.split('\t').next().unwrap_or("");
         if !push_unique(&mut out, id.trim(), name) {
             break;
@@ -98,6 +101,18 @@ mod tests {
     }
 
     #[test]
+    fn codex_兩百多_kb_的原始輸出照樣解析得出來() {
+        // 真實原始輸出約 262 KB，大半是每個型號的 base_instructions；用合成的同等大小資料驗解析不受大小影響
+        let filler = "x".repeat(5_000);
+        let rows: Vec<String> = (0..52).map(|i| format!(r#"{{"slug":"m-{i}","display_name":"M {i}","visibility":"list","priority":{i},"base_instructions":"{filler}"}}"#)).collect();
+        let raw = format!(r#"{{"models":[{}]}}"#, rows.join(","));
+        assert!(raw.len() > 255 * 1024 && raw.len() < super::super::run::STDOUT_CAP, "{}", raw.len());
+        let m = parse_codex(&raw).unwrap();
+        assert_eq!(m.len(), 52);
+        assert_eq!(m[51].id, "m-51");
+    }
+
+    #[test]
     fn codex_壞輸出回原因_不丟例外() {
         assert!(parse_codex("").is_err());
         assert!(parse_codex("not json").unwrap_err().contains("JSON"));
@@ -111,12 +126,17 @@ mod tests {
 
     #[test]
     fn agy_取代號與顯示名_略過空行說明與重複() {
-        // agy 還沒有實機樣本：這份沿用手寫的 tests/fixtures/agy-models/sample.txt（#2353 第①階段註明）
+        // 實機樣本（2026-11-26 在 w02 跑 `agy models` 的 stdout，27 行，與原始輸出逐位元組相同）
         let sample = include_str!("../../../tests/fixtures/agy-models/sample.txt");
         let m = parse_agy(sample);
-        assert!(!m.is_empty());
-        assert_eq!(m[0], ModelEntry { id: "gemini-4-argon-medium".into(), name: "Gemini 4 Argon (Medium)".into() });
-        assert!(m.iter().any(|x| x.id == "claude-opus-5-5-low"), "以 CLI 自己列的為準，不用前綴過濾");
+        assert_eq!(m.len(), 27, "27 行都要列");
+        assert_eq!(m[0], ModelEntry { id: "gemini-4-neon-high".into(), name: "Gemini 4 Neon (High)".into() });
+        assert!(m.iter().any(|x| x.id == "gemini-pro-orchestrator" && x.name == "Orchestrator (Carbon)"));
+        // R7：不用前綴過濾，CLI 自己列的 claude-*、gpt-oss-* 都要在
+        assert!(m.iter().any(|x| x.id == "claude-opus-5-5-low") && m.iter().any(|x| x.id == "claude-sonnet-5-5-high"));
+        assert_eq!(m[26], ModelEntry { id: "gpt-oss-120b-medium".into(), name: "GPT-OSS 120B (Medium)".into() });
+        // 換成 CRLF 也一樣
+        assert_eq!(parse_agy(&sample.replace('\n', "\r\n")), m);
         let out = "a-1\tName A\r\n\nb-2\tName B\ta-1\tdup\na-1\tdup\nno-tab-line\nbad id\tX\n-x\tY\nc-3\t\n";
         assert_eq!(parse_agy(out), vec![ModelEntry { id: "a-1".into(), name: "Name A".into() }, ModelEntry { id: "b-2".into(), name: "Name B".into() }, ModelEntry { id: "c-3".into(), name: "c-3".into() }]);
         assert!(parse_agy("Fetching available models...\n").is_empty());
