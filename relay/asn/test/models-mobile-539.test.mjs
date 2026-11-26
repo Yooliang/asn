@@ -2,7 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CLAUDE_MODELS, GEMINI_MODELS, launchModelChoices, switchModelsFor } from '../ui/lib/model-catalog.mjs'
+import { CLAUDE_ALIAS_MODELS, launchModelChoices, switchModelsFor } from '../ui/lib/model-catalog.mjs'
+import { CLAUDE_ALIAS_LABEL } from '../ui/lib/remote-models.mjs'
 import { createModelSwitcher } from '../ui/lib/model-switch.mjs'
 import { acpSwitchChoices, opDialogText } from '../ui/lib/partner-ops-ui.mjs'
 import * as mobileOps from '../ui/lib/mobile-ops.mjs'
@@ -13,28 +14,39 @@ import { MODEL_RE } from '../ui/lib/partner-ops.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
 
-test('switchModelsFor：Claude 三個別名、Gemini 一份小清單、pi 原樣回傳查到的、其他回空（手動輸入）', () => {
-  assert.equal(switchModelsFor('claude'), CLAUDE_MODELS)
-  assert.equal(switchModelsFor('Claude'), CLAUDE_MODELS, '大小寫不拘')
-  assert.equal(switchModelsFor('gemini'), GEMINI_MODELS)
-  assert.ok(GEMINI_MODELS.length >= 3)
-  for (const m of GEMINI_MODELS) { assert.match(m.id, /^gemini-[a-z0-9.-]+$/); assert.match(m.id, MODEL_RE); assert.ok(m.label) }
+test('switchModelsFor：Claude 只有別名（fable、opus、sonnet、haiku）、Gemini 不再寫死（向本機讀）、pi 原樣回傳查到的、其他回空（手動輸入）', () => {
+  assert.equal(switchModelsFor('claude'), CLAUDE_ALIAS_MODELS)
+  assert.equal(switchModelsFor('Claude'), CLAUDE_ALIAS_MODELS, '大小寫不拘')
+  assert.deepEqual(CLAUDE_ALIAS_MODELS.map(m => m.id), ['fable', 'opus', 'sonnet', 'haiku'], 'haiku 在選項裡')
+  for (const m of CLAUDE_ALIAS_MODELS) { assert.match(m.id, MODEL_RE); assert.ok(m.label) }
+  assert.deepEqual(switchModelsFor('gemini'), [], '清單改向本機讀，不寫死')
   const pi = [{ provider: 'xai', model: 'grok-4.7' }]
   assert.equal(switchModelsFor('pi', { piModels: pi }), pi)
   assert.deepEqual(switchModelsFor('pi'), [])
   for (const e of ['grok', 'codex', 'acp', '', undefined]) assert.deepEqual(switchModelsFor(e), [], String(e))
 })
 
-test('切換模型與手機都讀 switchModelsFor：Claude 選單、手機清單同一份', () => {
+test('電腦版切換模型讀 switchModelsFor；手機在 P4 以前維持改版前的清單（以 main 568a87db 的輸出為標準答案）', () => {
   assert.deepEqual(createModelSwitcher({ transport: {} }).models, switchModelsFor('claude'))
-  assert.deepEqual(phoneModels().map(m => m.id), switchModelsFor('claude').map(m => m.id))
-  assert.deepEqual(phoneModels('gemini').map(m => m.id), GEMINI_MODELS.map(m => m.id))
+  const before = JSON.parse(read('test/fixtures/phone-models-before-2355.json'))
+  assert.deepEqual(phoneModels(), before.claude)
+  assert.deepEqual(phoneModels('claude'), before.claude)
+  assert.deepEqual(phoneModels('gemini'), before.gemini, '手機的 Gemini 清單維持改版前，不能退成輸入框')
+  for (const e of ['grok', 'codex', 'acp', 'pi', '']) assert.deepEqual(phoneModels(e), before.others, String(e))
+  // 手機內建通道對話框：m.js 用 phoneAcpList 當 list，結果跟改版前的 acpSwitchChoices(friend) 一樣
+  const gem = { node: 'H', agent: '小格', engine: 'gemini', model: 'gemini-3.8-flash-low' }
+  assert.deepEqual(acpSwitchChoices(gem, { list: mobileOps.phoneAcpList(gem) }), { models: before.gemini, selected: 'gemini-3.8-flash-low' })
+  assert.equal(acpSwitchChoices({ ...gem, model: '' }, { list: mobileOps.phoneAcpList(gem) }).selected, before.gemini[0].id)
+  assert.deepEqual(acpSwitchChoices({ ...gem, engine: 'grok' }, { list: mobileOps.phoneAcpList({ engine: 'grok' }) }).models, [])
+  assert.match(read('ui/m.js'), /acpSwitchChoices\(opsFriend\.value, \{ list: phoneAcpList\(opsFriend\.value\) \}\)/, 'm.js 用手機自己的清單')
 })
 
 test('內建通道切換模型：Gemini 有清單（預設目前的，不在清單就第一個）；Grok 沒清單＝手動輸入', () => {
   const gem = { node: 'H', agent: '小格', engine: 'gemini', model: 'gemini-3.8-flash-low' }
-  assert.deepEqual(acpSwitchChoices(gem), { models: GEMINI_MODELS, selected: 'gemini-3.8-flash-low' })
-  assert.equal(acpSwitchChoices({ ...gem, model: '' }).selected, GEMINI_MODELS[0].id)
+  const list = [{ id: 'gemini-a', label: 'A' }, { id: 'gemini-3.8-flash-low', label: 'F' }]
+  assert.deepEqual(acpSwitchChoices(gem, { list }), { models: list, selected: 'gemini-3.8-flash-low' })
+  assert.equal(acpSwitchChoices({ ...gem, model: '' }, { list }).selected, 'gemini-a')
+  assert.deepEqual(acpSwitchChoices(gem), { models: [], selected: '' }, '沒讀到清單（手機、別台、讀不到）＝輸入框')
   assert.deepEqual(acpSwitchChoices({ ...gem, engine: 'grok' }).models, [])
   assert.deepEqual(acpSwitchChoices({ node: 'H', agent: 'c' }).models, [], 'Claude 不走這條')
   assert.deepEqual(acpSwitchChoices(null).models, [])
@@ -42,21 +54,26 @@ test('內建通道切換模型：Gemini 有清單（預設目前的，不在清�
   assert.match(opDialogText('model', '小格', '', 'acp').lead, /請輸入模型代號/)
 })
 
-test('開新夥伴選型號：只在這台、Claude 開成視窗、Gemini 內建通道時出現；其他不出現', () => {
-  assert.deepEqual(launchModelChoices('claude', 'term', { local: true, engine: 'claude' }), { show: true, models: CLAUDE_MODELS })
-  assert.deepEqual(launchModelChoices('gemini', 'acp', { local: true, engine: 'acp' }), { show: true, models: GEMINI_MODELS })
-  for (const [v, r, local] of [['claude', 'term', false], ['claude', 'pi', true], ['gemini', 'term', true], ['grok', 'acp', true], ['codex', 'term', true], ['pi', 'pi', true], ['', '', true]]) {
-    assert.deepEqual(launchModelChoices(v, r, { local, engine: 'claude' }), { show: false, models: [] }, `${v}/${r}/${local}`)
+test('開新夥伴選型號：Claude 開成視窗放別名、Gemini 內建通道向本機讀；其他不出現', () => {
+  const c = launchModelChoices('claude', 'term', { engine: 'claude' })
+  assert.equal(c.show, true); assert.equal(c.kind, 'aliases')
+  assert.deepEqual(c.models.map(m => m.id), ['fable', 'opus', 'sonnet', 'haiku'])
+  for (const m of c.models) assert.ok(m.label.endsWith(CLAUDE_ALIAS_LABEL), `別名要標「${CLAUDE_ALIAS_LABEL}」：${m.label}`)
+  assert.deepEqual(launchModelChoices('gemini', 'acp', { engine: 'acp' }), { show: true, kind: 'list', vendor: 'gemini', models: [], note: '' })
+  for (const [v, r] of [['claude', 'pi'], ['gemini', 'term'], ['grok', 'acp'], ['codex', 'term'], ['pi', 'pi'], ['', '']]) {
+    const x = launchModelChoices(v, r, { engine: 'claude' })
+    assert.equal(x.show, false, `${v}/${r}`); assert.deepEqual(x.models, [])
   }
 })
 
 test('開新夥伴接線：第 2 頁有型號下拉（預設不指定），本機開時帶 model', () => {
   const html = read('ui/list.html'), js = read('ui/list.js')
   assert.match(html, /<label class="partner-model-pick" v-else-if="launchModel\.show">型號[\s\S]*?<option value="">不指定（照預設）<\/option>[\s\S]*?v-for="m in launchModel\.models"/)
-  assert.match(js, /launchModelChoices\(dlgRow\.value\?\.id, dlgAuto\.value\.run, \{ local: partnerDlg\.node === info\.node, engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
+  assert.match(js, /launchModelChoices\(dlgRow\.value\?\.id, dlgAuto\.value\.run, \{ engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
+  assert.match(js, /if \(!launchModelOnThisPc\.value\) return \{ \.\.\.c, show: false/, '別台電腦照舊不出（P4 才做）')
   assert.match(js, /localLaunchRequest\(dlgAuto\.value, \{[^}]*model: launchModelPick\.value,/, '選了型號就帶進送出內容')
   assert.match(read('ui/lib/auto-run.mjs'), /\.\.\.\(model \? \{ model \} : \{\}\)/, '有選才帶 model')
-  assert.match(read('ui/lib/partner-ops-ui.mjs'), /<label class="op-field" v-if="op === 'model' && acpModels\.length">模型/)
+  assert.match(read('ui/lib/partner-ops-ui.mjs'), /<label class="op-field" v-if="op === 'model' && acpView\.models\.length">模型/)
   assert.match(read('src-tauri/src/launch/mod.rs'), /pub model: String,/)
 })
 

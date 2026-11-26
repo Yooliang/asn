@@ -71,6 +71,8 @@ export const dlaunchProbeSource = ({ step = 2 } = {}) => `(async () => {
     // Gemini：也有型號（內建通道），而且切過去還是只有一個被選
     cards()[2].click(); await sleep(150);
     if (!cards()[2].className.includes('on')) return { ok: false, why: '點 Gemini 沒有選起來' };
+    // 清單向本機讀（#2355），讀到才有選項
+    await waitFor(() => (dlg().querySelector('.partner-model-pick select')?.options.length ?? 0) > 1, 40);
     const gp = dlg().querySelector('.partner-model-pick select');
     if (!gp || !vis(gp) || ![...gp.options].some(o => /Gemini/.test(o.textContent))) return { ok: false, why: 'Gemini 沒有型號下拉' };
     cards()[0].click(); await sleep(150);
@@ -141,6 +143,7 @@ export default {
       open_link: null, ai_cli_login: null, grok_accounts_list: [], launch_cwd_candidates: ['D:/work'],
       ai_cli_detect: DETECT, ai_cli_status: STATUS, pi_models: [], pi_providers: [], partner_launch_local: { ok: true },
       claude_accounts_list: CLAUDE, claude_account_current: CLAUDE[0],
+      agent_models: { by: 'vendor', values: { gemini: { models: [{ vendor: 'gemini', status: 'ok', models: [{ id: 'gemini-4-argon-high', name: 'Gemini 4 Argon (High)' }] }] } }, fallback: { models: [] } },
     }
   },
 }

@@ -1,20 +1,22 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CLAUDE_MODELS } from '../ui/lib/model-catalog.mjs'
+import { CLAUDE_ALIAS_MODELS as CLAUDE_MODELS } from '../ui/lib/model-catalog.mjs'
 import { MODEL_QUERY_TIMEOUT_MS, canOfferModelSwitch, confirmText, createModelSwitcher, currentModelLabel, modelFamily, modelMenuState, resultView } from '../ui/lib/model-switch.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
 
-test('模型清單：Opus／Sonnet／Haiku，id 都能直接當 --model', () => {
-  assert.deepEqual(CLAUDE_MODELS.map(m => m.id), ['opus', 'sonnet', 'haiku'])
+test('模型清單：Claude 別名 Fable／Opus／Sonnet（取自 claude --help）加既有的 Haiku，id 都能直接當 --model', () => {
+  assert.deepEqual(CLAUDE_MODELS.map(m => m.id), ['fable', 'opus', 'sonnet', 'haiku'])
   for (const m of CLAUDE_MODELS) assert.match(m.id, /^[a-z]+$/)
 })
 
 test('比對目前模型：別名、完整名稱、後綴都認得，認不得回 null', () => {
   assert.equal(modelFamily('opus'), 'opus')
   assert.equal(modelFamily('claude-sonnet-4-5'), 'sonnet')
+  assert.equal(modelFamily('Fable[1m]'), 'fable')
   assert.equal(modelFamily('Haiku[1m]'), 'haiku')
+  assert.equal(modelFamily('gpt-5'), null)
   assert.equal(modelFamily('gpt-5'), null)
   assert.equal(modelFamily(undefined), null)
 })
@@ -41,7 +43,7 @@ test('選單狀態：閒置可選且目前那項打勾；忙碌全部停用並�
   const idle = modelMenuState({ ok: true, canSwitch: true, idle: true, model: 'opus' })
   assert.equal(idle.state, 'ready')
   assert.equal(idle.current, 'Opus')
-  assert.deepEqual(idle.items.map(i => [i.id, i.checked, i.disabled]), [['opus', true, false], ['sonnet', false, false], ['haiku', false, false]])
+  assert.deepEqual(idle.items.map(i => [i.id, i.checked, i.disabled]), [['fable', false, false], ['opus', true, false], ['sonnet', false, false], ['haiku', false, false]])
 
   const noModel = modelMenuState({ ok: true, canSwitch: true, idle: true })
   assert.equal(noModel.current, '預設')

@@ -1,19 +1,19 @@
 // 對話中切換模型（名單右鍵「切換模型 ▸」與之後的對話上方功能列 #40 共用）。
 // 只放純邏輯與一個小控制器，不碰 Vue、不碰 DOM；後端指令在 src-tauri/src/launch/switch.rs。
-import { CLAUDE_MODELS, switchModelsFor } from './model-catalog.mjs'
+import { CLAUDE_ALIAS_MODELS, switchModelsFor } from './model-catalog.mjs'
 import { partnerEngine } from './partner-ops.mjs'
 
 /** 查詢最久等多久（右鍵選單不能被慢的查詢卡住）；切換本身要等舊視窗關掉、新對話出現，不設前端逾時。 */
 export const MODEL_QUERY_TIMEOUT_MS = 2500
 
 /** 啟動參數裡的 --model 屬於哪一家（opus／sonnet／haiku）；認不得回 null。 */
-export function modelFamily(raw, models = CLAUDE_MODELS) {
+export function modelFamily(raw, models = CLAUDE_ALIAS_MODELS) {
   const s = String(raw ?? '').toLowerCase()
   return models.find(m => s.includes(m.family))?.family ?? null
 }
 
 /** 顯示用的目前模型名稱：沒指定＝「預設」；認得的用目錄裡的名稱；認不得原樣顯示。 */
-export function currentModelLabel(raw, models = CLAUDE_MODELS) {
+export function currentModelLabel(raw, models = CLAUDE_ALIAS_MODELS) {
   if (raw == null || raw === '') return '預設'
   const fam = modelFamily(raw, models)
   return models.find(m => m.family === fam)?.label ?? String(raw)
@@ -39,7 +39,7 @@ export function modelSwitchBlock(friend, { selfNode, engine }) {
  * 把後端的查詢結果整理成選單要的樣子。
  * state：none（切不了）／ready（可選）／busy（對話進行中，列出但停用）
  */
-export function modelMenuState(q, models = CLAUDE_MODELS) {
+export function modelMenuState(q, models = CLAUDE_ALIAS_MODELS) {
   if (!q || !q.ok || !q.canSwitch) {
     return { state: 'none', reason: q?.reason || '找不到這個視窗', current: '', items: [] }
   }

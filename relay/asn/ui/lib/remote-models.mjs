@@ -7,7 +7,13 @@ import { isValidModelId } from './model-id.mjs'
  * Claude 沒有清單（CLI 沒有列型號的指令），所以只留別名：別名永遠指向最新版，不會過時（#2355 D1）。
  * 內容取自 `claude --help` 的 --model 說明；test/fixtures/claude-help-model.txt 存那段原文，CLI 說明一改測試就會紅。
  */
-export const CLAUDE_ALIASES = Object.freeze(['fable', 'opus', 'sonnet'])
+export const CLAUDE_HELP_ALIASES = Object.freeze(['fable', 'opus', 'sonnet'])
+/**
+ * 既有別名，保留：`claude --help` 的範例沒列 haiku，但 CLI 的 --model 一直認得它，原本切換模型與手機的按鈕也有它，
+ * 拿掉等於讓使用者少一個能選的型號（領隊一審要求）。不跟 fixture 比對；CLI 哪天不認得它再拿掉。
+ */
+export const CLAUDE_KEPT_ALIASES = Object.freeze(['haiku'])
+export const CLAUDE_ALIASES = Object.freeze([...CLAUDE_HELP_ALIASES, ...CLAUDE_KEPT_ALIASES])
 /** 畫面上標在 Claude 別名旁邊的說明 */
 export const CLAUDE_ALIAS_LABEL = '別名（最新版）'
 
@@ -35,8 +41,8 @@ export const CODE_TEXT = Object.freeze({
 export const UNKNOWN_FAILURE_TEXT = '讀不到型號清單'
 /** 別台電腦沒有回報 models（舊版 ASN／舊後台）。只會出現在別台 */
 export const NONE_TEXT = '那台電腦的 ASN 版本較舊，不能選型號，請先更新'
-/** 本機沒有回報 models（正常不會發生；保險用，同樣不說「那台」） */
-export const NONE_TEXT_LOCAL = '這台電腦沒有回報型號清單，請先更新 ASN'
+/** 本機沒有回報 models（正常不會發生；保險用，同樣不說「那台」）。本機畫面跟本機 ASN 一定是同一版，所以不寫「請先更新」（領隊 11/26 裁示） */
+export const NONE_TEXT_LOCAL = '這台電腦讀不到型號清單'
 export const PENDING_TEXT = '正在讀取型號清單…'
 
 const VENDOR_LABEL = Object.freeze({ claude: 'Claude', codex: 'Codex', gemini: 'Gemini', pi: 'pi', grok: 'Grok' })

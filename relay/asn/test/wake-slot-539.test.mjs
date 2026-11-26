@@ -96,14 +96,16 @@ test('群組按鈕拿掉「輸入邀請碼加入」（電腦與手機同一份�
 })
 
 test('開新夥伴型號下拉跟後端 launch_model_plan 同一個判斷：視窗只認 profile 明寫 engine "claude"；背景（內建通道）照記', () => {
-  assert.equal(launchModelChoices('claude', 'term', { local: true, engine: 'claude' }).show, true)
-  assert.equal(launchModelChoices('claude', 'term', { local: true, engine: '' }).show, false, '沒寫 engine 的自訂 profile：不出下拉')
-  assert.equal(launchModelChoices('claude', 'term', { local: true }).show, false, '不知道 engine 也不出')
-  assert.equal(launchModelChoices('claude', 'term', { local: true, engine: 'codex' }).show, false)
-  assert.equal(launchModelChoices('gemini', 'acp', { local: true, engine: 'acp' }).show, true, '背景模式後端照記，不看 engine')
-  assert.equal(launchModelChoices('gemini', 'acp', { local: true, engine: '' }).show, true)
-  assert.equal(launchModelChoices('claude', 'term', { local: false, engine: 'claude' }).show, false, '別台電腦照舊不出')
-  assert.deepEqual(launchModelChoices('claude', 'term', { local: true, engine: '' }).models, [])
+  assert.equal(launchModelChoices('claude', 'term', { engine: 'claude' }).show, true)
+  const noEngine = launchModelChoices('claude', 'term', { engine: '' })
+  assert.equal(noEngine.show, false, '沒寫 engine 的自訂 profile：不出下拉')
+  assert.equal(noEngine.note, '這個啟動設定沒有寫明是哪一家，不能指定型號', '不出下拉要說明原因')
+  assert.equal(launchModelChoices('claude', 'term').show, false, '不知道 engine 也不出')
+  assert.equal(launchModelChoices('claude', 'term', { engine: 'codex' }).show, false)
+  assert.equal(launchModelChoices('claude', 'term', { engine: 'codex' }).note, '', '寫了別家 engine 的不用多說')
+  assert.equal(launchModelChoices('gemini', 'acp', { engine: 'acp' }).show, true, '背景模式後端照記，不看 engine')
+  assert.equal(launchModelChoices('gemini', 'acp', { engine: '' }).show, true)
+  assert.deepEqual(launchModelChoices('claude', 'term', { engine: '' }).models, [])
 })
 
 test('本機 profile 的 engine：有回報就用回報的（含空字串）；沒回報退回內建設定（profiles.rs）的 engine；目錄外的當沒寫', () => {
@@ -116,5 +118,5 @@ test('本機 profile 的 engine：有回報就用回報的（含空字串）；�
   assert.equal(localProfileEngine('my-custom', null), '')
   assert.equal(localProfileEngine('my-custom', { profiles: [{ id: 'claude', engine: 'claude' }] }), '')
   const list = read('ui/list.js')
-  assert.match(list, /launchModelChoices\(dlgRow\.value\?\.id, dlgAuto\.value\.run, \{ local: partnerDlg\.node === info\.node, engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
+  assert.match(list, /launchModelChoices\(dlgRow\.value\?\.id, dlgAuto\.value\.run, \{ engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
 })

@@ -43,7 +43,7 @@ import { createHold } from './lib/hold-press.mjs'
 import { POLL_MS as TQ_POLL_MS, TEXT as TERMREQ_TEXT, countdownText as tqCountdownText, decideArgs as tqDecideArgs, errorText as tqError, normalizeList as tqList, nextToAsk as tqNext } from './lib/term-ask.mjs'
 import { friendId } from './lib/roster.mjs'
 import { restoreMobileTab } from './lib/session.mjs'
-import { MODEL_NOTE, chatPageState, normalizeLastChat, opLineNote, opStep, phoneModels, renamedChatId, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
+import { MODEL_NOTE, chatPageState, normalizeLastChat, opLineNote, opStep, phoneAcpList, phoneModels, renamedChatId, runFor, setRun, showsInSheet } from './lib/mobile-ops.mjs'
 import { chatGroupItems, nameplateView } from './lib/actionbar.mjs'
 import { buildPartnerMenu } from './lib/partner-menu.mjs'
 import { headCallView } from './lib/head-call.mjs'
@@ -1330,7 +1330,7 @@ const app = createApp({
     const opsRows = computed(() => buildPartnerMenu(opsFriend.value, opsCtx.value, 'phone'))   // 四個入口共用的組選單函式（#1559，lib/partner-menu.mjs）
     const opsView = computed(() => sharedWhy(opsRows.value))   // 同一個原因只在選單最上方寫一次
     const ops = reactive({ phase: 'menu', newName: '', note: '', ack: false, model: '', error: '', view: null })
-    const opsAcp = computed(() => acpSwitchChoices(opsFriend.value))   // 內建通道工作者的型號清單（Gemini 有、Grok 沒有＝手動輸入），跟電腦版同一份
+    const opsAcp = computed(() => acpSwitchChoices(opsFriend.value, { list: phoneAcpList(opsFriend.value) }))   // 內建通道工作者的型號清單（Gemini 有、Grok 沒有＝手動輸入）；手機維持改版前的固定清單，P4 才改讀型號清單（#2355）
     const opsText = computed(() => opDialogText(ops.phase, opsFriend.value?.agent || opsFriend.value?.nick || '', opsFriend.value?.device || '', dialogEngine(opsFriend.value), { hasList: opsAcp.value.models.length > 0 }))
     const opsTitle = computed(() => (ops.phase === 'menu' ? (opsFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
     const opsModels = phoneModels(), opsModelNote = MODEL_NOTE

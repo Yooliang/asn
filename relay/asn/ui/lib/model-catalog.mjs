@@ -1,6 +1,8 @@
 // 開新夥伴 UI 用模型清單（瀏覽器可載入；勿 import Node 模組）。
 // 與 relay/shared/launcher-profiles.mjs 的 MODEL_CATALOG 保持同步（test/partner.test.mjs 會比對）。
 
+import { CLAUDE_ALIASES, CLAUDE_ALIAS_LABEL } from './remote-models.mjs'
+
 /** @typedef {'window'|'background'} LaunchMode */
 
 export const MODEL_CATALOG = [
@@ -102,51 +104,44 @@ export function customRunOptions(row) {
  * Claude 可切換的模型（對話中途換模型用；--model 接受這些別名）。
  * family 用來和啟動參數裡的 --model 比對（別名 opus、完整名稱 claude-opus-4-5、帶 [1m] 後綴都算同一家）。
  */
-export const CLAUDE_MODELS = [
-  { id: 'opus', family: 'opus', label: 'Opus' },
-  { id: 'sonnet', family: 'sonnet', label: 'Sonnet' },
-  { id: 'haiku', family: 'haiku', label: 'Haiku' },
-]
-
+const capital = s => s.charAt(0).toUpperCase() + s.slice(1)
 /**
- * Gemini（agy 內建通道）可選的型號（#539 之四）：取自 `agy models` 的輸出（2026-10-30，只取 gemini 開頭的代號與顯示名）。
- * 真正能不能用以那台 agy 為準：切換時後端會再跑一次 `agy models` 比對，清單外的會被拒絕並列出可選的。
+ * Claude 切換模型的選項（#2355 D1）：Claude CLI 沒有列型號的指令，所以只放別名（fable、opus、sonnet），別名永遠指向最新版。
+ * family 用來和啟動參數裡的 --model 比對（別名 opus、完整名稱 claude-opus-4-5、帶 [1m] 後綴都算同一家）；
+ * 不在別名裡的（例如 haiku）認不得就原樣顯示啟動參數。
  */
-export const GEMINI_MODELS = [
-  { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
-  { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
-  { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
-  { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
-  { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
-  { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
-]
+export const CLAUDE_ALIAS_MODELS = Object.freeze(CLAUDE_ALIASES.map(id => Object.freeze({ id, family: id, label: capital(id) })))
 
 /**
- * 「切換模型」與「開新夥伴選型號」共用的型號清單（#539 之四，asn真 #1556 第 4 點：兩邊是同一份）。
+ * 「切換模型」共用的型號清單（#539 之四，asn真 #1556 第 4 點：兩邊是同一份）。
  * engine：claude／pi／gemini／grok／codex…（ACP 工作者用名單上的 engine，例如 gemini）。
- * pi 沒有固定清單：傳入向 pi 查到的清單（pi-models.mjs 的 cleanPiModels 結果），原樣回傳。
- * 回 [{ id, label }]；回空陣列＝這家沒有清單，畫面退回手動輸入代號（grok、codex 目前如此）。
+ * 只有 Claude 有固定的別名清單；pi 沒有固定清單：傳入向 pi 查到的清單（pi-models.mjs 的 cleanPiModels 結果），原樣回傳。
+ * Gemini（agy）的清單改向本機讀（remote-models.mjs 的 modelState，#2355），這裡回空陣列。
+ * 回 [{ id, label }]；回空陣列＝這裡沒有清單，畫面退回手動輸入代號（grok、codex 目前如此）。
  */
 export function switchModelsFor(engine, { piModels = null } = {}) {
   switch (String(engine ?? '').toLowerCase()) {
-    case 'claude': return CLAUDE_MODELS
-    case 'gemini': return GEMINI_MODELS
+    case 'claude': return CLAUDE_ALIAS_MODELS
     case 'pi': return Array.isArray(piModels) ? piModels : []
     default: return []
   }
 }
 
 /**
- * 開新夥伴第 2 頁「型號」（#539 之四）：選完廠牌與運行後，這家有清單才出現（預設＝不指定，照原本的開法）。
- * 只有開在這台電腦才能選（遠端開帶型號要改後台開窗表，還沒做）；Claude 只在開成視窗時帶 --model，Gemini 只在內建通道時記下型號。
+ * 開新夥伴第 2 頁「型號」（#539 之四、#2355）：選完廠牌與運行後，這家有清單才出現（預設＝不指定，照原本的開法）。
+ * 只有開在這台電腦才能選（別台要改後台開窗表，是 #2355 P4）；呼叫端自己判斷是不是這台，這裡不看。
+ * Claude 只在開成視窗時帶 --model，清單是別名；Gemini 只在內建通道時記下型號，清單向本機讀。
  * 跟後端 launch_model_plan（launch/local.rs）同一個判斷：內建通道（背景）照記；開成視窗只認 profile 明寫 engine "claude"，
- * 沒寫 engine 的自訂 profile 後端會回錯誤，所以不出下拉。engine＝這次要用的 profile 的 engine（partner-launch-ui.mjs 的 localProfileEngine）。
- * 回 { show, models }。
+ * 沒寫 engine 的自訂 profile 後端會回錯誤，所以不出下拉，改寫一句說明。engine＝這次要用的 profile 的 engine（partner-launch-ui.mjs 的 localProfileEngine）。
+ * 回 { show, kind: 'aliases'|'list'|'', vendor, models, note }；kind 'list' 的清單要向本機讀（vendor 是 agent_models 的廠牌），models 先給空的。
  */
 export const LAUNCH_MODEL_RUN = { claude: 'term', gemini: 'acp' }
+export const NO_ENGINE_NOTE = '這個啟動設定沒有寫明是哪一家，不能指定型號'
 const engineAccepts = (run, engine) => run === 'acp' || engine === 'claude'
-export function launchModelChoices(vendorId, run, { local = false, engine = '' } = {}) {
-  const models = switchModelsFor(vendorId)
-  const ok = local && models.length > 0 && LAUNCH_MODEL_RUN[vendorId] === run && engineAccepts(run, engine)
-  return { show: ok, models: ok ? models : [] }
+export function launchModelChoices(vendorId, run, { engine = '' } = {}) {
+  const none = { show: false, kind: '', vendor: '', models: [], note: '' }
+  if (LAUNCH_MODEL_RUN[vendorId] !== run) return none
+  if (!engineAccepts(run, engine)) return engine === '' ? { ...none, note: NO_ENGINE_NOTE } : none
+  if (vendorId === 'claude') return { show: true, kind: 'aliases', vendor: '', models: CLAUDE_ALIAS_MODELS.map(m => ({ id: m.id, label: `${m.label}・${CLAUDE_ALIAS_LABEL}` })), note: '' }
+  return { show: true, kind: 'list', vendor: vendorId, models: [], note: '' }
 }
