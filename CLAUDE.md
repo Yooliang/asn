@@ -15,5 +15,5 @@
 - `relay/machine`、`relay/cloud-agent` 的程式會在 Linux 上跑，檔案一律 LF（見 `.gitattributes`）。
 - 改動先跑對應資料夾的測試（指令見 README）。
 - 不用整批 taskkill；只關自己啟動並記下 PID 的程序。
-- 開 PR 一律掛要進的版本里程碑（`gh pr create --milestone 0.2.x`），不確定進哪一版就問 asn真；版號由 asn真 統一改；發版照里程碑清點，沒掛的不進。
+- 合進 main 就進下一版，PR 不掛里程碑；版號由 asn真 統一改。
 - PR 不夾帶：跟這次無關的改動各開一張。
