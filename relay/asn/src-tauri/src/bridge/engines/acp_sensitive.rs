@@ -108,32 +108,6 @@ pub enum ReadVerdict {
     Unresolvable,
 }
 
-/// 要算敏感根的家目錄：工作者環境裡的 USERPROFILE 與 HOME（兩個都算，沒有就不算）＋這台電腦實際的使用者資料夾（real_home，測試傳 None）
-pub fn homes_from(env: &[(String, String)], real_home: Option<PathBuf>) -> Vec<PathBuf> {
-    let get = |n: &str| env.iter().find(|(k, v)| k.eq_ignore_ascii_case(n) && !v.trim().is_empty()).map(|(_, v)| PathBuf::from(v));
-    let mut out: Vec<PathBuf> = vec![];
-    for h in [get("USERPROFILE"), get("HOME"), real_home].into_iter().flatten().filter(|h| !h.as_os_str().is_empty()) {
-        if !out.contains(&h) {
-            out.push(h);
-        }
-    }
-    out
-}
-
-/// 工作者建立時算敏感清單的正式做法（Worker::new 呼叫，測試也直接呼叫）：
-/// 家目錄＝環境裡的 USERPROFILE、HOME 加上這台電腦實際的；環境變數只帶名字不像金鑰的（展開變數與環境變數指定的位置用）
-pub fn roots_for_worker(env: &[(String, String)], real_home: PathBuf) -> SensitiveRoots {
-    let safe: Vec<(String, String)> = env
-        .iter()
-        .filter(|(k, _)| {
-            let u = k.to_uppercase();
-            !["KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"].iter().any(|w| u.contains(w))
-        })
-        .cloned()
-        .collect();
-    SensitiveRoots::build(&homes_from(env, Some(real_home)), &safe)
-}
-
 /// 敏感根清單。啟動時算好（每個家目錄各算一次，字面與實際位置兩種形式），之後每次請求只比字串
 #[derive(Clone)]
 pub struct SensitiveRoots {
@@ -147,6 +121,8 @@ pub struct SensitiveRoots {
     homes: Vec<String>,
     home_paths: Vec<PathBuf>,
     brains: Vec<PathBuf>,
+    /// 明確放行的資料夾（已正規化）：自己的工作資料夾、附件下載資料夾、agy 的內建說明檔。見 exempt.rs
+    exempt_dirs: Vec<String>,
     env: Vec<(String, String)>,
     canon: Canon,
 }
@@ -240,6 +216,7 @@ impl SensitiveRoots {
             homes: home_strs,
             home_paths: homes.to_vec(),
             brains: homes.iter().map(|h| agy_brain(h)).collect(),
+            exempt_dirs: vec![],
             env: env.to_vec(),
             canon,
         }
@@ -692,7 +669,7 @@ pub fn read_verdict(path_raw: &str, ctx: &ReadCtx) -> ReadVerdict {
         literals.push(nstr(&folded.to_string_lossy()));
         literals.push(nstr(&joined.to_string_lossy()));
         for (f, may_exempt) in &forms {
-            if hits(f, tool, roots) && !(*may_exempt && exempt_brain(f, roots, ctx.base, tool)) {
+            if hits(f, tool, roots) && !(*may_exempt && (roots.exempt(f) || exempt_brain(f, roots, ctx.base, tool))) {
                 return ReadVerdict::Sensitive;
             }
         }
@@ -764,7 +741,7 @@ fn walk(v: &Value, under_key: bool, out: &mut Vec<String>, depth: usize) {
         Value::Object(m) => m.iter().for_each(|(k, x)| {
             // 指令與程式碼欄位是整段命令，不是路徑，路徑判定管不到（敏感清單不是邊界）
             let l = k.to_lowercase();
-            if key_is_path(k) || !(l.contains("command") || l == "cmd" || l.contains("script")) {
+            if key_is_path(k) || !matches!(l.as_str(), "command" | "commandline" | "command_line" | "commands" | "cmd" | "script" | "scripts" | "scriptblock" | "script_block") {
                 walk(x, under_key || key_is_path(k), out, depth)
             }
         }),
@@ -791,6 +768,10 @@ pub fn param_keys(params: &Value) -> Vec<String> {
     }
 }
 
+mod exempt;
+pub use exempt::{homes_from, roots_for_worker, ATTACHMENTS_READABLE};
+#[cfg(test)]
+pub use exempt::env_without_homes;
 mod fragments;
 mod jsonstr;
 use jsonstr::{container_like, json_container};

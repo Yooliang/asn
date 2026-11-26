@@ -456,6 +456,7 @@ fn make_worker_with(ctx: &EngineCtx, approvals: &Arc<Approvals>, make_driver: &M
         pids: ctx.pids.clone(),
         handoff_dir: ctx.handoff_dir.clone(),
         work_dir: ctx.work_dir.clone(),
+        real_home: ctx.home.clone(),
     })
 }
 

@@ -3,7 +3,7 @@
 use super::acp_approvals::{ask_text, Answer, Approvals, Target};
 use super::acp_config::{NotifyTo, WorkerCfg};
 use super::acp_policy::{category_label, decide, inside_agy_conv_dir, is_network_error, paths_block_reason, read_block_reason, redact, upstream_5xx, Req, Verdict, WorkerError, NO_READ_PATH_NOTE};
-use super::acp_sensitive::{homes_from, roots_for_worker, ReadVerdict, SensitiveRoots};
+use super::acp_sensitive::{roots_for_worker, ReadVerdict};
 use super::rpc::Log;
 use super::{BoxFut, EngineEvent, EventTx, Notice, Notifier, PidBook};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -331,6 +331,8 @@ pub struct WorkerInit {
     pub handoff_dir: Option<std::path::PathBuf>,
     /// 機器工作資料夾：「這封開始處理了」的記號放這裡（channel_turns，#828）
     pub work_dir: std::path::PathBuf,
+    /// 這台電腦實際的使用者資料夾（敏感位置清單要算進去）。正式由引擎環境給（identity::home_dir()），測試給假的
+    pub real_home: std::path::PathBuf,
     /// 型號是佇列項目帶來的：等驅動用這個型號啟動成功之後，把型號記進這個檔案（acp-models.json）；None＝不用記
     pub record_model_on_start: Option<std::path::PathBuf>,
 }
@@ -345,20 +347,12 @@ pub type WorkerHandle = Arc<Worker>;
 
 impl Worker {
     pub fn new(mut i: WorkerInit) -> WorkerHandle {
-        // 讀取的敏感位置清單：啟動時用兩個家目錄（工作者環境的、這台電腦實際的）算好，放進政策（#2356）。測試不碰真的使用者資料夾
-        if i.cfg.permissions.sensitive.is_none() {
-            // 單元測試只認暫存資料夾底下的假家目錄、不帶環境變數，絕不去碰測試機上真的使用者資料夾；正式做法在 roots_for_worker（有自己的測試）
-            let roots = if cfg!(test) {
-                let tmp = std::env::temp_dir();
-                let homes = homes_from(&i.env, None).into_iter().filter(|h| h.starts_with(&tmp)).collect::<Vec<_>>();
-                SensitiveRoots::build(&homes, &[])
-            } else {
-                roots_for_worker(&i.env, crate::identity::home_dir())
-            };
-            let mut c = (*i.cfg).clone();
-            c.permissions.sensitive = Some(Arc::new(roots));
-            i.cfg = Arc::new(c);
-        }
+        // 讀取的敏感位置清單：啟動時用兩個家目錄（工作者環境的、real_home）加上這位的工作資料夾算好，放進政策（#2356）。
+        // 一律重算（接手等會換 cwd）；正式與測試走同一條路，差別只在 real_home 由呼叫端給
+        let roots = roots_for_worker(&i.env, i.real_home.clone(), &i.cfg.cwd, &i.work_dir);
+        let mut c = (*i.cfg).clone();
+        c.permissions.sensitive = Some(Arc::new(roots));
+        i.cfg = Arc::new(c);
         let need = i.store.get(&i.cfg).is_empty();
         Arc::new(Worker {
             st: Mutex::new(St {
