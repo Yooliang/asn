@@ -234,3 +234,12 @@ test('接線：older／attach-done 的退訂在 done／finish 裡同步 off()（
   assert.ok(/const finish = r => \{[^}]*\boff\(\)/.test(chat), 'attach 的 finish 會 off()')
   assert.ok(!/\bun\b\s*=|if \(un\)/.test(chat), '舊的 un 變數整段刪掉')
 })
+
+test('接線：panel 的視窗大小監聽掛在 await readyFor 之前（掛載到就緒之間調整大小不漏記）', () => {
+  const js = read('panel.js')
+  const iMounted = js.indexOf('onMounted(async () => {')
+  const iResize = js.indexOf("window.addEventListener('resize'", iMounted)
+  const iReady = js.indexOf('await eventHub.readyFor(', iMounted)
+  assert.ok(iMounted >= 0 && iResize >= 0 && iReady >= 0, `三段都要找得到：${iMounted} ${iResize} ${iReady}`)
+  assert.ok(iResize < iReady, 'resize 監聽要在 await readyFor 之前')
+})
