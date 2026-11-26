@@ -10,7 +10,8 @@ import { CAT_NEEDS, ITEM_NEEDS, catsFor, settingNeeds } from '../ui/lib/setting-
 import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
 import { MOBILE_SETTING_KEYS } from '../ui/lib/mobile-settings.mjs'
 
-const NAMES = ['tray', 'windowFrame', 'autostart', 'guard', 'bridge', 'voice', 'launch', 'usage', 'push', 'phoneUpdate', 'vibrate', 'toast', 'windowMode', 'quotaReader', 'taskManager']
+// 11-26 依調查員審查定案，之後不改（#1853 會引用）
+const NAMES = ['tray', 'desktopWindow', 'autostart', 'guard', 'bridge', 'localSpeech', 'hostAgents', 'claudeLocalLogs', 'push', 'shellSelfUpdate', 'vibrate', 'desktopToast', 'quotaReader', 'taskManager']
 const catKeys = SETTING_CATS.map(c => c.key)
 const src = f => readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8')
 
@@ -27,10 +28,10 @@ test('能力名稱快照：能力名稱定了不能改，#1853 會引用', () =>
 })
 
 test('電腦與手機的能力互補（這幾個本來就一邊有一邊沒有），網頁先全部沒有', () => {
-  for (const k of ['tray', 'windowFrame', 'autostart', 'guard', 'bridge', 'voice', 'launch', 'usage', 'toast', 'windowMode', 'quotaReader', 'taskManager']) {
+  for (const k of ['tray', 'desktopWindow', 'autostart', 'guard', 'bridge', 'localSpeech', 'hostAgents', 'claudeLocalLogs', 'desktopToast', 'quotaReader', 'taskManager']) {
     assert.equal(capsDesktop[k], true, `電腦 ${k}`); assert.equal(capsAndroid[k], false, `手機 ${k}`)
   }
-  for (const k of ['push', 'phoneUpdate', 'vibrate']) {
+  for (const k of ['push', 'shellSelfUpdate', 'vibrate']) {
     assert.equal(capsDesktop[k], false, `電腦 ${k}`); assert.equal(capsAndroid[k], true, `手機 ${k}`)
   }
   assert.ok(Object.values(capsWeb).every(v => v === false))
@@ -50,7 +51,8 @@ test('needs 裡出現的每個能力名稱都在表裡；類別層每一類都�
     for (const n of needs) assert.ok(n in capsDesktop, `${token} 需要的「${n}」不在能力表裡`)
   }
   assert.deepEqual(Object.keys(CAT_NEEDS), catKeys.map(k => `cat.${k}`), '類別層要跟 SETTING_CATS 同一組、同順序')
-  assert.deepEqual(settingNeeds('cat.window'), ['tray', 'windowFrame'])
+  assert.deepEqual(settingNeeds('cat.window'), ['tray', 'desktopWindow'])
+  for (const t of ['mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim']) assert.deepEqual(settingNeeds(t), [], `${t} 是設計選擇，不放進能力表`)
   assert.deepEqual(settingNeeds('不存在的指令'), [])
 })
 
