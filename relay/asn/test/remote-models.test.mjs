@@ -2,7 +2,7 @@
 import { test, mock, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CLAUDE_ALIASES, CLAUDE_ALIAS_LABEL, CODE_TEXT, NONE_TEXT, PENDING_TEXT, PENDING_TIMEOUT_MS, UNKNOWN_FAILURE_TEXT, codeText, modelState } from '../ui/lib/remote-models.mjs'
+import { CLAUDE_ALIASES, CLAUDE_ALIAS_LABEL, CODE_TEXT, NONE_TEXT, NONE_TEXT_LOCAL, PENDING_TEXT, PENDING_TIMEOUT_MS, UNKNOWN_FAILURE_TEXT, codeText, modelState } from '../ui/lib/remote-models.mjs'
 
 const logs = []
 mock.method(console, 'info', (...a) => { logs.push(a.join(' ')) })
@@ -15,7 +15,11 @@ test('沒有 models（舊電腦／舊後台）→ none，不能重試', () => {
   for (const s of [null, undefined, {}, { models: null }, { models: 'x' }]) {
     const r = modelState(s, 'gemini')
     assert.equal(r.state, 'none'); assert.equal(r.note, NONE_TEXT); assert.equal(r.canRetry, false); assert.deepEqual(r.models, [])
+    assert.equal(modelState(s, 'gemini', { where: 'remote' }).note, NONE_TEXT)
   }
+  const l = modelState(null, 'gemini', { where: 'local' })
+  assert.equal(l.state, 'none'); assert.equal(l.note, NONE_TEXT_LOCAL); assert.ok(!l.note.includes('那台'))
+  assert.ok(NONE_TEXT.includes('那台電腦'))
 })
 
 test('摘要裡沒有這家廠牌 → unavailable（與 none 分開）', () => {
@@ -70,7 +74,7 @@ test('pending 超過 10 分鐘（以 launcher_at 為準）→ unavailable；剛�
   const at = Date.parse('2026-11-26T10:00:00Z')
   assert.equal(modelState(s, 'gemini', { launcherAt: at, now: at + PENDING_TIMEOUT_MS }).state, 'pending')
   const late = modelState(s, 'gemini', { launcherAt: '2026-11-26T10:00:00Z', now: new Date(at + PENDING_TIMEOUT_MS + 1) })
-  assert.equal(late.state, 'unavailable'); assert.equal(late.note, `${UNKNOWN_FAILURE_TEXT}：${CODE_TEXT.timeout}`); assert.equal(late.canRetry, true)
+  assert.equal(late.state, 'unavailable'); assert.equal(late.note, `${UNKNOWN_FAILURE_TEXT}：${CODE_TEXT.timeout.remote}`); assert.equal(late.canRetry, true)
   assert.equal(modelState(s, 'gemini', { launcherAt: 'garbage', now: at + 9e9 }).state, 'pending')
 })
 
@@ -84,7 +88,22 @@ test('unavailable／error：每個代碼都有白話，廠牌名換進去，代�
       assert.ok(!r.note.includes(code === 'ok' ? '\u0000' : code))
     }
   }
-  assert.equal(modelState(src({ vendor: 'gemini', status: 'unavailable', code: 'not_installed', models: [] }), 'gemini').note, '讀不到型號清單：這台電腦沒有安裝 Gemini')
+  const st = (code, where) => modelState(src({ vendor: 'gemini', status: 'unavailable', code, models: [] }), 'gemini', where === undefined ? {} : { where }).note
+  // 提到電腦的代碼：本機說「這台電腦」、別台說「那台電腦」，兩種各測；不傳 where 等同別台
+  assert.equal(st('not_installed', 'local'), '讀不到型號清單：這台電腦沒有安裝 Gemini')
+  assert.equal(st('not_installed', 'remote'), '讀不到型號清單：那台電腦沒有安裝 Gemini')
+  assert.equal(st('not_installed'), st('not_installed', 'remote'))
+  assert.equal(st('not_logged_in', 'local'), '讀不到型號清單：Gemini 還沒登入（登入後再試）')
+  assert.equal(st('not_logged_in', 'remote'), '讀不到型號清單：Gemini 還沒登入（到那台電腦登入後再試）')
+  assert.equal(st('not_logged_in'), st('not_logged_in', 'remote'))
+  // 每個代碼：local 句不含「那台」；說到電腦的 remote 句不含「這台」
+  for (const code of Object.keys(CODE_TEXT)) {
+    assert.ok(!codeText(code, 'X', 'local').includes('那台'), code)
+    assert.ok(!codeText(code, 'X', 'remote').includes('這台'), code)
+    assert.equal(codeText(code, 'X'), codeText(code, 'X', 'remote'))
+  }
+  // pending 逾時、清單是空的，兩種 where 都走到同一套（不說錯台）
+  assert.equal(codeText('__proto__', 'X', 'local'), UNKNOWN_FAILURE_TEXT)
   assert.equal(modelState(src({ vendor: 'pi', status: 'error', code: 'spawn_failed', models: [] }), 'pi').note, '讀不到型號清單：讀取失敗')
   assert.equal(modelState(src({ vendor: 'gemini', status: 'error', code: 'zzz', models: [] }), 'gemini').note, UNKNOWN_FAILURE_TEXT)
   assert.equal(modelState(src({ vendor: 'gemini', status: 'error', models: [] }), 'gemini').note, UNKNOWN_FAILURE_TEXT)
@@ -115,7 +134,9 @@ test('CODE_TEXT：鍵＝Rust Code 的 8 個值（讀原始碼守門）', () => {
   const codes = [...body.matchAll(/Code::\w+ => "([a-z_]+)"/g)].map(m => m[1])
   assert.equal(codes.length, 8)
   assert.deepEqual(Object.keys(CODE_TEXT).sort(), [...codes].sort())
-  assert.equal(CODE_TEXT.spawn_failed, '讀取失敗')
+  for (const k of codes) assert.deepEqual(Object.keys(CODE_TEXT[k]).sort(), ['local', 'remote'], k)
+  assert.equal(CODE_TEXT.spawn_failed.local, '讀取失敗')
+  assert.equal(CODE_TEXT.spawn_failed.remote, '讀取失敗')
 })
 
 test('Claude 別名：與 claude --help 的 --model 說明（fixture）完全一致，順序也一樣', () => {

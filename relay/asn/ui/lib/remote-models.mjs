@@ -15,24 +15,28 @@ export const CLAUDE_ALIAS_LABEL = '別名（最新版）'
 export const PENDING_TIMEOUT_MS = 10 * 60 * 1000
 
 /**
- * 固定代碼 → 白話。鍵必須等於 Rust 端 `Code` 的全部值（test/remote-models.test.mjs 讀原始碼守門）。
- * {廠牌} 由 codeText 換成廠牌名稱。
+ * 固定代碼 → 白話，每個代碼分 local（本機，說「這台電腦」）與 remote（別台，說「那台電腦」）兩句。
+ * 鍵必須等於 Rust 端 `Code` 的全部值（test/remote-models.test.mjs 讀原始碼守門）。
+ * {廠牌} 由 codeText 換成廠牌名稱。不提到電腦的代碼兩句相同。
  */
+const same = (s) => Object.freeze({ local: s, remote: s })
 export const CODE_TEXT = Object.freeze({
-  ok: '沒有可選的型號',
-  not_installed: '這台電腦沒有安裝 {廠牌}',
-  not_logged_in: '{廠牌} 還沒登入（到那台電腦登入後再試）',
-  timeout: '讀取逾時，請稍後重試',
-  spawn_failed: '讀取失敗',
-  too_large: '型號太多，放不進回報（清單不完整）',
-  parse_failed: '讀到了但看不懂格式（版本太新或太舊）',
-  unsupported: '這家沒有提供型號清單',
+  ok: same('沒有可選的型號'),
+  not_installed: Object.freeze({ local: '這台電腦沒有安裝 {廠牌}', remote: '那台電腦沒有安裝 {廠牌}' }),
+  not_logged_in: Object.freeze({ local: '{廠牌} 還沒登入（登入後再試）', remote: '{廠牌} 還沒登入（到那台電腦登入後再試）' }),
+  timeout: same('讀取逾時，請稍後重試'),
+  spawn_failed: same('讀取失敗'),
+  too_large: same('型號太多，放不進回報（清單不完整）'),
+  parse_failed: same('讀到了但看不懂格式（版本太新或太舊）'),
+  unsupported: same('這家沒有提供型號清單'),
 })
 
 /** 不認得的代碼（或沒有代碼）時的整句 */
 export const UNKNOWN_FAILURE_TEXT = '讀不到型號清單'
-/** 那台電腦沒有回報 models（舊版 ASN／舊後台） */
+/** 別台電腦沒有回報 models（舊版 ASN／舊後台）。只會出現在別台 */
 export const NONE_TEXT = '那台電腦的 ASN 版本較舊，不能選型號，請先更新'
+/** 本機沒有回報 models（正常不會發生；保險用，同樣不說「那台」） */
+export const NONE_TEXT_LOCAL = '這台電腦沒有回報型號清單，請先更新 ASN'
 export const PENDING_TEXT = '正在讀取型號清單…'
 
 const VENDOR_LABEL = Object.freeze({ claude: 'Claude', codex: 'Codex', gemini: 'Gemini', pi: 'pi', grok: 'Grok' })
@@ -44,15 +48,19 @@ const VENDOR_LABEL = Object.freeze({ claude: 'Claude', codex: 'Codex', gemini: '
  */
 const NARROW_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
 
-/** CODE_TEXT 的某一句（換上廠牌名稱）；不認得的代碼回 UNKNOWN_FAILURE_TEXT */
-export function codeText(code, vendorLabel = '') {
-  const t = typeof code === 'string' && Object.prototype.hasOwnProperty.call(CODE_TEXT, code) ? CODE_TEXT[code] : ''
+/**
+ * CODE_TEXT 的某一句（換上廠牌名稱）；不認得的代碼回 UNKNOWN_FAILURE_TEXT。
+ * where：'local'（本機）或 'remote'（別台，預設）；其他值當 remote。
+ */
+export function codeText(code, vendorLabel = '', where = 'remote') {
+  const e = typeof code === 'string' && Object.prototype.hasOwnProperty.call(CODE_TEXT, code) ? CODE_TEXT[code] : null
+  const t = e ? (where === 'local' ? e.local : e.remote) : ''
   return t ? t.replaceAll('{廠牌}', vendorLabel || '這個工具') : UNKNOWN_FAILURE_TEXT
 }
 
 /** 「讀不到型號清單：{白話原因}」；代碼不認得就只有前半句 */
-function failNote(code, label) {
-  const t = codeText(code, label)
+function failNote(code, label, where) {
+  const t = codeText(code, label, where)
   return t === UNKNOWN_FAILURE_TEXT ? t : `${UNKNOWN_FAILURE_TEXT}：${t}`
 }
 
@@ -93,14 +101,16 @@ function unavailable(note, canRetry = true) { return result('unavailable', [], n
 /**
  * 某廠牌的型號清單 → 畫面狀態。
  * source：launcher（別台，有 models 陣列）或本機命令的回應（同一個形狀）；沒有 models 陣列＝none。
- * ctx：{ now, launcherAt, vendorLabel, narrow }
+ * ctx：{ now, launcherAt, vendorLabel, narrow, where }
+ *   where：'local'（本機，文案說「這台電腦」）或 'remote'（別台，預設，說「那台電腦」）。
  *   now／launcherAt：毫秒數、Date 或 ISO 字串；pending 超過 PENDING_TIMEOUT_MS（以 launcherAt 為準）就當 unavailable。沒給 launcherAt（本機）就不判斷。
  *   narrow：true 時濾掉窄規則不收的型號（#2387 修好前用），被濾掉的筆數寫一行 console.info（只有廠牌與筆數）。
  * 回 { state: 'ready'|'stale'|'pending'|'unavailable'|'none', models: [{ id, label }], note, canRetry }；note 是給使用者看的白話。
  */
 export function modelState(source, vendorId, ctx = {}) {
   const list = source?.models
-  if (!Array.isArray(list)) return result('none', [], NONE_TEXT, false)
+  const where = ctx.where === 'local' ? 'local' : 'remote'
+  if (!Array.isArray(list)) return result('none', [], where === 'local' ? NONE_TEXT_LOCAL : NONE_TEXT, false)
   const label = ctx.vendorLabel || VENDOR_LABEL[vendorId] || String(vendorId ?? '')
   const entry = list.find(e => e && e.vendor === vendorId)
   if (!entry) {
@@ -113,7 +123,7 @@ export function modelState(source, vendorId, ctx = {}) {
     const at = toMs(ctx.launcherAt), now = toMs(ctx.now)
     if (Number.isFinite(at) && Number.isFinite(now) && now - at > PENDING_TIMEOUT_MS) {
       console.info('[型號清單]', vendorId, 'pending 太久，當成讀不到')
-      return unavailable(failNote('timeout', label))
+      return unavailable(failNote('timeout', label, where))
     }
     return result('pending', [], PENDING_TEXT, false)
   }
@@ -122,7 +132,7 @@ export function modelState(source, vendorId, ctx = {}) {
     const { models, dropped, narrowed } = cleanModels(entry.models, ctx.narrow === true)
     if (dropped) console.info('[型號清單]', vendorId, `有 ${dropped} 筆格式不正確，已略過`)
     if (narrowed) console.info(`[型號清單] ${vendorId} 有 ${narrowed} 筆因切換模型的格式限制先不列出`)
-    if (!models.length) return unavailable(failNote('ok', label))
+    if (!models.length) return unavailable(failNote('ok', label, where))
     if (entry.stale === true) {
       console.info('[型號清單]', vendorId, '沿用上次的清單', code)
       return result('stale', models, staleNote(entry.age_s), true)
@@ -132,7 +142,7 @@ export function modelState(source, vendorId, ctx = {}) {
 
   if (status === 'unavailable' || status === 'error') {
     console.info('[型號清單]', vendorId, status, code)
-    return unavailable(failNote(code, label))
+    return unavailable(failNote(code, label, where))
   }
 
   console.info('[型號清單]', vendorId, '不認得的狀態', status)
