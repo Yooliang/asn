@@ -280,7 +280,8 @@ pub fn inside_agy_conv_dir(paths: &[String], brain: &Path, base: &Path) -> bool 
             let (Some(id), Some(first)) = (parts.next(), parts.next()) else { return false };
             // Windows 會吃掉名字尾巴的點與空白（`.system_generated.` 開到同一個資料夾），先去掉再比
             let first = first.trim_end_matches(['.', ' ']);
-            valid_conv_id(id) && !first.is_empty() && !first.eq_ignore_ascii_case(".system_generated")        })
+            valid_conv_id(id) && !first.is_empty() && !first.eq_ignore_ascii_case(".system_generated")
+        })
 }
 
 /// 使用者資料夾底下放登入資料、金鑰、對話記錄的地方：寫到這些地方算真的越權，整輪中止，不給它換位置再試（#608）
