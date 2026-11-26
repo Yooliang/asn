@@ -107,7 +107,7 @@ pub fn protocol_and_roster(profile_id: &str) -> (&'static str, &'static str) {
     }
 }
 
-/// 驗證請求並組出工作者設定。權限見 [`permissions_for`]（Gemini 讀寫執行都放行，其他引擎只放行讀與上網）
+/// 驗證請求並組出工作者設定。權限見 [`permissions_for`]（不分廠牌，讀、寫、執行、上網都放行，其他拒絕）
 pub fn build_cfg(env: &dyn QueueEnv, req: &Req, work_dir: &Path) -> Result<WorkerCfg, String> {
     let config = env.config().map_err(|e| format!("啟動設定不可用：{e}"))?;
     let mut lr = LaunchReq { profile: &req.profile, name: &req.name, cwd: req.cwd.clone() };

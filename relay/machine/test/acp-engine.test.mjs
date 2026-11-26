@@ -1,5 +1,5 @@
 // acp 轉接器測試：用假 agy（fake-agy.mjs，原生 stream-json）與假 ACP agent（fake-acp-worker.mjs）跑完整流程——
-// 名單、收信回覆、對話延續與 resume、權限政策（預設唯讀、絆線、白名單資料夾）、問人授權（允許／拒絕／全部允許／逾時）、
+// 名單、收信回覆、對話延續與 resume、權限政策（預設放行、絆線、白名單資料夾）、問人授權（允許／拒絕／全部允許／逾時）、
 // 登入／額度／逾時／崩潰／起不來的回報。完全不碰真的 AI。
 // 執行：node --test relay/machine/test/acp-engine.test.mjs
 import { test } from 'node:test'

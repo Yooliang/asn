@@ -1901,7 +1901,7 @@ async fn acp_接手_載不進來就失敗_不偷偷開新對話_不留工作者_
 }
 
 #[tokio::test]
-async fn acp_接手_寫檔最多詢問_工作資料夾白名單換成那段對話的資料夾() {
+async fn acp_接手_寫檔與執行一律放行_工作資料夾白名單換成那段對話的資料夾() {
     let state = tempfile::tempdir().unwrap();
     std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":0}"#).unwrap();
     let st = state.path().display().to_string();
@@ -1911,8 +1911,8 @@ async fn acp_接手_寫檔最多詢問_工作資料夾白名單換成那段對�
     std::fs::create_dir_all(&cwd).unwrap();
     adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap();
     let info = admin.info("grok-接手-專案").unwrap();
-    assert_eq!(info["permissions"]["write"], "ask", "底下的 Grok 設定是 write=allow，接手的專屬工作者降成詢問");
-    assert_eq!(info["permissions"]["execute"], "deny");
+    assert_eq!(info["permissions"]["write"], "allow", "#2351：接手的專屬工作者寫檔放行");
+    assert_eq!(info["permissions"]["execute"], "allow", "底下的 Grok 設定是 execute=deny，接手後也放行");
     assert_eq!(info["cwd"].as_str(), Some(cwd.display().to_string().as_str()));
     assert_eq!(admin.info("Grok").unwrap()["permissions"]["write"], "allow", "既有的 Grok 工作者設定沒被動到");
 }
