@@ -170,7 +170,8 @@ export const RemoteInput = {
           drawFrame(f)
         })
         offEnd = props.eventHub.subscribe(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
-        await props.eventHub.readyFor([FRAME_EVENT, END_EVENT])   // 註冊失敗會丟錯，接到下面的 catch → inputStartError
+        // 註冊失敗會丟錯，接到下面的 catch → inputStartError；等的期間已經卸載／換了一次就不管結果（不印、不 finish 已卸載的元件）
+        try { await props.eventHub.readyFor([FRAME_EVENT, END_EVENT]) } catch (e) { if (!current()) return; throw e }
         if (!current()) return
         // 手機的 start 先等本人確認（生物辨識）：確認回來時這個畫面已經收掉就不送（電腦版不看第四個參數）
         const r = await props.api.start(props.node, props.name, props.machine, { wanted: current })

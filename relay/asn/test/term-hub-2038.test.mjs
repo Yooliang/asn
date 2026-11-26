@@ -25,7 +25,9 @@ globalThis.Terminal = class {
 }
 globalThis.document ??= { addEventListener() {}, removeEventListener() {}, visibilityState: 'visible' }
 const { createTermViewSession } = await import('../ui/lib/term-view.mjs')
-const { RemoteView, FRAME_EVENT, END_EVENT } = await import('../ui/lib/term-remote.mjs')
+const { RemoteView, FRAME_EVENT, END_EVENT, REMOTE_TEXT } = await import('../ui/lib/term-remote.mjs')
+// 順序守門退化（拿掉 await readyFor）時，有幾支會一直等而不是紅：給逾時，CI 才不會卡住
+const GUARD_TIMEOUT = { timeout: 15_000 }
 const { RemoteInput } = await import('../ui/lib/term-remote-input.mjs')
 
 const read = rel => fs.readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
@@ -106,7 +108,7 @@ test('順序守門：工作階段要等三個底層監聽都註冊完才 open（
   s.stop()
 })
 
-test('順序守門：看別台、別台打字都要等底層註冊完才發起', async () => {
+test('順序守門：看別台、別台打字都要等底層註冊完才發起', GUARD_TIMEOUT, async () => {
   for (const Comp of [RemoteView, RemoteInput]) {
     const rh = rigHub({ gated: true }), r = remoteApi(rh)
     const v = mountComp(Comp, rh, r.api)
@@ -137,7 +139,7 @@ test('順序守門（本機畫面）：底層註冊慢，open 時 Rust 立刻送
   s.stop()
 })
 
-test('順序守門（看別台）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「正在看」', async () => {
+test('順序守門（看別台）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「正在看」', GUARD_TIMEOUT, async () => {
   const rh = rigHub({ gated: true })
   const api = {
     start: async () => { setTimeout(() => rh.fire(FRAME_EVENT, { id: 'r1', text: '別台的畫面', meta: { cols: 80, rows: 24 } }), 30); return { id: 'r1', expires_s: Math.floor(Date.now() / 1000) + 600 } },
@@ -151,7 +153,7 @@ test('順序守門（看別台）：底層註冊慢，發起後 Rust 送出的�
   v.unmount()
 })
 
-test('順序守門（別台打字）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「可以打字」', async () => {
+test('順序守門（別台打字）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「可以打字」', GUARD_TIMEOUT, async () => {
   const rh = rigHub({ gated: true })
   const api = {
     start: async () => { setTimeout(() => rh.fire(FRAME_EVENT, { id: 'r1', text: '打字那台的畫面', meta: { cols: 80, rows: 24 } }), 30); return { id: 'r1', expires_s: Math.floor(Date.now() / 1000) + 600 } },
@@ -335,16 +337,46 @@ test('底層註冊失敗：本機畫面走 lost、不 open（錯誤路徑不能�
   assert.equal(rh.liveTotal(), 0, '失敗後已訂的也退乾淨')
 })
 
-test('底層註冊失敗：看別台、別台打字顯示原本的錯誤（phase=ended、有說明），不發起', async () => {
-  for (const Comp of [RemoteView, RemoteInput]) {
-    const rh = rigHub({ failOn: [END_EVENT] }), r = remoteApi(rh)
-    const v = mountComp(Comp, rh, r.api)
-    await until(() => v.st.phase.value === 'ended', '進到結束狀態')
-    assert.ok(String(v.st.note.value).length > 0, '畫面上有說明文字')
-    assert.equal(r.calls.filter(c => c.what === 'start').length, 0, '不發起')
-    assert.equal(rh.liveTotal(), 0)
+test('底層註冊失敗：看別台、別台打字畫面顯示白話（不是事件名或英文狀態），原文寫進 log，不發起', async () => {
+  const origInfo = console.info, logged = []
+  console.info = (...a) => { logged.push(a.map(String).join(' ')) }
+  try {
+    for (const Comp of [RemoteView, RemoteInput]) {
+      logged.length = 0
+      const rh = rigHub({ failOn: [END_EVENT] }), r = remoteApi(rh)
+      const v = mountComp(Comp, rh, r.api)
+      await until(() => v.st.phase.value === 'ended', '進到結束狀態')
+      assert.equal(v.st.note.value, REMOTE_TEXT.failed, '畫面是白話')
+      assert.ok(!/term-view|failed|[A-Za-z]{3,}/.test(v.st.note.value), '畫面不含事件名或英文')
+      assert.ok(logged.some(l => l.includes(END_EVENT)), 'log 有原文（含事件名）')
+      assert.equal(r.calls.filter(c => c.what === 'start').length, 0, '不發起')
+      assert.equal(rh.liveTotal(), 0)
+      v.unmount()
+    }
+  } finally { console.info = origInfo }
+})
+
+test('舊的寫法（不帶 code 的錯）照舊顯示原文：Rust 端回的已經是白話', async () => {
+  const { startError } = await import('../ui/lib/term-remote.mjs')
+  assert.equal(startError(new Error('那台電腦沒有回應')), '那台電腦沒有回應')
+  assert.equal(startError(''), REMOTE_TEXT.failed)
+})
+
+test('別台打字：等事件中心的期間就卸載，之後註冊失敗也不印「沒有開始」、不動已卸載的元件', async () => {
+  const origInfo = console.info, logged = []
+  console.info = (...a) => { logged.push(a.map(String).join(' ')) }
+  try {
+    const rh = rigHub({ gated: true, failOn: [END_EVENT] }), r = remoteApi(rh)
+    const v = mountComp(RemoteInput, rh, r.api)
+    await until(() => rh.hub.subscriberCount(FRAME_EVENT) === 1, '先真的訂到（還在等底層註冊）')
     v.unmount()
-  }
+    assert.equal(rh.hub.subscriberCount(FRAME_EVENT), 0, '卸載就退訂')
+    rh.release()
+    await new Promise(res => setTimeout(res, 30))
+    assert.ok(!logged.some(l => l.includes('別台打字沒有開始')), '卸載後不印')
+    assert.equal(r.calls.filter(c => c.what === 'start').length, 0)
+    assert.equal(rh.liveTotal(), 0)
+  } finally { console.info = origInfo }
 })
 
 test('兩個終端畫面用不同 view_id：各自只收到自己那幅', async () => {

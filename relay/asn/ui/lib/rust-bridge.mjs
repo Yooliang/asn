@@ -3,6 +3,10 @@
 // 這裡不碰 __TAURI__：listen 由外面注入（唯一的注入點在 tauri.mjs），形狀＝ (evt, fn) => Promise<() => void>，fn 收到的是 payload。
 const safeOff = off => { if (typeof off !== 'function') return; try { off() } catch { /* 取消失敗（視窗已關）：沒有可補救的，不影響其他事件 */ } }
 
+/** readyFor 丟的錯：訊息是給 log 的原文（含事件名與狀態），帶 code 讓畫面改顯示白話 */
+export const HUB_NOT_READY = 'hub-not-ready'
+const notReady = msg => Object.assign(new Error(msg), { code: HUB_NOT_READY })
+
 export function createRustBridge({ listen = null, dispatch, log = () => {}, warn = log }) {
   // 每個事件名一格：count＝訂閱者數；gen＝世代號（退訂就加一，讓舊的註冊結果與舊回呼失效）；state＝idle｜starting｜on｜failed
   const slots = new Map()
@@ -61,13 +65,13 @@ export function createRustBridge({ listen = null, dispatch, log = () => {}, warn
     // 只等指定的事件，而且要求它們真的註冊成功：任何一個沒有人訂閱、沒有事件通道、或 listen 失敗就丟錯（呼叫端接回自己的錯誤路徑）。
     // 空陣列、不是陣列都丟錯：空集合恆真會讓「什麼都沒等」看起來像已就緒。ready() 不受影響，照舊一定 resolve
     async readyFor(names) {
-      if (!Array.isArray(names) || names.length === 0) throw new Error('readyFor 要給至少一個事件名')
+      if (!Array.isArray(names) || names.length === 0) throw notReady('readyFor 要給至少一個事件名')
       const picked = names.map(n => [n, slots.get(n)])
       const missing = picked.filter(([, s]) => !s || s.count <= 0).map(([n]) => n)
-      if (missing.length) throw new Error(`還沒訂閱：${missing.join('、')}`)
+      if (missing.length) throw notReady(`還沒訂閱：${missing.join('、')}`)
       await Promise.all(picked.map(([, s]) => s.pending).filter(Boolean))
       const bad = picked.filter(([, s]) => s.state !== 'on')
-      if (bad.length) throw new Error(`事件沒有註冊成功：${bad.map(([n, s]) => `${n}（${s.state}${s.why ? '：' + s.why : ''}）`).join('、')}`)
+      if (bad.length) throw notReady(`事件沒有註冊成功：${bad.map(([n, s]) => `${n}（${s.state}${s.why ? '：' + s.why : ''}）`).join('、')}`)
     },
     dispose() {
       disposed = true
