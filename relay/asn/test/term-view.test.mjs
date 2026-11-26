@@ -2,26 +2,28 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { rigHub } from './helpers/rig-hub.mjs'
 import { TERM_VIEW_LATEST, createFollow, createTermViewSession, followScrollTo, followTarget, frameToWrite, latestVisible, pasteNeedsConfirm, pasteSummary, termKeyHandler, xtermOptions } from '../ui/lib/term-view.mjs'
 
 const meta = (o = {}) => ({ cursor_x: 3, cursor_y: 4, cols: 120, rows: 40, ...o })
 const frame = (view_id, seq, text = 'x', m = {}) => ({ view_id, seq, text, meta: meta(m) })
 
 function rig({ open, sendInput } = {}) {
-  const handlers = {}, calls = { closed: [], written: [], resized: [], disposed: 0, created: [], unlistened: 0, lost: [], sent: [], inputErrors: [] }
+  const rh = rigHub(), handlers = rh.handlers
+  const calls = { closed: [], written: [], resized: [], disposed: 0, created: [], get unlistened() { return rh.state.offs }, lost: [], sent: [], inputErrors: [] }
   const session = createTermViewSession({
     sendInput: sendInput ?? (async (id, data, paste) => { calls.sent.push([id, data, paste]) }),
     onInputError: e => calls.inputErrors.push(e),
     open: open ?? (async () => 7),
     close: async id => { calls.closed.push(id) },
-    listen: async (evt, fn) => { handlers[evt] = fn; return () => { calls.unlistened++ } },
+    hub: rh.hub,
     createTerm: async size => {
       calls.created.push(size)
       return { write: s => calls.written.push(s), resize: (c, r) => calls.resized.push([c, r]), dispose: () => { calls.disposed++ } }
     },
     onLost: r => calls.lost.push(r),
   })
-  return { session, handlers, calls }
+  return { session, handlers, calls, rh }
 }
 
 test('一幅畫面：清掉重畫、換行補成 CRLF、結尾不多捲一行、游標放回去', () => {
@@ -76,10 +78,12 @@ test('開好之前就到的第一幅不會掉', async () => {
 test('關掉：通知後台停讀、取消監聽、收掉 xterm，之後的畫面不畫', async () => {
   const r = rig()
   await r.session.start()
+  assert.equal(r.rh.liveTotal(), 3, '先確認真的訂到了三個底層監聽（不然「都取消」是空集合恆真）')
   r.handlers['term-view-frame'](frame(7, 1))
   await r.session.flushed()
   r.session.stop()
   r.session.stop()
+  assert.equal(r.rh.liveTotal(), 0)
   assert.deepEqual(r.calls.closed, [7], '只關一次')
   assert.equal(r.calls.unlistened, 3, "畫面、結束、輸入錯誤三個監聽都取消")
   assert.equal(r.calls.disposed, 1)
@@ -165,7 +169,7 @@ test('打字：還沒開好、已經關掉、空字、沒有送字的依賴，�
   assert.equal(r2.session.input('x'), false, '關掉之後')
   await r2.session.inputFlushed()
   assert.deepEqual(r2.calls.sent, [])
-  const only = createTermViewSession({ open: async () => 1, close: async () => {}, listen: async () => () => {}, createTerm: async () => ({ write() {}, resize() {}, dispose() {} }), onLost() {} })
+  const only = createTermViewSession({ open: async () => 1, close: async () => {}, hub: rigHub().hub, createTerm: async () => ({ write() {}, resize() {}, dispose() {} }), onLost() {} })
   await only.start()
   assert.equal(only.input('x'), false, '沒有送字的依賴＝只看')
 })

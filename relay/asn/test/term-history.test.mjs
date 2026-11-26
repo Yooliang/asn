@@ -3,6 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { HISTORY_COOLDOWN_MS, HISTORY_LINES, atBottom, createHistory, historyScrollTop, historyToWrite, scrollWantsHistory, wheelWantsHistory } from '../ui/lib/term-history.mjs'
+import { rigHub } from './helpers/rig-hub.mjs'
 import { createTermViewSession, frameToWrite, latestVisible } from '../ui/lib/term-view.mjs'
 
 const SRC = name => fs.readFileSync(new URL('../ui/lib/' + name, import.meta.url), 'utf8')
@@ -167,11 +168,11 @@ test('scrollTop 保持：載入前就在底部（含捲不動）則往上讓出 
 
 // ---- 接上 session ----
 function rig({ history, now } = {}) {
-  const handlers = {}, c = { written: [], resized: [], states: [], histCalls: [], painted: [] }
+  const rh = rigHub(), handlers = rh.handlers, c = { written: [], resized: [], states: [], histCalls: [], painted: [] }
   let t = now ?? 0
   const session = createTermViewSession({
     open: async () => 7, close: async () => {},
-    listen: async (evt, fn) => { handlers[evt] = fn; return () => {} },
+    hub: rh.hub,
     createTerm: async () => ({ write: s => c.written.push(s), resize: (a, b) => c.resized.push([a, b]), dispose() {} }),
     onLost() {}, onPainted: f => c.painted.push(f.seq),
     now: () => t,
@@ -233,7 +234,7 @@ test('session：後端沒有歷史或失敗都不凍結、不彈窗，冷卻內�
 })
 
 test('session：沒有給 history 的 api（舊版）完全不動', async () => {
-  const s2 = createTermViewSession({ open: async () => 7, close: async () => {}, listen: async () => () => {}, createTerm: async () => ({ write() {}, resize() {}, dispose() {} }), onLost() {} })
+  const s2 = createTermViewSession({ open: async () => 7, close: async () => {}, hub: rigHub().hub, createTerm: async () => ({ write() {}, resize() {}, dispose() {} }), onLost() {} })
   await s2.start()
   assert.equal(s2.wantHistory(), false)
 })

@@ -2298,6 +2298,7 @@ const app = createApp({
     })
     const pickAvatarFile = file => applySetting('avatar-upload', file)
     return {
+      eventHub: core.hub,   // 終端畫面的事件走這座（#2038 PR-6）；不能叫 hub（上面已有群組的 hub）
       termOpSlotEl,
       version: info.version, skin, lookNow, paneOnly, sideFolded, sideLocked, backToList, NOTICE_TAB, NOTICE_CATS, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, noticeView, noticeShown, noticeAll, noticeUnreadN, noticeSelRow, goNotice, noticeTime, markAllNotices, openNoticeRow, accounts, accountLine, deviceMenu, deviceMenuPos, openDeviceMenu, closeDeviceMenu, deviceMenuSwitch, deviceAcct, deviceAcctView, deviceAcctTitleText, closeDeviceAcct, deviceAcctSubmit, DEVICE_CONFIRM_NOTE, DEVICE_CLOSE_NOTE, voice, voiceCfg, ttsVoices, sttSt, sttText, voiceMsg, saveVoice, installFromSettings, AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       upd, autoCheck, checkUpdate, installUpdate, updateNoticeText, progressText, progressPct,

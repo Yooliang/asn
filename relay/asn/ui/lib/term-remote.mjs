@@ -144,17 +144,6 @@ export async function openTerm(Terminal, options, hostRef, tick, alive) {
   return null
 }
 
-/**
- * 註冊事件監聽，但只在這一次發起還算數時留著：listen 是非同步的，註冊完時那一次可能已經作廢（收掉或重新發起），
- * 這時馬上解除、回 null，不然監聽會一直留著（收掉時 cleanup 已經跑過，不會再收它）。
- */
-export async function listenWhile(api, event, fn, wanted) {
-  const off = await api.listen(event, fn)
-  if (wanted()) return off
-  try { off?.() } catch { /* 解除失敗不影響 */ }
-  return null
-}
-
 /** 錯誤訊息給本人看的部分：Rust 端回的已經是白話；空的就用通用的 */
 export function startError(e) {
   const s = String(e?.message ?? e ?? '').trim()
@@ -169,6 +158,7 @@ export const RemoteView = {
     machine: { type: String, default: '' },       // 那台電腦的名字
     active: { type: Boolean, default: true },
     barInline: { type: Boolean, default: true },  // true＝狀態文字在終端上方一條（手機）；false＝交給外層放到視窗最下面的狀態列（電腦版，用 status 事件傳）
+    eventHub: { type: Object, required: true },   // 事件中心（#2038）：收畫面、收結束都走它
     endedNote: { type: String, default: '' },     // 電腦版：一掛上就是「已結束」、寫這句、不發起（打字中離開分頁），等本人按「重新看」才發起
   },
   // cancel：本人取消了發起前的確認（手機，mobile-remote-view.mjs）。不顯示錯誤，交給外層切回訊息
@@ -243,8 +233,9 @@ export const RemoteView = {
         const Terminal = await loadXterm()
         if (!wanted()) return
         // lib/tauri.mjs 的 listen 交給回呼的已經是內容本身（不是 { payload }）。#1029 第一版前這裡讀 ev.payload，每一幅都被丟掉，畫面一直停在「等」
-        // 每個監聽註冊完先看這一次還算不算數：已作廢就馬上解除，不掛到 offFrame／offEnd 上
-        const offF = await listenWhile(props.api, FRAME_EVENT, f => {
+        // 事件走事件中心（#2038）：訂閱同步回傳取消函式，立刻存進 offFrame／offEnd，cleanup 隨時能取消（作廢的由橋的世代號擋）。
+        // 底層監聽註冊完（ready）之前不能發起，不然發起後馬上到的第一幅會掉
+        offFrame = props.eventHub.subscribe(FRAME_EVENT, f => {
           if (!f || f.id !== id || !term) return
           if (phase.value !== 'watching') phase.value = 'watching'
           // 窗格的欄、列數和畫面不一樣就跟著改（#903）：游標列是窗格內的列號，xterm 的列數不同時最後一列會落在別處
@@ -252,12 +243,10 @@ export const RemoteView = {
           if (Number.isInteger(c) && Number.isInteger(r) && c > 0 && r > 0 && (term.cols !== c || term.rows !== r) && typeof term.resize === 'function') term.resize(c, r)
           term.write(frameToWrite(f), keepCursorVisible)   // 寫完（游標位置更新後）再調捲動位置
           emit('screen', { text: String(f.text ?? ''), cols: c > 0 ? c : 0 })
-        }, wanted)
-        if (!offF) return
-        offFrame = offF
-        const offE = await listenWhile(props.api, END_EVENT, e => { if (e?.id === id) finish(e.text || '') }, wanted)
-        if (!offE) return
-        offEnd = offE
+        })
+        offEnd = props.eventHub.subscribe(END_EVENT, e => { if (e?.id === id) finish(e.text || '') })
+        await props.eventHub.ready()
+        if (!wanted()) return
         const r = await props.api.start(props.node, props.name, props.machine, { wanted })
         // 發起的時候這一格被收掉了（或又重新發起）：這次已經開始，要記得結束，不然那台會一直送到到期
         if (!wanted()) { if (r?.id) void props.api.stop(r.id).catch(() => {}); return }

@@ -61,6 +61,7 @@ export const ChatPane = {
     phone: { type: Boolean, default: false },      // 手機：對話裡的圖片自動下載的大小門檻較小（1.5 MB，電腦 3 MB）、圖框較小、動作列多「分享」（#1911）
     friend: { type: Object, default: null },
     me: { type: Object, default: () => ({ nick: '我', status: 'online' }) },
+    eventHub: { type: Object, default: null },     // 事件中心（#2038）：傳給終端三個元件（TermView、RemoteView、RemoteInput）；沒有終端的畫面不用給
     friendAv: { type: String, default: '' },       // 大頭貼圖片網址（自動產生或設備上傳）
     meAv: { type: String, default: '' },
     log: { type: Array, default: () => [] },
@@ -860,9 +861,9 @@ export const ChatPane = {
   <p class="term-reopen-note term-confirm-note" v-if="confirmNote" role="note">{{ confirmNote }}</p>
   <div class="chatpane-body">
   <div class="chatpane-main">
-  <term-view v-if="termShown" ref="tvEl" @unsent="restoreDraft" :api="termViewApi" :name="termViewName" :active="active" :keep="viewActive === null"></term-view>
-  <remote-view v-if="remoteShown && !typingShown" ref="rvEl" :ended-note="typingEndedNote" :api="remoteViewApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')" @screen="onRemoteScreen"></remote-view>
-  <remote-input v-if="typingShown" ref="rinEl" @unsent="restoreDraft" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" @back="remoteTyping = false" @screen="onRemoteScreen" :snap="waitSnap" @phase="p => { inputPhase = p }" @refused="onInputRefused"></remote-input>
+  <term-view v-if="termShown" ref="tvEl" @unsent="restoreDraft" :api="termViewApi" :event-hub="eventHub" :name="termViewName" :active="active" :keep="viewActive === null"></term-view>
+  <remote-view v-if="remoteShown && !typingShown" ref="rvEl" :ended-note="typingEndedNote" :api="remoteViewApi" :event-hub="eventHub" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" :bar-inline="false" @cancel="showMsgs" @status="s => setRemoteBar('view', s)" @started="$emit('remote-started', $event)" @ended="$emit('remote-ended')" @screen="onRemoteScreen"></remote-view>
+  <remote-input v-if="typingShown" ref="rinEl" @unsent="restoreDraft" :bar-inline="false" @status="s => setRemoteBar('input', s)" :api="remoteInputApi" :event-hub="eventHub" :node="friend.node" :name="termViewName" :machine="friend.device || friend.machine || friend.nodeName || ''" :active="remoteLive" @back="remoteTyping = false" @screen="onRemoteScreen" :snap="waitSnap" @phase="p => { inputPhase = p }" @refused="onInputRefused"></remote-input>
   <div class="m-term-keys" v-if="keyRowShown" role="group" :aria-label="KEYS_TEXT.row">
     <div class="m-term-keyrow">
       <button v-for="k in TERM_KEYS" :key="k.id" type="button" class="m-term-key" :class="'k-' + k.id" :aria-label="k.aria" :disabled="!keysUsable" @click="pressKey(k)">{{ k.label }}</button>

@@ -6,6 +6,7 @@ import { SEND_LABEL, SEND_LABEL_TERM, composeTermHint } from '../ui/lib/compose.
 import { ENTER_DELAY_MS } from '../ui/lib/term-remote-input.mjs'
 import { createLineSender, stripControls } from '../ui/lib/term-line.mjs'
 import { createTermViewSession } from '../ui/lib/term-view.mjs'
+import { rigHub } from './helpers/rig-hub.mjs'
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const pane = read('../ui/lib/chatpane.mjs')
@@ -54,16 +55,18 @@ test('打字元件：整句送出後隔一下再送 Enter；開始前先排著�
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 // 看本機的送字：走本機畫面的 session（termViewApi.input → term_view_input）
 async function localRig({ fail = false } = {}) {
-  const sent = [], errors = [], unsent = []
+  const sent = [], errors = [], unsent = [], lost = []
   const session = createTermViewSession({
+    onLost: r => lost.push(r),
     sendInput: async (id, data, paste) => { if (fail) throw new Error('視窗不在前景'); sent.push([id, data, paste]) },
     onInputError: e => errors.push(e),
     open: async () => 7,
     close: async () => {},
-    listen: async () => () => {},
+    hub: rigHub().hub,
     createTerm: async () => ({ write() {}, resize() {}, dispose() {} }),
   })
   await session.start()
+  assert.deepEqual(lost, [], '工作階段沒有被吞進「讀不到」（假綠防線：接線錯了會被 start 的 catch 吞掉）')
   const ask = { value: null }
   const lines = createLineSender({ send: (d, p) => session.sendText(d, p), askPaste: ask, emit: (ev, t) => { if (ev === 'unsent') unsent.push(t) } })
   return { session, sent, errors, unsent, ask, lines }

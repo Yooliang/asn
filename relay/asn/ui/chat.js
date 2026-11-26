@@ -33,7 +33,8 @@ const app = createApp({
     const avatars = ref({})   // 各設備上傳的大頭貼（節點 → data URL），由樞紐推送
     const friendAv = computed(() => (f.value ? avatarSrc(f.value, { avatars: avatars.value }) : ''))
     const meAv = computed(() => selfAvatarSrc({ selfNode: snap.value?.selfNode ?? '', windowName: snap.value?.windowName ?? '', avatars: avatars.value }))
-    const voice = createVoiceUi({ invoke, hub: createWindowHub(), createMic, createAudio: browserAudio, reactive })   // 念出訊息＋語音輸入（金鑰與辨識都在 Rust 端）
+    const eventHub = createWindowHub()   // 這個視窗唯一的一座事件中心（#2038 PR-6）：語音和終端畫面共用
+    const voice = createVoiceUi({ invoke, hub: eventHub, createMic, createAudio: browserAudio, reactive })   // 念出訊息＋語音輸入（金鑰與辨識都在 Rust 端）
     listen('asn:avatars', a => { avatars.value = a ?? {} })
     listen('asn:state', s => { snap.value = s })
     listen('asn:log', p => { if (p.id === id) log.value = p.log })
@@ -83,7 +84,7 @@ const app = createApp({
       cards,
       groupMenu: op => emit('asn:cmd', { op: 'group-menu', id, what: op }),
       groupDecide: (cardId, approve) => emit('asn:cmd', { op: 'group-decide', id, cardId, approve }),
-      skin, termViewApi, callState, f, roster, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
+      skin, termViewApi, eventHub, callState, f, roster, me, transport, selfNode, loadOlder, log, look, friendAv, meAv, voice, photoApi, shotApi, plain, ctl, RESIZE_DIRS, resizeFrom,
       send: (text, opts) => emit('asn:cmd', { op: 'send', id, text, voice: opts?.voice === true, replySeq: opts?.replySeq }),
       nudge: () => emit('asn:cmd', { op: 'nudge', id }),
       attach,

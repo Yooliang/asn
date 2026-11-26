@@ -5,7 +5,7 @@
 // 守門測試鎖住 m.js、m.html、其他 mobile*.mjs 不准引用 remoteViewApi、remoteInputApi。
 // 指令和電腦版同名同參數（term_view_remote_available／start／input／set／stop），事件也一樣；差別只在 start 之前的確認。
 // 打字的那台看有沒有開「允許遠端在這台打字」（0.2.33 起不再跳確認框），送字只送到 Rust 端登記過（那台接受過）的工作階段。
-import { invoke as tauriInvoke, listen, makeKnownPeerApi, makeRemoteStartApi, remoteInputApi, remoteViewApi } from './tauri.mjs'
+import { invoke as tauriInvoke, makeKnownPeerApi, makeRemoteStartApi, remoteInputApi, remoteViewApi } from './tauri.mjs'
 import { NO_LOCK_TEXT, confirmViewer, confirmWithToken } from './mobile-confirm.mjs'
 import { normalizeList } from './mobile-known-peers.mjs'
 
@@ -32,7 +32,6 @@ export function makeMobileRemoteViewApi({ confirm = () => confirmViewer(), invok
     },
     pause: remoteViewApi.pause,
     stop: remoteViewApi.stop,
-    listen,
   }
 }
 
@@ -70,7 +69,6 @@ export function makeMobileRemoteInputApi({ confirm = challenge => confirmWithTok
     send,
     pause: remoteInputApi.pause,
     stop: remoteInputApi.stop,
-    listen,
   }
 }
 
