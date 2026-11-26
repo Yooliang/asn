@@ -91,7 +91,7 @@ test('每個視窗都收得到 attach-cache-cleared：所有視窗進入檔都�
     const direct = /from '\.\/lib\/tauri\.mjs'/.test(src)
     assert.ok(direct, `${e}.js 要載入 lib/tauri.mjs（attach-cache-cleared 靠載入就註冊）`)
   }
-  assert.match(read('ui/lib/tauri.mjs'), /^if \(T\?\.event\) createWindowHub\(\)\.subscribe\('attach-cache-cleared'/m)
+  assert.match(read('ui/lib/tauri.mjs'), /^if \(H\(\)\.hasEvent\) createWindowHub\(\)\.subscribe\('attach-cache-cleared'/m)
 })
 
 test('畫面接線：帳號登入類事件不再直接 listen', () => {

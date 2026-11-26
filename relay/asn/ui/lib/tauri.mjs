@@ -1,7 +1,10 @@
 // Tauri 前端小橋：invoke／事件。錯誤一律包成 Error(字串)，讓 AsnCore 用 e.message 處理。
 import { shownPhotos } from './photo.mjs'
 import { createWindowHub as makeWindowHub } from './event-hub.mjs'
-const T = globalThis.__TAURI__
+import { host, makeHost, isInjected } from './host.mjs'
+// 主機：本模組載入當下建一份（和以前載入時讀主機物件的時機一樣）；有人用 setHost 換過就走換進來的，每次呼叫才讀
+const loadedHost = makeHost()
+const H = () => (isInjected() ? host : loadedHost)
 
 // 出口失敗寫記錄（#2106）：只記指令名與原文（限長），不記 args（可能含信件內容、路徑、金鑰）。
 // 同一指令＋同一原文 60 秒內只記一行：輪詢類指令（收信、視窗狀態、終端狀態）失敗時會每幾秒重來，不去重 ui.log 會被洗掉。
@@ -25,7 +28,7 @@ const logFail = (cmd, msg) => {
   } catch { /* 記錄本身出錯不能影響呼叫端 */ }
 }
 export const invoke = async (cmd, args) => {
-  try { return await T.core.invoke(cmd, args) } catch (e) {
+  try { return await H().invoke(cmd, args) } catch (e) {
     const msg = typeof e === 'string' ? e : (e?.message ?? String(e))
     logFail(cmd, msg)   // log 保留完整原文（含代號）
     // 後端的錯誤開頭有固定代號 `[前綴:名稱]`（設定層 `settings`、回報匯流排 `report`、設備改名 `rename`）：在這個唯一的出口拆開——message 是去掉代號的白話句（畫面直接顯示不會冒出代號），
@@ -37,19 +40,19 @@ export const invoke = async (cmd, args) => {
   }
 }
 // 開外部連結：沒有 Tauri（純網頁、測試）就什麼都不做，回 undefined（維持 chatpane 以前的 ?. 行為）
-export const openLink = url => (T?.core?.invoke ? invoke('open_link', { url }) : undefined)
-export const listen = (evt, fn) => T.event.listen(evt, e => fn(e.payload))
-export const emit = (evt, payload) => T.event.emit(evt, payload)
+export const openLink = url => (H().available ? invoke('open_link', { url }) : undefined)
+export const listen = (evt, fn) => H().listen(evt, fn)
+export const emit = (evt, payload) => H().emit(evt, payload)
 export const ctl = op => invoke('win_ctl', { op })
-// ---------- 事件中心的接法（#2038）：listen／emit／emitTo 注入事件中心的唯一一處；F3 的主機接縫（host.mjs）做好後只改這裡 ----------
-const hubTransport = () => ({ listen, emit, emitTo: (label, evt, payload) => T.event.emitTo(label, evt, payload) })
+// ---------- 事件中心的接法（#2038）：listen／emit／emitTo 注入事件中心的唯一一處；三個函式都走主機接縫（host.mjs） ----------
+const hubTransport = () => ({ listen, emit, emitTo: (label, evt, payload) => H().emitTo(label, evt, payload) })
 // 沒有 AsnCore 的視窗（chat、panel、setup-progress…）用：只有 hub＋Rust 橋，不跑收信輪詢
 export const createWindowHub = () => makeWindowHub({ ...hubTransport(), log: m => console.info('[ASN]', m), warn: m => console.warn('[ASN]', m) })
 // AsnCore 的 hub：先建好、這裡再把 Rust 事件的橋接上
 export const bindRustEvents = hub => hub.attachRust(hubTransport().listen)
 // 附件快取清空了（換帳號、登入、登出）：這個視窗記著的大圖也丟掉（#1493）
 // 模組一載入就訂（每個載入 tauri.mjs 的視窗都會註冊，包括沒有 AsnCore 的子視窗）；用這個視窗自己的 hub，橋接失敗只記一行
-if (T?.event) createWindowHub().subscribe('attach-cache-cleared', () => shownPhotos.clear())
+if (H().hasEvent) createWindowHub().subscribe('attach-cache-cleared', () => shownPhotos.clear())
 
 // 給 AsnCore 的 transport：HTTP 與金鑰都在 Rust 端，這裡拿不到金鑰
 export const transport = {
@@ -512,7 +515,7 @@ export async function initFrame(hub = createWindowHub()) {
 // 自訂外框的八個拖邊緣調整大小的把手
 export const RESIZE_DIRS = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
 const RESIZE_NAME = { n: 'North', s: 'South', e: 'East', w: 'West', ne: 'NorthEast', nw: 'NorthWest', se: 'SouthEast', sw: 'SouthWest' }
-export const resizeFrom = dir => { try { return T.window.getCurrentWindow().startResizeDragging(RESIZE_NAME[dir]) } catch { return undefined } }
+export const resizeFrom = dir => { try { return H().window.startResizeDragging(RESIZE_NAME[dir]) } catch { return undefined } }
 
 // ---- #2106 ⑩：手機（m.js）第一批。方法名＝指令的駝峰寫法，參數形狀與以前直接 invoke 時完全相同 ----
 // 手機只用得到這幾個 Rust 指令（金鑰與權杖都在 Rust 端，這裡拿不到）：給 AsnCore 的 transport

@@ -1,7 +1,7 @@
 // 事件中心（#2038）：畫面檔訂閱事件的唯一介面。
 // - 內部事件（AsnCore 的 state／log／notify／avatars）：emit 直接扇出給訂閱者。
 // - Rust 事件（事件表 rust-events.mjs 登記的）：第一個訂閱者進來才向橋註冊，最後一個退訂就取消，同名事件最多一個底層 listener。
-// listen／emit／emitTo 都由外面注入（注入點在 tauri.mjs），這裡不碰 __TAURI__。
+// listen／emit／emitTo 都由外面注入（注入點在 tauri.mjs），這裡不碰主機物件（只認注入進來的函式）。
 //   listen: (evt, fn) => Promise<() => void>，fn 收到的是 payload
 //   emit: (evt, payload) => Promise（視窗之間廣播）；emitTo: (label, evt, payload) => Promise（送給指定視窗）
 import { RUST_EVENTS } from './rust-events.mjs'

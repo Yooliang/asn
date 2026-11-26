@@ -21,8 +21,8 @@
 //  - LIB_WIRING 的登記值只是自我聲明，守門不驗證那座 hub 真的是傳進去的那座
 //  - 例外表（ALLOW、HUB_DUP_ALLOW、NO_SUBSCRIBER_ALLOW、LIB_WIRING 的 none）變長不會紅，要靠看 diff 才發現
 //
-// 例外名單只有兩個：tauri.mjs（橋的出口）與 skin-boot.js（classic script，要早於 Vue 套外觀）。
-// 等 #1763 F3 的 host.mjs 落地、tauri.mjs 改走 host 之後，例外會改成 skin-boot.js 與 host.mjs；到時只改 ALLOW 表。
+// 直接碰 Tauri 事件 API 的例外只有兩個：host.mjs（主機接縫，#1763 F3）與 skin-boot.js（classic script，要早於 Vue 套外觀）；
+// tauri.mjs 只剩自己定義的 listen（轉給 host.listen）列在 G3。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -57,11 +57,12 @@ const hits = (files, rule) => files.filter((f) => DETECT[rule](stripComments(f.s
 const ALLOW = {
   importListen: {},
   tauriEvent: {
-    'lib/tauri.mjs': '橋的出口：全前端唯一向 Tauri 註冊事件、送事件的地方（F3 host.mjs 落地後，例外改成 host.mjs）',
+    'lib/host.mjs': '主機接縫（#1763 F3）：全前端唯一向 Tauri 註冊事件、送事件的地方',
     'skin-boot.js': 'classic script：要早於 Vue 套好外觀、不能 import，只聽 asn:skin',
   },
   foreignListen: {
-    'lib/tauri.mjs': '橋的出口：自己定義 listen 並注入事件中心（F3 host.mjs 落地後，例外改成 host.mjs）',
+    'lib/tauri.mjs': '橋的出口：自己定義 listen（轉給 host.listen）並注入事件中心',
+    'lib/host.mjs': '主機接縫：定義 listen（轉給 Tauri 的事件 API）',
     'skin-boot.js': 'classic script：直接聽 asn:skin（同 G2 的例外）',
   },
 }
