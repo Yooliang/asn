@@ -65,18 +65,18 @@ const app = createApp({
     eventHub.subscribe('asn:state', s => { snap.value = s })
     eventHub.subscribe('asn:avatars', a => { avatars.value = a ?? {} })
     let sizeTimer = null
-    const fpShow = kind === 'fpshow' ? useFpShow(eventHub) :{ fps: null, fpsCancel: () => {} }
+    const fpShow = kind === 'fpshow' ? useFpShow(eventHub) : { fps: null, fpsCancel: () => {} }
     if (kind === 'fpshow') document.title = FP_SHOW_TEXT.pcTitle
     onMounted(async () => {
       if (kind === 'fpshow') return   // 這扇不跟樞紐要內容、不記大小
-      // 先等四個接收處都向橋註冊完再打招呼，樞紐回的內容才不會比接收處早到；掛不起來就記一行、照送（跟以前一樣不擋）
-      try { await eventHub.readyFor(['asn:panel', 'asn:settings', 'asn:state', 'asn:avatars']) } catch (e) { console.warn(`[ASN] 面板視窗的事件沒掛好（asn:panel／asn:settings／asn:state／asn:avatars），照送 panel-hello：${e?.message ?? e}`) }
-      emit('asn:cmd', { op: 'panel-hello', kind })
-      // 視窗大小記住：停下來才通知樞紐存檔（樞紐下次開這扇視窗時用）
+      // 視窗大小記住：停下來才通知樞紐存檔（樞紐下次開這扇視窗時用）。要在下面的 await 之前掛，掛載到就緒之間調整大小才不會漏記
       window.addEventListener('resize', () => {
         clearTimeout(sizeTimer)
         sizeTimer = setTimeout(() => emit('asn:set', { op: 'panel-size', kind, w: window.innerWidth, h: window.innerHeight }), 400)
       })
+      // 先等四個接收處都向橋註冊完再打招呼，樞紐回的內容才不會比接收處早到；掛不起來就記一行、照送（跟以前一樣不擋）
+      try { await eventHub.readyFor(['asn:panel', 'asn:settings', 'asn:state', 'asn:avatars']) } catch (e) { console.warn(`[ASN] 面板視窗的事件沒掛好（asn:panel／asn:settings／asn:state／asn:avatars），照送 panel-hello：${e?.message ?? e}`) }
+      emit('asn:cmd', { op: 'panel-hello', kind })
     })
     const pickFile = async file => {
       localMsg.value = ''
