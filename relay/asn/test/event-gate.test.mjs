@@ -10,6 +10,7 @@
 //  G5 表裡登記的事件（除了 listeners:0 與白名單）前端真的有人接
 //  G6 同一個事件名，同一扇視窗只准在一座 hub 訂閱（tauri.mjs 模組層、initFrame()、core.hub、createWindowHub() 各是一座）
 //
+// 呼叫可以寫成 x.f(…)、x?.f(…)、x.f?.(…)、x.f ?. (…)（readyFor、broadcast、sendTo、emit 都一樣）；G7 的 createWindowHub( 與 createEventHub( 都算自建 hub。
 // 事件名的寫法：單引號、雙引號、反引號的字面值，或同檔／import 來的常數都認得；
 // 反引號裡有 ${}、或名字是別的運算式（認不出來），一律點名紅，不會被略過（emit 與訂閱端同一套規則）。
 // 入口檔的 createWindowHub( 只准「const X = createWindowHub()」或「createWindowHub().subscribe／on(…)」兩種寫法，其他用法點名紅。
@@ -157,7 +158,9 @@ export const sitesOf = (files, file) => {
   }
   return out
 }
-const readyForNames = (files, file) => [...stripComments(file.src).matchAll(/\.readyFor\(\s*(?:\[([^\]]*)\]|([^)]*))/g)].flatMap((m) => (m[1] === undefined ? [null] : m[1].split(',').map((x) => x.trim()).filter(Boolean).map((x) => tokenName(files, file, x))))
+// readyFor：.readyFor(、?.readyFor(、.readyFor?.(、readyFor ?. (（點、?.、空白、換行都容許）；裸的 readyFor?.( 也算（裸的 readyFor( 是函式宣告，不算）
+const READY_FOR_RE = new RegExp(`(?:${DOT}readyFor${CALL_OPEN}|(?<![\\w$.])readyFor\\s*\\?\\.\\s*\\()\\s*(?:\\[([^\\]]*)\\]|([^)]*))`, 'g')
+const readyForNames = (files, file) => [...stripComments(file.src).matchAll(READY_FOR_RE)].flatMap((m) => (m[1] === undefined ? [null] : m[1].split(',').map((x) => x.trim()).filter(Boolean).map((x) => tokenName(files, file, x))))
 
 // tauri.mjs 自己的訂閱：模組層那座 hub、initFrame 預設那座 hub、以及直接 listen 的（relay-report-bell 走 listen 回呼）
 const tauriSites = (file) => {
@@ -176,9 +179,16 @@ export const emitSitesOf = (files, file) => {
   const s = stripComments(file.src)
   const out = []
   const push = (re, from) => { for (const m of s.matchAll(re)) out.push(evtOf(files, file, m.slice(from, from + 4))) }
-  if (importsOf(s).includes('emit')) push(new RegExp(`(?<![\\w$.])emit\\(\\s*${ARG}`, 'g'), 1)
-  push(new RegExp(`\\.broadcast\\(\\s*${ARG}`, 'g'), 1)
-  push(new RegExp(`\\.sendTo\\(\\s*[^,]+,\\s*${ARG}`, 'g'), 1)
+  // 裸 emit( 要 import 自 tauri.mjs 才算（Vue 元件的 emit('pick') 不是視窗事件）
+  if (importsOf(s).includes('emit')) push(new RegExp(`(?<![\\w$.])emit\\s*\\(\\s*${ARG}`, 'g'), 1)
+  // 明寫了可選呼叫的（emit?.(、sendTo?.(、broadcast?.(：函式是別人傳進來、可能不存在）一律算
+  push(new RegExp(`(?<![\\w$.])emit\\s*\\?\\.\\s*\\(\\s*${ARG}`, 'g'), 1)
+  // x.emit?.(…)、x?.emit(…)：接收者不限（x.emit(…) 沒有 ?. 的不算，Vue 元件的 ctx.emit 太多）
+  push(new RegExp(`(?:\\?\\.\\s*emit\\s*\\(|\\.\\s*emit\\s*\\?\\.\\s*\\()\\s*${ARG}`, 'g'), 1)
+  push(new RegExp(`${DOT}broadcast${CALL_OPEN}\\s*${ARG}`, 'g'), 1)
+  push(new RegExp(`${DOT}sendTo${CALL_OPEN}\\s*[^,]+,\\s*${ARG}`, 'g'), 1)
+  push(new RegExp(`(?<![\\w$.])broadcast\\s*\\?\\.\\s*\\(\\s*${ARG}`, 'g'), 1)
+  push(new RegExp(`(?<![\\w$.])sendTo\\s*\\?\\.\\s*\\(\\s*[^,]+,\\s*${ARG}`, 'g'), 1)
   return out
 }
 
@@ -448,10 +458,13 @@ test('G4 注入式測試：事件名三種引號都認、反引號帶 ${}／變�
 // lib 檔的 hub 都是呼叫端傳進來的（LIB_WIRING 登記的就是這個假設）；自己 createWindowHub() 會多出一座 hub，登記就失真。
 // 本來就要建 hub 的只有 event-hub.mjs（定義）與 tauri.mjs（橋的出口）。其他例外寫在這張表（只准少、不准多）：檔名 → 原因
 const LIB_HUB_BUILDERS = new Set(['lib/event-hub.mjs', 'lib/tauri.mjs'])
-const LIB_CREATE_HUB_ALLOW = {}
-const libCreatesHub = (f) => f.name.startsWith('lib/') && !LIB_HUB_BUILDERS.has(f.name) && /createWindowHub\s*\(/.test(stripComments(f.src))
+const LIB_CREATE_HUB_ALLOW = {
+  'lib/core.mjs': 'AsnCore 建構時沒人傳 hub 才建預設那座（this.hub = hub ?? createEventHub(…)）；各視窗的 core.hub 就是這座，是 core.hub 的出處',
+}
+// createWindowHub( 與 createEventHub( 都算（後者是前者底下的建構函式，自己建一樣會多出一座）；?.( 的寫法也算
+const libCreatesHub = (f) => f.name.startsWith('lib/') && !LIB_HUB_BUILDERS.has(f.name) && /\bcreate(?:Window|Event)Hub\s*(?:\?\.)?\s*\(/.test(stripComments(f.src))
 
-test('G7 lib 檔不自己呼叫 createWindowHub()（hub 由呼叫端傳進來）', () => {
+test('G7 lib 檔不自己呼叫 createWindowHub()／createEventHub()（hub 由呼叫端傳進來）', () => {
   const found = uiFiles.filter(libCreatesHub).map((f) => f.name)
   const extra = found.filter((n) => !(n in LIB_CREATE_HUB_ALLOW))
   assert.deepEqual(extra, [], `這些 lib 檔自己建了 hub（請改成由呼叫端傳進來，LIB_WIRING 才準）：${extra.join('、')}`)
@@ -466,6 +479,53 @@ test('G7 注入式測試：lib 檔自己 createWindowHub() 要紅，改成收參
   assert.equal(libCreatesHub({ name: 'lib/voice-ui.mjs', src: "// createWindowHub() 只在註解" }), false)
   assert.equal(libCreatesHub({ name: 'lib/tauri.mjs', src: 'const h = createWindowHub()' }), false)
   assert.equal(libCreatesHub({ name: 'w.js', src: 'const h = createWindowHub()' }), false)
+  // createEventHub( 也算（自建 hub 的另一個入口）
+  for (const bad of ["const h = createEventHub({ listen })", "createEventHub().subscribe('asn:state', f)", "const h = createEventHub ( { } )", "const h = createEventHub?.({})"]) {
+    assert.equal(libCreatesHub({ name: 'lib/voice-ui.mjs', src: bad }), true, `要紅：${bad}`)
+  }
+  assert.equal(libCreatesHub({ name: 'lib/voice-ui.mjs', src: "import { createEventHub } from './event-hub.mjs'\nexport const w = (hub) => hub.subscribe('asn:state', f)" }), false, '只 import 沒呼叫不算')
+  assert.equal(libCreatesHub({ name: 'lib/voice-ui.mjs', src: "// createEventHub() 只在註解" }), false)
+  assert.equal(libCreatesHub({ name: 'lib/event-hub.mjs', src: 'const h = createEventHub()' }), false, 'event-hub.mjs 本身是定義處')
+  assert.equal(libCreatesHub({ name: 'lib/tauri.mjs', src: 'const h = createEventHub()' }), false)
+  assert.equal(libCreatesHub({ name: 'w.js', src: 'const h = createEventHub()' }), false, '入口檔不歸 G7 管')
+  // 例外只有登記在 LIB_CREATE_HUB_ALLOW 的 core.mjs：它沒登記就紅（棘輪由上面的 G7 測試負責）
+  assert.equal(libCreatesHub({ name: 'lib/core.mjs', src: 'this.hub = hub ?? createEventHub({})' }), true)
+  assert.deepEqual(Object.keys(LIB_CREATE_HUB_ALLOW), ['lib/core.mjs'])
+})
+
+test('偵測器：?. 可選呼叫的 readyFor／emit／broadcast／sendTo 不能繞過（壞字抓得到、好字不誤抓）', () => {
+  const files = (src) => [{ name: 'w.js', src: "import { emit } from './lib/tauri.mjs'\nconst NAME = 'asn:state'\n" + src }]
+  const rf = (src) => { const f = files(src); return readyForNames(f, f[0]) }
+  const em = (src) => { const f = files(src); return emitSitesOf(f, f[0]).map((x) => x.evt) }
+  const badReady = ["x.readyFor?.(['not-in-table'])", "x?.readyFor(['not-in-table'])", "x.readyFor ?. (['not-in-table'])", "x\n  ?.readyFor?.(['not-in-table'])", "readyFor?.(['not-in-table'])"]
+  for (const code of badReady) assert.deepEqual(rf(code), ['not-in-table'], `readyFor 要認得出名字：${code}`)
+  assert.deepEqual(rf('x.readyFor?.(list)'), [null], '認不出來的要點名')
+  assert.deepEqual(rf('x?.readyFor(`a-${k}`)'), [null])
+  assert.deepEqual(rf("x.readyFor?.([NAME, 'asn:log'])"), ['asn:state', 'asn:log'])
+  assert.deepEqual(rf("function readyFor(names) { return names }\nconst readyForm = 1"), [], '函式宣告、同字頭的名字不誤抓')
+  const badEmit = ["emit?.('not-in-table', 1)", "x.emit?.('not-in-table', 1)", "x?.emit('not-in-table', 1)", "x?.broadcast('not-in-table', 1)", "x.broadcast?.('not-in-table', 1)", "sendTo?.(w, 'not-in-table', 1)", "x?.sendTo(w, 'not-in-table', 1)", "x.sendTo ?. (w, 'not-in-table', 1)", "x\n  ?.broadcast('not-in-table', 1)"]
+  for (const code of badEmit) assert.deepEqual(em(code), ['not-in-table'], `送出端要認得出名字：${code}`)
+  for (const code of ['emit?.(evtName, 1)', 'x.emit?.(`a-${k}`, 1)', 'x?.broadcast(pick(y), 1)', 'sendTo?.(w, name, 1)']) assert.deepEqual(em(code), [null], `認不出來的要點名：${code}`)
+  assert.deepEqual(em("emit?.(NAME, 1)"), ['asn:state'], '常數要解得開')
+  // 好：Vue 元件的 ctx.emit(…) 沒有 ?.、本地函式 sendTo(id, text) 不是視窗事件，都不誤抓
+  assert.deepEqual(em("ctx.emit('pick', 1)\nsendTo(id, text, opts)\nconst sendTo2 = 1"), [])
+})
+
+test('G4 注入式測試：readyFor／emit 用 ?. 寫、事件名不在表就紅，改成表裡的名字就綠', () => {
+  const table = new Set(TABLE)
+  const js = new Set(jsEventNames())
+  const check = (src) => {
+    const f = [{ name: 'w.js', src }]
+    const badReady = readyForNames(f, f[0]).filter((n) => n === null || !table.has(n))
+    const badEmit = emitSitesOf(f, f[0]).filter(({ evt }) => evt === null || !js.has(evt))
+    return badReady.length + badEmit.length
+  }
+  const okJs = jsEventNames()[0]
+  const okAny = [...TABLE][0]
+  assert.ok(okJs && okAny, '事件表要有可用的名字')
+  for (const bad of ["hub.readyFor?.(['not-in-table'])", "hub?.readyFor(['not-in-table'])", "hub.readyFor ?. (['not-in-table'])", "hub.readyFor?.(list)"]) assert.equal(check(bad), 1, `要紅：${bad}`)
+  for (const bad of ["emit?.('not-in-table', 1)", "x.emit?.('not-in-table', 1)", "x?.broadcast('not-in-table', 1)", "sendTo?.(w, 'not-in-table', 1)", 'x.emit?.(evtName, 1)']) assert.equal(check(bad), 1, `要紅：${bad}`)
+  for (const good of [`hub.readyFor?.(['${okAny}'])`, `hub?.readyFor(['${okAny}'])`, `emit?.('${okJs}', 1)`, `x.emit?.('${okJs}', 1)`, `x?.broadcast('${okJs}', 1)`, `sendTo?.(w, '${okJs}', 1)`]) assert.equal(check(good), 0, `要綠：${good}`)
 })
 
 test('G4／G6 注入式測試：串接、換行、?. 三種寫法不能繞過（要紅），改成正常寫法要綠', () => {
