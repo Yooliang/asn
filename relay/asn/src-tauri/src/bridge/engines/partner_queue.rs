@@ -955,6 +955,7 @@ mod tests {
         // 不是讀取、寫入的工具：參數裡的路徑也判定（沒登記的、呼叫外部工具的、網路類收到本機檔案網址）
         assert!(run(vec![step(1, "mystery_tool", json!({"path": p(&ssh)}))]).is_some());
         assert!(run(vec![step(1, "call_mcp_tool", json!({"arguments": {"files": [p(&ssh)]}}))]).is_some());
+        assert!(run(vec![step(1, "call_mcp_tool", json!({"arguments": json!({"files": [p(&ssh)]}).to_string()}))]).is_some(), "參數是 JSON 字串也要解開");
         let url = format!("file:///{}", p(&ssh).replace('\\', "/").trim_start_matches('/'));
         assert!(run(vec![step(1, "read_url_content", json!({"Url": url}))]).is_some());
         assert!(run(vec![step(1, "read_url_content", json!({"Url": "https://example.com/a"}))]).is_none());

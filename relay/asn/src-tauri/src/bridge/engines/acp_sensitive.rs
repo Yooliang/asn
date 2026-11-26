@@ -487,6 +487,15 @@ pub fn opaque_device_path(s: &str, local_names: &[String]) -> bool {
     false
 }
 
+/// 磁碟機字母加冒號、後面接的不是分隔符（`C:xxx`）：這種寫法的意思取決於各程序自己的目前資料夾，沒辦法在這裡確定。
+/// `C:`、`C:\`、`C:/` 本身不算。裝置前綴後面的磁碟機同樣看。純字串判斷，任何平台都能測
+pub fn drive_relative(s: &str) -> bool {
+    let t = s.replace('\\', "/");
+    let t = t.strip_prefix("//?/").or_else(|| t.strip_prefix("//./")).unwrap_or(&t);
+    let b = t.as_bytes();
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] != b'/'
+}
+
 fn win_clean_with(s: &str, hosts: &[&str]) -> String {
     let mut t = s.replace('\\', "/");
     for p in ["//?/", "//./"] {
@@ -639,15 +648,23 @@ pub fn read_verdict(path_raw: &str, ctx: &ReadCtx) -> ReadVerdict {
     if path_raw.len() > MAX_PATH_LEN || path_raw.contains(['\n', '\r', '\0']) {
         return ReadVerdict::Unresolvable;
     }
+    // 層數超過上限、還沒解開的巢狀 JSON 字串（抽取時原樣收進來的）：沒辦法判定，偏向擋
+    if json_container(raw).is_some() {
+        return ReadVerdict::Unresolvable;
+    }
     let roots = ctx.roots;
     let hosts: Vec<&str> = roots.local_names.iter().map(String::as_str).collect();
     let (cands, mut failed) = expand(&strip_file_url(raw), &roots.home_paths, &roots.env);
     let mut literals: Vec<String> = vec![];
     for c0 in cands {
-        if cfg!(windows) && opaque_device_path(&c0, &roots.local_names) {
+        if cfg!(windows) && (opaque_device_path(&c0, &roots.local_names) || drive_relative(&c0)) {
             return ReadVerdict::Unresolvable;
         }
         let cleaned = if cfg!(windows) { win_clean_with(&c0, &hosts) } else { c0.clone() };
+        // 清理過的形式也要看：磁碟機後面不接分隔符的寫法，在接上工作資料夾之前就擋下
+        if cfg!(windows) && drive_relative(&cleaned) {
+            return ReadVerdict::Unresolvable;
+        }
         // 路徑段有萬用字元：取第一個萬用字元之前的部分，照遞迴搜尋判定
         let (c, tool) = match wildcard_prefix(&cleaned) {
             Some(p) => (p, ReadTool::Recursive),
@@ -703,21 +720,54 @@ fn looks_like_path(s: &str) -> bool {
         || s.matches('%').count() >= 2
 }
 
-fn walk(v: &Value, under_key: bool, out: &mut Vec<String>) {
+/// JSON 字串裡再包 JSON 字串，最多往下解幾層；再深的原樣收進來，判定那邊直接當解析不了
+const MAX_JSON_DEPTH: usize = 4;
+
+fn push_unique(out: &mut Vec<String>, s: &str) {
+    if !s.trim().is_empty() && !out.iter().any(|x| x == s) {
+        out.push(s.to_string());
+    }
+}
+
+/// 字串本身是一段 JSON 物件或陣列（前綴先篩，免得每個字串都去解析）
+pub(crate) fn json_container(s: &str) -> Option<Value> {
+    let t = s.trim_start();
+    if !t.starts_with(['{', '[']) { return None; }
+    serde_json::from_str::<Value>(s).ok().filter(|v| matches!(v, Value::Object(_) | Value::Array(_)))
+}
+
+fn walk(v: &Value, under_key: bool, out: &mut Vec<String>, depth: usize) {
     match v {
         Value::String(s) => {
-            // 路徑類欄位的字串一律收（超長、含換行的由判定那邊直接擋）；其他欄位要長得像路徑、而且是單行的短字串
-            let ordinary = s.len() <= MAX_PATH_LEN && !s.contains('\n') && looks_like_path(s);
-            if !s.trim().is_empty() && (under_key || ordinary) && !out.contains(s) {
-                out.push(s.clone());
+            // 字串能解成物件或陣列：往裡面找（有層數上限，超過的原樣收進來由判定擋）
+            if let Some(inner) = json_container(s) {
+                if depth < MAX_JSON_DEPTH {
+                    walk(&inner, under_key, out, depth + 1);
+                } else {
+                    push_unique(out, s);
+                }
+                return;
+            }
+            if under_key {
+                // 路徑類欄位的字串一律收（超長、含換行的由判定那邊直接擋）
+                push_unique(out, s);
+            } else if s.len() <= MAX_PATH_LEN && !s.contains('\n') {
+                if looks_like_path(s) {
+                    push_unique(out, s);
+                }
+            } else {
+                // 其他欄位的超長或多行文字：整段是一般文字（有空白）就不收；沒有空白、長得像路徑的整段或逐行收進來，交給判定擋
+                for line in s.lines().map(str::trim).filter(|l| !l.is_empty() && !l.contains(char::is_whitespace) && looks_like_path(l)) {
+                    push_unique(out, line);
+                }
             }
         }
-        Value::Array(a) => a.iter().for_each(|x| walk(x, under_key, out)),
+        Value::Array(a) => a.iter().for_each(|x| walk(x, under_key, out, depth)),
         Value::Object(m) => m.iter().for_each(|(k, x)| {
             // 指令與程式碼欄位是整段命令，不是路徑，路徑判定管不到（敏感清單不是邊界）
             let l = k.to_lowercase();
             if key_is_path(k) || !(l.contains("command") || l == "cmd" || l.contains("script")) {
-                walk(x, under_key || key_is_path(k), out)
+                walk(x, under_key || key_is_path(k), out, depth)
             }
         }),
         _ => {}
@@ -727,14 +777,7 @@ fn walk(v: &Value, under_key: bool, out: &mut Vec<String>) {
 /// 讀取請求的參數 → 所有可能是路徑的字串：路徑類欄位名底下的字串（含陣列、巢狀），以及任何位置長得像路徑的字串
 pub fn extract_read_paths(params: &Value) -> Vec<String> {
     let mut out = vec![];
-    // 參數本身是一段 JSON 字串：先解開再抽
-    if let Value::String(s) = params {
-        if let Ok(inner @ (Value::Object(_) | Value::Array(_))) = serde_json::from_str::<Value>(s) {
-            walk(&inner, false, &mut out);
-            return out;
-        }
-    }
-    walk(params, false, &mut out);
+    walk(params, false, &mut out, 0);
     out
 }
 

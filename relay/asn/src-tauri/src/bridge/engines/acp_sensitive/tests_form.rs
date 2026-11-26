@@ -115,9 +115,9 @@ fn 路徑形式變體_超長與多行的路徑欄位() {
     let got = extract_read_paths(&json!({"files": [multi]}));
     assert_eq!(got.len(), 1);
     assert_eq!(verdict(&r, &got[0], ReadTool::Single), ReadVerdict::Unresolvable);
-    // 其他欄位的超長、多行文字仍不當路徑
-    assert!(extract_read_paths(&json!({"note": format!("a/{}", "b".repeat(5000))})).is_empty());
-    assert!(extract_read_paths(&json!({"note": "x/y\nz"})).is_empty());
+    // 其他欄位的超長、多行文字：有空白的一般文字不收
+    assert!(extract_read_paths(&json!({"note": format!("see a/b {}", "word ".repeat(1000))})).is_empty());
+    assert!(extract_read_paths(&json!({"note": "first line has spaces / and slash\nsecond one too"})).is_empty());
     // 一般長度的正常路徑不受影響
     assert_eq!(verdict(&r, &ps(&r.work.join("a.txt")), ReadTool::Single), ReadVerdict::Allow);
 }
@@ -310,4 +310,83 @@ fn 正式路徑建立清單_兩個家目錄與環境變數過濾() {
     assert!(roots.env.iter().all(|(k, _)| !k.contains("TOKEN") && !k.contains("SECRET")), "{:?}", roots.env.iter().map(|(k, _)| k).collect::<Vec<_>>());
     // Debug 不印環境變數
     assert!(!format!("{roots:?}").contains("MYDIR"));
+}
+
+#[test]
+fn 路徑形式變體_磁碟機後面不接分隔符_純字串判斷() {
+    for p in ["C:..\\a", "C:.ssh\\id", "c:Users\\a", "C:a", "Z:*", "\\\\?\\C:a", "//?/C:a", "\\\\.\\C:a", "C:../a"] {
+        assert!(drive_relative(p), "{p}");
+    }
+    for p in ["C:", "C:\\", "C:/", "C:\\a", "C:/a", "\\\\?\\C:\\a", "a", "", "ab:c", "https://x/y", "/etc/x", "relative\\a", "1:a"] {
+        assert!(!drive_relative(p), "{p}");
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn 路徑形式變體_windows丁() {
+    let r = rig();
+    // 不管實際會解到哪裡，磁碟機後面不接分隔符的寫法一律當解析不了；工作資料夾在家目錄底下時也一樣
+    let home_work = r.home.join("proj");
+    std::fs::create_dir_all(&home_work).unwrap();
+    for p in [r"C:..\Users\x\.ssh\id", r"C:.ssh\id", r"c:Users\x\a", r"C:..\.ssh\id", r"\\?\C:foo", "file:///C:foo", "C:foo/bar"] {
+        for base in [&r.work, &home_work] {
+            let v = read_verdict(p, &ReadCtx { roots: &r.roots, base, tool: ReadTool::Single });
+            assert_eq!(v, ReadVerdict::Unresolvable, "{p}");
+        }
+    }
+    // 對照：磁碟機本身、磁碟機加分隔符，以及一般的暫存檔不受影響
+    for p in ["C:", r"C:\", "C:/"] {
+        assert_ne!(verdict(&r, p, ReadTool::Single), ReadVerdict::Unresolvable, "{p}");
+    }
+    assert_eq!(verdict(&r, &ps(&r.work.join("a.txt")), ReadTool::Single), ReadVerdict::Allow);
+    assert_eq!(verdict(&r, &ps(&r.home.join(".ssh").join("id")), ReadTool::Single), ReadVerdict::Sensitive);
+}
+
+#[test]
+fn 抽取_其他欄位的超長與多行路徑字串也收_交給判定擋() {
+    let r = rig();
+    // 超長、沒有空白、長得像路徑：收進來，判定回解析不了
+    let long = format!("{}/{}", ps(&r.home), "a/../".repeat(900) + ".ssh/id");
+    assert!(long.len() > MAX_PATH_LEN);
+    let got = extract_read_paths(&json!({"note": long}));
+    assert_eq!(got, vec![long.clone()]);
+    assert_eq!(verdict(&r, &got[0], ReadTool::Single), ReadVerdict::Unresolvable);
+    // 多行：含敏感路徑的那一行收進來，判定擋下；其他行不影響
+    let bad = ps(&r.home.join(".ssh").join("id"));
+    let multi = format!("說明文字 有 空白\n{bad}\nlast line");
+    let got = extract_read_paths(&json!({"note": multi}));
+    assert_eq!(got, vec![bad.clone()]);
+    assert_eq!(verdict(&r, &got[0], ReadTool::Single), ReadVerdict::Sensitive);
+    // 一般的長文字（有空白）不收，不會誤擋
+    let prose = format!("please look at src/lib.rs and docs/a.md {}", "more words here ".repeat(500));
+    assert!(extract_read_paths(&json!({"note": prose.clone(), "other": [prose]})).is_empty());
+}
+
+#[test]
+fn 抽取_巢狀_json_字串要解開_有層數上限() {
+    let r = rig();
+    let bad = ps(&r.home.join(".ssh").join("id"));
+    let nest = |levels: usize| {
+        let mut cur = json!({"p": bad});
+        for _ in 0..levels {
+            cur = json!({"arguments": cur.to_string()});
+        }
+        cur
+    };
+    // 參數裡的字串是 JSON，裡面再帶路徑：抽得到、也擋得住
+    for levels in 1..=MAX_JSON_DEPTH {
+        let got = extract_read_paths(&nest(levels));
+        assert_eq!(got, vec![bad.clone()], "{levels} 層");
+        assert!(blocked(&r, &got[0]));
+    }
+    // 超過上限：沒解開的原樣收進來，判定當解析不了
+    let got = extract_read_paths(&nest(MAX_JSON_DEPTH + 1));
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(!got.contains(&bad));
+    assert_eq!(verdict(&r, &got[0], ReadTool::Single), ReadVerdict::Unresolvable);
+    // 陣列形式的 JSON 字串也解
+    assert_eq!(extract_read_paths(&json!({"arguments": json!([bad.clone()]).to_string()})), vec![bad.clone()]);
+    // 不是物件或陣列的字串照舊
+    assert!(extract_read_paths(&json!({"arguments": "{not json"})).is_empty());
 }

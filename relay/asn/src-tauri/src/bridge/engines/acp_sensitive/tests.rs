@@ -144,7 +144,7 @@ fn 抽取_陣列與巢狀欄位都拿得到() {
     assert_eq!(extract_read_paths(&json!({"SearchDirectory": ".ssh", "Query": "x"})), vec![".ssh".to_string()]);
     assert!(extract_read_paths(&json!({})).is_empty());
     assert!(extract_read_paths(&json!({"a": 1, "b": [null, false]})).is_empty());
-    assert!(extract_read_paths(&json!({"a": "x\ny/z"})).is_empty(), "多行文字不當路徑");
+    assert!(extract_read_paths(&json!({"a": "x y\nz w/q"})).is_empty(), "多行一般文字不當路徑");
 }
 
 #[test]
