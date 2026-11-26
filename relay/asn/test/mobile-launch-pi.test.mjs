@@ -51,6 +51,13 @@ test('送出內容：經 pi 帶清單裡的提供者與模型，profile 一律 p
   assert.equal(launchPiChoice(claude, L).defaultModel, 'claude-sonnet-5')
 })
 
+test('送出內容與 Rust 共用樣本相同（#2386：Rust 的 build_launch_body 讀同一份，證明 pi 欄位到得了後台）', async () => {
+  const { readFileSync } = await import('node:fs')
+  const sample = JSON.parse(readFileSync(new URL('../../shared/test-vectors/mobile-launch-pi-request.json', import.meta.url), 'utf8')).request
+  const claude = launchVendors(L).find(v => v.id === 'claude')
+  assert.deepEqual(buildLaunchRequest(f({ first: ' 開始吧 ' }), { run: 'pi', row: claude, launcher: L }), sample)
+})
+
 test('送出前檢查：沒有能用的開法、經 pi 沒選到清單裡的模型都擋下', () => {
   assert.equal(launchFormError(f(), elig, { run: 'pi', piOk: true }), '')
   assert.match(launchFormError(f(), elig, { run: null }), /沒有能用的開法/)

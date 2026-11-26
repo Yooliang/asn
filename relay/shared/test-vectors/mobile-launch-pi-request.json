@@ -1,0 +1,12 @@
+{
+  "_說明": "#2386：手機畫面 buildLaunchRequest（ui/lib/mobile-launch.mjs）經 pi 開夥伴時實際產生的請求。前端測試（test/mobile-launch-pi.test.mjs）要求 buildLaunchRequest 的輸出與 request 逐欄相同；Rust 測試（relay.rs）把同一份 request 交給 build_launch_body，要求 body 帶有 pi_provider、pi_model。兩邊讀同一份，前端改了鍵名或 Rust 丟了欄位，都會紅。",
+  "request": {
+    "node": "H",
+    "name": "夥伴-2",
+    "cwd": "D:\\x",
+    "first_message": "開始吧",
+    "profile": "pi",
+    "pi_provider": "anthropic",
+    "pi_model": "claude-sonnet-5"
+  }
+}
