@@ -14,7 +14,8 @@ export function workerSpecFromProfile({ name, cwd, profile, workDir }) {
     cwd,
     roster_engine: acp.roster_engine ?? profile.model ?? 'acp',
     label: profile.label ?? '工作者',
-    permissions: { read: 'allow', write: 'deny', execute: 'deny', network: 'allow', other: 'deny' },
+    // 開夥伴開出來的工作者不分廠牌：讀、寫檔、執行指令、上網放行，其他拒絕（#2351；Rust 端 partner_queue.rs 的 permissions_for 同一份）
+    permissions: { read: 'allow', write: 'allow', execute: 'allow', network: 'allow', other: 'deny' },
   }
   const r = normalizeWorker(raw, { workDir, index: 0 })
   if (r.error) throw new Error(r.error)

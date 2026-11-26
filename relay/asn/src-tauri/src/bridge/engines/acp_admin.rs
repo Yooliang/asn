@@ -39,11 +39,6 @@ pub trait AcpAdmin: Send + Sync {
     }
     /// 換班接手（清掉對話後重開，第一則提示是接班說明）
     fn handover(&self, name: &str, note: &str) -> Result<Value, String>;
-    /// 「Gemini 可寫檔和執行指令」開關切換後：「開新夥伴」開出的 Gemini 馬上依新開關重開（正在跑的那一輪中止）。
-    /// agents.json 手寫的、Grok 不動。回重開的名字與失敗的 (名字, 原因)
-    fn apply_gemini_toggle(&self) -> (Vec<String>, Vec<(String, String)>) {
-        (vec![], vec![])
-    }
     /// 接手：另開一個專屬的 Grok 工作者，載入指定的對話（session）。會等到載入成功或失敗才回；只動自己新開的工作者，不碰任何既有程序
     fn adopt(&self, _session_id: &str, _cwd: &str) -> Result<Value, String> {
         Err("沒有可以接手的 Grok 工作者設定".into())
@@ -287,7 +282,6 @@ impl AcpAdmin for AcpAdminImpl {
             return Err(e);
         }
         let w = (env.make)(Arc::new(old.renamed_cfg(new_name)));
-        w.set_perm_source(old.perm_source());
         w.mark_renamed(name, old.pending_intro());
         ws[i] = (new_name.to_string(), w.clone());
         drop(ws);
@@ -295,18 +289,6 @@ impl AcpAdmin for AcpAdminImpl {
         env.store.note(format!("acp: 工作者 {name} 改名為 {new_name}（結束程序 pid={pid}，帶原本的對話重開）"));
         let _ = self.events.send(EngineEvent::RosterChanged);
         Ok(json!({ "kind": "acp", "pid": pid, "old_name": name, "new_name": new_name }))
-    }
-
-    fn apply_gemini_toggle(&self) -> (Vec<String>, Vec<(String, String)>) {
-        let ws: Vec<(String, WorkerHandle)> = self.workers.lock().unwrap().iter().filter(|(_, w)| w.follows_toggle()).cloned().collect();
-        let (mut done, mut failed) = (vec![], vec![]);
-        for (name, w) in ws {
-            match w.admin_apply_toggle() {
-                Ok(_) => done.push(name),
-                Err(e) => failed.push((name, e)),
-            }
-        }
-        (done, failed)
     }
 
     fn handover(&self, name: &str, note: &str) -> Result<Value, String> {

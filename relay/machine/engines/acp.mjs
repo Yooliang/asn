@@ -20,7 +20,9 @@ import { isSystemNotice } from '../system-notice.mjs'
 const DRIVERS = { 'agy-stream': createAgyDriver, acp: createAcpDriver }
 const defaultMakeDriver = args => DRIVERS[args.cfg.protocol](args)
 
-// 每個工作者的 session id 存 WORK_DIR/acp-workers.json（重啟後 resume 同一段對話）。指令或協定換了就不沿用
+// 每個工作者的 session id 存 WORK_DIR/acp-workers.json（重啟後 resume 同一段對話）。指令或協定換了就不沿用。
+// 每筆另存 preamble_fp（#2351）：上次成功送出的開場說明全文的指紋；接回舊對話時指紋缺（舊帳本）或不同就重送開場說明。
+// 檔案版本不變，只多一個欄位；Rust 端 acp_worker.rs 的 Store 是同一份格式
 function openStore(file, log) {
   let state = {}
   try { state = JSON.parse(fs.readFileSync(file, 'utf8')).workers ?? {} } catch (e) { if (e.code !== 'ENOENT') log(`acp-workers.json 讀不了，當作沒有：${e.message}`) }
@@ -28,10 +30,22 @@ function openStore(file, log) {
     const tmp = `${file}.${process.pid}.tmp`
     try { fs.writeFileSync(tmp, JSON.stringify({ version: 1, workers: state }, null, 1)); fs.renameSync(tmp, file) } catch (e) { log(`acp-workers.json 存不了：${e.message}`) }
   }
-  return cfg => ({
-    get: name => { const s = state[name]; return s && s.protocol === cfg.protocol && s.command === cfg.command ? s.session_id : '' },
-    set: (name, id) => { state[name] = { session_id: id, protocol: cfg.protocol, command: cfg.command, updated: new Date().toISOString() }; save() },
-  })
+  return cfg => {
+    const mine = name => { const s = state[name]; return s && s.protocol === cfg.protocol && s.command === cfg.command ? s : null }
+    return {
+      get: name => mine(name)?.session_id ?? '',
+      // 編號沒變就保留指紋；換了新對話，指紋清空（新對話還沒收過開場說明）
+      set: (name, id) => {
+        const keep = mine(name)?.session_id === id ? (mine(name).preamble_fp ?? '') : ''
+        state[name] = { session_id: id, protocol: cfg.protocol, command: cfg.command, preamble_fp: keep, updated: new Date().toISOString() }
+        save()
+      },
+      // 舊帳本沒有這欄＝空字串（缺）
+      fp: name => mine(name)?.preamble_fp ?? '',
+      // 帳本裡沒有這個工作者的對話編號就不記
+      setFp: (name, fp) => { const s = mine(name); if (s && s.preamble_fp !== fp) { s.preamble_fp = fp; save() } },
+    }
+  }
 }
 
 // ctx：{ log, workDir, mailboxName, env?, send? }。send({to_node,to_agent,body})：橋提供的寄信函式（授權詢問、登入通知用）

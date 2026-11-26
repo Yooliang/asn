@@ -3,7 +3,7 @@
 //! 對應 engines/acp-driver-agy.mjs。權限的現實（實測）：agy 無頭模式不能問人，指令會被它自己拒絕，但寫檔不問就直接寫，
 //! 所以看每個工具步驟的事件，違反政策就立刻殺掉行程（絆線：能擋住後續動作並明確回報，但那一次寫入可能已經發生）。
 use super::acp_config::WorkerCfg;
-use super::acp_policy::{agy_scratch, agy_user_home, describe_agy_tool, redact, sensitive_write, WorkerError};
+use super::acp_policy::{agy_brain, agy_user_home, describe_agy_tool, redact, sensitive_write, WorkerError};
 use super::acp_worker::{Denied, Driver, DriverArgs, TurnResult};
 use super::rpc::{Rpc, SpawnOpts};
 use super::{acp_clean_env, BoxFut};
@@ -160,8 +160,9 @@ fn on_step(sh: &Arc<Shared>, a: &DriverArgs, s: Value) {
         c.seen.insert(key);
     }
     let home = agy_user_home(&a.env);
-    let sid = sh.sid.lock().unwrap().clone();
-    if let Err(reason) = a.guard.check_tool(&info, state, a.full_access, agy_scratch(&home, &sid).as_deref()) {
+    // 先過 check_tool：agy 自己的對話資料夾（brain/<編號>/ 底下，不含 .system_generated）的寫入在這裡就放行，不會走到下面的 sensitive_write。
+    // 只有 check_tool 不放行的才進到下面，那時寫到 .gemini 整個還是算敏感位置、整輪中止
+    if let Err(reason) = a.guard.check_tool(&info, state, a.full_access, Some(agy_brain(&home).as_path())) {
         // 寫到不能寫、但不是放登入資料或金鑰的地方：上層接回同一段對話請它改寫到工作資料夾（#608）；寫到敏感位置或其他種類的違規照舊整輪中止
         let redirect = (info.category == "write" && !info.paths.is_empty() && !sensitive_write(&info.paths, &home, &a.cfg.cwd)).then(|| info.paths.join("、"));
         if let Some(c) = sh.cur.lock().unwrap().as_mut() {

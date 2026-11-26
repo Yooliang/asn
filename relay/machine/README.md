@@ -333,7 +333,7 @@ node <ASN 原始碼>/relay/machine/recv.mjs --once     # 拉一次、印出、ac
 收到信就送一輪、拿回覆寄回（橋負責帶 `reply_to`），同一工作者保持同一段對話（session id 存 `machine-<ID>/acp-workers.json`，重啟 resume）。
 
 - 驅動：`protocol:"agy-stream"`（預設；直接跑 `agy` 的 stream-json）或 `"acp"`（標準 ACP，備援／其他 agent）。選擇理由、實測與風險見 `docs/AGENT-ENGINES.md` 第 9 節。
-- 權限：預設唯讀（read/network 放行，write/execute/other 拒絕）、白名單資料夾；每類可設 `allow`／`deny`／`ask`（問人：詢問信經仲介寄給原寄件人或指定節點，回「允許／拒絕／全部允許 編號」，逾時拒絕）。**agy 無頭模式無法預防寫檔，只能偵測中止（絆線）**，詳見該文件 9.2。
+- 權限：預設 read/write/execute/network 放行、other 拒絕（#2351；開新夥伴開出的工作者也是這組），寫檔以白名單資料夾為界；每類可設 `allow`／`deny`／`ask`（問人：詢問信經仲介寄給原寄件人或指定節點，回「允許／拒絕／全部允許 編號」，逾時拒絕）。**agy 無頭模式無法預防寫檔，只能偵測中止（絆線）**，詳見該文件 9.2。
 - 失敗不吞信：沒登入（名單狀態 `login-required`）、額度用完（`quota`）、逾時、崩潰、違規、佇列滿，都以 `[收發室] 轉交給 X 失敗：…` 回給寄件人。
 - 子行程環境是白名單（`cleanEnv`），不帶任何金鑰；`env_pass` 只能列非金鑰名稱的變數。
 - 轉接器介面的擴充（向下相容）：`createEngine` 的 ctx 多一個 `send({to_node,to_agent,body,from_agent})`（轉接器主動寄信用）；名單上的視窗可帶 `engine_label`（roster 與信件標頭顯示的引擎名，路由仍用 `engine`＝轉接器代號）與 `noFallback`（不代收沒指定收件人的信）；`handlers.onReply(視窗, 內文, 信件id?)` 第三個參數選用，轉接器知道回哪一封時帶上。

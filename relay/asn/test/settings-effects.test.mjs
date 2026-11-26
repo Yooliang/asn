@@ -27,7 +27,7 @@ export const UNDRIVEN = {
   '設備頁的排序與移除：拖放（dragstart／dragover／drop）與鍵盤上下鍵不是單純的點選或輸入，要另寫手勢操作': ['device-move', 'device-reorder', 'device-show', 'device-remove', 'device-restore'],
   '設備詳情更深一層的流程（改名輸入後確認、忘記、替換設備）：效果紀錄只追到第二層': ['device-rename', 'known-forget', 'replace-pick', 'replace-do', 'replace-keep'],
   '工作管理員（設備詳情→工作管理員→工作列上的動作）：第三層以上': ['tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view', 'tm-handover', 'tm-restart-ask', 'tm-restart-cancel', 'tm-restart-confirm'],
-  '本機橋接與系統整合選項（開機啟動、守護、橋接、終端服務、接管、遠端輸入）：要這台機器的支援旗標為真才會顯示，假環境不給': ['autostart', 'guard', 'guard-resume', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-gemini-full-access', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy'],
+  '本機橋接與系統整合選項（開機啟動、守護、橋接、終端服務、接管、遠端輸入）：要這台機器的支援旗標為真才會顯示，假環境不給': ['autostart', 'guard', 'guard-resume', 'bridge-launch', 'bridge-auto-resume', 'bridge-compact', 'bridge-compact-n', 'bridge-term-server', 'bridge-term-fetch-retry', 'bridge-screen-watch', 'bridge-perm-phone', 'bridge-mobile-view', 'bridge-remote-input', 'bridge-unaddressed', 'bridge-takeover', 'bridge-takeover-yes', 'bridge-takeover-no', 'askpass-copy'],
   '啟動設定的資料夾清單與安裝確認：要先有資料夾項目或偵測到可安裝的 AI 程式，假環境沒有': ['launch-cwd-remove', 'launch-cwd-suggest', 'launch-install-ask', 'launch-install-yes', 'launch-install-no'],
   '個人頁的大頭貼移除：要先有大頭貼才會出現': ['avatar-remove'],
 }

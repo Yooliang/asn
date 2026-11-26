@@ -741,7 +741,7 @@ async fn agy_寫到放登入資料的地方_不給換位置_直接中止() {
 }
 
 #[tokio::test]
-async fn agy_目前這段對話的_scratch_可寫_同一段對話的其他地方與別段對話的_scratch_不行() {
+async fn agy_任一段對話的資料夾可寫_系統目錄_brain_本身與登入資料不行() {
     let uh = agy_home();
     let up = uh.path().display().to_string();
     let gate = WriteGate::new();
@@ -755,19 +755,23 @@ async fn agy_目前這段對話的_scratch_可寫_同一段對話的其他地方
     std::fs::create_dir_all(&scratch).unwrap();
     std::fs::create_dir_all(brain.join(&sid).join(".system_generated")).unwrap();
     std::fs::create_dir_all(brain.join("conv-other").join("scratch")).unwrap();
-    let ok = scratch.join("pr_comment.md");
-    gate.open(&ok);
-    h.put_pull(to_agent(2, "Gemini", &format!("@@WRITE {}", ok.display()))).await;
-    h.wait("寫進 scratch", |h| h.bodies().len() == 2).await;
-    assert!(h.bodies()[1].contains("已寫入"), "{}", h.bodies()[1]);
-    assert!(ok.exists());
-    // 同一段對話的 .system_generated、別段對話的 scratch：在 ~/.gemini 底下，直接中止
-    for (i, bad) in [brain.join(&sid).join(".system_generated").join("x.txt"), brain.join("conv-other").join("scratch").join("x.txt")].iter().enumerate() {
+    // 放行：scratch、這段對話資料夾本身的檔（分析檔）、別段對話的資料夾（換班後改舊段寫的文件）
+    let oks = [scratch.join("pr_comment.md"), brain.join(&sid).join("analysis.md"), brain.join("conv-other").join("old.md")];
+    for (i, ok) in oks.iter().enumerate() {
+        gate.open(ok);
+        h.put_pull(to_agent(2 + i as u32, "Gemini", &format!("@@WRITE {}", ok.display()))).await;
+        h.wait("寫進對話資料夾", |h| h.bodies().len() == 2 + i).await;
+        assert!(h.bodies()[1 + i].contains("已寫入"), "{}", h.bodies()[1 + i]);
+        assert!(ok.exists(), "{}", ok.display());
+    }
+    // 中止：任一段的 .system_generated、直接寫在 brain 底下、~/.gemini 的登入資料
+    let bads = [brain.join(&sid).join(".system_generated").join("x.txt"), brain.join("conv-other").join(".system_generated").join("x.txt"), brain.join("x.txt"), uh.path().join(".gemini").join("oauth_creds.json")];
+    for (i, bad) in bads.iter().enumerate() {
         let n = h.bodies().len();
-        h.put_pull(to_agent(3 + i as u32, "Gemini", &format!("@@WRITE {}", bad.display()))).await;
+        h.put_pull(to_agent(10 + i as u32, "Gemini", &format!("@@WRITE {}", bad.display()))).await;
         h.wait("被擋", |h| h.bodies().len() > n).await;
         assert!(h.bodies()[n].contains("想做不被允許的事"), "{}", h.bodies()[n]);
-        gate.killed_before_write(bad, "scratch 以外的位置").await;
+        gate.killed_before_write(bad, "對話資料夾以外的位置").await;
     }
 }
 
@@ -1859,6 +1863,48 @@ async fn acp_接手_專屬工作者載入既有對話_信接在同一段後面_�
     assert!(h.bodies()[1].contains("[第4輪]"), "{}", h.bodies()[1]);
 }
 
+/// #2351：升級前就接手的 Grok，帳本沒有開場說明的指紋；重開 ASN 接回同一段對話後，要重送一次開場說明（舊對話裡可能還寫著唯讀）
+#[tokio::test]
+async fn acp_接手的_grok_舊帳本沒有指紋_重啟後重送開場說明_之後不再送() {
+    let state = tempfile::tempdir().unwrap();
+    std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":2}"#).unwrap();
+    let st = state.path().display().to_string();
+    let mut h = eh(Some(json!([grok_base()])), &[("FAKE_ACP_STATE", &st), ("FAKE_ACP_LOAD", "1")], "acp", &[]).await;
+    let admin = h.set.acp_admin().unwrap();
+    let cwd = h.work.path().join("專案");
+    std::fs::create_dir_all(&cwd).unwrap();
+    adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap();
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    h.put_pull(to_agent(1, "grok-接手-專案", "一")).await;
+    h.wait("回覆1", |h| h.fr.sent().len() == 1).await;
+    let ledger = h.work.path().join("acp-workers.json");
+    let read = || serde_json::from_str::<Value>(&std::fs::read_to_string(&ledger).unwrap()).unwrap();
+    for _ in 0..100 {
+        if read()["workers"]["grok-接手-專案"]["preamble_fp"].as_str().is_some_and(|f| !f.is_empty()) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    }
+    let saved: Value = read();
+    assert!(saved["workers"]["grok-接手-專案"]["preamble_fp"].as_str().is_some_and(|f| f.len() == 16), "第一輪送出後記下指紋：{saved}\n{:?}\n{}", h.bodies(), h.log_text());
+    // 升級前的帳本：沒有指紋這一欄
+    let mut old = saved.clone();
+    for (_, w) in old["workers"].as_object_mut().unwrap().iter_mut() {
+        w.as_object_mut().unwrap().remove("preamble_fp");
+    }
+    std::fs::write(&ledger, old.to_string()).unwrap();
+    h.restart().await;
+    h.set.refresh_all().await;
+    h.core.refresh_roster(now()).await;
+    h.put_pull(to_agent(2, "grok-接手-專案", "二")).await;
+    h.wait("回覆2", |h| h.fr.sent().len() == 2).await;
+    assert!(h.bodies()[1].contains("[第4輪 含說明]"), "接回同一段對話但指紋缺：重送開場說明：{}", h.bodies()[1]);
+    h.put_pull(to_agent(3, "grok-接手-專案", "三")).await;
+    h.wait("回覆3", |h| h.fr.sent().len() == 3).await;
+    assert!(h.bodies()[2].contains("[第5輪]") && !h.bodies()[2].contains("含說明"), "重送過就不再送：{}", h.bodies()[2]);
+}
+
 #[tokio::test]
 async fn acp_接手_載不進來就失敗_不偷偷開新對話_不留工作者_也不留紀錄() {
     let state = tempfile::tempdir().unwrap();
@@ -1897,7 +1943,7 @@ async fn acp_接手_載不進來就失敗_不偷偷開新對話_不留工作者_
 }
 
 #[tokio::test]
-async fn acp_接手_寫檔最多詢問_工作資料夾白名單換成那段對話的資料夾() {
+async fn acp_接手_寫檔與執行一律放行_工作資料夾白名單換成那段對話的資料夾() {
     let state = tempfile::tempdir().unwrap();
     std::fs::write(state.path().join("sess-grok1.json"), r#"{"turns":0}"#).unwrap();
     let st = state.path().display().to_string();
@@ -1907,8 +1953,8 @@ async fn acp_接手_寫檔最多詢問_工作資料夾白名單換成那段對�
     std::fs::create_dir_all(&cwd).unwrap();
     adopt_blocking(&admin, "sess-grok1", &cwd.display().to_string()).await.unwrap();
     let info = admin.info("grok-接手-專案").unwrap();
-    assert_eq!(info["permissions"]["write"], "ask", "底下的 Grok 設定是 write=allow，接手的專屬工作者降成詢問");
-    assert_eq!(info["permissions"]["execute"], "deny");
+    assert_eq!(info["permissions"]["write"], "allow", "#2351：接手的專屬工作者寫檔放行");
+    assert_eq!(info["permissions"]["execute"], "allow", "底下的 Grok 設定是 execute=deny，接手後也放行");
     assert_eq!(info["cwd"].as_str(), Some(cwd.display().to_string().as_str()));
     assert_eq!(admin.info("Grok").unwrap()["permissions"]["write"], "allow", "既有的 Grok 工作者設定沒被動到");
 }
