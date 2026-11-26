@@ -11,7 +11,7 @@ import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
 import { CALL_BEAT_MS } from './lib/call-beats.mjs'
-import { RESIZE_DIRS, createWindowHub, ctl, emit, initFrame, invoke, listen, photoApi, resizeFrom, shotApi, termViewApi, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, createWindowHub, ctl, emit, initFrame, invoke, photoApi, resizeFrom, shotApi, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 // 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
 installUiLog({ source: 'chat' })
@@ -35,13 +35,19 @@ const app = createApp({
     const meAv = computed(() => selfAvatarSrc({ selfNode: snap.value?.selfNode ?? '', windowName: snap.value?.windowName ?? '', avatars: avatars.value }))
     const eventHub = createWindowHub()   // 終端畫面與語音共用同一座事件中心（#2038 PR-6）；tauri.mjs 與 initFrame 各自另有一座，只訂不相干的事件
     const voice = createVoiceUi({ invoke, hub: eventHub, createMic, createAudio: browserAudio, reactive })   // 念出訊息＋語音輸入（金鑰與辨識都在 Rust 端）
-    listen('asn:avatars', a => { avatars.value = a ?? {} })
-    listen('asn:state', s => { snap.value = s })
-    listen('asn:log', p => { if (p.id === id) log.value = p.log })
+    // 視窗之間的事件（名單視窗的樞紐送來）：同一座事件中心，視窗關閉時一起消失，不單獨退訂
+    eventHub.subscribe('asn:avatars', a => { avatars.value = a ?? {} })
+    eventHub.subscribe('asn:state', s => { snap.value = s })
+    eventHub.subscribe('asn:log', p => { if (p.id === id) log.value = p.log })
     const cards = ref([])   // 群組：待主持人確認的卡片（名單視窗的樞紐讀好推來）
-    listen('asn:room', p => { if (p.id === id) cards.value = p.cards ?? [] })
-    onMounted(() => {
+    eventHub.subscribe('asn:room', p => { if (p.id === id) cards.value = p.cards ?? [] })
+    // 先等四個接收處都向橋註冊完再跟名單視窗打招呼，回的快照才不會比接收處早到；掛不起來就記一行、照送（跟以前一樣不擋）
+    const sayHello = async () => {
+      try { await eventHub.readyFor(['asn:avatars', 'asn:state', 'asn:log', 'asn:room']) } catch (e) { console.warn(`[ASN] 對話視窗的事件沒掛好（asn:avatars／asn:state／asn:log／asn:room），照送 hello：${e?.message ?? e}`) }
       emit('asn:cmd', { op: 'hello', id })
+    }
+    onMounted(() => {
+      void sayHello()
       window.addEventListener('focus', () => emit('asn:cmd', { op: 'read', id }))
     })
     // 通話中每 20 秒告訴名單視窗一聲（它的「自動念」這時要暫停，免得回信念兩次）
@@ -55,11 +61,16 @@ const app = createApp({
     // 往上捲到頂載入更舊的信：請名單視窗的樞紐代跑，等它回報（它補進記錄的更新會先經 asn:log 到這裡）
     // opts.toSeq：群組訊息編號點了、往前補載到那一則（#1530）
     const loadOlder = (fid, opts) => new Promise(resolve => {
-      let un = null, timer = null
-      const done = r => { clearTimeout(timer); if (un) un(); resolve(r) }
+      let off = () => {}, timer = null, over = false
+      // 收到自己的回報或 60 秒逾時，兩者其一就退訂（退訂是同步的，橋還沒註冊完也能擋住）
+      const done = r => { if (over) return; over = true; clearTimeout(timer); off(); resolve(r) }
+      off = eventHub.subscribe('asn:older', r => { if (r?.id === fid) done(r) })
       timer = setTimeout(() => done({ more: true, added: 0, error: true }), 60_000)
-      Promise.resolve(listen('asn:older', r => { if (r?.id === fid) done(r) })).then(u => { un = typeof u === 'function' ? u : null })
-      emit('asn:cmd', { op: 'older', id: fid, ...(Number.isInteger(opts?.toSeq) ? { toSeq: opts.toSeq } : {}) })
+      void (async () => {
+        // 先掛好再送，回報不會比接收處早到；掛不起來就記一行、照送（最差等到逾時）
+        try { await eventHub.readyFor(['asn:older']) } catch (e) { console.warn(`[ASN] 事件 asn:older 沒掛好，照送：${e?.message ?? e}`) }
+        if (!over) emit('asn:cmd', { op: 'older', id: fid, ...(Number.isInteger(opts?.toSeq) ? { toSeq: opts.toSeq } : {}) })
+      })()
     })
     // 群組裡點成員（#1515）：在夥伴名單裡就請名單視窗照從名單點進去一樣開；不在名單回 false（畫面自己說明）
     const openMember = key => {
@@ -72,12 +83,13 @@ const app = createApp({
     let attachSeq = 0
     const attach = async (photo, caption, done) => {
       const token = `${Date.now().toString(36)}-${++attachSeq}`
-      let un = null, timer = null, over = false
-      const finish = r => { if (over) return; over = true; clearTimeout(timer); if (un) un(); if (typeof done === 'function') done(r) }
+      let off = () => {}, timer = null, over = false
+      const finish = r => { if (over) return; over = true; clearTimeout(timer); off(); if (typeof done === 'function') done(r) }
+      off = eventHub.subscribe('asn:attach-done', r => { if (r?.token === token) finish({ ok: r.ok !== false, error: r.error ?? '' }) })
       timer = setTimeout(() => finish({ ok: false, error: '等太久沒有結果，請看對話裡有沒有出現' }), 170_000)
-      try { const u = await listen('asn:attach-done', r => { if (r?.token === token) finish({ ok: r.ok !== false, error: r.error ?? '' }) }); un = typeof u === 'function' ? u : null } catch { /* 聽不到就只能等逾時 */ }
-      if (over && un) un()
-      emit('asn:cmd', { op: 'attach', id, photo, caption, token })   // 先掛好再送，回報不會比監聽早到
+      try { await eventHub.readyFor(['asn:attach-done']) } catch (e) { console.warn(`[ASN] 事件 asn:attach-done 沒掛好，照送（聽不到就只能等逾時）：${e?.message ?? e}`) }
+      if (over) return   // 等的期間已經逾時結束
+      emit('asn:cmd', { op: 'attach', id, photo, caption, token })   // 先掛好再送，回報不會比接收處早到
     }
     return {
       openMember,

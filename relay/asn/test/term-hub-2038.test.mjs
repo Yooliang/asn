@@ -59,9 +59,9 @@ function mountComp(Comp, rh, api) {
 }
 
 // ---------- 事件表 ----------
-test('事件表：五種終端事件登記為已搬（共 21 種）；remote-input-stalled 沒有接收處、沒登記', () => {
+test('事件表：五種終端事件登記為已搬；remote-input-stalled 沒有接收處、沒登記', () => {
   for (const k of FIVE) assert.ok(HUB_MIGRATED.includes(k), k)
-  assert.equal(HUB_MIGRATED.length, 21)
+  assert.ok(HUB_MIGRATED.length >= 21, '總數不寫死，之後搬更多事件不用回頭改')
   assert.ok(!HUB_MIGRATED.includes('term-view-remote-input-stalled'))
   assert.equal(RUST_EVENTS['term-view-remote-input-stalled'].listeners, 0)
 })
@@ -337,7 +337,7 @@ test('底層註冊失敗：本機畫面走 lost、不 open（錯誤路徑不能�
   assert.equal(rh.liveTotal(), 0, '失敗後已訂的也退乾淨')
 })
 
-test('底層註冊失敗：看別台、別台打字畫面顯示白話（不是事件名或英文狀態），原文寫進 log，不發起', async () => {
+test('底層註冊失敗：看別台、別台打字畫面顯示白話（不是事件名或英文狀態），原文寫進 log，不發起', async t => {
   const origInfo = console.info, logged = []
   console.info = (...a) => { logged.push(a.map(String).join(' ')) }
   try {
@@ -345,13 +345,13 @@ test('底層註冊失敗：看別台、別台打字畫面顯示白話（不是�
       logged.length = 0
       const rh = rigHub({ failOn: [END_EVENT] }), r = remoteApi(rh)
       const v = mountComp(Comp, rh, r.api)
+      t.after(() => v.unmount())   // 斷言紅了也要卸載，否則 node 要等元件的到期計時器
       await until(() => v.st.phase.value === 'ended', '進到結束狀態')
       assert.equal(v.st.note.value, REMOTE_TEXT.failed, '畫面是白話')
       assert.ok(!/term-view|failed|[A-Za-z]{3,}/.test(v.st.note.value), '畫面不含事件名或英文')
       assert.ok(logged.some(l => l.includes(END_EVENT)), 'log 有原文（含事件名）')
       assert.equal(r.calls.filter(c => c.what === 'start').length, 0, '不發起')
       assert.equal(rh.liveTotal(), 0)
-      v.unmount()
     }
   } finally { console.info = origInfo }
 })

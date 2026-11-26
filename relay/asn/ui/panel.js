@@ -10,23 +10,25 @@ import { PANEL_KINDS, panelItem, panelTitle } from './lib/panels.mjs'
 import { selfAvatarSrc } from './lib/avatar.mjs'
 import { plainMessage } from './lib/plain-errors.mjs'
 import { avatarFromFile } from './lib/avatar-canvas.mjs'
-import { RESIZE_DIRS, ctl, emit, fpShowCancel, initFrame, knownDeviceApi, listen, resizeFrom } from './lib/tauri.mjs'
+import { RESIZE_DIRS, createWindowHub, ctl, emit, fpShowCancel, initFrame, knownDeviceApi, resizeFrom } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { FpQrCanvas, QR_TEXT, normalizeQr } from './lib/fp-qr.mjs'
-import { FP_SHOW_TEXT, FP_SHOW_WINDOW_MS, groupFp16 } from './lib/fp-show.mjs'
+import { FP_SHOW_TEXT, FP_SHOW_WINDOW_MS, applyFpShow, groupFp16 } from './lib/fp-show.mjs'
 import { AsnButton } from './lib/ui-kit.mjs'
 // 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
 installUiLog({ source: 'panel' })
 
 const { createApp, ref, reactive, computed, onMounted } = Vue
 await initFrame()
+// 視窗之間的事件與 Rust 對這扇視窗送的事件共用這一座；tauri.mjs 與 initFrame 各自另有一座，只訂不相干的事件
+const eventHub = createWindowHub()
 const qs = new URLSearchParams(location.search)
 const q = qs.get('kind')
 // ?kind=fpshow＝手機正在核對這台的指紋（#1863）：只由 Rust 的領取迴圈開關，不是分頁、不跟樞紐打招呼
 const kind = q === 'fpshow' ? 'fpshow' : PANEL_KINDS.includes(q) ? q : 'guide'
 
 // 核對指紋的視窗：請求編號與到期時間（毫秒）由 Rust 放在網址，新的請求取代舊的時用 asn:fpshow 換；QR 與指紋向本機要
-function useFpShow() {
+function useFpShow(eventHub) {
   const until0 = Number(qs.get('until'))
   const fps = reactive({ id: qs.get('id') ?? '', until: Number.isFinite(until0) && until0 > 0 ? until0 : Date.now() + FP_SHOW_WINDOW_MS, left: 0, qr: null, fp: '', err: '', busy: false })
   const tickLeft = () => { fps.left = Math.min(FP_SHOW_WINDOW_MS, Math.max(0, fps.until - Date.now())) }   // 最多顯示 5 分鐘（請求的壽命）
@@ -38,8 +40,7 @@ function useFpShow() {
     } catch (e) { console.info('[ASN] 指紋 QR Code 做不出來', String(e?.message ?? e)); fps.err = FP_SHOW_TEXT.pcQrFailed }
     try { fps.fp = groupFp16(String(await knownDeviceApi.ownFingerprint() ?? '').slice(0, 16)) } catch (e) { console.info('[ASN] 這台的指紋讀不到', String(e?.message ?? e)) }
   }
-  // TODO(#2038 PR-7)：視窗之間的事件，之後搬進事件中心（hub）
-  listen('asn:fpshow', p => { if (typeof p?.id === 'string') { fps.id = p.id; fps.busy = false } if (Number.isFinite(p?.until)) fps.until = p.until; tickLeft() })
+  eventHub.subscribe('asn:fpshow', p => { applyFpShow(fps, p); tickLeft() })   // Rust 對這扇視窗送的（emit_to）：視窗已開著又來新請求
   const fpsCancel = async () => {
     if (fps.busy || !fps.id) return
     fps.busy = true
@@ -59,15 +60,17 @@ const app = createApp({
     // 頭像上傳時選到壞圖的訊息在這裡產生（裁圖在這扇視窗），其餘訊息由樞紐的快照帶來
     const st = computed(() => (settings.value ? { ...settings.value, avMsg: localMsg.value || settings.value.avMsg } : null))
     const meAv = computed(() => selfAvatarSrc({ selfNode: snap.value?.selfNode ?? '', windowName: snap.value?.windowName ?? '', avatars: avatars.value }))
-    listen('asn:panel', p => { if (p.kind === kind) { key.value = p.key; document.title = panelTitle(kind, p.key) } })
-    listen('asn:settings', s => { settings.value = s; localMsg.value = '' })
-    listen('asn:state', s => { snap.value = s })
-    listen('asn:avatars', a => { avatars.value = a ?? {} })
+    eventHub.subscribe('asn:panel', p => { if (p.kind === kind) { key.value = p.key; document.title = panelTitle(kind, p.key) } })
+    eventHub.subscribe('asn:settings', s => { settings.value = s; localMsg.value = '' })
+    eventHub.subscribe('asn:state', s => { snap.value = s })
+    eventHub.subscribe('asn:avatars', a => { avatars.value = a ?? {} })
     let sizeTimer = null
-    const fpShow = kind === 'fpshow' ? useFpShow() : { fps: null, fpsCancel: () => {} }
+    const fpShow = kind === 'fpshow' ? useFpShow(eventHub) :{ fps: null, fpsCancel: () => {} }
     if (kind === 'fpshow') document.title = FP_SHOW_TEXT.pcTitle
-    onMounted(() => {
+    onMounted(async () => {
       if (kind === 'fpshow') return   // 這扇不跟樞紐要內容、不記大小
+      // 先等四個接收處都向橋註冊完再打招呼，樞紐回的內容才不會比接收處早到；掛不起來就記一行、照送（跟以前一樣不擋）
+      try { await eventHub.readyFor(['asn:panel', 'asn:settings', 'asn:state', 'asn:avatars']) } catch (e) { console.warn(`[ASN] 面板視窗的事件沒掛好（asn:panel／asn:settings／asn:state／asn:avatars），照送 panel-hello：${e?.message ?? e}`) }
       emit('asn:cmd', { op: 'panel-hello', kind })
       // 視窗大小記住：停下來才通知樞紐存檔（樞紐下次開這扇視窗時用）
       window.addEventListener('resize', () => {

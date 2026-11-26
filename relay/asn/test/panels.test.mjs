@@ -131,7 +131,7 @@ test('守門（獨立視窗）：panel.html／panel.js 有自訂外框、標題�
   assert.ok(rz && rz.getAttribute('@mousedown.left.prevent') === 'resizeFrom(d)', '拖邊緣調整大小')
   assert.ok(js.includes('await initFrame()'), '外框跟著設定（自訂／原生）')
   assert.ok(js.includes("emit('asn:set', { op: 'panel-size'") && js.includes("emit('asn:cmd', { op: 'panel-hello', kind })"))
-  assert.ok(js.includes("listen('asn:panel'") && js.includes("PANEL_KINDS.includes(q) ? q : 'guide'"))
+  assert.ok(js.includes("eventHub.subscribe('asn:panel'") && js.includes("PANEL_KINDS.includes(q) ? q : 'guide'"))
   assert.equal(doc.querySelectorAll('[v-html]').length, 0, '不用 v-html')
 })
 
