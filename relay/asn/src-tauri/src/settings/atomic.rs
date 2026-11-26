@@ -307,7 +307,7 @@ mod tests {
             ("account.rs login_skipped", include_str!("../account.rs"), "atomic::write(&f, b\"1\"", "SETTINGS"),
             ("account.rs device_id", include_str!("../account.rs"), "atomic::write(&f, id.as_bytes()", "SETTINGS"),
             ("bridge/engines/partner_queue.rs 名冊", include_str!("../bridge/engines/partner_queue.rs"), "atomic::write(file, json!(", "SETTINGS"),
-            ("bridge/pending.rs save_atomic", include_str!("../bridge/pending.rs"), "atomic::write(file,", "QUEUE"),
+            ("bridge/core.rs pending 存檔", include_str!("../bridge/core.rs"), "atomic::write(&self.pending_file(),", "QUEUE"),
         ];
         for (name, src, anchor, want) in sites {
             let i = src.find(anchor).unwrap_or_else(|| panic!("{name}：找不到寫入呼叫（{anchor}）"));
@@ -331,6 +331,8 @@ mod tests {
             (include_str!("../account.rs"), "crate::write_atomic("),
             (include_str!("../bridge/mod.rs"), "crate::write_atomic(&settings_path("),
             (include_str!("../bridge/engines/partner_queue.rs"), "crate::write_atomic(file, &json!("),
+            (include_str!("../bridge/core.rs"), "crate::write_atomic("),
+            (include_str!("../bridge/core.rs"), "pending::save_atomic("),
         ] {
             assert!(!src.contains(bad), "還有走 {bad}（STATE）的呼叫");
         }

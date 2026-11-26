@@ -835,7 +835,7 @@ impl Core {
             return;
         }
         let m: serde_json::Map<String, Value> = self.room_redo.iter().map(|(k, (hi, ids))| { let mut v: Vec<&String> = ids.iter().collect(); v.sort(); (k.clone(), json!({"hi": hi, "ids": v})) }).collect();
-        if let Err(e) = crate::write_atomic(&f, &Value::Object(m).to_string()) {
+        if let Err(e) = crate::settings::atomic::write(&f, Value::Object(m).to_string().as_bytes(), crate::settings::atomic::STATE) {
             self.log.line(&format!("rooms redo save failed: {e}"));
         }
     }
@@ -929,7 +929,7 @@ impl Core {
         if text == self.last_saved {
             return;
         }
-        match pending::save_atomic(&self.pending_file(), &snap) {
+        match crate::settings::atomic::write(&self.pending_file(), snap.to_string().as_bytes(), crate::settings::atomic::QUEUE) {
             Ok(_) => {
                 self.last_saved = text;
                 self.persist_failed = false;
