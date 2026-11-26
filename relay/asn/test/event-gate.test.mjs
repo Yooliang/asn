@@ -116,25 +116,39 @@ const tokenName = (files, file, tok) => {
 }
 // 一個檔裡用 const X = createWindowHub() 單純寫法建的 hub 變數（其他寫法不算，入口檔另外點名）
 const WIN_VAR_RE = /^[ \t]*(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*(?:await\s+)?createWindowHub\s*\(\s*\)\s*;?[ \t]*$/gm
-const INLINE_RE = new RegExp(`createWindowHub\\s*\\(\\s*\\)\\s*\\.(subscribe|on)\\(\\s*${ARG}`, 'g')
+// 「.」與「?.」、方法名與「(」之間都容許空白、換行與 ?.（eventHub\n  .subscribe(…)、eventHub?.on?.(…)）
+const DOT = '\\s*(?:\\?\\.|\\.)\\s*'
+const CALL_OPEN = '\\s*(?:\\?\\.)?\\s*\\('
+const INLINE_RE = new RegExp(`createWindowHub\\s*\\(\\s*\\)${DOT}(subscribe|on)${CALL_OPEN}\\s*${ARG}`, 'g')
+const RECV_TAIL = /((?:[\w$]+\s*\??\s*\.\s*)*[\w$]+)\s*$/
+// 方法呼叫前面的接收者：{ recv, chain }。接在 )、]、}、引號後面（串接、看不出是哪座 hub）→ chain:true，recv 是 ')'
+const receiverBefore = (s, idx) => {
+  const before = s.slice(Math.max(0, idx - 300), idx).replace(/\s+$/, '')
+  if (/createWindowHub\s*\(\s*\)$/.test(before)) return { recv: 'createWindowHub()', chain: false, inline: true }
+  const m = RECV_TAIL.exec(before)
+  if (!m || /[)\]}'"`]$/.test(before)) return { recv: ')', chain: true }
+  return { recv: m[1].replace(/\s+/g, '').replace(/\?$/, ''), chain: false }
+}
 const winVarsOf = (s) => new Set([...s.matchAll(WIN_VAR_RE)].map((m) => m[1]))
 // 入口檔裡 createWindowHub( 的用法：只認「const X = createWindowHub()」與「createWindowHub().subscribe／on(」，其他的一律點名
 export const hubCreationProblems = (file) => stripComments(file.src).split('\n').filter((l) => /createWindowHub\s*\(/.test(l) && !/^\s*import\b/.test(l)).filter((l) => {
   if (new RegExp(WIN_VAR_RE.source).test(l)) return false
-  return !(/createWindowHub\s*\(\s*\)\s*\.(?:subscribe|on)\(/.test(l) && (l.match(/createWindowHub\s*\(/g) ?? []).length === 1)
+  return !(new RegExp(`createWindowHub\\s*\\(\\s*\\)${DOT}(?:subscribe|on)${CALL_OPEN}`).test(l) &&(l.match(/createWindowHub\s*\(/g) ?? []).length === 1)
 }).map((l) => `${file.name}：createWindowHub() 的用法認不出來（${l.trim()}）——請寫成 const X = createWindowHub()，再用 X.subscribe／X.on`)
 // 一個檔裡所有「這個接收者訂了這個事件」：{ recv, how, evt, id, inline }（evt 解不出來就是 null，id 是原始寫法）
 export const sitesOf = (files, file) => {
   const s = stripComments(file.src)
   const winVars = winVarsOf(s)
   const out = []
-  for (const m of s.matchAll(new RegExp(`([\\w$][\\w$.?]*)\\.(subscribe|on)\\(\\s*${ARG}`, 'g'))) {
-    const recv = m[1].replace(/\?$/, '')   // h?.subscribe → h
+  for (const m of s.matchAll(new RegExp(`${DOT}(subscribe|on)${CALL_OPEN}\\s*${ARG}`, 'g'))) {
+    const { recv, chain, inline } = receiverBefore(s, m.index)
+    if (inline) continue   // createWindowHub().subscribe(…) 由下面 INLINE_RE 處理
     // hub 類接收者（含這個檔自己 createWindowHub() 建出來的變數）的 .on／.subscribe 都算；
-    // 其他接收者的 .subscribe 在入口檔也算（判不出是哪座 hub 要被點名），在 lib 檔不算（別的訂閱制物件，例如 recentShown，不是事件中心）
-    if (!(HUB_ON_RECV.test(recv) || winVars.has(recv)) && (m[2] === 'on' || !isEntry(file.name))) continue
-    const { evt, raw } = evtOf(files, file, m.slice(3, 7))
-    out.push({ recv, how: m[2], evt, id: raw })
+    // 其他接收者的 .subscribe 在入口檔也算（判不出是哪座 hub 要被點名），在 lib 檔不算（別的訂閱制物件，例如 recentShown，不是事件中心）；
+    // 串接（接在 )、] 後面）看不出接收者，一律算、一律點名
+    if (!chain && !(HUB_ON_RECV.test(recv) || winVars.has(recv)) && (m[1] === 'on' || !isEntry(file.name))) continue
+    const { evt, raw } = evtOf(files, file, m.slice(2, 6))
+    out.push({ recv, how: m[1], evt, id: raw, chain })
   }
   // createWindowHub().subscribe('x'…) 直接串的寫法：每一處都是獨立的一座 hub
   for (const m of s.matchAll(INLINE_RE)) {
@@ -192,7 +206,9 @@ export const analyze = (files, wiring = LIB_WIRING) => {
   const libSites = new Map()
   for (const f of files) {
     if (INFRA.has(f.name) || f.name === 'lib/tauri.mjs' || isEntry(f.name)) continue
-    const ss = sitesOf(files, f).filter((x) => x.how === 'subscribe' || HUB_ON_RECV.test(x.recv))
+    const all = sitesOf(files, f)
+    for (const x of all.filter((y) => y.chain)) problems.push(`${f.name}：${x.recv}.${x.how}(${x.evt ?? x.id}) 接在別的呼叫後面，看不出是哪一座 hub（請拆成 const X = …，再用 X.subscribe／X.on）`)
+    const ss = all.filter((x) => !x.chain && (x.how === 'subscribe' || HUB_ON_RECV.test(x.recv)))
     if (ss.length) libSites.set(f.name, ss)
   }
   for (const entry of files.filter((f) => isEntry(f.name))) {
@@ -277,10 +293,12 @@ test('G3 不呼叫別人傳進來的 listen（語音辨識的 native.listen 不�
 test('G4 hub 的 on／subscribe／readyFor 用到的事件名都在事件表裡', () => {
   const unknown = []
   const unresolved = []
+  const chained = []
   for (const f of uiFiles) {
     if (INFRA.has(f.name)) continue
     for (const x of sitesOf(uiFiles, f)) {
       if (/^lib\/tauri\.mjs$/.test(f.name)) continue
+      if (x.chain) { chained.push(`${f.name}:${x.recv}.${x.how}(${x.evt ?? x.id})`); continue }
       if (x.evt === null) { unresolved.push(`${f.name}:${x.recv}.${x.how}(${x.id})`); continue }
       const internal = INTERNAL.has(x.evt) && /^core$/.test(x.recv)
       if (!TABLE.has(x.evt) && !internal) unknown.push(`${f.name}:${x.evt}`)
@@ -288,6 +306,7 @@ test('G4 hub 的 on／subscribe／readyFor 用到的事件名都在事件表裡'
     for (const n of readyForNames(uiFiles, f)) if (n === null || !TABLE.has(n)) unknown.push(`${f.name}:readyFor ${n}`)
   }
   for (const t of tauriSites(uiFiles.find((f) => f.name === 'lib/tauri.mjs'))) if (!TABLE.has(t.evt)) unknown.push(`lib/tauri.mjs:${t.evt}`)
+  assert.deepEqual(chained, [], `這些 .on／.subscribe 接在別的呼叫後面，看不出是哪一座 hub（請拆成 const X = …，再用 X.subscribe／X.on）：${chained.join('、')}`)
   assert.deepEqual(unresolved, [], `這些訂閱的事件名解不出來（請用字串或同檔／import 的常數）：${unresolved.join('、')}`)
   assert.deepEqual(unknown, [], `這些事件名不在 lib/rust-events.mjs 的表裡（先登記再用）：${unknown.join('、')}`)
 })
@@ -423,6 +442,60 @@ test('G4 注入式測試：事件名三種引號都認、反引號帶 ${}／變�
   assert.deepEqual(rf('hub.readyFor(list)'), [null])
   // .on 的接收者：hub／Hub 結尾與 .hub 屬性都算，別的 .on 不算
   assert.deepEqual(evts("props.hub.on('a-x', f)\nmyHub.on('b-x', f)\nstate.on('c-x', f)"), ['a-x', 'b-x'])
+})
+
+// ---------- G7 lib 檔不自己建 hub ----------
+// lib 檔的 hub 都是呼叫端傳進來的（LIB_WIRING 登記的就是這個假設）；自己 createWindowHub() 會多出一座 hub，登記就失真。
+// 本來就要建 hub 的只有 event-hub.mjs（定義）與 tauri.mjs（橋的出口）。其他例外寫在這張表（只准少、不准多）：檔名 → 原因
+const LIB_HUB_BUILDERS = new Set(['lib/event-hub.mjs', 'lib/tauri.mjs'])
+const LIB_CREATE_HUB_ALLOW = {}
+const libCreatesHub = (f) => f.name.startsWith('lib/') && !LIB_HUB_BUILDERS.has(f.name) && /createWindowHub\s*\(/.test(stripComments(f.src))
+
+test('G7 lib 檔不自己呼叫 createWindowHub()（hub 由呼叫端傳進來）', () => {
+  const found = uiFiles.filter(libCreatesHub).map((f) => f.name)
+  const extra = found.filter((n) => !(n in LIB_CREATE_HUB_ALLOW))
+  assert.deepEqual(extra, [], `這些 lib 檔自己建了 hub（請改成由呼叫端傳進來，LIB_WIRING 才準）：${extra.join('、')}`)
+  const stale = Object.keys(LIB_CREATE_HUB_ALLOW).filter((n) => !found.includes(n))
+  assert.deepEqual(stale, [], `白名單裡這些 lib 檔已經沒有自己建 hub，請刪掉：${stale.join('、')}`)
+})
+
+test('G7 注入式測試：lib 檔自己 createWindowHub() 要紅，改成收參數要綠', () => {
+  assert.equal(libCreatesHub({ name: 'lib/voice-ui.mjs', src: "const h = createWindowHub()\nh.subscribe('asn:state', f)" }), true)
+  assert.equal(libCreatesHub({ name: 'lib/voice-ui.mjs', src: "createWindowHub().subscribe('asn:state', f)" }), true)
+  assert.equal(libCreatesHub({ name: 'lib/voice-ui.mjs', src: "export const w = (hub) => hub.subscribe('asn:state', f)" }), false)
+  assert.equal(libCreatesHub({ name: 'lib/voice-ui.mjs', src: "// createWindowHub() 只在註解" }), false)
+  assert.equal(libCreatesHub({ name: 'lib/tauri.mjs', src: 'const h = createWindowHub()' }), false)
+  assert.equal(libCreatesHub({ name: 'w.js', src: 'const h = createWindowHub()' }), false)
+})
+
+test('G4／G6 注入式測試：串接、換行、?. 三種寫法不能繞過（要紅），改成正常寫法要綠', () => {
+  const tauri = 'export const createWindowHub = () => 1\n'
+  const entry = (extra) => `import { createWindowHub } from './lib/tauri.mjs'\nconst eventHub = createWindowHub()\neventHub.subscribe('asn:state', f)\n${extra}\n`
+  const mk = (extra, libSrc = '') => [{ name: 'lib/tauri.mjs', src: tauri }, { name: 'w.js', src: entry(extra) + (libSrc ? "import './lib/x.mjs'\n" : '') }, { name: 'lib/x.mjs', src: libSrc }]
+  const w = (extra) => { const f = mk(extra); return sitesOf(f, f[1]) }
+  // 事件名解析：三種寫法都要抓得到事件名
+  assert.deepEqual(w("eventHub.on('asn:log', f).on('not-in-table', g)").map((x) => x.evt), ['asn:state', 'asn:log', 'not-in-table'])
+  assert.deepEqual(w("eventHub\n  .subscribe('not-in-table', f)").map((x) => x.evt), ['asn:state', 'not-in-table'])
+  assert.deepEqual(w("eventHub.on?.('not-in-table', f)").map((x) => x.evt), ['asn:state', 'not-in-table'])
+  assert.deepEqual(w("eventHub?.subscribe('not-in-table', f)").map((x) => x.evt), ['asn:state', 'not-in-table'])
+  // 串接：第二段的接收者看不出來 → chain，G4 會點名、G6 的 analyze 也有 problem
+  const chained = w("eventHub.on('asn:log', f).on('not-in-table', g)")
+  assert.deepEqual(chained.map((x) => x.chain), [false, false, true])
+  assert.equal(w("eventHub.on('asn:log', f)\n  .on('not-in-table', g)").filter((x) => x.chain).length, 1, '串接換行也算')
+  assert.equal(w("eventHub.on('asn:log', f)?.on('x-y', g)").filter((x) => x.chain).length, 1, '串接加 ?. 也算')
+  assert.equal(w("list[0].on('x-y', g)").filter((x) => x.chain).length, 1, '] 後面接 .on 也算')
+  assert.equal(analyze(mk("eventHub.on('asn:log', f).on('not-in-table', g)")).problems.length, 1)
+  // 換行／?. 的第二座 hub 訂同名事件，G6 要抓得到
+  assert.deepEqual(dupsOf(analyze(mk("const hub2 = createWindowHub()\nhub2\n  .on('asn:state', g)")).windows), ['w.js:asn:state（win:eventHub、win:hub2）'])
+  assert.deepEqual(dupsOf(analyze(mk("const hub2 = createWindowHub()\nhub2.on?.('asn:state', g)")).windows), ['w.js:asn:state（win:eventHub、win:hub2）'])
+  assert.deepEqual(dupsOf(analyze(mk("const hub2 = createWindowHub()\nhub2?.subscribe('asn:state', g)")).windows), ['w.js:asn:state（win:eventHub、win:hub2）'])
+  assert.deepEqual(dupsOf(analyze(mk("createWindowHub()\n  .on('asn:state', g)")).windows), ['w.js:asn:state（win:eventHub、win:inline#0）'])
+  // lib 檔裡的串接也要點名
+  assert.equal(analyze(mk('', "export const w = (hub) => hub.on('asn:log', f).on('asn:cmd', g)"), { 'lib/x.mjs': { 'w.js': 'core' } }).problems.length, 1)
+  // 好：拆成正常寫法就綠，且不誤抓別的 .on
+  assert.equal(w("eventHub.on('asn:log', f)\neventHub.on('asn:cmd', g)").filter((x) => x.chain).length, 0)
+  assert.equal(analyze(mk("eventHub.on('asn:log', f)\neventHub.on('asn:cmd', g)")).problems.length, 0)
+  assert.equal(w("state\n  .on('c-x', f)").length, 1, '別人的 .on（換行）不算')
 })
 
 test('G1～G3 注入式測試：餵假檔，違規要紅，移掉轉綠', () => {
