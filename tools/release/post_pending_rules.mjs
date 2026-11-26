@@ -114,9 +114,16 @@ export function roomHas(item, room, deps) {
   let r
   try { r = deps.asnCli(['room', '--room-read', room, '--last', String(ROOM_READ_LAST), '--json']) } catch { return { ok: false } }
   if (!r || r.status !== 0 || typeof r.stdout !== 'string' || Buffer.byteLength(r.stdout, 'utf8') > MAX_READ_BYTES) return { ok: false }
-  let rows
-  try { const j = JSON.parse(r.stdout); rows = Array.isArray(j) ? j : j?.messages } catch { return { ok: false } }
-  if (!Array.isArray(rows)) return { ok: false }
+  // 實際輸出（relay/asn/src-tauri/src/cli/room.rs 的 json_line）：每則一行 JSON 物件，沒有外層陣列；
+  // 欄位 seq、from、from_name、trust、at、mentions、body（有標示時多 from_label，有附件時多 attachments）；沒有訊息時輸出是空的
+  const rows = []
+  for (const line of r.stdout.split(/\r?\n/)) {
+    if (line.trim() === '') continue
+    let m
+    try { m = JSON.parse(line) } catch { return { ok: false } }
+    if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.body !== 'string') return { ok: false }
+    rows.push(m)
+  }
   const sig = signatureOf(item)
-  return { ok: true, found: rows.some((m) => typeof m?.body === 'string' && m.body.includes(sig)) }
+  return { ok: true, found: rows.some((m) => m.body.includes(sig)) }
 }

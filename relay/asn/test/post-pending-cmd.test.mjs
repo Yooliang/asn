@@ -51,9 +51,14 @@ function okGithub(e, items) {
 }
 // 假的 asn-cli：讀群組回 rows（可依第幾次讀取給不同內容）、送出記錄下來
 function fakeCli(e, { rows = () => [], sendStatus = 0 } = {}) {
-  e.calls.reads = 0; e.calls.sends = []; e.calls.order = []
+  e.calls.reads = 0; e.calls.sends = []; e.calls.order = []; e.calls.readArgs = []
   e.deps.asnCli = (args) => {
-    if (args[0] === 'room') { e.calls.reads += 1; e.calls.order.push('read'); return { status: 0, stdout: JSON.stringify(rows(e.calls.reads).map((body) => ({ seq: 1, body }))), stderr: '' } }
+    if (args[0] === 'room') {
+      e.calls.reads += 1; e.calls.order.push('read'); e.calls.readArgs.push(args)
+      // 真實輸出（room.rs json_line）：每則一行 JSON 物件，沒有外層陣列；沒有訊息時輸出是空的
+      const lines = rows(e.calls.reads).map((body, i) => JSON.stringify({ seq: i + 1, from: 'n~a', from_name: '甲', trust: 'owner', at: '2026-11-21T10:00:00Z', mentions: [], body }))
+      return { status: 0, stdout: lines.length ? `${lines.join('\n')}\n` : '', stderr: '' }
+    }
     e.calls.order.push('send'); e.calls.sends.push({ room: args[args.indexOf('--room') + 1], body: args[args.indexOf('--body') + 1] }); return { status: sendStatus, stdout: '', stderr: sendStatus ? '拒絕：/kick @all【發版完成】' : '' }
   }
 }
@@ -181,6 +186,20 @@ test('#2345 PR-2 冪等：送出前群組已有同平台同版號那則 → 不�
   assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
 })
 
+test('#2345 PR-2 讀群組的命令列：照 room.rs 的參數名（room --room-read <代號> --last 50 --json），群組代號取自設定檔', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const e = setup([it])
+  run(e)
+  assert.deepEqual(e.calls.readArgs[0], ['room', '--room-read', 'room-a', '--last', '50', '--json'])
+})
+
+test('#2345 PR-2 群組讀回來是空的（真實格式：沒有訊息時輸出為空）：視為沒貼過，照送', () => {
+  const e = setup([mk('published', 'desktop', '0.2.99', 1)])
+  fakeCli(e, { rows: () => [] })
+  run(e)
+  assert.equal(e.calls.sends.length, 1)
+})
+
 test('#2345 PR-2 冪等：認領後、送出前才出現同則（第二次讀才有）→ 不送，只清', () => {
   const it = mk('published', 'linux', '0.2.99', 1)
   const e = setup([it])
@@ -199,7 +218,8 @@ test('#2345 PR-2 讀不到群組內容：不送、attempts 加 1（不能確認�
   run(e)
   assert.equal(e.calls.sends.length, 0)
   assert.equal(pendingOf(e).items[0].attempts, 1)
-  for (const stdout of ['不是 JSON', '{"x":1}']) {
+  // 不是真實格式（外層陣列、外層物件、缺 body、混進非 JSON 的行）一律當讀不到
+  for (const stdout of ['不是 JSON', '{"x":1}', '[{"seq":1,"body":"x"}]', '{"messages":[{"body":"x"}]}', '{"seq":1,"body":"x"}\n壞行\n']) {
     const e2 = setup([it]); e2.deps.asnCli = (args) => (args[0] === 'room' ? { status: 0, stdout, stderr: '' } : (e2.calls.sends = [1], { status: 0 }))
     e2.calls.sends = []; run(e2)
     assert.equal(e2.calls.sends.length, 0)
@@ -298,7 +318,7 @@ test('#2345 PR-2 多筆只成功一筆：只清那一筆，告警仍 active；�
   const b = mk('published', 'desktop', '0.2.92', 2, 2 * HOUR)
   const e = setup([a, b]); raise(e)
   e.deps.asnCli = (args) => {
-    if (args[0] === 'room') return { status: 0, stdout: '[]', stderr: '' }
+    if (args[0] === 'room') return { status: 0, stdout: '', stderr: '' }
     e.calls.sends.push(args); return { status: args[args.indexOf('--body') + 1].includes('v0.2.91') ? 0 : 2, stdout: '', stderr: '' }
   }
   e.calls.sends = []
