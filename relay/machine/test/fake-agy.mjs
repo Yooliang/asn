@@ -23,6 +23,7 @@
 // 環境變數 FAKE_AGY_STATE：資料夾，存各 conversation 已經跑過幾輪（模擬 --conversation 可恢復）。
 // `fake-agy.mjs models`：照 agy 1.x 實測的格式列模型（說明行在 stderr；stdout 一行「代號<Tab>名稱」），清單取 FAKE_AGY_MODELS（逗號分隔）
 import fs from 'node:fs'
+import { spawn } from 'node:child_process'
 import path from 'node:path'
 import readline from 'node:readline'
 
@@ -31,6 +32,15 @@ if (argv[0] === 'models') {
   process.stderr.write('Fetching available models...\n')
   for (const id of (process.env.FAKE_AGY_MODELS || 'gemini-4-argon-medium,gemini-3.8-flash-high').split(',').filter(Boolean)) process.stdout.write(`${id}\t${id.toUpperCase()}\n`)
   process.exit(0)
+}
+// 環境變數 FAKE_AGY_TREE：路徑前綴。有設時啟動就開一個子程序、子程序再開一個孫程序（都 detached、睡著不退出，不然 Windows 的 node 會讓子程序隨父死），
+//   pid 各寫進 <前綴>.c／<前綴>.g（#2350：停止時整棵程序樹要被收掉）。
+if (process.env.FAKE_AGY_TREE) {
+  const base = process.env.FAKE_AGY_TREE
+  const grand = 'setInterval(() => {}, 1000)'
+  const child = `const { spawn } = require('child_process'), fs = require('fs'); const g = spawn(process.execPath, ['-e', ${JSON.stringify(grand)}], { stdio: 'ignore', detached: true }); fs.writeFileSync(${JSON.stringify(base + '.g')}, String(g.pid)); setInterval(() => {}, 1000)`
+  const c = spawn(process.execPath, ['-e', child], { stdio: 'ignore', detached: true })
+  fs.writeFileSync(base + '.c', String(c.pid))
 }
 const flag = n => argv.includes(n)
 const opt = n => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : '' }
