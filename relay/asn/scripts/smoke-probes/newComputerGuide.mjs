@@ -120,7 +120,10 @@ export const newComputerGuideProbeSource = ({ kind = 'blank', page = 'partners' 
   // 先不用：卡片收起、出現「顯示新手引導」、記在本機；再點回來
   const hide = card().querySelector('.ng-hide');
   if (!hide || txt(hide) !== '先不用') return { ok: false, why: '卡片上沒有「先不用」' };
-  await real({ click: at(hide) }, 400);
+  hide.scrollIntoView({ block: 'center' }); await new Promise(r => setTimeout(r, 100));   // 使用者會把名單捲到看得到鈕再按（右下的「＋」鈕浮在名單上）
+  const hp = at(hide), hit = document.elementFromPoint(hp[0], hp[1]);
+  if (hit !== hide && !hide.contains(hit)) return { ok: false, why: '「先不用」被別的東西蓋住，點不到：' + (hit && (hit.className || hit.tagName)) };
+  await real({ click: hp }, 400);
   if (!(await waitFor(() => !card(), 60))) return { ok: false, why: '按「先不用」之後卡片還在' };
   if (localStorage.getItem(KEY) !== '1') return { ok: false, why: '「先不用」沒有記在本機' };
   const rs = await waitFor(reshow, 20);

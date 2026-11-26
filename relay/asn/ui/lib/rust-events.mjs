@@ -11,6 +11,7 @@ export const RUST_EVENTS = Object.freeze({
   // 視窗外框、右下角提示
   'asn:frame': { scope: 'all', platform: 'desktop', shape: 'bool（是否原生外框）' },
   'asn:open': { scope: 'all', platform: 'desktop', shape: '{cid}' },
+  'asn:snap-max': { scope: 'window', platform: 'desktop', shape: '字串 hover／down／leave（放大鈕分割版面 #1788）' },
   'asn:fpshow': { scope: 'window', platform: 'desktop', shape: '{id,until}（指紋 QR 視窗換請求）' },
   // 邀請、正在播放
   'asn:invite': { scope: 'all', platform: 'both', shape: '邀請碼字串' },
@@ -41,4 +42,4 @@ export const RUST_EVENTS = Object.freeze({
 })
 
 // 已經搬到 hub 的事件（其餘還是各處直接 listen，之後的 PR 再搬）
-export const HUB_MIGRATED = Object.freeze(['agent-setup', 'agent-setup-remote', 'asn:frame', 'asn:open', 'update-progress', 'android-update-progress', 'asn:stt-progress', 'claude-mod-status', 'claude-account-auto', 'grok-account-auto', 'auth-signed-out', 'attach-cache-cleared', 'asn:invite', 'asn:now-playing', 'term-being-viewed', 'relay-bell'])
+export const HUB_MIGRATED = Object.freeze(['agent-setup', 'agent-setup-remote', 'asn:frame', 'asn:open', 'asn:snap-max', 'update-progress', 'android-update-progress', 'asn:stt-progress', 'claude-mod-status', 'claude-account-auto', 'grok-account-auto', 'auth-signed-out', 'attach-cache-cleared', 'asn:invite', 'asn:now-playing', 'term-being-viewed', 'relay-bell'])
