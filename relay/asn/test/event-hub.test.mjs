@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createEventHub, createWindowHub } from '../ui/lib/event-hub.mjs'
 import { AsnCore } from '../ui/lib/core.mjs'
-import { RUST_EVENTS, HUB_MIGRATED } from '../ui/lib/rust-events.mjs'
+import { RUST_EVENTS, HUB_MIGRATED, jsEventNames, rustEventNames } from '../ui/lib/rust-events.mjs'
 
 function fakeListen() {
   const recs = []
@@ -122,15 +122,19 @@ test('broadcast／sendTo：走注入的 emit／emitTo；沒注入就什麼都不
   await createEventHub().broadcast('a', 1)
 })
 
-test('事件表：26 種、欄位齊、已搬的 4 種都在表裡', () => {
-  assert.equal(Object.keys(RUST_EVENTS).length, 26)
+test('事件表：Rust 26 種＋JS 12 種、欄位齊、已搬的都在表裡', () => {
+  assert.equal(rustEventNames().length, 26)
+  assert.equal(jsEventNames().length, 12)
+  assert.equal(Object.keys(RUST_EVENTS).length, 38)
   for (const [k, v] of Object.entries(RUST_EVENTS)) {
     assert.ok(['all', 'window'].includes(v.scope), k)
     assert.ok(['desktop', 'mobile', 'both'].includes(v.platform), k)
     assert.equal(typeof v.shape, 'string', k)
   }
   for (const k of HUB_MIGRATED) assert.ok(k in RUST_EVENTS, k)
-  assert.deepEqual([...HUB_MIGRATED].sort(), ['agent-setup', 'agent-setup-remote', 'android-update-progress', 'asn:frame', 'asn:invite', 'asn:now-playing', 'asn:open', 'asn:stt-progress', 'attach-cache-cleared', 'auth-signed-out', 'claude-account-auto', 'claude-mod-status', 'grok-account-auto', 'relay-bell', 'term-being-viewed', 'term-view-closed', 'term-view-frame', 'term-view-input-error', 'term-view-remote-end', 'term-view-remote-frame', 'update-progress'].sort())
+  // asn:skin 在表裡（事件名的唯一來源），但 skin-boot.js 是 classic script 不經 hub，所以不進已搬清單
+  assert.ok('asn:skin' in RUST_EVENTS && !HUB_MIGRATED.includes('asn:skin'))
+  assert.deepEqual([...HUB_MIGRATED].sort(), ['agent-setup', 'agent-setup-remote', 'android-update-progress', 'asn:attach-done', 'asn:avatars', 'asn:call', 'asn:cmd', 'asn:fpshow', 'asn:frame', 'asn:invite', 'asn:log', 'asn:now-playing', 'asn:older', 'asn:open', 'asn:panel', 'asn:room', 'asn:set', 'asn:settings', 'asn:state', 'asn:stt-progress', 'attach-cache-cleared', 'auth-signed-out', 'claude-account-auto', 'claude-mod-status', 'grok-account-auto', 'relay-bell', 'term-being-viewed', 'term-view-closed', 'term-view-frame', 'term-view-input-error', 'term-view-remote-end', 'term-view-remote-frame', 'update-progress'].sort())
 })
 
 // ---------- AsnCore 委派 ----------

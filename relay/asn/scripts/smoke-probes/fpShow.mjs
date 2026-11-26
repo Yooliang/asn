@@ -8,6 +8,7 @@ import { FP_SHOW_MIN_VERSION } from '../../ui/lib/fp-show.mjs'
 //   noreply＝名單上那台的 ASN 不在線：不送請求，直接說沒有回應（重試、取消）
 //   old＝那台的 ASN 版本太舊：不送請求，說要更新
 const REQ_ID = '11111111-1111-4111-8111-111111111111'
+const REQ_ID_NEW = '22222222-2222-4222-8222-222222222222'
 
 // 假的 29×29 格子（三個定位方塊＋固定亂數），只拿來看畫面，不是真的能掃的碼
 function fakeRows(n = 29) {
@@ -24,7 +25,7 @@ function fakeRows(n = 29) {
 
 // skin：這扇視窗是 Rust 新開的，外觀跟著名單視窗走（真機是同一個 localStorage 的 asnSkin，加上名單送的 asn:skin 事件）；
 // 冒煙每個情境是獨立的分頁，這裡走 asn:skin 那條路把外觀交給它。click：按「取消核對」看有沒有帶編號送出（按下去會變灰，所以截圖的情境不按）
-export const fpShowDeskSource = ({ skin = 'aero', click = false } = {}) => `(async () => {
+export const fpShowDeskSource = ({ skin = 'aero', click = false, swap = false } = {}) => `(async () => {
   try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
@@ -51,11 +52,19 @@ export const fpShowDeskSource = ({ skin = 'aero', click = false } = {}) => `(asy
     if (h.top < b.bottom && b.left < h.right && h.bottom > b.top) return { ok: false, why: '標題被右上角的視窗鈕蓋到' } }
   if (btn.disabled) return { ok: false, why: '「取消核對」一開始就不能按' };
   if (!${JSON.stringify(click)}) return { ok: true, why: '' };
+  // swap：視窗已開著又來新請求時，Rust 對這扇視窗送 asn:fpshow（經事件中心收），取消鈕要改帶新編號（#2038 PR-7）
+  const want = ${JSON.stringify(swap)} ? ${JSON.stringify(REQ_ID_NEW)} : ${JSON.stringify(REQ_ID)};
+  if (${JSON.stringify(swap)}) {
+    const subs = (globalThis.__smokeListeners || {})['asn:fpshow'] || [];
+    if (subs.length !== 1) return { ok: false, why: 'asn:fpshow 的底層監聽數應該是 1，實際是 ' + subs.length };
+    for (const fn of subs) fn({ event: 'asn:fpshow', payload: { id: ${JSON.stringify(REQ_ID_NEW)}, until: 4102444800000 } });
+    await sleep(200);
+  }
   globalThis.__smokeCalls = [];
   globalThis.__smokeInput(JSON.stringify({ click: at(btn) }));
   let sent = [];
   for (let i = 0; i < 30; i++) { sent = (globalThis.__smokeCalls || []).filter(c => c[0] === 'fp_show_cancel'); if (sent.length) break; await sleep(100) }
-  if (sent.length !== 1 || sent[0][1]?.id !== ${JSON.stringify(REQ_ID)}) return { ok: false, why: '按「取消核對」沒有帶那筆編號送出：' + JSON.stringify(sent) };
+  if (sent.length !== 1 || sent[0][1]?.id !== want) return { ok: false, why: '按「取消核對」沒有帶' + (${JSON.stringify(swap)} ? '換過的新' : '那筆') + '編號送出：' + JSON.stringify(sent) };
   return { ok: true, why: '' };
   } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
 })()`
@@ -114,15 +123,15 @@ const PHONE_MEMBERS = mode => [
 ]
 
 // until 給很遠的未來：視窗的倒數最多顯示 5 分鐘（panel.js 夾住），截圖每次一樣
-const desk = (name, skin, click = false) => ({ name, page: `panel.html?kind=fpshow&id=${REQ_ID}&until=4102444800000`, width: 480, height: 560, state: { signedIn: true, fpShowDesk: true, ...(skin ? { skin } : {}) }, ready: '#app.win .fps', probe: { fpShow: 'desk', skin: skin ?? 'aero', click }, ...(click ? {} : { shot: `${name}.png` }) })
+const desk = (name, skin, click = false, swap = false) => ({ name, page: `panel.html?kind=fpshow&id=${REQ_ID}&until=4102444800000`, width: 480, height: 560, state: { signedIn: true, fpShowDesk: true, ...(skin ? { skin } : {}) }, ready: '#app.win .fps', probe: { fpShow: 'desk', skin: skin ?? 'aero', click, swap }, ...(click ? {} : { shot: `${name}.png` }) })
 const phone = (name, mode, skin) => ({ name, page: 'm.html', reducedMotion: true, state: { signedIn: true, fpMark: 'phone', fpShowPhone: mode, ...(skin ? { skin } : {}) }, ready: '#app.m .m-row-btn', probe: { fpShow: mode }, shot: `${name}.png` })
 
 export default {
   key: 'fpShow',
   kind: probe => (probe.fpShow === 'desk' ? '核對指紋時電腦跳出的 QR Code 視窗檢查' : '手機請電腦跳出 QR Code 的畫面檢查'),
-  source: probe => (probe.fpShow === 'desk' ? fpShowDeskSource({ skin: probe.skin, click: probe.click === true }) : fpShowPhoneSource(probe.fpShow)),
+  source: probe => (probe.fpShow === 'desk' ? fpShowDeskSource({ skin: probe.skin, click: probe.click === true, swap: probe.swap === true }) : fpShowPhoneSource(probe.fpShow)),
   scenarios: [
-    desk('panel-fpshow-aero'), desk('panel-fpshow-modern', 'modern'), desk('panel-fpshow-line', 'line'), desk('panel-fpshow-cancel', undefined, true),
+    desk('panel-fpshow-aero'), desk('panel-fpshow-modern', 'modern'), desk('panel-fpshow-line', 'line'), desk('panel-fpshow-cancel', undefined, true), desk('panel-fpshow-swap', undefined, true, true),
     phone('m-fpshow-wait-aero', 'wait'), phone('m-fpshow-noreply-aero', 'noreply'), phone('m-fpshow-shown-aero', 'shown'), phone('m-fpshow-old-aero', 'old'),
     phone('m-fpshow-wait-modern', 'wait', 'modern'), phone('m-fpshow-noreply-modern', 'noreply', 'modern'),
     phone('m-fpshow-wait-line', 'wait', 'line'), phone('m-fpshow-shown-line', 'shown', 'line'),

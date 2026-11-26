@@ -226,10 +226,10 @@ test('守門：設定不再用彈出對話框，點分類列表的一項就開�
 
 test('守門：分離視窗不持有設定狀態或金鑰——只收快照、用 asn:set 下指令', () => {
   const panel = read('panel.js')
-  assert.ok(panel.includes("listen('asn:settings'") && panel.includes("emit('asn:set'"))
+  assert.ok(panel.includes("eventHub.subscribe('asn:settings'") && panel.includes("emit('asn:set'"))
   assert.ok(!/store\(|transport|relay_|invoke\(/.test(panel.replace(/^\/\/.*$/gm, '')), '視窗裡沒有存檔、收發室或 Rust 指令的呼叫')
   const hub = read('list.js')
-  assert.ok(hub.includes("emit('asn:settings', settingsState.value)") && hub.includes("listen('asn:set'"))
+  assert.ok(hub.includes("emit('asn:settings', settingsState.value)") && hub.includes("core.hub.on('asn:set'"))
 })
 
 test('開網址不用 explorer.exe（長網址會被當成路徑開成檔案總管），改用 ShellExecuteW', async () => {

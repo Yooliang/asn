@@ -524,5 +524,10 @@ test('一次選多張接線：兩個選檔都能多選；外層送完回報結�
   for (const f of ['ui/list.js', 'ui/m.js']) assert.match(read(f), /if \(typeof done === 'function'\) done\(\{ ok: r\.ok !== false, error: r\.error \?\? '' \}\)/, f)
   assert.match(read('ui/list.js'), /emit\('asn:attach-done', \{ id: c\.id, token: c\.token, \.\.\.r \}\)/)
   const chat = read('ui/chat.js')
-  assert.ok(chat.indexOf("await listen('asn:attach-done'") < chat.indexOf("emit('asn:cmd', { op: 'attach', id, photo, caption, token })"), '先掛好監聽再送')
+  // 先要找得到每一段（找不到 indexOf 回 -1，-1 < 任何正數恆真，守門就什麼都不守了）
+  const sub = chat.indexOf("eventHub.subscribe('asn:attach-done'")
+  const ready = chat.indexOf("eventHub.readyFor(['asn:attach-done'])")
+  const send = chat.indexOf("emit('asn:cmd', { op: 'attach', id, photo, caption, token })")
+  assert.ok(sub >= 0 && ready >= 0 && send >= 0, `找不到訂閱／等註冊／送出的其中一段：${sub} ${ready} ${send}`)
+  assert.ok(sub < ready && ready < send, '先訂閱、等註冊完、才送出')
 })
