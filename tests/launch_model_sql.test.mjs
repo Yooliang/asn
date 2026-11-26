@@ -299,6 +299,36 @@ test('實跑：unconfirmed 後再回報 ok，沒帶 model_used 不會把先前�
   assert.equal((await q('select model_used from relay.launches where id = $1', [id]))[0].model_used, 'opus')
 })
 
+test('靜態：5 參數版的回報函式撤銷 public、anon、authenticated 的執行權限', () => {
+  assert.match(sql, /revoke all on function public\.asn_relay_launch_result\(text, uuid, text, text, text\) from public, anon, authenticated;/)
+})
+
+test('實跑：5 參數版的回報函式只有 service_role 能執行', { skip }, async () => {
+  const { q } = await setup()
+  const sig = 'public.asn_relay_launch_result(text,uuid,text,text,text)'
+  const can = async role => (await q('select has_function_privilege($1, $2, \'execute\') ok', [role, sig]))[0].ok
+  assert.equal(await can('anon'), false)
+  assert.equal(await can('authenticated'), false)
+  assert.equal(await can('service_role'), true)
+})
+
+test('實跑：回報結果只能回報自己節點的那一筆（4 參數版與 5 參數版）', { skip }, async () => {
+  const { q, launch } = await setup()
+  const call4 = (node, id) => q("select public.asn_relay_launch_result($1, $2::uuid, 'ok', 'x') r", [node, id])
+  const call5 = (node, id) => q("select public.asn_relay_launch_result($1, $2::uuid, 'failed', 'x', 'opus') r", [node, id])
+  const row = async id => (await q('select status, detail, model_used from relay.launches where id = $1', [id]))[0]
+  for (const [label, call, status] of [['4 參數版', call4, 'ok'], ['5 參數版', call5, 'failed']]) {
+    const id = (await launch(`own-${label.charAt(0)}`, { model: 'opus' })).id
+    await q("select public.asn_relay_launch_pending('W')")
+    const before = await row(id)
+    assert.equal(before.status, 'taken', label)
+    assert.deepEqual((await call('R', id))[0].r, { error: 'not_found' }, `${label}：別的節點回報`)
+    assert.deepEqual(await row(id), before, `${label}：別的節點回報後狀態、說明、實際型號都沒變`)
+    assert.deepEqual((await call('W', id))[0].r, { ok: true }, `${label}：自己節點回報`)
+    assert.equal((await row(id)).status, status, label)
+  }
+})
+
 test('實跑：down 還原到舊行為（窄規則、沒有 model 欄位與新函式），已存的 pi 值不擋退回', { skip }, async () => {
   const { db, q, launch } = await setup()
   assert.ok((await launch('g1', { profile: 'pi', pp: 'openrouter', pm: 'meta/llama-3' })).id)
