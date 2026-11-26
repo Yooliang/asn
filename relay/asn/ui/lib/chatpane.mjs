@@ -440,7 +440,7 @@ export const ChatPane = {
       nudgeCooling.value = true; setTimeout(() => { nudgeCooling.value = false }, 2500)
       emit('nudge')
     }
-    // ---- 照片：選圖／貼上 → 前端壓縮（長邊 2048、webp、≤ 5 MB）→ 發 photo 事件（樞紐經 Rust 上傳寄出）；輸入框裡的字當說明 ----
+    // ---- 照片：選圖／貼上 → 前端壓縮（長邊 2048、短邊不足 1280 的長圖不縮、總像素 ≤ 8 MP、webp、≤ 5 MB）→ 發 photo 事件（樞紐經 Rust 上傳寄出）；輸入框裡的字當說明 ----
     const fileEl = ref(null), photoBusy = ref(false), photoMsg = ref('')
     // 送一張並等結果：外層（名單視窗、手機、對話視窗）送完呼叫 done({ ok, error })；太久沒回就當沒送出（#1497）
     const ATTACH_WAIT_MS = 180_000
