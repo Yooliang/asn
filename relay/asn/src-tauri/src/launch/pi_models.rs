@@ -137,8 +137,9 @@ pub fn models_real(force: bool) -> Vec<PiModel> {
             return v;
         }
     }
-    match super::pi_setup::run_pi(&["--list-models"], LIST_TIMEOUT_SECS) {
-        Ok((0, out)) => {
+    // 執行交給統一的型號探測模組（#2353）：非同步、有逾時、環境白名單；失敗（沒有 pi、逾時、非 0 結束）照舊回空、不進快取
+    match crate::agent_tools::models::pi_list_text_blocking() {
+        Ok(out) => {
             let v = parse_models(&out);
             store(&MODELS_CACHE, v.clone());
             v

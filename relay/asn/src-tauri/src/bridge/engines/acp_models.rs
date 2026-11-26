@@ -84,23 +84,18 @@ pub fn parse_agy_models(stdout: &str) -> Vec<String> {
 
 /// 跑 `<agy> models` 列出可選的模型（agy 原生通道用）。指令與前置參數照工作者設定，環境照工作者的白名單；逾時就結束它
 pub async fn agy_models(cfg: &super::acp_config::WorkerCfg, env: &[(String, String)]) -> Result<Vec<String>, String> {
-    use crate::nowin::NoWindow;
-    let mut cmd = tokio::process::Command::new(&cfg.command);
-    cmd.no_window()
-        .args(&cfg.args)
-        .arg("models")
-        .current_dir(&cfg.cwd)
-        .env_clear()
-        .envs(super::acp_clean_env(env, &cfg.env_pass))
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    let out = tokio::time::timeout(AGY_MODELS_TIMEOUT, cmd.output()).await.map_err(|_| "列可選模型太久沒有回應".to_string())?.map_err(|e| format!("列不出可選的模型：{e}"))?;
-    if !out.status.success() {
-        return Err("列不出可選的模型（可能要先在這台電腦登入 agy）".into());
-    }
-    let list = parse_agy_models(&String::from_utf8_lossy(&out.stdout));
+    // 執行交給統一的型號探測模組（#2353）：指令、前置參數、工作資料夾、環境白名單照工作者設定；逾時照切換驗證的 20 秒
+    use crate::agent_tools::models::{run, RunFail, Spawn};
+    let mut args = cfg.args.clone();
+    args.push("models".into());
+    let spec = Spawn { program: std::path::PathBuf::from(&cfg.command), args, cwd: Some(cfg.cwd.clone()), env: super::acp_clean_env(env, &cfg.env_pass), merge_stderr: false };
+    let text = run(spec, AGY_MODELS_TIMEOUT).await.map_err(|e| match e {
+        RunFail::Timeout => "列可選模型太久沒有回應".to_string(),
+        RunFail::Spawn(m) => format!("列不出可選的模型：{m}"),
+        RunFail::TooLarge => "列不出可選的模型：輸出太大".to_string(),
+        RunFail::Exit(_) => "列不出可選的模型（可能要先在這台電腦登入 agy）".to_string(),
+    })?;
+    let list = parse_agy_models(&text);
     if list.is_empty() {
         return Err("這個工作者沒有列出可選的模型".into());
     }

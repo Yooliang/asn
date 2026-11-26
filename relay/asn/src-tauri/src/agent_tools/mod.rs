@@ -7,6 +7,7 @@ mod detect;
 
 pub use detect::resolve_binary;
 mod install;
+pub mod models;
 mod status;
 mod types;
 

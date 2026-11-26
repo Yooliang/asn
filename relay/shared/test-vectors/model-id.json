@@ -1,0 +1,42 @@
+{
+  "_說明": "#2353 R3：模型代號的統一格式。Rust（agent_tools/models）與前端（ui/lib/model-id.mjs）讀同一份向量，兩邊逐字相同。第②階段 SQL 與 Edge Function 也要抄同一條。",
+  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+\\[\\]-]{0,99}$",
+  "valid": [
+    "a",
+    "gpt-6-luna",
+    "gpt-5.6-terra",
+    "gemini-4-argon-medium",
+    "claude-opus-5-5-low",
+    "opus[1m]",
+    "anthropic/claude-sonnet-5-5",
+    "openai-codex/gpt-6-luna",
+    "MiniMax-M3.1-Flash",
+    "x_1",
+    "a:b",
+    "a@b",
+    "a+b",
+    "0abc",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ],
+  "invalid": [
+    "",
+    "-x",
+    "--model",
+    "-",
+    ".x",
+    "_x",
+    "/x",
+    "[x]",
+    "a b",
+    "a;rm",
+    "a|b",
+    "a$b",
+    "a`b",
+    "a\"b",
+    "a\nb",
+    "a\tb",
+    "中文",
+    "a中",
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ]
+}
