@@ -1,7 +1,9 @@
 // #2353：產生 Unicode「格式字元」（\p{Cf}）的連續區間，給 SQL 的 name 檢查用。
 // 只輸出到 stdout（不寫檔）：一行 PostgreSQL 字元類的內容，每個區間寫成 \UXXXXXXXX 或 \UXXXXXXXX-\UXXXXXXXX。
 // 用法：node tools/gen-cf-ranges.mjs
-// 結果要貼進 supabase/migrations/20261126100000_launcher_models.sql 的 name 檢查；tests/launcher_models_sql.test.mjs 會重跑本腳本比對。
+// 流程：已套用的 migration 不能回頭改。tests/launcher_models_sql.test.mjs 會檢查「最新一支定義 relay.sanitize_launcher_models 的 migration」
+// 的 Cf 區間有沒有涵蓋 Node 的 \p{Cf}（涵蓋即可，SQL 多擋無害）。測試紅燈時：用本腳本產生新區間，
+// 另寫一支新的 migration（create or replace relay.sanitize_launcher_models），不要改舊檔。
 // 資料來自執行這支腳本的 Node 所帶的 Unicode 版本（process.versions.unicode）。
 const CF = /\p{Cf}/u
 

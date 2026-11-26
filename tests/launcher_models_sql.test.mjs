@@ -4,7 +4,7 @@ import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { cfClassBody, cfRanges } from '../tools/gen-cf-ranges.mjs'
+import { cfRanges } from '../tools/gen-cf-ranges.mjs'
 
 const FILE = '20261126100000_launcher_models.sql'
 const sql = fs.readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -146,12 +146,62 @@ test('實跑：name 擋控制字元與常見格式字元', { skip }, async () =>
   assert.deepEqual((await get()).models[0].models, [{ id: 'good', name: '中文 Name (v1)' }])
 })
 
-test('靜態：migration 的 Cf 區間與 tools/gen-cf-ranges.mjs 現場產生的逐字相同（Node 的 Unicode 資料換了就會紅）', () => {
-  const m = /\\u007f-\\u009f(.*?)\]'/.exec(sql)
+// 已套用到正式庫的 migration 不能回頭改，所以不逐字比對；改成檢查「目前生效的 SQL 區間涵蓋 Node 的 \p{Cf}」。
+// 「目前生效」＝migrations 資料夾裡、檔名時間戳最新、且定義了 relay.sanitize_launcher_models 的那一支（日後新增的 migration 自動接手）。
+const MIG_DIR = new URL('../supabase/migrations/', import.meta.url)
+export function latestSanitizeMigration() {
+  const files = fs.readdirSync(MIG_DIR).filter(f => /^\d+_.*\.sql$/.test(f)).sort()
+  const hit = files.filter(f => /create or replace function relay\.sanitize_launcher_models\(/i.test(fs.readFileSync(new URL(f, MIG_DIR), 'utf8')))
+  assert.ok(hit.length > 0, '找不到定義 relay.sanitize_launcher_models 的 migration')
+  return hit[hit.length - 1]
+}
+
+// 從 migration 文字解析出 name 檢查的字元類，回傳 [起, 迄] 碼點區間
+export function parseSqlNameClass(text) {
+  const m = /\(m\.x->>'name'\) ~ '\[(.*?)\]'/.exec(text)
   assert.ok(m, '找不到 name 檢查的字元類')
-  assert.equal(m[1], cfClassBody(), '請重跑 node tools/gen-cf-ranges.mjs，把輸出貼回 migration')
-  assert.match(sql, /由 tools\/gen-cf-ranges\.mjs 產生，勿手改/)
+  const ranges = []
+  const re = /\\[uU]([0-9a-fA-F]{4,8})(?:-\\[uU]([0-9a-fA-F]{4,8}))?/g
+  for (const t of m[1].matchAll(re)) {
+    const a = parseInt(t[1], 16)
+    ranges.push([a, t[2] ? parseInt(t[2], 16) : a])
+  }
+  assert.ok(ranges.length > 10, '解析出的區間太少，格式可能變了')
+  return ranges
+}
+
+const uplus = cp => 'U+' + cp.toString(16).toUpperCase().padStart(4, '0')
+
+// 斷言 Node 每個 \p{Cf} 碼點都落在 SQL 區間內；SQL 比 Node 多擋的不算錯
+export function assertCoversCf(text, file) {
+  const ranges = parseSqlNameClass(text)
+  for (const [a, b] of cfRanges()) {
+    for (let cp = a; cp <= b; cp++) {
+      if (!ranges.some(([x, y]) => cp >= x && cp <= y)) {
+        assert.fail(`${file} 的 Cf 區間沒涵蓋 ${uplus(cp)}。請用 tools/gen-cf-ranges.mjs 另寫一支新的 migration 更新 relay.sanitize_launcher_models，不要改已套用的舊檔`)
+      }
+    }
+  }
+}
+
+test('靜態：目前生效的 SQL Cf 區間涵蓋 Node 的 \\p{Cf}（Node 的 Unicode 資料更新後若有新碼點就會紅）', () => {
+  const file = latestSanitizeMigration()
+  const text = fs.readFileSync(new URL(file, MIG_DIR), 'utf8').replace(/\r\n/g, '\n')
+  assertCoversCf(text, file)
   assert.ok(cfRanges().length > 10)
+})
+
+test('靜態：涵蓋檢查本身會擋（假 migration 少一個區間）', () => {
+  const fake = sql.replace('\\U000110bd', '')
+  assert.notEqual(fake, sql)
+  assert.throws(() => assertCoversCf(fake, 'fake.sql'), err => {
+    assert.match(err.message, /另寫一支新的 migration/)
+    assert.match(err.message, /U\+110BD/)
+    return true
+  })
+  assertCoversCf(sql, FILE) // 原版不報錯
+  // SQL 多擋（多一個區間）不算錯
+  assertCoversCf(sql.replace('\\U000110bd', '\\U000110bd\\U00001234'), FILE)
 })
 
 // 向量的每一筆是字串，或碼點數字的陣列
