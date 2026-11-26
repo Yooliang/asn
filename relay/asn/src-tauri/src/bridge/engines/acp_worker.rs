@@ -349,7 +349,10 @@ impl Worker {
     pub fn new(mut i: WorkerInit) -> WorkerHandle {
         // 讀取的敏感位置清單：啟動時用兩個家目錄（工作者環境的、real_home）加上這位的工作資料夾算好，放進政策（#2356）。
         // 一律重算（接手等會換 cwd）；正式與測試走同一條路，差別只在 real_home 由呼叫端給
-        let roots = roots_for_worker(&i.env, i.real_home.clone(), &i.cfg.cwd, &i.work_dir);
+        let mut own_dirs: Vec<&std::path::Path> = vec![i.cfg.cwd.as_path()];
+        own_dirs.extend(i.cfg.permissions.allow_dirs.iter().map(|p| p.as_path()));
+        own_dirs.extend(i.cfg.permissions.write_dirs.iter().flatten().map(|p| p.as_path()));
+        let roots = roots_for_worker(&i.env, i.real_home.clone(), &i.cfg.name, &own_dirs, &i.work_dir);
         let mut c = (*i.cfg).clone();
         c.permissions.sensitive = Some(Arc::new(roots));
         i.cfg = Arc::new(c);

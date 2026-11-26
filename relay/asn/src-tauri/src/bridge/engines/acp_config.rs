@@ -50,7 +50,7 @@ fn num(v: Option<&Value>, d: u64, min: u64) -> u64 {
     }
 }
 
-fn valid_name(s: &str) -> bool {
+pub(crate) fn valid_name(s: &str) -> bool {
     let ok = |c: char| c.is_ascii_alphanumeric() || ('\u{4e00}'..='\u{9fff}').contains(&c);
     let mut it = s.chars();
     let Some(first) = it.next() else { return false };

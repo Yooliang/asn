@@ -1,6 +1,7 @@
 //! 敏感位置裡明確放行的資料夾，和工作者建立時算清單的正式做法。
 //! 放行只開在這幾處（每個形式——字面與實際位置——都要各自落在裡面，經捷徑跳出去的照擋）：
-//! - 這位工作者自己的工作資料夾：必須是 ASN 資料夾底下的嚴格子資料夾；它本身是敏感根、或底下含別的敏感根時不放行
+//! - 這位工作者自己的資料夾（機器工作資料夾底下的 `workers/<自己的名字>`，名字要過名字驗證）：
+//!   工作資料夾、白名單資料夾、寫入資料夾各自要落在它本身或底下；它本身是敏感根、或底下含別的敏感根時不放行
 //! - 收信附件的下載資料夾（可以整個關掉，見 ATTACHMENTS_READABLE）
 //! - agy 的內建說明檔（`.gemini/antigravity-cli/builtin/skills`）
 use super::*;
@@ -22,8 +23,9 @@ pub fn homes_from(env: &[(String, String)], real_home: Option<PathBuf>) -> Vec<P
 
 /// 工作者建立時算敏感清單的唯一做法（Worker::new 呼叫，測試也走這裡）：
 /// 家目錄＝環境裡的 USERPROFILE、HOME 加上 real_home（正式是這台電腦實際的使用者資料夾，測試傳假的）；
-/// 環境變數只帶名字不像金鑰的（展開變數與環境變數指定的位置用）；cwd、work_dir 用來算明確放行的資料夾
-pub fn roots_for_worker(env: &[(String, String)], real_home: PathBuf, cwd: &Path, work_dir: &Path) -> SensitiveRoots {
+/// 環境變數只帶名字不像金鑰的（展開變數與環境變數指定的位置用）；
+/// name、own_dirs（工作資料夾、白名單資料夾、寫入資料夾）、work_dir 用來算明確放行的資料夾
+pub fn roots_for_worker(env: &[(String, String)], real_home: PathBuf, name: &str, own_dirs: &[&Path], work_dir: &Path) -> SensitiveRoots {
     let safe: Vec<(String, String)> = env
         .iter()
         .filter(|(k, _)| {
@@ -32,7 +34,7 @@ pub fn roots_for_worker(env: &[(String, String)], real_home: PathBuf, cwd: &Path
         })
         .cloned()
         .collect();
-    SensitiveRoots::build(&homes_from(env, Some(real_home)), &safe).with_workdirs(cwd, work_dir, ATTACHMENTS_READABLE)
+    SensitiveRoots::build(&homes_from(env, Some(real_home)), &safe).with_workdirs(name, own_dirs, work_dir, ATTACHMENTS_READABLE)
 }
 
 /// 測試用：目前的環境變數，拿掉所有會指到使用者資料夾與各工具資料夾的變數。
@@ -45,7 +47,7 @@ pub fn env_without_homes() -> Vec<(String, String)> {
 
 impl SensitiveRoots {
     /// 算明確放行的資料夾（字面與實際位置兩種形式各自判斷）
-    pub fn with_workdirs(mut self, cwd: &Path, work_dir: &Path, attachments: bool) -> SensitiveRoots {
+    pub fn with_workdirs(mut self, name: &str, own_dirs: &[&Path], work_dir: &Path, attachments: bool) -> SensitiveRoots {
         let canon = self.canon;
         let mut asn: Vec<String> = vec![];
         for h in &self.home_paths {
@@ -58,29 +60,38 @@ impl SensitiveRoots {
                 push_forms(&mut asn, Path::new(v.trim()), canon);
             }
         }
+        // 自己的容器：機器工作資料夾底下的 workers/<這位的名字>（名字要先過名字驗證），而且本身要嚴格在 ASN 資料夾底下
+        let mut own: Vec<String> = vec![];
+        if crate::bridge::engines::acp_config::valid_name(name) {
+            push_forms(&mut own, &work_dir.join("workers").join(name), canon);
+        }
+        own.retain(|c| asn.iter().any(|a| c.starts_with(&format!("{a}/"))));
         let mut dirs: Vec<String> = vec![];
-        // 每個形式（字面、實際位置）各自要嚴格落在指定的容器資料夾裡、而且底下不含別的敏感根才算；捷徑指到別處的那一種形式不收
+        // 每個形式（字面、實際位置）各自要落在指定的容器資料夾裡（容器本身算不算由 or_equal 決定）、而且底下不含別的敏感根才算；捷徑指到別處的那一種形式不收
         let roots = self.roots.clone();
-        let mut add = |dir: &Path, containers: &[String]| {
+        let mut add = |dir: &Path, containers: &[String], or_equal: bool| {
             let mut forms: Vec<String> = vec![];
             push_forms(&mut forms, dir, canon);
             for f in forms {
-                let inside = containers.iter().any(|c| f.starts_with(&format!("{c}/")));
+                let inside = containers.iter().any(|c| f.starts_with(&format!("{c}/")) || (or_equal && f == *c));
                 let holds_a_root = roots.iter().any(|r| *r == f || r.starts_with(&format!("{f}/")));
                 if inside && !holds_a_root && !dirs.contains(&f) {
                     dirs.push(f);
                 }
             }
         };
-        add(cwd, &asn);
+        // 工作資料夾與所有寫入／白名單資料夾：同一條規則
+        for d in own_dirs {
+            add(d, &own, true);
+        }
         if attachments {
-            add(&work_dir.join("attachments"), &asn);
+            add(&work_dir.join("attachments"), &asn, false);
         }
         for h in &self.home_paths {
             if let Some(gemini) = agy_brain(h).parent().and_then(Path::parent) {
                 let mut cont: Vec<String> = vec![];
                 push_forms(&mut cont, gemini, canon);
-                add(&agy_brain(h).parent().unwrap().join("builtin").join("skills"), &cont);
+                add(&agy_brain(h).parent().unwrap().join("builtin").join("skills"), &cont, false);
             }
         }
         self.exempt_dirs = dirs;

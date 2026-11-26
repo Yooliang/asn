@@ -1045,6 +1045,47 @@ mod tests {
         eng.stop();
     }
 
+    /// 手寫的 cwd、白名單資料夾、寫入資料夾：只有落在自己的 workers/<名字> 才放行，指到 ASN 資料夾其他位置照擋
+    #[tokio::test]
+    async fn 手寫的工作資料夾與白名單寫入資料夾_只有自己的_workers_名字_放行() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        let asn = home.join(".asn");
+        let work = asn.join("machine-T");
+        let own = work.join("workers").join("手寫丙");
+        let other = work.join("workers").join("別人");
+        let accounts = asn.join("claude-accounts");
+        for p in [&own.join("out"), &other, &accounts] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        let q = tempfile::tempdir().unwrap();
+        let env = env_for(q.path());
+        let mut proc_env = crate::bridge::engines::acp_sensitive::env_without_homes();
+        proc_env.push(("USERPROFILE".into(), home.display().to_string()));
+        let p = |x: &Path| x.display().to_string();
+        let agents = json!({ "workers": [
+            { "name": "手寫丙", "engine": "acp", "roster_engine": "gemini", "protocol": "agy-stream", "command": "node", "cwd": p(&own.join("work")),
+              "permissions": { "write": "allow", "allow_dirs": [p(&own.join("work")), p(&own.join("out"))], "write_dirs": [p(&own.join("out"))] } },
+            { "name": "手寫丁", "engine": "acp", "roster_engine": "gemini", "protocol": "agy-stream", "command": "node", "cwd": p(&other),
+              "permissions": { "write": "allow", "allow_dirs": [p(&other), p(&accounts), p(&work)], "write_dirs": [p(&work.join("workers")), p(&asn)] } } ] });
+        let (eng, rec) = rec_engine_with(&work, &env, Some(agents), proc_env, Arc::new(|_| {}));
+        wait_spawns(&rec, 2).await;
+        let args = |n: &str| driver_args().lock().unwrap().iter().rev().find(|(_, a)| a.cfg.name == n).map(|(_, a)| a.clone()).expect("找得到驅動參數");
+        let step = |idx: u32, tool: &str, params: Value| json!({"event": "step_update", "step_update": {"conversation_id": "c1", "step_index": idx, "state": "ACTIVE", "step_type": "tool", "tool_name": tool, "tool_info": {"name": tool, "parameters": params}}});
+        let a = args("手寫丙");
+        let run = |tool: &str, params: Value| crate::bridge::engines::acp_agy::run_events_for_test(&a, vec![step(1, tool, params)]);
+        assert!(run("read_file", json!({"Path": p(&own.join("out").join("a.md"))})).is_none(), "寫入資料夾在自己的資料夾底下");
+        assert!(run("read_file", json!({"Path": p(&own.join("work").join("a.md"))})).is_none(), "工作資料夾");
+        assert!(run("read_file", json!({"Path": p(&accounts.join("x"))})).is_some());
+        // 白名單與寫入資料夾都指到 ASN 資料夾其他位置、cwd 也不是自己的資料夾：全擋
+        let b = args("手寫丁");
+        let run_b = |tool: &str, params: Value| crate::bridge::engines::acp_agy::run_events_for_test(&b, vec![step(1, tool, params)]);
+        for bad in [other.join("a.md"), accounts.join("x"), work.join("acp-workers.json"), work.join("workers").join("x"), asn.join("k.json")] {
+            assert!(run_b("read_file", json!({"Path": p(&bad)})).is_some(), "{}", bad.display());
+        }
+        eng.stop();
+    }
+
     /// 沒登記的工具名與改分類的三個工具：執行不被允許的工作者，步驟完成時要中止；放行的工作者不中止
     #[tokio::test]
     async fn 沒登記的_agy_工具名與改分類的工具_照執行或寫入政策() {

@@ -296,7 +296,7 @@ fn 正式路徑建立清單_兩個家目錄與環境變數過濾() {
         ("API_TOKEN", &ps(&h1.join(".ssh"))),
         ("MY_SECRET_DIR", &ps(&h1.join(".ssh"))),
     ]);
-    let roots = roots_for_worker(&e, h3.clone(), &work, &work);
+    let roots = roots_for_worker(&e, h3.clone(), "甲", &[&work], &work);
     let v = |p: &str| read_verdict(p, &ReadCtx { roots: &roots, base: &work, tool: ReadTool::Single });
     // 兩個環境家目錄加上實際的家目錄，每個都算
     for h in [&h1, &h2, &h3] {
@@ -535,7 +535,7 @@ fn 放行資料夾_自己的工作資料夾只放行嚴格子資料夾() {
     let e = ex();
     let own = e.work_dir.join("workers").join("甲");
     std::fs::create_dir_all(&own).unwrap();
-    let roots = roots_for_worker(&[], e.home.clone(), &own, &e.work_dir);
+    let roots = roots_for_worker(&[], e.home.clone(), "甲", &[&own], &e.work_dir);
     let v = |p: &Path| v_in(&roots, &own, p, ReadTool::Single);
     // 自己資料夾裡的檔：絕對、相對路徑都放行；資料夾本身與遞迴搜尋也放行
     assert_eq!(v(&own.join("a.md")), ReadVerdict::Allow);
@@ -551,19 +551,46 @@ fn 放行資料夾_自己的工作資料夾只放行嚴格子資料夾() {
     assert_eq!(v(&own.join("hop").join("id")), ReadVerdict::Sensitive);
     // 自己的資料夾是 ASN 資料夾本身、家目錄、ASN 資料夾的上層，或底下含別的敏感根：不放行
     for bad_cwd in [e.asn.clone(), e.home.clone(), e.home.parent().unwrap().to_path_buf()] {
-        let r = roots_for_worker(&[], e.home.clone(), &bad_cwd, &e.work_dir.join("none"));
+        let r = roots_for_worker(&[], e.home.clone(), "甲", &[&bad_cwd], &e.work_dir.join("none"));
         for p in [e.asn.join("claude-accounts").join("x"), e.home.join(".ssh").join("id"), e.asn.join("k.bin")] {
             assert_eq!(v_in(&r, &bad_cwd, &p, ReadTool::Single), ReadVerdict::Sensitive, "cwd={} {}", bad_cwd.display(), p.display());
         }
     }
     // 自己的資料夾放在別的敏感資料夾底下（不是 ASN 資料夾）：不放行
     for bad_cwd in [e.home.join(".ssh").join("work"), e.home.join(".gemini").join("w")] {
-        let r = roots_for_worker(&[], e.home.clone(), &bad_cwd, &e.work_dir.join("none"));
+        let r = roots_for_worker(&[], e.home.clone(), "甲", &[&bad_cwd], &e.work_dir.join("none"));
         assert_eq!(v_in(&r, &bad_cwd, &bad_cwd.join("a.md"), ReadTool::Single), ReadVerdict::Sensitive, "{}", bad_cwd.display());
     }
-    let nested = e.asn.join("w");
-    let r = roots_for_worker(&kv(&[("CODEX_HOME", &ps(&nested.join("codex")))]), e.home.clone(), &nested, &e.work_dir.join("none"));
-    assert_eq!(v_in(&r, &nested, &nested.join("a.md"), ReadTool::Single), ReadVerdict::Sensitive, "底下含別的敏感根");
+    // 自己的資料夾底下含別的敏感根：不放行
+    let r = roots_for_worker(&kv(&[("CODEX_HOME", &ps(&own.join("codex")))]), e.home.clone(), "甲", &[&own], &e.work_dir);
+    assert_eq!(v_in(&r, &own, &own.join("a.md"), ReadTool::Single), ReadVerdict::Sensitive, "底下含別的敏感根");
+}
+
+#[test]
+fn 放行資料夾_白名單與寫入資料夾套同一條規則() {
+    let e = ex();
+    let own = e.work_dir.join("workers").join("甲");
+    let sub = own.join("out");
+    std::fs::create_dir_all(&sub).unwrap();
+    let probe = |name: &str, dirs: &[&Path], target: &Path| {
+        let r = roots_for_worker(&[], e.home.clone(), name, dirs, &e.work_dir);
+        v_in(&r, &own, target, ReadTool::Single)
+    };
+    // 寫入資料夾指到自己 workers/<名字> 底下：放行
+    assert_eq!(probe("甲", &[&own, &sub], &sub.join("a.md")), ReadVerdict::Allow);
+    // 白名單、寫入資料夾指到 ASN 資料夾底下但不在自己的 workers/<名字>：不放行
+    let other = e.work_dir.join("workers").join("乙");
+    for bad in [e.asn.join("claude-accounts"), other.clone(), e.work_dir.join("workers"), e.work_dir.clone(), e.asn.clone()] {
+        std::fs::create_dir_all(&bad).unwrap();
+        // 即使 cwd 本身是自己的資料夾，這一項也不能因為別項而放行
+        assert_eq!(probe("甲", &[&bad], &bad.join("a.md")), ReadVerdict::Sensitive, "{}", bad.display());
+    }
+    // 名字不合格：不放行
+    for name in ["..", "甲/..", "a\\b", "", "甲 乙"] {
+        assert_eq!(probe(name, &[&own], &own.join("a.md")), ReadVerdict::Sensitive, "name={name:?}");
+    }
+    // 名字對不上資料夾（拿別人的名字放行自己的資料夾）：不放行
+    assert_eq!(probe("乙", &[&own], &own.join("a.md")), ReadVerdict::Sensitive);
 }
 
 #[test]
@@ -572,10 +599,10 @@ fn 放行資料夾_附件資料夾有開關_內建說明檔只放行指定位置
     let own = e.work_dir.join("workers").join("甲");
     let att = e.work_dir.join("attachments").join("a.txt");
     assert!(ATTACHMENTS_READABLE, "預設開放");
-    let on = roots_for_worker(&[], e.home.clone(), &own, &e.work_dir);
+    let on = roots_for_worker(&[], e.home.clone(), "甲", &[&own], &e.work_dir);
     assert_eq!(v_in(&on, &own, &att, ReadTool::Single), ReadVerdict::Allow);
     // 開關關掉：附件擋回去，自己的資料夾不受影響
-    let off = SensitiveRoots::build(&[e.home.clone()], &[]).with_workdirs(&own, &e.work_dir, false);
+    let off = SensitiveRoots::build(&[e.home.clone()], &[]).with_workdirs("甲", &[&own], &e.work_dir, false);
     assert_eq!(v_in(&off, &own, &att, ReadTool::Single), ReadVerdict::Sensitive);
     assert_eq!(v_in(&off, &own, &own.join("a.md"), ReadTool::Single), ReadVerdict::Allow);
     // 內建說明檔
@@ -588,7 +615,7 @@ fn 放行資料夾_附件資料夾有開關_內建說明檔只放行指定位置
     std::fs::remove_dir_all(e.work_dir.join("attachments")).unwrap();
     std::fs::create_dir_all(e.home.join(".ssh").join("sub")).unwrap();
     link(&e.work_dir.join("attachments"), &e.home.join(".ssh").join("sub"));
-    let on2 = roots_for_worker(&[], e.home.clone(), &own, &e.work_dir);
+    let on2 = roots_for_worker(&[], e.home.clone(), "甲", &[&own], &e.work_dir);
     assert_eq!(v_in(&on2, &own, &e.work_dir.join("attachments").join("id"), ReadTool::Single), ReadVerdict::Sensitive);
     assert_eq!(v_in(&on2, &own, &e.home.join(".ssh").join("sub").join("id"), ReadTool::Single), ReadVerdict::Sensitive, "捷徑的實際位置不能變成放行");
 }
@@ -597,15 +624,15 @@ fn 放行資料夾_附件資料夾有開關_內建說明檔只放行指定位置
 fn 放行資料夾_asn_資料夾改了位置也成立() {
     let d = tempfile::tempdir().unwrap();
     let (home, asn) = (d.path().join("home"), d.path().join("elsewhere").join("asnhome"));
-    let own = asn.join("workers").join("甲");
+    let own = asn.join("machine-T").join("workers").join("甲");
     for p in [&home, &own] {
         std::fs::create_dir_all(p).unwrap();
     }
     let e = kv(&[("ASN_HOME", &ps(&asn))]);
-    let roots = roots_for_worker(&e, home.clone(), &own, &asn.join("machine-T"));
+    let roots = roots_for_worker(&e, home.clone(), "甲", &[&own], &asn.join("machine-T"));
     assert_eq!(v_in(&roots, &own, &own.join("a.md"), ReadTool::Single), ReadVerdict::Allow);
     assert_eq!(v_in(&roots, &own, &asn.join("key.bin"), ReadTool::Single), ReadVerdict::Sensitive);
     // 沒有 ASN_HOME 這個設定時，同一個位置不是 ASN 資料夾，不放行任何東西（也不在清單裡，所以一般檔放行）
-    let plain = roots_for_worker(&[], home.clone(), &own, &asn.join("machine-T"));
+    let plain = roots_for_worker(&[], home.clone(), "甲", &[&own], &asn.join("machine-T"));
     assert_eq!(v_in(&plain, &own, &asn.join("key.bin"), ReadTool::Single), ReadVerdict::Allow);
 }
