@@ -197,6 +197,15 @@ pub(crate) fn remote_model_args(engine: &str, args: &[String], model: &str) -> R
     }
 }
 
+/// 遠端開窗最後要執行的啟動參數：沒指定型號＝原樣交回；有指定＝照 [`remote_model_args`] 組（先驗再組，只剩一個 `--model=<值>`）。
+/// `start_remote_window` 一律經這個函式套型號（原始碼守門測試會確認）
+pub(crate) fn final_remote_args(engine: &str, args: &[String], model: Option<&str>) -> Result<Vec<String>, String> {
+    match model {
+        Some(m) => remote_model_args(engine, args, m),
+        None => Ok(args.to_vec()),
+    }
+}
+
 pub(crate) const MODEL_BAD: &str = "型號代號格式不對，請重新選一次";
 pub(crate) const MODEL_NO_ENGINE: &str = "這個啟動設定沒有寫明是哪一家，不能指定型號，請不要選型號再開一次";
 pub(crate) const MODEL_NO_VENDOR: &str = "這個廠牌開新夥伴時不能指定型號，請不要選型號再開一次";
@@ -253,9 +262,7 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
         let plan = super::pi::plan(name, &args, super::pi::resolve_ext_state(), "", &files, now_ms())?;
         return super::pi_term::open_pi_real(name, &command, &plan.args, &cwd, false, &plan.env).map(|o| o.pid);
     }
-    if let Some(m) = model {
-        args = remote_model_args(&prof.engine, &args, m)?;
-    }
+    args = final_remote_args(&prof.engine, &args, model)?;
     // 同本機開窗：預設接續同名夥伴上一段對話（背景開也一樣）；只有測試用的隱藏視窗不查真實的對話檔
     if show.real_resume {
         super::resume::apply_resume_real(&mut args, &command, if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, name, &cwd.to_string_lossy())?;
@@ -1040,6 +1047,30 @@ mod tests {
         assert_eq!(out.iter().filter(|x| x.as_str() == "--model" || x.starts_with("--model=")).count(), 1, "整串只會有一個 --model");
         assert_eq!(remote_model_args("claude", &[], "opus[1m]").unwrap(), sv(&["--model=opus[1m]"]), "統一規則放行的寫法照帶");
         assert_eq!(remote_model_args("claude", &sv(&["-n", "x"]), "anthropic/claude-sonnet-5-5").unwrap(), sv(&["-n", "x", "--model=anthropic/claude-sonnet-5-5"]));
+    }
+
+    #[test]
+    fn 遠端最終參數_帶型號剛好一個_model_等號_不帶型號原樣() {
+        let a = sv(&["-n", "小乙", "--model", "opus", "--remote-control", "--model=haiku", "小乙"]);
+        let out = final_remote_args("claude", &a, Some("sonnet")).unwrap();
+        let models: Vec<&String> = out.iter().filter(|x| x.as_str() == "--model" || x.starts_with("--model")).collect();
+        assert_eq!(models, vec!["--model=sonnet"], "剛好一個 --model=<值>，原本的兩種寫法都拿掉");
+        assert!(!out.iter().any(|x| x == "opus" || x == "--model=haiku"));
+        // 不帶型號：profile 自己的 --model 照舊
+        assert_eq!(final_remote_args("claude", &a, None).unwrap(), a);
+        assert_eq!(final_remote_args("codex", &a, None).unwrap(), a, "不帶型號不看廠牌");
+        assert_eq!(final_remote_args("codex", &a, Some("x")), Err(MODEL_NO_VENDOR.to_string()));
+    }
+
+    #[test]
+    fn start_remote_window_真的經_final_remote_args_套型號() {
+        let src = include_str!("local.rs").replace("\r\n", "\n");
+        let from = src.find("pub fn start_remote_window(").unwrap();
+        let body = &src[from..from + src[from..].find("\n}\n").unwrap()];
+        assert!(body.contains("args = final_remote_args(&prof.engine, &args, model)?"), "開窗前要用 final_remote_args 把型號套進最後的 argv");
+        let call = body.find("final_remote_args(").unwrap();
+        let spawn = body.find("start_window_split(").unwrap();
+        assert!(call < spawn, "套型號要在開窗之前");
     }
 
     #[test]

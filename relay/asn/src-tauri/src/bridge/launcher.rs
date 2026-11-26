@@ -39,7 +39,7 @@ pub const BG_HINT: &str = "背景夥伴已排入，但 30 秒內還沒開出來�
 pub const TERM_EXTRA: &str = "asn終端只收名稱與資料夾，不支援指定模型或第一句話";
 pub const MODEL_TERM: &str = "asn終端不能指定型號，請不要選型號再開一次";
 pub const MODEL_WITH_PI: &str = "經 pi 開的夥伴請用 pi 的提供者與模型，不能另外指定型號";
-pub const MODEL_GROK: &str = "Grok 開新夥伴時還不能指定型號，請不要選型號再開一次";
+pub const MODEL_BG_UNSUPPORTED: &str = "這個背景夥伴開新夥伴時還不能指定型號，請不要選型號再開一次";
 pub const MODEL_BG_FORMAT: &str = "這個型號代號背景夥伴還不能用（只能用英數與 . _ -），請換一個";
 pub const AGY_LIST_UNREADABLE: &str = "這台電腦現在讀不到 agy 的型號清單，請稍後再試";
 pub const TERM_NO_CONSENT: &str = "這台電腦沒有開啟「允許我的其他設備替這台開新視窗」";
@@ -241,7 +241,7 @@ pub fn remote_model_plan(l: &Value, profile_id: &str, p: &Profile, agy_listed: &
     }
     if p.mode == LaunchMode::Background {
         if profile_id != "gemini" {
-            return Err(MODEL_GROK.into());
+            return Err(MODEL_BG_UNSUPPORTED.into());
         }
         // acp-models.json 載入時會濾掉不合窄規則的代號，所以先擋下，不讓它被無聲丟掉
         if !bg_model_valid(&m) {

@@ -1724,7 +1724,7 @@ async fn 遠端指定型號_用不上一律明確回_failed_不開窗不排佇�
         ("claude", json!({"model": ""}), crate::launch::local::MODEL_BAD.into()),
         ("claude", json!({"model": 5}), crate::launch::local::MODEL_BAD.into()),
         ("custom", json!({"model": "opus"}), crate::launch::local::MODEL_NO_ENGINE.into()),
-        ("grok", json!({"model": "grok-4.7"}), launcher::MODEL_GROK.into()),
+        ("grok", json!({"model": "grok-4.7"}), launcher::MODEL_BG_UNSUPPORTED.into()),
         ("pi", json!({"model": "opus"}), launcher::MODEL_WITH_PI.into()),
         ("claude", json!({"model": "opus", "pi_provider": "minimax", "pi_model": "MiniMax-M3.1-Flash"}), launcher::MODEL_WITH_PI.into()),
         ("gemini", json!({"model": "no-such-model"}), "這台電腦的 agy 沒有「no-such-model」".into()),
@@ -1928,7 +1928,9 @@ fn 遠端型號_純函式_各_profile_的分流() {
     assert_eq!(plan(json!({"model": "opus"}), "claude", &prof("claude", LaunchMode::Window)), Ok(R::Arg("opus".into())));
     assert_eq!(plan(json!({"model": "g-1"}), "gemini", &prof("acp", LaunchMode::Background)), Ok(R::Record("g-1".into())));
     assert!(plan(json!({"model": "g-2"}), "gemini", &prof("acp", LaunchMode::Background)).is_err());
-    assert_eq!(plan(json!({"model": "x"}), "grok", &prof("acp", LaunchMode::Background)), Err(launcher::MODEL_GROK.to_string()));
+    assert_eq!(plan(json!({"model": "x"}), "grok", &prof("acp", LaunchMode::Background)), Err(launcher::MODEL_BG_UNSUPPORTED.to_string()));
+    assert_eq!(plan(json!({"model": "x"}), "my-custom-bg", &prof("acp", LaunchMode::Background)), Err(launcher::MODEL_BG_UNSUPPORTED.to_string()));
+    assert!(!launcher::MODEL_BG_UNSUPPORTED.contains("Grok"), "自訂的背景 profile 也會看到這句，不能點名 Grok");
     assert_eq!(plan(json!({"model": "x"}), "pi", &prof("pi", LaunchMode::Window)), Err(launcher::MODEL_WITH_PI.to_string()));
     assert_eq!(plan(json!({"model": "x"}), "codex", &prof("codex", LaunchMode::Window)), Err(crate::launch::local::MODEL_NO_VENDOR.to_string()));
     // 統一規則的向量：不合格的一律回錯
