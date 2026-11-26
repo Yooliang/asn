@@ -127,7 +127,8 @@ const VENDOR_RE = /^[a-z][a-z0-9-]{0,19}$/;
 const MODEL_STATUS = new Set(["ok", "unavailable", "error", "pending"]);
 const MODEL_CODE = new Set(["ok", "not_installed", "not_logged_in", "timeout", "too_large", "parse_failed", "spawn_failed", "unsupported"]);
 const AGE_S_MAX = 31536000;
-const UNSAFE_NAME_RE = /[\p{Cc}\p{Cf}]/u;
+// 控制字元、格式字元、孤立代理碼（JS 字串可能帶著；送進資料庫時 jsonb 會拒收）。SQL 端的 Cf 區間由 tools/gen-cf-ranges.mjs 產生
+const UNSAFE_NAME_RE = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const isRec = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
 
 function sanitizeVendor(e: unknown): Json | null {
@@ -192,7 +193,7 @@ export function sanitizeLauncher(l: Json): Json | null | { error: string } {
   const models = sanitizeModels(l.models);
   if (models) {
     const bytes = new TextEncoder().encode(JSON.stringify(models)).length;
-    if (bytes > MODELS_MAX_BYTES) console.warn("launcher.models 超過上限，整份不收", bytes, MODELS_MAX_BYTES);
+    if (bytes > MODELS_MAX_BYTES) console.warn("launcher.models 超過上限，只丟 models，launcher 其餘照存", bytes, MODELS_MAX_BYTES);
     else out.models = models;
   }
   return out;

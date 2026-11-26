@@ -4,8 +4,8 @@
 --   * vendor 符合 ^[a-z][a-z0-9-]{0,19}$，最多 8 家，同一家重複留先出現（且合格）的那筆。
 --   * status 只收 ok／unavailable／error／pending；stale 只收布林；code 只收固定代碼（ok、not_installed、not_logged_in、
 --     timeout、too_large、parse_failed、spawn_failed、unsupported）；age_s 只收 0～31536000 的整數。
---   * 型號代號 id 走統一規則 relay.valid_model_id（字元集＋以 / 切開後每一段不能是空字串、.、..）；name 1～80 字、不含控制字元與常見的格式字元；
---     每家最多 200 筆。
+--   * 型號代號 id 走統一規則 relay.valid_model_id（字元集＋以 / 切開後每一段不能是空字串、.、..）；name 1～80 字、不含控制字元與格式字元
+--     （Unicode 的 Cc 與 Cf；Cf 的區間由 tools/gen-cf-ranges.mjs 產生，與 Edge 的 \p{Cf} 等價）；每家最多 200 筆。
 --   * 不合格的整家（或那一筆）丟掉，其餘照存，不整份拒收。只收代號、顯示名、狀態與固定代碼，其餘欄位（含原因的原文）一律不收。
 --   * models 不算進原本 16000 bytes 的上限；models 本身另限 32000 bytes（jsonb::text 的長度），超過只丟 models，launcher 照常存。
 --   * pi_models 的代號也改用同一個規則函式（多了分段檢查）。
@@ -79,8 +79,8 @@ begin
         continue when jsonb_typeof(m.x->'id') is distinct from 'string' or not relay.valid_model_id(m.x->>'id');
         continue when jsonb_typeof(m.x->'name') is distinct from 'string'
                    or char_length(m.x->>'name') not between 1 and 80
-                   -- 控制字元與常見的格式字元（零寬、方向控制、BOM、軟連字號等）；完整的 \p{Cf} 由 Edge 保證
-                   or (m.x->>'name') ~ '[\u0001-\u001f\u007f-\u009f­؀-؅؜۝܏᠎​-‏‪-‮⁠-⁤⁦-⁯﻿￹-￻]';
+                   -- 控制字元（Cc）＋全部格式字元（Cf）。Cf 的區間由 tools/gen-cf-ranges.mjs 產生，勿手改（tests/launcher_models_sql.test.mjs 會重跑比對）
+                   or (m.x->>'name') ~ '[\u0001-\u001f\u007f-\u009f\U000000ad\U00000600-\U00000605\U0000061c\U000006dd\U0000070f\U00000890-\U00000891\U000008e2\U0000180e\U0000200b-\U0000200f\U0000202a-\U0000202e\U00002060-\U00002064\U00002066-\U0000206f\U0000feff\U0000fff9-\U0000fffb\U000110bd\U000110cd\U00013430-\U0001343f\U0001bca0-\U0001bca3\U0001d173-\U0001d17a\U000e0001\U000e0020-\U000e007f]';
         v_list := v_list || jsonb_build_array(jsonb_build_object('id', m.x->>'id', 'name', m.x->>'name'));
         v_n := v_n + 1;
       end loop;

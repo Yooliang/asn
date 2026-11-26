@@ -191,6 +191,21 @@ Deno.test("#2353 sanitizeModels：型號走統一規則；name 1～80 字、不�
   assertEquals(out.map((m) => m.id), ["openrouter/meta/llama-3", "ok5"]);
 });
 
+// name 規則的共用向量：SQL 測試（tests/launcher_models_sql.test.mjs）讀同一份，每一筆答案要一致
+const NV = JSON.parse(await Deno.readTextFile(new URL("../../../relay/shared/test-vectors/model-name.json", import.meta.url)));
+// 向量的每一筆是字串，或碼點數字的陣列
+const nameOf = (x: string | number[]): string => (typeof x === "string" ? x : String.fromCodePoint(...x));
+const nameKept = (name: string) => (launcherModels([MV("v", { models: [{ id: "m1", name }] })])![0].models as unknown[]).length === 1;
+
+Deno.test("#2353 sanitizeModels：name 對共用向量（model-name.json）逐筆答對，含 Tag、U+110BD 與孤立代理碼", () => {
+  for (const x of NV.valid) assert(nameKept(nameOf(x)), `應收：${JSON.stringify(x)}`);
+  for (const x of [...NV.invalid, ...NV.invalid_edge_only]) assert(!nameKept(nameOf(x)), `應丟：${JSON.stringify(x)}`);
+  assert(nameKept("N".repeat(NV.max_chars)));
+  assert(!nameKept("N".repeat(NV.max_chars + 1)));
+  assert(!nameKept(""));
+  assert(NV.invalid_edge_only.length > 0);
+});
+
 Deno.test("#2353 sanitizeLauncher：models 緊湊序列化超過 24000 bytes 就丟掉整個 models，並 console.warn；其餘照存", () => {
   const warns: unknown[][] = [];
   const orig = console.warn;
@@ -201,6 +216,7 @@ Deno.test("#2353 sanitizeLauncher：models 緊湊序列化超過 24000 bytes 就
     assertEquals("models" in out, false);
     assertEquals(out.cwd_allow, ["D:/x"]);
     assertEquals(warns.length, 1);
+    assert(String(warns[0][0]).includes("只丟 models") && !String(warns[0][0]).includes("整份"), "warn 要講實際行為：只丟 models");
     // 剛好不超過：留下
     const fit = [MV("codex", { models: Array.from({ length: 100 }, (_, i) => ({ id: `m${i}`.padEnd(99, "x"), name: "N".repeat(80) })) })];
     assert(new TextEncoder().encode(JSON.stringify(fit)).length < 24000);

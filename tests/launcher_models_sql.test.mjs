@@ -4,6 +4,7 @@ import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { cfClassBody, cfRanges } from '../tools/gen-cf-ranges.mjs'
 
 const FILE = '20261126100000_launcher_models.sql'
 const sql = fs.readFileSync(new URL(`../supabase/migrations/${FILE}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -11,7 +12,9 @@ const down = fs.readFileSync(new URL(`../supabase/sql/rollback/${FILE.replace('.
 const prev = fs.readFileSync(new URL('../supabase/migrations/20261028140000_launcher_pi_models.sql', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const V = JSON.parse(fs.readFileSync(new URL('../relay/shared/test-vectors/model-id.json', import.meta.url), 'utf8'))
 
-const fnBody = (text, name) => { const m = new RegExp(`create or replace function ${name.replace('.', '\\.')}\\(.*?\\$function\\$;`, 's').exec(text); assert.ok(m, name); return m[0] }
+const NV = JSON.parse(fs.readFileSync(new URL('../relay/shared/test-vectors/model-name.json', import.meta.url), 'utf8'))
+
+const fnBody =(text, name) => { const m = new RegExp(`create or replace function ${name.replace('.', '\\.')}\\(.*?\\$function\\$;`, 's').exec(text); assert.ok(m, name); return m[0] }
 
 test('靜態：只換 asn_relay_set_launcher、建兩支 relay 函式、不 grant、含向量的 pattern', () => {
   assert.match(sql, /create or replace function relay\.valid_model_id\(/)
@@ -141,6 +144,38 @@ test('實跑：name 擋控制字元與常見格式字元', { skip }, async () =>
   const names = ['a\u0001b', 'a\u007fb', 'a\u0085b', 'a\u200bb', 'a\u202eb', 'a\ufeffb', 'a\u00adb', 'a\u2066b', 'a\nb']
   await set({ ...base, models: [vend('v', { models: [...names.map((n, i) => ({ id: `m${i}`, name: n })), { id: 'good', name: '中文 Name (v1)' }] })] })
   assert.deepEqual((await get()).models[0].models, [{ id: 'good', name: '中文 Name (v1)' }])
+})
+
+test('靜態：migration 的 Cf 區間與 tools/gen-cf-ranges.mjs 現場產生的逐字相同（Node 的 Unicode 資料換了就會紅）', () => {
+  const m = /\\u007f-\\u009f(.*?)\]'/.exec(sql)
+  assert.ok(m, '找不到 name 檢查的字元類')
+  assert.equal(m[1], cfClassBody(), '請重跑 node tools/gen-cf-ranges.mjs，把輸出貼回 migration')
+  assert.match(sql, /由 tools\/gen-cf-ranges\.mjs 產生，勿手改/)
+  assert.ok(cfRanges().length > 10)
+})
+
+// 向量的每一筆是字串，或碼點數字的陣列
+const nameOf = x => (typeof x === 'string' ? x : String.fromCodePoint(...x))
+
+test('實跑：name 對共用向量（model-name.json）逐筆答對（Edge 讀同一份）', { skip }, async () => {
+  const { set, get } = await setup()
+  const all = [...NV.valid, ...NV.invalid].map(nameOf)
+  await set({ ...base, models: [vend('v', { models: all.map((n, i) => ({ id: `m${i}`, name: n })) })] })
+  assert.deepEqual((await get()).models[0].models.map(m => m.name), NV.valid.map(nameOf))
+  // 長度：剛好上限收、多一個丟
+  await set({ ...base, models: [vend('v', { models: [{ id: 'a', name: 'N'.repeat(NV.max_chars) }, { id: 'b', name: 'N'.repeat(NV.max_chars + 1) }] })] })
+  assert.deepEqual((await get()).models[0].models.map(m => m.id), ['a'])
+})
+
+test('實跑：name 的每個 Cf 區間頭尾與 \\p{Cf} 一致（涵蓋 Tag、U+110BD 等）', { skip }, async () => {
+  const { db } = await setup()
+  const bad = []
+  for (const [a, b] of cfRanges()) for (const cp of [a, b]) {
+    const input = JSON.stringify([vend('v', { models: [{ id: 'm', name: `a${String.fromCodePoint(cp)}b` }] })])
+    const out = (await db.query('select relay.sanitize_launcher_models($1::jsonb) r', [input])).rows[0].r
+    if (out[0].models.length !== 0) bad.push(cp.toString(16))
+  }
+  assert.deepEqual(bad, [], '這些 Cf 碼點沒被 SQL 擋住')
 })
 
 test('實跑：型號代號對共用向量（經 models 與 pi_models）', { skip }, async () => {
