@@ -62,7 +62,7 @@ function fakeCli(e, { rows = () => [], sendStatus = 0, who = whoamiOut() } = {})
     if (args[0] === 'room') {
       e.calls.reads += 1; e.calls.order.push('read'); e.calls.readArgs.push(args)
       // 真實輸出（room.rs json_line）：每則一行 JSON 物件，沒有外層陣列；沒有訊息時輸出是空的
-      const lines = rows(e.calls.reads).map((row, i) => JSON.stringify({ seq: i + 1, from: typeof row === 'string' ? SELF : row.from, from_name: '甲', trust: 'owner', at: '2026-11-21T10:00:00Z', mentions: [], body: typeof row === 'string' ? row : row.body }))
+      const lines = rows(e.calls.reads).map((row, i) => JSON.stringify({ seq: i + 1, from: typeof row === 'string' ? SELF : row.from, from_name: '甲', trust: 'owner', at: typeof row === 'string' || !('at' in row) ? '2026-11-21T10:00:00Z' : row.at, mentions: [], body: typeof row === 'string' ? row : row.body }))
       return { status: 0, stdout: lines.length ? `${lines.join('\n')}\n` : '', stderr: '' }
     }
     e.calls.order.push('send'); e.calls.sends.push({ room: args[args.indexOf('--room') + 1], body: args[args.indexOf('--body') + 1] }); return { status: sendStatus, stdout: '', stderr: sendStatus ? '拒絕：/kick @all【發版完成】' : '' }
@@ -562,6 +562,21 @@ test('#2345 PR-2 舊版發版腳本貼的開頭照舊認得（電腦版要 commi
   assert.equal(l.calls.sends.length, 0)
   const other = setup([li]); fakeCli(other, { rows: () => [{ body: oldLinux, from: 'x~別人' }] }); run(other)
   assert.equal(other.calls.sends.length, 1, '別人貼的舊文也不算')
+})
+
+test('#2345 PR-2 Linux 舊文沒有 commit：只認 48 小時內、自己發的、時間欄位正常的那則', () => {
+  const li = mk('published', 'linux', '0.2.99', 1)
+  const oldLinux = '【Linux 版發版完成】v0.2.99：AppImage、deb 已附加到 GitHub Release v0.2.99、官網已更新。'
+  const sent = (row) => { const e = setup([li]); fakeCli(e, { rows: () => [row] }); run(e); return e.calls.sends.length }
+  const at = (ms) => new Date(T0 + ms).toISOString()
+  assert.equal(sent({ body: oldLinux, from: SELF, at: at(-(MAX_AGE_MS - 1000)) }), 0, '48 小時內、自己：已貼')
+  assert.equal(sent({ body: oldLinux, from: SELF, at: at(-(MAX_AGE_MS + 1000)) }), 1, '超過 48 小時：不算')
+  assert.equal(sent({ body: oldLinux, from: SELF, at: 'not-a-time' }), 1, '壞值：不算')
+  assert.equal(sent({ body: oldLinux, from: SELF, at: undefined }), 1, '缺少：不算')
+  assert.equal(sent({ body: oldLinux, from: SELF, at: at(60_000) }), 1, '未來：不算')
+  assert.equal(sent({ body: oldLinux, from: 'x~別人', at: at(-1000) }), 1, 'from 不是自己：不算')
+  // 新格式與電腦版舊文不受時間影響
+  assert.equal(sent({ body: composeMessage(li), from: SELF, at: at(-(MAX_AGE_MS * 3)) }), 0)
 })
 
 test('#2345 PR-2 自己的身分：用 send --whoami 取得，讀群組每則的 from 是 節點~視窗名；拿不到就不送', () => {

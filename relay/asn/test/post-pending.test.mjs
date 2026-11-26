@@ -1,7 +1,7 @@
 import test, { mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { runOnce, runCommand, parseArgs, ALERT_CAUSES, WORKFLOWS } from '../../../tools/release/auto_publish.mjs'
-import { PENDING_PLATFORMS, PENDING_KINDS, isSemver, isCommit, isPlatform, isKind, validateItem, buildItem, enqueuePending, readPending, pendingPathOf, MAX_ITEM_BYTES, MAX_FILE_BYTES, MAX_ITEMS, MAX_ATTEMPTS, MAX_CLAIMED_BY, LAST_ERROR_MAX, LAST_ERROR_MAX_BYTES, LOCK_FUTURE_MS, PENDING_BAD_MESSAGE, PENDING_FULL_MESSAGE, PENDING_LOCK_BAD_MESSAGE, cleanLastError, isLastError } from '../../../tools/release/post_pending.mjs'
+import { PENDING_PLATFORMS, PENDING_KINDS, isSemver, isCommit, isPlatform, isKind, validateItem, buildItem, enqueuePending, readPending, pendingPathOf, MAX_ITEM_BYTES, MAX_FILE_BYTES, MAX_ITEMS, MAX_ATTEMPTS, MAX_CLAIMED_BY, LAST_ERROR_MAX, LAST_ERROR_MAX_BYTES, LOCK_FUTURE_MS, PENDING_BAD_MESSAGE, PENDING_REJECTED_MESSAGE, PENDING_FULL_MESSAGE, PENDING_LOCK_BAD_MESSAGE, cleanLastError, isLastError } from '../../../tools/release/post_pending.mjs'
 import { POST_FAILED_FIXED } from '../../../tools/release/post_pending_rules.mjs'
 import { env, row, sha, short, opts, STATE, T0, lk, seededState, postFails, alertOf, lastState, pendingOf, PENDING, publishWithPostFailed, markerOut } from './helpers/auto-publish-env.mjs'
 
@@ -469,7 +469,7 @@ test('#2345 一筆合格、一筆不合格：合格的留在佇列，不合格�
   assert.ok(![...e.fsMap.keys()].some((k) => k.startsWith(`${PENDING}.bad-`)), '整個檔沒有被改名')
   const al = alertOf(e).alerts['pending-bad']
   assert.equal(al.status, 'active')
-  assert.match(al.message, /1 筆/)
+  assert.equal(al.message, PENDING_REJECTED_MESSAGE)
   m.mock.restore()
 })
 

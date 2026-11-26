@@ -151,8 +151,8 @@ export const stampOf = (deps) => new Date(deps.now()).toISOString().replace(/[:.
 
 export const PENDING_FULL_MESSAGE = '待貼佇列已滿，新的一筆沒有寫入，請人工處理佇列'
 export const PENDING_LOCK_BAD_MESSAGE = '待貼佇列的鎖檔不正常，已改名保留，請人工檢查'
-export const pendingRejectedMessage = (n) => `待貼佇列有 ${n} 筆格式不合格，已另存到 .rejected 檔，其餘照留，請人工檢查`
-const raisePendingBad = (opts, deps, message) => makeAlerts(opts, deps).raise('pending-bad', 'pending-bad', message, 'post-pending')
+export const PENDING_REJECTED_MESSAGE = '待貼佇列有項目格式不合格，已另存到 .rejected 檔，其餘照留，請人工檢查'
+const raisePendingBad = (opts, deps, message) => makeAlerts(opts, deps).raiseLine('pending-bad', 'pending-bad', message, 'post-pending')
 
 // 整個檔讀不懂：改名留存、留 pending-bad 告警、不覆寫
 export function quarantine(opts, deps) {
@@ -168,7 +168,7 @@ export function saveRejected(opts, deps, rejected) {
   const to = `${pendingPathOf(opts)}.rejected-${stampOf(deps)}`
   atomicWrite(deps, to, JSON.stringify({ v: 1, rejectedAt: new Date(deps.now()).toISOString(), items: rejected }, null, 2))
   deps.log(`待貼佇列有 ${rejected.length} 筆不合格，已另存為 ${to}`)
-  raisePendingBad(opts, deps, pendingRejectedMessage(rejected.length))
+  raisePendingBad(opts, deps, PENDING_REJECTED_MESSAGE)
 }
 
 // 壞鎖改名隔離：改名前記下讀到的內容，改名後重讀隔離檔比對；對不上代表搬到的是別人剛換上的鎖，要還原並放棄

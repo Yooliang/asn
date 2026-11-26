@@ -78,7 +78,7 @@ export function runPostPending(opts, deps) {
     deps.log(`待貼項目超過期限，已移到 .expired 檔：${refOf(x)}#${x.kind}`)
     out(`${labelOf(x)}：超過 48 小時，不再代貼，已移到 .expired 檔`)
   }
-  if (scan.value.length > 0) alerts.raise('pending-bad', 'pending-bad', EXPIRED_FIXED, 'post-pending')
+  if (scan.value.length > 0) alerts.raiseLine('pending-bad', 'pending-bad', EXPIRED_FIXED, 'post-pending')
 
   const snapshot = [...scan.items].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1))
   let handled = 0
@@ -92,7 +92,7 @@ export function runPostPending(opts, deps) {
     if (handled >= MAX_PER_RUN) break
     if (claimFuture(item, deps.now())) {
       deps.log(`待貼項目的認領時間比現在晚，當成認領逾時處理：${refOf(item)}#${item.kind}`)
-      alerts.raise('pending-bad', 'bad-claim', BAD_CLAIM_FIXED, 'post-pending')
+      alerts.raiseLine('pending-bad', 'pending-bad', BAD_CLAIM_FIXED, 'post-pending')
     }
     if (claimLive(item, deps.now())) { out(`${labelOf(item)}：別人正在處理，略過`); continue }
     handled += 1

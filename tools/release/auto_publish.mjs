@@ -254,6 +254,18 @@ export function makeAlerts(opts, deps) {
         this.raise(cause, reason, line, ref)
       } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
     },
+    // 累加不同原因的版本：同類已有 active 告警時，訊息每個原因一行固定句，同一句不重複、不覆寫別的原因；ref 與來源清單照 raise 累加。--ack-alert 一次清全部
+    raiseLine(cause, reason, line, ref = null) {
+      try {
+        const old = load().alerts[cause]
+        if (old && old.status === 'active' && old.reason === reason) {
+          const lines = String(old.message).split('\n')
+          this.raise(cause, reason, lines.includes(line) ? old.message : [...lines, line].join('\n'), ref)
+          return
+        }
+        this.raise(cause, reason, line, ref)
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
     resolve(cause) {
       try {
         const cur = load().alerts

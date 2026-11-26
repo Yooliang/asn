@@ -45,11 +45,18 @@ const LEGACY_HEAD = {
   desktop: (v) => `【發版完成】v${v}：安裝檔已發 GitHub Release`,
   linux: (v) => `【Linux 版發版完成】v${v}：AppImage、deb 已附加到 GitHub Release`,
 }
-export function isPostedBody(item, body) {
+// Linux 舊文沒有 commit，只比開頭，所以另外要求訊息時間在 MAX_AGE_MS 內（recent ＝ 這則訊息夠新）
+export function isPostedBody(item, body, recent = false) {
   if (body.startsWith(composeMessage(item))) return true
   if (item.kind !== 'published') return false
   if (!body.startsWith(LEGACY_HEAD[item.platform](item.version))) return false
-  return item.platform === 'linux' ? true : body.includes(`commit ${item.commit}`)
+  return item.platform === 'linux' ? recent === true : body.includes(`commit ${item.commit}`)
+}
+// 群組每則的 at（ISO 時間）在 now 之前、且不超過 MAX_AGE_MS 才算夠新；缺少、格式不對、未來一律不算
+export function isRecentAt(at, nowMs) {
+  if (typeof at !== 'string' || !/^\d{4}-\d{2}-\d{2}T/.test(at)) return false
+  const t = Date.parse(at)
+  return Number.isFinite(t) && t <= nowMs && nowMs - t <= MAX_AGE_MS
 }
 
 // ---- 群組設定檔：只在代貼端自己的資料夾，路徑寫死、不接受命令列或環境變數改
@@ -131,17 +138,25 @@ export function checkGithub(item, deps) {
 //   機器節點判定：<節點>　（失敗時是「機器節點判定失敗：…」）
 // 群組讀出來每則的 from 是「<節點>~<視窗名>」（room.rs：my_key ＝ format!("{}~{}", node, name)）。
 // 回「節點~視窗名」，拿不到（指令失敗、格式不認得、視窗沒名字）回 null，呼叫端當成讀不到、不送
-const WHO_BAD = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u
+// 代貼端解析 --whoami 輸出依賴的固定字串（行首）。caller.rs 的 whoami 一改文字，契約測試會紅，要同步改這裡（另見 #2372）
+export const WHOAMI_CHAIN_PREFIX = '判定（行程鏈）：'
+export const WHOAMI_ENV_PREFIX = '判定（環境變數備援）：'
+export const WHOAMI_NODE_PREFIX = '機器節點判定：'
+export const WHOAMI_PID_KEY = 'pid='
+export const WHOAMI_NAME_KEY = 'name='
+export const WHOAMI_NO_NAME = '(無名)'
+const WHO_BAD =/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u
 export function selfFrom(deps) {
   let r
   try { r = deps.asnCli(['send', '--whoami']) } catch { return null }
   if (!r || r.status !== 0 || typeof r.stdout !== 'string' || Buffer.byteLength(r.stdout, 'utf8') > MAX_READ_BYTES) return null
   const text = r.stdout.replace(/\r\n/g, '\n')
-  const name = /^判定（行程鏈）：pid=\d+ name=(.+)$/m.exec(text)?.[1] ?? /^判定（環境變數備援）：pid=\d+ name=(.+)$/m.exec(text)?.[1]
-  const node = /^機器節點判定：(.+)$/m.exec(text)?.[1]
+  const nameOf = (prefix) => new RegExp(`^${prefix}${WHOAMI_PID_KEY}\\d+ ${WHOAMI_NAME_KEY}(.+)$`, 'm').exec(text)?.[1]
+  const name = nameOf(WHOAMI_CHAIN_PREFIX) ?? nameOf(WHOAMI_ENV_PREFIX)
+  const node = new RegExp(`^${WHOAMI_NODE_PREFIX}(.+)$`, 'm').exec(text)?.[1]
   const clean = (s) => (typeof s === 'string' ? s.trim() : '')
   const n = clean(name), nd = clean(node)
-  if (!n || !nd || n === '(無名)' || WHO_BAD.test(n) || WHO_BAD.test(nd) || nd.includes('~')) return null
+  if (!n || !nd || n === WHOAMI_NO_NAME || WHO_BAD.test(n) || WHO_BAD.test(nd) || nd.includes('~')) return null
   return `${nd}~${n}`
 }
 
@@ -163,5 +178,6 @@ export function roomHas(item, room, me, deps) {
     if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.body !== 'string') return { ok: false }
     rows.push(m)
   }
-  return { ok: true, found: rows.some((m) => m.from === me && isPostedBody(item, m.body)) }
+  const nowMs = deps.now()
+  return { ok: true, found: rows.some((m) => m.from === me && isPostedBody(item, m.body, isRecentAt(m.at, nowMs))) }
 }
