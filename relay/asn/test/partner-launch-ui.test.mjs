@@ -177,6 +177,8 @@ test('廠牌卡右邊的短標示（#2354）：標示靠右、同一行；反灰
   const m = fs.readFileSync(new URL('../ui/mobile.css', import.meta.url), 'utf8')
   assert.match(m, /\.m-opt-row\{display:flex;align-items:center;justify-content:space-between;/)
   assert.match(m, /\.m-opt\.off \.m-opt-tag\{color:#9a3b14\}/)
+  assert.match(m, /\.m-opt-tag\.is-out\{color:var\(--accent\)\}/, '手機：尚未登入的字樣用主色，跟反灰的尚未安裝分開')
+  assert.match(css, /\.pmodel-tag\.is-out\{color:var\(--accent\)\}/, '電腦版：同上')
 })
 
 test('開新夥伴的設備清單不列「永久移除」的設備（跟設定頁、設備頁籤一致）；本機不會被濾掉', () => {

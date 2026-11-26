@@ -1,6 +1,6 @@
 // 冒煙探測「電腦版開新夥伴三頁」（probe.dlaunch，#2354）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
 // 第 2 頁（step 2）：步驟列寫「1. 設備 2. 廠牌 3. 設定」；沒有「運行」；廠牌卡右邊同一行有短標示
-//   （Claude 無、Codex 尚未登入［反灰］、Gemini 無終端畫面、Grok 與 DeepSeek、MiniMax 尚未安裝［反灰］）；反灰的點了不會被選起來；Claude 有型號
+//   （Claude 無、Codex 尚未登入［只標字、可選］、Gemini 無終端畫面、Grok 與 DeepSeek、MiniMax 尚未安裝［反灰］）；反灰的點了不會被選起來；Claude 有型號
 // 第 3 頁（step 3）：名字、工作資料夾、第一句話，加上只有本機視窗廠牌才有的「顯示方式」（Gemini 沒有）；沒有摘要列、沒有 pi 的模型；按鈕寫「開始」；截圖拍得到顯示方式
 // 送出（step 'submit'）：按「開始」＝呼叫 partner_launch_local，profile 是 claude，沒有「運行」欄位
 // 開法：新手引導卡（這台電腦沒有視窗）→ Claude 那列的「開一個視窗」＝對話框直接在第 2 頁
@@ -43,7 +43,7 @@ export const dlaunchProbeSource = ({ step = 2 } = {}) => `(async () => {
     if (shown.includes('運行')) return { ok: false, why: '對話框畫面上還寫著「運行」：' + shown.slice(0, 160) };
     const cardInfo = c => ({ label: txt(c.querySelector('.pmodel-lb')), tag: txt(c.querySelector('.pmodel-tag')), disabled: c.disabled === true })
     const got = cards().map(c => { const i = cardInfo(c); return i.label + '/' + i.tag + '/' + (i.disabled ? '灰' : '可') }).join('、');
-    const wantCards = 'Claude//可、Codex/尚未登入/灰、Gemini/無終端畫面/可、Grok/尚未安裝/灰、DeepSeek/尚未安裝/灰、MiniMax/尚未安裝/灰';
+    const wantCards = 'Claude//可、Codex/尚未登入/可、Gemini/無終端畫面/可、Grok/尚未安裝/灰、DeepSeek/尚未安裝/灰、MiniMax/尚未安裝/灰';
     if (got !== wantCards) return { ok: false, why: '廠牌卡與標示不對：' + got + '（應為 ' + wantCards + '）' };
     // 標示在卡片右邊、跟名稱同一行
     for (const c of cards()) {
@@ -57,6 +57,13 @@ export const dlaunchProbeSource = ({ step = 2 } = {}) => `(async () => {
     // 反灰的點了也不會被選
     for (const c of cards().filter(x => x.disabled)) { c.click(); await sleep(60) }
     if (!cards()[0].className.includes('on') || cards().filter(c => c.className.includes('on')).length !== 1) return { ok: false, why: '點反灰的卡片之後選取變了' };
+    // 尚未登入的（Codex）只標字樣、不反灰：點了選得起來（偵測可能是快取，不能擋人），再點回 Claude；標示用主色、跟反灰的尚未安裝分開
+    const codexTag = cards()[1].querySelector('.pmodel-tag'), missTag = cards()[3].querySelector('.pmodel-tag');
+    if (cards()[1].className.includes('off') || getComputedStyle(cards()[1]).opacity !== '1') return { ok: false, why: '尚未登入的 Codex 卡片被反灰了' };
+    if (getComputedStyle(codexTag).color === getComputedStyle(missTag).color) return { ok: false, why: '尚未登入與尚未安裝的字樣顏色一樣，分不出來' };
+    cards()[1].click(); await sleep(150);
+    if (!cards()[1].className.includes('on')) return { ok: false, why: '點尚未登入的 Codex 沒有選起來' };
+    cards()[0].click(); await sleep(150);
     // 型號：Claude 有，選項是三個別名
     const pick = dlg().querySelector('.partner-model-pick select');
     if (!pick || !vis(pick)) return { ok: false, why: 'Claude 沒有型號下拉' };

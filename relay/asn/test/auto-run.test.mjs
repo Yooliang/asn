@@ -83,21 +83,21 @@ test('每個廠牌「開在別台」實際送出的內容（buildLaunchRequest�
   assert.ok(!launchVendorCards({ ...launcher, profiles: [...launcher.profiles, { id: 'codex' }] }).some(c => c.id === 'codex'))
 })
 
-test('廠牌卡標示的判斷規則：尚未安裝 ＞ 尚未登入 ＞ 無終端畫面；前兩個反灰不能選；自訂設定不加標示', () => {
+test('廠牌卡標示的判斷規則：尚未安裝 ＞ 尚未登入 ＞ 無終端畫面；只有尚未安裝反灰不能選，尚未登入只標字樣、照樣能選；自訂設定不加標示', () => {
   assert.deepEqual(BADGE_TEXT, { missing: '尚未安裝', loggedOut: '尚未登入', noTerm: '無終端畫面' })
   const gemini = { ...cat('gemini'), installed: true }, grok = { ...cat('grok'), installed: true }
-  assert.deepEqual(launchBadge(gemini), { text: '無終端畫面', disabled: false })
-  assert.deepEqual(launchBadge(grok), { text: '無終端畫面', disabled: false })
-  assert.deepEqual(launchBadge({ ...cat('claude'), installed: true }), { text: '', disabled: false })
-  assert.deepEqual(launchBadge({ ...cat('codex'), installed: true }), { text: '', disabled: false })
+  assert.deepEqual(launchBadge(gemini), { text: '無終端畫面', disabled: false, kind: 'noTerm' })
+  assert.deepEqual(launchBadge(grok), { text: '無終端畫面', disabled: false, kind: 'noTerm' })
+  assert.deepEqual(launchBadge({ ...cat('claude'), installed: true }), { text: '', disabled: false, kind: '' })
+  assert.deepEqual(launchBadge({ ...cat('codex'), installed: true }), { text: '', disabled: false, kind: '' })
   // 優先序
-  assert.deepEqual(launchBadge({ ...grok, installed: false }, { loggedOut: true }), { text: '尚未安裝', disabled: true }, '沒裝＞沒登入')
-  assert.deepEqual(launchBadge({ ...grok, installed: false }), { text: '尚未安裝', disabled: true }, '沒裝＞無終端畫面')
-  assert.deepEqual(launchBadge(grok, { loggedOut: true }), { text: '尚未登入', disabled: true }, '沒登入＞無終端畫面')
+  assert.deepEqual(launchBadge({ ...grok, installed: false }, { loggedOut: true }), { text: '尚未安裝', disabled: true, kind: 'missing' }, '沒裝＞沒登入')
+  assert.deepEqual(launchBadge({ ...grok, installed: false }), { text: '尚未安裝', disabled: true, kind: 'missing' }, '沒裝＞無終端畫面')
+  assert.deepEqual(launchBadge(grok, { loggedOut: true }), { text: '尚未登入', disabled: false, kind: 'loggedOut' }, '沒登入＞無終端畫面；只標字、不反灰（偵測可能是快取）')
   // 自訂設定（沒有 channels）：不加標示，背景的也不標
-  assert.deepEqual(launchBadge({ id: 'my', mode: 'background', installed: true }), { text: '', disabled: false })
+  assert.deepEqual(launchBadge({ id: 'my', mode: 'background', installed: true }), { text: '', disabled: false, kind: '' })
   const cards = vendorCards([{ ...cat('claude'), installed: true }, { ...grok, installed: false }, { ...cat('codex'), installed: true }], { loggedOut: { codex: true } })
-  assert.deepEqual(cards.map(c => [c.id, c.badge.text, c.disabled]), [['claude', '', false], ['grok', '尚未安裝', true], ['codex', '尚未登入', true]])
+  assert.deepEqual(cards.map(c => [c.id, c.badge.text, c.disabled]), [['claude', '', false], ['grok', '尚未安裝', true], ['codex', '尚未登入', false]])
 })
 
 test('「尚未登入」只在確定的時候標：Gemini 偵測不到永遠不標；沒收到回報、回報過期、登入失效、不確定都不標', () => {
@@ -114,19 +114,41 @@ test('「尚未登入」只在確定的時候標：Gemini 偵測不到永遠不�
   assert.deepEqual(vendorStatesOf(undefined), {})
 })
 
+test('選了「尚未登入」的廠牌：卡片能選，別台、本機送出的參數都照常（只標字樣、不擋人）', () => {
+  const launcher = { profiles: prof(['claude', 'gemini', 'grok']), cwd_allow: ['D:/work'] }
+  const out = loggedOutFromStates({ claude: STATE.LOGGED_OUT, grok: STATE.INSTALLED_LOGGED_OUT })
+  const cards = launchVendorCards(launcher, { loggedOut: out })
+  const claude = cards.find(c => c.id === 'claude'), grok = cards.find(c => c.id === 'grok')
+  assert.deepEqual([claude.badge.text, claude.disabled, grok.badge.text, grok.disabled], ['尚未登入', false, '尚未登入', false], '兩張都標尚未登入、都沒反灰')
+  // 手機選卡的閘門（pickLaunchVendor）只看 disabled：這兩張都過得去
+  assert.equal(cards.filter(c => !c.disabled && c.badge.text === '尚未登入').length, 2)
+  // 別台：送出的內容跟已登入的一樣
+  const f = { node: 'n1', name: ' helper ', cwd: 'D:/work', first: '', piModel: '' }
+  const remote = row => { const a = autoRunFor(row, { local: false }); return [a.ok, buildLaunchRequest({ ...f, profile: row.profileId }, { run: a.run, row, launcher })] }
+  assert.deepEqual(remote(claude), [true, { node: 'n1', name: 'helper', cwd: 'D:/work', first_message: null, profile: 'claude' }])
+  assert.deepEqual(remote(grok), [true, { node: 'n1', name: 'helper', cwd: 'D:/work', first_message: null, profile: 'grok' }])
+  // 本機（電腦版）：同樣能送
+  const la = autoRunFor(claude, { local: true })
+  assert.equal(la.ok, true)
+  assert.deepEqual(localLaunchRequest(la, { name: ' helper ', cwd: 'D:/work' }), { profile: 'claude', name: 'helper', cwd: 'D:/work', display: 'foreground', first_message: '' })
+  // 電腦版選卡（pickPartnerModel）只看 m.disabled；手機也是
+  assert.match(read('ui/list.js'), /function pickPartnerModel\(m\) \{\s+if \(m\.disabled\) return/)
+  assert.match(read('ui/m.js'), /function pickLaunchVendor\(v\) \{ if \(v\.disabled\) return;/)
+})
+
 test('別台的廠牌卡：那台沒有的標尚未安裝（反灰）；只能經 pi 的廠牌永遠列出，沒有 pi＝尚未安裝、pi 沒登入這家＝尚未登入', () => {
   const brief = cards => cards.map(c => [c.id, c.badge.text, c.disabled])
   // 只有 Claude：其餘都尚未安裝，DeepSeek、MiniMax 也是（沒有 pi）
   assert.deepEqual(brief(launchVendorCards({ profiles: prof(['claude']), cwd_allow: ['D:/work'] })), [['claude', '', false], ['gemini', '尚未安裝', true], ['grok', '尚未安裝', true], ['deepseek', '尚未安裝', true], ['minimax', '尚未安裝', true]])
   // 有 pi 與模型清單：清單裡只有 minimax → deepseek 尚未登入（反灰）、minimax 可選
   const L = { profiles: prof(['claude', 'gemini', 'pi']), cwd_allow: ['D:/work'], pi_models: [{ provider: 'minimax', model: 'MiniMax-M3' }] }
-  assert.deepEqual(brief(launchVendorCards(L)), [['claude', '', false], ['gemini', '無終端畫面', false], ['grok', '尚未安裝', true], ['deepseek', '尚未登入', true], ['minimax', '', false]])
+  assert.deepEqual(brief(launchVendorCards(L)), [['claude', '', false], ['gemini', '無終端畫面', false], ['grok', '尚未安裝', true], ['deepseek', '尚未登入', false], ['minimax', '', false]])
   // 有 pi 但那台沒回報模型清單（沒開放遠端管理）：不知道有沒有登入，不標、不反灰（開的時候再說明原因）
   const noList = launchVendorCards({ profiles: prof(['claude', 'pi']), cwd_allow: ['D:/work'] })
   assert.deepEqual(brief(noList).slice(-2), [['deepseek', '', false], ['minimax', '', false]])
   // 帳號回報確定 Grok、Claude 沒登入：標尚未登入；回報裡的 Gemini 不標
   const out = loggedOutFromStates({ claude: STATE.LOGGED_OUT, grok: STATE.INSTALLED_LOGGED_OUT, gemini: STATE.LOGGED_OUT })
-  assert.deepEqual(brief(launchVendorCards({ profiles: prof(['claude', 'gemini', 'grok']), cwd_allow: ['D:/work'] }, { loggedOut: out })).slice(0, 3), [['claude', '尚未登入', true], ['gemini', '無終端畫面', false], ['grok', '尚未登入', true]])
+  assert.deepEqual(brief(launchVendorCards({ profiles: prof(['claude', 'gemini', 'grok']), cwd_allow: ['D:/work'] }, { loggedOut: out })).slice(0, 3), [['claude', '尚未登入', false], ['gemini', '無終端畫面', false], ['grok', '尚未登入', false]])
   // 目錄外的自訂設定：照回報列出、不加標示
   const custom = launchVendorCards({ profiles: [...prof(['claude']), { id: 'my-tool', mode: 'background' }], cwd_allow: ['D:/work'] }).find(c => c.id === 'my-tool')
   assert.deepEqual([custom.badge.text, custom.disabled, custom.installed], ['', false, true])

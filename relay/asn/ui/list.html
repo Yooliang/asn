@@ -506,7 +506,7 @@
         <button v-for="m in dlgVendors" :key="m.id" type="button" class="pmodel" :class="{ on: partnerDlg.vendor ? partnerDlg.vendor === m.id : partnerDlg.profile === m.profileId, off: m.disabled }" :disabled="m.disabled" @click="pickPartnerModel(m)">
           <span class="pmodel-ic" :data-m="m.id"></span>
           <span class="pmodel-lb">{{ m.label }}</span>
-          <small class="pmodel-tag" v-if="m.badge.text">{{ m.badge.text }}</small>
+          <small class="pmodel-tag" :class="{ 'is-out': m.badge.kind === 'loggedOut' }" v-if="m.badge.text">{{ m.badge.text }}</small>
         </button>
       </div>
       <!-- #539 之四：這家有型號清單才出現（跟「切換模型」同一份）；預設不指定。只能經 pi 的廠牌（DeepSeek、MiniMax）同一格改成 pi 的模型清單 -->

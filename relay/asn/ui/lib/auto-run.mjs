@@ -52,12 +52,15 @@ export function localLaunchRequest(auto, { name = '', cwd = '', display = 'foreg
   return { profile: auto?.profile ?? '', ...base, display, first_message: foregroundOnly ? String(firstMessage).trim() : '', ...(model ? { model } : {}) }
 }
 
-/** 廠牌卡的標示與是否反灰。row.installed：false＝沒裝；loggedOut：確定沒登入（只有拿到新鮮回報、或偵測得到時才傳 true） */
+/**
+ * 廠牌卡的標示與是否反灰。row.installed：false＝沒裝；loggedOut：確定沒登入（只有拿到新鮮回報、或偵測得到時才傳 true）。
+ * 只有「尚未安裝」反灰、不能選；「尚未登入」只標字樣（偵測可能是快取，不能因此擋住人），kind 讓畫面把它跟反灰的原因分開上色。
+ */
 export function launchBadge(row, { loggedOut = false } = {}) {
-  if (row?.installed === false) return { text: BADGE_TEXT.missing, disabled: true }
-  if (loggedOut) return { text: BADGE_TEXT.loggedOut, disabled: true }
-  if (row?.channels && row.mode === 'background') return { text: BADGE_TEXT.noTerm, disabled: false }   // 自訂設定（沒有 channels）不加標示
-  return { text: '', disabled: false }
+  if (row?.installed === false) return { text: BADGE_TEXT.missing, disabled: true, kind: 'missing' }
+  if (loggedOut) return { text: BADGE_TEXT.loggedOut, disabled: false, kind: 'loggedOut' }
+  if (row?.channels && row.mode === 'background') return { text: BADGE_TEXT.noTerm, disabled: false, kind: 'noTerm' }   // 自訂設定（沒有 channels）不加標示
+  return { text: '', disabled: false, kind: '' }
 }
 
 /** 一串廠牌列 → 帶 badge（{ text, disabled }）與 disabled 的卡片。loggedOut：{ 廠牌 id: true } */

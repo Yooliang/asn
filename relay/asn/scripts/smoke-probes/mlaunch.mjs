@@ -20,12 +20,16 @@ export const mlaunchProbeSource = ({ big, cards, selected }) => `(async () => {
   const next = [...document.querySelectorAll('.m-lch .m-btn-big')].find(b => b.textContent.includes('下一步'));
   if (!next || next.disabled) return { ok: false, why: '「下一步」不能按' };
   next.click();
-  const fs = await wait(() => [...document.querySelectorAll('.m-lch fieldset')].find(f => f.querySelector('legend')?.textContent.trim() === '模型'));
-  if (!fs) return { ok: false, why: '第 2 步沒有「模型」：' + (document.querySelector('.m-lch')?.innerText || '').slice(0, 120) };
+  const fs = await wait(() => [...document.querySelectorAll('.m-lch fieldset')].find(f => f.querySelector('legend')?.textContent.trim() === '廠牌'));
+  if (!fs) return { ok: false, why: '第 2 步沒有「廠牌」：' + (document.querySelector('.m-lch')?.innerText || '').slice(0, 120) };
   // 沒有「運行」：不是 fieldset、也不是畫面上任何一個字；「前台或背景」的說明元素也不存在（明寫「應不存在」，不是找不到就略過）
   if ([...document.querySelectorAll('.m-lch fieldset legend')].some(l => txt(l) === '運行')) return { ok: false, why: '第 2 步還有「運行」選項' };
   if (document.querySelector('.m-lch-display')) return { ok: false, why: '第 2 步還有「前台或背景」的說明' };
   if (txt(document.querySelector('.m-lch')).includes('運行')) return { ok: false, why: '第 2 步畫面上還寫著「運行」：' + txt(document.querySelector('.m-lch')).slice(0, 160) };
+  // 欄位順序跟電腦版第 3 頁一樣：名字 → 工作資料夾 → 第一句話
+  const fieldOrder = [...document.querySelectorAll('.m-lch .m-field')].map(l => txt(l).slice(0, 5));
+  const idx = w => fieldOrder.findIndex(t => t.startsWith(w));
+  if (idx('名字') < 0 || !(idx('名字') < idx('工作資料夾') && idx('工作資料夾') < idx('第一句話'))) return { ok: false, why: '欄位順序不對：' + fieldOrder.join('、') + '（應為 名字、工作資料夾、第一句話）' };
   if (${big ? 'true' : 'false'}) {
     const els = [...document.querySelectorAll('#app *')];
     const sizes = els.map(e => parseFloat(getComputedStyle(e).fontSize) || 0);
