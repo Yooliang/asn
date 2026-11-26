@@ -81,6 +81,15 @@ export function fpShowPhaseOf(status) {
   return 'noreply'
 }
 
+/**
+ * 電腦跳出的視窗收到 asn:fpshow（Rust 送來：已開著的視窗換成新的請求）：換編號（取消鈕復位）、換到期時間。
+ * id 不是字串、until 不是有限數就各自不動。fps 是畫面用的 reactive，直接改它的欄位才跟得上。
+ */
+export function applyFpShow(fps, p) {
+  if (typeof p?.id === 'string') { fps.id = p.id; fps.busy = false }
+  if (Number.isFinite(p?.until)) fps.until = p.until
+}
+
 /** 新的流程狀態（畫面用 reactive 包起來再交給 createFpShowFlow） */
 export const newFpShowState = () => ({ phase: 'idle', node: '', id: '', startedAt: 0, note: '', gen: 0 })
 

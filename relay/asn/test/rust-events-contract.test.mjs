@@ -6,7 +6,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { RUST_EVENTS } from '../ui/lib/rust-events.mjs'
+import { RUST_EVENTS, isJsEvent, jsEventNames, rustEventNames } from '../ui/lib/rust-events.mjs'
 
 const SRC = fileURLToPath(new URL('../src-tauri/src/', import.meta.url))
 const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.rs') ? [path.join(d, e.name)] : []))
@@ -31,7 +31,8 @@ export function emittedNames(files) {
 }
 
 const rustNames = emittedNames(walk(SRC))
-const tableNames = new Set(Object.keys(RUST_EVENTS))
+// 表裡 origin:'js' 的是視窗之間的 JS 事件（#2038 PR-7），不是 Rust 送的，不拿去跟 Rust 原始碼比對
+const tableNames = new Set(rustEventNames())
 // Rust 送了前端還沒人接的（不刪 Rust，本版不改 Rust；之後另開單決定刪或接上）
 // term-req-update、window-spool：#2332 處理中（PR-4 只登記、不新增接收者）
 // relay-report-bell：tauri.mjs 的 onReport 仍直接 listen，#2340 處理中（PR-5 只登記、不搬接收處）
@@ -51,6 +52,19 @@ test('掃描有抓到東西：事件數對得上表（掃描規則壞掉不會�
   assert.equal(rustNames.size, 26)
   assert.equal(tableNames.size, 26)
   for (const must of ['agent-setup', 'asn:frame', 'auth-signed-out', 'attach-cache-cleared', 'term-view-remote-input-stalled', 'term-view-remote-end']) assert.ok(rustNames.has(must), `常數／間接送出的事件也要抓到：${must}`)
+})
+
+test('JS 事件：正向有 12 種、與 Rust 送的名字不相交、from／to 都有值（過濾壞了不會兩邊都空集合照綠）', () => {
+  const js = jsEventNames()
+  assert.equal(js.length, 12)
+  assert.ok(js.includes('asn:cmd') && js.includes('asn:skin'))
+  assert.ok(isJsEvent('asn:cmd') && !isJsEvent('asn:fpshow') && !isJsEvent('asn:frame'))
+  assert.deepEqual(js.filter(n => rustNames.has(n)), [], '標成 JS 的事件，Rust 不該也送')
+  for (const n of js) {
+    assert.ok(RUST_EVENTS[n].from && RUST_EVENTS[n].to, `${n} 要寫 from／to`)
+    assert.equal(RUST_EVENTS[n].listeners, undefined, `${n} 不填 listeners`)
+  }
+  assert.equal(tableNames.size + js.length, Object.keys(RUST_EVENTS).length)
 })
 
 test('listeners:0 的白名單與事件表一致（只准少、不准多）', () => {

@@ -58,7 +58,7 @@ import { createAutoResumePoller, launchNoticeLogPath } from './lib/auto-resume.m
 import { SEND_MAX, UNLOCK_TEXT, adoptRequest, answerRequest, candidateRows, createTermPoller, promptKey, sendConfirmView, sendDraftView, sendRequest, sentText, trackHeld, unlockRequest, willSendText } from './lib/term-panel.mjs'
 import { plainMessage, termRemoteErrorText } from './lib/plain-errors.mjs'
 import { patchWithFallback } from './lib/settings-save.mjs'
-import { RESIZE_DIRS, authApi, autostartApi, bindRustEvents, deviceReplaceApi, bridgeApi, cliLoginApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, listen, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
+import { RESIZE_DIRS, authApi, autostartApi, bindRustEvents, deviceReplaceApi, bridgeApi, cliLoginApi, ctl, emit, initFrame, invoke, knownDeviceApi, linkApi, logViewApi, settingsApi, termRemoteApi, trayApi, updateApi, voiceApi, windowApi, photoApi, remoteInputApi, remoteViewApi, resizeFrom, shellApi, shotApi, store, termViewApi, transport } from './lib/tauri.mjs'
 import { installUiLog } from './lib/ui-log.mjs'
 import { createStateLog } from './lib/state-log.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
@@ -1146,7 +1146,7 @@ const callTick = ref(0)                 // 通話狀態變動時加一，讓「�
 const mergedCalls = reactive({})        // 整合模式：哪些分頁的 chat-pane 正在通話（chat-pane 的 call-state 事件）
 const setPaneCall = (id, on) => { if (on) mergedCalls[id] = true; else delete mergedCalls[id]; callTick.value++ }
 const callBeats = createCallBeats({ isLocalCall: isCallActive })   // 通話中（本視窗或對話視窗）不自動念，通話自己會念回信
-await listen('asn:call', p => { callBeats.onBeat(p); callTick.value++ })   // 分開模式：對話視窗的通話廣播
+core.hub.on('asn:call', p => { callBeats.onBeat(p); callTick.value++ })   // 分開模式：對話視窗的通話廣播（不能寫 hub.on：上面的 hub 是群組的）
 startCallPoll({ anyCall: () => callBeats.anyCall(), pull: why => core.pull(why) })   // 通話中每 2 秒多收一次信，結束就停
 const voiceCfg = reactive(normalizeCfg(await voiceApi.cfgGet().catch(() => null)))
 core.on('notify', n => {
@@ -1299,7 +1299,7 @@ async function closePanel(kind) {
 }
 
 // 對話視窗的指令
-await listen('asn:cmd', async c => {
+core.hub.on('asn:cmd', async c => {
   if (c.op === 'hello') { sync(); emit('asn:avatars', avatars.value); pushLog(c.id); core.markRead(c.id) }
   else if (c.op === 'read') core.markRead(c.id)
   // 大頭貼欄被視窗太窄自動收起而鎖定時不改（#1293；setup 裡的 sideLocked 在這裡拿不到，用同一個判斷式現算）
@@ -1315,6 +1315,7 @@ await listen('asn:cmd', async c => {
   else if (c.op === 'open-chat') { if (typeof c.id === 'string' && core.friends.has(c.id)) await openChat(c.id) }   // 分離模式的對話視窗點了群組成員（#1515）；id 已在對話視窗換好，這裡再確認在名單裡
   else if (c.op === 'older') { const r = await loadOlder(c.id, Number.isInteger(c.toSeq) ? { toSeq: c.toSeq } : undefined); emit('asn:older', { id: c.id, ...r }) }
 })
+await core.hub.ready()   // 這個接收處註冊完才往下走（第一扇對話視窗的 hello 不能比它早到）
 const sendTo = async (id, text, opts) => { const r = await core.send(id, text, opts); if (!r.ok) console.info('[ASN] send failed', r.error) }
 // 對話窗的送出：群組走群組發言（本人簽章），其餘照舊寄信給夥伴
 const sendMsg = async (id, text, opts) => {
@@ -1372,7 +1373,7 @@ watchBeingViewed(core.hub, list => { beingViewed.value = list })   // #2038 PR-4
 core.on('relay-bell', p => { void core.pull('bell'); core.refreshRosterSoon(); roomBells.ring(p); refreshLaunchersOnBell() })   // #2038 PR-5；Rust 端的 Realtime 門鈴：收信，也立刻重拉名單（別台設備的忙碌／閒置變了也是敲這個鈴）
 window.addEventListener('focus', () => core.refreshRosterSoon())   // 回到前景立刻更新名單
 core.on('asn:open', c => void openChat(c.cid))   // 提示被點了
-await core.ready()   // 以前是 await listen(...)：事件註冊完才往下走
+await core.ready()   // 以前是逐個 await 底層監聽：事件註冊完才往下走
 
 watch([me, chatPins, showNowPlaying, notifyPrefs, skin, frame, closeTo, autoAddClaude, autoCheck, dims, devPrefs, () => ui.mode, () => ui.dpMode, () => ui.bubble, () => ui.toolbar, () => ui.collapsed, () => ui.pinnedChat, sizes, () => ui.tabs, () => ui.active, () => ui.panel, () => sess.wins, () => sess.panelWins, () => sess.ready], () => { sync(); saveMe() }, { deep: true })
 // #2162⓪：先展開讀進來的舊內容，這版不認得的欄位（手機版 mobilePrefs／lastChat／navTab、新版新增的欄位）原樣保留；下面列的欄位每次都明確帶值，會蓋過舊值
@@ -2285,14 +2286,14 @@ const app = createApp({
     }, { immediate: true })
     const pushSettings = () => { if (ui.mode === 'split') emit('asn:settings', settingsState.value) }
     watch(settingsState, pushSettings, { deep: true })
-    void listen('asn:cmd', c => {
+    core.hub.on('asn:cmd', c => {
       if (c.op !== 'panel-hello' || !PANEL_KINDS.includes(c.kind)) return
       sync()   // 設定視窗的大頭貼要用 asn:state 裡的自己的節點與視窗名
       emit('asn:panel', { kind: c.kind, key: ui.panel[c.kind] })
       if (c.kind === 'setting') pushSettings()
       emit('asn:avatars', avatars.value)
     })
-    void listen('asn:set', c => {
+    core.hub.on('asn:set', c => {
       if (c.op === 'panel-size') { if (PANEL_KINDS.includes(c.kind)) sizes[c.kind] = normalizePanelSize({ w: c.w, h: c.h }) }
       else void applySetting(c.op, c.value)
     })
