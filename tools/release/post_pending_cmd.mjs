@@ -41,27 +41,44 @@ function expireOld(opts, deps) {
 }
 
 // 認領：只有這一筆還在、而且沒有別人還有效的認領時才成功
-function claim(opts, deps, id) {
+// 比對一筆一律用 id 加 commit：同 id 被換成別的 commit 就是另一筆，不能動
+const sameItem = (x, item) => x.id === item.id && x.commit === item.commit
+const swapped = (items, item) => items.some((x) => x.id === item.id && x.commit !== item.commit)
+
+function claim(opts, deps, item) {
   const at = iso(deps.now())
   const r = withQueue(opts, deps, (items) => {
-    const cur = items.find((x) => x.id === id)
-    if (!cur || claimLive(cur, deps.now())) return { items: null, value: false }
-    return { items: items.map((x) => (x.id === id ? { ...x, claimedBy: deps.pid, claimedAt: at } : x)), value: true }
+    const cur = items.find((x) => sameItem(x, item))
+    if (!cur) {
+      if (swapped(items, item)) deps.log(`待貼項目的 commit 已換成新的，不認領舊的：${refOf(item)}#${item.kind}`)
+      return { items: null, value: false }
+    }
+    if (claimLive(cur, deps.now())) return { items: null, value: false }
+    return { items: items.map((x) => (sameItem(x, item) ? { ...x, claimedBy: deps.pid, claimedAt: at } : x)), value: true }
   })
   return r.ok && r.value === true ? at : null
 }
 
-// 確定送出（或群組已經有同則）之後才清這一筆
-// 回 { ok }：false＝待貼檔沒更新成（拿不到鎖等），呼叫端要講白話、告警不清
-const removeItem = (opts, deps, id) => withQueue(opts, deps, (items) => ({ items: items.filter((x) => x.id !== id), value: null }))
+// 確定送出（或群組已經有同則）之後才清這一筆；只清 id 與 commit 都相同的那筆
+// 回 { ok, value }：ok false＝待貼檔沒更新成（拿不到鎖等），呼叫端要講白話、告警不清；value 是這一筆有沒有真的清掉
+const removeItem = (opts, deps, item) => withQueue(opts, deps, (items) => {
+  if (!items.some((x) => sameItem(x, item))) {
+    if (swapped(items, item)) deps.log(`待貼項目的 commit 已換成新的，不清掉新的那筆：${refOf(item)}#${item.kind}`)
+    return { items: null, value: false }
+  }
+  return { items: items.filter((x) => !sameItem(x, item)), value: true }
+})
 
-// 失敗：attempts 加 1、寫清洗過的 lastError、放掉自己的認領（認領已被別人接手就不動）
+// 失敗：attempts 加 1、寫清洗過的 lastError、放掉自己的認領（認領已被別人接手、或 commit 已換成新的就不動）
 function fail(opts, deps, item, claimAt, text) {
-  return withQueue(opts, deps, (items) => ({
-    items: items.map((x) => (x.id === item.id && x.claimedBy === deps.pid && x.claimedAt === claimAt
-      ? { ...x, attempts: Math.min(MAX_ATTEMPTS, x.attempts + 1), lastError: cleanLastError(text), claimedBy: null, claimedAt: null } : x)),
-    value: null,
-  }))
+  return withQueue(opts, deps, (items) => {
+    if (swapped(items, item) && !items.some((x) => sameItem(x, item))) deps.log(`待貼項目的 commit 已換成新的，失敗不記到新的那筆：${refOf(item)}#${item.kind}`)
+    return {
+      items: items.map((x) => (sameItem(x, item) && x.claimedBy === deps.pid && x.claimedAt === claimAt
+        ? { ...x, attempts: Math.min(MAX_ATTEMPTS, x.attempts + 1), lastError: cleanLastError(text), claimedBy: null, claimedAt: null } : x)),
+      value: null,
+    }
+  })
 }
 
 // 回 { code, lines }
@@ -99,12 +116,16 @@ export function runPostPending(opts, deps) {
     const done = (s) => out(`${labelOf(item)}：${s}`)
     // 待貼檔沒更新成（拿不到鎖等）：這一筆不算處理完，告警維持
     const clear = (okText) => {
-      if (removeItem(opts, deps, item.id).ok) { cleared.push(refOf(item)); done(okText) } else done(`${okText.startsWith('已貼') ? '已貼' : '群組已經有這則'}，但待貼檔沒更新`)
+      const head = okText.startsWith('已貼') ? '已貼' : '群組已經有這則'
+      const r = removeItem(opts, deps, item)
+      if (!r.ok) done(`${head}，但待貼檔沒更新`)
+      else if (r.value === true) { cleared.push(refOf(item)); done(okText) }
+      else done(`${head}，但佇列裡這筆已換成新的版本，留給下一輪處理`)
     }
     // 認領前先比對一次：群組已經有就只清，不必佔認領
     const pre = roomHas(item, cfg.room, me(), deps)
     if (pre.ok && pre.found) { clear('群組已經有這則，只清掉待貼'); continue }
-    const at = claim(opts, deps, item.id)
+    const at = claim(opts, deps, item)
     if (at === null) { done('認領沒成功（別人先處理了），略過'); continue }
     const stop = (why) => {
       const f = fail(opts, deps, item, at, why)
@@ -126,10 +147,12 @@ export function runPostPending(opts, deps) {
 
   // 恢復的條件要同時成立：這一輪至少處理完一筆、佇列已空、而且 post-failed 的每個來源都是這一輪處理完的。
   // 沒進佇列的失敗（寫佇列失敗、來源不明）與這一輪沒處理到的來源，告警一律維持
-  const remain = cleared.length > 0 ? alerts.dropRefs('post-failed', cleared) : null
-  const left = withQueue(opts, deps, () => ({ items: null, value: null }))
-  if (left.ok && left.items.length > 0) out(`佇列還有 ${left.items.length} 筆沒處理完，告警維持`)
-  else if (left.ok && remain === 0) alerts.resolve('post-failed')
-  else if (left.ok && remain !== null) out('還有不在佇列裡或這一輪沒處理到的失敗，告警維持')
+  // 在待貼鎖內、同一個讀改寫動作裡：重讀告警的來源清單、確認佇列真的空了才標恢復（拿掉來源到標恢復之間新記的失敗不會被蓋掉）
+  const fin = withQueue(opts, deps, (items) => ({
+    items: null,
+    value: cleared.length > 0 ? alerts.resolveIfDrained('post-failed', cleared, () => items.length === 0) : null,
+  }))
+  if (fin.ok && fin.items.length > 0) out(`佇列還有 ${fin.items.length} 筆沒處理完，告警維持`)
+  else if (fin.ok && fin.value !== null && fin.value.remain > 0) out('還有不在佇列裡或這一輪沒處理到的失敗，告警維持')
   return { code: 0, lines }
 }

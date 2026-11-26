@@ -14,7 +14,8 @@ export const MAX_AGE_MS = 48 * 60 * 60 * 1000
 export const MAX_PER_RUN = 4
 // 讀群組最近幾則；asn-cli 的上限是 200（room.rs 的 MAX_LAST），群組在這個範圍內沒有同則才當作沒貼過
 export const ROOM_READ_LAST = 200
-export const MAX_READ_BYTES = 256 * 1024
+// 讀群組（與 --whoami）的輸出上限 1 MB；超過就當讀不到、不送
+export const MAX_READ_BYTES = 1024 * 1024
 // 一筆最壞的總耗時：讀群組兩次、gh 最多 GH_CALLS_MAX 次、送出一次
 export const WORST_CASE_ITEM_MS = 2 * READ_TIMEOUT_MS + GH_CALLS_MAX * GH_TIMEOUT_MS + SEND_TIMEOUT_MS
 

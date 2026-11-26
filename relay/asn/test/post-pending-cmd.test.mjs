@@ -3,12 +3,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import fs from 'node:fs'
-import { parseArgs } from '../../../tools/release/auto_publish.mjs'
+import { parseArgs, makeAlerts } from '../../../tools/release/auto_publish.mjs'
 import { runPostPending } from '../../../tools/release/post_pending_cmd.mjs'
 import { buildItem } from '../../../tools/release/post_pending.mjs'
 import {
   SEND_TIMEOUT_MS, READ_TIMEOUT_MS, GH_TIMEOUT_MS, CLAIM_TIMEOUT_MS, WORST_CASE_ITEM_MS, MAX_AGE_MS, MAX_PER_RUN,
-  POST_FAILED_FIXED, composeMessage, signatureOf, defaultConfigPath,
+  POST_FAILED_FIXED, MAX_READ_BYTES, composeMessage, signatureOf, defaultConfigPath,
 } from '../../../tools/release/post_pending_rules.mjs'
 import { env, sha, opts, T0, PENDING, ALERT, alertOf, pendingOf } from './helpers/auto-publish-env.mjs'
 
@@ -673,4 +673,87 @@ test('#2345 PR-2 群組設定檔：代號第一個字要是英數；超過大小
   const r = run(e)
   assert.equal(r.code, 2)
   assert.ok(!reads.includes(CFG), '太大就不讀')
+})
+
+// ---- 二審修正：認領之後同 id 被換成新 commit、告警恢復前重讀、讀群組輸出上限
+// 假的換新：第二次讀群組時（認領之後、送出之前），佇列裡同一個 id 被換成新 commit 的那一筆
+const swapAtRead2 = (e, newItem) => (n) => { if (n === 2) put(e, [newItem]); return [] }
+
+test('#2345 PR-2 二審：認領後同 id 換成新 commit，送出成功 → 新的那筆還在、告警沒被恢復、記 log', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const fresh = mk('published', 'desktop', '0.2.99', 2)
+  const e = setup([it]); raise(e)
+  fakeCli(e, { rows: swapAtRead2(e, fresh) })
+  const r = run(e)
+  assert.equal(e.calls.sends.length, 1)
+  assert.deepEqual(pendingOf(e).items, [fresh], '新的那筆原封不動留在佇列')
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+  assert.ok(e.calls.logs.some((l) => l.includes('commit 已換成新的')), '有記 log')
+  assert.ok(r.lines.some((l) => l.includes('換成新的版本')))
+})
+
+test('#2345 PR-2 二審：認領後同 id 換成新 commit，送出失敗 → 失敗不記到新的那筆、告警維持、記 log', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const e = setup([it]); raise(e)
+  // 新的那筆連認領欄位都和這一輪相同，只有 commit 不同
+  const fresh = mk('published', 'desktop', '0.2.99', 2, HOUR, { claimedBy: e.deps.pid, claimedAt: new Date(e.deps.now()).toISOString() })
+  fakeCli(e, { rows: swapAtRead2(e, fresh), sendStatus: 1 })
+  run(e)
+  assert.deepEqual(pendingOf(e).items, [fresh], '新的那筆 attempts、lastError、認領欄位都沒被動')
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+  assert.ok(e.calls.logs.some((l) => l.includes('commit 已換成新的')), '有記 log')
+})
+
+test('#2345 PR-2 二審：群組已有同則而清待貼時，同 id 已換成新 commit 的那筆也不能清', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const fresh = mk('published', 'desktop', '0.2.99', 2)
+  const e = setup([it]); raise(e)
+  fakeCli(e, { rows: (n) => { if (n === 2) { put(e, [fresh]); return [composeMessage(it)] } return [] } })
+  run(e)
+  assert.equal(e.calls.sends.length, 0)
+  assert.deepEqual(pendingOf(e).items, [fresh])
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+})
+
+test('#2345 PR-2 二審：認領前同 id 已換成新 commit → 不認領舊的、不送、新的那筆不動、記 log', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const fresh = mk('published', 'desktop', '0.2.99', 2)
+  const e = setup([it]); raise(e)
+  fakeCli(e, { rows: (n) => { if (n === 1) put(e, [fresh]); return [] } })
+  run(e)
+  assert.equal(e.calls.sends.length, 0)
+  assert.deepEqual(pendingOf(e).items, [fresh])
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+  assert.ok(e.calls.logs.some((l) => l.includes('不認領舊的')))
+})
+
+test('#2345 PR-2 二審：來源拿掉之後、標恢復之前又記了新的失敗 → 告警維持 active，新的來源在清單裡', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const e = setup([it]); raise(e)
+  const origRename = e.deps.rename
+  let n = 0
+  e.deps.rename = (a, b) => {
+    origRename(a, b)
+    // 告警檔第一次被寫完的瞬間，常駐程式記下另一個版本的失敗
+    if (b === ALERT && (n += 1) === 1) makeAlerts(opts, e.deps).raiseAppend('post-failed', 'post-failed', POST_FAILED_FIXED, 'desktop@0.2.100')
+  }
+  run(e)
+  const a = alertOf(e).alerts['post-failed']
+  assert.equal(a.status, 'active')
+  assert.ok(a.refs.includes('desktop@0.2.100'))
+})
+
+test('#2345 PR-2 二審：讀群組的輸出接近上限（超過舊的 256 KB）也能解析，超過上限才當讀不到', () => {
+  assert.ok(MAX_READ_BYTES >= 1024 * 1024)
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const big = (kb) => Array.from({ length: Math.ceil(kb / 2) }, (_, i) => `${i} ${'x'.repeat(2000)}`)
+  const e = setup([it])
+  fakeCli(e, { rows: () => big(400) })
+  run(e)
+  assert.equal(e.calls.sends.length, 1, '約 400 KB 照常解析、送出')
+  const e2 = setup([it])
+  fakeCli(e2, { rows: () => big(1100) })
+  run(e2)
+  assert.equal(e2.calls.sends.length, 0, '超過上限當讀不到、不送')
+  assert.equal(pendingOf(e2).items[0].attempts, 1)
 })

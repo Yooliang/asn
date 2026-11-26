@@ -284,6 +284,18 @@ export function makeAlerts(opts, deps) {
         return refs.length
       } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`); return 1 }
     },
+    // dropRefs 加標恢復放在同一次讀改寫：拿掉 covered 之後來源清單真的空、而且 queueEmpty() 為真才標 resolved，否則只存拿掉後的清單。
+    // 回 { remain, resolved }；沒有 active 告警回 { remain: 0, resolved: false }；寫不成回 { remain: 1, resolved: false }
+    resolveIfDrained(cause, covered, queueEmpty) {
+      try {
+        const cur = load().alerts
+        if (cur[cause]?.status !== 'active') return { remain: 0, resolved: false }
+        const refs = refsOfAlert(cur[cause]).filter((r) => r === null || !covered.includes(baseRef(r)))
+        const resolved = refs.length === 0 && queueEmpty() === true
+        save({ ...cur, [cause]: resolved ? { ...cur[cause], refs, status: 'resolved', resolvedAt: new Date(deps.now()).toISOString() } : { ...cur[cause], refs } })
+        return { remain: refs.length, resolved }
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`); return { remain: 1, resolved: false } }
+    },
     // 人工 --ack <平台@版號>：ref 是這個 key（或 `<key>（<tag>）` 這種帶標籤寫法）的 active 告警一起 resolve，其他 ref 不動；回傳清掉幾筆
     resolveByRef(key) {
       try {
