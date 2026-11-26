@@ -309,6 +309,8 @@ struct St {
     auth_retry_at: u64,
     /// 已經做過「等 10 秒自動再試一次」的信編號（上限幾十筆）。核心延遲補送同一則時不再內部重試，免得一次補送實際送出兩次（#1670）
     net_retried: HashSet<String>,
+    /// 還沒記下來的型號記錄（見 WorkerInit.record_model_on_start）：驅動第一次啟動成功時寫一次就清掉
+    record_model_pending: Option<std::path::PathBuf>,
 }
 
 pub struct WorkerInit {
@@ -325,6 +327,8 @@ pub struct WorkerInit {
     pub handoff_dir: Option<std::path::PathBuf>,
     /// 機器工作資料夾：「這封開始處理了」的記號放這裡（channel_turns，#828）
     pub work_dir: std::path::PathBuf,
+    /// 型號是佇列項目帶來的：等驅動用這個型號啟動成功之後，把型號記進這個檔案（acp-models.json）；None＝不用記
+    pub record_model_on_start: Option<std::path::PathBuf>,
 }
 
 pub struct Worker {
@@ -359,6 +363,7 @@ impl Worker {
                 model: i.cfg.model.clone(),
                 auth_retry_at: 0,
                 net_retried: HashSet::new(),
+                record_model_pending: i.record_model_on_start.clone(),
             }),
             i,
             start_lock: tokio::sync::Mutex::new(()),
@@ -554,11 +559,31 @@ impl Worker {
                 s.driver = Some(d.clone());
             }
         }
+        self.record_started_model();
         if d.resume_lost() {
             self.st.lock().unwrap().need_preamble = true;
             self.log("先前的對話找不到了，已開新的（之前的上下文遺失）");
         }
         Ok(d)
+    }
+
+    /// 驅動用佇列項目帶來的型號啟動成功了：把「實際套用的型號」（st.model）記進 acp-models.json，只寫一次。
+    /// 啟動失敗走不到這裡，所以檔案不會被動到；寫不進去只記 log（這次執行照型號跑，重開 ASN 後回到原本的）
+    fn record_started_model(&self) {
+        let (file, model) = {
+            let mut s = self.st.lock().unwrap();
+            match s.record_model_pending.take() {
+                Some(f) => (f, s.model.clone()),
+                None => return,
+            }
+        };
+        if model.is_empty() {
+            return;
+        }
+        match super::acp_models::set(&file, &self.i.cfg.name, &model) {
+            Ok(()) => self.log(format!("型號 {model} 啟動成功，已記下")),
+            Err(e) => self.log(format!("型號 {model} 啟動成功，但沒記下來：{e}")),
+        }
     }
 
     pub fn start(self: &Arc<Self>) {

@@ -327,7 +327,9 @@ impl AcpEngine {
     }
 
     /// 動態加一個背景工作者（開新夥伴）。同名且還在名單上（沒被關閉）＝失敗；同名但已被關閉／起不來＝換成新的
-    fn add_partner(&self, cfg: WorkerCfg) -> Result<(), String> {
+    /// pinned＝佇列項目帶了型號（cfg.model 就是項目的）：工作者建立時以項目為準、不被 acp-models.json 蓋掉，
+    /// 等它真的用這個型號啟動成功才把型號記進 acp-models.json
+    fn add_partner(&self, cfg: WorkerCfg, pinned: bool) -> Result<(), String> {
         let store = self.store.lock().unwrap().clone().ok_or("工作者管理還沒啟動")?;
         {
             let mut ws = self.workers.lock().unwrap();
@@ -343,7 +345,7 @@ impl AcpEngine {
         let name = cfg.name.clone();
         let (protocol, cwd) = (cfg.protocol.clone(), cfg.cwd.display().to_string());
         // 權限在 build_cfg 時就固定（Gemini 一律放行寫檔與執行指令），重開、換班接手、換模型都沿用同一份 cfg，不需另外重算
-        let w = self.make_worker(Arc::new(cfg), store);
+        let w = make_worker_with(&self.ctx, &self.approvals, &self.make_driver, Arc::new(cfg), store, pinned);
         self.workers.lock().unwrap().push((name.clone(), w.clone()));
         w.start();
         self.ctx.log(format!("acp: 動態啟動工作者 {name}（protocol={protocol} cwd={cwd}）"));
@@ -379,7 +381,7 @@ impl AcpEngine {
             };
             let r = pq::build_cfg(&*env, &req, &self.ctx.work_dir).and_then(|cfg| {
                 let cwd = cfg.cwd.display().to_string();
-                self.add_partner(cfg).map(|_| cwd)
+                self.add_partner(cfg, req.model.is_some()).map(|_| cwd)
             });
             match r {
                 Ok(cwd) => {
@@ -421,7 +423,7 @@ impl AcpEngine {
     }
 
     fn make_worker(&self, cfg: Arc<WorkerCfg>, store: Arc<Store>) -> WorkerHandle {
-        make_worker_with(&self.ctx, &self.approvals, &self.make_driver, cfg, store)
+        make_worker_with(&self.ctx, &self.approvals, &self.make_driver, cfg, store, false)
     }
 }
 
@@ -438,9 +440,11 @@ fn with_recorded_model(ctx: &EngineCtx, cfg: Arc<WorkerCfg>) -> Arc<WorkerCfg> {
     }
 }
 
-fn make_worker_with(ctx: &EngineCtx, approvals: &Arc<Approvals>, make_driver: &MakeDriver, cfg: Arc<WorkerCfg>, store: Arc<Store>) -> WorkerHandle {
-    let cfg = with_recorded_model(ctx, cfg);
+/// pinned＝cfg.model 是佇列項目帶來的型號：不套 acp-models.json 記下的，並且要等工作者用它啟動成功才寫進那個檔
+fn make_worker_with(ctx: &EngineCtx, approvals: &Arc<Approvals>, make_driver: &MakeDriver, cfg: Arc<WorkerCfg>, store: Arc<Store>, pinned: bool) -> WorkerHandle {
+    let cfg = if pinned { cfg } else { with_recorded_model(ctx, cfg) };
     Worker::new(WorkerInit {
+        record_model_on_start: pinned.then(|| ctx.work_dir.join(super::acp_models::MODELS_FILE)),
         cfg,
         env: ctx.env.clone(),
         log: ctx.log.clone(),
@@ -503,9 +507,9 @@ impl Engine for AcpEngine {
         }
         // 開新夥伴開出過的背景工作者：重啟後依 profile 重建（重驗授權與指令；現在不成立的留在名冊裡、記 log、不啟動）
         for (name, profile, cwd) in super::partner_queue::read_partners(&self.ctx.work_dir.join(super::partner_queue::PARTNERS_FILE)) {
-            let req = super::partner_queue::Req { profile, name: name.clone(), cwd };
+            let req = super::partner_queue::Req { profile, name: name.clone(), cwd, model: None };
             let env = self.queue_env.lock().unwrap().clone();
-            match super::partner_queue::build_cfg(&*env, &req, &self.ctx.work_dir).and_then(|cfg| self.add_partner(cfg)) {
+            match super::partner_queue::build_cfg(&*env, &req, &self.ctx.work_dir).and_then(|cfg| self.add_partner(cfg, false)) {
                 Ok(()) => {}
                 Err(e) => self.ctx.log(format!("acp: 重啟後沒能建回背景工作者「{name}」：{e}")),
             }
@@ -524,7 +528,7 @@ impl Engine for AcpEngine {
                 let base = match &base_grok {
                     Some(b) => b.clone(),
                     None => {
-                        let req = super::partner_queue::Req { profile: "grok".into(), name: name.clone(), cwd: cwd.clone() };
+                        let req = super::partner_queue::Req { profile: "grok".into(), name: name.clone(), cwd: cwd.clone(), model: None };
                         let env = self.queue_env.lock().unwrap().clone();
                         match super::partner_queue::build_cfg(&*env, &req, &self.ctx.work_dir) {
                             Ok(c) => c,
@@ -556,7 +560,7 @@ impl Engine for AcpEngine {
             super::acp_admin::AdoptEnv {
                 make: Arc::new({
                     let store = store.clone();
-                    move |cfg| make_worker_with(&ctx, &approvals, &make_driver, cfg, store.clone())
+                    move |cfg| make_worker_with(&ctx, &approvals, &make_driver, cfg, store.clone(), false)
                 }),
                 store,
                 file: self.ctx.work_dir.join(ADOPTED_FILE),
@@ -565,7 +569,7 @@ impl Engine for AcpEngine {
                 base: {
                     let (env, work_dir) = (self.queue_env.lock().unwrap().clone(), self.ctx.work_dir.clone());
                     Arc::new(move |cwd: &str| {
-                        let req = super::partner_queue::Req { profile: "grok".into(), name: super::grok_adopt::worker_name(cwd, ""), cwd: cwd.to_string() };
+                        let req = super::partner_queue::Req { profile: "grok".into(), name: super::grok_adopt::worker_name(cwd, ""), cwd: cwd.to_string(), model: None };
                         super::partner_queue::build_cfg(&*env, &req, &work_dir).map_err(|e| format!("這台電腦沒有現成的 Grok 內建通道工作者，改用「開新夥伴」的 grok 設定也開不起來：{e}"))
                     })
                 },

@@ -576,6 +576,10 @@ struct FakeEnv {
     /// 排佇列時就失敗（缺執行檔、未授權資料夾…）
     enq_err: Option<String>,
     enqueued: Mutex<Vec<(String, String, String)>>,
+    /// 排佇列時帶進項目的型號（跟 enqueued 同一個順序）
+    enqueued_models: Mutex<Vec<Option<String>>>,
+    /// 假工作者啟動成功：引擎記進名冊後，把項目帶的型號記進 acp-models.json（真的工作者在驅動啟動成功時才寫）
+    bg_worker_records: bool,
     started: Mutex<Vec<(String, String, String)>>,
     /// start 時實際會執行的命令（取自本機設定，展開 {name} 後）
     commands: Mutex<Vec<(String, Vec<String>)>>,
@@ -617,6 +621,8 @@ impl FakeEnv {
             bg_hold: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             enq_err: None,
             enqueued: Mutex::new(vec![]),
+            enqueued_models: Mutex::new(vec![]),
+            bg_worker_records: false,
             started: Mutex::new(vec![]),
             commands: Mutex::new(vec![]),
             live: vec![],
@@ -685,13 +691,15 @@ impl LaunchEnv for FakeEnv {
         }
         Ok("t-1".into())
     }
-    fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, work_dir: &Path) -> Result<(), String> {
+    fn enqueue_background(&self, _config: &LaunchConfig, profile: &str, name: &str, cwd: &str, model: Option<&str>, work_dir: &Path) -> Result<(), String> {
         if let Some(e) = &self.enq_err {
             return Err(e.clone());
         }
         self.enqueued.lock().unwrap().push((profile.into(), name.into(), cwd.into()));
+        self.enqueued_models.lock().unwrap().push(model.map(String::from));
         if let Some(o) = self.bg_outcome.clone() {
             let (wd, name, profile, cwd) = (work_dir.to_path_buf(), name.to_string(), profile.to_string(), cwd.to_string());
+            let record = self.bg_worker_records.then(|| model.map(String::from)).flatten();
             let hold = self.bg_hold.clone();
             std::thread::spawn(move || {
                 while hold.load(std::sync::atomic::Ordering::SeqCst) {
@@ -699,7 +707,14 @@ impl LaunchEnv for FakeEnv {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 match o {
-                    Ok(()) => crate::bridge::engines::partner_queue::remember(&wd.join(crate::bridge::engines::partner_queue::PARTNERS_FILE), &name, &profile, &cwd),
+                    Ok(()) => {
+                        crate::bridge::engines::partner_queue::remember(&wd.join(crate::bridge::engines::partner_queue::PARTNERS_FILE), &name, &profile, &cwd);
+                        if let Some(m) = record {
+                            // 假工作者晚一點才啟動成功：報 ok 之後才記，驗證啟動端等得到
+                            std::thread::sleep(std::time::Duration::from_millis(60));
+                            let _ = crate::bridge::engines::acp_models::set(&wd.join(crate::bridge::engines::acp_models::MODELS_FILE), &name, &m);
+                        }
+                    }
                     Err(e) => crate::bridge::engines::partner_queue::record_failure(&wd, &name, &profile, &e),
                 }
             });
@@ -1785,18 +1800,62 @@ async fn 遠端開_pi_帶斜線與冒號的型號_照舊兩段送_回報_提供�
 }
 
 #[tokio::test]
-async fn 遠端指定型號_gemini_背景夥伴_排入成功才記型號_開好回報_model_used() {
-    let mut l = lharness(|s, p| model_env(s, p, |e| e.bg_outcome = Some(Ok(()))), (30_000, 60_000, 20)).await;
+async fn 遠端指定型號_gemini_背景夥伴_型號放進佇列項目_啟動端不寫檔_工作者記下後才回報_model_used() {
+    let mut l = lharness(
+        |s, p| {
+            model_env(s, p, |e| {
+                e.bg_outcome = Some(Ok(()));
+                e.bg_worker_records = true;
+                e.bg_hold.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+        },
+        (30_000, 60_000, 20),
+    )
+    .await;
+    crate::bridge::engines::acp_models::set(&models_file(&l.h), "小格", "gemini-old").unwrap();
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+    l.h.core.pull("bell", T0).await;
+    // 排進去了、型號跟著項目走；工作者還沒啟動成功之前，acp-models.json 一個字都沒動
+    assert_eq!(*l.env.enqueued_models.lock().unwrap(), vec![Some("gemini-3.8-flash".to_string())]);
+    let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap();
+    assert_eq!(m.get("小格").map(String::as_str), Some("gemini-old"), "排入佇列後、工作者啟動前不能寫型號記錄");
+    assert!(results(&l.h).is_empty());
+    l.env.bg_hold.store(false, std::sync::atomic::Ordering::SeqCst);
+    wait_until(|| !results(&l.h).is_empty()).await;
+    let r = results(&l.h);
+    assert_eq!((r[0]["status"].as_str(), r[0]["model_used"].as_str()), (Some("ok"), Some("gemini-3.8-flash")));
+    let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap();
+    assert_eq!(m.get("小格").map(String::as_str), Some("gemini-3.8-flash"), "工作者啟動成功後才記");
+    let _ = l.rx.recv().await;
+}
+
+#[tokio::test]
+async fn 遠端指定型號_gemini_背景夥伴_拿不到工作者實際用的型號_照常_ok_但不帶_model_used() {
+    // 工作者沒記下型號（沒啟動成功）：寬限時間到了照常回 ok，但不能拿請求值頂替；原本的記錄不動
+    let mut l = lharness(|s, p| model_env(s, p, |e| e.bg_outcome = Some(Ok(()))), (30_000, 400, 20)).await;
+    crate::bridge::engines::acp_models::set(&models_file(&l.h), "小格", "gemini-old").unwrap();
     let cwd = l.proj.path().to_path_buf();
     l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
     l.h.core.pull("bell", T0).await;
     wait_until(|| !results(&l.h).is_empty()).await;
     let r = results(&l.h);
-    assert_eq!((r[0]["status"].as_str(), r[0]["model_used"].as_str()), (Some("ok"), Some("gemini-3.8-flash")));
-    assert_eq!(l.env.enqueued.lock().unwrap().len(), 1);
+    assert_eq!(r[0]["status"], "ok");
+    assert!(r[0].get("model_used").is_none(), "拿不到實際值就不帶：{}", r[0]);
     let m = crate::bridge::engines::acp_models::read(&models_file(&l.h)).unwrap();
-    assert_eq!(m.get("小格").map(String::as_str), Some("gemini-3.8-flash"));
+    assert_eq!(m.get("小格").map(String::as_str), Some("gemini-old"));
     let _ = l.rx.recv().await;
+}
+
+#[test]
+fn 工作者記下的型號跟請求不同_或沒記_都不算確認() {
+    let d = tempfile::tempdir().unwrap();
+    assert_eq!(launcher::confirmed_bg_model(d.path(), "小格", "m-1"), None, "沒有檔案");
+    let f = d.path().join(crate::bridge::engines::acp_models::MODELS_FILE);
+    crate::bridge::engines::acp_models::set(&f, "小格", "m-old").unwrap();
+    assert_eq!(launcher::confirmed_bg_model(d.path(), "小格", "m-1"), None, "舊的別的值不能頂替");
+    crate::bridge::engines::acp_models::set(&f, "小格", "m-1").unwrap();
+    assert_eq!(launcher::confirmed_bg_model(d.path(), "小格", "m-1").as_deref(), Some("m-1"));
 }
 
 #[tokio::test]
@@ -1817,7 +1876,7 @@ async fn 遠端指定型號_排佇列失敗不留記錄_也不蓋掉同名夥伴
 }
 
 #[tokio::test]
-async fn 遠端指定型號_引擎消化時失敗_把型號記錄還原成寫入前的樣子() {
+async fn 遠端指定型號_引擎消化時失敗_型號記錄維持寫入前的樣子() {
     for prev in [Some("gemini-old"), None] {
         let mut l = lharness(|s, p| model_env(s, p, |e| e.bg_outcome = Some(Err("已經有叫「小格」的工作者".into()))), (30_000, 60_000, 20)).await;
         if let Some(p) = prev {
@@ -1866,10 +1925,14 @@ fn 遠端型號_純函式_各_profile_的分流() {
 }
 
 #[test]
-fn 守門_型號記錄在排入成功之後才寫() {
+fn 守門_啟動端不寫型號記錄_型號只放佇列項目由工作者啟動成功後寫() {
     let src = crate::settings::src_scan::prod_source(include_str!("../launcher.rs")).to_string();
+    assert!(!src.contains("acp_models::set(") && !src.contains("record_background_model") && !src.contains("restore_background_model"), "啟動端（launcher）不能寫 acp-models.json");
     let begin = src.split("async fn begin(self: &Arc<Self>").nth(1).unwrap().split("async fn begin_term").next().unwrap();
-    let (enq, rec) = (begin.find("env.enqueue_background(").unwrap(), begin.find("record_background_model(").unwrap());
-    assert!(enq < rec, "型號記錄要在 enqueue_background 之後才寫");
-    assert!(!begin[..enq].contains("record_background_model("), "排入之前不能寫型號記錄");
+    assert!(begin.contains("m2.as_deref()"), "型號要帶進 enqueue_background");
+    // 工作者端：啟動成功（ensure_driver 的 r? 之後）才記
+    let w = crate::settings::src_scan::prod_source(include_str!("../engines/acp_worker.rs")).to_string();
+    let ens = w.split("let r = d.start().await;").nth(1).unwrap();
+    let (ok, rec) = (ens.find("r?;").unwrap(), ens.find("self.record_started_model();").unwrap());
+    assert!(ok < rec, "型號要在驅動啟動成功之後才記");
 }

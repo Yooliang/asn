@@ -56,7 +56,7 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
         if let ModelPlan::Record(m) = &model_plan {
             crate::bridge::engines::acp_models::set(&work_dir.join(crate::bridge::engines::acp_models::MODELS_FILE), &req.name, m)?;
         }
-        enqueue_background(work_dir, &req.profile, &req.name, &launch_req.cwd)?;
+        enqueue_background(work_dir, &req.profile, &req.name, &launch_req.cwd, None)?;
         return Ok(json!({ "ok": true, "mode": "background", "queued": true }));
     }
 
@@ -305,12 +305,17 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-pub(crate) fn enqueue_background(work_dir: &Path, profile: &str, name: &str, cwd: &str) -> Result<(), String> {
+/// 排進背景夥伴的佇列。model＝遠端指定的型號（沒指定＝None，佇列項目就沒有這個鍵）：型號跟著項目走，工作者建立時優先採用
+pub(crate) fn enqueue_background(work_dir: &Path, profile: &str, name: &str, cwd: &str, model: Option<&str>) -> Result<(), String> {
     let file = work_dir.join("partner-queue.jsonl");
     if let Some(p) = file.parent() {
         std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
     }
-    let line = serde_json::to_string(&json!({ "profile": profile, "name": name, "cwd": cwd })).map_err(|e| e.to_string())?;
+    let mut item = json!({ "profile": profile, "name": name, "cwd": cwd });
+    if let Some(m) = model {
+        item["model"] = json!(m);
+    }
+    let line = serde_json::to_string(&item).map_err(|e| e.to_string())?;
     use std::io::Write;
     let mut f = std::fs::OpenOptions::new()
         .create(true)
