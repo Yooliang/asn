@@ -251,7 +251,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 
 ## 9. 第一期實作：Gemini 工作者上線（2026-10-04）
 
-程式：`relay/machine/engines/acp.mjs`（轉接器）＋ `acp-config.mjs`（設定）、`acp-worker.mjs`（佇列／健康狀態／問人）、`acp-policy.mjs`（權限政策）、`acp-approvals.mjs`（授權簿）、`acp-driver-agy.mjs`、`acp-driver-acp.mjs`（兩種驅動）、`acp-errors.mjs`。範本 `relay/machine/agents.example.json`。測試 `relay/machine/test/acp-*.test.mjs`＋假 agent（`fake-agy.mjs`、`fake-acp-worker.mjs`）。
+程式：`relay/machine/engines/acp.mjs`（轉接器）＋ `acp-config.mjs`（設定）、`acp-worker.mjs`（佇列／健康狀態／問人）、`acp-policy.mjs`（權限政策）、`acp-approvals.mjs`（授權簿）、`acp-driver-agy.mjs`、`acp-driver-acp.mjs`（兩種驅動）、`acp-errors.mjs`。讀取的敏感位置判定：`acp-sensitive.mjs`（判定）＋ `acp-sensitive-roots.mjs`（清單）、`acp-sensitive-path.mjs`（路徑形式）、`acp-sensitive-extract.mjs`（參數抽取）、`acp-sensitive-exempt.mjs`（放行的資料夾）、`acp-sensitive-data.mjs`、`acp-brain.mjs`。範本 `relay/machine/agents.example.json`。測試 `relay/machine/test/acp-*.test.mjs`＋假 agent（`fake-agy.mjs`、`fake-acp-worker.mjs`）。**電腦版與這一版的讀取判定是同一套規則、同一份清單**：清單與判定參數只存在 `relay/shared/sensitive-roots.json`（這一版直接讀，電腦版用測試逐項比對），判定的測試向量在 `relay/shared/test-vectors/sensitive-read.json`，兩邊逐筆比同一份期望；改清單時三處一起改。
 
 ### 9.1 選哪一條路：agy 原生 stream-json（主），標準 ACP（備援）
 
@@ -272,7 +272,7 @@ MCP 管的是「agent 呼叫外部工具」，不是「外部把訊息送給 age
 |---|---|---|
 | 執行指令（`run_command`） | 實測（agy 1.5.18、沒加放行旗標）：指令照樣啟動，讀取在受限環境裡被擋（是 agy 的沙箱還是本機設定未確定）；列目錄、搜尋也走這個工具 | 照 `execute` 的政策；`execute:allow` 才加 `--dangerously-skip-permissions` |
 | 寫檔（`write_to_file`…） | **不問就直接寫，連工作資料夾以外也寫得進去**（`--mode plan` 也擋不住：被明確要求時照寫；`--sandbox` 只限制終端機） | **絆線**：驅動看每個工具步驟事件，違反政策（write 不是 allow、或路徑在白名單資料夾外）就立刻殺掉 agy 並回報。真 agy 實測 3/3 在檔案寫成前殺掉，但這是「事件比寫入早到」的時間差，不是保證 |
-| 讀檔（`read_file`，參數 `Path`） | 不問；連資料夾外也讀得到（agy 自己也會讀它內建的說明檔） | **絆線（#2356）**：只擋敏感位置（登入資料、金鑰、各工具的設定與對話記錄），命中就殺掉 agy 並回報；一般檔可以讀。放在 ASN 資料夾底下的這位工作者自己的工作資料夾（預設 `~/.asn/machine-<ID>/workers/<名字>/`）、收信附件的下載資料夾、agy 的內建說明檔位置，不在擋的範圍；ASN 資料夾裡的其他東西照擋。這是事後才看到的，那一次讀取可能已經發生，也管不到指令。要唯讀仍可靠：工作資料夾用空的專用資料夾（預設 `~/.asn/machine-<ID>/workers/<名字>/`）＋說明。不要把工作者的資料夾指到專案目錄 |
+| 讀檔（`read_file`，參數 `Path`） | 不問；連資料夾外也讀得到（agy 自己也會讀它內建的說明檔） | **絆線（#2356）**：只擋敏感位置（登入資料、金鑰、各工具的設定與對話記錄），命中就殺掉 agy 並回報；一般檔可以讀。放在 ASN 資料夾底下的這位工作者自己的資料夾（工作資料夾、`allow_dirs`、寫入資料夾；位在 ASN 資料夾底下時，只認 `<ASN>/workers/<名字>` 和 `<ASN>/machine-<ID>/workers/<名字>` 兩個位置，名字要先通過名字檢查，實際位置也要落在同一處；預設 `~/.asn/machine-<ID>/workers/<名字>/`）、收信附件的下載資料夾、agy 的內建說明檔位置，不在擋的範圍；ASN 資料夾裡的其他東西照擋。這是事後才看到的，那一次讀取可能已經發生，也管不到指令。要唯讀仍可靠：工作資料夾用空的專用資料夾（預設 `~/.asn/machine-<ID>/workers/<名字>/`）＋說明。不要把工作者的資料夾指到專案目錄 |
 | 上網 | 不問 | `network:deny` 時同樣用絆線 |
 
 所以：**agy 的寫檔無法「預防」，只能「偵測並中止」**，這是 agy 目前的限制，不是我們的取捨。要真正預防，只能用會送權限請求的 ACP agent（9.3）。另外模型本身也會遵守第一則訊息附的角色說明（真實測試：要它寫檔，它直接回「做不到，我目前是唯讀狀態」），但那是軟性的，不能當安全邊界。

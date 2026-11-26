@@ -10,7 +10,7 @@
 import { spawn } from 'node:child_process'
 import { cleanEnv } from './acp-client.mjs'
 import { classifyFailure, WorkerError } from './acp-errors.mjs'
-import { describeAgyTool, redact } from './acp-policy.mjs'
+import { describeAgyTool, isRegisteredAgyTool, redact } from './acp-policy.mjs'
 
 // cfg.args 放最前面（可放額外旗標；測試時放假 agy 的腳本路徑），後面才是這個驅動需要的旗標
 export function agyArgs({ cfg, sessionId, fullAccess }) {
@@ -60,6 +60,11 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
     }
     const first = !cur.seen.has(key)
     cur.seen.add(key)
+    // 沒登記的工具名：類別是用關鍵字猜的、猜不出來就照執行處理，記一行 log（只記工具名，不記參數）
+    if (first && !isRegisteredAgyTool(info.tool)) {
+      const how = { execute: '執行', write: '寫入', network: '網路', read: '讀取' }[info.category] ?? '內部控制'
+      log(`agy 工具名沒登記，類別以${how}處理：${redact(info.tool)}`)
+    }
     const verdict = guard.checkTool({ ...info, state: s.state, firstSight: first })
     if (verdict && verdict.ok === false) {
       cur.violation = { reason: verdict.reason, summary: info.summary }

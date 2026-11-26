@@ -66,14 +66,14 @@ pub fn category_of_acp_kind(kind: &str) -> &'static str {
 
 // 實機看到的工具名（agy 1.5.18）：read_file（參數 Path）、run_command（CommandLine）、update_steps；列目錄與搜尋都走 run_command。
 // 舊版名字（view_file、write_to_file…）一併保留
-const AGY_READ: [&str; 7] = ["read_file", "view_file", "list_dir", "find_by_name", "grep_search", "read_resource", "list_resources"];
-const AGY_WRITE: [&str; 8] = ["write_file", "edit_file", "delete_knowledge", "write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"];
+pub(super) const AGY_READ: [&str; 7] = ["read_file", "view_file", "list_dir", "find_by_name", "grep_search", "read_resource", "list_resources"];
+pub(super) const AGY_WRITE: [&str; 8] = ["write_file", "edit_file", "delete_knowledge", "write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"];
 // 會啟動指令、子代理、工作流程、外部工具，或把訊息、排程送出去的，都照執行類的政策
-const AGY_EXEC: [&str; 13] = [
+pub(super) const AGY_EXEC: [&str; 13] = [
     "run_command", "send_command_input", "command_status", "notebook_execution", "execute_browser_javascript", "run_workflow", "swarm", "invoke_subagent", "define_subagent", "manage_subagents", "send_message", "schedule", "call_mcp_tool",
 ];
-const AGY_NET: [&str; 9] = ["generate_image", "read_url_content", "search_web", "open_browser_url", "read_browser_page", "capture_browser_console_logs", "capture_browser_screenshot", "list_browser_pages", "get_browser_dom"];
-const AGY_INTERNAL: &[&str] = &[
+pub(super) const AGY_NET: [&str; 9] = ["generate_image", "read_url_content", "search_web", "open_browser_url", "read_browser_page", "capture_browser_console_logs", "capture_browser_screenshot", "list_browser_pages", "get_browser_dom"];
+pub(super) const AGY_INTERNAL: &[&str] = &[
     "finish", "wait", "wait_5_seconds", "ask_question", "ask_permission", "ask_custom_permission", "list_permissions", "manage_task", "update_steps", "manage_inbox", "search_marketplace", "list_plugin_accounts",
 ];
 

@@ -5,9 +5,9 @@ use super::{EXTRA_HOME_PATHS, HOST_KEY_DIR, PREFIX_HOME_FILES, SENSITIVE_HOME_DI
 use std::sync::OnceLock;
 
 /// 同時處理的片段命中上限（防超長文字拖慢）
-const MAX_HITS: usize = 50;
+pub(super) const MAX_HITS: usize = 50;
 /// 每個命中往前找幾個空白邊界當路徑起點（路徑本身可能含空白，例如 `Program Files`）
-const MAX_STARTS: usize = 8;
+pub(super) const MAX_STARTS: usize = 8;
 
 /// 正規化：只轉 ASCII 小寫與斜線方向，位元組長度不變，索引才能對回原字串
 fn norm(s: &str) -> String {
@@ -41,8 +41,10 @@ pub(super) fn fragments() -> &'static Vec<String> {
     })
 }
 
-const LEAD: &[u8] = b"/ \t\"'(=:";
-const TRAIL: &[u8] = b"/ \t\"'),;:";
+pub(super) const LEAD: &[u8] = b"/ \t\"'(=:";
+pub(super) const TRAIL: &[u8] = b"/ \t\"'),;:";
+/// 片段兩側夾著的修剪字元（候選路徑前後去掉）
+pub(super) const TRIM: &str = "\"'(),;";
 
 /// 一行有空白的文字：夾著敏感位置片段的，回傳可能的路徑候選（從幾個空白邊界到片段後面那段路徑結束），其餘回空
 pub(super) fn prose_candidates(line: &str) -> Vec<String> {
@@ -68,7 +70,7 @@ pub(super) fn prose_candidates(line: &str) -> Vec<String> {
             starts.dedup();
             let from = starts.len().saturating_sub(MAX_STARTS);
             for j in &starts[from..] {
-                let c = line[*j..stop].trim_matches(|c: char| "\"'(),;".contains(c));
+                let c = line[*j..stop].trim_matches(|c: char| TRIM.contains(c));
                 if !c.is_empty() && !out.iter().any(|x| x == c) {
                     out.push(c.to_string());
                 }

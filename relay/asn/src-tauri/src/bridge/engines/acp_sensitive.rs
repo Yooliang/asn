@@ -55,6 +55,13 @@ pub const EXTRA_HOME_PATHS: [&str; 33] = [
 /// 檔名只寫前綴的位置：（資料夾, 檔名前綴），相對於使用者資料夾
 pub const PREFIX_HOME_FILES: [(&str, &str); 2] = [(".cargo", "credentials"), (".terraform.d", "credentials")];
 
+/// 本機應用資料夾（環境變數 LOCALAPPDATA 底下）與漫遊資料夾（APPDATA 底下）裡的敏感位置
+const LOCALAPPDATA_ROOTS: [&str; 3] = [crate::appdir::PACKAGE, "Google/Chrome/User Data", "Microsoft/Edge/User Data"];
+const APPDATA_ROOTS: [&str; 2] = ["Microsoft/Credentials", "Microsoft/Protect"];
+
+/// 參數是整段指令或程式碼的欄位名（小寫）：路徑判定管不到，抽取時略過（名字裡有路徑字眼的不略過）
+const SKIP_KEYS: [&str; 9] = ["command", "commandline", "command_line", "commands", "cmd", "script", "scripts", "scriptblock", "script_block"];
+
 /// 環境變數指定的位置（絕對路徑才算）
 const ENV_ROOTS: [&str; 6] = ["CODEX_HOME", "PI_CODING_AGENT_DIR", "ASN_HOME", "IRORI_HOME", "ASN_CLAUDE_HOME", "ASN_GROK_HOME"];
 
@@ -160,13 +167,10 @@ impl SensitiveRoots {
         }
         let mut env_paths: Vec<PathBuf> = ENV_ROOTS.iter().filter_map(|n| get(n)).collect();
         if let Some(la) = get("LOCALAPPDATA") {
-            env_paths.push(la.join(crate::appdir::PACKAGE));
-            env_paths.push(la.join("Google/Chrome/User Data"));
-            env_paths.push(la.join("Microsoft/Edge/User Data"));
+            env_paths.extend(LOCALAPPDATA_ROOTS.iter().map(|r| la.join(r)));
         }
         if let Some(ap) = get("APPDATA") {
-            env_paths.push(ap.join("Microsoft/Credentials"));
-            env_paths.push(ap.join("Microsoft/Protect"));
+            env_paths.extend(APPDATA_ROOTS.iter().map(|r| ap.join(r)));
         }
         for p in env_paths {
             if !p.is_absolute() && !p.to_string_lossy().starts_with('/') {
@@ -741,7 +745,7 @@ fn walk(v: &Value, under_key: bool, out: &mut Vec<String>, depth: usize) {
         Value::Object(m) => m.iter().for_each(|(k, x)| {
             // 指令與程式碼欄位是整段命令，不是路徑，路徑判定管不到（敏感清單不是邊界）
             let l = k.to_lowercase();
-            if key_is_path(k) || !matches!(l.as_str(), "command" | "commandline" | "command_line" | "commands" | "cmd" | "script" | "scripts" | "scriptblock" | "script_block") {
+            if key_is_path(k) || !SKIP_KEYS.contains(&l.as_str()) {
                 walk(x, under_key || key_is_path(k), out, depth)
             }
         }),
@@ -779,3 +783,5 @@ use jsonstr::{container_like, json_container};
 mod tests;
 #[cfg(test)]
 mod tests_form;
+#[cfg(test)]
+mod tests_shared;

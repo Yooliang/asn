@@ -52,6 +52,8 @@ function openStore(file, log) {
 export function createEngine({ log, workDir, mailboxName, env = process.env, send, deps = {} }) {
   const file = envGet(env, 'AGENTS_FILE') || locateHome('agents.json')
   const makeDriver = deps.makeDriver ?? defaultMakeDriver
+  // 這台電腦實際的使用者資料夾（讀取的敏感位置清單要算進去；測試可注入假的，才不會去碰真的使用者資料夾）
+  const realHome = deps.realHome ?? os.homedir()
   const approvals = createApprovals({ log })
   const workers = new Map()
   let handlers = { onSent() {}, onFail() {}, onReply() {} }
@@ -75,7 +77,7 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, sen
       for (const cfg of conf.workers) {
         try { fs.mkdirSync(cfg.cwd, { recursive: true }) } catch (e) { log(`acp: ${cfg.name} 的工作資料夾建不起來（${cfg.cwd}）：${e.message}`); continue }
         const w = createWorker({
-          cfg, env, log, approvals, store: store(cfg), makeDriver,
+          cfg, env, log, approvals, store: store(cfg), makeDriver, realHome, workDir,
           notify: m => notify({ ...m, from_agent: cfg.name }),
           handlers: {
             onSent: id => handlers.onSent(id),
@@ -120,7 +122,7 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, sen
       }
       try { fs.mkdirSync(cfg.cwd, { recursive: true }) } catch (e) { throw new Error(`工作資料夾建不起來：${e.message}`) }
       const w = createWorker({
-        cfg, env, log, approvals, store: store(cfg), makeDriver,
+        cfg, env, log, approvals, store: store(cfg), makeDriver, realHome, workDir,
         notify: m => notify({ ...m, from_agent: cfg.name }),
         handlers: {
           onSent: id => handlers.onSent(id),
