@@ -2,6 +2,7 @@
 //! 政策＝每個「類別」一個決定 allow／deny／ask，外加「白名單資料夾」（有路徑的讀寫請求，路徑在白名單外一律拒絕）。
 //!   read 讀檔搜尋思考、write 寫刪搬、execute 執行指令、network 上網（預設都是 allow）；other 分不出類別（預設 deny）。
 //!   寫入以白名單資料夾（預設只有工作者自己的工作資料夾）為界；執行指令沒有路徑可查，邊界只靠工作資料夾與 agents.json 的明寫設定。
+use super::acp_sensitive::SENSITIVE_HOME_DIRS;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
@@ -284,10 +285,8 @@ pub fn inside_agy_conv_dir(paths: &[String], brain: &Path, base: &Path) -> bool 
         })
 }
 
-/// 使用者資料夾底下放登入資料、金鑰、對話記錄的地方：寫到這些地方算真的越權，整輪中止，不給它換位置再試（#608）
-// ASN 的新舊資料夾名取自 home.rs（舊名只准寫在那裡）
-const SENSITIVE_HOME_DIRS: [&str; 10] = [".gemini", ".ssh", crate::home::NEW_NAME, crate::home::LEGACY_NAME, ".claude", ".codex", ".pi", ".aws", ".config", ".gnupg"];
-
+/// 使用者資料夾底下放登入資料、金鑰、對話記錄的地方：寫到這些地方算真的越權，整輪中止，不給它換位置再試（#608）。
+/// 清單（SENSITIVE_HOME_DIRS）與讀取共用，只定義在 acp_sensitive.rs
 pub fn sensitive_write(paths: &[String], user_home: &Path, base: &Path) -> bool {
     let real_home = std::fs::canonicalize(user_home).unwrap_or_else(|_| user_home.to_path_buf());
     paths.iter().any(|p| {
