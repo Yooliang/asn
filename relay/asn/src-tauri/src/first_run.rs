@@ -365,7 +365,7 @@ mod tests {
         }
         // 取得 data_dir 到呼叫之間不准有別的寫入動作
         let between = &run[startup..call];
-        for bad in ["write_atomic", "create_dir_all", "ui_log::append", "fs::write"] {
+        for bad in ["write_atomic", "atomic::write", "create_dir_all", "ui_log::append", "fs::write"] {
             assert!(!between.contains(bad), "datadir::startup 與 first_run 之間不能有 {bad}");
         }
         // 截圖模式與 ASN_DATA 覆蓋都不跑

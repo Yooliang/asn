@@ -195,11 +195,6 @@ pub fn load_state(file: &Path, now: u64, keep_ms: u64) -> Loaded {
     out
 }
 
-/// 原子寫入：先寫暫存檔再 rename；pending 是還沒送達的信件，要 fsync（佇列類）
-pub fn save_atomic(file: &Path, data: &Value) -> std::io::Result<()> {
-    crate::settings::atomic::write(file, data.to_string().as_bytes(), crate::settings::atomic::QUEUE)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,7 +219,7 @@ mod tests {
         assert!(!snap.to_string().contains("body"));
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("pending.json");
-        save_atomic(&f, &snap).unwrap();
+        crate::settings::atomic::write(&f, snap.to_string().as_bytes(), crate::settings::atomic::QUEUE).unwrap();
         assert!(std::fs::read_dir(d.path()).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".tmp")));
         let l = load_state(&f, 100, 1000);
         assert_eq!(l.pending.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), vec!["b", "c"]);
@@ -244,7 +239,7 @@ mod tests {
         assert_eq!(snap["pending"][1]["room"]["window"], Value::Null, "與 Node 橋相同：節點本身存 null");
         let d = tempfile::tempdir().unwrap();
         let f = d.path().join("pending.json");
-        save_atomic(&f, &snap).unwrap();
+        crate::settings::atomic::write(&f, snap.to_string().as_bytes(), crate::settings::atomic::QUEUE).unwrap();
         let l = load_state(&f, 100, 1000);
         assert_eq!(l.pending[0].room.as_ref().unwrap().window, "T-視窗甲");
         assert_eq!(l.pending[1].room, Some(RoomRef { id: "R1".into(), seq: 5, window: String::new(), member: String::new() }));

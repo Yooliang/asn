@@ -289,10 +289,6 @@ pub fn read_settings_name(data_dir: &Path) -> Option<String> {
     // 走共用設定層（#2162）；合不合法在 NamesDoc::normalize 判斷
     settings::load_in::<settings::NamesDoc>(data_dir).value.window_name
 }
-/// 只剩 bridge/core.rs 使用，待 #2232 E 一起刪除
-pub fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
-    settings::atomic::write(path, text.as_bytes(), settings::atomic::STATE)
-}
 
 #[cfg(feature = "gui")]
 #[tauri::command]

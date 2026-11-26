@@ -562,7 +562,7 @@ fn 守門_持有密碼的型別不能自動衍生除錯輸出() {
 
 #[test]
 fn 守門_密碼不寫檔不進環境變數不進指令列不進剪貼簿() {
-    let banned = ["fs::write", "File::create", "create_new(", ".append(true)", "write_atomic", "set_var(", "remove_var(", "Command::new", "clipboard", "Clipboard", "localStorage", ".envs(", ".env("];
+    let banned = ["fs::write", "File::create", "create_new(", ".append(true)", "write_atomic", "atomic::write", "set_var(", "remove_var(", "Command::new", "clipboard", "Clipboard", "localStorage", ".envs(", ".env("];
     let mut bad = vec![];
     for (name, text) in sources() {
         for (i, line) in code_only(&text).lines().enumerate() {
