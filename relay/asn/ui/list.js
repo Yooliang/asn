@@ -30,7 +30,7 @@ import { deviceAsn } from './lib/presence.mjs'
 import { loadCloudNodes, saveCloudNodes, nextCloudNodes, sameNodes } from './lib/cloud-memory.mjs'
 import { createReportScheduler } from './lib/report-reload.mjs'
 import { mineFromStatus, nextPollMs, remoteUpdateView } from './lib/remote-update.mjs'
-import { emo, initial, plain } from './lib/text.mjs'
+import { emo, hueOf, initial, plain } from './lib/text.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
 import { TermView } from './lib/term-view.mjs'
@@ -78,8 +78,8 @@ import { contextLabel } from './lib/context-usage.mjs'
 import { elevatedBadge } from './lib/elevated.mjs'
 import { NOTICE_CATS, NOTICE_CAT_ALL, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, NOTICE_ID, NOTICE_TAB, filterNoticeRows, isNoticeFriend, noticeRows, noticeTime, noticeUnreadCount, withoutNoticeItems, withoutNoticeTabs } from './lib/notice.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
-import { backgroundRestoreNoticeText, collectLaunchFailures, collectLaunchModelUsed, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, launchOkNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
-import { launchModelView, pickedModel, remoteLaunchModelChoice } from './lib/remote-launch-models.mjs'
+import { backgroundRestoreNoticeText, collectLaunchFailures, collectLaunchModelUsed, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, launchOkToastText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
+import { launchModelView, pickKeptWhenShown, pickedModel, remoteLaunchModelChoice, usedModelLabel } from './lib/remote-launch-models.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
 import { canOfferModelSwitch, confirmText, createModelSwitcher } from './lib/model-switch.mjs'
@@ -478,6 +478,17 @@ function showLaunchNotice(notice) {
   Object.assign(launchNotice, { open: true, logPath: launchNoticeLogPath(notice, launchLogPaths.bridgeLog), title: notice.title, body: notice.body })
 }
 function closeLaunchNotice() { launchNotice.open = false }
+// 別台開好了、那台回報了實際型號：右下角提示（不蓋住畫面、幾秒後自己消失；點一下開那位的對話）。顯示名用那台摘要裡的清單查，查不到顯示代號（usedModelLabel 已寫 console）。
+// 使用者在設定裡關了「右下角通知」就不跳，只寫 console；提示開不起來也只寫 console，不再退回擋畫面的對話框（這則只是告知，不是要使用者處理的事）
+function showLaunchOkToast(ok) {
+  const label = usedModelLabel(remoteLaunchers.value[ok.node], ok.modelUsed)
+  const t = launchOkToastText(ok.name, label)
+  if (notifyPrefs.value.toast === false) { console.info('[ASN] 右下角通知已關閉，不顯示開好的提示', t.title, label); return }
+  const cid = friendId(ok.node, ok.name)
+  const f = core.friends.get(cid)
+  void windowApi.showToast({ cid, title: t.title, line: t.line, status: f?.status ?? 'online', hue: hueOf(cid), dp: initial(ok.name), av: null })
+    .catch(e => console.info('[ASN] 開好的提示開不起來', String(e?.message ?? e)))
+}
 // 別台正在看這台（#597）：一定顯示，不能關，只能按結束。Rust 在傳第一幅之前就會通知這裡
 const beingViewed = ref([])
 const stopBeingViewed = id => termRemoteApi.viewedStop(id).catch(e => console.info('[ASN] 結束觀看失敗', String(e?.message ?? e)))
@@ -728,6 +739,8 @@ watch(() => [partnerDlg.open, partnerDlg.node], () => { modelLoader.reset(); rem
 watch(() => [partnerDlg.open, partnerDlg.step, partnerDlg.node, launchModelChoice.value.kind === 'list' ? launchModelChoice.value.vendor : ''], ([open, step, , vendor]) => { if (open && step === 2 && vendor) (launchModelOnThisPc.value ? modelLoader : remoteModelLoader).ensure(vendor) })
 function reloadLaunchModels() { const c = launchModelChoice.value; if (c.kind === 'list') void (launchModelOnThisPc.value ? modelLoader : remoteModelLoader).load(c.vendor, { force: true }) }
 const launchModelPick = computed(() => pickedModel(launchModel.value, partnerDlg.model))
+// 下拉不顯示了（那台的旗標沒了、換了廠牌或開法）：選擇一起清掉。留著的話，送出會一直被「請重新選一次型號」擋下，畫面上卻沒有地方可以重選
+watch(() => launchModel.value.show, () => { const kept = pickKeptWhenShown(launchModel.value, partnerDlg.model); if (kept !== partnerDlg.model) partnerDlg.model = kept })
 const dlgPiPick = computed(() => dlgAuto.value.run === 'pi' && piChoice.value.ok)
 const partnerCanRun = computed(() => dlgAuto.value.ok)
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
@@ -1129,9 +1142,9 @@ async function pollLaunchResults() {
         console.info('[ASN] 開新夥伴失敗', fail.detail)
         showLaunchNotice(launchFailedNoticeText(fail.name, fail.detail))
       }
-      // 開好了而且那台回報了實際用的型號：告訴使用者（沒回報就不講型號，不拿選的值頂替）
-      for (const ok of collectLaunchModelUsed(body?.launches, trackSnap)) showLaunchNotice(launchOkNoticeText(ok.name, ok.modelUsed))
-      // 開好了而且那台回報了實際用的型號：告訴使用者（沒回報就不講型號，不拿選的值頂替）
+      // 開好了而且那台回報了實際用的型號：用不打斷操作的右下角提示告訴使用者（沒回報就不講型號，不拿選的值頂替）
+      for (const ok of collectLaunchModelUsed(body?.launches, trackSnap)) showLaunchOkToast(ok)
+      // 已經有結果（開好或失敗）的追蹤項目從清單拿掉
       for (const row of body?.launches ?? []) {
         if (row.status === 'ok' || row.status === 'failed') {
           launchTrack.value = launchTrack.value.filter(t => t.id !== row.id)

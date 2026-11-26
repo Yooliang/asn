@@ -1917,6 +1917,21 @@ async fn 名單摘要帶_launch_model_旗標() {
     assert!(launcher["profiles"].is_array() && launcher["cwd_allow"].is_array(), "其他欄位照舊");
 }
 
+/// #2355 P4：名單摘要的 launch_model 與 models 是 Launcher::summary 真的送出的內容（models 來自 report_value() 讀真的 agy 實機清單），
+/// 跟共用 golden 逐字相同。Deno（launch_chain_1752_test.ts）與 node（remote-launch-models-2355p4.test.mjs）讀同一份檔案，
+/// 所以 Rust 端形狀改了，這裡先紅、對面不會還拿舊形狀測。程式不寫檔：golden 要改時，用失敗訊息印出的實際輸出自己貼進檔案。
+#[tokio::test]
+async fn 名單摘要的_launch_model_與_models_跟共用_golden_逐字相同() {
+    crate::agent_tools::models::seed_samples_for_test(include_str!("../../../tests/fixtures/agy-models/sample.txt"));
+    let mut l = lharness(|s, p| model_env(s, p, |e| e.models = crate::agent_tools::models::report_value()), (30_000, 60_000, 20)).await;
+    l.h.core.refresh_roster(T0).await;
+    let launcher = l.h.fr.rosters().last().unwrap()["launcher"].clone();
+    let got = json!({ "launch_model": launcher["launch_model"], "models": launcher["models"] });
+    let golden: Value = serde_json::from_str(include_str!("../../../../../shared/test-vectors/launcher-summary-models-2355p4.json")).unwrap();
+    let want = json!({ "launch_model": golden["launch_model"], "models": golden["models"] });
+    assert_eq!(got, want, "形狀改了：請把下面的實際輸出貼進 relay/shared/test-vectors/launcher-summary-models-2355p4.json（保留 _說明）\n{}", serde_json::to_string_pretty(&got).unwrap());
+}
+
 #[test]
 fn 遠端型號_純函式_各_profile_的分流() {
     let prof = |engine: &str, mode: LaunchMode| Profile { label: "x".into(), command: "c".into(), args: vec![], engine: engine.into(), mode, disabled: false, disabled_reason: String::new() };

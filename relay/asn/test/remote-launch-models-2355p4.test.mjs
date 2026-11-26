@@ -2,13 +2,14 @@
 import { test, mock, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CODE_TEXT, MODEL_PICK_ERR, buildLaunchRequest, launchErrorText, launchFormError, modelUsedOf, progressView } from '../ui/lib/mobile-launch.mjs'
-import { launchModelView, pickedModel, remoteLaunchModelChoice } from '../ui/lib/remote-launch-models.mjs'
+import { CODE_TEXT, MODEL_PICK_ERR, NO_MODEL_REPORTED_TEXT, buildLaunchRequest, launchErrorText, launchFormError, modelUsedOf, progressView } from '../ui/lib/mobile-launch.mjs'
+import { launchModelView, pickKeptWhenShown, pickedModel, remoteLaunchModelChoice, usedModelLabel } from '../ui/lib/remote-launch-models.mjs'
 import { createModelLoader } from '../ui/lib/local-models.mjs'
 import { acpListVendor, acpListWhere } from '../ui/lib/partner-ops-ui.mjs'
-import { collectLaunchModelUsed, launchOkNoticeText } from '../ui/lib/partner-launch-notify.mjs'
-import { NONE_TEXT, REMOTE_REFRESH_HINT, REMOTE_RETRY_LABEL, modelState, remoteView } from '../ui/lib/remote-models.mjs'
+import { collectLaunchModelUsed, launchOkToastText } from '../ui/lib/partner-launch-notify.mjs'
+import { NARROW_RE, NONE_TEXT, REMOTE_REFRESH_HINT, REMOTE_RETRY_LABEL, modelState, remoteView } from '../ui/lib/remote-models.mjs'
 import { NO_ENGINE_NOTE } from '../ui/lib/model-catalog.mjs'
+import * as Vue from 'vue'
 
 const logs = []
 mock.method(console, 'info', (...a) => { logs.push(a.join(' ')) })
@@ -21,6 +22,11 @@ const launcher = (extra = {}) => ({
   cwd_allow: ['D:/work'], launch_model: true, models: [GEM, { vendor: 'codex', status: 'ok', models: [{ id: 'gpt-x', name: 'GPT X' }] }], ...extra,
 })
 const row = (id, profileId = id) => ({ id, profileId })
+
+// Rust 測試（bridge/tests/rooms_launch.rs）用真的 Launcher::summary／report_value() 讀 agy 實機清單產出、逐字比對的 golden；
+// 這裡的契約測試吃它，不在 JS 裡手寫一份「Rust 大概會送這樣」的鏡像
+const GOLDEN = JSON.parse(read('../shared/test-vectors/launcher-summary-models-2355p4.json'))
+const goldenLauncher = (extra = {}) => ({ ...launcher(), launch_model: GOLDEN.launch_model, models: GOLDEN.models, ...extra })
 
 // ---- 下拉出不出現、出什麼 ----
 test('Claude 開成視窗＝四個別名；Gemini 內建通道＝向摘要讀的清單', () => {
@@ -98,9 +104,82 @@ test('buildLaunchRequest：背景 Gemini、Claude 視窗帶 model；asn終端與
   assert.equal(term.profile, 'gemini-term'); assert.equal('model' in term, false, 'asn終端不帶（電腦端會拒絕）')
   for (const none of ['', undefined, null]) assert.equal('model' in buildLaunchRequest(F, { run: 'acp', row: row('gemini'), launcher: l, model: none }), false, String(none))
   assert.equal('model' in buildLaunchRequest(F, { run: 'acp', row: row('gemini'), launcher: l, model: 'a b' }), false, '格式不合的不送')
-  // 經 pi：model 與 pi_provider／pi_model 不並存（後台會 bad_model）
-  const pi = buildLaunchRequest({ ...F, profile: 'pi', piModel: '' }, { run: 'pi', row: row('gemini', 'pi'), launcher: { ...l, pi_models: [{ provider: 'google', model: 'gemini-x' }] }, model: 'opus' })
-  assert.ok(pi === null || !('model' in pi))
+  // 經 pi：model 與 pi_provider／pi_model 不並存（後台會 bad_model）。用一份確定能成功的 pi 資料（Claude 在那台 pi 有 anthropic 的模型）
+  const piL = { ...l, pi_models: [{ provider: 'anthropic', model: 'claude-sonnet-5' }] }
+  const pi = buildLaunchRequest({ ...F, profile: 'claude', piModel: '' }, { run: 'pi', row: row('claude'), launcher: piL, model: 'opus' })
+  assert.ok(pi, '這份 pi 資料要真的產生請求，下面的斷言才有意義')
+  assert.deepEqual({ p: pi.profile, prov: pi.pi_provider, m: pi.pi_model }, { p: 'pi', prov: 'anthropic', m: 'claude-sonnet-5' })
+  assert.equal('model' in pi, false, '經 pi 不帶 model')
+})
+
+test('buildLaunchRequest 自己再擋一次：Codex、沒寫 engine 的設定、那台沒有 launch_model 帶了 model 一律不送（呼叫端漏了也不會送出），原因寫進 console', () => {
+  const l = launcher()
+  // Codex：任何開法都不能帶
+  for (const run of ['term', 'acp', 'pi']) {
+    logs.length = 0
+    const r = buildLaunchRequest({ ...F, profile: 'codex' }, { run, row: row('codex'), launcher: l, model: 'gpt-x' })
+    assert.equal(r === null ? false : 'model' in r, false, `codex/${run}`)
+    if (run !== 'pi') assert.ok(logs.some(x => x.includes('不能指定型號')), `codex/${run} 要有 console 記錄`)
+  }
+  // 沒寫 engine 的自訂設定
+  const noEngine = launcher({ profiles: [{ id: 'claude', mode: 'window' }] })
+  assert.equal('model' in buildLaunchRequest({ ...F, profile: 'claude' }, { run: 'term', row: row('claude'), launcher: noEngine, model: 'opus' }), false)
+  // 那台沒有 launch_model（舊版）
+  const old = launcher({ launch_model: undefined })
+  assert.equal('model' in buildLaunchRequest(F, { run: 'acp', row: row('gemini'), launcher: old, model: 'gemini-4-argon-high' }), false)
+  // 沒有 row／沒有 launcher
+  assert.equal('model' in buildLaunchRequest(F, { run: 'acp', row: null, launcher: l, model: 'x' }), false)
+  assert.equal('model' in buildLaunchRequest(F, { run: 'acp', row: row('gemini'), launcher: null, model: 'x' }), false)
+  // 對照：能帶的照樣帶
+  assert.equal(buildLaunchRequest(F, { run: 'acp', row: row('gemini'), launcher: l, model: 'gemini-4-argon-high' }).model, 'gemini-4-argon-high')
+})
+
+test('契約：Rust 真的送出的摘要（golden）→ 下拉狀態；窄規則用正式程式的 NARROW_RE，不另寫一份', () => {
+  const l = goldenLauncher()
+  assert.equal(GOLDEN.launch_model, true)
+  const gem = GOLDEN.models.find(m => m.vendor === 'gemini')
+  assert.ok(gem.models.length > 3, 'golden 的 gemini 清單讀得到')
+  const c = remoteLaunchModelChoice(l, row('gemini'), 'acp')
+  assert.deepEqual({ show: c.show, kind: c.kind, vendor: c.vendor }, { show: true, kind: 'list', vendor: 'gemini' })
+  const state = modelState(l, 'gemini', { where: 'remote', narrow: true })
+  assert.equal(state.state, 'ready')
+  assert.deepEqual(state.models.map(m => m.id), gem.models.map(m => m.id).filter(id => NARROW_RE.test(id)))
+  const view = launchModelView(c, { ...state, loading: false })
+  assert.ok(view.models.length > 3 && view.note === '')
+  // Claude：golden 裡是「不支援」，下拉用別名
+  const claude = remoteLaunchModelChoice(l, row('claude'), 'term')
+  assert.deepEqual([claude.show, claude.kind], [true, 'aliases'])
+  // 少了旗標（舊電腦）：不出下拉
+  const { launch_model: _x, ...rest } = l
+  assert.deepEqual(remoteLaunchModelChoice(rest, row('gemini'), 'acp').show, false)
+  // golden 裡的顯示名，開好後查得到
+  assert.equal(usedModelLabel(l, 'gemini-4-argon-high'), 'Gemini 4 Argon (High)')
+})
+
+test('旗標消失、選擇清掉：下拉不顯示時 pickKeptWhenShown 回空字串；下拉還在就保留。接上 Vue 的 watch，旗標一沒、選擇就清（手機與電腦版同一個函式）', async () => {
+  const shown = { show: true, models: [{ id: 'opus' }] }
+  assert.equal(pickKeptWhenShown(shown, 'opus'), 'opus')
+  assert.equal(pickKeptWhenShown({ show: false, models: [] }, 'opus'), '')
+  assert.equal(pickKeptWhenShown(null, 'opus'), '')
+  // 接線的樣子（跟 m.js、list.js 同一條）：選了型號 → 那台的 launch_model 變成不是 true → 下拉消失，選擇也要清掉，送出不再被擋
+  const lch = Vue.reactive({ model: '' })
+  const launcherRef = Vue.ref(launcher())
+  const view = Vue.computed(() => launchModelView(remoteLaunchModelChoice(launcherRef.value, row('claude'), 'term'), null))
+  const pick = Vue.computed(() => pickedModel(view.value, lch.model))
+  Vue.watch(() => view.value.show, () => { lch.model = pickKeptWhenShown(view.value, lch.model) })
+  lch.model = 'opus'
+  await Vue.nextTick()
+  assert.equal(pick.value, 'opus'); assert.equal(lch.model, 'opus', '下拉還在：選擇保留')
+  launcherRef.value = launcher({ launch_model: false })
+  await Vue.nextTick()
+  assert.equal(view.value.show, false)
+  assert.equal(lch.model, '', '下拉不見，選擇一起清掉')
+  assert.equal(launchFormError({ ...F, name: 'abc' }, { ok: true, reason: '' }, { run: 'term', modelOk: !lch.model || !!pick.value }), '', '不再被「請重新選一次型號」擋下')
+})
+
+test('接線：手機與電腦版都在下拉不顯示時清掉選擇', () => {
+  assert.match(read('ui/m.js'), /watch\(\(\) => lchModel\.value\.show, \(\) => \{ lch\.model = pickKeptWhenShown\(lchModel\.value, lch\.model\) \}\)/)
+  assert.match(read('ui/list.js'), /watch\(\(\) => launchModel\.value\.show, \(\) => \{ const kept = pickKeptWhenShown\(launchModel\.value, partnerDlg\.model\); if \(kept !== partnerDlg\.model\) partnerDlg\.model = kept \}\)/)
 })
 
 test('launchFormError：選的型號不在清單裡就請他重選', () => {
@@ -131,7 +210,13 @@ test('開好後顯示實際型號：用那台回報的 model_used；沒有回報
   assert.equal(progressView({ status: 'ok' }, true, '小格').text, '「小格」已經開好了，可以直接對話。')
   // 有選型號、那台沒回報 model_used：照實說，不寫成已套用、不把選的值寫上去
   const t = progressView({ status: 'ok' }, true, '小格', '', { picked: 'opus' }).text
-  assert.ok(t.includes('沒有回報實際用了哪個型號')); assert.ok(!t.includes('opus'))
+  assert.equal(t, '「小格」已經開好了，可以直接對話。（那台沒有回報實際使用的型號）'); assert.equal(NO_MODEL_REPORTED_TEXT, '（那台沒有回報實際使用的型號）'); assert.ok(!t.includes('opus'))
+  // 名單上那個新視窗回報的模型也叫「型號」（畫面上不再有「模型：」）
+  assert.equal(progressView(null, true, '小格', 'sonnet').text, '「小格」已經開好了（型號：sonnet），可以直接對話。')
+  // 顯示名：呼叫端用那台的清單查到的名字；沒給就用代號
+  assert.equal(progressView(done, true, '小格', '', { label: 'Gemini 4 Argon (High)' }).text, '「小格」已經開好了（型號：Gemini 4 Argon (High)），可以直接對話。')
+  assert.equal(progressView(done, false, '小格', '', { label: 'Gemini 4 Argon (High)' }).text, '那台已經開好（型號：Gemini 4 Argon (High)），等它出現在名單上…')
+  assert.equal(progressView({ status: 'ok' }, true, '小格', '', { label: 'X' }).text, '「小格」已經開好了，可以直接對話。', '沒有實際型號就不顯示 label')
   // 這一輪沒查到（row 是 null）時沿用之前拿到的
   assert.equal(progressView(null, true, '小格', '', { used: 'opus' }).text, '「小格」已經開好了（型號：opus），可以直接對話。')
   // model_used 優先於名單上那個視窗回報的模型
@@ -140,16 +225,30 @@ test('開好後顯示實際型號：用那台回報的 model_used；沒有回報
   assert.equal(modelUsedOf({ model_used: 'a b' }), ''); assert.equal(modelUsedOf({ model_used: 5 }), ''); assert.equal(modelUsedOf(null, 'x'), 'x')
 })
 
-test('電腦版開好通知：只有那台回報了 model_used 才通知，內容是實際型號', () => {
-  const track = [{ id: 'a', name: '小格', model: 'gemini-x' }, { id: 'b', name: '小文', model: 'opus' }, { id: 'c', name: '小武', model: '' }]
+test('實際型號的顯示名：用那台的清單（launcher.models）查 name；Claude 別名用別名名稱；查不到顯示代號並把代號寫進 console', () => {
+  const l = launcher()
+  assert.equal(usedModelLabel(l, 'gemini-4-argon-high'), 'Gemini 4 Argon (High)')
+  assert.equal(usedModelLabel(l, ' gemini-4-argon-high '), 'Gemini 4 Argon (High)', '空白不影響')
+  assert.equal(usedModelLabel(l, 'opus'), 'Opus', 'Claude 沒有清單：用別名名稱')
+  assert.equal(logs.length, 0, '查到了就不寫 console')
+  assert.equal(usedModelLabel(l, 'gemini-9-unknown'), 'gemini-9-unknown')
+  assert.ok(logs.some(x => x.includes('gemini-9-unknown')), '查不到：代號寫進 console')
+  assert.equal(usedModelLabel(null, 'x1'), 'x1'); assert.equal(usedModelLabel(l, ''), ''); assert.equal(usedModelLabel(l, undefined), '')
+})
+
+test('電腦版開好提示：只有那台回報了 model_used 才通知，內容是實際型號的顯示名；用右下角提示，不是擋畫面的對話框', () => {
+  const track = [{ id: 'a', node: 'Q', name: '小格', model: 'gemini-x' }, { id: 'b', node: 'Q', name: '小文', model: 'opus' }, { id: 'c', node: 'Q', name: '小武', model: '' }]
   const launches = [{ id: 'a', status: 'ok', model_used: 'gemini-4-argon-high' }, { id: 'b', status: 'ok' }, { id: 'c', status: 'ok', model_used: 'a b' }, { id: 'd', status: 'failed', model_used: 'opus' }]
   const got = collectLaunchModelUsed(launches, track)
-  assert.deepEqual(got, [{ id: 'a', name: '小格', modelUsed: 'gemini-4-argon-high' }], '沒回報的（b）、格式不對的（c）、失敗的（d）都不通知；也不拿選的 gemini-x 頂替')
-  const n = launchOkNoticeText('小格', 'gemini-4-argon-high')
-  assert.ok(n.body.includes('「小格」') && n.body.includes('gemini-4-argon-high')); assert.equal(n.hideLogPath, true)
+  assert.deepEqual(got, [{ id: 'a', node: 'Q', name: '小格', modelUsed: 'gemini-4-argon-high' }], '沒回報的（b）、格式不對的（c）、失敗的（d）都不通知；也不拿選的 gemini-x 頂替')
+  assert.deepEqual(launchOkToastText('小格', 'Gemini 4 Argon (High)'), { title: '「小格」在那台開好了', line: '型號：Gemini 4 Argon (High)' })
+  assert.equal(launchOkToastText('', 'x').title, '「夥伴」在那台開好了')
   const list = read('ui/list.js')
-  assert.match(list, /collectLaunchModelUsed\(body\?\.launches, trackSnap\)/, 'pollLaunchResults 接上成功通知')
+  assert.match(list, /for \(const ok of collectLaunchModelUsed\(body\?\.launches, trackSnap\)\) showLaunchOkToast\(ok\)/, 'pollLaunchResults 接上開好的提示')
+  assert.doesNotMatch(list, /launchOkNoticeText/, '不再用擋畫面的對話框')
+  assert.match(list, /function showLaunchOkToast\(ok\) \{[\s\S]*?usedModelLabel\(remoteLaunchers\.value\[ok\.node\], ok\.modelUsed\)[\s\S]*?windowApi\.showToast\(/, '顯示名用那台的清單查、用右下角提示')
   assert.match(list, /model: body\.model \?\? ''/, '追蹤項目記下送出的型號')
+  assert.equal((list.match(/開好了而且那台回報了實際用的型號/g) ?? []).length, 1, '註解不重複')
 })
 
 // ---- 讀取器（別台）----
@@ -213,7 +312,11 @@ test('接線：手機開新夥伴有型號下拉與「再查一次」、電腦�
   assert.match(html, /@click="reloadLchModels"/)
   assert.match(m, /buildLaunchRequest\(lch, \{[^}]*model: lchModelPick\.value/, '送出帶選的型號')
   assert.match(m, /modelOk: !lch\.model \|\| !!lchModelPick\.value/)
-  assert.match(m, /progressView\(row, appeared, t\.name,[\s\S]*?\{ used, picked: t\.model \}\)/, '進度顯示實際型號')
+  assert.match(m, /progressView\(row, appeared, t\.name,[\s\S]*?\{ used, picked: t\.model, label \}\)/, '進度顯示實際型號（顯示名）')
+  assert.match(m, /label = usedModelLabel\(lchData\.machines\[t\.node\]\?\.launcher, used\)/, '顯示名用那台的清單查')
+  // 切換模型剛進入讀取：沒有結果的第一拍也算「正在讀取」，不先露出空的輸入框
+  assert.match(m, /opsAcpWhere\.value \? opsAcpViews\.value\.gemini \?\? \{ state: 'pending', models: \[\], note: PENDING_TEXT/)
+  assert.match(html, /<input [^>]*v-else-if="!opsAcpReading"[^>]*aria-label="模型"/)
   assert.match(html, /@click="reloadOpsAcp"/); assert.match(html, /v-if="opsAcpNote"/)
   assert.match(lhtml, /launchModel\.retryLabel \|\| '重新讀取'/)
   assert.match(list, /remoteLaunchModelChoice\(dlgRemoteLauncher\.value, dlgRow\.value, dlgAuto\.value\.run\)/)

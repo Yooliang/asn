@@ -67,7 +67,7 @@ const VENDOR_LABEL = Object.freeze({ claude: 'Claude', codex: 'Codex', gemini: '
  * 與 Rust 的 acp_models::valid_model（launch_model_plan 用）同一條，是各處規則裡最窄的。
  * #2387 做完後，連同 modelState 的 narrow 選項一起刪掉。
  */
-const NARROW_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
+export const NARROW_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/
 
 /**
  * CODE_TEXT 的某一句（換上廠牌名稱）；不認得的代碼回 UNKNOWN_FAILURE_TEXT。

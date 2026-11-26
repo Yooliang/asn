@@ -7,6 +7,7 @@ import { MODEL_CATALOG, vendorRows } from './model-catalog.mjs'
 import { PI_ONLY_VENDORS, cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, piVendorState } from './pi-models.mjs'
 import { vendorCards } from './auto-run.mjs'
 import { isValidModelId } from './model-id.mjs'
+import { remoteLaunchModelChoice } from './remote-launch-models.mjs'
 
 export const REASON = {
   needLogin: '要先登入，才能替電腦開新夥伴',
@@ -139,14 +140,20 @@ export function buildLaunchRequest(f, { run = '', row = null, launcher = null, m
   // 型號（#2355 P4）：asn終端與經 pi 都不帶（那台會拒絕；pi 用自己的提供者與模型欄位）；不指定就不送這個鍵（不送 null，舊後台的欄位判斷不被攪亂）
   const termId = run === 'term' ? remoteTermProfile(launcher, row) : ''
   if (termId) return { ...base, profile: termId }
-  if (run !== 'pi') return { ...base, profile: f.profile, ...(typeof model === 'string' && isValidModelId(model) ? { model } : {}) }
+  if (run !== 'pi') {
+    // 呼叫端已先用 pickedModel 擋過；這裡自己再擋一次（呼叫端漏了也不會送出）：這一家這個開法在那台不能指定型號（Codex、沒寫 engine 的自訂設定、那台沒有 launch_model）就一律不帶，原因寫進 console
+    const want = typeof model === 'string' && model !== ''
+    const ok = want && isValidModelId(model) && remoteLaunchModelChoice(launcher, row, run).show
+    if (want && !ok) console.info('[ASN] 這個開法不能指定型號（或格式不合），這次不帶型號', { vendor: row?.id ?? '', run })
+    return { ...base, profile: f.profile, ...(ok ? { model } : {}) }
+  }
   const pc = launchPiChoice(row, launcher)
   const pi = pc.ok ? piLaunchArgs(row?.id, f.piModel || pc.defaultModel, pc.models) : null
   return pi ? { ...base, profile: 'pi', pi_provider: pi.provider, pi_model: pi.model } : null
 }
 
 // Rust／後台的錯誤字串（例如「launch HTTP 409 name_taken」）→ 給人看的中文
-// bad_model、model_unsupported 兩句跟後台 launch.ts 的 ERROR_TEXT 逐字相同（test/launch-model-error-text-2355p4.test.mjs 讀原始碼比對；supabase 的 deno 測試再比一次）
+// bad_model、model_unsupported 兩句跟後台 launch.ts 的 ERROR_TEXT 逐字相同（test/remote-launch-models-2355p4.test.mjs 讀原始碼比對；supabase 的 deno 測試 launch_chain_1752_test.ts 再比一次）
 export const CODE_TEXT = {
   forbidden: '只有本人能替電腦開新夥伴，請確認已登入同一個帳號',
   not_found: '找不到這台電腦',
@@ -181,19 +188,22 @@ export const modelUsedOf = (row, used = '') => {
   for (const v of [row?.model_used, used]) if (typeof v === 'string' && isValidModelId(v.trim())) return v.trim()
   return ''
 }
-export function progressView(row, appeared, name = '', model = '', { used = '', picked = '' } = {}) {
+// label＝實際型號的顯示名（呼叫端用那台的清單查，usedModelLabel；沒給或查不到就用代號本身）
+export const NO_MODEL_REPORTED_TEXT = '（那台沒有回報實際使用的型號）'
+export function progressView(row, appeared, name = '', model = '', { used = '', picked = '', label = '' } = {}) {
   const m = String(model ?? '').trim()
   const actual = modelUsedOf(row, used)
+  const shown = actual ? (String(label ?? '').trim() || actual) : ''
   if (appeared) {
-    if (actual) return { phase: 'done', text: `「${name}」已經開好了（型號：${actual}），可以直接對話。` }
-    if (m) return { phase: 'done', text: `「${name}」已經開好了（模型：${m}），可以直接對話。` }
+    if (actual) return { phase: 'done', text: `「${name}」已經開好了（型號：${shown}），可以直接對話。` }
+    if (m) return { phase: 'done', text: `「${name}」已經開好了（型號：${m}），可以直接對話。` }
     // 有選型號、那台卻沒說實際用了哪個：照實講，不寫成已套用
-    if (picked) return { phase: 'done', text: `「${name}」已經開好了，可以直接對話。那台沒有回報實際用了哪個型號。` }
+    if (picked) return { phase: 'done', text: `「${name}」已經開好了，可以直接對話。${NO_MODEL_REPORTED_TEXT}` }
     return { phase: 'done', text: `「${name}」已經開好了，可以直接對話。` }
   }
   switch (row?.status) {
     case 'failed': return { phase: 'failed', text: `沒有開成功：${friendlyDetail(row.detail)}` }
-    case 'ok': return { phase: 'waiting', text: actual ? `那台已經開好（型號：${actual}），等它出現在名單上…` : '那台已經開好，等它出現在名單上…' }
+    case 'ok': return { phase: 'waiting', text: actual ? `那台已經開好（型號：${shown}），等它出現在名單上…` : '那台已經開好，等它出現在名單上…' }
     case 'unconfirmed': return { phase: 'waiting', text: '已經送出，但還沒確認開好；等一下看看名單。' }
     case 'taken': return { phase: 'opening', text: '那台正在開…' }
     default: return { phase: 'sending', text: '正在發送指令…' }

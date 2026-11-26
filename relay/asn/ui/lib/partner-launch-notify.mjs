@@ -42,14 +42,18 @@ export function collectLaunchModelUsed(launches, track) {
     if (row?.status !== 'ok' || typeof row.model_used !== 'string') continue
     const modelUsed = row.model_used.trim()
     if (!isValidModelId(modelUsed)) continue
-    out.push({ id: row.id, name: byId.get(row.id)?.name ?? row.name ?? '', modelUsed })
+    out.push({ id: row.id, node: byId.get(row.id)?.node ?? '', name: byId.get(row.id)?.name ?? row.name ?? '', modelUsed })
   }
   return out
 }
 
-export function launchOkNoticeText(partnerName, modelUsed) {
+/**
+ * 開好了的提示（右下角、不打斷操作的那種，#2355 P4 一審）：title＝「名字」開好了、line＝實際型號。label＝型號的顯示名（用那台的清單查，查不到就是代號）。
+ * 提示小窗很窄（一行約 20 字，超過會被切掉），所以型號單獨放第二行，不跟前面的話擠在一起。
+ */
+export function launchOkToastText(partnerName, label) {
   const name = String(partnerName ?? '').trim() || '夥伴'
-  return { title: '新夥伴已開好', body: `「${name}」已經在那台電腦開好了。\n實際使用的型號：${String(modelUsed ?? '').trim()}`, hideLogPath: true }   // 成功通知不附記錄檔路徑
+  return { title: `「${name}」在那台開好了`, line: `型號：${String(label ?? '').trim()}` }
 }
 
 /** 仍在啟動中、背景模式、本機、逾時且尚未改回前台 */

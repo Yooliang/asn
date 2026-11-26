@@ -38,7 +38,7 @@ test('第 2 步：手機與別台電腦用那台啟動設定摘要的 pi_models 
   assert.match(m, /PI_MODEL_PICK_ERR/, '選單外的不送')
   const html = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
   assert.match(html, /<select class="set-sel m-ops-input" v-if="opsPiChoices\.groups\.length"/)
-  assert.match(html, /<input class="set-input m-ops-input" v-else v-model="ops\.model"/)
+  assert.match(html, /<input class="set-input m-ops-input" v-else-if="!opsAcpReading" v-model="ops\.model"/)   // 讀取清單中（pending）不顯示輸入框，讀不到才退回輸入框（#2355 P4 一審）
   const l = fs.readFileSync(new URL('../ui/list.js', import.meta.url), 'utf8')
   assert.match(l, /const pm = remoteLaunchers\.value\[node\]\?\.pi_models/)
   // 送不出去的（資料庫收 : @ + [ ]，但後台的模型欄位不收）不列

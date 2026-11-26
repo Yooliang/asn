@@ -1,11 +1,14 @@
 // 冒煙探測「電腦版替別台開新夥伴第 2 頁的型號下拉、開好後的通知」（probe.dlaunchRemoteModels，#2355 P4）。scripts/smoke-probes/ 底下的檔案由 smoke-registry.mjs 自動收集（#1540）
 // 別台（辦公室）回報的摘要：Gemini 的清單用 agy 的實機樣本（src-tauri/tests/fixtures/agy-models/sample.txt），跟手機（mlaunchModels）、電腦版本機（dlaunchModels）同一份。
 //   ready＝讀到清單；claude＝四個別名；unavailable＝讀不到（白話原因＋「再查一次」，按了重新向後台問）；noflag＝那台沒有 launch_model：不出下拉，只有一句說明
-//   used＝選了型號送出，開好後跳通知寫出那台回報的實際型號
+//   used＝選了型號送出，開好後跳右下角提示（show_toast），寫出那台回報的實際型號顯示名
+//   flagoff／flagoff-submit＝選了型號之後那台的 launch_model 不見：下拉消失、選擇清掉，送出不被擋也不帶型號
 // 開法：新手引導卡（這台電腦沒有視窗）→ Claude 那一列的「開一個視窗」＝對話框在第 2 頁（這台）→ 〈 上一步 → 選「辦公室」→ 下一步 〉＝別台的第 2 頁。
 // 為了拍到選項，把下拉撐成清單（size）；收合版（closed）不撐開，拍實際畫面。
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { launchOkToastText } from '../../ui/lib/partner-launch-notify.mjs'
+import { hueOf, initial } from '../../ui/lib/text.mjs'
 
 const agyText = fs.readFileSync(fileURLToPath(new URL('../../src-tauri/tests/fixtures/agy-models/sample.txt', import.meta.url)), 'utf8')
 const agyModels = agyText.split(/\r?\n/).filter(l => l.includes('\t')).map(l => { const [id, name] = l.split('\t'); return { id: id.trim(), name: (name ?? '').trim() } })
@@ -19,13 +22,15 @@ const launcher = (extra = {}) => ({
   cwd_allow: ['D:/work'], launch_model: true, models: [GEM_OK, CLAUDE_NONE], ...extra,
 })
 const noFlag = (() => { const { launch_model: _x, ...rest } = launcher(); return rest })()
-export const DRM_LAUNCHERS = { ready: launcher(), claude: launcher(), unavailable: launcher({ models: [GEM_GONE, CLAUDE_NONE] }), 'unavailable-retry': launcher({ models: [GEM_GONE, CLAUDE_NONE] }), noflag: noFlag, used: launcher() }
+const GEM_STALE = { ...GEM_OK, stale: true, age_s: 900, code: 'timeout' }   // 清單是舊的：有「再查一次」，按了重新向後台問
+export const DRM_LAUNCHERS = { ready: launcher(), claude: launcher(), unavailable: launcher({ models: [GEM_GONE, CLAUDE_NONE] }), 'unavailable-retry': launcher({ models: [GEM_GONE, CLAUDE_NONE] }), noflag: noFlag, used: launcher(), flagoff: launcher({ models: [GEM_STALE, CLAUDE_NONE] }), 'flagoff-submit': launcher({ models: [GEM_STALE, CLAUDE_NONE] }) }
 const body = l => ({ machines: [{ node: 'Q', online: true, platform: 'windows', launcher: l }] })
 
 export const drmProbeSource = ({ kase, closed = false }) => `(async () => {
   const want = ${JSON.stringify({ kase, closed })};
-  const GEM_COUNT = ${agyModels.length}, FIRST = ${JSON.stringify(FIRST.id)};
+  const GEM_COUNT = ${agyModels.length}, FIRST = ${JSON.stringify(FIRST.id)}, FIRST_NAME = ${JSON.stringify(FIRST.name)};
   const READY = ${JSON.stringify(body(DRM_LAUNCHERS.ready))};
+  const NOFLAG = ${JSON.stringify(body(noFlag))};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
   const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
@@ -104,10 +109,38 @@ export const drmProbeSource = ({ kase, closed = false }) => `(async () => {
       const b = sent[1] && sent[1].body;
       if (!b || b.model !== FIRST || b.profile !== 'gemini' || b.node !== 'Q') return fail('送出的請求要帶選的型號：' + JSON.stringify(b));
       if (b.pi_provider || b.pi_model) return fail('不經 pi 的請求不該帶 pi 欄位：' + JSON.stringify(b));
-      const note = await waitFor(() => [...document.querySelectorAll('.launch-notice-body')].find(p => vis(p) && txt(p).includes('實際使用的型號')), 120);
-      if (!note) return fail('等了 12 秒，沒有看到開好的通知');
-      if (txt(note) !== '「小格」已經在那台電腦開好了。 實際使用的型號：' + FIRST) return fail('通知內容不對：' + txt(note));
-      if (document.querySelector('.launch-notice-log')) return fail('成功通知不該附記錄檔路徑');
+      // 開好了：右下角提示（不蓋住畫面），內容是實際型號的顯示名（那台清單裡查到的名字，不是代號）
+      const tc = await waitFor(() => calls('show_toast')[0], 120);
+      if (!tc) return fail('等了 12 秒，沒有跳出開好的提示');
+      const tt = tc[1] && tc[1].toast;
+      if (!tt || tt.cid !== 'Q/小格' || tt.title !== '「小格」在那台開好了' || tt.line !== '型號：' + FIRST_NAME) return fail('提示內容不對：' + JSON.stringify(tt));
+      if (tt.line.includes(FIRST)) return fail('有清單時要顯示名，不能寫代號：' + tt.line);
+      if ([...document.querySelectorAll('.launch-notice-body')].some(vis)) return fail('不該再跳擋畫面的對話框');
+      return { ok: true, why: '' };
+    }
+    // 旗標消失：選了型號之後那台的 launch_model 不見了＝下拉消失、選擇清掉；送出不被擋、不帶型號
+    if (want.kase === 'flagoff' || want.kase === 'flagoff-submit') {
+      if (!(await waitFor(() => opts().length > 1, 60))) return fail('型號下拉沒有出現清單：' + txt(hint()));
+      pick().value = FIRST; pick().dispatchEvent(new Event('change', { bubbles: true })); await sleep(150);
+      if (pick().value !== FIRST) return fail('選不起來：' + pick().value);
+      if (!retry()) return fail('清單是舊的，要有「再查一次」：' + txt(hint()));
+      globalThis.__smokeOverride = { relay_launchers: NOFLAG };
+      await real({ click: at(retry()) }, 300);
+      if (!(await waitFor(() => !pick(), 60))) return fail('那台沒有 launch_model 了，下拉應該消失');
+      if (txt(hint()) !== '那台電腦的 ASN 版本較舊，不能選型號，請先更新') return fail('說明不對：「' + txt(hint()) + '」');
+      if (want.kase === 'flagoff') return { ok: true, why: '' };
+      await real({ click: at(btn('下一步')) }, 400);
+      const nameInput = dlg().querySelector('input[aria-label="夥伴名字"]');
+      if (!nameInput) return fail('第 3 頁找不到名字欄（被舊的選擇擋住？）：' + txt(dlg().querySelector('.partner-err')));
+      nameInput.value = '小格'; nameInput.dispatchEvent(new Event('input', { bubbles: true })); await sleep(120);
+      globalThis.__smokeOverride = { relay_launch: { id: 'L1' }, relay_launchers: { ...NOFLAG, launches: [{ id: 'L1', status: 'ok' }] } };
+      const go = btn('開始');
+      if (!go || go.disabled) return fail('「開始」不能按：' + txt(dlg().querySelector('.partner-err')));
+      await real({ click: at(go) }, 400);
+      const sent = calls('relay_launch')[0];
+      if (!sent) return fail('按了開始，沒有送出開窗請求：' + txt(dlg()?.querySelector('.partner-err')));
+      const b = sent[1] && sent[1].body;
+      if (!b || 'model' in b) return fail('下拉消失後的請求不該帶型號：' + JSON.stringify(b));
       return { ok: true, why: '' };
     }
     if (want.kase === 'unavailable') {
@@ -147,6 +180,13 @@ const scene = (name, kase, { closed = false, shot = true } = {}) => ({
   ready: '#app.win', probe: { dlaunchRemoteModels: { kase, closed } }, ...(shot ? { shot: `${name}.png` } : {}),
 })
 
+// 開好後的右下角提示的實景：toast.html 吃跟 show_toast 一樣的網址參數（wins.rs 的 toast_url），內容用正式的 launchOkToastText 做，不手寫一份
+const toastScene = (() => {
+  const t = launchOkToastText('小格', FIRST.name)
+  const q = new URLSearchParams({ cid: 'Q/小格', title: t.title, line: t.line, status: 'online', hue: String(hueOf('Q/小格')), dp: initial('小格') })
+  return { name: 'toast-launch-ok', page: `toast.html?${q}`, width: 270, height: 96, state: { signedIn: true }, ready: '#app', shot: 'toast-launch-ok.png' }
+})()
+
 export default {
   key: 'dlaunchRemoteModels',
   kind: '電腦版替別台開新夥伴的型號下拉檢查',
@@ -158,7 +198,10 @@ export default {
     scene('list-launch-remote-models-claude', 'claude'),
     scene('list-launch-remote-models-unavailable', 'unavailable'),
     scene('list-launch-remote-models-noflag', 'noflag'),
-    scene('list-launch-remote-models-notice', 'used'),
+    scene('list-launch-remote-models-notice', 'used'),   // 開好後的右下角提示（show_toast 的內容另有 toast.html 的實景：toast-launch-ok）
+    toastScene,
+    scene('list-launch-remote-models-flagoff', 'flagoff'),
+    scene('list-launch-remote-models-flagoff-submit', 'flagoff-submit', { shot: false }),
     scene('list-launch-remote-models-unavailable-retry', 'unavailable-retry', { shot: false }),
   ],
   table: (scenario) => {
@@ -168,6 +211,7 @@ export default {
       relay_list: { members: [{ id: 'Q', name: '辦公室', agents: [{ name: 'demo', status: 'idle', cwd_label: 'demo' }] }] },
       relay_launchers: body(DRM_LAUNCHERS[k]),
       relay_launch: { id: 'L1' },
+      show_toast: null,   // 開好後的右下角提示（假後台只記下呼叫）
       ...(k === 'used' ? { __fastPoll: 400 } : {}),
     }
   },

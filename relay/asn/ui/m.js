@@ -68,7 +68,8 @@ import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, device
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
 import { acpListWhere, acpSwitchChoices, createOpRunner, makeOpRun, opDialogText, runPartnerOp } from './lib/partner-ops-ui.mjs'
 import { createModelLoader } from './lib/local-models.mjs'
-import { launchModelView, pickedModel, remoteLaunchModelChoice } from './lib/remote-launch-models.mjs'
+import { PENDING_TEXT } from './lib/remote-models.mjs'
+import { launchModelView, pickKeptWhenShown, pickedModel, remoteLaunchModelChoice, usedModelLabel } from './lib/remote-launch-models.mjs'
 import { switchModelsFor } from './lib/model-catalog.mjs'
 import { defaultPartnerName } from './lib/partner.mjs'
 import { groupHeading, statusNote } from './lib/tabs.mjs'
@@ -1293,18 +1294,22 @@ const app = createApp({
     }
     // 第 2 步才去讀型號清單（切回第 1 步再回來不重讀；要重讀按「再查一次」）。放在這裡：廠牌卡要用到後面才宣告的 acctAllDevs，watch 一建立就會算一次
     watch(() => [lchStep2.value, lch.node, lchModelChoice.value.kind === 'list' ? lchModelChoice.value.vendor : ''], ([step2, , vendor]) => { if (step2 && vendor) lchModelLoader.ensure(vendor) })
+    // 下拉不顯示了（那台的旗標沒了、換了廠牌或開法）：選擇一起清掉。留著的話，送出會一直被「請重新選一次型號」擋下，畫面上卻沒有地方可以重選
+    watch(() => lchModel.value.show, () => { lch.model = pickKeptWhenShown(lchModel.value, lch.model) })
     const sleep = ms => new Promise(r => setTimeout(r, ms))
     async function trackLaunch(t) {
       const stop = Date.now() + LAUNCH_GIVE_UP_MS
-      let used = ''   // 那台回報的實際型號（model_used）：這一輪沒查到時沿用之前的，不拿選的值頂替
+      let used = '', label = ''   // 那台回報的實際型號（model_used）：這一輪沒查到時沿用之前的，不拿選的值頂替；label＝它的顯示名（用那台的清單查，查不到就是代號本身）
       while (lch.id === t.id && Date.now() < stop) {
         await sleep(LAUNCH_POLL_MS)
         let row = null
         try { row = ((await mobileLaunchApi.launchers([t.id]))?.launches ?? []).find(l => l.id === t.id) } catch { /* 下一輪再問 */ }
         if (row?.status === 'ok' || row?.status === 'unconfirmed') await core.refreshRoster()
+        const before = used
         used = modelUsedOf(row, used)
+        if (used !== before) label = usedModelLabel(lchData.machines[t.node]?.launcher, used)   // 只在拿到新的型號時查一次（查不到的 console 記錄不會每 3 秒重複）
         const appeared = appearedIn(friends.value, t.node, t.name)
-        const v = progressView(row, appeared, t.name, appeared ? appearedModel(friends.value, t.node, t.name) : '', { used, picked: t.model })
+        const v = progressView(row, appeared, t.name, appeared ? appearedModel(friends.value, t.node, t.name) : '', { used, picked: t.model, label })
         if (lch.id !== t.id) return
         Object.assign(lch, { vphase: v.phase, text: v.text })
         if (appeared) {
@@ -1366,7 +1371,9 @@ const app = createApp({
       },
       onChange: (v, view) => { opsAcpViews.value = { ...opsAcpViews.value, [v]: view } },
     })
-    const opsAcpView = computed(() => (opsAcpWhere.value ? opsAcpViews.value.gemini ?? null : null))
+    // 還沒有讀取結果的第一拍也算「正在讀取」：不能先露出一個空的輸入框，等清單回來又換成下拉
+    const opsAcpView = computed(() => (opsAcpWhere.value ? opsAcpViews.value.gemini ?? { state: 'pending', models: [], note: PENDING_TEXT, canRetry: false, loading: true } : null))
+    const opsAcpReading = computed(() => opsAcpView.value?.state === 'pending')
     const opsAcp = computed(() => acpSwitchChoices(opsFriend.value, { list: opsAcpView.value?.models ?? [] }))
     const opsAcpNote = computed(() => opsAcpView.value?.note ?? '')
     const opsAcpCanRetry = computed(() => Boolean(opsAcpView.value?.canRetry) && !opsAcpView.value?.loading)
@@ -1378,7 +1385,7 @@ const app = createApp({
       else if (phase !== 'model') { opsAcpLoader.reset(); opsAcpViews.value = {} }
     })
     watch(() => opsAcp.value.models, models => { if (ops.phase === 'model' && models.length && !models.some(m => m.id === ops.model)) ops.model = opsAcp.value.selected })
-    const opsText = computed(() => opDialogText(ops.phase, opsFriend.value?.agent || opsFriend.value?.nick || '', opsFriend.value?.device || '', dialogEngine(opsFriend.value), { hasList: opsAcp.value.models.length > 0 }))
+    const opsText = computed(() => opDialogText(ops.phase, opsFriend.value?.agent || opsFriend.value?.nick || '', opsFriend.value?.device || '', dialogEngine(opsFriend.value), { hasList: opsAcp.value.models.length > 0 || opsAcpReading.value }))   // 讀取中也不叫人輸入代號（輸入框這時候不顯示）
     const opsTitle = computed(() => (ops.phase === 'menu' ? (opsFriend.value?.nick ?? '') : opsText.value.title || OP_LABEL[ops.phase] || ''))
     const opsModels = switchModelsFor('claude'), opsModelNote = MODEL_NOTE   // Claude 只有別名（跟電腦版同一份：fable、opus、sonnet、haiku）
     const opsIsPi = computed(() => ['pi', 'acp'].includes(partnerEngine(opsFriend.value)))   // pi 與內建通道的工作者沒有固定的模型清單：改成輸入框（Claude 的常用清單對它們不適用）
@@ -1811,7 +1818,7 @@ const app = createApp({
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, reaccept, reacceptAsk, reacceptNo, reacceptYes, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, removedBlock, acctRowLine, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody, fs, FP_SHOW_TEXT, fpShowStart, fpShowRetry, fpShowEnd, fpShowScan,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, opsAcpNote, opsAcpCanRetry, opsAcpRetryLabel, reloadOpsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, opsAcpNote, opsAcpReading, opsAcpCanRetry, opsAcpRetryLabel, reloadOpsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideNode, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       SUB_LAPSED_TEXT, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLoginTargets, acctLoginPress, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, acctHead, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchAuto, lchPi, lchModel, reloadLchModels, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,

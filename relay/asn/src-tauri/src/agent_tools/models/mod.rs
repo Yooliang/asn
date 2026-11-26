@@ -569,6 +569,18 @@ fn to_report_value(list: &[VendorModels]) -> serde_json::Value {
     serde_json::to_value(list).unwrap_or(serde_json::Value::Null)
 }
 
+/// 測試用（#2355 P4 的 golden 樣本）：把全域快取換成實機樣本，讓 `report_value()` 不必去跑真的 CLI 就能產出真輸出。
+/// gemini＝agy 實機清單（呼叫端用 include_str! 讀 tests/fixtures/agy-models/sample.txt，走真的 parse_agy）；
+/// claude＝固定讀不到；codex、pi＝沒裝。四家都寫成「新鮮」的，`snapshot` 就不會在背景去探測。
+#[cfg(test)]
+pub(crate) fn seed_samples_for_test(agy_text: &str) {
+    let (c, now) = (global(), Instant::now());
+    c.put(Vendor::Gemini, VendorModels::from_list(Vendor::Gemini, parse::parse_agy(agy_text)), now);
+    c.put(Vendor::Claude, claude_unsupported(), now);
+    c.put(Vendor::Codex, VendorModels::unavailable(Vendor::Codex, Code::NotInstalled, "沒裝"), now);
+    c.put(Vendor::Pi, VendorModels::unavailable(Vendor::Pi, Code::NotInstalled, "沒裝"), now);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

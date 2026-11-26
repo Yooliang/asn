@@ -72,7 +72,7 @@ test('舊版電腦提醒與開好時寫出實際模型（asn真 審 #471）', as
   const friends = [{ node: 'H', agent: '小皮', status: 'online', model: 'minimax/MiniMax-M3' }, { node: 'H', agent: '舊的', status: 'offline', model: 'x' }]
   assert.equal(appearedModel(friends, 'H', '小皮'), 'minimax/MiniMax-M3')
   assert.equal(appearedModel(friends, 'H', '舊的'), '', '離線的不算')
-  assert.equal(progressView(null, true, '小皮', 'minimax/MiniMax-M3').text, '「小皮」已經開好了（模型：minimax/MiniMax-M3），可以直接對話。')
+  assert.equal(progressView(null, true, '小皮', 'minimax/MiniMax-M3').text, '「小皮」已經開好了（型號：minimax/MiniMax-M3），可以直接對話。')
   assert.equal(progressView(null, true, '小皮').text, '「小皮」已經開好了，可以直接對話。', '沒回報模型：照舊')
   const fs = await import('node:fs')
   const m = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')

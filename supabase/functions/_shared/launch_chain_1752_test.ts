@@ -8,7 +8,7 @@ import { remoteModelRows, remoteTermProfile } from "../../../relay/asn/ui/lib/pa
 // @ts-ignore
 import { isTermProfile } from "../../../relay/asn/ui/lib/model-catalog.mjs";
 // @ts-ignore
-import { NONE_TEXT, modelState } from "../../../relay/asn/ui/lib/remote-models.mjs";
+import { NARROW_RE, NONE_TEXT, modelState } from "../../../relay/asn/ui/lib/remote-models.mjs";
 // @ts-ignore
 import { launchModelView, remoteLaunchModelChoice } from "../../../relay/asn/ui/lib/remote-launch-models.mjs";
 // @ts-ignore
@@ -93,18 +93,19 @@ Deno.test("#2353 第③階段：指定型號只在那台電腦有回報 models �
 });
 
 // #2355 P4：launcher.models → 後台 sanitizeLauncher → 畫面 modelState／remoteLaunchModelChoice，整條路接得起來。
-// 輸入的形狀由 Rust 讀出來（launcher.rs 帶 launch_model、models；VendorModels 的欄位名），清單用 agy 的實機樣本，不手寫一份剛好會過的資料。
-const AGY_SAMPLE = new URL("../../../relay/asn/src-tauri/tests/fixtures/agy-models/sample.txt", import.meta.url);
+// launch_model 與 models 讀 Rust 測試產出的 golden（relay/shared/test-vectors/launcher-summary-models-2355p4.json）：
+// 那份是 Rust 真的 Launcher::summary／report_value() 讀 agy 實機清單的輸出（Rust 端有測試逐字比對），這裡不手寫、不鏡像。
+const SUMMARY_GOLDEN = new URL("../../../relay/shared/test-vectors/launcher-summary-models-2355p4.json", import.meta.url);
 Deno.test("#2355 P4 整條路：Rust 摘要的 models、launch_model → 後台 sanitizeLauncher → 畫面型號下拉（Claude 別名、Gemini 讀清單；沒旗標或舊電腦不出下拉）", async () => {
   const src = await Deno.readTextFile(LAUNCHER_RS);
-  assert(/s\["launch_model"\]\s*=\s*json!\(true\)/.test(src), "launcher.rs 不再帶 launch_model？這支測試要跟著 Rust 的形狀走");
-  assert(/s\["models"\]\s*=\s*models/.test(src), "launcher.rs 不再把 models 放進摘要？");
-  const agy = (await Deno.readTextFile(AGY_SAMPLE)).split(/\r?\n/).filter((l) => l.includes("\t")).map((l) => { const [id, name] = l.split("\t"); return { id: id.trim(), name: (name ?? "").trim() }; });
-  assert(agy.length > 3, "agy 實機樣本讀不到");
+  const golden = JSON.parse(await Deno.readTextFile(SUMMARY_GOLDEN)) as { launch_model: boolean; models: { vendor: string; models: { id: string; name: string }[] }[] };
+  assertEquals(golden.launch_model, true, "golden 的旗標");
+  const agy = golden.models.find((m) => m.vendor === "gemini")!.models;
+  assert(agy.length > 3, "golden 的 gemini 清單讀不到");
   const sent = {
     ...summaryShapeFromRust(src, termProfilesFromRust(src)),
-    launch_model: true,
-    models: [{ vendor: "gemini", status: "ok", models: agy }, { vendor: "claude", status: "unavailable", code: "unsupported", models: [] }],
+    launch_model: golden.launch_model,
+    models: golden.models,
   };
   const stored = sanitizeLauncher(sent) as Record<string, unknown>;
   assert(stored && !("error" in stored));
@@ -117,7 +118,7 @@ Deno.test("#2355 P4 整條路：Rust 摘要的 models、launch_model → 後台 
   assertEquals([choice.show, choice.kind, choice.vendor], [true, "list", "gemini"]);
   const state = modelState(stored, "gemini", { where: "remote", narrow: true });
   assertEquals(state.state, "ready");
-  assertEquals(state.models.map((m: { id: string }) => m.id), agy.filter((m) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/.test(m.id)).map((m) => m.id));
+  assertEquals(state.models.map((m: { id: string }) => m.id), agy.filter((m) => NARROW_RE.test(m.id)).map((m) => m.id));
   const view = launchModelView(choice, { ...state, loading: false });
   assert(view.models.length > 3 && view.note === "");
 

@@ -1,7 +1,7 @@
 // 替別台電腦開新夥伴時的「型號」下拉（#2355 P4）：手機與電腦版共用這一份判斷，畫面只負責擺。純函式，node 與瀏覽器都能跑。
 // 清單來源是那台回報的摘要（launcher.models，經 modelState 整理）；讀取、再問、「再查一次」由 local-models.mjs 的 createModelLoader（where: 'remote'）負責。
 import { NONE_TEXT, PENDING_TEXT } from './remote-models.mjs'
-import { launchModelChoices } from './model-catalog.mjs'
+import { CLAUDE_ALIAS_MODELS, launchModelChoices } from './model-catalog.mjs'
 import { localProfileEngine } from './partner-launch-ui.mjs'
 
 /**
@@ -36,3 +36,26 @@ export function launchModelView(choice, view) {
 
 /** 使用者選的型號，必須還在目前的清單裡才算數（清單換了、換了廠牌都不能偷帶舊的）；不在就回空字串＝不指定 */
 export const pickedModel = (view, picked) => (view?.show && Array.isArray(view.models) && view.models.some(m => m.id === picked) ? picked : '')
+
+/**
+ * 型號下拉不顯示時（那台的旗標沒了、換成不能帶型號的開法或廠牌）要把選擇一起清掉：下拉看不到，留著的選擇就會讓送出一直被擋、又沒有地方重選。
+ * 下拉還在就原樣回傳（清單裡還在不在由 pickedModel 另外檢查）。畫面用 watch 在 view.show 變 false 時套用。
+ */
+export const pickKeptWhenShown = (view, picked) => (view?.show ? picked : '')
+
+/**
+ * 那台回報的實際型號（model_used）→ 畫面上的顯示名：用那台摘要裡的清單（launcher.models）查 name，Claude 的別名用別名名稱；
+ * 查不到就顯示代號本身，並把代號寫進 console 一行（給排查的人，畫面上只看到代號）。空的就回空字串。
+ */
+export function usedModelLabel(launcher, id) {
+  const code = typeof id === 'string' ? id.trim() : ''
+  if (!code) return ''
+  for (const v of Array.isArray(launcher?.models) ? launcher.models : []) {
+    const hit = (Array.isArray(v?.models) ? v.models : []).find(m => m?.id === code && typeof m.name === 'string' && m.name.trim())
+    if (hit) return hit.name.trim()
+  }
+  const alias = CLAUDE_ALIAS_MODELS.find(m => m.id === code)
+  if (alias) return alias.label
+  console.info('[ASN] 那台回報的型號在清單裡查不到顯示名，改顯示代號', code)
+  return code
+}
