@@ -3,7 +3,8 @@
 // 只在有帶且合格時才多傳 p_exclude_agents；沒帶＝舊呼叫完全不變。
 import { parseAgentName } from "./agent_inbox.ts";
 
-export type InboxRpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
+// 回傳型別用 PromiseLike：呼叫端傳的是 db.rpc()，它只有 then、不是 Promise（#2197）
+export type InboxRpc = (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
 
 export const MAX_EXCLUDE = 50;
 
