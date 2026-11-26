@@ -42,13 +42,26 @@ pub fn to_value(list: &[VendorModels]) -> Value {
     json!({ "models": serde_json::to_value(list).unwrap_or(Value::Null) })
 }
 
-/// 命令本體。不帶 `force`：只讀快取、不等（與摘要同一套 `snapshot`）；帶 `force`：略過快取真的重讀（`probe(v, true)`，一家一家讀）
+/// 命令本體：只負責把真的 `probe`／`snapshot` 交給 `query_with`
 pub async fn query(vendor: Option<&str>, force: bool) -> Result<Value, String> {
+    query_with(vendor, force, probe, snapshot).await
+}
+
+/// 命令的實際流程，兩個取資料的函式由呼叫端傳入（測試用假的，才測得到下面三件事）。
+/// 不帶 `force`：只讀快取、不等（`snapshot_fn`，與摘要同一套）；
+/// 帶 `force`：略過快取真的重讀（`probe_fn(v, true)`，各家同時讀，見 `read_all`）。
+/// 兩條路最後都要套每家筆數上限（`cap_local`）。
+pub async fn query_with<P, Fut, S>(vendor: Option<&str>, force: bool, probe_fn: P, snapshot_fn: S) -> Result<Value, String>
+where
+    P: Fn(Vendor, bool) -> Fut,
+    Fut: std::future::Future<Output = VendorModels> + Send + 'static,
+    S: Fn(Vendor) -> VendorModels,
+{
     let vendors = pick_vendors(vendor)?;
     let list = if force {
-        read_all(&vendors, |v| probe(v, true)).await
+        read_all(&vendors, |v| probe_fn(v, true)).await
     } else {
-        vendors.iter().map(|v| snapshot(*v)).collect()
+        vendors.iter().map(|v| snapshot_fn(*v)).collect()
     };
     Ok(to_value(&cap_local(list)))
 }
@@ -82,17 +95,23 @@ mod tests {
     }
 
     #[test]
-    fn 重新讀取四家同時查_總時間接近單家_順序固定() {
-        let delay = std::time::Duration::from_millis(300);
-        let started = std::time::Instant::now();
-        // 刻意讓排前面的家比較慢，確認回應順序不是照完成先後
-        let got = crate::rt::block_on(read_all(&Vendor::ALL, |v| async move {
-            let extra = (Vendor::ALL.len() - Vendor::ALL.iter().position(|x| *x == v).unwrap()) as u64;
-            tokio::time::sleep(delay + std::time::Duration::from_millis(extra * 10)).await;
-            many(v, 2)
-        }));
-        let took = started.elapsed();
-        assert!(took < delay * 2, "四家應該同時查，實測 {took:?}（依序至少 {:?}）", delay * 4);
+    fn 重新讀取四家同時查_順序固定() {
+        // 不看時間：四家都等同一個 Barrier(4)，四家同時在讀才過得了；依序讀第一家會永遠等不到其他三家，直到逾時
+        let gate = std::sync::Arc::new(tokio::sync::Barrier::new(Vendor::ALL.len()));
+        let got = crate::rt::block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                read_all(&Vendor::ALL, |v| {
+                    let gate = gate.clone();
+                    async move {
+                        gate.wait().await;
+                        many(v, 2)
+                    }
+                }),
+            )
+            .await
+        })
+        .expect("四家沒有同時在讀（依序讀會卡在第一家，逾時）");
         let order: Vec<&str> = got.iter().map(|v| v.vendor.as_str()).collect();
         let want: Vec<&str> = Vendor::ALL.iter().map(|v| v.id()).collect();
         assert_eq!(order, want, "順序維持 Vendor 固定順序");
@@ -115,6 +134,68 @@ mod tests {
                 assert!(r.models.is_empty());
             } else {
                 assert_eq!((r.status, r.models.len()), (Status::Ok, 2), "其他家照常");
+            }
+        }
+    }
+
+    type Calls = std::sync::Arc<std::sync::Mutex<Vec<(Vendor, bool)>>>;
+
+    /// 用假的 probe／snapshot 跑 `query_with`；回傳 (結果, probe 被呼叫的記錄(廠牌, force), snapshot 被呼叫的廠牌)
+    fn run(vendor: Option<&str>, force: bool, n: usize) -> (Result<Value, String>, Vec<(Vendor, bool)>, Vec<Vendor>) {
+        let probed: Calls = Default::default();
+        let snapped: std::sync::Arc<std::sync::Mutex<Vec<Vendor>>> = Default::default();
+        let (p, s) = (probed.clone(), snapped.clone());
+        let r = crate::rt::block_on(query_with(
+            vendor,
+            force,
+            move |v, f| {
+                p.lock().unwrap().push((v, f));
+                async move { many(v, n) }
+            },
+            move |v| {
+                s.lock().unwrap().push(v);
+                many(v, n)
+            },
+        ));
+        let (a, b) = (probed.lock().unwrap().clone(), snapped.lock().unwrap().clone());
+        (r, a, b)
+    }
+
+    #[test]
+    fn 按重新讀取_每家都走真讀取且帶_force_不碰快取() {
+        let (r, probed, snapped) = run(None, true, 2);
+        assert!(r.is_ok());
+        assert_eq!(probed.len(), Vendor::ALL.len(), "每家都讀一次");
+        assert!(probed.iter().all(|(_, f)| *f), "按重新讀取＝probe(v, true)，不能是快取：{probed:?}");
+        assert!(snapped.is_empty(), "force 時不該走快取快照：{snapped:?}");
+    }
+
+    #[test]
+    fn 不帶_force_只讀快取_不啟動真讀取() {
+        let (r, probed, snapped) = run(None, false, 2);
+        assert!(r.is_ok());
+        assert!(probed.is_empty(), "沒按重新讀取就不該讀：{probed:?}");
+        assert_eq!(snapped, Vendor::ALL.to_vec(), "照固定順序各取一次快照");
+    }
+
+    #[test]
+    fn 指定一家時只動那一家_兩條路都是() {
+        let (_, probed, _) = run(Some("codex"), true, 1);
+        assert_eq!(probed, vec![(Vendor::Codex, true)]);
+        let (_, _, snapped) = run(Some("pi"), false, 1);
+        assert_eq!(snapped, vec![Vendor::Pi]);
+        assert_eq!(run(Some("nope"), true, 1).0.unwrap_err(), "不認得的廠牌");
+    }
+
+    #[test]
+    fn 兩條路回應都套每家筆數上限() {
+        for force in [true, false] {
+            let (r, _, _) = run(None, force, 250);
+            let v = r.unwrap();
+            let arr = v["models"].as_array().unwrap();
+            assert_eq!(arr.len(), Vendor::ALL.len());
+            for item in arr {
+                assert_eq!(item["models"].as_array().unwrap().len(), LOCAL_MAX_MODELS, "force={force}：每家只留 200 筆");
             }
         }
     }
