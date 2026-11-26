@@ -1,11 +1,11 @@
 // 傳照片／檔案前的處理（只能在瀏覽器／WebView 裡跑）。
 // 可重用的入口（截圖標註等功能直接呼叫，再交給 core.sendAttachment）：
-//   imageFromBlob(blob, name)  任何圖片 Blob → 縮到長邊 2048、轉 webp（逐步降品質到 ≤ 5 MB）、附 256 長邊縮圖
+//   imageFromBlob(blob, name)  任何圖片 Blob → 長邊縮到 2048（短邊不足 1280 的長圖不縮，總像素 ≤ 8 MP）、轉 webp（逐步降品質到 ≤ 5 MB）、附 256 長邊縮圖
 //   fileFromBlob(blob, name)   一般檔案 Blob → 原樣（不壓縮、不轉檔），只檢查副檔名白名單與 25 MB
 //   attachmentFromFile(file)   選到的 File：圖片走 imageFromBlob，其餘走 fileFromBlob
 // 都回 { kind, name, data（base64）, width?, height?, thumb? }；格式與大小在送出前還會由 Rust 再檢查一次，這裡只是盡量做對。
 // 尺寸與規則在 photo.mjs（純函式，有單元測試）。
-import { FILE_EXT_TEXT, FILE_MAX_BYTES, PHOTO_MAX_BYTES, PHOTO_MAX_EDGE, PHOTO_PICK_MAX, THUMB_EDGE, cleanPhotoName, fileMimeOf, fitSize, isThumb, webpName } from './photo.mjs'
+import { FILE_EXT_TEXT, FILE_MAX_BYTES, PHOTO_MAX_BYTES, PHOTO_PICK_MAX, PHOTO_ROUNDS, THUMB_EDGE, cleanPhotoName, fileMimeOf, fitPhoto, fitSize, isThumb, webpName } from './photo.mjs'
 
 const blobOf = (cv, q) => new Promise(res => cv.toBlob(b => res(b), 'image/webp', q))
 
@@ -31,9 +31,9 @@ export async function imageFromBlob(blob, name = 'photo') {
   let bmp
   try { bmp = await createImageBitmap(blob) } catch { throw new Error('讀不了這個圖片檔，請換一張。') }
   try {
-    // 先照長邊 2048；壓不進 5 MB 就逐步降品質，再不行就縮小邊長
-    for (const edge of [PHOTO_MAX_EDGE, 1600, 1200]) {
-      const { w, h } = fitSize(bmp.width, bmp.height, edge)
+    // 先照新規則（長邊 2048、短邊保底 1280，長圖不縮糊）；壓不進 5 MB 就逐步降品質，再不行就逐輪縮小，最後退回只看長邊的舊規則
+    for (const round of PHOTO_ROUNDS) {
+      const { w, h } = fitPhoto(bmp.width, bmp.height, round)
       const cv = drawTo(bmp, w, h)
       for (const q of [0.88, 0.78, 0.68, 0.55, 0.42]) {
         const out = await blobOf(cv, q)

@@ -5,7 +5,7 @@
 ## 原則
 
 - 照片**不進信件內文**：檔案放後台 Supabase Storage 的私有 bucket，信裡只帶「附件編號＋縮圖資訊」。
-- 寄件端在本機壓縮（長邊 2048、webp、≤ 5 MB），向 `relay` 函式要一次性上傳網址，傳完確認，再寄信。
+- 寄件端在本機壓縮（長邊 2048，但短邊不足 1280 的長圖以短邊保底不縮，總像素 ≤ 8 MP、長邊 ≤ 8192；webp、≤ 5 MB），向 `relay` 函式要一次性上傳網址，傳完確認，再寄信。
 - 只有寄件節點與收件節點（群組信＝群組成員）能換到下載網址，短效（5 分鐘）；拿到編號的別人打不開。
 - 預設保存 30 天，之後檔案與縮圖都刪；信的文字仍依訊息規則保存 90 天。每台設備有總量上限。
 - 金鑰只在各端的程式裡（ASN 的 Rust、`send/recv` 腳本）；網頁介面與模型拿不到。
@@ -92,7 +92,7 @@ bucket `attachments`：**私有**、單檔上限 25 MB、`allowed_mime_types` �
 
 ## 用戶端
 
-- **ASN 電腦版**：選圖（或貼上）→ 前端畫布縮到長邊 2048 並轉 webp（逐步降品質到 ≤ 5 MB）、另做 256 長邊縮圖 → 交 Rust 指令 `relay_send_attachment`。Rust 檢查檔頭是 webp、大小 ≤ 5 MB、縮圖格式，才依序 `attach_init` → `PUT` → `attach_commit` → `send`（金鑰只在 Rust）。對話裡顯示縮圖，點了放大（Rust 指令 `relay_attachment_fetch` 取回整張，轉成 data URL 顯示），可「另存」（`relay_attachment_save`，存到 `下載\ASN\`）。
+- **ASN 電腦版**：選圖（或貼上）→ 前端畫布縮到長邊 2048（長圖以短邊 1280 保底、總像素 ≤ 8 MP；`fitPhoto`）並轉 webp（逐步降品質到 ≤ 5 MB，再不行逐輪縮小，最後退回只看長邊的舊規則）、另做 256 長邊縮圖 → 交 Rust 指令 `relay_send_attachment`。Rust 檢查檔頭是 webp、大小 ≤ 5 MB、縮圖格式，才依序 `attach_init` → `PUT` → `attach_commit` → `send`（金鑰只在 Rust）。對話裡顯示縮圖，點了放大（Rust 指令 `relay_attachment_fetch` 取回整張，轉成 data URL 顯示），可「另存」（`relay_attachment_save`，存到 `下載\ASN\`）。
 - **附件快取（#1493，電腦與手機都有）**：放大看與另存都先讀本機副本（`src-tauri/src/attach_cache.rs`），沒有才換網址下載；同一張第二次打開不再連線。
   - 位置：系統的 App 快取資料夾底下的 `attach-cache/<節點>/`（電腦＝`%LOCALAPPDATA%\tw.yooliang.asn`，手機＝App 的 cache，不在下載資料夾）。檔名只用附件編號（uuid，小寫），寄件人給的檔名只寫在旁邊的說明檔。
   - 只存下載後通過大小、型別、檔頭檢查的檔；讀出來時再驗一次，不對就刪掉重抓。

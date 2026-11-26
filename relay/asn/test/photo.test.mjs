@@ -9,6 +9,7 @@ import { AsnCore } from '../ui/lib/core.mjs'
 import {
   FILE_ACCEPT, FILE_MAX_BYTES, FILE_TYPES, fileMimeOf, noticeOf,
   PHOTO_MAX_BYTES, PHOTO_MAX_EDGE, THUMB_MAX_CHARS, cleanPhotoName, expiresAt, fitSize, formatBytes, friendlyPhotoError, isThumb,
+  fitPhoto, PHOTO_ROUNDS, PHOTO_MAX_PIXELS, PHOTO_HARD_EDGE,
   normalizePhotos, photoExpired, recentPhotos, shownPhotos, expiryMs, photoText, photoTitle, stripPhotoLines, webpName,
 } from '../ui/lib/photo.mjs'
 import { FAKE_KEY, startFakeRelay, U } from './fake-relay.mjs'
@@ -29,6 +30,47 @@ test('fitSize：長邊超過上限才縮（保持比例、取整數）、不放�
   assert.deepEqual(fitSize(0, 5), { w: 0, h: 0 })
   assert.deepEqual(fitSize(NaN, 5), { w: 0, h: 0 })
   assert.equal(PHOTO_MAX_EDGE, 2048); assert.equal(PHOTO_MAX_BYTES, 5 * 1024 * 1024); assert.equal(THUMB_MAX_CHARS, 12000)
+})
+
+test('fitPhoto（#2331）：一般照片尺寸與舊規則完全一樣；長圖以短邊保底不縮；超過 8 MP／8192 才縮', () => {
+  for (const [w, h] of [[4000, 3000], [3000, 4000], [1920, 1080], [1080, 1920], [1000, 500], [2048, 2048], [6000, 6000], [4032, 3024]]) {
+    assert.deepEqual(fitPhoto(w, h), fitSize(w, h), `${w}×${h} 應與舊規則相同`)
+  }
+  assert.deepEqual(fitPhoto(4000, 3000), { w: 2048, h: 1536 })
+  assert.deepEqual(fitPhoto(1920, 1080), { w: 1920, h: 1080 })
+  assert.deepEqual(fitPhoto(1162, 3604), { w: 1162, h: 3604 })   // 設計稿合一長圖：不縮
+  assert.deepEqual(fitPhoto(1080, 5000), { w: 1080, h: 5000 })   // 手機全頁截圖：不縮
+  // 短邊 ≥ 1280 的長圖：由短邊保底決定，仍受 8 MP 與 8192 限制
+  const big = fitPhoto(1500, 9000)
+  assert.ok(big.w * big.h <= PHOTO_MAX_PIXELS && Math.max(big.w, big.h) <= PHOTO_HARD_EDGE, JSON.stringify(big))
+  const huge = fitPhoto(6000, 6000)
+  assert.ok(huge.w * huge.h <= PHOTO_MAX_PIXELS)
+  const wide = fitPhoto(1000, 20000)
+  assert.ok(wide.h <= PHOTO_HARD_EDGE, JSON.stringify(wide))
+  assert.ok(fitPhoto(1280, 6000).w * fitPhoto(1280, 6000).h <= PHOTO_MAX_PIXELS)
+  assert.deepEqual(fitPhoto(0, 5), { w: 0, h: 0 })
+  assert.deepEqual(fitPhoto(NaN, 5), { w: 0, h: 0 })
+  // 圖本身不放大
+  assert.deepEqual(fitPhoto(300, 200), { w: 300, h: 200 })
+})
+
+test('fitPhoto 後備輪次：最後三輪（short:0）就是舊規則的 2048／1600／1200，低階手機記憶體不夠時退回舊行為', () => {
+  const old = PHOTO_ROUNDS.slice(-3)
+  assert.deepEqual(old.map(r => r.long), [2048, 1600, 1200])
+  for (const r of old) for (const [w, h] of [[4000, 3000], [1162, 3604], [1080, 5000], [3000, 4000]]) {
+    assert.deepEqual(fitPhoto(w, h, r), fitSize(w, h, r.long))
+  }
+  assert.deepEqual(PHOTO_ROUNDS[0], { long: 2048, short: 1280 })
+  // 輪次越後面越小（不增大）
+  const area = r => { const f = fitPhoto(1162, 3604, r); return f.w * f.h }
+  for (let i = 1; i < PHOTO_ROUNDS.length; i++) assert.ok(area(PHOTO_ROUNDS[i]) <= area(PHOTO_ROUNDS[i - 1]))
+})
+
+test('主圖寄出走 fitPhoto＋逐輪後備（守門：改回只看長邊 2048 會紅）', () => {
+  const src = read('ui/lib/photo-canvas.mjs')
+  assert.match(src, /for \(const round of PHOTO_ROUNDS\)/)
+  assert.match(src, /fitPhoto\(bmp\.width, bmp\.height, round\)/)
+  assert.doesNotMatch(src, /for \(const edge of \[PHOTO_MAX_EDGE/)
 })
 
 test('檔名：控制字元、括號、引號、路徑與 shell 符號都清掉；webp 副檔名；空的退回預設', () => {

@@ -36,6 +36,29 @@ export function fitSize(w, h, max = PHOTO_MAX_EDGE) {
   return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) }
 }
 
+// 主圖縮放規則（#2331）：s = min(1, max(長邊保底, 短邊保底))，再套總像素與長邊硬上限。
+// 一般照片（4000×3000 等）由長邊 2048 決定，結果與舊規則相同；長圖、全頁截圖（短邊 < 1280）則以短邊保底，不被長邊拖累成糊字。
+export const PHOTO_SHORT_EDGE = 1280         // 短邊保底：短邊不足這個數時，寧可長邊超過 2048 也不把圖縮小
+export const PHOTO_MAX_PIXELS = 8_000_000    // 總像素上限（8 MP）：防止解碼與畫布吃光低階手機記憶體
+export const PHOTO_HARD_EDGE = 8192          // 長邊硬上限
+// 逐輪後備（5 MB 壓不下、或記憶體不夠時依序試）：前兩輪用新規則，之後退回只看長邊的舊規則（short: 0），最後一輪 1200 與舊版完全一樣
+export const PHOTO_ROUNDS = Object.freeze([
+  Object.freeze({ long: 2048, short: PHOTO_SHORT_EDGE }),
+  Object.freeze({ long: 1600, short: 1000 }),
+  Object.freeze({ long: 2048, short: 0 }),
+  Object.freeze({ long: 1600, short: 0 }),
+  Object.freeze({ long: 1200, short: 0 }),
+])
+export function fitPhoto(w, h, { long = PHOTO_MAX_EDGE, short = PHOTO_SHORT_EDGE } = {}) {
+  if (!(w > 0) || !(h > 0)) return { w: 0, h: 0 }
+  const hi = Math.max(w, h), lo = Math.min(w, h)
+  let s = Math.min(1, Math.max(long / hi, short > 0 ? short / lo : 0))
+  const cap = Math.min(Math.sqrt(PHOTO_MAX_PIXELS / (w * h)), PHOTO_HARD_EDGE / hi)
+  if (s <= cap) return { w: Math.max(1, Math.round(w * s)), h: Math.max(1, Math.round(h * s)) }
+  s = cap   // 被上限壓住時無條件捨去，確保取整後仍在上限內
+  return { w: Math.max(1, Math.floor(w * s)), h: Math.max(1, Math.floor(h * s)) }
+}
+
 // 檔名清理（同後端與 Rust）：控制字元、括號、引號、路徑與 shell 符號換成空白，至多 80 字
 const BAD = new RegExp('[\\x00-\\x1f\\x7f-\\x9f' + [0x2028, 0x2029, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(c => String.fromCharCode(c)).join('') + '〔〕［］【】「」『』()（）\\[\\]{}<>《》`\'"“”‘’\\\\/|:*?;&$%!#^~=,]', 'g')
 export function cleanPhotoName(s, fallback = 'photo.webp') {
