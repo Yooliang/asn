@@ -45,11 +45,44 @@ pub fn to_value(list: &[VendorModels]) -> Value {
 /// 命令本體。不帶 `force`：只讀快取、不等（與摘要同一套 `snapshot`）；帶 `force`：略過快取真的重讀（`probe(v, true)`，一家一家讀）
 pub async fn query(vendor: Option<&str>, force: bool) -> Result<Value, String> {
     let vendors = pick_vendors(vendor)?;
-    let mut list = Vec::with_capacity(vendors.len());
-    for v in vendors {
-        list.push(if force { probe(v, true).await } else { snapshot(v) });
-    }
+    let list = if force {
+        read_all(&vendors, |v| probe(v, true)).await
+    } else {
+        vendors.iter().map(|v| snapshot(*v)).collect()
+    };
     Ok(to_value(&cap_local(list)))
+}
+
+/// 各家「同時」讀（總時間約等於最慢那一家），回傳順序與 `vendors` 相同。
+/// 同一家的單一飛行旗標在 `probe` 內，所以同一家仍不會同時跑兩個 CLI。不新增依賴：自己輪詢一組 future
+async fn read_all<F, Fut>(vendors: &[Vendor], fetch: F) -> Vec<VendorModels>
+where
+    F: Fn(Vendor) -> Fut,
+    Fut: std::future::Future<Output = VendorModels>,
+{
+    let mut pending: Vec<Option<std::pin::Pin<Box<Fut>>>> = vendors.iter().map(|v| Some(Box::pin(fetch(*v)))).collect();
+    let mut done: Vec<Option<VendorModels>> = vendors.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        let mut all = true;
+        for (slot, out) in pending.iter_mut().zip(done.iter_mut()) {
+            if let Some(f) = slot {
+                match f.as_mut().poll(cx) {
+                    std::task::Poll::Ready(r) => {
+                        *out = Some(r);
+                        *slot = None;
+                    }
+                    std::task::Poll::Pending => all = false,
+                }
+            }
+        }
+        if all { std::task::Poll::Ready(()) } else { std::task::Poll::Pending }
+    })
+    .await;
+    vendors
+        .iter()
+        .zip(done)
+        .map(|(v, d)| d.unwrap_or_else(|| VendorModels::error(*v, super::Code::SpawnFailed, "讀取沒有結果")))
+        .collect()
 }
 
 #[cfg(test)]
@@ -59,6 +92,24 @@ mod tests {
 
     fn many(v: Vendor, n: usize) -> VendorModels {
         VendorModels::from_list(v, (0..n).map(|i| ModelEntry { id: format!("m{i}"), name: format!("Model number {i} with a long display name") }).collect())
+    }
+
+    #[test]
+    fn 重新讀取四家同時查_總時間接近單家_順序固定() {
+        let delay = std::time::Duration::from_millis(300);
+        let started = std::time::Instant::now();
+        // 刻意讓排前面的家比較慢，確認回應順序不是照完成先後
+        let got = crate::rt::block_on(read_all(&Vendor::ALL, |v| async move {
+            let extra = (Vendor::ALL.len() - Vendor::ALL.iter().position(|x| *x == v).unwrap()) as u64;
+            tokio::time::sleep(delay + std::time::Duration::from_millis(extra * 10)).await;
+            many(v, 2)
+        }));
+        let took = started.elapsed();
+        assert!(took < delay * 2, "四家應該同時查，實測 {took:?}（依序至少 {:?}）", delay * 4);
+        let order: Vec<&str> = got.iter().map(|v| v.vendor.as_str()).collect();
+        let want: Vec<&str> = Vendor::ALL.iter().map(|v| v.id()).collect();
+        assert_eq!(order, want, "順序維持 Vendor 固定順序");
+        assert!(got.iter().all(|v| v.models.len() == 2), "內容各家都在");
     }
 
     #[test]
