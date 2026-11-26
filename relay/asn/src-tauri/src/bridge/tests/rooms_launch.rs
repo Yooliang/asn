@@ -1847,6 +1847,20 @@ async fn 遠端指定型號_gemini_背景夥伴_拿不到工作者實際用的�
     let _ = l.rx.recv().await;
 }
 
+#[tokio::test]
+async fn 遠端指定型號_同名夥伴原本就記著同一個型號_這次工作者沒啟動成功_不帶_model_used() {
+    let mut l = lharness(|s, p| model_env(s, p, |e| e.bg_outcome = Some(Ok(()))), (30_000, 400, 20)).await;
+    crate::bridge::engines::acp_models::set(&models_file(&l.h), "小格", "gemini-3.8-flash").unwrap();
+    let cwd = l.proj.path().to_path_buf();
+    l.h.fr.st.lock().unwrap().launches.push(lreq(1, "小格", &cwd, json!({"profile": "gemini", "model": "gemini-3.8-flash"})));
+    l.h.core.pull("bell", T0).await;
+    wait_until(|| !results(&l.h).is_empty()).await;
+    let r = results(&l.h);
+    assert_eq!(r[0]["status"], "ok");
+    assert!(r[0].get("model_used").is_none(), "舊值剛好相同：分不出是不是這次寫的，不能帶：{}", r[0]);
+    let _ = l.rx.recv().await;
+}
+
 #[test]
 fn 工作者記下的型號跟請求不同_或沒記_都不算確認() {
     let d = tempfile::tempdir().unwrap();

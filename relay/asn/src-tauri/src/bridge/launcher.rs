@@ -652,6 +652,8 @@ impl Launcher {
         if is_bg {
             let since = now_ms();
             let wd = self.work_dir.clone();
+            // 排入之前就先看一次：記錄裡這個名字的舊值已經等於請求的型號，事後從檔案分不出是不是這次工作者寫的，就不回報 model_used
+            let stale = bg_model.as_deref().is_some_and(|m| confirmed_bg_model(&self.work_dir, &name, m).is_some());
             let m2 = bg_model.clone();
             let queued = tokio::task::spawn_blocking(move || env.enqueue_background(&cfg2, &p2, &n2, &c2, m2.as_deref(), &wd)).await.map_err(|e| format!("背景工作失敗：{e}")).and_then(|r| r);
             if let Err(e) = queued {
@@ -661,7 +663,7 @@ impl Launcher {
             self.record(&l, "queued", "");
             let me = self.clone();
             tokio::spawn(async move {
-                me.wait_for_background(l, since, bg_model).await;
+                me.wait_for_background(l, since, bg_model, stale).await;
                 me.inflight.lock().unwrap().remove(&lower);
             });
             return;
@@ -745,7 +747,8 @@ impl Launcher {
     /// 背景夥伴：等引擎消化佇列。記進名冊＝開出來了（回 ok、通知核心刷新名單與送第一句話）；引擎記了失敗＝回中文原因
     /// model＝請求指定的型號：開好後不直接拿請求值回報，而是等工作者啟動成功記進 acp-models.json 的值（見 [`confirmed_bg_model`]），
     /// 寬限時間內等不到就照常回報 ok、不帶 model_used。失敗不碰 acp-models.json（工作者沒啟動成功就沒寫過）
-    async fn wait_for_background(&self, l: Value, since: u64, model: Option<String>) {
+    /// stale＝排入前記錄裡就已經是這個型號：分不出是不是這次寫的，一律不帶 model_used
+    async fn wait_for_background(&self, l: Value, since: u64, model: Option<String>, stale: bool) {
         let s = |k: &str| l.get(k).and_then(Value::as_str).unwrap_or("").to_string();
         let name = s("name");
         let t0 = std::time::Instant::now();
@@ -755,6 +758,10 @@ impl Launcher {
             match pq::find_outcome(&self.work_dir, &name, since) {
                 Some(Ok(())) => {
                     let used = match &model {
+                        Some(_) if stale => {
+                            self.log.line(&format!("launcher: 背景夥伴 {name} 記錄裡原本就是這個型號，分不出是不是這次寫的，回報不帶 model_used"));
+                            None
+                        }
                         Some(m) => self.await_bg_model(&name, m).await,
                         None => None,
                     };
