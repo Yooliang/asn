@@ -6,6 +6,9 @@ import { env, row, sha, short, opts, STATE, T0, lk, seededState, postFails, aler
 
 const FIELDS = ['at', 'attempts', 'claimedAt', 'claimedBy', 'commit', 'createdAt', 'id', 'kind', 'lastError', 'platform', 'version']
 const quiet = () => mock.method(console, 'warn', () => {})
+// 行分隔字元 U+2028、段落分隔字元 U+2029：用程式產生，不在原始碼裡放原始字元
+const LS = String.fromCharCode(0x2028)
+const PS = String.fromCharCode(0x2029)
 
 test('#2345 發佈成功、沒貼成：佇列有 1 筆固定欄位（沒有 text、room），告警照舊 active', async () => {
   const e = env({ desktopRows: [row('v0.2.99', 222)] })
@@ -201,7 +204,7 @@ test('#2345 單筆序列化超過上限：整筆拒絕', () => {
 })
 
 test('#2345 cleanLastError：拿掉換行與控制字元、截到 100 字、非字串回 null', () => {
-  assert.equal(cleanLastError('甲\n乙\r丙\t丁\u0000戊\u007f己\u0085庚 辛 壬'), '甲乙丙丁戊己庚辛壬')
+  assert.equal(cleanLastError('甲\n乙\r丙\t丁\u0000戊\u007f己\u0085庚' + LS + '辛' + PS + '壬'), '甲乙丙丁戊己庚辛壬')
   assert.equal(cleanLastError('x'.repeat(250)).length, 100)
   assert.equal(cleanLastError('a\nb'.repeat(80)).length, 100)
   assert.equal(cleanLastError('正常'), '正常')
@@ -213,7 +216,7 @@ test('#2345 lastError 驗證：null 或 ≤100 字無控制字元的字串才收
   const ok = buildItem({ kind: 'published', platform: 'linux', version: '0.2.99', commit: sha(3) }, T0)
   assert.ok(validateItem({ ...ok, lastError: null }))
   assert.ok(validateItem({ ...ok, lastError: 'x'.repeat(100) }))
-  for (const bad of ['x'.repeat(101), 'a\nb', 'a\rb', 'a\u0000b', 'a\u007fb', 'a\u0085b', 'a b', 'a b', 5]) {
+  for (const bad of ['x'.repeat(101), 'a\nb', 'a\rb', 'a\u0000b', 'a\u007fb', 'a\u0085b', 'a' + LS + 'b', 'a' + PS + 'b', 5]) {
     m.mock.resetCalls()
     assert.equal(validateItem({ ...ok, lastError: bad }), null, JSON.stringify(bad))
     assert.ok(m.mock.calls.some((c) => /lastError/.test(c.arguments[0])))
