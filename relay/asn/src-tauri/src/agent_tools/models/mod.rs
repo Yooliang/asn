@@ -16,8 +16,10 @@
 //! `{vendor, status, code?, stale?, age_s?, models:[{id,name}]}`。status：ok／unavailable／error／pending；
 //! pending＝第一次還沒有結果（讀取中）；stale＝重查失敗、沿用上次的清單（status 仍是 ok，code 是這次失敗的原因，age_s＝這份清單距今幾秒）。
 mod parse;
+mod redact;
 mod run;
 
+pub use redact::mask_reason;
 pub use parse::{parse_agy, parse_codex, parse_pi, valid_model_id, MAX_MODELS, MODEL_ID_PATTERN, REPORT_FLOOR_BYTES, REPORT_MAX_BYTES, REPORT_MAX_MODELS};
 pub use run::{run, run_blocking, RunFail, Spawn};
 
@@ -75,6 +77,19 @@ pub enum Code {
 
 impl Code {
     pub const ALL: [Code; 8] = [Code::Ok, Code::NotInstalled, Code::NotLoggedIn, Code::Timeout, Code::TooLarge, Code::ParseFailed, Code::SpawnFailed, Code::Unsupported];
+    /// 與序列化出去的字串相同（寫 log 用）
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Code::Ok => "ok",
+            Code::NotInstalled => "not_installed",
+            Code::NotLoggedIn => "not_logged_in",
+            Code::Timeout => "timeout",
+            Code::TooLarge => "too_large",
+            Code::ParseFailed => "parse_failed",
+            Code::SpawnFailed => "spawn_failed",
+            Code::Unsupported => "unsupported",
+        }
+    }
 }
 
 /// 讀取失敗 → 固定代碼。結束碼不是 0、讀到一半出 IO 錯誤，都是「CLI 起來了但沒給出結果」，歸 spawn_failed（解析不出來才是 parse_failed）
@@ -86,7 +101,7 @@ pub fn code_of(e: &RunFail) -> Code {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct VendorModels {
     pub vendor: String,
     pub status: Status,
@@ -105,6 +120,38 @@ pub struct VendorModels {
     pub reason: String,
 }
 
+/// 手寫：`{:?}` 不印原因原文（可能帶路徑、帳號、金鑰），只說有幾個字；要看原因請走 `failure_log_line`（遮罩過）
+impl std::fmt::Debug for VendorModels {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VendorModels")
+            .field("vendor", &self.vendor)
+            .field("status", &self.status)
+            .field("code", &self.code)
+            .field("stale", &self.stale)
+            .field("age_s", &self.age_s)
+            .field("models", &self.models)
+            .field("reason", &format_args!("<已遮蔽 {} 字>", self.reason.chars().count()))
+            .finish()
+    }
+}
+
+/// 探測沒讀到型號時寫進本機 ui.log 的那一行：廠牌、狀態、固定代碼、遮罩後的原因。
+/// 讀到了（code＝ok）與讀取中（pending）不寫；沿用舊清單（status 仍是 ok、code 是失敗原因）要寫
+pub fn failure_log_line(v: &VendorModels) -> Option<String> {
+    let code = v.code?;
+    if code == Code::Ok || v.status == Status::Pending {
+        return None;
+    }
+    let status = match v.status {
+        Status::Ok => "ok",
+        Status::Unavailable => "unavailable",
+        Status::Error => "error",
+        Status::Pending => "pending",
+    };
+    let stale = if v.stale { " stale=true" } else { "" };
+    Some(format!("[型號探測] vendor={} status={status} code={}{stale} reason={}", v.vendor, code.as_str(), mask_reason(&v.reason)))
+}
+
 impl VendorModels {
     fn new(v: Vendor, status: Status, code: Option<Code>, models: Vec<ModelEntry>, reason: impl Into<String>) -> Self {
         VendorModels { vendor: v.id().into(), status, code, stale: false, age_s: None, models, reason: reason.into() }
@@ -119,7 +166,30 @@ impl VendorModels {
     pub fn pending(v: Vendor) -> Self {
         Self::new(v, Status::Pending, None, vec![], "尚未讀取")
     }
-    /// 解析完的結果：空的算 Unavailable（多半是還沒登入）
+    /// 一家的原始輸出 → 結果。**有輸出卻一筆都解析不出來＝解析失敗**（error／parse_failed），不能叫人去登入；
+    /// 只有真的沒輸出（去掉空白與 BOM 後是空的）才算「沒列出任何型號」。Codex 不需要登入，空清單一律是解析失敗
+    pub fn from_text(v: Vendor, text: &str) -> Self {
+        let blank = text.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}').is_empty();
+        let list = match v {
+            Vendor::Pi => parse_pi(text),
+            Vendor::Gemini => parse_agy(text),
+            _ => match parse_codex(text) {
+                Ok(l) => l,
+                Err(e) => return Self::error(v, Code::ParseFailed, e),
+            },
+        };
+        if !list.is_empty() {
+            return Self::from_list(v, list);
+        }
+        if v == Vendor::Codex {
+            return Self::error(v, Code::ParseFailed, "輸出是合法的 JSON，但沒有可列出的型號");
+        }
+        if blank {
+            return Self::from_list(v, list);
+        }
+        Self::error(v, Code::ParseFailed, format!("{} 有輸出（{} 字）但一筆型號都解析不出來", v.binary(), text.chars().count()))
+    }
+    /// 解析完的結果：空的算 Unavailable（多半是還沒登入）。**只給「真的沒輸出」用**，有輸出的走 `from_text`
     fn from_list(v: Vendor, list: Vec<ModelEntry>) -> Self {
         if list.is_empty() {
             Self::unavailable(v, Code::NotLoggedIn, "CLI 沒有列出任何型號（可能還沒登入）")
@@ -206,6 +276,12 @@ impl ProbeCache {
     /// 寫入一次探測結果。**失敗（Error）不蓋掉上次成功的清單**：格子裡已經有讀到型號的結果時，保留那份舊清單，
     /// 狀態仍是 Ok，標 `stale`、`code` 換成這次失敗的原因，`reason` 註明「重查失敗，沿用上次的清單」；下一次重查在 1 分鐘後
     pub fn put(&self, vendor: Vendor, value: VendorModels, now: Instant) {
+        // ui.log（elog 在有視窗的建置會同步寫檔）；原因先遮罩才出去
+        self.put_logged(vendor, value, now, &mut |line| elog!("{line}"));
+    }
+
+    /// `put`，記錄的出口由呼叫端給（測試用它收集要寫的那一行）。每次得到「沒讀到型號」的結果（含沿用舊清單）都寫一行
+    fn put_logged(&self, vendor: Vendor, value: VendorModels, now: Instant, log: &mut dyn FnMut(&str)) {
         let mut g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         let slot = match g.get(&vendor) {
             Some(old) if value.status == Status::Error && old.value.status == Status::Ok && !old.value.models.is_empty() => {
@@ -217,6 +293,9 @@ impl ProbeCache {
             }
             _ => Slot { at: now, ok_at: now, value },
         };
+        if let Some(line) = failure_log_line(&slot.value) {
+            log(&line);
+        }
         g.insert(vendor, slot);
     }
 
@@ -356,14 +435,7 @@ pub async fn probe_uncached(v: Vendor) -> VendorModels {
         Ok(t) => t,
         Err(e) => return VendorModels::error(v, code_of(&e), e.reason(v.binary())),
     };
-    match v {
-        Vendor::Pi => VendorModels::from_list(v, parse_pi(&text)),
-        Vendor::Gemini => VendorModels::from_list(v, parse_agy(&text)),
-        _ => match parse_codex(&text) {
-            Ok(l) => VendorModels::from_list(v, l),
-            Err(e) => VendorModels::error(v, Code::ParseFailed, e),
-        },
-    }
+    VendorModels::from_text(v, &text)
 }
 
 /// 探測一家；`force`＝略過快取（使用者按了「重新讀取」）。
@@ -917,6 +989,145 @@ mod tests {
         let got = crate::rt::block_on(probe_in(c, Vendor::Codex, true, || async { ok(Vendor::Codex) }));
         assert_eq!(got.status, Status::Ok);
         assert!(c.claim(Vendor::Codex).is_some(), "查完旗標放開");
+    }
+
+    // ---- 一審補件 ① reason 在本機要記（遮罩）、Debug 不印原文 ----
+
+    const SECRET_REASON: &str = r"pi 起不來：C:\Users\someone\.pi\bin\pi.exe token=SECRET123 /home/alice/x ey0123456789abcdef0123456789abcdef0123456789";
+
+    fn assert_no_raw(text: &str) {
+        for raw in ["someone", "SECRET123", "alice", "ey0123456789abcdef0123456789abcdef0123456789"] {
+            assert!(!text.contains(raw), "不該出現原文 {raw}：{text}");
+        }
+    }
+
+    #[test]
+    fn 失敗時寫一行記錄_有廠牌_代碼_遮罩後的原因() {
+        let line = failure_log_line(&VendorModels::error(Vendor::Pi, Code::SpawnFailed, SECRET_REASON)).unwrap();
+        assert!(line.starts_with("[型號探測] vendor=pi status=error code=spawn_failed reason="), "{line}");
+        assert_no_raw(&line);
+        assert!(line.contains('~') && line.contains("<隱藏>"), "{line}");
+        // 沒讀到型號的每一種都記；讀到了與讀取中不記
+        assert!(failure_log_line(&VendorModels::unavailable(Vendor::Gemini, Code::NotInstalled, "找不到 agy")).unwrap().contains("code=not_installed"));
+        assert!(failure_log_line(&ok(Vendor::Codex)).is_none());
+        assert!(failure_log_line(&VendorModels::pending(Vendor::Pi)).is_none());
+    }
+
+    #[test]
+    fn 寫入快取時每次非_ok_都記一行_含沿用舊清單_原文不外漏() {
+        let c = leak();
+        let t0 = Instant::now();
+        let mut lines: Vec<String> = Vec::new();
+        c.put_logged(Vendor::Pi, ok(Vendor::Pi), t0, &mut |l| lines.push(l.to_string()));
+        assert!(lines.is_empty(), "成功不記");
+        let t1 = t0 + OK_TTL + Duration::from_secs(1);
+        c.put_logged(Vendor::Pi, VendorModels::error(Vendor::Pi, Code::Timeout, SECRET_REASON), t1, &mut |l| lines.push(l.to_string()));
+        assert_eq!(lines.len(), 1, "沿用舊清單（stale）也要記：{lines:?}");
+        assert!(lines[0].contains("stale=true") && lines[0].contains("code=timeout") && lines[0].contains("沿用上次的清單"), "{}", lines[0]);
+        c.put_logged(Vendor::Codex, VendorModels::unavailable(Vendor::Codex, Code::NotInstalled, SECRET_REASON), t0, &mut |l| lines.push(l.to_string()));
+        c.put_logged(Vendor::Gemini, VendorModels::error(Vendor::Gemini, Code::ParseFailed, SECRET_REASON), t0, &mut |l| lines.push(l.to_string()));
+        assert_eq!(lines.len(), 3);
+        lines.iter().for_each(|l| assert_no_raw(l));
+        // put 本身走 elog!（寫 ui.log）：守門，免得有人把記錄那行拿掉
+        let src = include_str!("mod.rs").split("#[cfg(test)]").next().unwrap();
+        assert!(src.contains(r#"self.put_logged(vendor, value, now, &mut |line| elog!("{line}"))"#));
+    }
+
+    #[test]
+    fn debug_輸出不印原因原文() {
+        let v = VendorModels::error(Vendor::Pi, Code::SpawnFailed, SECRET_REASON);
+        let d = format!("{v:?} {:?}", vec![v.clone()]);
+        assert_no_raw(&d);
+        assert!(d.contains("已遮蔽") && d.contains("vendor"), "{d}");
+        let e = format!("{:?} {:?}", RunFail::Spawn(SECRET_REASON.into()), RunFail::Io(SECRET_REASON.into()));
+        assert_no_raw(&e);
+        assert_eq!(format!("{:?}", RunFail::Exit(Some(3))), "Exit(Some(3))");
+        assert_eq!(Code::ALL.map(|c| c.as_str().to_string()).to_vec(), Code::ALL.map(|c| serde_json::to_value(c).unwrap().as_str().unwrap().to_string()).to_vec());
+    }
+
+    // ---- 一審補件 ② 有輸出卻解析出 0 筆＝parse_failed ----
+
+    fn kind(v: &VendorModels) -> (Status, Option<Code>) {
+        (v.status, v.code)
+    }
+
+    #[test]
+    fn 有輸出但解析出零筆_每一家都是_parse_failed_不叫人去登入() {
+        let pf = (Status::Error, Some(Code::ParseFailed));
+        // pi：有文字但不是表格
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Pi, "Something unexpected happened\n")), pf);
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Pi, "No models available.")), pf);
+        // agy：有輸出但沒有任何「代號<Tab>顯示名」
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Gemini, "Error: something odd\nsee docs\n")), pf);
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Gemini, "bad id\tX\n")), pf, "有行但代號全不合法");
+        // Codex：合法 JSON 但沒有 list 型號（空陣列、全 hide）；不是合法 JSON；缺 models
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Codex, r#"{"models":[]}"#)), pf);
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Codex, r#"{"models":[{"slug":"a","visibility":"hide"}]}"#)), pf);
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Codex, "not json")), pf);
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Codex, "{}")), pf);
+        for t in [r#"{"models":[]}"#, "x"] {
+            assert_ne!(VendorModels::from_text(Vendor::Codex, t).code, Some(Code::NotLoggedIn), "Codex 不需要登入");
+        }
+    }
+
+    #[test]
+    fn 真正空輸出照舊_pi_與_agy_是沒登入_有型號仍是_ok() {
+        for blank in ["", "  \n\t ", "\u{feff}\n"] {
+            assert_eq!(kind(&VendorModels::from_text(Vendor::Pi, blank)), (Status::Unavailable, Some(Code::NotLoggedIn)), "{blank:?}");
+            assert_eq!(kind(&VendorModels::from_text(Vendor::Gemini, blank)), (Status::Unavailable, Some(Code::NotLoggedIn)), "{blank:?}");
+        }
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Codex, "")), (Status::Error, Some(Code::ParseFailed)), "Codex 空輸出本來就是解析失敗");
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Gemini, "a-1\tA\n")), (Status::Ok, Some(Code::Ok)));
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Pi, "anthropic     claude-sonnet-5-5   1M  128K  yes  yes\n")), (Status::Ok, Some(Code::Ok)));
+        assert_eq!(VendorModels::from_text(Vendor::Codex, r#"{"models":[{"slug":"a","visibility":"list"}]}"#).status, Status::Ok);
+    }
+
+    // ---- 一審補件 ③ 最大量 wire 向量（Rust 產生，Edge 與 SQL 驗證） ----
+
+    const WIRE_MAX: &str = include_str!("../../../../../shared/test-vectors/launcher-models-wire-max.json");
+
+    /// 八家（後台的家數上限）：每家 300 筆候選、id 100 字（合法最長）、顯示名 80 字（合法最長），pi 排最後
+    fn max_list() -> Vec<VendorModels> {
+        let pad = |mut s: String, fill: char, to: usize| {
+            while s.chars().count() < to {
+                s.push(fill);
+            }
+            s
+        };
+        ["claude", "codex", "gemini", "grok", "kimi", "qwen", "droid", "pi"]
+            .iter()
+            .map(|v| VendorModels {
+                vendor: v.to_string(),
+                status: Status::Ok,
+                code: Some(Code::Ok),
+                stale: false,
+                age_s: None,
+                models: (0..300).map(|i| ModelEntry { id: pad(format!("{v}-{i:03}-"), 'x', 100), name: pad(format!("{v} {i:03} "), 'N', 80) }).collect(),
+                reason: String::new(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn wire_最大量_真輸出與共用向量逐字相同_且後台規則收得下() {
+        let out = to_report_value(&limit_for_report(max_list()));
+        let want = serde_json::from_str::<serde_json::Value>(WIRE_MAX).unwrap()["models"].clone();
+        if out != want {
+            panic!("最大量輸出變了。把下面這一行貼進 launcher-models-wire-max.json 的 models：\n{}", serde_json::to_string(&out).unwrap());
+        }
+        assert_eq!(backend_accepts(&out), Ok(()));
+        let bytes = serde_json::to_vec(&out).unwrap().len();
+        assert!(bytes <= 24_000 && bytes > 23_000, "要逼近上限但不超過：{bytes}");
+        let arr = out.as_array().unwrap();
+        assert_eq!(arr.len(), 8);
+        let counts: Vec<usize> = arr.iter().map(|e| e["models"].as_array().unwrap().len()).collect();
+        assert!(counts.iter().all(|n| *n > 0), "每家都有保底：{counts:?}");
+        assert!(WIRE_MAX.chars().all(|c| !c.is_control() || c == '\n' || c == '\r'), "向量檔不放不可見字元");
+        assert!(!WIRE_MAX.chars().any(is_invisible), "向量檔不放格式字元");
+    }
+
+    fn is_invisible(c: char) -> bool {
+        parse::is_format_char(c)
     }
 
     #[test]
