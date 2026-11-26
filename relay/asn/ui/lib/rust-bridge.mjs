@@ -4,8 +4,8 @@
 const safeOff = off => { if (typeof off !== 'function') return; try { off() } catch { /* 取消失敗（視窗已關）：沒有可補救的，不影響其他事件 */ } }
 
 /** readyFor 丟的錯：訊息是給 log 的原文（含事件名與狀態），帶 code 讓畫面改顯示白話 */
-export const HUB_NOT_READY = 'hub-not-ready'
-const notReady = msg => Object.assign(new Error(msg), { code: HUB_NOT_READY })
+export const HUB_NOT_READY_CODE = 'hub-not-ready'
+const notReady = msg => Object.assign(new Error(msg), { code: HUB_NOT_READY_CODE })
 
 export function createRustBridge({ listen = null, dispatch, log = () => {}, warn = log }) {
   // 每個事件名一格：count＝訂閱者數；gen＝世代號（退訂就加一，讓舊的註冊結果與舊回呼失效）；state＝idle｜starting｜on｜failed

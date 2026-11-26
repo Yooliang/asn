@@ -4,7 +4,7 @@
 import { frameToWrite, loadXterm, xtermOptions } from './term-view.mjs'
 import { installWideChars } from './term-width.mjs'
 import { GRACE_ENDED_TEXT } from './term-grace.mjs'
-import { HUB_NOT_READY } from './rust-bridge.mjs'
+import { HUB_NOT_READY_CODE } from './rust-bridge.mjs'
 const { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } = globalThis.Vue ?? {}
 
 // 第 2 格的字和本機終端一樣（#1029 前是「看畫面」）
@@ -148,7 +148,7 @@ export async function openTerm(Terminal, options, hostRef, tick, alive) {
 /** 錯誤訊息給本人看的部分：Rust 端回的已經是白話；空的就用通用的 */
 export function startError(e) {
   // 事件中心沒準備好（readyFor 丟的）：原文只有事件名和英文狀態，呼叫端已寫進 log；畫面用白話
-  if (e?.code === HUB_NOT_READY) return REMOTE_TEXT.failed
+  if (e?.code === HUB_NOT_READY_CODE) return REMOTE_TEXT.failed
   const s = String(e?.message ?? e ?? '').trim()
   return s || REMOTE_TEXT.failed
 }

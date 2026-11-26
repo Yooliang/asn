@@ -108,17 +108,17 @@ test('順序守門：工作階段要等三個底層監聽都註冊完才 open（
   s.stop()
 })
 
-test('順序守門：看別台、別台打字都要等底層註冊完才發起', GUARD_TIMEOUT, async () => {
+test('順序守門：看別台、別台打字都要等底層註冊完才發起', GUARD_TIMEOUT, async t => {
   for (const Comp of [RemoteView, RemoteInput]) {
     const rh = rigHub({ gated: true }), r = remoteApi(rh)
     const v = mountComp(Comp, rh, r.api)
+    t.after(() => v.unmount())   // 斷言紅了也要卸載：元件的到期計時器不收掉，node 要等約 9 分鐘才結束
     await tick(10)
     assert.equal(rh.pendingGates(), 2, '畫面、結束兩個底層註冊都還在等')
     assert.equal(r.calls.filter(c => c.what === 'start').length, 0, '底層沒註冊完，不能發起')
     await rh.release()
     await until(() => r.calls.some(c => c.what === 'start'), '註冊完才發起')
     assert.equal(r.calls.find(c => c.what === 'start').live, 2, '發起時兩個底層監聽都已經掛上')
-    v.unmount()
   }
 })
 
@@ -139,32 +139,32 @@ test('順序守門（本機畫面）：底層註冊慢，open 時 Rust 立刻送
   s.stop()
 })
 
-test('順序守門（看別台）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「正在看」', GUARD_TIMEOUT, async () => {
+test('順序守門（看別台）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「正在看」', GUARD_TIMEOUT, async t => {
   const rh = rigHub({ gated: true })
   const api = {
     start: async () => { setTimeout(() => rh.fire(FRAME_EVENT, { id: 'r1', text: '別台的畫面', meta: { cols: 80, rows: 24 } }), 30); return { id: 'r1', expires_s: Math.floor(Date.now() / 1000) + 600 } },
     stop: async () => {}, pause: async () => {},
   }
   const v = mountComp(RemoteView, rh, api)
+  t.after(() => v.unmount())
   await tick(80)           // 底層註冊還在等；沒有 await ready() 的話這段時間內已經發起、畫面已經送出而且丟了
   await rh.release()
   await until(() => v.st.phase.value === 'watching', '收到畫面、進到正在看')
   assert.ok(xterms.at(-1).writes.some(w => w.includes('別台的畫面')), '畫面真的寫進 xterm')
-  v.unmount()
 })
 
-test('順序守門（別台打字）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「可以打字」', GUARD_TIMEOUT, async () => {
+test('順序守門（別台打字）：底層註冊慢，發起後 Rust 送出的畫面不會掉，進到「可以打字」', GUARD_TIMEOUT, async t => {
   const rh = rigHub({ gated: true })
   const api = {
     start: async () => { setTimeout(() => rh.fire(FRAME_EVENT, { id: 'r1', text: '打字那台的畫面', meta: { cols: 80, rows: 24 } }), 30); return { id: 'r1', expires_s: Math.floor(Date.now() / 1000) + 600 } },
     stop: async () => {}, send: async () => {}, pause: async () => {},
   }
   const v = mountComp(RemoteInput, rh, api)
+  t.after(() => v.unmount())
   await tick(80)
   await rh.release()
   await until(() => v.st.phase.value === 'typing', '收到畫面、進到可以打字')
   assert.ok(xterms.at(-1).writes.some(w => w.includes('打字那台的畫面')), '畫面真的寫進 xterm')
-  v.unmount()
 })
 
 // ---------- 同一個 payload 物件給所有處理器：處理器不能就地改它 ----------
