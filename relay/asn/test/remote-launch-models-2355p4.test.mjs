@@ -323,3 +323,35 @@ test('接線：手機開新夥伴有型號下拉與「再查一次」、電腦�
   assert.match(list, /model: launchModelPick\.value \}\)/, '電腦版別台送出帶型號')
   assert.match(read('ui/lib/partner-ops-ui.mjs'), /machinesByNode\(await props\.api\.launchers\(\)\)\[props\.friend\.node\]/, '別台工作者的清單向後台問 launchers')
 })
+
+// ---- 二審：三處「拿掉也全綠」的守門（畫面元件不好單測，照原始碼守門的老作法）----
+test('守門：電腦版送出別台前，選的型號已不在清單裡就擋下（不悄悄改成不指定型號），且擋在組請求之前', () => {
+  const list = read('ui/list.js')
+  const guard = list.indexOf('if (partnerDlg.model && !launchModelPick.value) throw new Error(MODEL_PICK_ERR)')
+  assert.ok(guard > 0, '送出時要有「選了卻不在清單」的把關')
+  const build = list.indexOf('remoteLaunchRequest({ node: partnerDlg.node', guard)
+  assert.ok(build > guard && build - guard < 400, '把關要緊接在組別台請求之前')
+})
+
+test('守門：換電腦時型號清單重置——電腦版 watch 要盯 partnerDlg.node 並清掉兩個讀取器與兩份結果', () => {
+  const list = read('ui/list.js')
+  const m = list.match(/watch\(\(\) => \[partnerDlg\.open, partnerDlg\.node\], \(\) => \{([^\n]*)\}\)/)
+  assert.ok(m, 'watch 的來源要含 partnerDlg.open 與 partnerDlg.node')
+  for (const part of ['modelLoader.reset()', 'remoteModelLoader.reset()', 'launchModelViews.value = {}', 'remoteModelViews.value = {}']) {
+    assert.ok(m[1].includes(part), `換電腦要清：${part}`)
+  }
+})
+
+test('守門：換電腦時型號清單重置——手機 resetLchModels 清讀取器與結果，換電腦與重開新夥伴都要呼叫', () => {
+  const m = read('ui/m.js')
+  assert.match(m, /const resetLchModels = \(\) => \{ lchModelLoader\.reset\(\); lchModelViews\.value = \{\} \}/)
+  const pick = m.slice(m.indexOf('function pickLaunchDevice(node)'), m.indexOf('function openLaunchNow('))
+  assert.match(pick, /if \(node !== lch\.node\) \{ lch\.model = ''; resetLchModels\(\) \}/, '換一台電腦：清選擇與清單')
+  const open = m.slice(m.indexOf('function openLaunchNow('), m.indexOf('function openLaunchNow(') + 900)
+  assert.match(open, /Object\.assign\(lch, initialLaunch\(\), \{ vphase: 'sending' \}\)\n\s*resetLchModels\(\)/, '重開新夥伴：清單也重來')
+})
+
+test('守門：手機離開「切換模型」時丟掉讀取結果，換看另一位夥伴不沿用上一台的清單', () => {
+  const m = read('ui/m.js')
+  assert.match(m, /if \(phase === 'model' && where\) opsAcpLoader\.ensure\('gemini'\)\n\s*else if \(phase !== 'model'\) \{ opsAcpLoader\.reset\(\); opsAcpViews\.value = \{\} \}/)
+})
