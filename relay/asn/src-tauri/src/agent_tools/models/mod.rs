@@ -9,8 +9,12 @@
 //!
 //! 快取：成功 10 分鐘、失敗只記 1 分鐘（不要每次回報都重打壞掉的指令）；`snapshot` 只讀快取、不等，
 //! 過期或還沒有時在背景重查一次（同時只跑一個），所以第一次回報不會卡住。
-//! 結果裡的 `reason` 是給 log 看的；畫面上的白話字由前端負責（第②階段以後）。
-//! 隱私：只收代號與顯示名，不碰路徑、憑證、帳號。
+//! 結果裡的 `reason` 是給 log 看的，**序列化時一定不輸出**（`#[serde(skip)]`）：上傳的只有固定代碼 `code`，畫面上的白話字由前端依 status／code 決定。
+//! 隱私：只收代號與顯示名，不碰路徑、憑證、帳號、原因原文。
+//!
+//! 摘要裡的形狀（`models` 陣列，每家一筆；與後台 `sanitizeModels` 收的完全一致）：
+//! `{vendor, status, code?, stale?, age_s?, models:[{id,name}]}`。status：ok／unavailable／error／pending；
+//! pending＝第一次還沒有結果（讀取中）；stale＝重查失敗、沿用上次的清單（status 仍是 ok，code 是這次失敗的原因，age_s＝這份清單距今幾秒）。
 mod parse;
 mod run;
 
@@ -29,6 +33,12 @@ pub const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const OK_TTL: Duration = Duration::from_secs(600);
 /// 失敗（讀不到、出錯）的結果記多久
 pub const FAIL_TTL: Duration = Duration::from_secs(60);
+/// 「沒安裝」記多久：不用每分鐘白查一次，但使用者裝好後也不能等太久
+pub const NOT_INSTALLED_TTL: Duration = Duration::from_secs(600);
+/// 回報時 pi 的每家上限（與後台一致；其他家用 `REPORT_MAX_MODELS`）。pi 要與 `pi_models`（200 筆）並行一版，不能比它少
+pub const PI_REPORT_MAX_MODELS: usize = 200;
+/// `age_s` 的上限（與後台一致：一年）
+const AGE_S_MAX: u64 = 31_536_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ModelEntry {
@@ -45,33 +55,76 @@ pub enum Status {
     Unavailable,
     /// 該讀卻失敗了（逾時、非 0 結束、輸出壞掉…）
     Error,
+    /// 第一次還沒有任何結果（讀取中；清單一定是空的）
+    Pending,
+}
+
+/// 固定代碼：只有這幾個值會上雲（原因原文留在本機 log）。與後台 `MODEL_CODE` 逐字相同
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Code {
+    Ok,
+    NotInstalled,
+    NotLoggedIn,
+    Timeout,
+    TooLarge,
+    ParseFailed,
+    SpawnFailed,
+    Unsupported,
+}
+
+impl Code {
+    pub const ALL: [Code; 8] = [Code::Ok, Code::NotInstalled, Code::NotLoggedIn, Code::Timeout, Code::TooLarge, Code::ParseFailed, Code::SpawnFailed, Code::Unsupported];
+}
+
+/// 讀取失敗 → 固定代碼。結束碼不是 0、讀到一半出 IO 錯誤，都是「CLI 起來了但沒給出結果」，歸 spawn_failed（解析不出來才是 parse_failed）
+pub fn code_of(e: &RunFail) -> Code {
+    match e {
+        RunFail::Timeout => Code::Timeout,
+        RunFail::TooLarge => Code::TooLarge,
+        RunFail::Spawn(_) | RunFail::Exit(_) | RunFail::Io(_) => Code::SpawnFailed,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct VendorModels {
     pub vendor: String,
-    pub models: Vec<ModelEntry>,
     pub status: Status,
-    /// 給 log 看的原因（Ok 時為空）
+    /// 固定代碼；pending 沒有
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<Code>,
+    /// 重查失敗、沿用上次成功的清單（status 維持 ok，code 是這次失敗的原因）
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stale: bool,
+    /// stale 時：這份清單距上次成功讀到幾秒
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_s: Option<u64>,
+    pub models: Vec<ModelEntry>,
+    /// 給 log 看的原因（Ok 時為空）。**絕不序列化**：原文可能帶路徑、帳號、環境值
+    #[serde(skip)]
     pub reason: String,
 }
 
 impl VendorModels {
-    fn new(v: Vendor, status: Status, models: Vec<ModelEntry>, reason: impl Into<String>) -> Self {
-        VendorModels { vendor: v.id().into(), models, status, reason: reason.into() }
+    fn new(v: Vendor, status: Status, code: Option<Code>, models: Vec<ModelEntry>, reason: impl Into<String>) -> Self {
+        VendorModels { vendor: v.id().into(), status, code, stale: false, age_s: None, models, reason: reason.into() }
     }
-    pub fn unavailable(v: Vendor, reason: impl Into<String>) -> Self {
-        Self::new(v, Status::Unavailable, vec![], reason)
+    pub fn unavailable(v: Vendor, code: Code, reason: impl Into<String>) -> Self {
+        Self::new(v, Status::Unavailable, Some(code), vec![], reason)
     }
-    pub fn error(v: Vendor, reason: impl Into<String>) -> Self {
-        Self::new(v, Status::Error, vec![], reason)
+    pub fn error(v: Vendor, code: Code, reason: impl Into<String>) -> Self {
+        Self::new(v, Status::Error, Some(code), vec![], reason)
     }
-    /// 解析完的結果：空的算 Unavailable
+    /// 第一次還沒有結果（讀取中）
+    pub fn pending(v: Vendor) -> Self {
+        Self::new(v, Status::Pending, None, vec![], "尚未讀取")
+    }
+    /// 解析完的結果：空的算 Unavailable（多半是還沒登入）
     fn from_list(v: Vendor, list: Vec<ModelEntry>) -> Self {
         if list.is_empty() {
-            Self::unavailable(v, "CLI 沒有列出任何型號（可能還沒登入）")
+            Self::unavailable(v, Code::NotLoggedIn, "CLI 沒有列出任何型號（可能還沒登入）")
         } else {
-            Self::new(v, Status::Ok, list, "")
+            Self::new(v, Status::Ok, Some(Code::Ok), list, "")
         }
     }
 }
@@ -133,40 +186,54 @@ impl Drop for Claim {
     }
 }
 
-/// 快取的一格。`stale`＝這份清單是上次成功時讀到的，剛剛重查失敗、沿用舊的（所以要比照失敗只記 1 分鐘，很快再試）
+/// 快取的一格。`at`＝這格寫入的時間（TTL 從這算）；`ok_at`＝清單上次成功讀到的時間（stale 時比 `at` 早，算 `age_s` 用）。
+/// 沿用舊清單（`value.stale`）也只記 1 分鐘，很快再試
 struct Slot {
     at: Instant,
+    ok_at: Instant,
     value: VendorModels,
-    stale: bool,
 }
 
 fn ttl_for(slot: &Slot) -> Duration {
-    if slot.value.status == Status::Ok && !slot.stale {
-        OK_TTL
-    } else {
-        FAIL_TTL
+    match (slot.value.status, slot.value.code) {
+        (Status::Ok, _) if !slot.value.stale => OK_TTL,
+        (Status::Unavailable, Some(Code::NotInstalled)) => NOT_INSTALLED_TTL,
+        _ => FAIL_TTL,
     }
 }
 
 impl ProbeCache {
     /// 寫入一次探測結果。**失敗（Error）不蓋掉上次成功的清單**：格子裡已經有讀到型號的結果時，保留那份舊清單，
-    /// 狀態仍是 Ok，`reason` 註明「重查失敗，沿用上次的清單」與這次失敗的原因；下一次重查在 1 分鐘後
+    /// 狀態仍是 Ok，標 `stale`、`code` 換成這次失敗的原因，`reason` 註明「重查失敗，沿用上次的清單」；下一次重查在 1 分鐘後
     pub fn put(&self, vendor: Vendor, value: VendorModels, now: Instant) {
         let mut g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         let slot = match g.get(&vendor) {
             Some(old) if value.status == Status::Error && old.value.status == Status::Ok && !old.value.models.is_empty() => {
                 let mut kept = old.value.clone();
                 kept.reason = format!("重查失敗，沿用上次的清單（{}）", value.reason);
-                Slot { at: now, value: kept, stale: true }
+                kept.stale = true;
+                kept.code = value.code;
+                Slot { at: now, ok_at: old.ok_at, value: kept }
             }
-            _ => Slot { at: now, value, stale: false },
+            _ => Slot { at: now, ok_at: now, value },
         };
         g.insert(vendor, slot);
     }
 
     fn lookup(&self, vendor: Vendor, now: Instant) -> Option<(VendorModels, bool)> {
         let g = self.slots.lock().unwrap_or_else(|e| e.into_inner());
-        g.get(&vendor).map(|s| (s.value.clone(), now.saturating_duration_since(s.at) < ttl_for(s)))
+        g.get(&vendor).map(|s| {
+            let mut v = s.value.clone();
+            if v.stale {
+                v.age_s = Some(now.saturating_duration_since(s.ok_at).as_secs().min(AGE_S_MAX));
+            }
+            (v, now.saturating_duration_since(s.at) < ttl_for(s))
+        })
+    }
+
+    /// 目前的結果（不管過期；還沒有就是 pending）
+    pub fn current(&self, vendor: Vendor, now: Instant) -> VendorModels {
+        self.lookup(vendor, now).map(|(v, _)| v).unwrap_or_else(|| VendorModels::pending(vendor))
     }
 
     /// 還新鮮的結果（過期或沒有＝None）
@@ -174,19 +241,45 @@ impl ProbeCache {
         self.lookup(vendor, now).and_then(|(v, ok)| ok.then_some(v))
     }
 
-    /// 只讀、不等：回目前的結果（過期的也先用；還沒有就回「尚未讀取」）；
-    /// 需要重查且沒有別人正在查時，另外回一個 `Claim`，呼叫端要在背景查完後 `finish`
+    /// 搶「這家正在重查」的旗標；已經有人在查就回 None
+    pub fn claim(&'static self, vendor: Vendor) -> Option<Claim> {
+        let claimed = self.busy.lock().unwrap_or_else(|e| e.into_inner()).insert(vendor);
+        // 注意用 then（惰性）：沒搶到時不能先建出 Claim 又立刻放掉，那會把別人的旗標清掉
+        claimed.then(|| Claim { cache: self, vendor })
+    }
+
+    fn is_busy(&self, vendor: Vendor) -> bool {
+        self.busy.lock().unwrap_or_else(|e| e.into_inner()).contains(&vendor)
+    }
+
+    /// 等別人把這家查完（最多 `max`）
+    async fn wait_idle(&self, vendor: Vendor, max: Duration, step: Duration) {
+        let start = Instant::now();
+        while self.is_busy(vendor) && start.elapsed() < max {
+            tokio::time::sleep(step).await;
+        }
+    }
+
+    /// 只讀、不等：回目前的結果（過期的也先用；第一次還沒有就回 pending）；
+    /// 需要重查且沒有別人正在查時，另外回一個 `Claim`，呼叫端要在背景查完後 `finish`。
+    /// Claude 沒有列型號的方式：永遠回「不支援」、永不排重查（不然每輪回報都白排一個什麼都不做的背景工作）
     pub fn begin(&'static self, vendor: Vendor, now: Instant) -> (VendorModels, Option<Claim>) {
+        if vendor == Vendor::Claude {
+            return (claude_unsupported(), None);
+        }
         let (value, fresh) = match self.lookup(vendor, now) {
             Some((v, fresh)) => (v, fresh),
-            None => (VendorModels::unavailable(vendor, "尚未讀取"), false),
+            None => (VendorModels::pending(vendor), false),
         };
         if fresh {
             return (value, None);
         }
-        let claimed = self.busy.lock().unwrap_or_else(|e| e.into_inner()).insert(vendor);
-        (value, claimed.then_some(Claim { cache: self, vendor }))
+        (value, self.claim(vendor))
     }
+}
+
+fn claude_unsupported() -> VendorModels {
+    VendorModels::unavailable(Vendor::Claude, Code::Unsupported, "Claude 沒有列出型號的方式（claude --help 只有 --model）")
 }
 
 fn global() -> &'static ProbeCache {
@@ -249,7 +342,7 @@ pub fn pi_list_text_blocking() -> Result<String, RunFail> {
 /// 不看快取直接探測一家
 pub async fn probe_uncached(v: Vendor) -> VendorModels {
     if v == Vendor::Claude {
-        return VendorModels::unavailable(v, "Claude 沒有列出型號的方式（claude --help 只有 --model）");
+        return claude_unsupported();
     }
     let (args, env, merge): (&[&str], _, _) = match v {
         Vendor::Pi => (&["--list-models"], pi_env(), true),
@@ -257,35 +350,44 @@ pub async fn probe_uncached(v: Vendor) -> VendorModels {
         _ => (&["debug", "models"], codex_env_from(&os_vars()), false),
     };
     let Some(spec) = spawn_for(v, args, env, merge) else {
-        return VendorModels::unavailable(v, format!("這台電腦找不到 {}", v.binary()));
+        return VendorModels::unavailable(v, Code::NotInstalled, format!("這台電腦找不到 {}", v.binary()));
     };
     let text = match run(spec, PROBE_TIMEOUT).await {
         Ok(t) => t,
-        Err(e) => return VendorModels::error(v, e.reason(v.binary())),
+        Err(e) => return VendorModels::error(v, code_of(&e), e.reason(v.binary())),
     };
     match v {
         Vendor::Pi => VendorModels::from_list(v, parse_pi(&text)),
         Vendor::Gemini => VendorModels::from_list(v, parse_agy(&text)),
         _ => match parse_codex(&text) {
             Ok(l) => VendorModels::from_list(v, l),
-            Err(e) => VendorModels::error(v, e),
+            Err(e) => VendorModels::error(v, Code::ParseFailed, e),
         },
     }
 }
 
-/// 探測一家；`force`＝略過快取（使用者按了「重新讀取」）
+/// 探測一家；`force`＝略過快取（使用者按了「重新讀取」）。
+/// 與 `snapshot` 的背景重查共用「同一家同時只跑一個」的旗標：已經有人在查就等那一個，不再多開一個同家 CLI
 pub async fn probe(v: Vendor, force: bool) -> VendorModels {
-    let c = global();
+    probe_in(global(), v, force, || probe_uncached(v)).await
+}
+
+async fn probe_in<F, Fut>(c: &'static ProbeCache, v: Vendor, force: bool, fetch: F) -> VendorModels
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = VendorModels>,
+{
     if !force {
         if let Some(f) = c.fresh(v, Instant::now()) {
             return f;
         }
     }
-    let r = probe_uncached(v).await;
-    let now = Instant::now();
-    c.put(v, r.clone(), now);
+    match c.claim(v) {
+        Some(claim) => claim.finish(fetch().await),
+        None => c.wait_idle(v, PROBE_TIMEOUT + Duration::from_secs(3), Duration::from_millis(100)).await,
+    }
     // 回快取裡的那份：重查失敗時是「沿用上次的清單」，不是空的失敗結果
-    c.lookup(v, now).map(|(kept, _)| kept).unwrap_or(r)
+    c.current(v, Instant::now())
 }
 
 /// 只讀快取、不等：第一次回報不會卡住。過期或還沒有時在背景重查一次（同時只跑一個）
@@ -317,13 +419,22 @@ pub fn limit_for_report(list: Vec<VendorModels>) -> Vec<VendorModels> {
     limit_with(list, REPORT_MAX_MODELS, REPORT_MAX_BYTES, REPORT_FLOOR_BYTES)
 }
 
-/// 截斷時 reason 會被換成較長的說明，先留這麼多位元組的餘裕
-const REASON_SLACK: usize = 160;
+/// 一筆都放不下時狀態會改成 error 並補上 code，先留這麼多位元組的餘裕（reason 不上雲，不算）
+const FIELD_SLACK: usize = 40;
+
+/// 這家回報時最多幾筆：pi 放寬到 `PI_REPORT_MAX_MODELS`（與 `pi_models` 並行一版，不能退化），其餘用 `max_models`
+fn cap_for(vendor: &str, max_models: usize) -> usize {
+    if vendor == Vendor::Pi.id() {
+        max_models.max(PI_REPORT_MAX_MODELS)
+    } else {
+        max_models
+    }
+}
 
 fn limit_with(list: Vec<VendorModels>, max_models: usize, max_bytes: usize, floor: usize) -> Vec<VendorModels> {
-    // 每家的固定部分（欄位、reason、陣列逗號）與每筆型號序列化後的大小（含逗號）
-    let sizes: Vec<Vec<usize>> = list.iter().map(|v| v.models.iter().take(max_models).map(|m| json_len(m) + 1).collect()).collect();
-    let base = |v: &VendorModels| json_len(&VendorModels { models: vec![], ..v.clone() }) + REASON_SLACK + 1;
+    // 每家的固定部分（欄位、陣列逗號）與每筆型號序列化後的大小（含逗號）
+    let sizes: Vec<Vec<usize>> = list.iter().map(|v| v.models.iter().take(cap_for(&v.vendor, max_models)).map(|m| json_len(m) + 1).collect()).collect();
+    let base = |v: &VendorModels| json_len(&VendorModels { models: vec![], ..v.clone() }) + FIELD_SLACK + 1;
     let mut used = 2 + list.iter().map(base).sum::<usize>();
     let reserve_after: Vec<usize> = (0..list.len()).map(|i| sizes[i + 1..].iter().map(|s| s.iter().sum::<usize>().min(floor)).sum()).collect();
     list.into_iter()
@@ -343,6 +454,9 @@ fn limit_with(list: Vec<VendorModels>, max_models: usize, max_bytes: usize, floo
             if kept.len() < total {
                 if kept.is_empty() {
                     v.status = Status::Error;
+                    v.code = Some(Code::TooLarge);
+                    v.stale = false;
+                    v.age_s = None;
                     v.reason = format!("超過回報上限，{total} 筆都放不下");
                 } else {
                     v.reason = format!("回報時截斷：只留前 {} 筆（共 {total} 筆）", kept.len());
@@ -357,6 +471,15 @@ fn limit_with(list: Vec<VendorModels>, max_models: usize, max_bytes: usize, floo
 /// 要放進回報的四家快取摘要（不等、已套回報上限）
 pub fn report_snapshot() -> Vec<VendorModels> {
     limit_for_report(snapshot_all())
+}
+
+/// 放進 launch 摘要 `models` 欄位的 JSON 陣列（不等探測、已套回報上限；不含 `reason`）
+pub fn report_value() -> serde_json::Value {
+    to_report_value(&report_snapshot())
+}
+
+fn to_report_value(list: &[VendorModels]) -> serde_json::Value {
+    serde_json::to_value(list).unwrap_or(serde_json::Value::Null)
 }
 
 #[cfg(test)]
@@ -407,8 +530,16 @@ mod tests {
     fn 回報上限_一筆都放不下的改成_error() {
         let big = VendorModels::from_list(Vendor::Pi, vec![ModelEntry { id: "m".into(), name: "n".repeat(80) }]);
         let r = limit_with(vec![big], 50, 100, 0);
-        assert_eq!((r[0].status, r[0].models.len()), (Status::Error, 0));
+        assert_eq!((r[0].status, r[0].code, r[0].models.len()), (Status::Error, Some(Code::TooLarge), 0));
         assert!(r[0].reason.contains("超過回報上限"));
+    }
+
+    #[test]
+    fn 回報上限_pi_最多兩百筆_其他家五十筆() {
+        let r = limit_for_report(vec![many(Vendor::Codex, 120, 3), many(Vendor::Pi, 250, 3)]);
+        assert_eq!(r[0].models.len(), REPORT_MAX_MODELS);
+        assert_eq!(r[1].models.len(), PI_REPORT_MAX_MODELS, "pi 比 pi_models 的 200 筆少會退化");
+        assert!(serde_json::to_vec(&r).unwrap().len() <= REPORT_MAX_BYTES);
     }
 
     fn leak() -> &'static ProbeCache {
@@ -421,16 +552,139 @@ mod tests {
     #[test]
     fn claude_固定讀不到_不寫死任何清單() {
         let r = crate::rt::block_on(probe_uncached(Vendor::Claude));
-        assert_eq!((r.status, r.models.len(), r.vendor.as_str()), (Status::Unavailable, 0, "claude"));
+        assert_eq!((r.status, r.code, r.models.len(), r.vendor.as_str()), (Status::Unavailable, Some(Code::Unsupported), 0, "claude"));
         assert!(r.reason.contains("--model"));
     }
 
     #[test]
-    fn 結構序列化_給後台與前端的欄位名() {
+    fn 結構序列化_給後台與前端的欄位名_reason_絕不輸出() {
         let j = serde_json::to_value(ok(Vendor::Codex)).unwrap();
-        assert_eq!(j, serde_json::json!({ "vendor": "codex", "models": [{ "id": "m", "name": "M" }], "status": "ok", "reason": "" }));
-        assert_eq!(serde_json::to_value(VendorModels::error(Vendor::Pi, "x")).unwrap()["status"], "error");
-        assert_eq!(serde_json::to_value(VendorModels::unavailable(Vendor::Gemini, "x")).unwrap()["status"], "unavailable");
+        assert_eq!(j, serde_json::json!({ "vendor": "codex", "status": "ok", "code": "ok", "models": [{ "id": "m", "name": "M" }] }));
+        let e = serde_json::to_value(VendorModels::error(Vendor::Pi, Code::Timeout, "x")).unwrap();
+        assert_eq!((&e["status"], &e["code"]), (&serde_json::json!("error"), &serde_json::json!("timeout")));
+        assert_eq!(serde_json::to_value(VendorModels::unavailable(Vendor::Gemini, Code::NotInstalled, "x")).unwrap()["status"], "unavailable");
+        // pending：沒有 code、stale、age_s 這些鍵
+        assert_eq!(serde_json::to_value(VendorModels::pending(Vendor::Pi)).unwrap(), serde_json::json!({ "vendor": "pi", "status": "pending", "models": [] }));
+    }
+
+    #[test]
+    fn 上傳的摘要裡沒有_reason_也沒有原因原文() {
+        // 原因原文帶路徑、帳號、環境值：每一種失敗與沿用舊清單，序列化後都不能出現
+        let secret = r"C:\Users\someone\.pi\token=SECRET123";
+        let all = vec![
+            VendorModels::error(Vendor::Codex, Code::SpawnFailed, secret),
+            VendorModels::unavailable(Vendor::Gemini, Code::NotInstalled, secret),
+            VendorModels { stale: true, age_s: Some(9), reason: secret.into(), ..ok(Vendor::Pi) },
+            ok(Vendor::Claude),
+        ];
+        let text = serde_json::to_string(&to_report_value(&limit_for_report(all))).unwrap();
+        assert!(!text.contains("reason") && !text.contains("SECRET123") && !text.contains("someone"), "{text}");
+    }
+
+    const WIRE: &str = include_str!("../../../../../shared/test-vectors/launcher-models-wire.json");
+
+    fn wire_models() -> serde_json::Value {
+        serde_json::from_str::<serde_json::Value>(WIRE).unwrap()["models"].clone()
+    }
+
+    fn entry(id: &str, name: &str) -> ModelEntry {
+        ModelEntry { id: id.into(), name: name.into() }
+    }
+
+    /// 跟 wire 樣本逐字相同的四家（codex ok、gemini stale、pi pending、claude 不支援）
+    fn wire_sample() -> Vec<VendorModels> {
+        let t0 = Instant::now();
+        let c = leak();
+        c.put(Vendor::Gemini, VendorModels::from_list(Vendor::Gemini, vec![entry("gemini-4-argon-medium", "Gemini 4 Argon (Medium)")]), t0);
+        c.put(Vendor::Gemini, VendorModels::error(Vendor::Gemini, Code::Timeout, "逾時"), t0 + Duration::from_secs(700));
+        // age_s＝距上次成功 1260 秒
+        let gemini = c.lookup(Vendor::Gemini, t0 + Duration::from_secs(1260)).unwrap().0;
+        vec![
+            VendorModels::from_list(Vendor::Codex, vec![entry("gpt-6-luna", "GPT-6 Luna"), entry("gpt-5.6-terra", "GPT-5.6 Terra")]),
+            gemini,
+            VendorModels::pending(Vendor::Pi),
+            claude_unsupported(),
+        ]
+    }
+
+    #[test]
+    fn wire_樣本_真的序列化結果與共用樣本逐字相同() {
+        assert_eq!(to_report_value(&limit_for_report(wire_sample())), wire_models(), "形狀改了：後台 sanitizeModels 與這份樣本要一起改");
+    }
+
+    /// 後台 `sanitizeModels`（PR-B #2384）規則的鏡像：樣本與真的輸出都要整份被收下、原樣不變
+    fn backend_accepts(v: &serde_json::Value) -> Result<(), String> {
+        let arr = v.as_array().ok_or("models 不是陣列")?;
+        if arr.len() > 8 {
+            return Err("超過 8 家".into());
+        }
+        let vendor_ok = |s: &str| s.len() <= 20 && s.chars().next().is_some_and(|c| c.is_ascii_lowercase()) && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        for e in arr {
+            let o = e.as_object().ok_or("不是物件")?;
+            for k in o.keys() {
+                if !["vendor", "status", "code", "stale", "age_s", "models"].contains(&k.as_str()) {
+                    return Err(format!("後台不收的欄位：{k}"));
+                }
+            }
+            if !vendor_ok(o["vendor"].as_str().ok_or("vendor")?) {
+                return Err("vendor 不合格".into());
+            }
+            if !["ok", "unavailable", "error", "pending"].contains(&o["status"].as_str().ok_or("status")?) {
+                return Err("status 不合格".into());
+            }
+            if let Some(c) = o.get("code") {
+                if !Code::ALL.iter().any(|k| serde_json::to_value(k).unwrap() == *c) {
+                    return Err("code 不合格".into());
+                }
+            }
+            if o.get("stale").is_some_and(|s| !s.is_boolean()) {
+                return Err("stale 要布林".into());
+            }
+            if o.get("age_s").is_some_and(|a| !a.as_u64().is_some_and(|n| n <= 31_536_000)) {
+                return Err("age_s 不合格".into());
+            }
+            let list = o["models"].as_array().ok_or("models")?;
+            if list.len() > 200 {
+                return Err("每家超過 200 筆".into());
+            }
+            for m in list {
+                let (id, name) = (m["id"].as_str().ok_or("id")?, m["name"].as_str().ok_or("name")?);
+                let n = name.chars().count();
+                if !valid_model_id(id) || n < 1 || n > 80 || name.chars().any(|c| c.is_control() || parse::is_format_char(c)) {
+                    return Err(format!("型號不合格：{id}"));
+                }
+            }
+        }
+        if serde_json::to_vec(v).unwrap().len() > 24_000 {
+            return Err("超過 24000 位元組".into());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn wire_後台會收下_樣本與最大量的真輸出都過後台的規則() {
+        assert_eq!(backend_accepts(&wire_models()), Ok(()));
+        // 最大量：pi 兩百筆、其他各五十筆、名字很長
+        let big: Vec<VendorModels> = Vendor::ALL.iter().map(|v| many(*v, 300, 40)).collect();
+        let out = to_report_value(&limit_for_report(big));
+        assert_eq!(backend_accepts(&out), Ok(()), "{}", serde_json::to_string(&out).unwrap().len());
+        // 鏡像本身要會擋：夾帶 reason 就不收
+        let mut bad = wire_models();
+        bad[0]["reason"] = "x".into();
+        assert!(backend_accepts(&bad).is_err());
+    }
+
+    #[test]
+    fn 固定代碼_八個值與後台逐字相同_每種失敗都有對應() {
+        let names: Vec<String> = Code::ALL.iter().map(|c| serde_json::to_value(c).unwrap().as_str().unwrap().to_string()).collect();
+        assert_eq!(names, ["ok", "not_installed", "not_logged_in", "timeout", "too_large", "parse_failed", "spawn_failed", "unsupported"]);
+        assert_eq!(code_of(&RunFail::Timeout), Code::Timeout);
+        assert_eq!(code_of(&RunFail::TooLarge), Code::TooLarge);
+        assert_eq!(code_of(&RunFail::Spawn("x".into())), Code::SpawnFailed);
+        assert_eq!(code_of(&RunFail::Exit(Some(1))), Code::SpawnFailed);
+        assert_eq!(code_of(&RunFail::Io("x".into())), Code::SpawnFailed);
+        assert_eq!(VendorModels::from_list(Vendor::Pi, vec![]).code, Some(Code::NotLoggedIn), "沒列出任何型號＝多半沒登入");
+        assert_eq!(ok(Vendor::Pi).code, Some(Code::Ok));
     }
 
     #[test]
@@ -438,7 +692,7 @@ mod tests {
         let c = leak();
         let t0 = Instant::now();
         c.put(Vendor::Codex, ok(Vendor::Codex), t0);
-        c.put(Vendor::Pi, VendorModels::error(Vendor::Pi, "壞了"), t0);
+        c.put(Vendor::Pi, VendorModels::error(Vendor::Pi, Code::SpawnFailed, "壞了"), t0);
         assert!(c.fresh(Vendor::Codex, t0 + OK_TTL - Duration::from_secs(1)).is_some());
         assert!(c.fresh(Vendor::Codex, t0 + OK_TTL + Duration::from_secs(1)).is_none());
         assert!(c.fresh(Vendor::Pi, t0 + FAIL_TTL - Duration::from_secs(1)).is_some());
@@ -451,7 +705,7 @@ mod tests {
         let c = leak();
         let t0 = Instant::now();
         let (v, claim) = c.begin(Vendor::Codex, t0);
-        assert_eq!((v.status, v.reason.as_str()), (Status::Unavailable, "尚未讀取"));
+        assert_eq!((v.status, v.code, v.reason.as_str()), (Status::Pending, None, "尚未讀取"), "還在讀＝pending，不是「讀不到」");
         let claim = claim.expect("第一次要排一個重查");
         assert!(c.begin(Vendor::Codex, t0).1.is_none(), "同時只跑一個");
         assert!(c.begin(Vendor::Pi, t0).1.is_some(), "別家不受影響");
@@ -557,7 +811,7 @@ mod tests {
     }
 
     fn fail(v: Vendor, why: &str) -> VendorModels {
-        VendorModels::error(v, why)
+        VendorModels::error(v, Code::Timeout, why)
     }
 
     #[test]
@@ -585,8 +839,82 @@ mod tests {
         c.put(Vendor::Codex, fail(Vendor::Codex, "壞了"), t0);
         assert_eq!(c.lookup(Vendor::Codex, t0).unwrap().0.status, Status::Error);
         // 沒裝（Unavailable）是真的結果，不當成失敗保留舊清單
-        c.put(Vendor::Pi, VendorModels::unavailable(Vendor::Pi, "這台電腦找不到 pi"), t1 + Duration::from_secs(300));
+        c.put(Vendor::Pi, VendorModels::unavailable(Vendor::Pi, Code::NotInstalled, "這台電腦找不到 pi"), t1 + Duration::from_secs(300));
         assert_eq!(c.lookup(Vendor::Pi, t1 + Duration::from_secs(300)).unwrap().0.status, Status::Unavailable);
+    }
+
+    #[test]
+    fn 沿用舊清單_標_stale_code_是這次失敗的原因_age_s_從上次成功起算_成功後清掉() {
+        let c = leak();
+        let t0 = Instant::now();
+        c.put(Vendor::Pi, ok(Vendor::Pi), t0);
+        let t1 = t0 + OK_TTL + Duration::from_secs(1);
+        c.put(Vendor::Pi, VendorModels::error(Vendor::Pi, Code::Timeout, "逾時"), t1);
+        let (v, _) = c.lookup(Vendor::Pi, t1 + Duration::from_secs(20)).unwrap();
+        assert_eq!((v.status, v.stale, v.code), (Status::Ok, true, Some(Code::Timeout)));
+        assert_eq!(v.age_s, Some(OK_TTL.as_secs() + 21), "距上次成功，不是距這次失敗");
+        // 連續失敗：age_s 仍從最初那次成功算，code 換成最新的原因
+        c.put(Vendor::Pi, VendorModels::error(Vendor::Pi, Code::SpawnFailed, "壞了"), t1 + Duration::from_secs(100));
+        let (v, _) = c.lookup(Vendor::Pi, t1 + Duration::from_secs(100)).unwrap();
+        assert_eq!((v.code, v.age_s), (Some(Code::SpawnFailed), Some(OK_TTL.as_secs() + 101)));
+        // 序列化：stale／age_s／code 都在，reason 不在
+        let j = serde_json::to_value(&v).unwrap();
+        assert_eq!((j["stale"].clone(), j["age_s"].clone(), j["code"].clone(), j.get("reason")), (true.into(), (OK_TTL.as_secs() + 101).into(), "spawn_failed".into(), None));
+        // 成功後 stale／age_s 清掉
+        c.put(Vendor::Pi, ok(Vendor::Pi), t1 + Duration::from_secs(200));
+        let (v, _) = c.lookup(Vendor::Pi, t1 + Duration::from_secs(250)).unwrap();
+        assert_eq!((v.stale, v.age_s, v.code), (false, None, Some(Code::Ok)));
+        let j = serde_json::to_value(&v).unwrap();
+        assert!(j.get("stale").is_none() && j.get("age_s").is_none(), "沒有 stale 時不輸出這兩個鍵：{j}");
+    }
+
+    #[test]
+    fn 沒安裝記十分鐘_沒登入與失敗只記一分鐘() {
+        let c = leak();
+        let t0 = Instant::now();
+        c.put(Vendor::Pi, VendorModels::unavailable(Vendor::Pi, Code::NotInstalled, "找不到"), t0);
+        c.put(Vendor::Codex, VendorModels::unavailable(Vendor::Codex, Code::NotLoggedIn, "沒登入"), t0);
+        assert!(c.fresh(Vendor::Pi, t0 + NOT_INSTALLED_TTL - Duration::from_secs(1)).is_some());
+        assert!(c.fresh(Vendor::Pi, t0 + NOT_INSTALLED_TTL + Duration::from_secs(1)).is_none());
+        assert!(c.fresh(Vendor::Codex, t0 + FAIL_TTL + Duration::from_secs(1)).is_none());
+    }
+
+    #[test]
+    fn claude_每輪回報都不排背景工作_永遠回不支援() {
+        let c = leak();
+        let t0 = Instant::now();
+        for i in 0..3 {
+            let (v, claim) = c.begin(Vendor::Claude, t0 + Duration::from_secs(i * 3600));
+            assert_eq!((v.status, v.code), (Status::Unavailable, Some(Code::Unsupported)));
+            assert!(claim.is_none(), "Claude 不該排重查（第 {i} 輪）");
+        }
+        assert!(c.begin(Vendor::Codex, t0).1.is_some(), "其他家照舊");
+    }
+
+    #[test]
+    fn 同一家同時只跑一個_手動重讀與背景重查共用旗標() {
+        let c = leak();
+        let a = c.claim(Vendor::Codex).expect("第一個搶到");
+        assert!(c.claim(Vendor::Codex).is_none(), "已經有人在查");
+        assert!(c.begin(Vendor::Codex, Instant::now()).1.is_none(), "背景重查也排不進去");
+        // probe_in(force)：旗標被佔著時不執行 fetch，等對方做完後讀快取
+        let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ran2 = ran.clone();
+        let h = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            a.finish(ok(Vendor::Codex));
+        });
+        let got = crate::rt::block_on(probe_in(c, Vendor::Codex, true, move || async move {
+            ran2.store(true, std::sync::atomic::Ordering::SeqCst);
+            fail(Vendor::Codex, "不該被呼叫")
+        }));
+        h.join().unwrap();
+        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst), "別人在查時，force 也不能再開一個同家 CLI");
+        assert_eq!(got.status, Status::Ok, "等到別人查完、讀到它的結果");
+        // 沒人在查時 force 會自己查，且查完放掉旗標
+        let got = crate::rt::block_on(probe_in(c, Vendor::Codex, true, || async { ok(Vendor::Codex) }));
+        assert_eq!(got.status, Status::Ok);
+        assert!(c.claim(Vendor::Codex).is_some(), "查完旗標放開");
     }
 
     #[test]
