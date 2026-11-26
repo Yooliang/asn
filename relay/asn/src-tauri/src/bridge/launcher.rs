@@ -331,13 +331,10 @@ impl LaunchEnv for SystemEnv {
         r
     }
     fn agy_model_listed(&self, model: &str) -> Result<bool, String> {
-        use crate::agent_tools::models::{snapshot, Status, Vendor};
+        use crate::agent_tools::models::{snapshot, Vendor};
         // 讀快取、不等：使用者能選到這個型號，代表清單早就回報過；清單讀不到（沒裝、沒登入、還在第一次讀取）就拒絕，不放行沒核對過的
         let v = snapshot(Vendor::Gemini);
-        if v.status != Status::Ok {
-            return Err(AGY_LIST_UNREADABLE.into());
-        }
-        Ok(v.models.iter().any(|m| m.id == model))
+        agy_listed(v.status, v.models.iter().map(|m| m.id.as_str()), model)
     }
     fn start(&self, config: &LaunchConfig, profile: &str, name: &str, cwd: &str, pi_args: &[String], model: Option<&str>) -> Result<u32, String> {
         // 背景與否照這台的設定（#931）：這台存了「開新夥伴的顯示方式＝背景」就背景，其餘看有沒有在用共用終端服務（在用＝背景）；服務沒在用一律前台。遠端不能選
@@ -387,6 +384,15 @@ impl LaunchEnv for SystemEnv {
             Err("這個版本沒有 asn終端".into())
         }
     }
+}
+
+/// agy 型號清單核對（吃快照的純函式，讓清單沒有或讀不到的情況可以直接測）：
+/// 狀態不是 Ok＝讀不到清單，回錯誤；清單裡沒有這個型號回 false
+pub(crate) fn agy_listed<'a>(status: crate::agent_tools::models::Status, ids: impl IntoIterator<Item = &'a str>, model: &str) -> Result<bool, String> {
+    if status != crate::agent_tools::models::Status::Ok {
+        return Err(AGY_LIST_UNREADABLE.into());
+    }
+    Ok(ids.into_iter().any(|id| id == model))
 }
 
 /// 排進佇列前用消化端同一套規則先驗一次（授權資料夾、名字、執行檔），不通過就當場回中文原因；通過才附加一行
@@ -1012,6 +1018,57 @@ mod tests {
         let text = std::fs::read_to_string(&queue).unwrap();
         let v: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!((v["profile"].as_str(), v["name"].as_str()), (Some("grok"), Some("小格")));
+        assert!(v.get("model").is_none(), "沒指定型號時佇列那一行不能有 model 這個鍵");
         let _ = d;
+    }
+
+    #[test]
+    fn 排進佇列_型號寫進那一行_消化端_parse_line_讀得回同一個型號() {
+        let (work, cwd) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let ok = FakeQ { allow: cwd.path().to_path_buf(), bin: true };
+        let cwd_s = cwd.path().to_string_lossy().to_string();
+        let queue = work.path().join(pq::QUEUE_FILE);
+        queue_background(&ok, "grok", "小格", &cwd_s, Some("grok-4.1-fast"), work.path()).unwrap();
+        queue_background(&ok, "grok", "小格二", &cwd_s, None, work.path()).unwrap();
+        let text = std::fs::read_to_string(&queue).unwrap();
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        let with = pq::parse_line(lines[0]).unwrap();
+        assert_eq!(with.model.as_deref(), Some("grok-4.1-fast"), "寫的一端帶了型號，讀的一端要讀得回");
+        assert_eq!(with.name, "小格");
+        let without = pq::parse_line(lines[1]).unwrap();
+        assert_eq!(without.model, None, "沒帶型號就讀回 None");
+        let v: Value = serde_json::from_str(lines[1]).unwrap();
+        assert!(v.get("model").is_none());
+    }
+
+    #[test]
+    fn agy_清單核對_不是_ok_讀不到_清單沒有回_false_有才放行() {
+        use crate::agent_tools::models::Status;
+        for st in [Status::Unavailable, Status::Error, Status::Pending] {
+            assert_eq!(agy_listed(st, ["gemini-3-pro"], "gemini-3-pro").unwrap_err(), AGY_LIST_UNREADABLE, "{st:?} 要回讀不到，就算清單裡有也一樣");
+        }
+        assert_eq!(agy_listed(Status::Ok, ["a", "b"], "gemini-3-pro"), Ok(false), "清單沒有這個型號不能放行");
+        assert_eq!(agy_listed(Status::Ok, ["a", "gemini-3-pro"], "gemini-3-pro"), Ok(true));
+        assert_eq!(agy_listed(Status::Ok, Vec::<&str>::new(), "x"), Ok(false));
+    }
+
+    /// SystemEnv 的轉傳不能在測試裡開真視窗、寫真佇列，用原始碼守門：型號要原樣傳下去，agy 核對要經 agy_listed
+    #[test]
+    fn system_env_轉傳型號_開窗_排佇列_agy_核對_都原樣經過() {
+        let src = include_str!("launcher.rs").replace("\r\n", "\n");
+        let imp = &src[src.find("impl LaunchEnv for SystemEnv").unwrap()..];
+        let imp = &imp[..imp.find("\n}\n").unwrap()];
+        let fn_body = |sig: &str| -> String {
+            let from = imp.find(sig).unwrap_or_else(|| panic!("找不到 {sig}"));
+            let rest = &imp[from..];
+            rest[..rest.find("\n    }\n").unwrap()].to_string()
+        };
+        let start = fn_body("fn start(&self, config");
+        assert!(start.contains("RemoteShow::real(bg), pi_args, model)"), "SystemEnv::start 要把 model 原樣傳給 start_remote_window：{start}");
+        let enq = fn_body("fn enqueue_background(&self");
+        assert!(enq.contains("profile, name, cwd, model, work_dir)"), "SystemEnv::enqueue_background 要把 model 原樣傳給 queue_background：{enq}");
+        let agy = fn_body("fn agy_model_listed(&self");
+        assert!(agy.contains("agy_listed(v.status, v.models.iter().map(|m| m.id.as_str()), model)"), "SystemEnv::agy_model_listed 要經 agy_listed 核對：{agy}");
     }
 }
