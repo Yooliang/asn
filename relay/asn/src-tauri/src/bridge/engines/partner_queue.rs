@@ -958,7 +958,7 @@ mod tests {
         logs.lock().unwrap().clear();
         assert!(run(vec![step(1, "update_steps", json!({"steps": [{"status": "done", "title": "x"}]})), step(2, "read_file", json!({"Path": work_cwd.clone()})), step(3, "mystery_tool", json!({"Path": "secret-looking"}))]).is_none());
         let l = logs.lock().unwrap().clone();
-        assert!(l.iter().any(|x| x.contains("mystery_tool") && x.contains("沒登記")), "{l:?}");
+        assert!(l.iter().any(|x| x.contains("mystery_tool") && x.contains("沒登記") && x.contains("類別以執行處理")), "{l:?}");
         assert!(!l.iter().any(|x| x.contains("update_steps") || x.contains("read_file") && x.contains("沒登記")), "{l:?}");
         assert!(!l.iter().any(|x| x.contains("secret-looking")), "log 不記參數：{l:?}");
         // 寫入範圍不變：工作資料夾內放行；家目錄裡的一般位置照舊要求改寫（redirect）；敏感位置整輪中止不重導
@@ -977,6 +977,26 @@ mod tests {
         assert!(guard.ask_permission(req("read", home.path())).await, "單檔類請求的上層資料夾本身不算");
         assert!(!guard.ask_permission(req("edit", &home.path().join("Desktop").join("x.txt"))).await, "寫入仍限工作資料夾");
         eng.stop();
+    }
+
+    /// 沒登記的工具名與改分類的三個工具：執行不被允許的工作者，步驟完成時要中止；放行的工作者不中止
+    #[tokio::test]
+    async fn 沒登記的_agy_工具名與改分類的工具_照執行或寫入政策() {
+        use crate::bridge::engines::acp_policy::describe_agy_tool;
+        for (perm, want_err) in [("deny", true), ("allow", false)] {
+            let work = tempfile::tempdir().unwrap();
+            let cwd = tempfile::tempdir().unwrap();
+            let env = env_for(cwd.path());
+            let (eng, rec) = rec_engine(work.path(), &env, Some(hand_written("手寫", cwd.path(), perm)));
+            wait_spawns(&rec, 1).await;
+            let work_cwd = std::fs::canonicalize(cwd.path()).map(|p| crate::launch::local::strip_verbatim_prefix(&p.to_string_lossy())).unwrap();
+            let guard = guards().lock().unwrap().iter().rev().find(|(c, _)| c.to_string_lossy().eq_ignore_ascii_case(&work_cwd)).map(|(_, g)| g.clone()).expect("找得到守門員");
+            for tool in ["mystery_tool", "call_mcp_tool", "delete_knowledge"] {
+                let r = guard.check_tool(&describe_agy_tool(tool, Some(&json!({}))), "DONE", false, None);
+                assert_eq!(r.is_err(), want_err, "{tool}，執行與寫入是 {perm}：{r:?}");
+            }
+            eng.stop();
+        }
     }
 
     #[tokio::test]

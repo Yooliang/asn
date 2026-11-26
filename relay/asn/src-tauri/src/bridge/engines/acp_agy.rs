@@ -157,9 +157,16 @@ fn on_step(sh: &Arc<Shared>, a: &DriverArgs, s: Value) {
         return;
     }
     let first_time = sh.cur.lock().unwrap().as_mut().map(|c| c.seen.insert(key)).unwrap_or(false);
-    // 沒登記的工具名：類別是用關鍵字猜的，不能默默放行，記一行 log（只記工具名，不記參數）
+    // 沒登記的工具名：類別是用關鍵字猜的、猜不出來就照執行處理，記一行 log（只記工具名，不記參數）
     if first_time && !is_registered_agy_tool(&info.tool) {
-        (a.log)(format!("agy 工具名沒登記，類別暫以 {} 處理：{}", info.category, redact(&info.tool)));
+        let how = match info.category.as_str() {
+            "execute" => "執行",
+            "write" => "寫入",
+            "network" => "網路",
+            "read" => "讀取",
+            _ => "內部控制",
+        };
+        (a.log)(format!("agy 工具名沒登記，類別以{how}處理：{}", redact(&info.tool)));
     }
     let home = agy_user_home(&a.env);
     // 先過 check_tool：agy 自己的對話資料夾（brain/<編號>/ 底下，不含 .system_generated）的寫入在這裡就放行，不會走到下面的 sensitive_write。

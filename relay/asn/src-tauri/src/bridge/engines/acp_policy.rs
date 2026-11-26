@@ -67,25 +67,24 @@ pub fn category_of_acp_kind(kind: &str) -> &'static str {
 // 實機看到的工具名（agy 1.5.18）：read_file（參數 Path）、run_command（CommandLine）、update_steps；列目錄與搜尋都走 run_command。
 // 舊版名字（view_file、write_to_file…）一併保留
 const AGY_READ: [&str; 7] = ["read_file", "view_file", "list_dir", "find_by_name", "grep_search", "read_resource", "list_resources"];
-const AGY_WRITE: [&str; 7] = ["write_file", "edit_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"];
-// 會啟動指令、子代理、工作流程，或把訊息、排程送出去的，都照執行類的政策
-const AGY_EXEC: [&str; 12] = [
-    "run_command", "send_command_input", "command_status", "notebook_execution", "execute_browser_javascript", "run_workflow", "swarm", "invoke_subagent", "define_subagent", "manage_subagents", "send_message", "schedule",
+const AGY_WRITE: [&str; 8] = ["write_file", "edit_file", "delete_knowledge", "write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"];
+// 會啟動指令、子代理、工作流程、外部工具，或把訊息、排程送出去的，都照執行類的政策
+const AGY_EXEC: [&str; 13] = [
+    "run_command", "send_command_input", "command_status", "notebook_execution", "execute_browser_javascript", "run_workflow", "swarm", "invoke_subagent", "define_subagent", "manage_subagents", "send_message", "schedule", "call_mcp_tool",
 ];
-const AGY_NET: [&str; 8] = ["read_url_content", "search_web", "open_browser_url", "read_browser_page", "capture_browser_console_logs", "capture_browser_screenshot", "list_browser_pages", "get_browser_dom"];
+const AGY_NET: [&str; 9] = ["generate_image", "read_url_content", "search_web", "open_browser_url", "read_browser_page", "capture_browser_console_logs", "capture_browser_screenshot", "list_browser_pages", "get_browser_dom"];
 const AGY_INTERNAL: &[&str] = &[
-    "finish", "wait", "wait_5_seconds", "ask_question", "ask_permission", "ask_custom_permission", "list_permissions", "manage_task", "update_steps", "manage_inbox", "delete_knowledge", "search_marketplace", "list_plugin_accounts",
-    "call_mcp_tool", "generate_image"
+    "finish", "wait", "wait_5_seconds", "ask_question", "ask_permission", "ask_custom_permission", "list_permissions", "manage_task", "update_steps", "manage_inbox", "search_marketplace", "list_plugin_accounts",
 ];
 
-/// 這個工具名登記過嗎（五張表裡有）。沒登記的會用關鍵字推測類別，但呼叫端要記一行 log，不能默默放行
+/// 這個工具名登記過嗎（五張表裡有）。沒登記的會用關鍵字推測類別、推不出來照執行類處理，呼叫端要記一行 log，不能默默放行
 pub fn is_registered_agy_tool(name: &str) -> bool {
     let n = name.to_lowercase();
     [&AGY_READ[..], &AGY_WRITE[..], &AGY_EXEC[..], &AGY_NET[..], AGY_INTERNAL].iter().any(|t| t.contains(&n.as_str()))
 }
 
 /// agy 原生 stream-json 的工具名 → 類別。"internal"＝代理自己的內部控制（規劃、等待、結束…），一律放行。
-/// 沒登記的新工具名用關鍵字推測；推測不出來視為 internal（呼叫端用 is_registered_agy_tool 判斷要不要記 log）
+/// 沒登記的新工具名先用關鍵字推測（寫入、網路比預設更具體）；推測不出來照執行類處理，不再當內部控制放行（呼叫端用 is_registered_agy_tool 判斷要不要記 log）
 pub fn category_of_agy_tool(name: &str) -> &'static str {
     let n = name.to_lowercase();
     let n = n.as_str();
@@ -116,7 +115,7 @@ pub fn category_of_agy_tool(name: &str) -> &'static str {
     if ["url", "web", "http", "fetch"].iter().any(|k| n.contains(k)) {
         return "network";
     }
-    "internal"
+    "execute"
 }
 
 #[derive(Clone, Debug)]
@@ -636,7 +635,8 @@ mod tests {
         assert_eq!(category_of_agy_tool("write_to_file"), "write");
         assert_eq!(category_of_agy_tool("run_command"), "execute");
         assert_eq!(category_of_agy_tool("browser_click"), "network");
-        assert_eq!(category_of_agy_tool("totally_new_tool"), "internal");
+        assert_eq!(category_of_agy_tool("totally_new_tool"), "execute", "沒登記又推不出類別：照執行類處理");
+        assert_eq!(category_of_agy_tool(""), "execute");
         assert_eq!(category_of_agy_tool("make_patch_x"), "write");
     }
 
@@ -655,6 +655,9 @@ mod tests {
             ("send_message", "execute"),
             ("schedule", "execute"),
             ("search_web", "network"),
+            ("generate_image", "network"),
+            ("call_mcp_tool", "execute"),
+            ("delete_knowledge", "write"),
             ("manage_task", "internal"),
             ("update_steps", "internal"),
             ("ask_question", "internal"),

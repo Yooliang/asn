@@ -1,5 +1,6 @@
 {
   "AGY_EXEC": {
+    "call_mcp_tool": "execute",
     "command_status": "execute",
     "define_subagent": "execute",
     "execute_browser_javascript": "execute",
@@ -17,10 +18,7 @@
     "ask_custom_permission": "internal",
     "ask_permission": "internal",
     "ask_question": "internal",
-    "call_mcp_tool": "internal",
-    "delete_knowledge": "internal",
     "finish": "internal",
-    "generate_image": "internal",
     "list_permissions": "internal",
     "list_plugin_accounts": "internal",
     "manage_inbox": "internal",
@@ -33,6 +31,7 @@
   "AGY_NET": {
     "capture_browser_console_logs": "network",
     "capture_browser_screenshot": "network",
+    "generate_image": "network",
     "get_browser_dom": "network",
     "list_browser_pages": "network",
     "open_browser_url": "network",
@@ -50,6 +49,7 @@
     "view_file": "read"
   },
   "AGY_WRITE": {
+    "delete_knowledge": "write",
     "edit_file": "write",
     "multi_replace_file_content": "write",
     "notebook_edit": "write",
@@ -62,17 +62,17 @@
     "ASK_CUSTOM_PERMISSION": "internal",
     "ASK_PERMISSION": "internal",
     "ASK_QUESTION": "internal",
-    "CALL_MCP_TOOL": "internal",
+    "CALL_MCP_TOOL": "execute",
     "CAPTURE_BROWSER_CONSOLE_LOGS": "network",
     "CAPTURE_BROWSER_SCREENSHOT": "network",
     "COMMAND_STATUS": "execute",
     "DEFINE_SUBAGENT": "execute",
-    "DELETE_KNOWLEDGE": "internal",
+    "DELETE_KNOWLEDGE": "write",
     "EDIT_FILE": "write",
     "EXECUTE_BROWSER_JAVASCRIPT": "execute",
     "FIND_BY_NAME": "read",
     "FINISH": "internal",
-    "GENERATE_IMAGE": "internal",
+    "GENERATE_IMAGE": "network",
     "GET_BROWSER_DOM": "network",
     "GREP_SEARCH": "read",
     "INVOKE_SUBAGENT": "execute",
@@ -110,8 +110,8 @@
     "WRITE_TO_FILE": "write"
   },
   "關鍵字與順序衝突案例": {
-    "": "internal",
-    "  ": "internal",
+    "": "execute",
+    "  ": "execute",
     "Browser_Navigate": "network",
     "WRITE_TO_FILE": "write",
     "Write_To_File": "write",
@@ -123,7 +123,7 @@
     "execute_something": "execute",
     "fetch_http_and_write": "write",
     "move_it": "write",
-    "my_browser_tool": "internal",
+    "my_browser_tool": "execute",
     "patch_exec": "write",
     "remove_thing": "write",
     "run_http": "execute",
@@ -131,9 +131,9 @@
     "sed_inplace": "write",
     "shell_run": "execute",
     "terminal_open": "execute",
-    "unknown_tool": "internal",
-    "view_file ": "internal",
+    "unknown_tool": "execute",
+    "view_file ": "execute",
     "webhook_delete": "write",
-    "完全未知的中文工具": "internal"
+    "完全未知的中文工具": "execute"
   }
 }
