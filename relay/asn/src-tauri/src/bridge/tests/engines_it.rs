@@ -26,7 +26,7 @@ fn worker(name: &str, protocol: &str, extra: Value) -> Value {
     let script = if protocol == "agy-stream" { fake("fake-agy.mjs") } else { fake("fake-acp-worker.mjs") };
     let mut w = json!({
         "name": name, "engine": "acp", "roster_engine": "gemini", "protocol": protocol, "command": "node", "args": [script], "label": "工作者",
-        "env_pass": ["FAKE_ACP_STATE", "FAKE_ACP_LOAD", "FAKE_ACP_AUTH", "FAKE_AGY_STATE", "FAKE_AGY_STUBBORN", "FAKE_AGY_WRITE_MS", "FAKE_AGY_FAIL_EXIT_MS", "FAKE_AGY_ECHO_PID", "FAKE_AGY_WRITE_GATE", "FAKE_X", "FAKE_ACP_MODELS", "FAKE_AGY_MODELS"],
+        "env_pass": ["FAKE_ACP_STATE", "FAKE_ACP_LOAD", "FAKE_ACP_AUTH", "FAKE_AGY_STATE", "FAKE_AGY_STUBBORN", "FAKE_AGY_WRITE_MS", "FAKE_AGY_FAIL_EXIT_MS", "FAKE_AGY_ECHO_PID", "FAKE_AGY_WRITE_GATE", "FAKE_AGY_TREE", "FAKE_X", "FAKE_ACP_MODELS", "FAKE_AGY_MODELS"],
     });
     for (k, v) in extra.as_object().unwrap() {
         w[k] = v.clone();
@@ -556,6 +556,47 @@ async fn agy_網路重試的等待期間工作者被停掉_不重開驅動_不�
     let log = h.log_text();
     assert!(log.contains("等待重試期間工作者已被關閉：不再重試"), "{log}");
     assert!(!log.contains("再試一次後恢復正常") && !log.contains("再試一次仍然斷線"), "等待後不能又拉起驅動重送：{log}");
+}
+
+/// #2350：agy 被停止時要連它開的子程序、孫程序一起收（假 agy 啟動時開 子→孫，睡著不退出）。
+/// Windows 的 `taskkill /T` 收整棵；Linux／macOS 的 `pkill -P` 只收到直接子程序（已知限制），那裡只斷言 agy 與子程序
+#[tokio::test]
+async fn agy_停止時整棵程序樹都被結束_含子程序與孫程序() {
+    let tree = tempfile::tempdir().unwrap();
+    let base = tree.path().join("tree").display().to_string();
+    let mut h = eh(Some(json!([worker("Gemini", "agy-stream", json!({}))])), &[("FAKE_AGY_TREE", &base)], "acp", &[]).await;
+    h.put_pull(to_agent(1, "Gemini", "x")).await;
+    h.wait("回覆", |h| !h.fr.sent().is_empty()).await;
+    let read = |p: String| std::fs::read_to_string(p).ok().and_then(|t| t.trim().parse::<u32>().ok());
+    let mut pids = (None, None);
+    for _ in 0..300 {
+        pids = (read(format!("{base}.c")), read(format!("{base}.g")));
+        if pids.0.is_some() && pids.1.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let (child, grand) = (pids.0.expect("子程序 pid"), pids.1.expect("孫程序 pid"));
+    let agy: Vec<u32> = std::fs::read_to_string(h.work.path().join("engine.pids")).unwrap().lines().filter_map(|l| l.parse().ok()).collect();
+    assert_eq!(agy.len(), 1, "帳本記著唯一的 agy 子程序");
+    assert!(crate::heartbeat::pid_alive(child) && crate::heartbeat::pid_alive(grand), "樹要先真的活著");
+    h.set.stop();
+    let mut must_die = vec![agy[0], child];
+    if cfg!(windows) {
+        must_die.push(grand);
+    }
+    for _ in 0..200 {
+        if must_die.iter().all(|p| !crate::heartbeat::pid_alive(*p)) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let alive: Vec<u32> = [agy[0], child, grand].into_iter().filter(|p| crate::heartbeat::pid_alive(*p)).collect();
+    // 收尾：失敗也不留孤兒（只結束這棵樹自己開的 pid）
+    for p in [grand, child] {
+        let _ = crate::bridge::orphans::kill_tree(p);
+    }
+    assert!(must_die.iter().all(|p| !alive.contains(p)), "停止 agy 要結束整棵程序樹，還活著的：{alive:?}");
 }
 
 #[tokio::test]

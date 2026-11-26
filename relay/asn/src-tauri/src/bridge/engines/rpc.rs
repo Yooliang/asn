@@ -290,9 +290,11 @@ impl Rpc {
         });
     }
 
-    /// 立刻強制結束（不等 1.5 秒）
+    /// 立刻強制結束（不等 1.5 秒），連子孫一起收（#2350）。
+    /// 順序由等行程的任務保證：先列出並結束子孫（`orphans::kill_tree`）、再結束根；先殺根的話子孫會被改掛，之後就找不到了
     pub fn kill_now(&self) {
         self.0.stopped.store(true, Ordering::SeqCst);
+        self.0.kill_tree.store(true, Ordering::SeqCst);
         self.0.kill.notify_one();
     }
 }
@@ -458,5 +460,91 @@ mod tests {
         let gap = exit.saturating_duration_since(end);
         // 正常結束管線很快 EOF：從行程結束到 on_exit 不該等滿任何一個管線的上限（DRAIN_MAX）
         assert!(gap < DRAIN_MAX, "正常結束管線很快 EOF，不該等滿上限：行程結束到 on_exit 花了 {gap:?}");
+    }
+
+    /// 造一棵三層的假程序樹：假引擎（node）→ 子程序 → 孫程序，三個都睡著不退出。
+    /// 子與孫的 pid 各寫進暫存檔，回傳 (rpc, 子 pid, 孫 pid)。測試結束要呼叫 `reap` 收尾（只結束自己開的 pid）
+    /// 一定要 detached：node 在 Windows 對非 detached 的子程序會掛 KILL_ON_JOB_CLOSE 的 Job，父死子就跟著死，測不出任何東西
+    async fn spawn_tree(dir: &std::path::Path) -> (Rpc, u32, u32) {
+        let base = dir.join("tree").to_string_lossy().replace('\\', "/");
+        let grand = "setInterval(()=>{},1000)";
+        let child = format!(
+            "const {{spawn}}=require('child_process'),fs=require('fs');const g=spawn(process.execPath,['-e',{}],{{stdio:'ignore',detached:true}});fs.writeFileSync({},String(g.pid));setInterval(()=>{{}},1000)",
+            serde_json::to_string(grand).unwrap(),
+            serde_json::to_string(&format!("{base}.g")).unwrap()
+        );
+        let root = format!(
+            "const {{spawn}}=require('child_process'),fs=require('fs');const c=spawn(process.execPath,['-e',{}],{{stdio:'ignore',detached:true}});fs.writeFileSync({},String(c.pid));setInterval(()=>{{}},1000)",
+            serde_json::to_string(&child).unwrap(),
+            serde_json::to_string(&format!("{base}.c")).unwrap()
+        );
+        let rpc = Rpc::spawn(opts(&root, Arc::new(|_| {}), Arc::new(|_| {}))).unwrap();
+        let read = |ext: &str| std::fs::read_to_string(format!("{base}.{ext}")).ok().and_then(|t| t.trim().parse::<u32>().ok());
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let (Some(c), Some(g)) = (read("c"), read("g")) {
+                return (rpc, c, g);
+            }
+            assert!(Instant::now() < deadline, "假程序樹沒有在 30 秒內建好");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// 等這些 pid 都不在了（上限給足，不照機器快慢）
+    async fn wait_gone(pids: &[u32]) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if pids.iter().all(|p| !crate::heartbeat::pid_alive(*p)) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }
+
+    /// 收尾：失敗時也不留孤兒（只結束這棵樹自己開的 pid）
+    fn reap(pids: &[u32]) {
+        for p in pids {
+            let _ = crate::bridge::orphans::kill_tree(*p);
+        }
+    }
+
+    /// 驗三層都結束。Windows 的 `taskkill /T` 收整棵；Linux／macOS 的 `pkill -P` 只收到直接子程序（已知限制，見 orphans.rs），
+    /// 所以那裡只斷言根與子，孫只做收尾
+    async fn assert_tree_gone(rpc: &Rpc, child: u32, grand: u32) {
+        let mut must_die = vec![rpc.pid(), child];
+        if cfg!(windows) {
+            must_die.push(grand);
+        }
+        let ok = wait_gone(&must_die).await;
+        let alive: Vec<u32> = [rpc.pid(), child, grand].into_iter().filter(|p| crate::heartbeat::pid_alive(*p)).collect();
+        reap(&[grand, child]);
+        assert!(ok, "整棵程序樹都要結束，還活著的：{alive:?}");
+    }
+
+    /// #2350：agy 走的 `kill_now` 也要連子孫一起收（假引擎→子→孫）
+    #[tokio::test]
+    async fn kill_now_結束整棵程序樹_含孫程序() {
+        if node().is_none() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let (rpc, child, grand) = spawn_tree(d.path()).await;
+        assert!(crate::heartbeat::pid_alive(child) && crate::heartbeat::pid_alive(grand), "樹要先真的活著");
+        rpc.kill_now();
+        assert_tree_gone(&rpc, child, grand).await;
+    }
+
+    /// D-9：Codex、ACP 走的 `stop()`（關 stdin、1.5 秒後收整棵）也要把孫程序收掉，守住不被日後改掉
+    #[tokio::test]
+    async fn stop_結束整棵程序樹_含孫程序() {
+        if node().is_none() {
+            return;
+        }
+        let d = tempfile::tempdir().unwrap();
+        let (rpc, child, grand) = spawn_tree(d.path()).await;
+        assert!(crate::heartbeat::pid_alive(child) && crate::heartbeat::pid_alive(grand), "樹要先真的活著");
+        rpc.stop();
+        assert_tree_gone(&rpc, child, grand).await;
     }
 }
