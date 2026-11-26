@@ -2766,18 +2766,25 @@ fn 壓縮交接設定_預設開且三次_記的是關_次數夾在二到十_寫�
     let d = tempfile::tempdir().unwrap();
     let s = super::read_settings(d.path());
     assert!(!s.compact_handoff_off && s.compact_handoff_n == 3, "沒有檔：預設打勾、3 次");
+    // 繞過 write_settings 直接放原文：走 save_raw_in，寫入前先讓讀取快取失效。快取只看修改時間與大小，直接 fs::write 連續寫
+    // 同樣大小的內容（99 與 -3）會偶爾讀到上一份（#2406）。每次把修改時間固定成同一個值，不靠計時就能測到這個最壞情況
+    let put = |text: &str| {
+        crate::settings::save_raw_in::<crate::settings::BridgeDoc>(d.path(), text).unwrap();
+        let f = std::fs::OpenOptions::new().write(true).open(super::settings_path(d.path())).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000)).unwrap();
+    };
     // 舊版寫的 bridge.json 沒有這兩個欄位
-    std::fs::write(super::settings_path(d.path()), r#"{"enabled":true,"auto_resume_off":true}"#).unwrap();
+    put(r#"{"enabled":true,"auto_resume_off":true}"#);
     let s = super::read_settings(d.path());
     assert!(!s.compact_handoff_off && s.compact_handoff_n == 3 && s.auto_resume_off, "缺欄位＝開、3 次；其他欄位照讀");
     super::write_settings(d.path(), super::BridgeSettings { compact_handoff_off: true, compact_handoff_n: 5, ..s }).unwrap();
     let back = super::read_settings(d.path());
     assert!(back.compact_handoff_off && back.compact_handoff_n == 5 && back.auto_resume_off, "寫了讀得回來，沒有蓋掉別的欄位");
     for (raw, want) in [("1", 2), ("99", 10), ("-3", 2), ("\"x\"", 3), ("null", 3)] {
-        std::fs::write(super::settings_path(d.path()), format!(r#"{{"compact_handoff_n":{raw}}}"#)).unwrap();
+        put(&format!(r#"{{"compact_handoff_n":{raw}}}"#));
         assert_eq!(super::read_settings(d.path()).compact_handoff_n, want, "{raw}");
     }
-    std::fs::write(super::settings_path(d.path()), "壞掉").unwrap();
+    put("壞掉");
     let bad = super::read_settings(d.path());
     assert!(!bad.compact_handoff_off && bad.compact_handoff_n == 3, "壞檔：預設");
     // 畫面送來的次數也夾在 2～10
