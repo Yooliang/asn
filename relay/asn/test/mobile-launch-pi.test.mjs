@@ -1,7 +1,11 @@
-// 手機開新夥伴：運行四選一（D1 #421）與遠端經 pi 帶提供者和模型（D2 #422）
+// 手機開新夥伴：自動開法（#2354，原本的運行四選一 D1 #421 拿掉了）與遠端經 pi 帶提供者和模型（D2 #422）
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { PI_REMOTE_NO_LIST, PI_REMOTE_NO_PI, buildLaunchRequest, launchFormError, launchPiChoice, launchRun, launchVendors, pickedRun, remotePi } from '../ui/lib/mobile-launch.mjs'
+import { PI_ONLY_CHANNELS, PI_REMOTE_NO_LIST, PI_REMOTE_NO_PI, buildLaunchRequest, launchFormError, launchPiChoice, launchVendors, remotePi } from '../ui/lib/mobile-launch.mjs'
+import { autoRunFor } from '../ui/lib/auto-run.mjs'
+
+// 手機畫面用的自動開法（m.js 的 lchAuto）：那台有沒有 pi、pi 能不能帶這家的模型
+const autoOf = (row, launcher) => { const pc = launchPiChoice(row, launcher); return autoRunFor(row, { local: false, piInstalled: remotePi(launcher).installed, piReady: pc.ok, piWhy: pc.why }) }
 
 const prof = ids => ids.map(id => ({ id, label: id }))
 const L = { profiles: prof(['claude', 'grok', 'pi']), cwd_allow: ['D:\\x'], pi_models: [{ provider: 'anthropic', model: 'claude-sonnet-5' }, { provider: 'minimax', model: 'MiniMax-M3.1-Flash' }, { provider: 'minimax', model: 'MiniMax-M3' }] }
@@ -17,24 +21,21 @@ test('廠牌清單：pi 不列成廠牌；那台 pi 列得到模型的「只能�
   assert.deepEqual(remotePi(NO_PI), { installed: false, models: [] }, '那台沒有 pi 的啟動設定：清單不採用')
 })
 
-test('運行四選一：順序固定、原生 CLI 永遠不能選；經 pi 沒有清單或沒有 pi 時反灰並寫原因', () => {
+test('自動開法：Claude 用終端（那台 pi 有清單也不改經 pi）、Grok 用背景通道、只能經 pi 的廠牌用 pi；沒清單或沒有 pi 時不能開並寫原因', () => {
   const claude = launchVendors(L).find(v => v.id === 'claude')
-  const r = launchRun(claude, L)
-  assert.deepEqual(r.options.map(o => o.key), ['term', 'acp', 'pi', 'self'])
-  assert.equal(r.options.find(o => o.key === 'self').ok, false)
-  assert.equal(r.options.find(o => o.key === 'pi').ok, true)
-  assert.equal(r.selected, 'term', 'asn終端優先：那台 pi 有清單也不預設經 pi（#931）')
-  const noList = launchRun(launchVendors(NO_LIST)[0], NO_LIST).options.find(o => o.key === 'pi')
-  assert.deepEqual([noList.ok, noList.why], [false, PI_REMOTE_NO_LIST])
-  const noPi = launchRun(launchVendors(NO_PI)[0], NO_PI).options.find(o => o.key === 'pi')
-  assert.deepEqual([noPi.ok, noPi.why], [false, PI_REMOTE_NO_PI])
-  assert.equal(launchRun(launchVendors(NO_LIST)[0], NO_LIST).selected, 'term', '沒有清單：照舊開成視窗')
-  const grokTerm = launchRun(launchVendors(L).find(v => v.id === 'grok'), L).options.find(o => o.key === 'term')
-  assert.deepEqual([grokTerm.ok, grokTerm.why], [false, '只能在那台電腦上開'], 'ASN 自帶終端只能在那台開')
-  assert.equal(pickedRun(r, 'term'), 'term')
-  assert.equal(pickedRun(r, 'pi'), 'pi', '使用者選經 pi 仍照選的')
-  assert.equal(pickedRun(r, 'self'), 'term', '不能選的不採用')
-  assert.deepEqual(launchRun(null, L), { options: [], selected: null })
+  assert.deepEqual(autoOf(claude, L), { run: 'term', profile: 'claude', ok: true, why: '' }, 'asn終端優先：那台 pi 有清單也不預設經 pi（#931）')
+  assert.deepEqual(autoOf(launchVendors(NO_LIST)[0], NO_LIST).run, 'term', '沒有清單：照舊開成視窗')
+  const grok = autoOf(launchVendors(L).find(v => v.id === 'grok'), L)
+  assert.deepEqual([grok.run, grok.profile, grok.ok], ['acp', 'grok', true], 'Grok 一律背景通道（ASN 自帶終端收不到信，不再當開法）')
+  const mm = autoOf(launchVendors(L).find(v => v.id === 'minimax'), L)
+  assert.deepEqual([mm.run, mm.profile, mm.ok], ['pi', 'pi', true])
+  // 只能經 pi 的廠牌：那台沒有清單、沒有 pi 時不能開，原因寫給使用者
+  const noListRow = { id: 'minimax', label: 'MiniMax', viaPiOnly: true, profileId: 'pi', toolId: 'pi', mode: 'window', channels: PI_ONLY_CHANNELS }
+  const noList = autoOf(noListRow, NO_LIST)
+  assert.deepEqual([noList.run, noList.ok, noList.why], ['pi', false, PI_REMOTE_NO_LIST])
+  const noPi = autoOf(noListRow, NO_PI)
+  assert.deepEqual([noPi.run, noPi.ok, noPi.why], ['pi', false, PI_REMOTE_NO_PI])
+  assert.deepEqual(autoRunFor(null), { run: null, profile: '', ok: false, why: '' })
 })
 
 test('送出內容：經 pi 帶清單裡的提供者與模型，profile 一律 pi；清單外的不送；其他開法照舊不帶 pi 欄位', () => {
@@ -69,6 +70,6 @@ test('舊版電腦提醒與開好時寫出實際模型（asn真 審 #471）', as
   const fs = await import('node:fs')
   const m = fs.readFileSync(new URL('../ui/m.html', import.meta.url), 'utf8')
   const l = fs.readFileSync(new URL('../ui/list.html', import.meta.url), 'utf8')
-  assert.ok(m.includes(`<p class="m-note" v-if="lchRunKey === 'pi' && lchPi.ok">{{ PI_REMOTE_VERSION_NOTE }}</p>`), '手機：選經 pi 時寫提醒')
+  assert.ok(m.includes(`<p class="m-note" v-if="lchAuto.run === 'pi' && lchPi.ok">{{ PI_REMOTE_VERSION_NOTE }}</p>`), '手機：選經 pi 時寫提醒')
   assert.ok(l.includes('dlgRemote">{{ PI_REMOTE_VERSION_NOTE }}</p>'), '電腦版替別台開也寫')
 })

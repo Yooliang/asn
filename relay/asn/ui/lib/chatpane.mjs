@@ -40,6 +40,7 @@ import { shotFileName } from './shot.mjs'
 import { buildNameHints } from './stt-text.mjs'
 import { statusTip, tierOf } from './sent-status.mjs'
 import { isAsnWindow, showsWaiting } from './roster.mjs'
+import { isBackgroundPartner } from './partner-ops.mjs'
 import { noticeDevOf } from './notice.mjs'
 import { loginNote, warnKind } from './head-tone.mjs'
 import { DISPLAY_ONLY_TAG, displayOnlyHint, isDisplayOnly, remoteComposeOn } from './display-only.mjs'
@@ -181,7 +182,8 @@ export const ChatPane = {
     }
     // 看別台電腦上的夥伴（#597）：那台在本人帳號底下、這台能發起才有入口，同樣放在第 2 格
     const remoteAvail = ref(null)
-    const canRemote = computed(() => !canTermView.value && remoteEntry({ api: props.remoteViewApi, friend: props.friend, selfNode: props.selfNode, avail: remoteAvail.value }))
+    // 背景夥伴（內建通道的 Gemini、Grok）沒有終端畫面：看畫面入口、打字列、「送進終端」都不給（#2354）
+    const canRemote = computed(() => !canTermView.value && !isBackgroundPartner(props.friend) && remoteEntry({ api: props.remoteViewApi, friend: props.friend, selfNode: props.selfNode, avail: remoteAvail.value }))
     const remoteOn = ref(false)
     const remoteShown = computed(() => remoteOn.value && canRemote.value)
     // 打字（0.2.10）：在看畫面時才有，按了換成可以打字的畫面；關掉看畫面就一起收掉

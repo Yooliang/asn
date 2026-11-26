@@ -185,6 +185,13 @@ export function partnerEngine(friend) {
   return 'other'
 }
 
+/**
+ * 背景夥伴（#2354）：用內建通道（acp）在後台跑的 Gemini、Grok，沒有終端畫面。看畫面入口與打字列不給它們（按了只會「這次觀看結束了」）。
+ * 跟 consoleBlock（actionbar.mjs）同一個判斷來源：名單回報的引擎。名單沒寫引擎的當 Claude，不誤傷舊資料。
+ * 已知取捨：舊的終端版 Grok（引擎也回報 grok）也會被當成背景夥伴，拿掉看畫面入口。
+ */
+export const isBackgroundPartner = friend => partnerEngine(friend) === 'acp'
+
 // 是不是 AI 夥伴（任何引擎都算，雲端代理也算；封存對它們都可用）。ctx.asn＝節點→在線的 ASN 視窗（名單帶的）；ctx.nonWindowNodes＝已知是手機的節點（選填）
 export function isAiPartner(friend, ctx = {}) {
   const f = friend ?? {}

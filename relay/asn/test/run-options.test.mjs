@@ -63,3 +63,17 @@ test('沒偵測到 pi 的說明（#394）：講清楚是「沒有 pi」、找過
   assert.match(why, /把 ASN 關掉重開/)
   assert.doesNotMatch(why, /擴充/)
 })
+
+// #2354：runOptions 現在只是 autoRunFor 的內部規則。這個檔的測試綠，只代表規則本身沒壞，不代表畫面對——
+// 所以另外鎖「畫面上沒有運行」：開新夥伴的畫面檔裡沒有任何運行名稱（RUN_OPTION_LABEL 的四個字串）與運行選項的元素
+test('畫面上沒有「運行」：規則還在（上面的測試），但手機與電腦版的開新夥伴畫面都不再顯示它（避免規則綠、畫面卻還留著選項的假綠）', async () => {
+  const fs = await import('node:fs')
+  const read = f => fs.readFileSync(new URL(`../ui/${f}`, import.meta.url), 'utf8')
+  const mLaunch = read('m.html').slice(read('m.html').indexOf('class="m-pgin m-lch"'), read('m.html').indexOf('<!-- /內頁 -->'))
+  const dlg = read('list.html').slice(read('list.html').indexOf('id="partner-dlg-title"'), read('list.html').indexOf('<!-- 終端：等你回答的提示框'))
+  assert.ok(mLaunch.length > 1000 && dlg.length > 1000, '截到兩個畫面的範圍')
+  for (const [name, html] of [['手機第 2 頁', mLaunch], ['電腦版對話框', dlg]]) {
+    for (const label of Object.values(RUN_OPTION_LABEL)) assert.ok(!html.includes(label), `${name} 不該出現「${label}」`)
+    assert.ok(!html.includes('運行') && !/legend>運行/.test(html) && !/name="partner-run"/.test(html), `${name} 不該有「運行」`)
+  }
+})

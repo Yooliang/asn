@@ -87,9 +87,10 @@ import { isPinned as chatIsPinned, normalizePins, pinMenuLabel, pinnedTargets, r
 import { createPinsSync } from './lib/pins-sync.mjs'
 import { PinDot } from './lib/pin-dot.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
-import { channelRows, customRunOptions, launchModelChoices, runOptions, vendorRows } from './lib/model-catalog.mjs'
-import { cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, providerStates } from './lib/pi-models.mjs'
-import { PI_ONLY_CHANNELS, PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchRun, launchVendors } from './lib/mobile-launch.mjs'
+import { launchModelChoices, vendorRows } from './lib/model-catalog.mjs'
+import { PI_ONLY_VENDORS, cleanPiModels, piChoiceFor, piLaunchArgs, piVendorState, providerStates } from './lib/pi-models.mjs'
+import { PI_ONLY_CHANNELS, PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchVendorCards, remotePi } from './lib/mobile-launch.mjs'
+import { autoRunFor, localLaunchRequest, loggedOutFromCli, loggedOutFromStates, vendorCards, vendorStatesOf } from './lib/auto-run.mjs'
 import { createMic } from './lib/mic.mjs'
 import { browserAudio } from './lib/tts-player.mjs'
 import { createVoiceUi } from './lib/voice-ui.mjs'
@@ -657,60 +658,55 @@ const launchToolRows = computed(() => MODEL_CATALOG.map(m => modelUiRow(m, cliTo
 const partnerModels = computed(() => launchToolRows.value)
 // 對話框裡的模型列：本機看偵測到的 CLI；別台設備看那台回報的 profile
 const dlgModels = computed(() => (partnerDlg.node && partnerDlg.node !== info.node ? remoteModelRows(remoteLaunchers.value[partnerDlg.node]) : partnerModels.value))
-const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', run: '', step: 1, piModel: '', vendor: '', model: '' })
+const partnerDlg = reactive({ open: false, node: '', deviceLabel: '', profile: 'claude', name: '', cwd: '', firstMessage: '', busy: false, error: '', modeLabel: '', display: 'foreground', step: 1, piModel: '', vendor: '', model: '' })
 const partnerFgOnly = computed(() => partnerDlg.node === info.node && foregroundOnlyProfile(partnerDlg.profile))
-// 「運行」四選一（#351、擁有者 10/27 定案）：內建通道 ＞ 經 pi ＞ ASN 開的終端（進階）＞ 自己開的 CLI（只作說明，永遠不能選）。
-// 目錄決定哪個能選；不能選的灰掉並寫原因；第一個能選的標「建議」。
+// 只選廠牌（#2354）：開法由 autoRunFor 自動決定（手機同一份），畫面上沒有「運行」。
 // 選到的廠牌列：一般廠牌照 profile 找；只能經 pi 的廠牌（DeepSeek、MiniMax）profile 都是 pi，所以照 vendor（廠牌 id）找
 const dlgRow = computed(() => (partnerDlg.vendor && dlgVendors.value.find(m => m.id === partnerDlg.vendor)) || dlgModels.value.find(m => m.profileId === partnerDlg.profile))
 // 經 pi（#351）：這台 pi 列得到哪些模型、各提供者有沒有登入。打開對話框時才向後端查，60 秒內不重查；先拿模型清單，登入狀態晚一點回來再補原因
-const piInfo = reactive({ models: [], providers: {}, at: 0 })
+// done＝兩個都查過了（沒查到之前不標「尚未登入」，不亂說）
+const piInfo = reactive({ models: [], providers: {}, at: 0, done: false })
 async function loadPiInfo() {
   if (Date.now() - piInfo.at < 60_000) return
   piInfo.at = Date.now()
-  try { piInfo.models = cleanPiModels(await transport.piModels()) } catch { piInfo.models = [] }
-  try { piInfo.providers = providerStates(await transport.piProviders()) } catch { piInfo.providers = {} }
+  try { piInfo.models = cleanPiModels(await transport.piModels()) } catch (e) { console.info('[ASN] pi 模型清單', e?.message ?? e); piInfo.models = [] }
+  try { piInfo.providers = providerStates(await transport.piProviders()) } catch (e) { console.info('[ASN] pi 登入狀態', e?.message ?? e); piInfo.providers = {} }
+  piInfo.done = true
 }
+// 這台（或選的那台）確定沒登入的廠牌：{ 廠牌 id: true }；由 setup 裡的 watch 依本機偵測、帳號回報更新（只在拿到新鮮資料時才標）
+const dlgLoginOut = ref({})
 // 別台設備（D2 #422）：用那台回報的 pi 模型清單（要開放遠端管理），跟手機同一套
 const dlgRemote = computed(() => !!partnerDlg.node && partnerDlg.node !== info.node)
 const dlgRemoteLauncher = computed(() => (dlgRemote.value ? remoteLaunchers.value[partnerDlg.node] ?? null : null))
 const piChoice = computed(() => (dlgRemote.value ? launchPiChoice(dlgRow.value, dlgRemoteLauncher.value) : piChoiceFor(dlgRow.value?.id, piInfo.models, piInfo.providers)))
 // 「經 pi」是否就緒的旗標 PI_VIA_READY 在 lib/flags.mjs（含原本的說明）
-// 只能經 pi 的廠牌（#351）：這台的 pi 列得到它的模型才出現，運行只有「經 pi」能選；遠端開 pi 帶模型還沒做，所以只在選這台時加
+// 只能經 pi 的廠牌（#351）：永遠列出（#2354），沒有 pi＝尚未安裝、pi 沒登入這家＝尚未登入；遠端開 pi 帶模型還沒做，所以只在選這台時加
 const piOnlyRows = computed(() => (PI_VIA_READY && partnerDlg.node === info.node
-  ? piOnlyVendorRows(piInfo.models, piInfo.providers).map(v => ({ ...v, profileId: 'pi', toolId: 'pi', installed: cliInstalled(cliTools.value, 'pi'), modeLabel: '用 asn終端（pi shell）開', installHint: '這台電腦沒偵測到 pi', channels: PI_ONLY_CHANNELS }))
+  ? PI_ONLY_VENDORS.map(v => {
+    const s = piVendorState(v.id, piInfo.models, piInfo.providers, { known: piInfo.done && cliInstalled(cliTools.value, 'pi') })
+    return { ...v, viaPiOnly: true, profileId: 'pi', toolId: 'pi', mode: 'window', modeLabel: '', installed: cliInstalled(cliTools.value, 'pi') && !s.missing, channels: PI_ONLY_CHANNELS, piLoggedOut: s.loggedOut }
+  })
   : []))
-const dlgVendors = computed(() => (dlgRemote.value ? launchVendors(dlgRemoteLauncher.value) : PI_VIA_READY ? [...vendorRows(dlgModels.value), ...piOnlyRows.value] : dlgModels.value))
-const partnerRun = computed(() => {
-  const row = dlgRow.value
-  if (dlgRemote.value) {   // 別台：手機同一套（遠端開，自帶終端只能在那台開、經 pi 看那台的清單）
-    const r = launchRun(row, dlgRemoteLauncher.value)
-    return { ...r, options: r.options.map(o => ({ ...o, self: o.key === 'self' })), recommended: r.options.find(o => o.ok && o.key !== 'self')?.key ?? '' }
-  }
-  const r = row?.channels
-    ? runOptions(row, { local: partnerDlg.node === info.node, piInstalled: cliInstalled(cliTools.value, 'pi'), piReady: PI_VIA_READY && piChoice.value.ok })
-    : null
-  if (!r) {   // 目錄上沒有的（自訂設定）：只看 mode（手機同一份）
-    const c = customRunOptions(row)
-    return { ...c, recommended: c.selected }
-  }
-  const rec = r.options.find(o => o.ok && o.key !== 'self')?.key ?? ''
-  // 經 pi 不能選時，原因用 pi 自己回答的（沒登入、這版 pi 沒有、沒列出模型），比目錄的通用說明準確
-  const piWhy = PI_VIA_READY && !piChoice.value.ok && partnerDlg.node === info.node ? piChoice.value.why : ''
-  return { ...r, options: r.options.map(o => ({ ...o, why: o.key === 'pi' && !o.ok && piWhy ? piWhy : o.why, self: o.key === 'self' })), recommended: rec }
+const dlgVendors = computed(() => {
+  if (dlgRemote.value) return launchVendorCards(dlgRemoteLauncher.value, { loggedOut: dlgLoginOut.value })
+  const own = vendorRows(dlgModels.value)
+  if (!PI_VIA_READY) return vendorCards(own, { loggedOut: dlgLoginOut.value })
+  const piOut = Object.fromEntries(piOnlyRows.value.filter(r => r.piLoggedOut).map(r => [r.id, true]))
+  return vendorCards([...own, ...piOnlyRows.value], { loggedOut: { ...dlgLoginOut.value, ...piOut } })
 })
-const partnerRunChoice = computed(() => {
-  const opts = partnerRun.value.options
-  const cur = opts.find(o => o.key === partnerDlg.run && o.ok && o.key !== 'self')
-  return cur ? cur.key : partnerRun.value.selected
-})
-const partnerRunModel = computed({ get: () => partnerRunChoice.value, set: v => { partnerDlg.run = v } })   // 預設選項要真的勾起來
-// 第 2 頁「型號」（#539 之四）：這家有清單、開在這台、運行對得上才出現；預設＝不指定（照原本的開法）。清單跟「切換模型」同一份（switchModelsFor）
-const launchModel = computed(() => launchModelChoices(dlgRow.value?.id, partnerRunChoice.value, { local: partnerDlg.node === info.node, engine: localProfileEngine(partnerDlg.profile, remoteLaunchers.value[info.node]) }))
+// 這個廠牌自動用的開法（手機同一份 autoRunFor）；經 pi 不能用時，原因用 pi 自己回答的（沒登入、這版 pi 沒有、沒列出模型）
+const dlgAuto = computed(() => autoRunFor(dlgRow.value, {
+  local: partnerDlg.node === info.node,
+  piInstalled: dlgRemote.value ? remotePi(dlgRemoteLauncher.value).installed : cliInstalled(cliTools.value, 'pi'),
+  piReady: PI_VIA_READY && piChoice.value.ok,
+  piWhy: PI_VIA_READY && !piChoice.value.ok ? piChoice.value.why : '',
+}))
+// 第 2 頁「型號」（#539 之四）：這家有清單、開在這台才出現；預設＝不指定（照原本的開法）。清單跟「切換模型」同一份（switchModelsFor）
+// 只能經 pi 的廠牌（DeepSeek、MiniMax）同一格改成 pi 的模型清單（dlgPiPick）
+const launchModel = computed(() => launchModelChoices(dlgRow.value?.id, dlgAuto.value.run, { local: partnerDlg.node === info.node, engine: localProfileEngine(partnerDlg.profile, remoteLaunchers.value[info.node]) }))
 const launchModelPick = computed(() => (launchModel.value.show && launchModel.value.models.some(m => m.id === partnerDlg.model) ? partnerDlg.model : ''))
-const partnerCanRun = computed(() => { const o = partnerRun.value.options.find(x => x.key === partnerRunChoice.value); return Boolean(o && o.ok && o.key !== 'self') })
-const TERM_WEZ_TOOLS = ['grok', 'agy']   // 後端 term_start 只收這兩個
-const partnerChannels = computed(() => channelRows(dlgModels.value.find(m => m.profileId === partnerDlg.profile)))   // #351：這個模型三條通道的狀態，只顯示說明
+const dlgPiPick = computed(() => dlgAuto.value.run === 'pi' && piChoice.value.ok)
+const partnerCanRun = computed(() => dlgAuto.value.ok)
 const partnerShowDisplay = computed(() => partnerDlg.node === info.node && showDisplayModeChoice(partnerDlg.profile))
 const launchCtx = computed(() => ({ selfNode: info.node, partnerModels: partnerModels.value, remoteLaunchers: remoteLaunchers.value, remoteMachines: remoteMachines.value, friends: friends.value, asn: asnMap.value }))
 const launchDeviceRowsList = computed(() => launchDeviceRows(friends.value, { selfNode: info.node, nodeNames: nodeNames.value, nodeOrder: nodeOrder.value, deviceOrder: devPrefs.deviceOrder, removed: devPrefs.deviceRemoved }))
@@ -743,21 +739,21 @@ async function browsePartnerCwd() {
   } catch (e) { partnerDlg.error = plainMessage(e); stateLog.cwdRejected('加入', cwdReason(e)) }
 }
 function pickPartnerModel(m) {
-  if (!m.installed) return
+  if (m.disabled) return   // 尚未安裝、尚未登入的不能選
   partnerDlg.vendor = m.id
   partnerDlg.profile = m.profileId
-  partnerDlg.run = ''
   partnerDlg.model = ''
+  partnerDlg.piModel = ''
   partnerDlg.modeLabel = m.modeLabel
   partnerDlg.name = defaultPartnerName(friends.value, m.viaPiOnly ? m.id : m.profileId)
   // pi 是互動式，只能前台；換回其他模型時還原成使用者上次的選擇
   partnerDlg.display = foregroundOnlyProfile(m.profileId) ? 'foreground' : (launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground')
 }
-// #351 三頁精靈：1. 設備 2. 廠牌與運行 3. 名稱與路徑。「＋」進來預先選這台（不能開就不選）；
+// #351 三頁精靈（#2354 改名）：1. 設備 2. 廠牌（加型號）3. 設定（名字、工作資料夾、第一句話，本機視窗廠牌另有顯示方式）。「＋」進來預先選這台（不能開就不選）；
 // 帶 nodeKey 進來（某台設備的入口）預先選那台，但一樣從第 1 頁開始
 function openPartnerDlg(nodeKey = '') {
   closeLaunchPicker()
-  if (!nodeKey || nodeKey === info.node) void refreshCliTools()   // 開這台：順便重新偵測（剛裝好 AI 不用重開 ASN）；不等它，結果回來對話框自己更新
+  if (!nodeKey || nodeKey === info.node) { void refreshCliTools(); void refreshCliStatus(false) }   // 開這台：順便重新偵測（剛裝好 AI 不用重開 ASN）、再查一次登入（卡片的「尚未登入」）；不等它，結果回來對話框自己更新
   partnerDlg.open = true
   partnerDlg.node = ''
   partnerDlg.deviceLabel = ''
@@ -777,15 +773,15 @@ function pickPartnerDevice(nodeKey) {
   partnerDlg.piModel = ''
   if (nodeKey === info.node && PI_VIA_READY) void loadPiInfo()   // 經 pi 只能在這台開（遠端開 pi 帶模型還沒做）
   partnerDlg.display = launchPrefs.launchDisplay === 'background' ? 'background' : 'foreground'
-  const first = dlgModels.value.find(m => m.installed) ?? dlgModels.value[0]
+  const first = dlgVendors.value.find(m => !m.disabled)
   if (first) pickPartnerModel(first)
   partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
   if (nodeKey !== info.node) {
     // 別台設備：開對話框時重抓一次它回報的 profile 與資料夾（剛啟用內建橋或剛改設定時才不會看到舊的）
     void refreshLaunchers().then(() => {
       if (!partnerDlg.open || partnerDlg.node !== nodeKey) return
-      const cur = dlgModels.value.find(m => m.profileId === partnerDlg.profile)
-      if (!cur) { const f = dlgModels.value[0]; if (f) pickPartnerModel(f) }
+      const cur = dlgVendors.value.find(m => !m.disabled && m.id === partnerDlg.vendor)
+      if (!cur) { const f = dlgVendors.value.find(m => !m.disabled); if (f) pickPartnerModel(f) }
       if (!partnerDlg.cwd || !partnerCwdChoices.value.includes(partnerDlg.cwd)) partnerDlg.cwd = partnerCwdChoices.value[0] ?? ''
     })
   }
@@ -1049,8 +1045,9 @@ async function toggleBuddyConsole() {
 async function submitPartnerDlg() {
   partnerDlg.error = ''
   if (!partnerDlg.name.trim() || !partnerDlg.cwd) { partnerDlg.error = '請填名字與工作資料夾'; return }
-  if (!partnerCanRun.value) { partnerDlg.error = '這個運行方式現在不能選'; return }
-  if (partnerRunChoice.value === 'term' && partnerDlg.node === info.node && TERM_WEZ_TOOLS.includes(dlgRow.value?.toolId)) return submitTermViaDialog()   // Grok／Gemini 的終端：ASN 自帶 WezTerm
+  if (!partnerCanRun.value) { partnerDlg.error = dlgAuto.value.why || '這個廠牌現在不能開'; return }
+  // Grok／Gemini 的 ASN 自帶 WezTerm 終端（term_start）：自動開法已經不選它們的終端（收不到信），這條路只留給將來目錄明寫 term 的 Grok／Gemini
+  if (dlgAuto.value.run === 'term' && partnerDlg.node === info.node && ['grok', 'agy'].includes(dlgRow.value?.toolId)) return submitTermViaDialog()   // 後端 term_start 只收這兩個
   partnerDlg.busy = true
   const mode = MODEL_CATALOG.find(m => m.profileId === partnerDlg.profile)?.mode ?? 'window'
   const foregroundOnly = foregroundOnlyProfile(partnerDlg.profile)
@@ -1065,11 +1062,9 @@ async function submitPartnerDlg() {
         void saveLaunchPrefs()
       }
       // 經 pi：一律用 pi 的啟動設定，帶這次查到清單裡的提供者與模型（piLaunchArgs 驗過才送，清單外的不送）
-      const viaPi = partnerRunChoice.value === 'pi' ? piLaunchArgs(dlgRow.value?.id, partnerDlg.piModel || piChoice.value.defaultModel, piInfo.models, piInfo.providers) : null
-      if (partnerRunChoice.value === 'pi' && !viaPi) throw new Error('pi 的模型清單裡沒有這個模型，請重新選一次')
-      const opened = await transport.partnerLaunchLocal(viaPi
-        ? { profile: 'pi', name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display: 'foreground', first_message: partnerDlg.firstMessage.trim(), pi_provider: viaPi.provider, pi_model: viaPi.model }
-        : { profile: partnerDlg.profile, name: partnerDlg.name.trim(), cwd: partnerDlg.cwd, display, first_message: foregroundOnly ? partnerDlg.firstMessage.trim() : '', ...(launchModelPick.value ? { model: launchModelPick.value } : {}) })
+      const viaPi = dlgAuto.value.run === 'pi' ? piLaunchArgs(dlgRow.value?.id, partnerDlg.piModel || piChoice.value.defaultModel, piInfo.models, piInfo.providers) : null
+      if (dlgAuto.value.run === 'pi' && !viaPi) throw new Error('pi 的模型清單裡沒有這個模型，請重新選一次')
+      const opened = await transport.partnerLaunchLocal(localLaunchRequest(dlgAuto.value, { name: partnerDlg.name, cwd: partnerDlg.cwd, display, firstMessage: partnerDlg.firstMessage, foregroundOnly, model: launchModelPick.value, viaPi }))
       // 內建終端開不起來、改用一般視窗：後端只在 ASN 這次執行的第一次帶 note，這裡照實顯示
       if (opened?.existing) {
         existingHit = true
@@ -1079,7 +1074,7 @@ async function submitPartnerDlg() {
       } else if (opened?.note) showLaunchNotice({ title: '已改用一般視窗', body: opened.note })
     } else {
       // 經 pi：profile 一律 pi，帶那台清單裡的提供者與模型（不在清單裡就不送）；其他開法照舊
-      const body = remoteLaunchRequest({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name, cwd: partnerDlg.cwd, first: partnerDlg.firstMessage, piModel: partnerDlg.piModel }, { run: partnerRunChoice.value, row: dlgRow.value, launcher: dlgRemoteLauncher.value })
+      const body = remoteLaunchRequest({ node: partnerDlg.node, profile: partnerDlg.profile, name: partnerDlg.name, cwd: partnerDlg.cwd, first: partnerDlg.firstMessage, piModel: partnerDlg.piModel }, { run: dlgAuto.value.run, row: dlgRow.value, launcher: dlgRemoteLauncher.value })
       if (!body) throw new Error('那台的 pi 模型清單裡沒有這個模型，請重新選一次')
       const r = await transport.launch(body)
       if (r?.id) launchTrack.value = [...launchTrack.value, { id: r.id, node: partnerDlg.node, name: partnerDlg.name.trim(), profile: partnerDlg.profile }]
@@ -2095,6 +2090,20 @@ const app = createApp({
       self: { claude: accounts.state.list.map(a => (a.current === true && accounts.state.loginFailed === true ? { ...a, login_failed: true } : a)), grok: accounts.state.grok, codex: { loggedIn: Boolean(accounts.state.codex), text: codexLine(accounts.state.codex, accounts.state.codexErr) } },
     }))
     watch(deviceTree, rows => { const next = nextCloudNodes(cloudMem.value, rows); if (!sameNodes(next, cloudMem.value)) { cloudMem.value = next; saveCloudNodes(next) } })
+    // 開新夥伴第 2 頁廠牌卡的「尚未登入」（#2354）：本機看偵測得到的登入（Claude、Codex）加帳號庫（Grok）；別台看它的帳號回報，回報沒收到、過期的不標。Gemini 偵測不到登入，永遠不標
+    watch([deviceTree, cliStatus, acctReady, () => partnerDlg.node], () => {
+      const node = partnerDlg.node
+      const states = vendorStatesOf(deviceTree.value.find(d => d.key === node))
+      dlgLoginOut.value = !node ? {} : node === info.node
+        ? { ...(acctReady.value ? loggedOutFromStates(states, ['grok']) : {}), ...loggedOutFromCli(cliStatus.value) }
+        : loggedOutFromStates(states)
+    }, { immediate: true })
+    // 選著的廠牌變成不能選（剛查到沒登入）：改選第一個能選的，不停在反灰的卡片上
+    watch(dlgVendors, rows => {
+      if (!partnerDlg.open || !partnerDlg.node) return
+      const cur = rows.find(m => m.id === partnerDlg.vendor)
+      if (cur?.disabled) { const f = rows.find(m => !m.disabled); if (f) pickPartnerModel(f) }
+    })
     const otherDeviceNodes = () => launchDeviceRowsList.value.map(d => d.key).filter(k => k && k !== info.node).slice(0, 20)
     watch(() => otherDeviceNodes().join(','), () => {
       const missing = otherDeviceNodes().filter(k => !accounts.state.reports[k])
@@ -2316,11 +2325,11 @@ const app = createApp({
       GUIDES, view, SETTING_CATS, catSub, PANEL_KINDS, panelTabId, panelGuide, panelTitle, openPanel, closePanel, settingsState, applySetting, pickAvatarFile,
       selfNode: info.node, transport, remotePiModelsFor, emo, initial, openChat, ctl, vendorIcon: vendorIconSvg,
       searchInput, focusSearch, launchPicker, launchPickerPos, launchPickerEl, openLaunchPicker, closeLaunchPicker, launchDeviceRows: launchDeviceRowsList, launchDisableReason: launchDisableReasonFor, pickPartnerDevice, partnerDevKey, partnerCanNext, partnerNext,
-      DISPLAY_MODES, partnerShowDisplay, partnerRun, partnerChannels,
+      DISPLAY_MODES, partnerShowDisplay,
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       beingViewed, stopBeingViewed, termViewApi, remoteViewApi: mineViewApi, remoteInputApi, termPane, termPaneRow, termPaneFriend, termBarApi, termBarBlocked: termBarBlockedView, termBarOps, onTermBarOp, termClose, termCloseCancel, termCloseConfirm, TERM_CLOSE_NOTE, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
-      dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, partnerRunChoice, partnerRunModel, partnerCanRun, launchModel, termWaitCount, openWaitingTerm,
+      dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, dlgAuto, dlgPiPick, partnerCanRun, launchModel, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
