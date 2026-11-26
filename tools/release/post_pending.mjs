@@ -4,7 +4,9 @@
 //   - 每一筆只放上面這些固定欄位，型別固定；多出欄位、型別不對、單筆序列化超過 MAX_ITEM_BYTES 都整筆拒絕。
 //   - version 是三段數字（每段最多 6 位）；commit 是 8 位小寫 hex（寫入端只收剛好 40 碼的 SHA、取前 8 碼）；platform 只認 desktop、linux；kind 只認 PENDING_KINDS。
 //   - at、createdAt、claimedAt 要與 new Date().toISOString() 往返一致；attempts 0～MAX_ATTEMPTS；claimedBy 0～MAX_CLAIMED_BY。
+//   - createdAt 比現在晚超過 FUTURE_TIME_MS 整筆拒絕（寫入、讀取都擋）；claimedAt 同樣，但讀取端不拒絕整筆，由代貼命令當成認領逾時處理。
 //   - id ＝ 平台@版號#kind，同一筆重複寫入只留一筆；讀檔時同一個 id 只留第一筆。
+//   - 同 id 但 commit 不同：那一筆正被認領中（未逾 CLAIM_TIMEOUT_MS）就不取代、記 log；否則用新的取代，attempts 歸 0、lastError 清空、createdAt 改現在、claimedBy／claimedAt 清掉。commit 相同則不寫檔。
 //   - 讀寫都在獨立的 post-pending.json.lock 內進行（不用 state.json.lock）；寫入走 atomicWrite。
 //   - 鎖檔時間戳在未來超過 LOCK_FUTURE_MS、或內容讀不懂，視為壞鎖：改名留存並留 pending-bad 告警，再重新取鎖；改名後重讀隔離檔，與改名前讀到的不同就還原並放棄。
 //   - 整個檔讀不懂或超過 MAX_FILE_BYTES 時改名成 post-pending.json.bad-<時間>、留 pending-bad 告警，不覆寫。
@@ -13,6 +15,7 @@
 //   - 驗證失敗的 warn 只說哪個欄位不合格，不印內容。
 import path from 'node:path'
 import { atomicWrite, acquireLock, releaseLock, parseLock, makeAlerts } from './auto_publish.mjs'
+import { CLAIM_TIMEOUT_MS } from './post_pending_rules.mjs'
 
 export const PENDING_FILE = 'post-pending.json'
 export const pendingPathOf = (opts) => path.join(path.dirname(opts.state), PENDING_FILE)
@@ -26,6 +29,8 @@ export const PENDING_BAD_MESSAGE = '待貼佇列檔或它的鎖不正常，已�
 export const MAX_ITEM_BYTES = 512
 export const MAX_FILE_BYTES = 64 * 1024
 export const LOCK_FUTURE_MS = 5 * 60 * 1000
+// 時間欄位（createdAt、claimedAt）比現在晚超過這個值就不合格：晚的時間永遠不會逾時，會讓項目卡住
+export const FUTURE_TIME_MS = 5 * 60 * 1000
 export const PENDING_FIELDS = ['at', 'attempts', 'claimedAt', 'claimedBy', 'commit', 'createdAt', 'id', 'kind', 'lastError', 'platform', 'version']
 
 // lastError：只寫進待貼檔給人排錯，不得出現在群組文案或 --post-pending 的輸出。
@@ -78,8 +83,12 @@ export const isPlatform = (v) => typeof v === 'string' && PENDING_PLATFORMS.incl
 export const isKind = (v) => typeof v === 'string' && PENDING_KINDS.includes(v)
 export const pendingId = (platform, version, kind) => `${platform}@${version}#${kind}`
 
+const isFuture = (iso, nowMs) => Date.parse(iso) - nowMs > FUTURE_TIME_MS
+
 // 驗一筆；回 { ok:true, item } 或 { ok:false, field }
-export function checkItem(x) {
+// nowMs 有給時，createdAt、claimedAt 比現在晚超過 FUTURE_TIME_MS 都不合格；
+// allowFutureClaim：讀取端用，claimedAt 太晚不拒絕整筆（由代貼命令當成認領逾時處理），createdAt 照擋
+export function checkItem(x, { nowMs = null, allowFutureClaim = false } = {}) {
   if (!x || typeof x !== 'object' || Array.isArray(x)) return { ok: false, field: 'item' }
   const extra = Object.keys(x).find((k) => !PENDING_FIELDS.includes(k))
   if (extra !== undefined) return { ok: false, field: 'extra' }
@@ -91,18 +100,18 @@ export function checkItem(x) {
   if (!isCommit(x.commit)) return { ok: false, field: 'commit' }
   if (x.id !== pendingId(x.platform, x.version, x.kind)) return { ok: false, field: 'id' }
   if (!isIso(x.at)) return { ok: false, field: 'at' }
-  if (!isIso(x.createdAt)) return { ok: false, field: 'createdAt' }
+  if (!isIso(x.createdAt) || (nowMs !== null && isFuture(x.createdAt, nowMs))) return { ok: false, field: 'createdAt' }
   if (!Number.isInteger(x.attempts) || x.attempts < 0 || x.attempts > MAX_ATTEMPTS) return { ok: false, field: 'attempts' }
   if (x.lastError !== null && !isLastError(x.lastError)) return { ok: false, field: 'lastError' }
   if (x.claimedBy !== null && !(Number.isInteger(x.claimedBy) && x.claimedBy >= 0 && x.claimedBy <= MAX_CLAIMED_BY)) return { ok: false, field: 'claimedBy' }
-  if (x.claimedAt !== null && !isIso(x.claimedAt)) return { ok: false, field: 'claimedAt' }
+  if (x.claimedAt !== null && (!isIso(x.claimedAt) || (nowMs !== null && !allowFutureClaim && isFuture(x.claimedAt, nowMs)))) return { ok: false, field: 'claimedAt' }
   if (Buffer.byteLength(JSON.stringify(x), 'utf8') > MAX_ITEM_BYTES) return { ok: false, field: 'size' }
   return { ok: true, item: { ...x } }
 }
 
 // 驗並丟掉不合格的；warn 只講欄位名，不印欄位內容
-export function validateItem(x, warn = console.warn) {
-  const r = checkItem(x)
+export function validateItem(x, warn = console.warn, check = {}) {
+  const r = checkItem(x, check)
   if (!r.ok) { warn(`待貼佇列：有一筆的 ${r.field} 欄位不合格，整筆丟掉`); return null }
   return r.item
 }
@@ -111,7 +120,7 @@ export function validateItem(x, warn = console.warn) {
 export function buildItem({ kind, platform, version, commit }, nowMs, warn = console.warn) {
   const iso = new Date(nowMs).toISOString()
   const short = typeof commit === 'string' && FULL_SHA_RE.test(commit) ? commit.slice(0, 8) : null
-  return validateItem({ id: pendingId(platform, version, kind), kind, platform, version, commit: short, at: iso, createdAt: iso, attempts: 0, lastError: null, claimedBy: null, claimedAt: null }, warn)
+  return validateItem({ id: pendingId(platform, version, kind), kind, platform, version, commit: short, at: iso, createdAt: iso, attempts: 0, lastError: null, claimedBy: null, claimedAt: null }, warn, { nowMs })
 }
 
 // 讀佇列；回 { ok:true, items, rejected } 或 { ok:false, bad:true }（整個檔讀不懂或太大，呼叫端要先處理壞檔）
@@ -131,7 +140,7 @@ export function readPending(opts, deps, warn = console.warn) {
   const rejected = []
   const seen = new Set()
   for (const x of doc.items) {
-    const it = validateItem(x, warn)
+    const it = validateItem(x, warn, { nowMs: deps.now(), allowFutureClaim: true })
     if (!it) { rejected.push(x); continue }
     if (seen.has(it.id)) continue
     seen.add(it.id)
@@ -140,15 +149,15 @@ export function readPending(opts, deps, warn = console.warn) {
   return { ok: true, items, rejected }
 }
 
-const stampOf = (deps) => new Date(deps.now()).toISOString().replace(/[:.]/g, '-')
+export const stampOf = (deps) => new Date(deps.now()).toISOString().replace(/[:.]/g, '-')
 
 export const PENDING_FULL_MESSAGE = '待貼佇列已滿，新的一筆沒有寫入，請人工處理佇列'
 export const PENDING_LOCK_BAD_MESSAGE = '待貼佇列的鎖檔不正常，已改名保留，請人工檢查'
-export const pendingRejectedMessage = (n) => `待貼佇列有 ${n} 筆格式不合格，已另存到 .rejected 檔，其餘照留，請人工檢查`
-const raisePendingBad = (opts, deps, message) => makeAlerts(opts, deps).raise('pending-bad', 'pending-bad', message, 'post-pending')
+export const PENDING_REJECTED_MESSAGE = '待貼佇列有項目格式不合格，已另存到 .rejected 檔，其餘照留，請人工檢查'
+const raisePendingBad = (opts, deps, message) => makeAlerts(opts, deps).raiseLine('pending-bad', 'pending-bad', message, 'post-pending')
 
 // 整個檔讀不懂：改名留存、留 pending-bad 告警、不覆寫
-function quarantine(opts, deps) {
+export function quarantine(opts, deps) {
   const p = pendingPathOf(opts)
   const to = `${p}.bad-${stampOf(deps)}`
   deps.rename(p, to)
@@ -157,11 +166,11 @@ function quarantine(opts, deps) {
 }
 
 // 只有部分筆不合格：不合格的另存成 .rejected-<時間>、留 pending-bad 告警（帶筆數），合格的留在佇列
-function saveRejected(opts, deps, rejected) {
+export function saveRejected(opts, deps, rejected) {
   const to = `${pendingPathOf(opts)}.rejected-${stampOf(deps)}`
   atomicWrite(deps, to, JSON.stringify({ v: 1, rejectedAt: new Date(deps.now()).toISOString(), items: rejected }, null, 2))
   deps.log(`待貼佇列有 ${rejected.length} 筆不合格，已另存為 ${to}`)
-  raisePendingBad(opts, deps, pendingRejectedMessage(rejected.length))
+  raisePendingBad(opts, deps, PENDING_REJECTED_MESSAGE)
 }
 
 // 壞鎖改名隔離：改名前記下讀到的內容，改名後重讀隔離檔比對；對不上代表搬到的是別人剛換上的鎖，要還原並放棄
@@ -201,6 +210,28 @@ export function acquirePendingLock(opts, deps) {
   return { lockPath, ...acquireLock(lockPath, deps) }
 }
 
+// 認領還有效：有認領者與認領時間、認領時間不比現在晚超過 FUTURE_TIME_MS、且未超過 CLAIM_TIMEOUT_MS
+const claimIsLive = (x, nowMs) => x.claimedBy !== null && x.claimedAt !== null && !isFuture(x.claimedAt, nowMs) && nowMs - Date.parse(x.claimedAt) < CLAIM_TIMEOUT_MS
+
+// 把新的一筆併進現有清單；沒有要改時回傳同一個陣列（呼叫端據此判斷不用寫檔）
+//   - id 沒有：加在最後
+//   - id 有、commit 相同：保留
+//   - id 有、commit 不同：認領中就不取代（記 log）；否則用新的一筆取代（attempts、lastError、createdAt、認領欄位都重置），取代後再驗一次
+function mergeItem(list, item, deps, warn) {
+  const old = list.find((x) => x.id === item.id)
+  if (!old) return [...list, item]
+  if (old.commit === item.commit) return list
+  const nowMs = deps.now()
+  if (claimIsLive(old, nowMs)) {
+    deps.log(`待貼佇列：${item.id} 正被認領中，commit 不同的新一筆先不取代`)
+    return list
+  }
+  const next = validateItem(item, warn, { nowMs })
+  if (!next) return list
+  deps.log(`待貼佇列：${item.id} 的 commit 不同，已用新的一筆取代`)
+  return list.map((x) => (x.id === item.id ? next : x))
+}
+
 // 寫入一筆待貼項目。任何失敗只記 log、回 { ok:false, why }，絕不丟例外（不能影響發版結果）
 export function enqueuePending(opts, deps, input) {
   const warn = (m) => { deps.log(m); console.warn(m) }
@@ -214,9 +245,8 @@ export function enqueuePending(opts, deps, input) {
       let cur = readPending(opts, deps, warn)
       if (!cur.ok) { quarantine(opts, deps); cur = { ok: true, items: [], rejected: [] } }
       else if (cur.rejected.length > 0) saveRejected(opts, deps, cur.rejected)
-      const exists = cur.items.some((x) => x.id === item.id)
-      if (exists && cur.rejected.length === 0) return { ok: true, count: cur.items.length }
-      const items = exists ? cur.items : [...cur.items, item]
+      const items = mergeItem(cur.items, item, deps, warn)
+      if (items === cur.items && cur.rejected.length === 0) return { ok: true, count: cur.items.length }
       const render = (list) => JSON.stringify({ v: 1, updatedAt: new Date(deps.now()).toISOString(), items: list }, null, 2)
       const text = render(items)
       if (items.length > MAX_ITEMS || Buffer.byteLength(text, 'utf8') > MAX_FILE_BYTES) {

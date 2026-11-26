@@ -1,7 +1,8 @@
 import test, { mock } from 'node:test'
 import assert from 'node:assert/strict'
 import { runOnce, runCommand, parseArgs, ALERT_CAUSES, WORKFLOWS } from '../../../tools/release/auto_publish.mjs'
-import { PENDING_PLATFORMS, PENDING_KINDS, isSemver, isCommit, isPlatform, isKind, validateItem, buildItem, enqueuePending, readPending, pendingPathOf, MAX_ITEM_BYTES, MAX_FILE_BYTES, MAX_ITEMS, MAX_ATTEMPTS, MAX_CLAIMED_BY, LAST_ERROR_MAX, LAST_ERROR_MAX_BYTES, LOCK_FUTURE_MS, PENDING_BAD_MESSAGE, PENDING_FULL_MESSAGE, PENDING_LOCK_BAD_MESSAGE, cleanLastError, isLastError } from '../../../tools/release/post_pending.mjs'
+import { PENDING_PLATFORMS, PENDING_KINDS, isSemver, isCommit, isPlatform, isKind, validateItem, buildItem, enqueuePending, readPending, pendingPathOf, MAX_ITEM_BYTES, MAX_FILE_BYTES, MAX_ITEMS, MAX_ATTEMPTS, MAX_CLAIMED_BY, LAST_ERROR_MAX, LAST_ERROR_MAX_BYTES, LOCK_FUTURE_MS, PENDING_BAD_MESSAGE, PENDING_REJECTED_MESSAGE, PENDING_FULL_MESSAGE, PENDING_LOCK_BAD_MESSAGE, cleanLastError, isLastError } from '../../../tools/release/post_pending.mjs'
+import { POST_FAILED_FIXED, CLAIM_TIMEOUT_MS } from '../../../tools/release/post_pending_rules.mjs'
 import { env, row, sha, short, opts, STATE, T0, lk, seededState, postFails, alertOf, lastState, pendingOf, PENDING, publishWithPostFailed, markerOut } from './helpers/auto-publish-env.mjs'
 
 const FIELDS = ['at', 'attempts', 'claimedAt', 'claimedBy', 'commit', 'createdAt', 'id', 'kind', 'lastError', 'platform', 'version']
@@ -280,7 +281,7 @@ test('#2345 ci-failed 回報貼群組失敗：佇列有一筆 kind=ci-failed，�
   assert.equal(it.platform, 'desktop')
   assert.equal(it.version, '0.2.99')
   assert.equal(it.commit, short(222))
-  assert.ok(alertOf(e).alerts['post-failed'].message.startsWith('通知群組失敗'))
+  assert.equal(alertOf(e).alerts['post-failed'].message, POST_FAILED_FIXED)
 })
 
 test('#2345 blocked 回報貼群組失敗：佇列有一筆 kind=blocked（Linux 那版，commit 取 Linux 的 run）', async () => {
@@ -468,7 +469,7 @@ test('#2345 一筆合格、一筆不合格：合格的留在佇列，不合格�
   assert.ok(![...e.fsMap.keys()].some((k) => k.startsWith(`${PENDING}.bad-`)), '整個檔沒有被改名')
   const al = alertOf(e).alerts['pending-bad']
   assert.equal(al.status, 'active')
-  assert.match(al.message, /1 筆/)
+  assert.equal(al.message, PENDING_REJECTED_MESSAGE)
   m.mock.restore()
 })
 
@@ -511,4 +512,53 @@ test('#2345 壞鎖改名前一刻被換成新的有效鎖：還原那把新鎖�
   assert.ok(![...e.fsMap.keys()].some((k) => k.startsWith(`${lock}.bad-`)), '沒有留下假的壞鎖檔')
   assert.ok(!e.fsMap.has(PENDING))
   assert.equal(alertOf(e).alerts['pending-bad'].status, 'active')
+})
+
+// 同 id 換了 commit
+const oldItem = (over = {}) => ({ ...buildItem({ kind: 'published', platform: 'linux', version: '0.2.99', commit: sha(7) }, T0 - 3_600_000), attempts: 3, lastError: '貼不出去', ...over })
+const seedPending = (item) => env({ files: { [PENDING]: JSON.stringify({ v: 1, updatedAt: 'x', items: [item] }) } })
+
+test('#2345 同 id 換了 commit、沒被認領：用新的取代，attempts、lastError、createdAt、認領欄位都重置', () => {
+  const e = seedPending(oldItem())
+  const r = enqueuePending(opts, e.deps, input)
+  assert.equal(r.ok, true)
+  const items = pendingOf(e).items
+  assert.equal(items.length, 1)
+  assert.equal(items[0].commit, short(3))
+  assert.equal(items[0].attempts, 0)
+  assert.equal(items[0].lastError, null)
+  assert.equal(items[0].createdAt, new Date(T0).toISOString())
+  assert.equal(items[0].claimedBy, null)
+  assert.equal(items[0].claimedAt, null)
+  assert.ok(e.calls.logs.some((m) => m.includes('linux@0.2.99#published') && m.includes('取代')))
+})
+
+test('#2345 同 id 同 commit：保留原樣，檔案不重寫', () => {
+  const text = JSON.stringify({ v: 1, updatedAt: 'x', items: [oldItem({ commit: short(3) })] })
+  const e = env({ files: { [PENDING]: text } })
+  const r = enqueuePending(opts, e.deps, input)
+  assert.equal(r.ok, true)
+  assert.equal(e.fsMap.get(PENDING), text)
+  assert.ok(!e.calls.ops.some((o) => o.startsWith('write:') && o.includes('post-pending.json')), '沒有寫檔')
+})
+
+test('#2345 同 id 換了 commit、正被認領中（沒逾時）：不取代，記 log', () => {
+  const claimed = oldItem({ claimedBy: 99, claimedAt: new Date(T0 - CLAIM_TIMEOUT_MS + 60_000).toISOString() })
+  const text = JSON.stringify({ v: 1, updatedAt: 'x', items: [claimed] })
+  const e = env({ files: { [PENDING]: text } })
+  const r = enqueuePending(opts, e.deps, input)
+  assert.equal(r.ok, true)
+  assert.equal(e.fsMap.get(PENDING), text, '原檔不動')
+  assert.ok(e.calls.logs.some((m) => m.includes('linux@0.2.99#published') && m.includes('認領中')))
+})
+
+test('#2345 同 id 換了 commit、認領已逾時：用新的取代', () => {
+  const claimed = oldItem({ claimedBy: 99, claimedAt: new Date(T0 - CLAIM_TIMEOUT_MS - 1000).toISOString() })
+  const e = seedPending(claimed)
+  assert.equal(enqueuePending(opts, e.deps, input).ok, true)
+  const it = pendingOf(e).items[0]
+  assert.equal(it.commit, short(3))
+  assert.equal(it.claimedBy, null)
+  assert.equal(it.claimedAt, null)
+  assert.equal(it.attempts, 0)
 })

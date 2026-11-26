@@ -1,5 +1,6 @@
 // 自動發佈常駐程式（#1980、#2003）：輪詢發版 run，全綠就依序跑 local_sign_publish（先 dry-run 再正式）。
 // 運行手冊（第一次上線、--seed、--ack、各檔案用途、回報訊息怎麼處理、怎麼停止）：docs/release/自動發佈運行手冊.md
+// 發版收尾補貼群組（發版視窗跑、從乾淨的 main 簽出）：node tools/release/auto_publish.mjs --post-pending [--state <檔>]
 // 用法：node tools/release/auto_publish.mjs [--once] [--interval 120] [--state <檔>] [--room <群組代號>] [--dry-run-only]
 //   播種：--seed <版號>（或 --seed-desktop／--seed-linux）--yes；人工確認一筆失敗：--ack <平台@版號>（同版告警一起清）；人工清一類告警：--ack-alert <類別>
 // 判斷規則全在 auto_publish_core.mjs；這支只負責呼叫端：取鎖、讀 gh、準備工作樹、跑子程序、存 state、貼群組。
@@ -13,6 +14,8 @@ import { spawnSync } from 'node:child_process'
 import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail, parsePostFailedMarker } from './asn_cli.mjs'
 import { enqueuePending } from './post_pending.mjs'
+import { POST_FAILED_FIXED, PENDING_WRITE_FAILED_FIXED, SEND_TIMEOUT_MS, READ_TIMEOUT_MS } from './post_pending_rules.mjs'
+import { runPostPending } from './post_pending_cmd.mjs'
 
 // 決定階段的回報裡，貼群組失敗時要另寫進待貼佇列的類別（其餘回報沒有版號與 commit）
 const PENDING_REPORT_KINDS = ['ci-failed', 'blocked']
@@ -35,10 +38,10 @@ export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
 export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 
 // 告警檔裡會出現的類別（--ack-alert 只認這些）
-export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad']
+export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad', 'pending-write-failed']
 
 export function parseArgs(argv) {
-  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, error: null }
+  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, postPending: false, error: null }
   for (let i = 0; i < argv.length && !o.error; i++) {
     const a = argv[i]
     const val = () => { const v = argv[++i]; if (v === undefined || v.startsWith('--')) { o.error = `${a} 後面要有值`; return null } return v }
@@ -53,7 +56,13 @@ export function parseArgs(argv) {
     else if (a === '--ack') o.ack = val()
     else if (a === '--ack-alert') o.ackAlert = val()
     else if (a === '--yes') o.yes = true
+    else if (a === '--post-pending') o.postPending = true
     else o.error = `不認得的參數：${a}`
+  }
+  // 代貼只讀自己的設定檔，不收命令列的群組代號，也不和其他子命令或常駐參數混用
+  if (!o.error && o.postPending) {
+    if (o.room !== null) o.error = '--post-pending 不接受 --room（群組代號只從代貼端自己的設定檔讀）'
+    else if (o.ack || o.ackAlert || o.seedDesktop || o.seedLinux || o.yes || o.once || o.dryRunOnly) o.error = '--post-pending 只能搭配 --state 使用'
   }
   if (!o.error && o.ack && (o.seedDesktop || o.seedLinux)) o.error = '--ack 和 --seed 不能同時給'
   if (!o.error && o.ackAlert !== null) {
@@ -207,6 +216,11 @@ const logPathOf = (opts) => path.join(path.dirname(opts.state), 'auto-publish.lo
 export const ALERT_FILE = 'alert.json'
 export const alertPathOf = (opts) => path.join(path.dirname(opts.state), ALERT_FILE)
 
+// 告警的來源清單：每次 raise 的 ref 累加（沒有 ref 記成 null＝來源不明）；舊告警檔沒有 refs 時來源不明（只能人工清）
+const refsOfAlert = (a) => (Array.isArray(a?.refs) ? a.refs : (a ? [null] : []))
+// ref 可能是「平台@版號」或「平台@版號（標籤）」，只取前半
+const baseRef = (r) => (typeof r === 'string' ? r.split('（')[0] : null)
+
 export function makeAlerts(opts, deps) {
   const p = alertPathOf(opts)
   const load = () => { try { const a = JSON.parse(deps.readFile(p)); return a && typeof a === 'object' && a.alerts && typeof a.alerts === 'object' ? a : { alerts: {} } } catch { return { alerts: {} } } }
@@ -220,20 +234,33 @@ export function makeAlerts(opts, deps) {
         const cur = load().alerts
         const old = cur[cause]
         const next = old && old.status === 'active' && old.reason === reason
-          ? { ...old, message, ref: ref ?? old.ref, lastAt: now, count: (old.count ?? 1) + 1 }
-          : { cause, reason, message, ref, firstAt: now, lastAt: now, count: 1, status: 'active' }
+          ? { ...old, message, ref: ref ?? old.ref, refs: [...new Set([...refsOfAlert(old), ref ?? null])], lastAt: now, count: (old.count ?? 1) + 1 }
+          : { cause, reason, message, ref, refs: [ref ?? null], firstAt: now, lastAt: now, count: 1, status: 'active' }
         save({ ...cur, [cause]: next })
       } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
     },
-    // 累加版 raise（#2345）：同類已有 active 告警時，把這一行接在原訊息後面（同一行不重複），不蓋掉前一筆；沒有就新建。
-    // 用在同一版電腦版與 Linux 都沒貼成，兩個平台的補貼原文都要留。ref 取最新一筆，--ack-alert 一次清全部
+    // 累加版 raise（#2345）：同類已有 active 告警時，同一句固定句不重複，ref 取最新一筆、來源清單（refs）累加；沒有就新建。
+    // 升級前留下的舊訊息（不是這句固定句）直接覆寫成固定句，不往後接。--ack-alert 一次清全部
     raiseAppend(cause, reason, line, ref = null) {
       try {
         const cur = load().alerts
         const old = cur[cause]
         if (old && old.status === 'active' && old.reason === reason) {
+          const legacy = String(old.message).split('\n').some((l) => l !== line)
+          if (legacy) this.raise(cause, reason, line, ref)
+          else if (!refsOfAlert(old).includes(ref ?? null) || (ref && ref !== old.ref)) this.raise(cause, reason, old.message, ref) // 同一句不重複，但來源與最新 ref 要記
+          return
+        }
+        this.raise(cause, reason, line, ref)
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
+    // 累加不同原因的版本：同類已有 active 告警時，訊息每個原因一行固定句，同一句不重複、不覆寫別的原因；ref 與來源清單照 raise 累加。--ack-alert 一次清全部
+    raiseLine(cause, reason, line, ref = null) {
+      try {
+        const old = load().alerts[cause]
+        if (old && old.status === 'active' && old.reason === reason) {
           const lines = String(old.message).split('\n')
-          if (!lines.includes(line)) this.raise(cause, reason, `${old.message}\n${line}`, ref)
+          this.raise(cause, reason, lines.includes(line) ? old.message : [...lines, line].join('\n'), ref)
           return
         }
         this.raise(cause, reason, line, ref)
@@ -245,6 +272,29 @@ export function makeAlerts(opts, deps) {
         if (cur[cause]?.status !== 'active') return
         save({ ...cur, [cause]: { ...cur[cause], status: 'resolved', resolvedAt: new Date(deps.now()).toISOString() } })
       } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`) }
+    },
+    // 把已經處理完的來源（covered：「平台@版號」的清單）從 active 告警的來源清單拿掉，回剩下幾個來源；
+    // 來源不明（沒記 ref）的拿不掉，所以剩下 0 個才代表這個告警的每個來源都處理完了。沒有 active 告警回 0。不改狀態
+    dropRefs(cause, covered) {
+      try {
+        const cur = load().alerts
+        if (cur[cause]?.status !== 'active') return 0
+        const refs = refsOfAlert(cur[cause]).filter((r) => r === null || !covered.includes(baseRef(r)))
+        save({ ...cur, [cause]: { ...cur[cause], refs } })
+        return refs.length
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`); return 1 }
+    },
+    // dropRefs 加標恢復放在同一次讀改寫：拿掉 covered 之後來源清單真的空、而且 queueEmpty() 為真才標 resolved，否則只存拿掉後的清單。
+    // 回 { remain, resolved }；沒有 active 告警回 { remain: 0, resolved: false }；寫不成回 { remain: 1, resolved: false }
+    resolveIfDrained(cause, covered, queueEmpty) {
+      try {
+        const cur = load().alerts
+        if (cur[cause]?.status !== 'active') return { remain: 0, resolved: false }
+        const refs = refsOfAlert(cur[cause]).filter((r) => r === null || !covered.includes(baseRef(r)))
+        const resolved = refs.length === 0 && queueEmpty() === true
+        save({ ...cur, [cause]: resolved ? { ...cur[cause], refs, status: 'resolved', resolvedAt: new Date(deps.now()).toISOString() } : { ...cur[cause], refs } })
+        return { remain: refs.length, resolved }
+      } catch (e) { deps.log(`寫告警檔失敗（不影響發版）：${e.message}`); return { remain: 1, resolved: false } }
     },
     // 人工 --ack <平台@版號>：ref 是這個 key（或 `<key>（<tag>）` 這種帶標籤寫法）的 active 告警一起 resolve，其他 ref 不動；回傳清掉幾筆
     resolveByRef(key) {
@@ -260,6 +310,16 @@ export function makeAlerts(opts, deps) {
   }
 }
 
+// 寫待貼佇列；沒寫成時（對不到 commit、鎖被佔、佇列滿、寫檔失敗）post-failed 的這個來源不在佇列裡，
+// 要在 post-failed 記一筆來源不明（--post-pending 清空佇列也不會把它標成已恢復），並另留自己的 pending-write-failed 告警
+function enqueueOrAlert(opts, deps, alerts, input, ref) {
+  const r = enqueuePending(opts, deps, input)
+  if (r.ok) return r
+  alerts.raiseAppend('post-failed', 'post-failed', POST_FAILED_FIXED, null)
+  alerts.raise('pending-write-failed', 'pending-write-failed', PENDING_WRITE_FAILED_FIXED, ref)
+  return r
+}
+
 // 貼群組：只准傳固定文案（不可含 git／子程序原文，remote URL 可能帶 token）
 // 失敗時寫告警檔 post-failed（getRef 給目前處理的版本；noAlert 給沒持鎖的分支，免得和持鎖者搶寫告警檔）
 function makePost(opts, deps, alerts, getRef = () => null) {
@@ -269,7 +329,7 @@ function makePost(opts, deps, alerts, getRef = () => null) {
     try { r = deps.asnCli(['send', '--room', opts.room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
     if (r.status !== 0) {
       deps.log(`貼群組失敗：${asnCliFail(r)}`)
-      if (!noAlert) alerts.raiseAppend('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
+      if (!noAlert) alerts.raiseAppend('post-failed', 'post-failed', POST_FAILED_FIXED, getRef())
       return false
     } else if (!noAlert) alerts.resolve('post-failed')
     return true
@@ -417,7 +477,7 @@ export async function runOnce(opts, deps) {
     const enqueueReport = (kind, key, runId) => {
       const [platform, version] = String(key).split('@')
       const run = runs.find((x) => x.runId === String(runId))
-      enqueuePending(opts, deps, { kind, platform, version, commit: run?.commit })
+      enqueueOrAlert(opts, deps, alerts, { kind, platform, version, commit: run?.commit }, String(key))
     }
     const d = decide({ runs, state, now: deps.now() })
     for (const n of d.notes || []) log(n)
@@ -476,11 +536,11 @@ export async function runOnce(opts, deps) {
     if (r.status === 0 && d.action === 'publish') {
       const pf = parsePostFailedMarker(r.stdout)
       if (pf) {
-        alerts.raiseAppend('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
+        alerts.raiseAppend('post-failed', 'post-failed', POST_FAILED_FIXED, ref)
         // 同一筆另寫進待貼佇列（只放固定欄位）：版號取自決定階段的 key、commit 取自 gh 的 run 列表，都不從子程序輸出解析。
         // 寫失敗只記 log（enqueuePending 不丟例外），不影響發版結果
         const run = runs.find((x) => x.runId === String(d.runId))
-        enqueuePending(opts, deps, { kind: 'published', platform: d.platform, version: String(d.key).slice(String(d.key).indexOf('@') + 1), commit: run?.commit })
+        enqueueOrAlert(opts, deps, alerts, { kind: 'published', platform: d.platform, version: String(d.key).slice(String(d.key).indexOf('@') + 1), commit: run?.commit }, ref)
       }
     }
     return out
@@ -619,6 +679,15 @@ async function main() {
   opts.state = rs.state
   const deps = realDeps(opts)
   if (rs.note) deps.log(rs.note)
+  if (opts.postPending) {
+    // 送出與讀群組各有逾時（認領逾時要大於它們的總和，見 post_pending_rules.mjs）
+    const sendCli = makeAsnCli({ timeoutMs: SEND_TIMEOUT_MS })
+    const readCli = makeAsnCli({ timeoutMs: READ_TIMEOUT_MS })
+    deps.asnCli = (args) => (args[0] === 'room' || args.includes('--whoami') ? readCli(args) : sendCli(args))
+    const r = runPostPending(opts, deps)
+    for (const l of r.lines) (r.code === 0 ? console.log : console.error)(l)
+    process.exit(r.code)
+  }
   if (opts.ack || opts.ackAlert || opts.seedDesktop || opts.seedLinux) {
     const r = await runCommand(opts, deps)
     ;(r.code === 0 ? console.log : console.error)(r.msg)
