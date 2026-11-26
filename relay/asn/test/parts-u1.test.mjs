@@ -140,6 +140,39 @@ test('守門的偵測是真的：塞一個字面顏色或 px 尺寸進零件規�
   assert.equal(bad('.x{color:var(--asn-fg,#123456);padding:var(--asn-gap)}'), false, 'var 的預設值例外')
 })
 
+// ---- 守門：別名指到的變數在非根元素被改時，同一個選擇器上要重設別名（var() 在定義的元素上就算完，不會跟著往下改） ----
+const blocks = css => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+  .map(([, sel, body]) => ({ sel: sel.trim(), props: new Set([...body.matchAll(/(--[\w-]+)\s*:/g)].map(x => x[1])) }))
+const missingAliasResets = (partsCss, kitCss) => {
+  const root = blocks(partsCss).find(b => b.sel === ':root')
+  const aliases = [...partsCss.match(/:root\s*\{[^}]*\}/)[0].matchAll(/(--asn-[\w-]+)\s*:\s*var\(\s*(--[\w-]+)/g)].map(([, a, src]) => [a, src])
+  assert.ok(root && aliases.length > 5, '要讀得到 parts.css :root 的別名（否則守門是空的）')
+  const mine = blocks(partsCss)
+  const miss = []
+  for (const kb of blocks(kitCss)) {
+    if (kb.sel === ':root') continue
+    for (const [alias, src] of aliases) {
+      if (!kb.props.has(src)) continue
+      if (!mine.some(b => b.sel === kb.sel && b.props.has(alias))) miss.push(`${kb.sel} 改了 ${src}，但 parts.css 沒在 ${kb.sel} 重設 ${alias}`)
+    }
+  }
+  return miss
+}
+
+test('守門：kit.css 在非根元素（例如手機 .m-body）改到的變數，parts.css 同一個選擇器也要重設對應的別名', () => {
+  const kit = read('../ui/kit.css')
+  assert.ok(/\.m-body\s*\{[^}]*--fs-2/.test(kit), '前提：kit.css 在 .m-body 改了字級（不然這支測不到東西）')
+  assert.deepEqual(missingAliasResets(CSS, kit), [])
+})
+
+test('別名重設守門的偵測是真的：拿掉 .m-body 那一行會被抓到', () => {
+  const kit = read('../ui/kit.css')
+  const without = CSS.replace(/\n\.m-body\{[^}]*\}/, '')
+  assert.notEqual(without, CSS, '前提：parts.css 有 .m-body 那一行')
+  const miss = missingAliasResets(without, kit)
+  assert.ok(miss.some(m => m.includes('--asn-fs')) && miss.some(m => m.includes('--asn-fs-s')), miss.join('\n'))
+})
+
 // ---- 不改變現有畫面 ----
 test('data-input／data-layout：現有樣式沒有任何選擇器用到；parts.css 沒有被任何頁面載入', () => {
   const dir = new URL('../ui/', import.meta.url)

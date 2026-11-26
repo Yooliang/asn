@@ -20,6 +20,9 @@
   /* 最小點擊尺寸：沒設 data-input 時照指標（電腦）；觸控改成 44px，見下面兩條 */
   --asn-hit:28px;
 }
+/* kit.css 在 .m-body 把字級改大一檔；var() 在定義的元素上就算完了，所以別名要在同一個選擇器上重設，手機才會拿到 14／12px
+   （有守門測試：kit.css 在非根元素改到的變數，這裡同一個選擇器也要重設對應的 --asn-*） */
+.m-body{--asn-fs:var(--fs-2,12px); --asn-fs-s:var(--fs-1,11px)}
 /* 平台屬性由殼設在 <html>（ui/shells/platform-attrs.mjs）：data-input 決定點擊尺寸，data-layout 決定少數間距 */
 :root[data-input="pointer"]{--asn-hit:28px}
 :root[data-input="touch"]{--asn-hit:44px}
