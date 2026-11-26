@@ -756,9 +756,9 @@ fn walk(v: &Value, under_key: bool, out: &mut Vec<String>, depth: usize) {
                     push_unique(out, s);
                 }
             } else {
-                // 其他欄位的超長或多行文字：整段是一般文字（有空白）就不收；沒有空白、長得像路徑的整段或逐行收進來，交給判定擋
-                for line in s.lines().map(str::trim).filter(|l| !l.is_empty() && !l.contains(char::is_whitespace) && looks_like_path(l)) {
-                    push_unique(out, line);
+                // 其他欄位的超長或多行文字，逐行看：沒有空白又像路徑的收；有空白的，夾著敏感位置片段的才把那段路徑收進來（片段由清單自動產生）
+                for line in s.lines().map(str::trim).filter(|l| !l.is_empty()) {
+                    if !line.contains(char::is_whitespace) { if looks_like_path(line) { push_unique(out, line) } } else { fragments::prose_candidates(line).iter().for_each(|c| push_unique(out, c)) }
                 }
             }
         }
@@ -793,6 +793,7 @@ pub fn param_keys(params: &Value) -> Vec<String> {
     }
 }
 
+mod fragments;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

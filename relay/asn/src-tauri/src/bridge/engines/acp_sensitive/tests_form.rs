@@ -364,6 +364,34 @@ fn 抽取_其他欄位的超長與多行路徑字串也收_交給判定擋() {
 }
 
 #[test]
+fn 抽取_有空白的行夾著敏感位置_片段由清單自動產生() {
+    use super::fragments::{fragments, prose_candidates};
+    let r = rig();
+    // 片段是從清單每一項的最後兩段產生的，清單每一項都要有對應的片段
+    let all: Vec<String> = SENSITIVE_HOME_DIRS.iter().chain(EXTRA_HOME_PATHS.iter()).map(|s| s.to_string()).collect();
+    for e in &all {
+        let n = e.replace('\\', "/").to_ascii_lowercase();
+        assert!(fragments().iter().any(|f| n.ends_with(f.as_str())), "{e}");
+    }
+    assert!(fragments().iter().any(|f| f == "chrome/user data"));
+    // 夾在多行提示裡的敏感路徑：收進來、判定擋下；一般含斜線的長提示不收
+    let chrome = ps(&r.home.join("AppData").join("Local").join("Google").join("Chrome").join("User Data").join("Default").join("Cookies"));
+    let multi = format!("請幫我看一下\nsee src/lib.rs and docs/a.md for context\nplease read {chrome} for details\n結尾 /x y");
+    let got = extract_read_paths(&json!({"Message": multi}));
+    assert!(got.contains(&chrome), "{got:?}");
+    assert!(got.len() <= 3, "多出來的只是從前面幾個空白邊界起算的候選：{got:?}");
+    assert_eq!(verdict(&r, &chrome, ReadTool::Single), ReadVerdict::Sensitive);
+    let prose = format!("see src/lib.rs and docs/a.md for context\n{}", "more words with a/b slash and .config-like text\n".repeat(200));
+    assert!(extract_read_paths(&json!({"Message": prose})).is_empty());
+    // 路徑本身含空白時，往前找得到起點；不在路徑段邊界上的不算
+    let spaced = format!("note: C:\\Program Files\\x\\y {}", "word ".repeat(10));
+    assert!(prose_candidates(&spaced).is_empty());
+    assert!(prose_candidates("my.sshkey is here / ok").is_empty() && prose_candidates("a x.ssh/y b").is_empty());
+    assert!(prose_candidates("please open ~/.ssh/id now").contains(&"~/.ssh/id".to_string()));
+    assert!(prose_candidates("read \"/etc/shadow\", thanks").contains(&"/etc/shadow".to_string()));
+}
+
+#[test]
 fn 抽取_巢狀_json_字串要解開_有層數上限() {
     let r = rig();
     let bad = ps(&r.home.join(".ssh").join("id"));

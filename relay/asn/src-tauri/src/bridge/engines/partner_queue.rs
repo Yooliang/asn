@@ -956,6 +956,12 @@ mod tests {
         assert!(run(vec![step(1, "mystery_tool", json!({"path": p(&ssh)}))]).is_some());
         assert!(run(vec![step(1, "call_mcp_tool", json!({"arguments": {"files": [p(&ssh)]}}))]).is_some());
         assert!(run(vec![step(1, "call_mcp_tool", json!({"arguments": json!({"files": [p(&ssh)]}).to_string()}))]).is_some(), "參數是 JSON 字串也要解開");
+        // 多行提示裡夾著敏感位置的一行（Chrome 的使用者資料）：中止；一般含斜線的長提示不誤擋
+        let chrome = home.path().join("AppData").join("Local").join("Google").join("Chrome").join("User Data").join("Default").join("Cookies");
+        let prompt = format!("請整理下面的內容\nsee src/lib.rs and docs/a.md\nread {} for details\n謝謝", p(&chrome));
+        assert!(run(vec![step(1, "send_message", json!({"Message": prompt}))]).is_some());
+        let plain = format!("請整理下面的內容\nsee src/lib.rs and docs/a.md\n{}", "more words with a/b slash\n".repeat(200));
+        assert!(run(vec![step(1, "send_message", json!({"Message": plain}))]).is_none());
         let url = format!("file:///{}", p(&ssh).replace('\\', "/").trim_start_matches('/'));
         assert!(run(vec![step(1, "read_url_content", json!({"Url": url}))]).is_some());
         assert!(run(vec![step(1, "read_url_content", json!({"Url": "https://example.com/a"}))]).is_none());
