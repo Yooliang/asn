@@ -12,13 +12,16 @@ export const GH_CALLS_MAX = 4
 export const CLAIM_TIMEOUT_MS = 10 * 60 * 1000
 export const MAX_AGE_MS = 48 * 60 * 60 * 1000
 export const MAX_PER_RUN = 4
-export const ROOM_READ_LAST = 50
+// 讀群組最近幾則；asn-cli 的上限是 200（room.rs 的 MAX_LAST），群組在這個範圍內沒有同則才當作沒貼過
+export const ROOM_READ_LAST = 200
 export const MAX_READ_BYTES = 256 * 1024
 // 一筆最壞的總耗時：讀群組兩次、gh 最多 GH_CALLS_MAX 次、送出一次
 export const WORST_CASE_ITEM_MS = 2 * READ_TIMEOUT_MS + GH_CALLS_MAX * GH_TIMEOUT_MS + SEND_TIMEOUT_MS
 
 // ---- 固定句
 export const POST_FAILED_FIXED = '群組通知沒貼出去，發版收尾時請由發版視窗跑 --post-pending'
+export const PENDING_WRITE_FAILED_FIXED = '有一筆群組通知沒貼成、也沒能寫進待貼佇列，--post-pending 補貼不到它，請人工補貼'
+export const BAD_CLAIM_FIXED = '有待貼項目的認領時間比現在還晚，已當成認領逾時處理，請人工確認'
 export const EXPIRED_FIXED = '有待貼項目超過 48 小時沒貼出去，已移到 .expired 檔、不再代貼，請人工確認'
 
 export const PLATFORM_NAME = { desktop: '電腦版', linux: 'Linux 版' }
@@ -26,8 +29,7 @@ const KIND_LABEL = { published: '已發佈通知', 'ci-failed': '打包失敗回
 const KIND_WHAT = { 'ci-failed': '打包流程沒有成功', blocked: '等人工處理，不會自動發佈', 'dryrun-failed': '試跑失敗，不會自動重試', 'publish-failed': '正式發佈失敗，不會自動重試' }
 export const labelOf = (item) => `${PLATFORM_NAME[item.platform]} v${item.version} ${KIND_LABEL[item.kind]}`
 
-// 認得「這則已經貼過」的開頭（結尾帶分隔符，避免 v0.2.9 誤認 v0.2.99）。
-// 已發佈通知沿用發版腳本原本的開頭，人工補貼過的也認得
+// 文案的固定開頭（結尾帶分隔符，避免 v0.2.9 誤認 v0.2.99）
 export function signatureOf(item) {
   if (item.kind === 'published') return item.platform === 'linux' ? `【Linux 版發版完成】v${item.version}：` : `【發版完成】v${item.version}：`
   return `【發版回報】${PLATFORM_NAME[item.platform]} v${item.version}：${KIND_WHAT[item.kind]}。`
@@ -37,12 +39,24 @@ export function composeMessage(item) {
   if (item.kind === 'published') return `${sig}${PLATFORM_NAME[item.platform]}已發佈，commit ${item.commit}。`
   return `${sig}commit ${item.commit}。`
 }
+// 判斷「這則已經貼過」要整段開頭相符（含平台、版號、commit 8 碼），不是只看有沒有包含簽名。
+// 舊貼法（local_sign_publish、linux_publish 原本的發版完成訊息）：開頭不同、commit 在句尾（Linux 舊文沒有 commit），也要繼續認得
+const LEGACY_HEAD = {
+  desktop: (v) => `【發版完成】v${v}：安裝檔已發 GitHub Release`,
+  linux: (v) => `【Linux 版發版完成】v${v}：AppImage、deb 已附加到 GitHub Release`,
+}
+export function isPostedBody(item, body) {
+  if (body.startsWith(composeMessage(item))) return true
+  if (item.kind !== 'published') return false
+  if (!body.startsWith(LEGACY_HEAD[item.platform](item.version))) return false
+  return item.platform === 'linux' ? true : body.includes(`commit ${item.commit}`)
+}
 
 // ---- 群組設定檔：只在代貼端自己的資料夾，路徑寫死、不接受命令列或環境變數改
 export const CONFIG_DIR = 'asn-post-config'
 export const CONFIG_FILE = 'post-room.json'
 export const CONFIG_MAX_BYTES = 1024
-const ROOM_RE = /^[A-Za-z0-9_-]{1,64}$/
+const ROOM_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 // 來源只有一個：%LOCALAPPDATA% 底下。拿不到就回 null（不退而求其次去讀家目錄）
 export const defaultConfigPath = (env = process.env) => (env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, CONFIG_DIR, CONFIG_FILE) : null)
 export const NO_LOCALAPPDATA_MSG = '找不到這台電腦的 LOCALAPPDATA 位置，沒辦法讀群組設定檔，所以不貼。請在登入的使用者帳號下執行（群組設定檔固定放在 LOCALAPPDATA 底下的 asn-post-config 資料夾）'
@@ -55,9 +69,12 @@ export function loadRoom(configPath, pendingPath, deps) {
   if (sameDir(configPath, pendingPath)) return { ok: false, msg: `群組設定檔不能和待貼佇列放在同一個資料夾，請改放到 ${defaultConfigPath(deps.env) ?? 'LOCALAPPDATA 底下的 asn-post-config 資料夾'}` }
   if (!deps.exists(configPath)) return { ok: false, msg: configHelp(configPath) }
   let doc
+  const tooBig = { ok: false, msg: `群組設定檔太大或格式不對，請重新建立 ${configPath}，內容 {"v":1,"room":"群組代號"}` }
   try {
+    // 先用 stat 擋大小，太大的檔不讀進記憶體
+    if (typeof deps.fileSize === 'function' && deps.fileSize(configPath) > CONFIG_MAX_BYTES) return tooBig
     const text = deps.readFile(configPath)
-    if (Buffer.byteLength(text, 'utf8') > CONFIG_MAX_BYTES) return { ok: false, msg: `群組設定檔太大或格式不對，請重新建立 ${configPath}，內容 {"v":1,"room":"群組代號"}` }
+    if (Buffer.byteLength(text, 'utf8') > CONFIG_MAX_BYTES) return tooBig
     doc = JSON.parse(text)
   } catch { return { ok: false, msg: `群組設定檔讀不懂，請重新建立 ${configPath}，內容 {"v":1,"room":"群組代號"}` } }
   const keys = doc && typeof doc === 'object' && !Array.isArray(doc) ? Object.keys(doc).sort().join(',') : ''
@@ -108,9 +125,31 @@ export function checkGithub(item, deps) {
   return { ok: true }
 }
 
+// ---- 自己的身分
+// 用 `asn-cli send --whoami`（不寄信，只印判定結果；send.rs、caller.rs 的 whoami）。輸出裡兩行：
+//   判定（行程鏈）：pid=<數字> name=<視窗名>　（判不到時是「判定（行程鏈）：無」，再看「判定（環境變數備援）：」同格式）
+//   機器節點判定：<節點>　（失敗時是「機器節點判定失敗：…」）
+// 群組讀出來每則的 from 是「<節點>~<視窗名>」（room.rs：my_key ＝ format!("{}~{}", node, name)）。
+// 回「節點~視窗名」，拿不到（指令失敗、格式不認得、視窗沒名字）回 null，呼叫端當成讀不到、不送
+const WHO_BAD = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Cs}]/u
+export function selfFrom(deps) {
+  let r
+  try { r = deps.asnCli(['send', '--whoami']) } catch { return null }
+  if (!r || r.status !== 0 || typeof r.stdout !== 'string' || Buffer.byteLength(r.stdout, 'utf8') > MAX_READ_BYTES) return null
+  const text = r.stdout.replace(/\r\n/g, '\n')
+  const name = /^判定（行程鏈）：pid=\d+ name=(.+)$/m.exec(text)?.[1] ?? /^判定（環境變數備援）：pid=\d+ name=(.+)$/m.exec(text)?.[1]
+  const node = /^機器節點判定：(.+)$/m.exec(text)?.[1]
+  const clean = (s) => (typeof s === 'string' ? s.trim() : '')
+  const n = clean(name), nd = clean(node)
+  if (!n || !nd || n === '(無名)' || WHO_BAD.test(n) || WHO_BAD.test(nd) || nd.includes('~')) return null
+  return `${nd}~${n}`
+}
+
 // ---- 群組內容比對
-// 回 { ok:true, found } 或 { ok:false }（讀不到或格式不認得，呼叫端不送）
-export function roomHas(item, room, deps) {
+// 只認自己這個身分（from ＝ me）發的、開頭整段相符的那則；別人貼的同一句不算。
+// 回 { ok:true, found } 或 { ok:false }（讀不到、身分拿不到或格式不認得，呼叫端不送）
+export function roomHas(item, room, me, deps) {
+  if (typeof me !== 'string' || me === '') return { ok: false }
   let r
   try { r = deps.asnCli(['room', '--room-read', room, '--last', String(ROOM_READ_LAST), '--json']) } catch { return { ok: false } }
   if (!r || r.status !== 0 || typeof r.stdout !== 'string' || Buffer.byteLength(r.stdout, 'utf8') > MAX_READ_BYTES) return { ok: false }
@@ -124,6 +163,5 @@ export function roomHas(item, room, deps) {
     if (!m || typeof m !== 'object' || Array.isArray(m) || typeof m.body !== 'string') return { ok: false }
     rows.push(m)
   }
-  const sig = signatureOf(item)
-  return { ok: true, found: rows.some((m) => m.body.includes(sig)) }
+  return { ok: true, found: rows.some((m) => m.from === me && isPostedBody(item, m.body)) }
 }

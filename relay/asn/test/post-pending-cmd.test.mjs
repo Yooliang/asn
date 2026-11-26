@@ -50,13 +50,19 @@ function okGithub(e, items) {
   fakeGh(e, { refs, releases })
 }
 // 假的 asn-cli：讀群組回 rows（可依第幾次讀取給不同內容）、送出記錄下來
-function fakeCli(e, { rows = () => [], sendStatus = 0 } = {}) {
-  e.calls.reads = 0; e.calls.sends = []; e.calls.order = []; e.calls.readArgs = []
+// 假的 --whoami 輸出（格式照 caller.rs 的 whoami）：節點 n、視窗名 a ＝ 群組裡的 from 是 n~a
+const whoamiOut = (node = 'n', name = 'a') => ({ status: 0, stdout: `asn pid=9 ppid=8 platform=windows home=/h\nCLAUDE_CODE_MESSAGING_SOCKET=(未設)\n父行程鏈（由近到遠）：\n  pid=5 node  <== session「${name}」\n判定（行程鏈）：pid=5 name=${name}\n判定（環境變數備援）：無\n~/.claude/sessions：\n  pid=5 name=${name} kind=interactive entrypoint=cli\n機器節點判定：${node}\n`, stderr: '' })
+const isWhoami = (args) => args[0] === 'send' && args.includes('--whoami')
+const SELF = 'n~a'
+// rows 的每一項是字串（自己發的）或 { body, from }（指定發言者）
+function fakeCli(e, { rows = () => [], sendStatus = 0, who = whoamiOut() } = {}) {
+  e.calls.reads = 0; e.calls.sends = []; e.calls.order = []; e.calls.readArgs = []; e.calls.whoami = 0
   e.deps.asnCli = (args) => {
+    if (isWhoami(args)) { e.calls.whoami += 1; return who }
     if (args[0] === 'room') {
       e.calls.reads += 1; e.calls.order.push('read'); e.calls.readArgs.push(args)
       // 真實輸出（room.rs json_line）：每則一行 JSON 物件，沒有外層陣列；沒有訊息時輸出是空的
-      const lines = rows(e.calls.reads).map((body, i) => JSON.stringify({ seq: i + 1, from: 'n~a', from_name: '甲', trust: 'owner', at: '2026-11-21T10:00:00Z', mentions: [], body }))
+      const lines = rows(e.calls.reads).map((row, i) => JSON.stringify({ seq: i + 1, from: typeof row === 'string' ? SELF : row.from, from_name: '甲', trust: 'owner', at: '2026-11-21T10:00:00Z', mentions: [], body: typeof row === 'string' ? row : row.body }))
       return { status: 0, stdout: lines.length ? `${lines.join('\n')}\n` : '', stderr: '' }
     }
     e.calls.order.push('send'); e.calls.sends.push({ room: args[args.indexOf('--room') + 1], body: args[args.indexOf('--body') + 1] }); return { status: sendStatus, stdout: '', stderr: sendStatus ? '拒絕：/kick @all【發版完成】' : '' }
@@ -73,7 +79,8 @@ function setup(items, { cfg = true } = {}) {
   return e
 }
 const run = (e) => runPostPending(opts, e.deps)
-const raise = (e, status = 'active') => e.fsMap.set(ALERT, JSON.stringify({ updatedAt: 'x', alerts: { 'post-failed': { cause: 'post-failed', reason: 'post-failed', message: POST_FAILED_FIXED, ref: null, firstAt: 'x', lastAt: 'x', count: 1, status } } }))
+// refs：告警記錄的來源（平台@版號；null＝來源不明，例如沒寫進佇列的失敗）
+const raise = (e, status = 'active', refs = ['desktop@0.2.99']) => e.fsMap.set(ALERT, JSON.stringify({ updatedAt: 'x', alerts: { 'post-failed': { cause: 'post-failed', reason: 'post-failed', message: POST_FAILED_FIXED, ref: refs[0] ?? null, refs, firstAt: 'x', lastAt: 'x', count: 1, status } } }))
 const ids = (e) => pendingOf(e).items.map((x) => x.id)
 
 test('#2345 PR-2 成功：1 筆、GitHub 檢查過、群組沒有同則 → 送出 1 次、佇列清空、告警 resolved', () => {
@@ -179,18 +186,18 @@ test('#2345 PR-2 失敗回報類只確認標籤與 commit（那一版本來就�
 test('#2345 PR-2 冪等：送出前群組已有同平台同版號那則 → 不送、不查 GitHub、只清待貼', () => {
   const it = mk('published', 'desktop', '0.2.99', 1)
   const e = setup([it]); raise(e)
-  fakeCli(e, { rows: () => ['別的訊息', `${composeMessage(it)} 人工補貼的也行`] })
+  fakeCli(e, { rows: () => ['別的訊息', `${composeMessage(it)} 人工補貼的也行`] })   // 自己發的、開頭整段相符
   run(e)
   assert.equal(e.calls.sends.length, 0)
   assert.deepEqual(ids(e), [])
   assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
 })
 
-test('#2345 PR-2 讀群組的命令列：照 room.rs 的參數名（room --room-read <代號> --last 50 --json），群組代號取自設定檔', () => {
+test('#2345 PR-2 讀群組的命令列：照 room.rs 的參數名（room --room-read <代號> --last 200 --json），群組代號取自設定檔', () => {
   const it = mk('published', 'desktop', '0.2.99', 1)
   const e = setup([it])
   run(e)
-  assert.deepEqual(e.calls.readArgs[0], ['room', '--room-read', 'room-a', '--last', '50', '--json'])
+  assert.deepEqual(e.calls.readArgs[0], ['room', '--room-read', 'room-a', '--last', '200', '--json'])
 })
 
 test('#2345 PR-2 群組讀回來是空的（真實格式：沒有訊息時輸出為空）：視為沒貼過，照送', () => {
@@ -203,7 +210,7 @@ test('#2345 PR-2 群組讀回來是空的（真實格式：沒有訊息時輸出
 test('#2345 PR-2 冪等：認領後、送出前才出現同則（第二次讀才有）→ 不送，只清', () => {
   const it = mk('published', 'linux', '0.2.99', 1)
   const e = setup([it])
-  fakeCli(e, { rows: (n) => (n >= 2 ? ['【Linux 版發版完成】v0.2.99：別人貼的'] : []) })
+  fakeCli(e, { rows: (n) => (n >= 2 ? [composeMessage(it)] : []) })
   run(e)
   assert.equal(e.calls.reads, 2)
   assert.equal(e.calls.sends.length, 0)
@@ -213,14 +220,14 @@ test('#2345 PR-2 冪等：認領後、送出前才出現同則（第二次讀才
 test('#2345 PR-2 讀不到群組內容：不送、attempts 加 1（不能確認有沒有貼過就不貼）', () => {
   const it = mk('published', 'desktop', '0.2.99', 1)
   const e = setup([it])
-  e.deps.asnCli = (args) => (args[0] === 'room' ? { status: 1, stdout: '', stderr: 'x' } : (e.calls.sends.push(args), { status: 0 }))
+  e.deps.asnCli = (args) => (isWhoami(args) ? whoamiOut() : args[0] === 'room' ? { status: 1, stdout: '', stderr: 'x' } : (e.calls.sends.push(args), { status: 0 }))
   e.calls.sends = []
   run(e)
   assert.equal(e.calls.sends.length, 0)
   assert.equal(pendingOf(e).items[0].attempts, 1)
   // 不是真實格式（外層陣列、外層物件、缺 body、混進非 JSON 的行）一律當讀不到
   for (const stdout of ['不是 JSON', '{"x":1}', '[{"seq":1,"body":"x"}]', '{"messages":[{"body":"x"}]}', '{"seq":1,"body":"x"}\n壞行\n']) {
-    const e2 = setup([it]); e2.deps.asnCli = (args) => (args[0] === 'room' ? { status: 0, stdout, stderr: '' } : (e2.calls.sends = [1], { status: 0 }))
+    const e2 = setup([it]); e2.deps.asnCli = (args) => (isWhoami(args) ? whoamiOut() : args[0] === 'room' ? { status: 0, stdout, stderr: '' } : (e2.calls.sends = [1], { status: 0 }))
     e2.calls.sends = []; run(e2)
     assert.equal(e2.calls.sends.length, 0)
   }
@@ -244,7 +251,7 @@ test('#2345 PR-2 超過 48 小時：不貼、移到 .expired 檔、記 warn 並�
 
 test('#2345 PR-2 一次 6 筆：只處理 4 筆（由舊到新），剩下 2 筆留到下次，告警維持', () => {
   const items = [1, 2, 3, 4, 5, 6].map((n) => mk('published', 'desktop', `0.2.${90 + n}`, n, (10 - n) * 60_000))
-  const e = setup(items); raise(e)
+  const e = setup(items); raise(e, 'active', items.map((x) => `${x.platform}@${x.version}`))
   // createdAt 越小越舊：n=1 最舊
   run(e)
   assert.equal(MAX_PER_RUN, 4)
@@ -316,8 +323,9 @@ test('#2345 PR-2 送出失敗：項目留著、attempts 加 1、lastError 經過
 test('#2345 PR-2 多筆只成功一筆：只清那一筆，告警仍 active；全部處理完才 resolve', () => {
   const a = mk('published', 'desktop', '0.2.91', 1, 3 * HOUR)
   const b = mk('published', 'desktop', '0.2.92', 2, 2 * HOUR)
-  const e = setup([a, b]); raise(e)
+  const e = setup([a, b]); raise(e, 'active', ['desktop@0.2.91', 'desktop@0.2.92'])
   e.deps.asnCli = (args) => {
+    if (isWhoami(args)) return whoamiOut()
     if (args[0] === 'room') return { status: 0, stdout: '', stderr: '' }
     e.calls.sends.push(args); return { status: args[args.indexOf('--body') + 1].includes('v0.2.91') ? 0 : 2, stdout: '', stderr: '' }
   }
@@ -459,10 +467,195 @@ test('#2345 PR-2 運行手冊：寫明發版收尾由發版視窗跑 --post-pend
   assert.ok(doc.includes(POST_FAILED_FIXED), '手冊引用的告警固定句與程式一致')
 })
 
-test('#2345 PR-2 佇列是空的：不貼，告警（若 active）標成已恢復', () => {
+test('#2345 PR-2 佇列是空的、這一輪沒貼也沒清任何一筆：告警維持 active（空佇列不等於已恢復）', () => {
   const e = setup([]); raise(e)
   const r = run(e)
   assert.equal(r.code, 0)
   assert.equal(e.calls.sends.length, 0)
-  assert.equal(alertOf(e).alerts['post-failed'].status, 'resolved')
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+})
+
+test('#2345 PR-2 有一筆沒進佇列的 post-failed（來源不明）＋佇列裡一筆送成功、佇列空了：告警仍然亮著', () => {
+  const e = setup([mk('published', 'desktop', '0.2.99', 1)])
+  raise(e, 'active', ['desktop@0.2.99', null])
+  run(e)
+  assert.equal(e.calls.sends.length, 1)
+  assert.deepEqual(ids(e), [])
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+  assert.deepEqual(alertOf(e).alerts['post-failed'].refs, [null], '處理完的來源被拿掉，來源不明的留著')
+})
+
+test('#2345 PR-2 告警記的另一個來源這一輪沒處理到（例如已逾期被移走）：貼成功也不清告警；舊告警檔沒有來源清單也不自動清', () => {
+  const old = mk('published', 'desktop', '0.2.98', 1, MAX_AGE_MS + 1000)
+  const e = setup([old, mk('published', 'desktop', '0.2.99', 2)])
+  raise(e, 'active', ['desktop@0.2.98', 'desktop@0.2.99'])
+  run(e)
+  assert.deepEqual(ids(e), [])
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+  const e2 = setup([mk('published', 'desktop', '0.2.99', 1)])
+  e2.fsMap.set(ALERT, JSON.stringify({ updatedAt: 'x', alerts: { 'post-failed': { cause: 'post-failed', reason: 'post-failed', message: POST_FAILED_FIXED, ref: 'desktop@0.2.99', firstAt: 'x', lastAt: 'x', count: 1, status: 'active' } } }))
+  run(e2)
+  assert.equal(alertOf(e2).alerts['post-failed'].status, 'active')
+})
+
+test('#2345 PR-2 一輪貼成一個來源、另一個失敗：只把貼成的來源從告警拿掉，告警維持 active', () => {
+  const a = mk('published', 'desktop', '0.2.91', 1, 3 * HOUR)
+  const b = mk('published', 'desktop', '0.2.92', 2, 2 * HOUR)
+  const e = setup([a, b]); raise(e, 'active', ['desktop@0.2.91', 'desktop@0.2.92'])
+  e.deps.asnCli = (args) => {
+    if (isWhoami(args)) return whoamiOut()
+    if (args[0] === 'room') return { status: 0, stdout: '', stderr: '' }
+    return { status: args[args.indexOf('--body') + 1].includes('v0.2.91') ? 0 : 2, stdout: '', stderr: '' }
+  }
+  run(e)
+  assert.deepEqual(alertOf(e).alerts['post-failed'].refs, ['desktop@0.2.92'])
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+})
+
+// ---- 冪等只認自己的身分、開頭整段相符
+test('#2345 PR-2 別人的訊息含有同一句簽名（甚至整句一樣）：不算已貼，照送', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const e = setup([it]); raise(e)
+  fakeCli(e, { rows: () => [{ body: composeMessage(it), from: 'x~別人' }, { body: composeMessage(it), from: 'n~b' }, { body: composeMessage(it), from: 'm~a' }] })
+  run(e)
+  assert.equal(e.calls.sends.length, 1)
+  assert.deepEqual(ids(e), [])
+})
+
+test('#2345 PR-2 自己的訊息：開頭完全相同才算已貼；簽名出現在中間、只有簽名開頭但 commit 不同，都不算', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const cases = [
+    [`${composeMessage(it)}後面再接別的`, 0],
+    [`前面多一句 ${composeMessage(it)}`, 1],
+    [signatureOf(it), 1],
+    [composeMessage(mk('published', 'desktop', '0.2.99', 2)), 1],
+    [composeMessage(mk('published', 'desktop', '0.2.98', 1)), 1],
+    [composeMessage(mk('published', 'linux', '0.2.99', 1)), 1],
+  ]
+  for (const [body, sends] of cases) {
+    const e = setup([it])
+    fakeCli(e, { rows: () => [body] })
+    run(e)
+    assert.equal(e.calls.sends.length, sends, body)
+  }
+  // 失敗回報類同樣：同版號但 commit 不同不算已貼
+  const f = mk('ci-failed', 'desktop', '0.2.99', 1)
+  const e2 = setup([f]); fakeCli(e2, { rows: () => [composeMessage(mk('ci-failed', 'desktop', '0.2.99', 2))] })
+  run(e2)
+  assert.equal(e2.calls.sends.length, 1)
+  const e3 = setup([f]); fakeCli(e3, { rows: () => [composeMessage(f)] })
+  run(e3)
+  assert.equal(e3.calls.sends.length, 0)
+})
+
+test('#2345 PR-2 舊版發版腳本貼的開頭照舊認得（電腦版要 commit 前 8 碼相符；Linux 舊文沒有 commit）', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const oldDesktop = (commit) => `【發版完成】v0.2.99：安裝檔已發 GitHub Release、官網已部署並線上核對通過、官網版本紀錄已寫入（平台：desktop）。commit ${commit}。接著提交兩個網站檔回 main。`
+  const same = setup([it]); fakeCli(same, { rows: () => [oldDesktop(full(1))] }); run(same)
+  assert.equal(same.calls.sends.length, 0, '舊文的 commit 是完整 SHA，前 8 碼相符就算已貼')
+  assert.deepEqual(ids(same), [])
+  const diff = setup([it]); fakeCli(diff, { rows: () => [oldDesktop(full(2))] }); run(diff)
+  assert.equal(diff.calls.sends.length, 1, 'commit 不同不算')
+  const li = mk('published', 'linux', '0.2.99', 1)
+  const oldLinux = '【Linux 版發版完成】v0.2.99：AppImage、deb 已附加到 GitHub Release v0.2.99、官網 latest.json 已加 linux、首頁已加 Linux 下載連結，部署與線上核對通過，網站檔已提交回 main。'
+  const l = setup([li]); fakeCli(l, { rows: () => [oldLinux] }); run(l)
+  assert.equal(l.calls.sends.length, 0)
+  const other = setup([li]); fakeCli(other, { rows: () => [{ body: oldLinux, from: 'x~別人' }] }); run(other)
+  assert.equal(other.calls.sends.length, 1, '別人貼的舊文也不算')
+})
+
+test('#2345 PR-2 自己的身分：用 send --whoami 取得，讀群組每則的 from 是 節點~視窗名；拿不到就不送', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const e = setup([it])
+  fakeCli(e, { who: whoamiOut('節點X', '視窗Y'), rows: () => [{ body: composeMessage(it), from: '節點X~視窗Y' }] })
+  run(e)
+  assert.equal(e.calls.sends.length, 0)
+  assert.equal(e.calls.whoami, 1, '整輪只查一次')
+  // 行程鏈判不到時改用環境變數備援那一行
+  const env2 = setup([it])
+  fakeCli(env2, { who: { status: 0, stdout: '判定（行程鏈）：無\n判定（環境變數備援）：pid=5 name=視窗Z\n機器節點判定：N\n', stderr: '' }, rows: () => [{ body: composeMessage(it), from: 'N~視窗Z' }] })
+  run(env2)
+  assert.equal(env2.calls.sends.length, 0)
+  for (const who of [
+    { status: 1, stdout: '', stderr: 'x' },
+    { status: 0, stdout: '', stderr: '' },
+    { status: 0, stdout: '判定（行程鏈）：無\n判定（環境變數備援）：無\n機器節點判定：N\n', stderr: '' },
+    { status: 0, stdout: '判定（行程鏈）：pid=5 name=(無名)\n機器節點判定：N\n', stderr: '' },
+    { status: 0, stdout: '判定（行程鏈）：pid=5 name=甲\n機器節點判定失敗：x\n', stderr: '' },
+    { status: 0, stdout: '判定（行程鏈）：pid=5 name=甲\n機器節點判定：N~M\n', stderr: '' },
+  ]) {
+    const e3 = setup([it]); fakeCli(e3, { who })
+    run(e3)
+    assert.equal(e3.calls.sends.length, 0, JSON.stringify(who))
+    assert.equal(pendingOf(e3).items[0].attempts, 1)
+    assert.equal(alertOf(e3).alerts['post-failed'].status, 'active')
+  }
+})
+
+// ---- 時間在未來
+test('#2345 PR-2 createdAt 在未來：整筆隔離、不貼、發 pending-bad 告警', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1, -(5 * 60_000 + 60_000))
+  const e = setup([it])
+  run(e)
+  assert.equal(e.calls.sends.length, 0)
+  assert.deepEqual(ids(e), [])
+  assert.ok([...e.fsMap.keys()].some((k) => k.includes('.rejected-')))
+  assert.equal(alertOf(e).alerts['pending-bad'].status, 'active')
+})
+
+test('#2345 PR-2 claimedAt 在未來：不會永遠被當成別人在處理，當成認領逾時；接手前先比對群組、發 pending-bad 告警', () => {
+  const claimedAt = new Date(T0 + 5 * 60_000 + 60_000).toISOString()
+  const it = mk('published', 'desktop', '0.2.99', 1, HOUR, { claimedBy: 999, claimedAt })
+  const e = setup([it])
+  const r = run(e)
+  assert.deepEqual(e.calls.order, ['read', 'read', 'send'], '先比對群組才接手')
+  assert.ok(!r.lines.some((l) => l.includes('別人正在處理')))
+  assert.deepEqual(ids(e), [])
+  assert.equal(alertOf(e).alerts['pending-bad'].status, 'active')
+  // 群組已經有就只清
+  const e2 = setup([it]); fakeCli(e2, { rows: () => [composeMessage(it)] })
+  run(e2)
+  assert.equal(e2.calls.sends.length, 0)
+  assert.deepEqual(ids(e2), [])
+  // 容許值內的未來時間（時鐘稍有誤差）仍算有效的認領
+  const near = mk('published', 'desktop', '0.2.99', 1, HOUR, { claimedBy: 999, claimedAt: new Date(T0 + 60_000).toISOString() })
+  const e3 = setup([near]); run(e3)
+  assert.equal(e3.calls.sends.length, 0)
+  assert.equal(pendingOf(e3).items[0].claimedBy, 999)
+})
+
+// ---- 小地方
+test('#2345 PR-2 貼完但待貼檔沒更新成：輸出固定句、那筆不算處理完、告警維持 active', () => {
+  const it = mk('published', 'desktop', '0.2.99', 1)
+  const e = setup([it]); raise(e)
+  const base = e.deps.asnCli
+  e.deps.asnCli = (args) => {
+    const r = base(args)
+    if (args[0] === 'send' && !isWhoami(args)) { e.fsMap.set(`${PENDING}.lock`, `777\n${T0 - 1000}`); e.deps.pidAlive = (p) => p === 777 }
+    return r
+  }
+  const r = run(e)
+  assert.equal(e.calls.sends.length, 1)
+  assert.ok(r.lines.includes('電腦版 v0.2.99 已發佈通知：已貼，但待貼檔沒更新'), r.lines.join('|'))
+  assert.equal(pendingOf(e).items.length, 1)
+  assert.equal(alertOf(e).alerts['post-failed'].status, 'active')
+})
+
+test('#2345 PR-2 群組設定檔：代號第一個字要是英數；超過大小先用 stat 擋、不讀內容', () => {
+  for (const room of ['-abc', '_abc']) {
+    const e = setup([mk('published', 'desktop', '0.2.99', 1)]); e.fsMap.set(CFG, JSON.stringify({ v: 1, room }))
+    assert.equal(run(e).code, 2, room)
+    assert.equal(e.calls.sends.length, 0)
+  }
+  const ok = setup([mk('published', 'desktop', '0.2.99', 1)]); ok.fsMap.set(CFG, JSON.stringify({ v: 1, room: 'a-b_c' }))
+  assert.equal(run(ok).code, 0)
+  const e = setup([mk('published', 'desktop', '0.2.99', 1)])
+  const reads = []
+  const baseRead = e.deps.readFile
+  e.deps.readFile = (p) => { reads.push(p); return baseRead(p) }
+  const baseSize = e.deps.fileSize
+  e.deps.fileSize = (p) => (p === CFG ? 1025 : baseSize(p))
+  const r = run(e)
+  assert.equal(r.code, 2)
+  assert.ok(!reads.includes(CFG), '太大就不讀')
 })

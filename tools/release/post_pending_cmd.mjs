@@ -2,8 +2,8 @@
 // 運行手冊：docs/release/自動發佈運行手冊.md。待貼佇列的格式與驗證在 post_pending.mjs，固定規則在 post_pending_rules.mjs。
 // 輸出（回傳的 lines）只由固定句、平台、版號、kind、結果組成：不印待貼檔內容、lastError、群組內容或外部指令的輸出。
 import { atomicWrite, releaseLock, makeAlerts } from './auto_publish.mjs'
-import { readPending, acquirePendingLock, pendingPathOf, quarantine, saveRejected, stampOf, cleanLastError, MAX_ATTEMPTS } from './post_pending.mjs'
-import { MAX_AGE_MS, MAX_PER_RUN, CLAIM_TIMEOUT_MS, POST_FAILED_FIXED, EXPIRED_FIXED, labelOf, composeMessage, loadRoom, defaultConfigPath, checkGithub, roomHas } from './post_pending_rules.mjs'
+import { readPending, acquirePendingLock, pendingPathOf, quarantine, saveRejected, stampOf, cleanLastError, MAX_ATTEMPTS, FUTURE_TIME_MS } from './post_pending.mjs'
+import { MAX_AGE_MS, MAX_PER_RUN, CLAIM_TIMEOUT_MS, POST_FAILED_FIXED, EXPIRED_FIXED, BAD_CLAIM_FIXED, labelOf, composeMessage, loadRoom, defaultConfigPath, checkGithub, roomHas, selfFrom } from './post_pending_rules.mjs'
 
 const iso = (ms) => new Date(ms).toISOString()
 const refOf = (item) => `${item.platform}@${item.version}`
@@ -25,7 +25,9 @@ function withQueue(opts, deps, fn) {
   } finally { releaseLock(lock.lockPath, deps, lock.content) }
 }
 
-const claimLive = (x, now) => x.claimedBy !== null && x.claimedAt !== null && now - Date.parse(x.claimedAt) < CLAIM_TIMEOUT_MS
+// 認領還有效：認領時間不能比現在晚超過 FUTURE_TIME_MS（太晚的是壞的認領，當成逾時）
+const claimFuture = (x, now) => x.claimedAt !== null && Date.parse(x.claimedAt) - now > FUTURE_TIME_MS
+const claimLive = (x, now) => x.claimedBy !== null && x.claimedAt !== null && !claimFuture(x, now) && now - Date.parse(x.claimedAt) < CLAIM_TIMEOUT_MS
 
 // 超過期限的移到 .expired 檔（佇列裡不再有）
 function expireOld(opts, deps) {
@@ -50,11 +52,12 @@ function claim(opts, deps, id) {
 }
 
 // 確定送出（或群組已經有同則）之後才清這一筆
+// 回 { ok }：false＝待貼檔沒更新成（拿不到鎖等），呼叫端要講白話、告警不清
 const removeItem = (opts, deps, id) => withQueue(opts, deps, (items) => ({ items: items.filter((x) => x.id !== id), value: null }))
 
 // 失敗：attempts 加 1、寫清洗過的 lastError、放掉自己的認領（認領已被別人接手就不動）
 function fail(opts, deps, item, claimAt, text) {
-  withQueue(opts, deps, (items) => ({
+  return withQueue(opts, deps, (items) => ({
     items: items.map((x) => (x.id === item.id && x.claimedBy === deps.pid && x.claimedAt === claimAt
       ? { ...x, attempts: Math.min(MAX_ATTEMPTS, x.attempts + 1), lastError: cleanLastError(text), claimedBy: null, claimedAt: null } : x)),
     value: null,
@@ -79,34 +82,54 @@ export function runPostPending(opts, deps) {
 
   const snapshot = [...scan.items].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1))
   let handled = 0
+  // 這一輪確實處理完（已貼出、或群組已有而清掉待貼檔）的項目；只有它們算「恢復」
+  const cleared = []
+  // 自己的身分（群組裡每則的 from）：整輪只查一次，拿不到就當成讀不到群組、不送
+  let meCache
+  const me = () => (meCache === undefined ? (meCache = selfFrom(deps)) : meCache)
+  const NOT_READ = '讀不到群組最近的訊息，或確認不了自己的身分'
   for (const item of snapshot) {
     if (handled >= MAX_PER_RUN) break
+    if (claimFuture(item, deps.now())) {
+      deps.log(`待貼項目的認領時間比現在晚，當成認領逾時處理：${refOf(item)}#${item.kind}`)
+      alerts.raise('pending-bad', 'bad-claim', BAD_CLAIM_FIXED, 'post-pending')
+    }
     if (claimLive(item, deps.now())) { out(`${labelOf(item)}：別人正在處理，略過`); continue }
     handled += 1
     const done = (s) => out(`${labelOf(item)}：${s}`)
+    // 待貼檔沒更新成（拿不到鎖等）：這一筆不算處理完，告警維持
+    const clear = (okText) => {
+      if (removeItem(opts, deps, item.id).ok) { cleared.push(refOf(item)); done(okText) } else done(`${okText.startsWith('已貼') ? '已貼' : '群組已經有這則'}，但待貼檔沒更新`)
+    }
     // 認領前先比對一次：群組已經有就只清，不必佔認領
-    const pre = roomHas(item, cfg.room, deps)
-    if (pre.ok && pre.found) { removeItem(opts, deps, item.id); done('群組已經有這則，只清掉待貼'); continue }
+    const pre = roomHas(item, cfg.room, me(), deps)
+    if (pre.ok && pre.found) { clear('群組已經有這則，只清掉待貼'); continue }
     const at = claim(opts, deps, item.id)
     if (at === null) { done('認領沒成功（別人先處理了），略過'); continue }
-    const stop = (why) => { fail(opts, deps, item, at, why); alerts.raise('post-failed', 'post-failed', POST_FAILED_FIXED, refOf(item)); done(`沒有貼：${why}`) }
-    if (!pre.ok) { stop('讀不到群組最近的訊息'); continue }
+    const stop = (why) => {
+      const f = fail(opts, deps, item, at, why)
+      alerts.raise('post-failed', 'post-failed', POST_FAILED_FIXED, refOf(item))
+      done(f.ok ? `沒有貼：${why}` : `沒有貼：${why}，而且待貼檔沒更新`)
+    }
+    if (!pre.ok) { stop(NOT_READ); continue }
     const gh = checkGithub(item, deps)
     if (!gh.ok) { stop(gh.why); continue }
     // 認領到送出之間可能有別人貼了：真正送出前再比對一次
-    const again = roomHas(item, cfg.room, deps)
-    if (!again.ok) { stop('讀不到群組最近的訊息'); continue }
-    if (again.found) { removeItem(opts, deps, item.id); done('群組已經有這則，只清掉待貼'); continue }
+    const again = roomHas(item, cfg.room, me(), deps)
+    if (!again.ok) { stop(NOT_READ); continue }
+    if (again.found) { clear('群組已經有這則，只清掉待貼'); continue }
     let r
     try { r = deps.asnCli(['send', '--room', cfg.room, '--body', composeMessage(item)]) } catch { r = { status: 1 } }
     if (r?.status !== 0) { deps.log(`貼群組失敗：${labelOf(item)}，結束碼 ${Number.isInteger(r?.status) ? r.status : '未知'}`); stop(`送出失敗（結束碼 ${Number.isInteger(r?.status) ? r.status : '未知'}）`); continue }
-    removeItem(opts, deps, item.id)
-    done('已貼到群組')
+    clear('已貼到群組')
   }
 
-  // 每一筆都處理完、佇列空了，才把告警標成已恢復；還有任何一筆留著就維持原狀
+  // 恢復的條件要同時成立：這一輪至少處理完一筆、佇列已空、而且 post-failed 的每個來源都是這一輪處理完的。
+  // 沒進佇列的失敗（寫佇列失敗、來源不明）與這一輪沒處理到的來源，告警一律維持
+  const remain = cleared.length > 0 ? alerts.dropRefs('post-failed', cleared) : null
   const left = withQueue(opts, deps, () => ({ items: null, value: null }))
-  if (left.ok && left.items.length === 0) alerts.resolve('post-failed')
-  else if (left.ok) out(`佇列還有 ${left.items.length} 筆沒處理完，告警維持`)
+  if (left.ok && left.items.length > 0) out(`佇列還有 ${left.items.length} 筆沒處理完，告警維持`)
+  else if (left.ok && remain === 0) alerts.resolve('post-failed')
+  else if (left.ok && remain !== null) out('還有不在佇列裡或這一輪沒處理到的失敗，告警維持')
   return { code: 0, lines }
 }
