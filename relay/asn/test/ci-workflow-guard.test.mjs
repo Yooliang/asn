@@ -233,3 +233,43 @@ test('#1977 守門本身會紅：拿掉 rust-test、串起兩個 job、少一步
   assert.ok(splitJobProblems(viaRust(kr, 'set +e; ' + kr)).some(p => /\|\| true／set \+e/.test(p)), 'keyring 加 set +e')
   assert.ok(splitJobProblems(viaRust('        working-directory: relay/asn/src-tauri\n', '        working-directory: relay/asn/src-tauri\n        if: always()\n')).some(p => /不准有 if:/.test(p)), 'keyring 步驟加 if:')
 })
+
+// #2370 Node 測試會讀到幾乎整個 repo 的檔（relay/machine、tools、site、supabase、docs…），用 paths 清單挑著跑一定會漏（#2360 只改手冊、main 紅了沒人知道）。
+// 所以另有一支只跑 Node 測試的 workflow：每張 PR、每次推 main 都跑，不准篩路徑。
+const NODE_WF = 'asn-node-tests.yml'
+const nodeTestsProblems = src => {
+  const t = src.replace(/\r\n/g, '\n').replace(/^\s*#.*$/gm, '')
+  const problems = []
+  const on = t.match(/^on:\n([\s\S]*?)(?=^\S)/m)?.[1] ?? ''
+  if (!/^  pull_request:\s*$/m.test(on)) problems.push('沒有每張 PR 都觸發（pull_request: 底下不能再設條件）')
+  if (!/^  push:\n    branches: \[main\]\s*$/m.test(on)) problems.push('沒有推 main 就觸發')
+  if (/\b(paths|paths-ignore|branches-ignore|types):/.test(on)) problems.push('觸發條件不准篩路徑或事件類型')
+  if (!/^permissions:\n  contents: read\s*$/m.test(t)) problems.push('權限要是只讀')
+  if (!/^concurrency:\n[\s\S]*?^  cancel-in-progress: /m.test(t)) problems.push('沒有 concurrency／cancel-in-progress')
+  if (!/uses: \.\/\.github\/actions\/asn-node-setup\s*$/m.test(t)) problems.push('沒有用共用的 Node 環境步驟')
+  if (!/^\s+run: npm test\s*$/m.test(t)) problems.push('沒有跑整套 npm test')
+  if (!/working-directory: relay\/asn\s*$/m.test(t)) problems.push('npm test 沒有在 relay/asn 跑')
+  if (/continue-on-error|\|\| true|set \+e|^\s+(?:-\s+)?if:/m.test(t)) problems.push('不准略過步驟或吞掉失敗')
+  if (/\bcargo\b/.test(t)) problems.push('這支只跑 Node 測試，不跑 cargo')
+  return problems
+}
+
+test('#2370 有一支每張 PR、每次推 main 都跑整套 Node 測試的 workflow', () => {
+  const src = workflows.find(([f]) => f === NODE_WF)?.[1]
+  assert.ok(src, `找不到 .github/workflows/${NODE_WF}`)
+  assert.deepEqual(nodeTestsProblems(src), [])
+})
+
+test('#2370 守門自我測試：拿掉或改鬆任一條件都要紅', () => {
+  const src = (workflows.find(([f]) => f === NODE_WF)?.[1] ?? '').replace(/\r\n/g, '\n')
+  const broken = (from, to) => { assert.ok(src.includes(from), `找不到要改的段落：${from}`); return nodeTestsProblems(src.replace(from, to)).length }
+  assert.ok(broken('  pull_request:\n', "  pull_request:\n    paths:\n      - 'relay/**'\n") > 0, 'PR 加路徑篩選')
+  assert.ok(broken('  pull_request:\n', '') > 0, '拿掉 PR 觸發')
+  assert.ok(broken('    branches: [main]\n', '') > 0, '拿掉推 main')
+  assert.ok(broken('run: npm test', 'run: npm test || true') > 0, '吞掉失敗')
+  assert.ok(broken('run: npm test', 'run: node --test test/one.test.mjs') > 0, '只跑部分')
+  assert.ok(broken('run: npm test', 'run: npm test && npm run test:rust && cargo test') > 0, '混進 cargo')
+  assert.ok(broken('    timeout-minutes:', '    continue-on-error: true\n    timeout-minutes:') > 0, 'continue-on-error')
+  assert.ok(broken('cancel-in-progress:', 'x-cancel:') > 0, '拿掉 cancel-in-progress')
+  assert.ok(broken('  contents: read', '  contents: write') > 0, '權限放寬')
+})

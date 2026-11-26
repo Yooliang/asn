@@ -1,0 +1,33 @@
+name: ASN Node 測試
+
+# 只跑 relay/asn 的 Node 測試（#2370）。
+# 這些測試會讀到幾乎整個 repo 的檔（relay/machine、relay/cloud-agent、tools、site、supabase、docs、.github…），
+# 用 paths 清單挑著跑一定會漏（#2360 只改運行手冊，沒人跑到讀它的測試，main 紅了），所以每張 PR、每次推 main 都跑，不篩路徑。
+# 不跑 cargo；需要建置成品的端到端測試在這裡照舊略過，由 asn-linux-build.yml 補跑。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 整支 workflow 只讀（#947）
+permissions:
+  contents: read
+
+# 同一張 PR 推新版就取消舊的那輪；推 main 的每一輪都跑完，才看得出是哪一次推送弄紅的
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  node-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: ./.github/actions/asn-node-setup
+
+      - name: 單元測試（Node）
+        working-directory: relay/asn
+        run: npm test

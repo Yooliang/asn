@@ -127,7 +127,7 @@ test('#1972 守門：repo 內每支有 pull_request 觸發的 workflow 都在監
   for (const f of expected) {
     assert.ok(watched.has(f) || (EXCLUDED[f] && EXCLUDED[f].length > 4), `${f} 有 pull_request 觸發，卻不在監看清單、也不在附理由的排除清單`)
   }
-  for (const f of ['wezterm-build.yml', 'asn-wezterm-linux-probe.yml', 'asn-linux-build.yml', 'asn-backend-tests.yml', 'asn-ui-shots.yml', 'asn-pr-checklist.yml']) {
+  for (const f of ['wezterm-build.yml', 'asn-wezterm-linux-probe.yml', 'asn-linux-build.yml', 'asn-backend-tests.yml', 'asn-ui-shots.yml', 'asn-pr-checklist.yml', 'asn-node-tests.yml']) {
     assert.ok(watched.has(f), `${f} 要被監看`)
   }
   assert.ok(!watched.has('asn-release.yml'), '只有 workflow_dispatch／push 觸發的不在清單')
