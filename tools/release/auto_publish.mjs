@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail, parsePostFailedMarker } from './asn_cli.mjs'
+import { enqueuePending } from './post_pending.mjs'
+
+// 決定階段的回報裡，貼群組失敗時要另寫進待貼佇列的類別（其餘回報沒有版號與 commit）
+const PENDING_REPORT_KINDS = ['ci-failed', 'blocked']
+// finish 那條（dry-run、正式發佈失敗）的回報另用 `${步驟}-failed` 當 kind：dryrun-failed、publish-failed
 
 // repo 根目錄取自這支腳本自己的位置，不用 git rev-parse：後者要靠 cwd 才知道在哪個 repo，而 cwd 正是會漂移的東西；
 // 腳本在哪個 worktree 裡，根目錄就是那個 worktree（checkWorktree 再確認它不是主 checkout）。
@@ -30,7 +35,7 @@ export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
 export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 
 // 告警檔裡會出現的類別（--ack-alert 只認這些）
-export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed']
+export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad']
 
 export function parseArgs(argv) {
   const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, error: null }
@@ -69,7 +74,7 @@ export function toRuns(platform, re, rows) {
     const id = String(r.databaseId)
     const cur = byId.get(id)
     if (cur && (cur.attempt ?? 1) > (r.attempt ?? 1)) continue
-    byId.set(id, { platform, version: m[1], tag: r.headBranch, runId: id, status: r.status, conclusion: r.conclusion || null, createdAt: r.createdAt, attempt: r.attempt ?? 1 })
+    byId.set(id, { platform, version: m[1], tag: r.headBranch, runId: id, status: r.status, conclusion: r.conclusion || null, createdAt: r.createdAt, attempt: r.attempt ?? 1, commit: r.headSha ?? null })
   }
   return [...byId.values()]
 }
@@ -259,13 +264,15 @@ export function makeAlerts(opts, deps) {
 // 失敗時寫告警檔 post-failed（getRef 給目前處理的版本；noAlert 給沒持鎖的分支，免得和持鎖者搶寫告警檔）
 function makePost(opts, deps, alerts, getRef = () => null) {
   return (text, { noAlert = false } = {}) => {
-    if (!opts.room) { deps.log(`（沒有 --room，未貼群組）${text}`); return }
+    if (!opts.room) { deps.log(`（沒有 --room，未貼群組）${text}`); return true }
     let r
     try { r = deps.asnCli(['send', '--room', opts.room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
     if (r.status !== 0) {
       deps.log(`貼群組失敗：${asnCliFail(r)}`)
       if (!noAlert) alerts.raiseAppend('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
+      return false
     } else if (!noAlert) alerts.resolve('post-failed')
+    return true
   }
 }
 
@@ -396,7 +403,7 @@ export async function runOnce(opts, deps) {
     }
     let runs = []
     for (const w of WORKFLOWS) {
-      const r = gh(['run', 'list', '--workflow', w.file, '-L', '20', '--json', 'databaseId,headBranch,status,conclusion,createdAt,attempt'])
+      const r = gh(['run', 'list', '--workflow', w.file, '-L', '20', '--json', 'databaseId,headBranch,headSha,status,conclusion,createdAt,attempt'])
       if (r.status !== 0) { log(`gh run list ${w.file} 失敗，這一輪略過：${String(r.stderr).trim().slice(0, 200)}`); return ghFailed() }
       let rows
       try { rows = JSON.parse(r.stdout) } catch { log(`gh run list ${w.file} 輸出不是 JSON，這一輪略過`); return ghFailed() }
@@ -406,6 +413,12 @@ export async function runOnce(opts, deps) {
     alerts.resolve('gh-failed')
     if (nt.ghFailSince !== undefined) { log('gh 已恢復，清掉連續失敗計時'); setN({ ghFailSince: undefined, ghFailNoticed: undefined }) }
 
+    // 回報沒貼成時寫進待貼佇列：版號、平台取自 key，commit 由 runId 在這一輪的 run 列表對出來（對不到就不寫，寫入端會拒絕）
+    const enqueueReport = (kind, key, runId) => {
+      const [platform, version] = String(key).split('@')
+      const run = runs.find((x) => x.runId === String(runId))
+      enqueuePending(opts, deps, { kind, platform, version, commit: run?.commit })
+    }
     const d = decide({ runs, state, now: deps.now() })
     for (const n of d.notes || []) log(n)
     if (d.action === 'wait') { log(`等待：${d.reason}`); return { outcome: 'wait' } }
@@ -415,7 +428,9 @@ export async function runOnce(opts, deps) {
       save(d.state)
       // 這一類回報在決定階段就貼，下面 ref 還沒指派；不先帶上的話貼群組失敗的告警 ref 會是 null（#2287）
       if (d.key) ref = d.key
-      post(d.message)
+      const posted = post(d.message)
+      // ci-failed、blocked 的回報沒貼成：另寫進待貼佇列（只放固定欄位；版號取自 key、commit 取自 gh 的 run 列表）。其他回報沒有版號和 commit，不寫
+      if (posted === false && PENDING_REPORT_KINDS.includes(d.result) && d.key) enqueueReport(d.result, d.key, d.state?.done?.[d.key]?.runId)
       return { outcome: 'report' }
     }
     if (d.action === 'publish' && opts.dryRunOnly) { log(`--dry-run-only：${d.key} 待正式發佈，不執行`); return { outcome: 'dry-run-only' } }
@@ -425,7 +440,8 @@ export async function runOnce(opts, deps) {
       const r = applyResult(d.state, { key: d.key, step: d.action, ok, detail, now: deps.now() })
       if (r.log) log(r.log)
       save(r.state)
-      if (r.report) post(r.report)
+      // 失敗回報沒貼成：另寫進待貼佇列，kind 為 dryrun-failed／publish-failed（版號取自 key、commit 由 runId 對出來）
+      if (r.report && post(r.report) === false) enqueueReport(`${String(d.action).toLowerCase()}-failed`, d.key, d.runId)
       return { outcome: ok ? d.action : `${d.action}-failed`, key: d.key }
     }
     ref = d.key
@@ -459,7 +475,13 @@ export async function runOnce(opts, deps) {
     // 同一版電腦版與 Linux 都沒貼成時用累加寫入，兩個平台的原文都保留
     if (r.status === 0 && d.action === 'publish') {
       const pf = parsePostFailedMarker(r.stdout)
-      if (pf) alerts.raiseAppend('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
+      if (pf) {
+        alerts.raiseAppend('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
+        // 同一筆另寫進待貼佇列（只放固定欄位）：版號取自決定階段的 key、commit 取自 gh 的 run 列表，都不從子程序輸出解析。
+        // 寫失敗只記 log（enqueuePending 不丟例外），不影響發版結果
+        const run = runs.find((x) => x.runId === String(d.runId))
+        enqueuePending(opts, deps, { kind: 'published', platform: d.platform, version: String(d.key).slice(String(d.key).indexOf('@') + 1), commit: run?.commit })
+      }
     }
     return out
   } finally {
@@ -561,6 +583,7 @@ export function realDeps(opts, repoRoot = REPO_ROOT) {
     now: () => Date.now(), pid: process.pid,
     exists: (p) => fs.existsSync(p),
     readFile: (p) => fs.readFileSync(p, 'utf8'),
+    fileSize: (p) => fs.statSync(p).size,
     writeFile: (p, s) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, s) },
     rename: (a, b) => fs.renameSync(a, b),
     createLock: (p, s) => {

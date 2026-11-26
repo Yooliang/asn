@@ -55,7 +55,7 @@ function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], gitOver
   return { deps, calls, fsMap, clock }
 }
 
-const row = (branch, id = 100, over = {}) => ({ databaseId: id, headBranch: branch, status: 'completed', conclusion: 'success', createdAt: '2026-11-21T09:00:00Z', attempt: 1, ...over })
+const row = (branch, id = 100, over = {}) => ({ databaseId: id, headBranch: branch, headSha: String(id).padStart(40, '0'), status: 'completed', conclusion: 'success', createdAt: '2026-11-21T09:00:00Z', attempt: 1, ...over })
 const opts = { state: STATE, room: 'r1', dryRunOnly: false }
 const lastState = (fsMap) => JSON.parse(fsMap.get(STATE))
 
