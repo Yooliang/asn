@@ -9,6 +9,7 @@ import { cleanPiModels } from './pi-models.mjs'
 import { runArchive } from './archive.mjs'
 import { clearRun, moveRun, runBanner, runFor, setRun } from './mobile-ops.mjs'
 import { switchModelsFor } from './model-catalog.mjs'
+import { createModelLoader } from './local-models.mjs'
 
 const errText = e => String(e?.message ?? e ?? '').replace(/\s+/g, ' ').trim().slice(0, 80) || '原因不明'
 // 寫進 ui.log 的原文要完整，不截斷（開發紀律三之 2）
@@ -158,12 +159,22 @@ export const PartnerOpStrip = {
 
 // 各動作的對話框文字（給人看；device＝設備名）。confirm＝要先確認；auto＝不用確認直接送出
 /**
- * 內建通道工作者「切換模型」的清單（#539 之四）：讀 switchModelsFor(名單上的 engine，例如 gemini)；沒有清單（grok 等）回空陣列＝手動輸入。
+ * 哪一家的內建通道工作者，切換模型時要向這台電腦讀清單（#2355）：只有 Gemini（agy）、而且工作者就在這台；Grok 沒有清單（D6）＝手動輸入。
+ * 回廠牌代號（給 agent_models）；不用讀回空字串。
+ */
+export function acpListVendor(friend, { selfNode = '', canRead = true } = {}) {
+  if (!canRead || dialogEngine(friend) !== 'acp') return ''
+  if (String(friend?.engine ?? '').toLowerCase() !== 'gemini') return ''
+  return selfNode && friend?.node === selfNode ? 'gemini' : ''
+}
+
+/**
+ * 內建通道工作者「切換模型」的清單：list 是向本機讀到的（modelState 的 models，#2355）；沒有（grok、別台、讀不到）＝空陣列＝手動輸入。
  * selected：目前的模型在清單裡就選它，否則第一個。回 { models, selected }
  */
-export function acpSwitchChoices(friend) {
+export function acpSwitchChoices(friend, { list = [] } = {}) {
   if (dialogEngine(friend) !== 'acp') return { models: [], selected: '' }
-  const models = switchModelsFor(friend?.engine)
+  const models = Array.isArray(list) ? list : []
   const cur = String(friend?.model ?? '')
   return { models, selected: models.some(m => m.id === cur) ? cur : (models[0]?.id ?? '') }
 }
@@ -233,10 +244,20 @@ export const PartnerOpDialog = {
   setup(props, { emit }) {
     const { ref, reactive, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const name = props.friend.agent || props.friend.nick
-    const acp = props.op === 'model' ? acpSwitchChoices(props.friend) : { models: [], selected: '' }
-    const acpModels = acp.models
-    const text = computed(() => opDialogText(props.op, name, props.friend.device, dialogEngine(props.friend), { hasList: acpModels.length > 0 }))
-    const form = reactive({ newName: name, note: '', ack: false, model: acp.selected })
+    // 內建通道（Gemini）的型號清單向這台電腦讀（#2355）；別台的工作者、或沒有清單的（Grok）退回輸入框
+    const acpVendor = props.op === 'model' ? acpListVendor(props.friend, { selfNode: props.selfNode, canRead: typeof props.api?.agentModels === 'function' }) : ''
+    const acpView = reactive({ models: [], note: '', canRetry: false })
+    const acpModels = computed(() => acpView.models)
+    const text = computed(() => opDialogText(props.op, name, props.friend.device, dialogEngine(props.friend), { hasList: acpView.models.length > 0 }))
+    const form = reactive({ newName: name, note: '', ack: false, model: '' })
+    const acpLoader = acpVendor ? createModelLoader({
+      fetch: a => props.api.agentModels(a), vendorLabel: v => (v === 'gemini' ? 'Gemini' : v),
+      onChange: (_v, view) => {
+        Object.assign(acpView, { models: view.models, note: view.note, canRetry: view.canRetry && !view.loading })
+        if (view.models.length && !view.models.some(m => m.id === form.model)) form.model = acpSwitchChoices(props.friend, { list: view.models }).selected
+      },
+    }) : null
+    const reloadAcp = () => { if (acpLoader) void acpLoader.load(acpVendor, { force: true }) }
     const st = reactive({ phase: 'form', error: '', busy: false, view: null })
     // pi 切換模型的下拉選單：查得到清單才用（null＝還在查或查不到，畫輸入框）
     const isPiModel = props.op === 'model' && dialogEngine(props.friend) === 'pi'
@@ -271,7 +292,7 @@ export const PartnerOpDialog = {
       if (st.busy) return
       if (isSelfPull) { await submitSelfPull(); return }
       if (pi.groups && !pi.groups.some(g => g.options.some(o => o.value === form.model))) { st.error = PI_MODEL_PICK_ERR; return }
-      if (acpModels.length && !acpModels.some(m => m.id === form.model)) { st.error = '請從清單選一個模型'; return }
+      if (acpView.models.length && !acpView.models.some(m => m.id === form.model)) { st.error = '請從清單選一個模型'; return }
       const err = opFormError(props.friend, props.op, form, props.item)
       if (err) { st.error = err; return }
       // 查詳情要在這裡把結果列出來；其他動作送出就收起對話框，進度由畫面上的提示列就地顯示（#1800）
@@ -292,9 +313,10 @@ export const PartnerOpDialog = {
       }
       if (text.value.auto) void submit()
       if (pi.loading) void loadPiModels()
+      if (acpLoader) void acpLoader.load(acpVendor)
     })
-    onBeforeUnmount(() => { closed = true })
-    return { text, form, st, submit, close, T: OP_PROGRESS_TEXT, launchNew, name, pi, piNote, acpModels, isSelfPull }
+    onBeforeUnmount(() => { closed = true; acpLoader?.reset() })
+    return { text, form, st, submit, close, T: OP_PROGRESS_TEXT, launchNew, name, pi, piNote, acpModels, acpView, reloadAcp, isSelfPull }
   },
   template: `
 <asn-dialog :title="text.title" @close="close">
@@ -306,7 +328,7 @@ export const PartnerOpDialog = {
     <label class="op-field" v-if="op === 'rename'">新名字
       <input class="set-input" type="text" v-model="form.newName" maxlength="40" aria-label="新名字" @keydown.enter.prevent="submit">
     </label>
-    <label class="op-field" v-if="op === 'model' && acpModels.length">模型
+    <label class="op-field" v-if="op === 'model' && acpView.models.length">模型
       <select class="set-sel" v-model="form.model" aria-label="模型">
         <option v-for="m in acpModels" :key="m.id" :value="m.id">{{ m.label }}</option>
       </select>
@@ -321,6 +343,8 @@ export const PartnerOpDialog = {
       <input class="set-input" type="text" v-model="form.model" maxlength="101" autocomplete="off" autocapitalize="off" spellcheck="false" :placeholder="text.placeholder || '例如 anthropic/claude-sonnet-5'" aria-label="模型" @keydown.enter.prevent="submit">
     </label>
     <small class="partner-hint" v-if="piNote">{{ piNote }}</small>
+    <small class="partner-hint" v-if="op === 'model' && acpView.note" role="status" aria-label="型號清單狀況">{{ acpView.note }}
+      <button type="button" class="aero-btn" v-if="acpView.canRetry" @click="reloadAcp">重新讀取</button></small>
     <ul class="model-points" v-if="text.points.length"><li v-for="p in text.points" :key="p">{{ p }}</li></ul>
     <label class="op-field" v-if="text.ack"><input type="checkbox" v-model="form.ack" aria-label="確認接手前要先關掉終端機"> {{ text.ack }}</label>
     <label class="op-field" v-if="op === 'handover' && !text.ack && !isSelfPull">補充的話（選填，會附在新夥伴的第一句話後面）

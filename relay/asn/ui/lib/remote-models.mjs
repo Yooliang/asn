@@ -35,8 +35,8 @@ export const CODE_TEXT = Object.freeze({
 export const UNKNOWN_FAILURE_TEXT = '讀不到型號清單'
 /** 別台電腦沒有回報 models（舊版 ASN／舊後台）。只會出現在別台 */
 export const NONE_TEXT = '那台電腦的 ASN 版本較舊，不能選型號，請先更新'
-/** 本機沒有回報 models（正常不會發生；保險用，同樣不說「那台」） */
-export const NONE_TEXT_LOCAL = '這台電腦沒有回報型號清單，請先更新 ASN'
+/** 本機沒有回報 models（正常不會發生；保險用，同樣不說「那台」）。本機畫面跟本機 ASN 一定是同一版，所以不寫「請先更新」（領隊 11/26 裁示） */
+export const NONE_TEXT_LOCAL = '這台電腦讀不到型號清單'
 export const PENDING_TEXT = '正在讀取型號清單…'
 
 const VENDOR_LABEL = Object.freeze({ claude: 'Claude', codex: 'Codex', gemini: 'Gemini', pi: 'pi', grok: 'Grok' })

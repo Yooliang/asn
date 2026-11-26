@@ -39,9 +39,9 @@ test('「⋯」選單：項目與可按條件完全來自 partner-ops.menuItems�
   assert.equal(showsInSheet('info'), true); assert.equal(showsInSheet('close'), false)
 })
 
-test('切換模型：手機列常用三個（opus／sonnet／haiku），都過後台的模型名稱規則，並註明只是常用清單', () => {
+test('切換模型：手機列 Claude 的三個別名（fable／opus／sonnet，#2355），都過後台的模型名稱規則，並註明只是常用清單', () => {
   const ms = phoneModels()
-  assert.deepEqual(ms.map(m => m.id), ['opus', 'sonnet', 'haiku'])
+  assert.deepEqual(ms.map(m => m.id), ['fable', 'opus', 'sonnet'])
   for (const m of ms) assert.match(m.id, MODEL_RE)
   assert.match(MODEL_NOTE, /常用/)
   assert.deepEqual(buildOpRequest(F('H', '小文'), 'model', { model: 'sonnet' }), { node: 'H', name: '小文', op: 'model', model: 'sonnet' })

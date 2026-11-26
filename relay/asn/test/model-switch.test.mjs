@@ -1,20 +1,21 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CLAUDE_MODELS } from '../ui/lib/model-catalog.mjs'
+import { CLAUDE_ALIAS_MODELS as CLAUDE_MODELS } from '../ui/lib/model-catalog.mjs'
 import { MODEL_QUERY_TIMEOUT_MS, canOfferModelSwitch, confirmText, createModelSwitcher, currentModelLabel, modelFamily, modelMenuState, resultView } from '../ui/lib/model-switch.mjs'
 
 const read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8')
 
-test('模型清單：Opus／Sonnet／Haiku，id 都能直接當 --model', () => {
-  assert.deepEqual(CLAUDE_MODELS.map(m => m.id), ['opus', 'sonnet', 'haiku'])
+test('模型清單：Claude 別名 Fable／Opus／Sonnet（取自 claude --help），id 都能直接當 --model', () => {
+  assert.deepEqual(CLAUDE_MODELS.map(m => m.id), ['fable', 'opus', 'sonnet'])
   for (const m of CLAUDE_MODELS) assert.match(m.id, /^[a-z]+$/)
 })
 
 test('比對目前模型：別名、完整名稱、後綴都認得，認不得回 null', () => {
   assert.equal(modelFamily('opus'), 'opus')
   assert.equal(modelFamily('claude-sonnet-4-5'), 'sonnet')
-  assert.equal(modelFamily('Haiku[1m]'), 'haiku')
+  assert.equal(modelFamily('Fable[1m]'), 'fable')
+  assert.equal(modelFamily('haiku'), null, 'haiku 不在別名裡：認不得，畫面原樣顯示')
   assert.equal(modelFamily('gpt-5'), null)
   assert.equal(modelFamily(undefined), null)
 })
@@ -41,17 +42,17 @@ test('選單狀態：閒置可選且目前那項打勾；忙碌全部停用並�
   const idle = modelMenuState({ ok: true, canSwitch: true, idle: true, model: 'opus' })
   assert.equal(idle.state, 'ready')
   assert.equal(idle.current, 'Opus')
-  assert.deepEqual(idle.items.map(i => [i.id, i.checked, i.disabled]), [['opus', true, false], ['sonnet', false, false], ['haiku', false, false]])
+  assert.deepEqual(idle.items.map(i => [i.id, i.checked, i.disabled]), [['fable', false, false], ['opus', true, false], ['sonnet', false, false]])
 
   const noModel = modelMenuState({ ok: true, canSwitch: true, idle: true })
   assert.equal(noModel.current, '預設')
   assert.ok(noModel.items.every(i => !i.checked), '沒指定模型時沒有任何一項打勾')
 
-  const busy = modelMenuState({ ok: true, canSwitch: true, idle: false, model: 'haiku', reason: '對話進行中，等它閒置再切換' })
+  const busy = modelMenuState({ ok: true, canSwitch: true, idle: false, model: 'sonnet', reason: '對話進行中，等它閒置再切換' })
   assert.equal(busy.state, 'busy')
   assert.ok(busy.items.every(i => i.disabled))
   assert.match(busy.reason, /閒置/)
-  assert.equal(busy.items.find(i => i.id === 'haiku').checked, true)
+  assert.equal(busy.items.find(i => i.id === 'sonnet').checked, true)
 
   for (const q of [null, { ok: false }, { ok: true, canSwitch: false, reason: '找不到這個夥伴的 Claude 視窗' }]) {
     const n = modelMenuState(q)
@@ -106,7 +107,7 @@ test('控制器：查詢出錯或逾時＝切不了；沒有查詢資料或模�
 
 test('控制器：執行拋錯＝失敗並帶原因', async () => {
   const sw = createModelSwitcher({ transport: { modelSwitchRun: async () => { throw new Error('操作逾時') } } })
-  const r = await sw.run('a', { raw: { pid: 1, sessionId: 's' } }, 'haiku')
+  const r = await sw.run('a', { raw: { pid: 1, sessionId: 's' } }, 'sonnet')
   assert.equal(r.ok, false)
   assert.equal(r.message, '操作逾時')
 })

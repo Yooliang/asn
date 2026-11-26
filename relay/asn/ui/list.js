@@ -88,6 +88,8 @@ import { createPinsSync } from './lib/pins-sync.mjs'
 import { PinDot } from './lib/pin-dot.mjs'
 import { vendorIconSvg } from './lib/vendor-icons.mjs'
 import { launchModelChoices, vendorRows } from './lib/model-catalog.mjs'
+import { createModelLoader } from './lib/local-models.mjs'
+import { PENDING_TEXT } from './lib/remote-models.mjs'
 import { PI_ONLY_VENDORS, cleanPiModels, piChoiceFor, piLaunchArgs, piVendorState, providerStates } from './lib/pi-models.mjs'
 import { PI_ONLY_CHANNELS, PI_REMOTE_VERSION_NOTE, buildLaunchRequest as remoteLaunchRequest, launchPiChoice, launchVendorCards, remotePi } from './lib/mobile-launch.mjs'
 import { autoRunFor, localLaunchRequest, loggedOutFromCli, loggedOutFromStates, vendorCards, vendorStatesOf } from './lib/auto-run.mjs'
@@ -703,7 +705,21 @@ const dlgAuto = computed(() => autoRunFor(dlgRow.value, {
 }))
 // 第 2 頁「型號」（#539 之四）：這家有清單、開在這台才出現；預設＝不指定（照原本的開法）。清單跟「切換模型」同一份（switchModelsFor）
 // 只能經 pi 的廠牌（DeepSeek、MiniMax）同一格改成 pi 的模型清單（dlgPiPick）
-const launchModel = computed(() => launchModelChoices(dlgRow.value?.id, dlgAuto.value.run, { local: partnerDlg.node === info.node, engine: localProfileEngine(partnerDlg.profile, remoteLaunchers.value[info.node]) }))
+// #2355 P3：清單向本機讀（agent_models）。Claude 讀不到清單，放別名；別台電腦的下拉是 P4，這裡不出。讀取狀態與 pending 自動再問都在 local-models.mjs
+const launchModelViews = ref({})
+const modelLoader = createModelLoader({ fetch: a => transport.agentModels(a), vendorLabel: v => (v === 'gemini' ? 'Gemini' : v), onChange: (v, view) => { launchModelViews.value = { ...launchModelViews.value, [v]: view } } })
+const launchModelChoice = computed(() => launchModelChoices(dlgRow.value?.id, dlgAuto.value.run, { engine: localProfileEngine(partnerDlg.profile, remoteLaunchers.value[info.node]) }))
+const launchModelOnThisPc = computed(() => partnerDlg.node === info.node)
+const launchModel = computed(() => {
+  const c = launchModelChoice.value
+  if (!launchModelOnThisPc.value) return { ...c, show: false, note: '', canRetry: false }
+  if (c.kind !== 'list') return { ...c, canRetry: false }
+  const v = launchModelViews.value[c.vendor]
+  return { ...c, models: v?.models ?? [], note: v?.note ?? PENDING_TEXT, canRetry: Boolean(v?.canRetry) && !v?.loading }
+})
+watch(() => partnerDlg.open, () => { modelLoader.reset(); launchModelViews.value = {} })
+watch(() => [partnerDlg.open, partnerDlg.step, launchModelOnThisPc.value && launchModelChoice.value.kind === 'list' ? launchModelChoice.value.vendor : ''], ([open, step, vendor]) => { if (open && step === 2 && vendor) modelLoader.ensure(vendor) })
+function reloadLaunchModels() { const c = launchModelChoice.value; if (c.kind === 'list') void modelLoader.load(c.vendor, { force: true }) }
 const launchModelPick = computed(() => (launchModel.value.show && launchModel.value.models.some(m => m.id === partnerDlg.model) ? partnerDlg.model : ''))
 const dlgPiPick = computed(() => dlgAuto.value.run === 'pi' && piChoice.value.ok)
 const partnerCanRun = computed(() => dlgAuto.value.ok)
@@ -2329,7 +2345,7 @@ const app = createApp({
       terms, termPrompt, termWill, termPick, termConfirm, termDismiss,
       termSend, termSendRow, termSendDraft, termSendConfirmView, termSendOpen, termsClose, termSendAsk, termSendPhone, termSendBack, termSendConfirm, SEND_MAX,
       beingViewed, stopBeingViewed, termViewApi, remoteViewApi: mineViewApi, remoteInputApi, termPane, termPaneRow, termPaneFriend, termBarApi, termBarBlocked: termBarBlockedView, termBarOps, onTermBarOp, termClose, termCloseCancel, termCloseConfirm, TERM_CLOSE_NOTE, termPaneActive, termRoster, termComposer, openTermTab, termPaneAnswer, termTimeline, entryLabel,
-      dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, dlgAuto, dlgPiPick, partnerCanRun, launchModel, termWaitCount, openWaitingTerm,
+      dlgRow, dlgVendors, dlgRemote, PI_REMOTE_VERSION_NOTE, piChoice, dlgAuto, dlgPiPick, partnerCanRun, launchModel, reloadLaunchModels, termWaitCount, openWaitingTerm,
       adopt, adoptLoad, adoptClose, adoptDo, adoptRelease, adoptUnlockAsk, adoptUnlockCancel, adoptUnlockConfirm, UNLOCK_TEXT,
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
