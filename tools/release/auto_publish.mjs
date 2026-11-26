@@ -16,6 +16,7 @@ import { enqueuePending } from './post_pending.mjs'
 
 // 決定階段的回報裡，貼群組失敗時要另寫進待貼佇列的類別（其餘回報沒有版號與 commit）
 const PENDING_REPORT_KINDS = ['ci-failed', 'blocked']
+// finish 那條（dry-run、正式發佈失敗）的回報另用 `${步驟}-failed` 當 kind：dryrun-failed、publish-failed
 
 // repo 根目錄取自這支腳本自己的位置，不用 git rev-parse：後者要靠 cwd 才知道在哪個 repo，而 cwd 正是會漂移的東西；
 // 腳本在哪個 worktree 裡，根目錄就是那個 worktree（checkWorktree 再確認它不是主 checkout）。
@@ -34,7 +35,7 @@ export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
 export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 
 // 告警檔裡會出現的類別（--ack-alert 只認這些）
-export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed']
+export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad']
 
 export function parseArgs(argv) {
   const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, error: null }
@@ -412,6 +413,12 @@ export async function runOnce(opts, deps) {
     alerts.resolve('gh-failed')
     if (nt.ghFailSince !== undefined) { log('gh 已恢復，清掉連續失敗計時'); setN({ ghFailSince: undefined, ghFailNoticed: undefined }) }
 
+    // 回報沒貼成時寫進待貼佇列：版號、平台取自 key，commit 由 runId 在這一輪的 run 列表對出來（對不到就不寫，寫入端會拒絕）
+    const enqueueReport = (kind, key, runId) => {
+      const [platform, version] = String(key).split('@')
+      const run = runs.find((x) => x.runId === String(runId))
+      enqueuePending(opts, deps, { kind, platform, version, commit: run?.commit })
+    }
     const d = decide({ runs, state, now: deps.now() })
     for (const n of d.notes || []) log(n)
     if (d.action === 'wait') { log(`等待：${d.reason}`); return { outcome: 'wait' } }
@@ -423,11 +430,7 @@ export async function runOnce(opts, deps) {
       if (d.key) ref = d.key
       const posted = post(d.message)
       // ci-failed、blocked 的回報沒貼成：另寫進待貼佇列（只放固定欄位；版號取自 key、commit 取自 gh 的 run 列表）。其他回報沒有版號和 commit，不寫
-      if (posted === false && PENDING_REPORT_KINDS.includes(d.result) && d.key) {
-        const runId = d.state?.done?.[d.key]?.runId
-        const run = runs.find((x) => x.runId === String(runId))
-        enqueuePending(opts, deps, { kind: d.result, platform: String(d.key).split('@')[0], version: String(d.key).split('@')[1], commit: run?.commit })
-      }
+      if (posted === false && PENDING_REPORT_KINDS.includes(d.result) && d.key) enqueueReport(d.result, d.key, d.state?.done?.[d.key]?.runId)
       return { outcome: 'report' }
     }
     if (d.action === 'publish' && opts.dryRunOnly) { log(`--dry-run-only：${d.key} 待正式發佈，不執行`); return { outcome: 'dry-run-only' } }
@@ -437,7 +440,8 @@ export async function runOnce(opts, deps) {
       const r = applyResult(d.state, { key: d.key, step: d.action, ok, detail, now: deps.now() })
       if (r.log) log(r.log)
       save(r.state)
-      if (r.report) post(r.report)
+      // 失敗回報沒貼成：另寫進待貼佇列，kind 為 dryrun-failed／publish-failed（版號取自 key、commit 由 runId 對出來）
+      if (r.report && post(r.report) === false) enqueueReport(`${String(d.action).toLowerCase()}-failed`, d.key, d.runId)
       return { outcome: ok ? d.action : `${d.action}-failed`, key: d.key }
     }
     ref = d.key

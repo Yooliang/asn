@@ -5,8 +5,8 @@
 //   - version 是三段數字；commit 是 8 位小寫 hex（寫入端由完整 SHA 取前 8 碼）；platform 只認 desktop、linux；kind 只認 PENDING_KINDS。
 //   - id ＝ 平台@版號#kind，同一筆重複寫入只留一筆。
 //   - 讀寫都在獨立的 post-pending.json.lock 內進行（不用 state.json.lock）；寫入走 atomicWrite。
-//   - 鎖檔時間戳在未來超過 LOCK_FUTURE_MS 視為壞鎖：改名留存並留 bad-state 告警，再重新取鎖。
-//   - 檔案讀不懂或超過 MAX_FILE_BYTES 時改名成 post-pending.json.bad-<時間>、留 bad-state 告警，不覆寫。
+//   - 鎖檔時間戳在未來超過 LOCK_FUTURE_MS 視為壞鎖：改名留存並留 pending-bad 告警，再重新取鎖。
+//   - 檔案讀不懂或超過 MAX_FILE_BYTES 時改名成 post-pending.json.bad-<時間>、留 pending-bad 告警，不覆寫。
 //   - 驗證失敗的 warn 只說哪個欄位不合格，不印內容。
 import path from 'node:path'
 import { atomicWrite, acquireLock, releaseLock, parseLock, makeAlerts } from './auto_publish.mjs'
@@ -16,12 +16,22 @@ export const pendingPathOf = (opts) => path.join(path.dirname(opts.state), PENDI
 
 // 平台白名單：與 auto_publish.mjs 的 WORKFLOWS 一致（測試有對照）
 export const PENDING_PLATFORMS = ['desktop', 'linux']
-// kind：published ＝已發佈但通知沒貼成；ci-failed、blocked ＝常駐程式的同名回報沒貼成
-export const PENDING_KINDS = ['published', 'ci-failed', 'blocked']
+// kind：published ＝已發佈但通知沒貼成；其餘是常駐程式的同名回報（ci-failed、blocked、dryrun-failed、publish-failed）沒貼成
+export const PENDING_KINDS = ['published', 'ci-failed', 'blocked', 'dryrun-failed', 'publish-failed']
+// 待貼佇列的壞檔、壞鎖、檔案過大都發這一類告警；程式不自動 resolve，只能 --ack-alert pending-bad 人工清
+export const PENDING_BAD_MESSAGE = '待貼佇列檔或它的鎖不正常，已改名保留、沒有覆寫，請人工檢查'
 export const MAX_ITEM_BYTES = 512
 export const MAX_FILE_BYTES = 64 * 1024
 export const LOCK_FUTURE_MS = 5 * 60 * 1000
 export const PENDING_FIELDS = ['at', 'attempts', 'claimedAt', 'claimedBy', 'commit', 'createdAt', 'id', 'kind', 'lastError', 'platform', 'version']
+
+// lastError：只寫進待貼檔給人排錯，不得出現在群組文案或 --post-pending 的輸出。
+// 只能是 null，或 ≤ LAST_ERROR_MAX 字、不含控制字元（C0、DEL、C1、行分隔 U+2028、段分隔 U+2029）的字串
+export const LAST_ERROR_MAX = 100
+const CONTROL_SRC = '[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029]'
+const CONTROL_RE = new RegExp(CONTROL_SRC)
+const CONTROL_ALL_RE = new RegExp(CONTROL_SRC, 'g')
+export const cleanLastError = (s) => (typeof s === 'string' ? s.replace(CONTROL_ALL_RE, '').slice(0, LAST_ERROR_MAX) : null)
 
 const SEMVER_RE = /^\d+\.\d+\.\d+$/
 const COMMIT_RE = /^[0-9a-f]{8}$/
@@ -49,7 +59,7 @@ export function checkItem(x) {
   if (typeof x.at !== 'string' || !ISO_RE.test(x.at)) return { ok: false, field: 'at' }
   if (typeof x.createdAt !== 'string' || !ISO_RE.test(x.createdAt)) return { ok: false, field: 'createdAt' }
   if (!Number.isInteger(x.attempts) || x.attempts < 0) return { ok: false, field: 'attempts' }
-  if (x.lastError !== null && !(typeof x.lastError === 'string' && x.lastError.length <= 300)) return { ok: false, field: 'lastError' }
+  if (x.lastError !== null && !(typeof x.lastError === 'string' && x.lastError.length <= LAST_ERROR_MAX && !CONTROL_RE.test(x.lastError))) return { ok: false, field: 'lastError' }
   if (x.claimedBy !== null && !Number.isInteger(x.claimedBy)) return { ok: false, field: 'claimedBy' }
   if (x.claimedAt !== null && !(typeof x.claimedAt === 'string' && ISO_RE.test(x.claimedAt))) return { ok: false, field: 'claimedAt' }
   if (Buffer.byteLength(JSON.stringify(x), 'utf8') > MAX_ITEM_BYTES) return { ok: false, field: 'size' }
@@ -88,13 +98,13 @@ export function readPending(opts, deps, warn = console.warn) {
 
 const stampOf = (deps) => new Date(deps.now()).toISOString().replace(/[:.]/g, '-')
 
-// 壞檔：改名留存、留 bad-state 告警、不覆寫
+// 壞檔：改名留存、留 pending-bad 告警、不覆寫
 function quarantine(opts, deps) {
   const p = pendingPathOf(opts)
   const to = `${p}.bad-${stampOf(deps)}`
   deps.rename(p, to)
   deps.log(`待貼佇列檔讀不懂或太大，已改名保留為 ${to}（沒有覆寫）`)
-  makeAlerts(opts, deps).raise('bad-state', 'bad-state', '待貼佇列檔讀不懂，已改名保留、沒有覆寫，請人工檢查', 'post-pending')
+  makeAlerts(opts, deps).raise('pending-bad', 'pending-bad', PENDING_BAD_MESSAGE, 'post-pending')
 }
 
 // 取待貼鎖：沿用 acquireLock；鎖檔時間戳在未來超過 LOCK_FUTURE_MS 的先當壞鎖處理（只作用在待貼鎖，不影響 state 鎖）
@@ -108,7 +118,7 @@ export function acquirePendingLock(opts, deps) {
       try {
         deps.rename(lockPath, to)
         deps.log(`待貼佇列的鎖檔時間戳在未來，視為壞鎖，已改名為 ${to}`)
-        makeAlerts(opts, deps).raise('bad-state', 'bad-state', '待貼佇列的鎖檔時間不正常，已視為壞鎖處理，請人工檢查工作機時鐘', 'post-pending')
+        makeAlerts(opts, deps).raise('pending-bad', 'pending-bad', PENDING_BAD_MESSAGE, 'post-pending')
       } catch (e) { return { got: false, why: `壞鎖改名失敗：${e.message}` } }
     }
   }
