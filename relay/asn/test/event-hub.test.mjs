@@ -22,6 +22,20 @@ test('內部事件：扇出順序＝訂閱順序、payload 同一個物件、不
   assert.equal(f.recs.length, 0, '不在事件表的名字不碰橋')
 })
 
+test('subscriberCount：只算還沒退訂的；同函式訂兩次算兩個；重複退訂不多扣；別的事件不受影響', () => {
+  const hub = createEventHub()
+  assert.equal(hub.subscriberCount('term-view-frame'), 0)
+  const f = () => {}
+  const a = hub.subscribe('term-view-frame', f), b = hub.subscribe('term-view-frame', f), c = hub.subscribe('state', f)
+  assert.equal(hub.subscriberCount('term-view-frame'), 2)
+  assert.equal(hub.subscriberCount('state'), 1)
+  a(); a()
+  assert.equal(hub.subscriberCount('term-view-frame'), 1, '重複退訂只扣一次')
+  b(); c()
+  assert.equal(hub.subscriberCount('term-view-frame'), 0)
+  assert.equal(hub.subscriberCount('state'), 0)
+})
+
 test('on 回傳 hub 可串接；subscribe 回傳取消函式', () => {
   const hub = createEventHub()
   assert.equal(hub.on('x', () => {}), hub)

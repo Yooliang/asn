@@ -35,6 +35,8 @@ export function createEventHub({ listen = null, emit = null, emitTo = null, even
       entry?.unsub()
       return hub
     },
+    // 唯讀：這個事件現在有幾個還沒退訂的訂閱者（冒煙與測試用，從訂閱表實際數，不是推算）
+    subscriberCount: evt => (handlers.get(evt) ?? []).filter(x => x.active).length,
     // 本視窗內扇出：逐一呼叫，例外 try/catch 後記一行（不中斷同事件的其他處理器）
     emit(evt, arg) {
       for (const entry of handlers.get(evt) ?? []) {

@@ -25,6 +25,9 @@ export const termHubProbeSource = ({ kind, end = 'A' }) => `(async () => {
   const closes = () => (globalThis.__smokeCalls || []).filter(c => c[0] === 'term_view_close');
   const push = (evt, payload) => { for (const fn of lsn(evt).slice()) fn({ event: evt, payload }) };
   const frame = (viewId, word) => push(FRAME, { view_id: viewId, seq: 1, text: word + String.fromCharCode(13, 10) + '(' + viewId + ')', meta: { cursor_x: 2, cursor_y: 1, cols: 80, rows: 24 } });
+  // 事件中心本人：從 #app 的 Vue 實例讀 setup 回傳的 eventHub（list 是 core.hub、chat 是 createWindowHub 那座），訂閱者數直接從它的訂閱表數
+  const hubOf = () => { const a = document.querySelector('#app'); const v = a && a.__vue_app__; const c = v && v._container && v._container._vnode && v._container._vnode.component; return c && c.proxy && c.proxy.eventHub };
+  const subs = evt => { const h = hubOf(); if (!h || typeof h.subscriberCount !== 'function') '拿不到頁面的事件中心（hub=' + typeof h + '）'; return h.subscriberCount(evt) };
   const counts = () => ['term-view-frame', 'term-view-closed', 'term-view-input-error'].map(e => e + '=' + lsn(e).length).join('，');
   const openTerm = async () => {
     const entry = await wait(() => vis('.chatpane .actionbar button').find(b => (b.getAttribute('aria-label') || b.textContent || '').includes('終端')));
@@ -47,8 +50,8 @@ export const termHubProbeSource = ({ kind, end = 'A' }) => `(async () => {
     if (o[0] !== 'demo' || o[1] !== 'demo2') return bad('兩個畫面的夥伴名不對：' + JSON.stringify(o));
     // 兩個畫面都開著、兩個 view_id 不同；這時底層 listener 還是每種事件各 1 個
     if (lsn(FRAME).length !== 1) return bad('兩個 TermView 同時開著，term-view-frame 底層監聽數應該是 1，實際是 ' + lsn(FRAME).length + '（' + counts() + '）');
-    const subs = opens().length - closes().length;
-    if (subs !== 2) return bad('訂閱者應該是 2 個開著的畫面，實際 ' + subs);
+    const nSubs = subs(FRAME);   // 從事件中心的訂閱表實際數
+    if (nSubs !== 2) return bad('term-view-frame 的訂閱者應該是 2（兩個開著的畫面），事件中心實際數到 ' + nSubs + '；開著的畫面 ' + (opens().length - closes().length));
     // 順序：先 A 後 B，各自一幅；字不同
     frame(11, 'ALPHA-AAAA');
     frame(12, 'BRAVO-BBBB');
@@ -66,7 +69,7 @@ export const termHubProbeSource = ({ kind, end = 'A' }) => `(async () => {
     if (rowsOfScreen(sa).includes('STRAY') || rowsOfScreen(sb).includes('STRAY')) return bad('別人的 view_id 竟然畫進了畫面');
     if (lsn(FRAME).length !== 1) return bad('送完畫面後 term-view-frame 底層監聽數不是 1：' + lsn(FRAME).length);
     if (end === 'B') { tabs()[1].click(); await wait(() => vis('.term-view-screen').length === 1 && rowsOfScreen(sb).includes('BRAVO-BBBB')) }
-    return { ok: true, why: '[smoke] term-view-frame 底層監聽數 = ' + lsn(FRAME).length + '，訂閱者 = ' + subs + '（' + counts() + '）；A 只有 ALPHA、B 只有 BRAVO' };
+    return { ok: true, why: '[smoke] term-view-frame 底層監聽數 = ' + lsn(FRAME).length + '，訂閱者 = ' + nSubs + '（事件中心實數；' + counts() + '）；A 只有 ALPHA、B 只有 BRAVO' };
   }
 
   if (kind === 'chat') {
@@ -78,6 +81,7 @@ export const termHubProbeSource = ({ kind, end = 'A' }) => `(async () => {
     if (!(await openTerm())) return bad('chat 頁按鈕列沒有「終端」');
     if (!(await wait(() => opens().length >= 1 && screens().length >= 1))) return bad('chat 頁終端開不起來');
     if (lsn(FRAME).length !== 1) return bad('chat 頁 term-view-frame 底層監聽數應該是 1，實際是 ' + lsn(FRAME).length);
+    if (subs(FRAME) !== 1) return bad('chat 頁 term-view-frame 訂閱者應該是 1，事件中心實際數到 ' + subs(FRAME));
     frame(11, 'CHATWIN-OK');   // chat 頁的夥伴也叫 demo，假後台給的編號同 keep 情境的 A（11）
     const sc = screens()[0];
     if (!(await wait(() => rowsOfScreen(sc).includes('CHATWIN-OK')))) return bad('chat 頁畫面沒有畫出送來的字：' + JSON.stringify(rowsOfScreen(sc).slice(0, 60)));
@@ -85,7 +89,7 @@ export const termHubProbeSource = ({ kind, end = 'A' }) => `(async () => {
     const all = Object.entries(globalThis.__smokeListeners || {}).map(([k, v]) => [k, v.length]);
     const dup = all.filter(([, n]) => n > 1);
     if (dup.length) return bad('chat 頁有事件的底層 listener 超過 1 個：' + JSON.stringify(dup));
-    return { ok: true, why: '[smoke] chat 視窗 term-view-frame 底層監聽數 = ' + lsn(FRAME).length + '，訂閱者 = ' + (opens().length - closes().length) + '；全部事件各自 ≤1：' + all.map(([k, n]) => k + '=' + n).join('，') };
+    return { ok: true, why: '[smoke] chat 視窗 term-view-frame 底層監聽數 = ' + lsn(FRAME).length + '，訂閱者 = ' + subs(FRAME) + '（事件中心實數）；全部事件各自 ≤1：' + all.map(([k, n]) => k + '=' + n).join('，') };
   }
 
   // other：另一個視窗（list 頁）一樣開著終端，但這個視窗沒有收到任何 frame（真的 emit_to 不會送來）
@@ -100,7 +104,8 @@ export const termHubProbeSource = ({ kind, end = 'A' }) => `(async () => {
   if (got !== 0) return bad('這個視窗沒被送任何畫面，底層 listener 卻被呼叫了 ' + got + ' 次');
   if (rowsOfScreen(sc).trim()) return bad('這個視窗沒收到畫面，畫面卻不是空的：' + JSON.stringify(rowsOfScreen(sc).slice(0, 60)));
   if (hooked.length !== 1) return bad('list 頁 term-view-frame 底層監聽數應該是 1，實際是 ' + hooked.length);
-  return { ok: true, why: '[smoke] 另一個視窗 term-view-frame 底層監聽數 = ' + hooked.length + '，收到次數 = ' + got + '，畫面是空的（等價 emit_to 只送發起視窗）' };
+  if (subs(FRAME) !== 1) return bad('list 頁 term-view-frame 訂閱者應該是 1，事件中心實際數到 ' + subs(FRAME));
+  return { ok: true, why: '[smoke] 另一個視窗 term-view-frame 底層監聽數 = ' + hooked.length + '，訂閱者 = ' + subs(FRAME) + '（事件中心實數），收到次數 = ' + got + '，畫面是空的（等價 emit_to 只送發起視窗）' };
 })()`
 
 export default {
