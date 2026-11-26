@@ -53,6 +53,10 @@ jobs:
       - name: Edge Function 測試（deno）
         run: deno test -A _shared/
 
+      # deno test 只檢查測試檔引用到的模組，各支 Function 的進入點沒人驗過（#2197）；用萬用字元，新增的 Function 也會驗到
+      - name: Edge Function 型別檢查（deno check）
+        run: deno check */index.ts
+
   relay-machine:
     runs-on: ubuntu-24.04
     timeout-minutes: 15

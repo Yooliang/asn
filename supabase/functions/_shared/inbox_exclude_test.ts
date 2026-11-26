@@ -38,6 +38,14 @@ Deno.test("readNodeInbox：migration 還沒套（帶參數呼叫出錯）時退�
   assert(!("p_exclude_agents" in calls[1]));
 });
 
+Deno.test("readNodeInbox：rpc 回的是只有 then 的物件（db.rpc 就是這種）也能傳進來、拿得到結果（#2197）", async () => {
+  // 刻意不是 Promise：沒有 catch／finally。InboxRpc 若改回要 Promise，這一條型別檢查就不過
+  const rpc = (_fn: string, _args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> => ({
+    then: (ok, bad) => Promise.resolve({ data: [{ id: "1" }], error: null }).then(ok, bad),
+  });
+  assertEquals((await readNodeInbox(rpc, "H", "H-ASN")).data, [{ id: "1" }]);
+});
+
 Deno.test("relay/index.ts：沒帶 agent 的 inbox 走 readNodeInbox 並傳 exclude 參數；舊的直接呼叫已不存在", async () => {
   const src = await Deno.readTextFile(new URL("../relay/index.ts", import.meta.url));
   assert(src.includes('readNodeInbox((fn, args) => db.rpc(fn, args), me.id, url.searchParams.get("exclude"))'));

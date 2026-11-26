@@ -89,6 +89,7 @@ npx supabase db query --linked "select count(*) from relay.messages"
 - migration 只新增檔案，已套用的不改；每個 migration 盡量附回復做法（見 `supabase/sql/rollback/` 的寫法）。
 - `supabase/.temp/` 是 CLI 的本機暫存，已列入 `.gitignore`。
 - 後端單元測試：`cd supabase/functions && deno test -A _shared/`。
+- 型別檢查（CI 也跑）：`cd supabase/functions && deno check */index.ts`。
 - 冒煙測試：用假金鑰與不帶金鑰呼叫 `?action=whoami`，兩者都應回 401。
 - 不要在 SQL 查詢或 log 中輸出 `key_hash`、金鑰或訊息內文。
 
