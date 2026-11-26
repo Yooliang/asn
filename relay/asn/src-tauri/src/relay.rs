@@ -1328,7 +1328,7 @@ fn launch_pi_fields(o: &serde_json::Map<String, Value>) -> Result<Option<(&str, 
     const BAD: &str = "pi 的型號格式不對";
     let get = |k: &str| match o.get(k) {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(s)) if crate::agent_tools::models::valid_model_id(s) => Ok(Some(s.as_str())),
+        Some(Value::String(s)) if crate::model_id::valid_model_id(s) => Ok(Some(s.as_str())),
         Some(_) => Err(BAD.to_string()),
     };
     match (get("pi_provider")?, get("pi_model")?) {

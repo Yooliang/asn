@@ -20,7 +20,8 @@ mod redact;
 mod run;
 
 pub use redact::mask_reason;
-pub use parse::{parse_agy, parse_codex, parse_pi, valid_model_id, MAX_MODELS, MODEL_ID_PATTERN, REPORT_FLOOR_BYTES, REPORT_MAX_BYTES, REPORT_MAX_MODELS};
+pub use crate::model_id::{valid_model_id, MODEL_ID_PATTERN};
+pub use parse::{parse_agy, parse_codex, parse_pi, MAX_MODELS, REPORT_FLOOR_BYTES, REPORT_MAX_BYTES, REPORT_MAX_MODELS};
 pub use run::{run, run_blocking, RunFail, Spawn};
 
 use serde::Serialize;
