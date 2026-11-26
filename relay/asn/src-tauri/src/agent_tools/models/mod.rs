@@ -16,6 +16,7 @@
 //! `{vendor, status, code?, stale?, age_s?, models:[{id,name}]}`。status：ok／unavailable／error／pending；
 //! pending＝第一次還沒有結果（讀取中）；stale＝重查失敗、沿用上次的清單（status 仍是 ok，code 是這次失敗的原因，age_s＝這份清單距今幾秒）。
 mod parse;
+pub mod query;
 mod redact;
 mod run;
 
@@ -440,7 +441,9 @@ pub async fn probe_uncached(v: Vendor) -> VendorModels {
 }
 
 /// 探測一家；`force`＝略過快取（使用者按了「重新讀取」）。
-/// 與 `snapshot` 的背景重查共用「同一家同時只跑一個」的旗標：已經有人在查就等那一個，不再多開一個同家 CLI
+/// 與 `snapshot` 的背景重查共用「同一家同時只跑一個」的旗標：已經有人在查就等那一個，不再多開一個同家 CLI。
+/// `force` 撞上別人正在查時：等對方做完後**再搶一次旗標、自己真的重讀一次**（最多一次），
+/// 這樣 force 回的一定是「按下重新讀取之後才讀到的」，不會是按之前就開始的那次查詢的結果；非 force 照舊只等不重讀
 pub async fn probe(v: Vendor, force: bool) -> VendorModels {
     probe_in(global(), v, force, || probe_uncached(v)).await
 }
@@ -455,9 +458,20 @@ where
             return f;
         }
     }
+    let (max, step) = (PROBE_TIMEOUT + Duration::from_secs(3), Duration::from_millis(100));
     match c.claim(v) {
         Some(claim) => claim.finish(fetch().await),
-        None => c.wait_idle(v, PROBE_TIMEOUT + Duration::from_secs(3), Duration::from_millis(100)).await,
+        None => {
+            c.wait_idle(v, max, step).await;
+            if force {
+                // 對方是在我按下之前開始的，它的結果不算：旗標放開後再搶一次自己讀（fetch 只在這裡或上面用到一次）。
+                // 又被別人搶先就再等一次、不再補查，所以一次 force 最多多讀一次，且旗標仍保證同一家同時只跑一個
+                match c.claim(v) {
+                    Some(claim) => claim.finish(fetch().await),
+                    None => c.wait_idle(v, max, step).await,
+                }
+            }
+        }
     }
     // 回快取裡的那份：重查失敗時是「沿用上次的清單」，不是空的失敗結果
     c.current(v, Instant::now())
@@ -972,20 +986,37 @@ mod tests {
         let a = c.claim(Vendor::Codex).expect("第一個搶到");
         assert!(c.claim(Vendor::Codex).is_none(), "已經有人在查");
         assert!(c.begin(Vendor::Codex, Instant::now()).1.is_none(), "背景重查也排不進去");
-        // probe_in(force)：旗標被佔著時不執行 fetch，等對方做完後讀快取
-        let ran = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        // probe_in(force)：旗標被佔著時不能同時再開一個（fetch 要等對方放掉旗標之後才跑），
+        // 對方做完後自己補查一次，回的是補查的結果（不是對方按下之前開始的那份）
+        let a_done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (a_done2, a_done3) = (a_done.clone(), a_done.clone());
+        let ran = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let ran2 = ran.clone();
+        let h = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(150));
+            a_done2.store(true, std::sync::atomic::Ordering::SeqCst);
+            a.finish(VendorModels::from_list(Vendor::Codex, vec![entry("old", "Old")]));
+        });
+        let got = crate::rt::block_on(probe_in(c, Vendor::Codex, true, move || async move {
+            assert!(a_done3.load(std::sync::atomic::Ordering::SeqCst), "別人還在查時，force 不能再開一個同家 CLI");
+            ran2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            VendorModels::from_list(Vendor::Codex, vec![entry("new", "New")])
+        }));
+        h.join().unwrap();
+        assert_eq!(ran.load(std::sync::atomic::Ordering::SeqCst), 1, "force 等完後補查剛好一次");
+        assert_eq!((got.status, got.models[0].id.as_str()), (Status::Ok, "new"), "回的是按下之後才讀到的");
+        // 非 force 撞上別人在查：照舊只等、不補查
+        assert!(c.claim(Vendor::Codex).is_some(), "旗標放開");
+        let c = leak();
+        let a = c.claim(Vendor::Codex).unwrap();
         let h = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(150));
             a.finish(ok(Vendor::Codex));
         });
-        let got = crate::rt::block_on(probe_in(c, Vendor::Codex, true, move || async move {
-            ran2.store(true, std::sync::atomic::Ordering::SeqCst);
-            fail(Vendor::Codex, "不該被呼叫")
-        }));
+        let got = crate::rt::block_on(probe_in(c, Vendor::Codex, false, || async { fail(Vendor::Codex, "非 force 不該補查") }));
         h.join().unwrap();
-        assert!(!ran.load(std::sync::atomic::Ordering::SeqCst), "別人在查時，force 也不能再開一個同家 CLI");
-        assert_eq!(got.status, Status::Ok, "等到別人查完、讀到它的結果");
+        assert_eq!((got.status, got.models[0].id.as_str()), (Status::Ok, "m"), "非 force：等別人查完、讀它的結果，不自己補查");
+        let c = leak();
         // 沒人在查時 force 會自己查，且查完放掉旗標
         let got = crate::rt::block_on(probe_in(c, Vendor::Codex, true, || async { ok(Vendor::Codex) }));
         assert_eq!(got.status, Status::Ok);

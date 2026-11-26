@@ -115,7 +115,8 @@ export const transport = {
   claudeQuotaState: () => invoke('claude_quota_state'),             // 這台目前登入的 Claude 帳號的額度查詢狀態（#1883）：→ { email, status: ok|login_expired|rate_limited|unavailable|none, read_at, windows }
   siteReleases: force => invoke('site_releases', { force: force === true }),   // 版本紀錄（後台公開表 asn_site_releases）：→ [{ version, date, lines }]；讀不到丟「暫時讀不到版本紀錄」（#462）
   piModels: force => invoke('pi_models', { force: force === true }),               // 經 pi 開新夥伴（#351）：→ [{ provider, model, context, thinking, images }]，只含已設好憑證的提供者；沒有 pi 回 []
-  piProviders: force => invoke('pi_providers', { force: force === true }),         // → [{ provider, state: ready|not_ready|missing|unknown }]；不讀憑證
+  agentModels: ({ vendor, force } = {}) => invoke('agent_models', { vendor: vendor ?? null, force: force === true }),   // 本機各家 CLI 的型號清單（#2355）：→ { models: [{ vendor, status, code?, stale?, age_s?, models: [{ id, name }] }] }；不帶 vendor＝四家，不帶 force＝只讀快取
+  piProviders: force => invoke('pi_providers', { force: force === true }),       // → [{ provider, state: ready|not_ready|missing|unknown }]；不讀憑證
   piSetupStatus: () => invoke('pi_setup_status'),     // 讓自己開的 pi 連上 ASN（#240 方案 A）：→ { pi, ext, installed, stale }
   piSetupInstall: () => invoke('pi_setup_install'),   // 使用者同意後才呼叫：pi install 擴充 → 新狀態
   piSetupRemove: () => invoke('pi_setup_remove'),     // 移除我們裝的那一筆 → 新狀態
@@ -576,6 +577,11 @@ export const makeMobileLaunchApi = (call = invoke) => ({
   launch: body => call('android_launch', { body }),
 })
 export const mobileLaunchApi = makeMobileLaunchApi()
+// 手機沒有本機型號探測（電腦版才有 agent_models）：回 { models: null }，畫面端的 modelState 會得到 none（#2355）
+export const makeMobileModelsApi = () => ({
+  agentModels: async () => ({ models: null }),
+})
+export const mobileModelsApi = makeMobileModelsApi()
 // 官網的版本紀錄（關於頁）：→ [{ version, date, lines }]；讀不到丟「暫時讀不到版本紀錄」
 export const makeMobileSiteApi = (call = invoke) => ({
   releases: force => call('site_releases', { force: force === true }),
