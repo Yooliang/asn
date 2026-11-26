@@ -6,6 +6,7 @@
 //   - at、createdAt、claimedAt 要與 new Date().toISOString() 往返一致；attempts 0～MAX_ATTEMPTS；claimedBy 0～MAX_CLAIMED_BY。
 //   - createdAt 比現在晚超過 FUTURE_TIME_MS 整筆拒絕（寫入、讀取都擋）；claimedAt 同樣，但讀取端不拒絕整筆，由代貼命令當成認領逾時處理。
 //   - id ＝ 平台@版號#kind，同一筆重複寫入只留一筆；讀檔時同一個 id 只留第一筆。
+//   - 同 id 但 commit 不同：那一筆正被認領中（未逾 CLAIM_TIMEOUT_MS）就不取代、記 log；否則用新的取代，attempts 歸 0、lastError 清空、createdAt 改現在、claimedBy／claimedAt 清掉。commit 相同則不寫檔。
 //   - 讀寫都在獨立的 post-pending.json.lock 內進行（不用 state.json.lock）；寫入走 atomicWrite。
 //   - 鎖檔時間戳在未來超過 LOCK_FUTURE_MS、或內容讀不懂，視為壞鎖：改名留存並留 pending-bad 告警，再重新取鎖；改名後重讀隔離檔，與改名前讀到的不同就還原並放棄。
 //   - 整個檔讀不懂或超過 MAX_FILE_BYTES 時改名成 post-pending.json.bad-<時間>、留 pending-bad 告警，不覆寫。
@@ -14,6 +15,7 @@
 //   - 驗證失敗的 warn 只說哪個欄位不合格，不印內容。
 import path from 'node:path'
 import { atomicWrite, acquireLock, releaseLock, parseLock, makeAlerts } from './auto_publish.mjs'
+import { CLAIM_TIMEOUT_MS } from './post_pending_rules.mjs'
 
 export const PENDING_FILE = 'post-pending.json'
 export const pendingPathOf = (opts) => path.join(path.dirname(opts.state), PENDING_FILE)
@@ -208,6 +210,28 @@ export function acquirePendingLock(opts, deps) {
   return { lockPath, ...acquireLock(lockPath, deps) }
 }
 
+// 認領還有效：有認領者與認領時間、認領時間不比現在晚超過 FUTURE_TIME_MS、且未超過 CLAIM_TIMEOUT_MS
+const claimIsLive = (x, nowMs) => x.claimedBy !== null && x.claimedAt !== null && !isFuture(x.claimedAt, nowMs) && nowMs - Date.parse(x.claimedAt) < CLAIM_TIMEOUT_MS
+
+// 把新的一筆併進現有清單；沒有要改時回傳同一個陣列（呼叫端據此判斷不用寫檔）
+//   - id 沒有：加在最後
+//   - id 有、commit 相同：保留
+//   - id 有、commit 不同：認領中就不取代（記 log）；否則用新的一筆取代（attempts、lastError、createdAt、認領欄位都重置），取代後再驗一次
+function mergeItem(list, item, deps, warn) {
+  const old = list.find((x) => x.id === item.id)
+  if (!old) return [...list, item]
+  if (old.commit === item.commit) return list
+  const nowMs = deps.now()
+  if (claimIsLive(old, nowMs)) {
+    deps.log(`待貼佇列：${item.id} 正被認領中，commit 不同的新一筆先不取代`)
+    return list
+  }
+  const next = validateItem(item, warn, { nowMs })
+  if (!next) return list
+  deps.log(`待貼佇列：${item.id} 的 commit 不同，已用新的一筆取代`)
+  return list.map((x) => (x.id === item.id ? next : x))
+}
+
 // 寫入一筆待貼項目。任何失敗只記 log、回 { ok:false, why }，絕不丟例外（不能影響發版結果）
 export function enqueuePending(opts, deps, input) {
   const warn = (m) => { deps.log(m); console.warn(m) }
@@ -221,9 +245,8 @@ export function enqueuePending(opts, deps, input) {
       let cur = readPending(opts, deps, warn)
       if (!cur.ok) { quarantine(opts, deps); cur = { ok: true, items: [], rejected: [] } }
       else if (cur.rejected.length > 0) saveRejected(opts, deps, cur.rejected)
-      const exists = cur.items.some((x) => x.id === item.id)
-      if (exists && cur.rejected.length === 0) return { ok: true, count: cur.items.length }
-      const items = exists ? cur.items : [...cur.items, item]
+      const items = mergeItem(cur.items, item, deps, warn)
+      if (items === cur.items && cur.rejected.length === 0) return { ok: true, count: cur.items.length }
       const render = (list) => JSON.stringify({ v: 1, updatedAt: new Date(deps.now()).toISOString(), items: list }, null, 2)
       const text = render(items)
       if (items.length > MAX_ITEMS || Buffer.byteLength(text, 'utf8') > MAX_FILE_BYTES) {
