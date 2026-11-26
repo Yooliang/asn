@@ -1,6 +1,6 @@
 // 執行：SUPABASE_URL=http://x SUPABASE_SERVICE_ROLE_KEY=x deno test -A supabase/functions/
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { handleNodeLaunchAction, LAUNCH_NAME_RE, type LaunchDeps, listLaunchers, parseLaunch, requestLaunch, sanitizeLauncher, sanitizePiModels } from "./launch.ts";
+import { fail, handleNodeLaunchAction, LAUNCH_NAME_RE, launchErrorText, type LaunchDeps, listLaunchers, parseLaunch, requestLaunch, sanitizeLauncher, sanitizePiModels } from "./launch.ts";
 
 type Call = { fn: string; args: Record<string, unknown> };
 function fakeDeps(answer: (c: Call) => unknown = () => ({ id: "11111111-1111-1111-1111-111111111111", bell_topic: "bell-H" })) {
@@ -19,7 +19,7 @@ function fakeDeps(answer: (c: Call) => unknown = () => ({ id: "11111111-1111-111
   return { deps, calls, rings };
 }
 const OK = { node: "H", profile: "default", name: "H-英雄-2", cwd: "D:\\Github\\eiyuu-md" };
-const OUT = { ...OK, pi_provider: null, pi_model: null };   // 沒帶經 pi 的提供者與模型（D2）＝兩個都是 null
+const OUT = { ...OK, pi_provider: null, pi_model: null, model: null };   // 沒帶經 pi 的提供者與模型（D2）＝兩個都是 null
 
 Deno.test("視窗名：英數、連字號、中文；不能以連字號開頭、不能有空白引號分號、最多 40 字", () => {
   for (const ok of ["H-英雄-2", "a", "工頭", "X".repeat(40), "9-a"]) assert(LAUNCH_NAME_RE.test(ok), ok);
@@ -293,11 +293,58 @@ Deno.test("啟動設定摘要的 pi_models（#443／#444）：只留 provider／
 });
 
 Deno.test("parseLaunch：經 pi 的提供者與模型（D2）選填、要一起給、格式照 piModelWire；舊版不帶就是 null", () => {
-  assertEquals(parseLaunch({ ...OK, profile: "pi", pi_provider: "minimax", pi_model: "MiniMax-M3.1-Flash" }), { ...OK, profile: "pi", first_message: null, pi_provider: "minimax", pi_model: "MiniMax-M3.1-Flash" });
+  assertEquals(parseLaunch({ ...OK, profile: "pi", pi_provider: "minimax", pi_model: "MiniMax-M3.1-Flash" }), { ...OK, profile: "pi", first_message: null, pi_provider: "minimax", pi_model: "MiniMax-M3.1-Flash", model: null });
   assertEquals(parseLaunch({ ...OK }), { ...OUT, first_message: null }, "舊版手機不帶：兩個都是 null");
-  for (const bad of [{ pi_provider: "minimax" }, { pi_model: "x" }, { pi_provider: "-x", pi_model: "y" }, { pi_provider: "a b", pi_model: "y" }, { pi_provider: "a", pi_model: "y:z" }, { pi_provider: "a", pi_model: "x".repeat(51) }, { pi_provider: 3, pi_model: "y" }]) {
+  for (const bad of [{ pi_provider: "minimax" }, { pi_model: "x" }, { pi_provider: "-x", pi_model: "y" }, { pi_provider: "a b", pi_model: "y" }, { pi_provider: "a", pi_model: "a//b" }, { pi_provider: "a", pi_model: "x".repeat(101) }, { pi_provider: 3, pi_model: "y" }]) {
     assertEquals(parseLaunch({ ...OK, ...bad }), { error: "bad_pi_model" }, JSON.stringify(bad));
   }
+});
+
+Deno.test("parseLaunch：pi 欄位改用統一型號規則，帶 / : 的代號與 51～100 字都收", () => {
+  for (const [pp, pm] of [["openrouter", "meta/llama-3"], ["a", "y:z"], ["a", "x".repeat(51)], ["a", "x".repeat(100)]]) {
+    const r = parseLaunch({ ...OK, pi_provider: pp, pi_model: pm });
+    assertEquals(r, { ...OUT, first_message: null, pi_provider: pp, pi_model: pm });
+  }
+});
+
+Deno.test("parseLaunch：model 走統一規則；格式不對、與 pi 欄位並存都回 bad_model", () => {
+  assertEquals(parseLaunch({ ...OK, model: "opus[1m]" }), { ...OUT, first_message: null, model: "opus[1m]" });
+  for (const bad of ["", "-x", "a b", "a//b", "a/..", "x".repeat(101), 3, {}, "--model=x"]) {
+    assertEquals(parseLaunch({ ...OK, model: bad }), { error: "bad_model" }, JSON.stringify(bad));
+  }
+  assertEquals(parseLaunch({ ...OK, model: "opus", pi_provider: "a", pi_model: "b" }), { error: "bad_model" });
+  assertEquals(parseLaunch({ ...OK, model: "opus", pi_provider: "a" }), { error: "bad_model" });
+  assertEquals(launchErrorText("bad_model"), "型號格式不對（或不能和 pi 的提供者、模型一起指定）");
+  assertEquals(launchErrorText("model_unsupported"), "那台電腦的 ASN 版本還不支援指定型號，請先更新");
+  assertEquals(fail("bad_model").status, 400);
+  assertEquals(fail("model_unsupported").status, 400);
+});
+
+Deno.test("requestLaunch：帶 model 呼叫 10 參數版（pi 兩欄明確帶 null）；SQL 回 model_unsupported 轉成中文錯誤", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const deps = { rpc: (fn: string, a: Record<string, unknown>) => { calls.push([fn, a]); return Promise.resolve({ data: { id: "i", bell_topic: "t" }, error: null }); }, ring: () => Promise.resolve() } as unknown as LaunchDeps;
+  await requestLaunch(deps, "P", { ...OK, model: "opus" }, "u1");
+  assertEquals(calls[0][1].p_model, "opus");
+  assertEquals(calls[0][1].p_pi_provider, null);
+  assertEquals(calls[0][1].p_pi_model, null);
+  assertEquals(calls[0][1].p_signed_user, "u1");
+  await requestLaunch(deps, "P", { ...OK, profile: "pi", pi_provider: "a", pi_model: "b" });
+  assertEquals("p_model" in calls[1][1], false, "只帶 pi：仍是 9 參數版");
+  const bad = { rpc: () => Promise.resolve({ data: { error: "model_unsupported" }, error: null }), ring: () => Promise.resolve() } as unknown as LaunchDeps;
+  const r = await requestLaunch(bad, "P", { ...OK, model: "opus" });
+  assertEquals(r.body.error, "model_unsupported");
+  assertEquals(r.body.detail, "那台電腦的 ASN 版本還不支援指定型號，請先更新");
+});
+
+Deno.test("launch_result：model_used 合格才轉送（5 參數版），不合格或沒帶照舊 4 參數", async () => {
+  const { deps, calls } = fakeDeps(() => ({ ok: true }));
+  const id = "22222222-2222-2222-2222-222222222222";
+  await handleNodeLaunchAction(deps, { id: "H" }, "launch_result", { id, status: "ok", detail: "d", model_used: "opus[1m]" });
+  await handleNodeLaunchAction(deps, { id: "H" }, "launch_result", { id, status: "ok", detail: "d", model_used: "a b" });
+  await handleNodeLaunchAction(deps, { id: "H" }, "launch_result", { id, status: "ok", detail: "d", model_used: 5 });
+  await handleNodeLaunchAction(deps, { id: "H" }, "launch_result", { id, status: "ok", detail: "d" });
+  assertEquals(calls[0].args, { p_node: "H", p_id: id, p_status: "ok", p_detail: "d", p_model_used: "opus[1m]" });
+  for (const c of calls.slice(1)) assertEquals(c.args, { p_node: "H", p_id: id, p_status: "ok", p_detail: "d" });
 });
 
 Deno.test("requestLaunch：帶了經 pi 才呼叫 9 參數的新版本；沒帶照舊呼叫原本的（參數一個都不多）", async () => {

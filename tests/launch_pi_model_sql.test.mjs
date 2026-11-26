@@ -1,4 +1,6 @@
 // 0.2 D2（#422）migration（20261028160000_launch_pi_model.sql）：開窗表多存經 pi 的提供者與模型。
+// 注意：這支只套 20261028160000 當時的窄規則；#2353 第③階段（20261126110000_launch_model.sql）把 pi 欄位改成統一型號規則，
+// 新行為（帶 / 與 : 會過、並存、約束）由 tests/launch_model_sql.test.mjs 守門。
 // 實跑：有安裝 @electric-sql/pglite 時（不是專案相依，自己 `npm i --no-save @electric-sql/pglite`）。沒裝就略過。
 import { track, closeAtEnd, fastPGlite } from './_pglite_close.mjs'
 import test from 'node:test'

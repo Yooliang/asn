@@ -20,6 +20,8 @@ const ALLOW = [
   '20261123120000_online_window.sql',
   // #1908：asn_relay_partner_op 整支照上一版重寫、只改忙碌規則；本體裡改名撞名的 done_at（剛改好名的窗，不是在線門檻）沿用上一版的 3 分鐘，一字不改。在線門檻都已用 relay.online_window()
   '20261125410000_partner_op_close_during_handover.sql',
+  // #2353 第③階段：asn_relay_launch 10 參數版整支照上一版重寫、只加型號檢查；撞名檢查裡的 done_at（剛開好的窗，不是在線門檻）沿用上一版的 3 分鐘，一字不改。在線門檻已用 relay.online_window()
+  '20261126110000_launch_model.sql',
 ]
 
 /** 剝掉 SQL 註解（`--` 到行尾、區塊註解），但保留單引號字串內的內容（字串裡的 -- 不是註解）。 */
