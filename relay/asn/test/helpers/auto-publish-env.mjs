@@ -52,7 +52,8 @@ export function env({ desktopRows = [], linuxRows = [], files = {}, alive = [], 
 }
 
 // headSha 預設由 run 編號補成 40 位 hex，每個 run 的 commit 都不同
-export const sha = (id) => String(id).padStart(40, '0')
+export const sha = (id) => Number(id).toString(16).padStart(8, '0') + 'a'.repeat(32)
+export const short = (id) => sha(id).slice(0, 8)
 export const row = (branch, id = 100, over = {}) => ({ databaseId: id, headBranch: branch, headSha: sha(id), status: 'completed', conclusion: 'success', createdAt: '2026-11-21T09:00:00Z', attempt: 1, ...over })
 export const opts = { state: STATE, room: 'r1', dryRunOnly: false }
 export const lastState = (fsMap) => JSON.parse(fsMap.get(STATE))

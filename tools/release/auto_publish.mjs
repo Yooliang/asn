@@ -14,6 +14,9 @@ import { decide, applyResult, seed, acknowledge, compareVersions, validateState,
 import { makeAsnCli, asnCliFail, parsePostFailedMarker } from './asn_cli.mjs'
 import { enqueuePending } from './post_pending.mjs'
 
+// 決定階段的回報裡，貼群組失敗時要另寫進待貼佇列的類別（其餘回報沒有版號與 commit）
+const PENDING_REPORT_KINDS = ['ci-failed', 'blocked']
+
 // repo 根目錄取自這支腳本自己的位置，不用 git rev-parse：後者要靠 cwd 才知道在哪個 repo，而 cwd 正是會漂移的東西；
 // 腳本在哪個 worktree 裡，根目錄就是那個 worktree（checkWorktree 再確認它不是主 checkout）。
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
@@ -260,13 +263,15 @@ export function makeAlerts(opts, deps) {
 // 失敗時寫告警檔 post-failed（getRef 給目前處理的版本；noAlert 給沒持鎖的分支，免得和持鎖者搶寫告警檔）
 function makePost(opts, deps, alerts, getRef = () => null) {
   return (text, { noAlert = false } = {}) => {
-    if (!opts.room) { deps.log(`（沒有 --room，未貼群組）${text}`); return }
+    if (!opts.room) { deps.log(`（沒有 --room，未貼群組）${text}`); return true }
     let r
     try { r = deps.asnCli(['send', '--room', opts.room, '--body', text]) } catch (e) { r = { status: 1, stderr: e.message } }
     if (r.status !== 0) {
       deps.log(`貼群組失敗：${asnCliFail(r)}`)
       if (!noAlert) alerts.raiseAppend('post-failed', 'post-failed', `通知群組失敗，這則訊息沒人看到，請人工確認並通知：${text}`, getRef())
+      return false
     } else if (!noAlert) alerts.resolve('post-failed')
+    return true
   }
 }
 
@@ -416,7 +421,13 @@ export async function runOnce(opts, deps) {
       save(d.state)
       // 這一類回報在決定階段就貼，下面 ref 還沒指派；不先帶上的話貼群組失敗的告警 ref 會是 null（#2287）
       if (d.key) ref = d.key
-      post(d.message)
+      const posted = post(d.message)
+      // ci-failed、blocked 的回報沒貼成：另寫進待貼佇列（只放固定欄位；版號取自 key、commit 取自 gh 的 run 列表）。其他回報沒有版號和 commit，不寫
+      if (posted === false && PENDING_REPORT_KINDS.includes(d.result) && d.key) {
+        const runId = d.state?.done?.[d.key]?.runId
+        const run = runs.find((x) => x.runId === String(runId))
+        enqueuePending(opts, deps, { kind: d.result, platform: String(d.key).split('@')[0], version: String(d.key).split('@')[1], commit: run?.commit })
+      }
       return { outcome: 'report' }
     }
     if (d.action === 'publish' && opts.dryRunOnly) { log(`--dry-run-only：${d.key} 待正式發佈，不執行`); return { outcome: 'dry-run-only' } }
