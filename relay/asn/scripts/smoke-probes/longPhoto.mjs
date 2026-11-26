@@ -70,11 +70,59 @@ export const longPhotoProbeSource = () => `(async () => {
   } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) } }
 })()`
 
+// 後備輪次（#2331）：模擬低階手機記憶體不夠——畫布總像素超過門檻就配不出來（getContext 回 null、toBlob 回 null，跟真實瀏覽器配不到記憶體時一樣）。
+// 1162×3604 的長圖：第 1 輪（新規則 1162×3604 ≈ 4.19 MP）與第 2 輪（1000×3102 ≈ 3.10 MP）都超過門檻 2 MP 而失敗，
+// 第 3 輪（舊規則長邊 2048 → 660×2048 ≈ 1.35 MP）成功。斷言：寄得出去、落在「長邊 2048 的舊規則那一級」（寬高 = fitSize(1162,3604,2048)）、
+// 新規則那兩輪確實被試過也確實失敗（攔截器計數 ≥ 2，且看到過 1162×3604 這個尺寸），避免假綠。攔截在 finally 還原，並驗證還原後與原函式相同。
+export const FALLBACK_PIXEL_LIMIT = 2_000_000
+
+export const longPhotoFallbackSource = () => `(async () => {
+  const LIMIT = ${FALLBACK_PIXEL_LIMIT};
+  const proto = HTMLCanvasElement.prototype;
+  const origGetContext = proto.getContext, origToBlob = proto.toBlob;
+  const failedSizes = [];
+  try {
+  const { imageFromBlob } = await import('/lib/photo-canvas.mjs');
+  const { fitSize } = await import('/lib/photo.mjs');
+  // 先在攔截前造好 1162×3604 的長圖
+  const src = document.createElement('canvas'); src.width = 1162; src.height = 3604;
+  const g0 = src.getContext('2d'); g0.fillStyle = '#fff'; g0.fillRect(0, 0, 1162, 3604);
+  g0.fillStyle = '#222'; g0.font = '14px sans-serif';
+  for (let y = 20; y < 3604; y += 18) g0.fillText('Order ' + y + '  訂單編號 ' + (y * 7919 % 9973) + '  備註 設計稿', 20, y);
+  const blob = await new Promise(res => src.toBlob(b => res(b), 'image/png'));
+  // 攔截：超過門檻的畫布一律配不出來
+  const tooBig = cv => cv.width * cv.height > LIMIT;
+  proto.getContext = function (...a) {
+    if (tooBig(this)) { failedSizes.push(this.width + '×' + this.height); return null }
+    return origGetContext.apply(this, a);
+  };
+  proto.toBlob = function (cb, ...a) {
+    if (tooBig(this)) { failedSizes.push(this.width + '×' + this.height); setTimeout(() => cb(null), 0); return }
+    return origToBlob.call(this, cb, ...a);
+  };
+  let n;
+  try { n = await imageFromBlob(blob, 'long.png') } catch (e) { return { ok: false, why: '8 MP 配不出來時沒有退到後備輪次，寄出失敗：' + (e && e.message || e) + '（失敗尺寸 ' + failedSizes.join('、') + '）' } }
+  const old = fitSize(1162, 3604, 2048);
+  const tier = [2048, 1600, 1200].find(L => { const f = fitSize(1162, 3604, L); return f.w === n.width && f.h === n.height }) || '?';
+  const note = '落在長邊 ' + tier + ' 那一級，輸出 ' + n.width + '×' + n.height + '，失敗 ' + failedSizes.length + ' 次（' + failedSizes.join('、') + '）';
+  if (!failedSizes.length || failedSizes.length < 2) return { ok: false, why: '新規則的輪次沒有被試到或沒有失敗（失敗 ' + failedSizes.length + ' 次），這支探測量不到後備：' + note };
+  if (!failedSizes.includes('1162×3604')) return { ok: false, why: '第 1 輪（新規則 1162×3604）沒有被試過：' + note };
+  if (n.width !== old.w || n.height !== old.h) return { ok: false, why: '應落在長邊 2048 那一級（舊規則 ' + old.w + '×' + old.h + '），實際 ' + note };
+  if (!(n.data && n.data.length > 0)) return { ok: false, why: '輸出沒有圖資料：' + note };
+  return { ok: true, why: note };
+  } catch (e) { return { ok: false, why: '檢查出錯：' + (e && e.message || e) }
+  } finally {
+    proto.getContext = origGetContext; proto.toBlob = origToBlob;
+    if (proto.getContext !== origGetContext || proto.toBlob !== origToBlob) console.error('攔截沒有還原');
+  }
+})()`
+
 export default {
   key: 'longPhoto',
-  kind: '長圖寄出檢查',
-  source: () => longPhotoProbeSource(),
+  kind: p => (p.fallback ? '長圖寄出後備輪次檢查' : '長圖寄出檢查'),
+  source: p => (p.fallback ? longPhotoFallbackSource() : longPhotoProbeSource()),
   scenarios: [
     { name: 'list-long-photo', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline' }, ready: '#app.win .actionbar', probe: { longPhoto: true } },
+    { name: 'list-long-photo-fallback', page: 'list.html', width: 900, height: 640, state: { signedIn: true, bar: 'offline' }, ready: '#app.win .actionbar', probe: { longPhoto: true, fallback: true } },
   ],
 }

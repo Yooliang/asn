@@ -32,17 +32,22 @@ export async function imageFromBlob(blob, name = 'photo') {
   try { bmp = await createImageBitmap(blob) } catch { throw new Error('讀不了這個圖片檔，請換一張。') }
   try {
     // 先照新規則（長邊 2048、短邊保底 1280，長圖不縮糊）；壓不進 5 MB 就逐步降品質，再不行就逐輪縮小，最後退回只看長邊的舊規則
+    // 低階手機配不出大畫布（getContext／drawImage 丟例外、toBlob 回 null）時，這一輪放棄、退到下一輪較小的尺寸（#2331）
+    let allocFailed = false
     for (const round of PHOTO_ROUNDS) {
       const { w, h } = fitPhoto(bmp.width, bmp.height, round)
-      const cv = drawTo(bmp, w, h)
+      let cv
+      try { cv = drawTo(bmp, w, h) } catch (e) { allocFailed = true; console.warn('[photo] 畫布配不出來，改試下一輪', w, h, e); continue }
       for (const q of [0.88, 0.78, 0.68, 0.55, 0.42]) {
         const out = await blobOf(cv, q)
-        if (!out || out.type !== 'image/webp') throw new Error('這個環境不能轉成 webp，無法傳照片。')
+        if (!out) { allocFailed = true; console.warn('[photo] toBlob 回 null，改試下一輪', w, h); break }
+        if (out.type !== 'image/webp') throw new Error('這個環境不能轉成 webp，無法傳照片。')
         if (out.size <= PHOTO_MAX_BYTES) {
           return { kind: 'image', name: webpName(name), data: await toBase64(out), width: w, height: h, thumb: await makeThumb(bmp) }
         }
       }
     }
+    if (allocFailed) throw new Error('這支手機記憶體不足，處理不了這張照片，請換一張或先縮小。')
     throw new Error('照片壓縮後還是超過 5 MB，請換一張或先縮小。')
   } finally { bmp.close?.() }
 }
