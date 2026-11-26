@@ -557,6 +557,8 @@ fn 孤兒清理_上一個橋被硬砍後留下的_worker_被收掉_別的程序�
 
 /// 假的本機設定與假視窗程式：start 之後過 appear_after 毫秒，在 sessions 資料夾寫出新視窗的 session 檔
 struct FakeEnv {
+    /// 摘要的 `models`（#2353）；Null＝不回報
+    models: Value,
     sessions: PathBuf,
     allow: Vec<PathBuf>,
     max_per_hour: u32,
@@ -596,6 +598,7 @@ struct FakeEnv {
 impl FakeEnv {
     fn new(sessions: &Path, allow: &Path) -> Arc<FakeEnv> {
         Arc::new(FakeEnv {
+            models: Value::Null,
             sessions: sessions.to_path_buf(),
             allow: vec![canonical_launch_cwd(&allow.to_string_lossy()).unwrap()],
             max_per_hour: 6,
@@ -629,6 +632,9 @@ impl FakeEnv {
     }
 }
 impl LaunchEnv for FakeEnv {
+    fn models(&self) -> Value {
+        self.models.clone()
+    }
     fn screen_code(&self, name: &str) -> Option<&'static str> {
         self.screens.lock().unwrap().iter().find(|(n, _)| n == name).map(|(_, c)| *c)
     }
@@ -748,6 +754,28 @@ async fn wait_until(f: impl Fn() -> bool) {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     assert!(f(), "條件在 10 秒內沒達成");
+}
+
+#[tokio::test]
+async fn 名單的_launcher_帶_models_與共用_wire_樣本逐字相同_沒回報就沒有這個鍵_沒設定仍是_null() {
+    const WIRE: &str = include_str!("../../../../../shared/test-vectors/launcher-models-wire.json");
+    let sample = serde_json::from_str::<Value>(WIRE).unwrap()["models"].clone();
+    // 環境回報了：名單 body 的 launcher.models 與樣本逐字相同；其餘欄位照舊
+    let mut l = lharness(|s, p| FakeEnv::with(s, p, |e| e.models = sample.clone()), (30_000, 60_000, 20)).await;
+    l.h.core.refresh_roster(T0).await;
+    let launcher = l.h.fr.rosters().last().unwrap()["launcher"].clone();
+    assert_eq!(launcher["models"], sample);
+    assert!(launcher["profiles"].is_array() && launcher["cwd_allow"].is_array() && launcher["max_per_hour"] == 6);
+    assert!(!launcher.to_string().contains("\"reason\""), "上傳的摘要沒有 reason");
+    // 環境不回報（舊行為）：launcher 沒有 models 這個鍵
+    let mut l2 = lharness(|s, p| FakeEnv::new(s, p), (30_000, 60_000, 20)).await;
+    l2.h.core.refresh_roster(T0).await;
+    assert!(l2.h.fr.rosters().last().unwrap()["launcher"].get("models").is_none());
+    // 沒有可用設定：launcher 仍是 null，不帶 models
+    let mut l3 = lharness(|s, p| FakeEnv::with(s, p, |e| e.models = sample.clone()), (30_000, 60_000, 20)).await;
+    *l3.env.config_err.lock().unwrap() = Some(launcher::NO_CONFIG.into());
+    l3.h.core.refresh_roster(T0).await;
+    assert_eq!(l3.h.fr.rosters().last().unwrap()["launcher"], Value::Null);
 }
 
 // ---- asn終端（#931）：gemini-term／grok-term ----

@@ -74,6 +74,11 @@ pub trait LaunchEnv: Send + Sync {
     fn enqueue_background(&self, _config: &LaunchConfig, _profile: &str, _name: &str, _cwd: &str, _work_dir: &Path) -> Result<(), String> {
         Err("這台電腦不能開背景夥伴".into())
     }
+    /// 各家 CLI 的型號清單（#2353 摘要的 `models`）：JSON 陣列，已套回報上限、不含原因原文；不等探測。
+    /// 預設 Null＝不回報（測試用的環境不能去跑真的 CLI）
+    fn models(&self) -> Value {
+        Value::Null
+    }
     /// 使用者有沒有打開「允許我的其他設備替這台開新視窗」（asn終端每次執行前都重查，不信任先前的摘要）。預設沒有
     fn remote_consent(&self) -> bool {
         false
@@ -272,6 +277,9 @@ impl LaunchEnv for SystemEnv {
         }
         queue_background(&pq::SystemQueueEnv { data_dir: Some(self.data_dir.clone()) }, profile, name, cwd, work_dir)
     }
+    fn models(&self) -> Value {
+        crate::agent_tools::models::report_value()
+    }
     fn remote_consent(&self) -> bool {
         super::read_settings(&self.data_dir).allow_remote_launch
     }
@@ -356,6 +364,11 @@ impl Launcher {
                     if !models.is_empty() {
                         s["pi_models"] = Value::Array(models);
                     }
+                }
+                // 各家型號清單（#2353）：環境回陣列才帶（舊版後台會丟掉這個欄位）。與 pi_models 並行一版
+                let models = self.env.models();
+                if models.is_array() {
+                    s["models"] = models;
                 }
                 // asn終端：三個條件都成立才帶；每次回報都重算（服務關掉、同意撤銷、CLI 不見，下一次摘要就沒有）
                 for (id, label, tool, _) in TERM_PROFILES {

@@ -242,6 +242,36 @@ test('實跑：pi_models 的 a//b、a/.. 現在被丟掉', { skip }, async () =>
   assert.deepEqual((await get()).pi_models, [{ provider: 'openrouter', model: 'meta/llama-3' }])
 })
 
+const WIRE = JSON.parse(fs.readFileSync(new URL('../relay/shared/test-vectors/launcher-models-wire.json', import.meta.url), 'utf8'))
+
+test('實跑：Rust 的 wire 樣本經 relay.sanitize_launcher_models 與 asn_relay_set_launcher 後深度相等（SQL 一筆都不丟）', { skip }, async () => {
+  assert.equal(WIRE.models.length, 4)
+  const { db, set, get } = await setup()
+  const r = await db.query('select relay.sanitize_launcher_models($1::jsonb) r', [JSON.stringify(WIRE.models)])
+  assert.deepEqual(r.rows[0].r, WIRE.models)
+  assert.deepEqual(await set({ ...base, models: WIRE.models }), { ok: true })
+  assert.deepEqual((await get()).models, WIRE.models)
+})
+
+const WIRE_MAX = JSON.parse(fs.readFileSync(new URL('../relay/shared/test-vectors/launcher-models-wire-max.json', import.meta.url), 'utf8'))
+
+test('實跑：Rust 的最大量 wire 樣本經 relay.sanitize_launcher_models 與 asn_relay_set_launcher 後深度相等（一筆不丟、沒超過 24000／32000）', { skip }, async () => {
+  const wire = WIRE_MAX.models
+  assert.equal(wire.length, 8)
+  const total = wire.reduce((n, e) => n + e.models.length, 0)
+  assert.ok(total > 100)
+  const compact = Buffer.byteLength(JSON.stringify(wire))
+  assert.ok(compact <= 24000 && compact > 23000, `緊湊 JSON ${compact} 位元組`)
+  const { db, set, get } = await setup()
+  const r = await db.query('select relay.sanitize_launcher_models($1::jsonb) r, octet_length(relay.sanitize_launcher_models($1::jsonb)::text) n', [JSON.stringify(wire)])
+  assert.deepEqual(r.rows[0].r, wire, 'SQL 整理後原樣不變')
+  assert.ok(r.rows[0].n <= 32000, `jsonb::text ${r.rows[0].n} 位元組超過 32000`)
+  assert.deepEqual(await set({ ...base, models: wire }), { ok: true })
+  const got = (await get()).models
+  assert.deepEqual(got, wire, '整份 launcher 存進去再讀出來，models 沒被丟')
+  assert.equal(got.reduce((n, e) => n + e.models.length, 0), total)
+})
+
 test('實跑：套用 down 之後行為回到 20261028140000，新函式消失', { skip }, async () => {
   const { db, set, get } = await setup()
   await db.exec(down)

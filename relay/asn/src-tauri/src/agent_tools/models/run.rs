@@ -20,7 +20,7 @@ pub struct Spawn {
     pub merge_stderr: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum RunFail {
     /// 起不來（找不到、沒權限…）
     Spawn(String),
@@ -30,6 +30,19 @@ pub enum RunFail {
     Exit(Option<i32>),
     /// 讀輸出讀到一半出了 IO 錯誤（不能當成讀完）
     Io(String),
+}
+
+/// 手寫：`{:?}` 不印系統回的錯誤原文（常帶路徑），只說有幾個字
+impl std::fmt::Debug for RunFail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RunFail::Spawn(e) => write!(f, "Spawn(<已遮蔽 {} 字>)", e.chars().count()),
+            RunFail::Timeout => f.write_str("Timeout"),
+            RunFail::TooLarge => f.write_str("TooLarge"),
+            RunFail::Exit(c) => write!(f, "Exit({c:?})"),
+            RunFail::Io(e) => write!(f, "Io(<已遮蔽 {} 字>)", e.chars().count()),
+        }
+    }
 }
 
 impl RunFail {
