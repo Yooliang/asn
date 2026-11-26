@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail, parsePostFailedMarker } from './asn_cli.mjs'
+import { enqueuePending } from './post_pending.mjs'
 
 // repo 根目錄取自這支腳本自己的位置，不用 git rev-parse：後者要靠 cwd 才知道在哪個 repo，而 cwd 正是會漂移的東西；
 // 腳本在哪個 worktree 裡，根目錄就是那個 worktree（checkWorktree 再確認它不是主 checkout）。
@@ -69,7 +70,7 @@ export function toRuns(platform, re, rows) {
     const id = String(r.databaseId)
     const cur = byId.get(id)
     if (cur && (cur.attempt ?? 1) > (r.attempt ?? 1)) continue
-    byId.set(id, { platform, version: m[1], tag: r.headBranch, runId: id, status: r.status, conclusion: r.conclusion || null, createdAt: r.createdAt, attempt: r.attempt ?? 1 })
+    byId.set(id, { platform, version: m[1], tag: r.headBranch, runId: id, status: r.status, conclusion: r.conclusion || null, createdAt: r.createdAt, attempt: r.attempt ?? 1, commit: r.headSha ?? null })
   }
   return [...byId.values()]
 }
@@ -396,7 +397,7 @@ export async function runOnce(opts, deps) {
     }
     let runs = []
     for (const w of WORKFLOWS) {
-      const r = gh(['run', 'list', '--workflow', w.file, '-L', '20', '--json', 'databaseId,headBranch,status,conclusion,createdAt,attempt'])
+      const r = gh(['run', 'list', '--workflow', w.file, '-L', '20', '--json', 'databaseId,headBranch,headSha,status,conclusion,createdAt,attempt'])
       if (r.status !== 0) { log(`gh run list ${w.file} 失敗，這一輪略過：${String(r.stderr).trim().slice(0, 200)}`); return ghFailed() }
       let rows
       try { rows = JSON.parse(r.stdout) } catch { log(`gh run list ${w.file} 輸出不是 JSON，這一輪略過`); return ghFailed() }
@@ -459,7 +460,13 @@ export async function runOnce(opts, deps) {
     // 同一版電腦版與 Linux 都沒貼成時用累加寫入，兩個平台的原文都保留
     if (r.status === 0 && d.action === 'publish') {
       const pf = parsePostFailedMarker(r.stdout)
-      if (pf) alerts.raiseAppend('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
+      if (pf) {
+        alerts.raiseAppend('post-failed', 'post-failed', `${d.key} 已發佈成功，但發版完成的通知沒貼到群組，請人工補貼這則原文：${pf.text}`, ref)
+        // 同一筆另寫進待貼佇列（只放固定欄位）：版號取自決定階段的 key、commit 取自 gh 的 run 列表，都不從子程序輸出解析。
+        // 寫失敗只記 log（enqueuePending 不丟例外），不影響發版結果
+        const run = runs.find((x) => x.runId === String(d.runId))
+        enqueuePending(opts, deps, { kind: 'published', platform: d.platform, version: String(d.key).slice(String(d.key).indexOf('@') + 1), commit: run?.commit })
+      }
     }
     return out
   } finally {
