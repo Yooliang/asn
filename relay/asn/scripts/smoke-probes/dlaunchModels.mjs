@@ -33,8 +33,8 @@ export const DLM_READY_AFTER = reply(ok('gemini', agyModels))
 
 const TOOL = (id, found) => ({ id, label: id, binary_found: found, install_available: false, login_available: found, install_blurb: '', login_blurb: '', version: '' })
 
-export const dlmProbeSource = ({ kase, card = '', expect = {} }) => `(async () => {
-  const want = ${JSON.stringify({ kase, card, expect })};
+export const dlmProbeSource = ({ kase, card = '', expect = {}, closed = false }) => `(async () => {
+  const want = ${JSON.stringify({ kase, card, expect, closed })};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
   const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
@@ -69,14 +69,19 @@ export const dlmProbeSource = ({ kase, card = '', expect = {} }) => `(async () =
     const E = want.expect;
     const settle = async () => { await sleep(500) };
     // 截圖用：原生下拉在無頭瀏覽器拍不到展開的選項，把它撐成清單（size）才看得到內容；只改這張圖，不影響檢查
-    const expand = () => { const s = pick(); if (s && s.options.length > 1) s.size = Math.min(s.options.length, 9) };
+    // 收合版（want.closed）不撐開，拍實際畫面的下拉
+    const expand = () => {
+      const s = pick();
+      if (!want.closed && s && s.options.length > 1) s.size = Math.min(s.options.length, 9);
+      if (want.closed && (!s || s.size > 1 || s.multiple)) throw new Error('收合版的型號應該是下拉，不是展開的清單');
+    };
     switch (want.kase) {
       case 'claude': {
         await settle();
         const o = opts();
-        if (o.length !== 4 || o[0] !== '不指定（照預設）') return fail('Claude 型號下拉應為不指定＋三個別名：' + o.join('、'));
-        if (!o.slice(1).every(x => x.endsWith('別名（最新版）'))) return fail('別名沒有標「別名（最新版）」：' + o.join('、'));
-        if (!/fable/i.test(o[1]) || !/opus/i.test(o[2]) || !/sonnet/i.test(o[3])) return fail('別名順序不對：' + o.join('、'));
+        if (o.length !== 5 || o[0] !== '不指定（照預設）') return fail('Claude 型號下拉應為不指定＋四個別名：' + o.join('、'));
+        if (!o.slice(1).every(x => x.endsWith('別名（最新版）'))) return fail('四個別名都要標「別名（最新版）」：' + o.join('、'));
+        if (!/fable/i.test(o[1]) || !/opus/i.test(o[2]) || !/sonnet/i.test(o[3]) || !/haiku/i.test(o[4])) return fail('別名順序不對（haiku 要在）：' + o.join('、'));
         if (calls('agent_models').length) return fail('Claude 不該向本機讀清單：' + JSON.stringify(calls('agent_models')));
         if (hint()) return fail('Claude 別名不該有狀況說明：' + txt(hint()));
         expand();
@@ -158,10 +163,10 @@ export const dlmProbeSource = ({ kase, card = '', expect = {} }) => `(async () =
 })()`
 
 const GEMINI_COUNT = agyModels.length
-const scene = (name, kase, { card = '', expect = {}, shot = true, skin, state = kase === 'transition' || kase === 'giveup' ? 'pending' : kase, noEngine } = {}) => ({
+const scene = (name, kase, { card = '', expect = {}, shot = true, skin, state = kase === 'transition' || kase === 'giveup' ? 'pending' : kase, closed = false } = {}) => ({
   name, page: 'list.html', width: 900, height: 760,
   state: { signedIn: true, dlaunch: true, dlm: state, ...(skin ? { skin } : {}) },
-  ready: '#app.win', probe: { dlaunchModels: { kase, card, expect } }, ...(shot ? { shot: `${name}.png` } : {}),
+  ready: '#app.win', probe: { dlaunchModels: { kase, card, expect, closed } }, ...(shot ? { shot: `${name}.png` } : {}),
 })
 
 const READY = { count: GEMINI_COUNT, sample: 'Gemini 4 Argon (High)' }
@@ -187,6 +192,11 @@ export default {
     scene('list-launch-models-claude', 'claude', { state: 'ready' }),
     scene('list-launch-models-codex', 'codex', { card: 'Codex', state: 'ready' }),
     scene('list-launch-models-pi', 'pi', { card: 'DeepSeek', state: 'ready' }),
+    // 收合版：實際畫面的下拉（上面幾張為了拍到選項，把下拉撐成清單）
+    scene('list-launch-models-ready-closed', 'ready', { card: 'Gemini', expect: READY, closed: true }),
+    scene('list-launch-models-stale-closed', 'stale', { card: 'Gemini', expect: READY, closed: true }),
+    scene('list-launch-models-claude-closed', 'claude', { state: 'ready', closed: true }),
+    scene('list-launch-models-pi-closed', 'pi', { card: 'DeepSeek', state: 'ready', closed: true }),
     // 不截圖：自動再問、放棄等待加重新讀取
     scene('list-launch-models-transition', 'transition', { card: 'Gemini', shot: false }),
     scene('list-launch-models-giveup', 'giveup', { card: 'Gemini', shot: false }),

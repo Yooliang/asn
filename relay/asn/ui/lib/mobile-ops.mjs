@@ -1,7 +1,6 @@
 // 手機版「對話」分頁與「⋯」選單的純邏輯：最後使用的那一位、選單走哪一步、手機可選的模型、進度條的內容。
 // 管理夥伴視窗的判斷（誰能按、為什麼不能按、請求內容、進度文字）全部用 lib/partner-ops.mjs，這裡不另寫一套。
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文，不顯示節點代號與夥伴 ID。
-import { switchModelsFor } from './model-catalog.mjs'
 import { friendId } from './roster.mjs'
 import { MENU_KEYS, OP_DONE_HIDE_MS, OP_UNCONFIRMED_HIDE_MS, partnerEngine } from './partner-ops.mjs'
 import { isMergedAway } from './notice.mjs'
@@ -32,7 +31,30 @@ export const showsInSheet = op => op === 'info'
 
 // 手機沒有本機查詢（電腦版右鍵是問那台電腦現在能切哪些），所以只列常用的三個；實際能不能用以那台電腦的回報為準
 export const MODEL_NOTE = '手機查不到電腦實際可用的模型，這裡只列常用的幾個；電腦不支援的會回報失敗。'
-export const phoneModels = (engine = 'claude') => switchModelsFor(engine).map(m => ({ id: m.id, label: m.label }))
+// 手機的切換模型清單：#2355 P3 只改電腦版，手機維持改版前的內容（領隊一審：手機不能有空窗）；手機改讀型號清單是 P4，到時整段刪掉。
+// 內容就是 P3 以前 model-catalog.mjs 的 CLAUDE_MODELS（只取 id、label）與 GEMINI_MODELS；test/fixtures/phone-models-before-2355.json 存改版前的原樣輸出。
+export const PHONE_CLAUDE_MODELS = Object.freeze([
+  { id: 'opus', label: 'Opus' },
+  { id: 'sonnet', label: 'Sonnet' },
+  { id: 'haiku', label: 'Haiku' },
+])
+export const PHONE_GEMINI_MODELS = Object.freeze([
+  { id: 'gemini-4-argon-high', label: 'Gemini 4 Argon (High)' },
+  { id: 'gemini-4-argon-medium', label: 'Gemini 4 Argon (Medium)' },
+  { id: 'gemini-4-argon-low', label: 'Gemini 4 Argon (Low)' },
+  { id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' },
+  { id: 'gemini-3.8-flash-medium', label: 'Gemini 3.8 Flash (Medium)' },
+  { id: 'gemini-3.8-flash-low', label: 'Gemini 3.8 Flash (Low)' },
+])
+export const phoneModels = (engine = 'claude') => {
+  switch (String(engine ?? '').toLowerCase()) {
+    case 'claude': return PHONE_CLAUDE_MODELS.map(m => ({ id: m.id, label: m.label }))
+    case 'gemini': return PHONE_GEMINI_MODELS.map(m => ({ id: m.id, label: m.label }))
+    default: return []
+  }
+}
+/** 手機內建通道工作者的清單（改版前：Gemini 有固定清單，Grok 等沒有＝輸入框）；給 acpSwitchChoices 的 list */
+export const phoneAcpList = friend => phoneModels(friend?.engine)
 
 // 改名完成後，對話分頁要跳到新名字（同一位夥伴）。回新的 id；不是改名或沒完成就回空字串
 export const renamedChatId = (friend, op, input, view) => (op === 'rename' && view?.phase === 'done' ? friendId(friend.node, String(input?.newName ?? '').trim()) : '')

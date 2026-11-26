@@ -8,8 +8,8 @@ import { fileURLToPath } from 'node:url'
 const agyText = fs.readFileSync(fileURLToPath(new URL('../../src-tauri/tests/fixtures/agy-models/sample.txt', import.meta.url)), 'utf8')
 const agyModels = agyText.split(/\r?\n/).filter(l => l.includes('\t')).map(l => { const [id, name] = l.split('\t'); return { id: id.trim(), name: (name ?? '').trim() } })
 
-export const dlswProbeSource = ({ kase }) => `(async () => {
-  const kase = ${JSON.stringify(kase)};
+export const dlswProbeSource = ({ kase, closed = false }) => `(async () => {
+  const kase = ${JSON.stringify(kase)}, closed = ${JSON.stringify(closed)};
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const vis = e => !!e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none';
   const at = el => { const r = el.getBoundingClientRect(); return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)] };
@@ -26,8 +26,7 @@ export const dlswProbeSource = ({ kase }) => `(async () => {
       const items = await waitFor(() => { const m = [...document.querySelectorAll('.ab-menu')].find(vis); const its = m ? [...m.querySelectorAll('[role="menuitem"], [role="menuitemradio"], button, li')].filter(vis) : []; return its.length ? its : null }, 40);
       if (!items) return fail('點了切換模型沒有出現選單');
       const all = items.map(txt).join('|');
-      for (const w of ['Fable', 'Opus', 'Sonnet']) if (!all.includes(w)) return fail('選單少了 ' + w + '：' + all);
-      if (/Haiku/i.test(all)) return fail('不該再有寫死的 Haiku：' + all);
+      for (const w of ['Fable', 'Opus', 'Sonnet', 'Haiku']) if (!all.includes(w)) return fail('選單少了 ' + w + '：' + all);
       const checked = [...document.querySelectorAll('.ab-menu [aria-checked="true"], .ab-menu .on, .ab-menu .checked')].filter(vis).map(txt).join('|');
       if (!checked.includes('Opus')) return fail('目前用 claude-opus-5-5，Opus 應該打勾：「' + checked + '」');
       if (calls('agent_models').length) return fail('Claude 不該向本機讀清單');
@@ -46,7 +45,8 @@ export const dlswProbeSource = ({ kase }) => `(async () => {
       if (o.length !== ${agyModels.length}) return fail('清單筆數不對：' + o.length);
       if (!o.includes('Gemini 4 Argon (High)')) return fail('清單裡沒有 Gemini 4 Argon (High)');
       if (note()) return fail('ready 不該有說明：' + txt(note()));
-      select().size = 9;   // 截圖用：把下拉撐成清單才拍得到選項
+      if (!closed) select().size = 9;   // 截圖用：把下拉撐成清單才拍得到選項；收合版（closed）不撐開，拍實際畫面
+      if (closed && select().size > 1) return fail('收合版的型號應該是下拉，不是展開的清單');
       return { ok: true, why: '' };
     }
     if (kase === 'agy-unavailable') {
@@ -60,10 +60,10 @@ export const dlswProbeSource = ({ kase }) => `(async () => {
   } catch (e) { return fail('檢查出錯：' + (e && e.message || e)) }
 })()`
 
-const scene = (name, kase, bar) => ({
+const scene = (name, kase, bar, closed = false) => ({
   name, page: 'list.html', width: 900, height: 700,
   state: { signedIn: true, bar, dlsw: kase },
-  ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: { switchModels: { kase } }, shot: `${name}.png`,
+  ready: '#app.win .actionbar .abtn[aria-label="管理"]', probe: { switchModels: { kase, closed } }, shot: `${name}.png`,
 })
 
 export default {
@@ -74,6 +74,7 @@ export default {
     scene('list-switch-models-agy', 'agy', 'acp'),
     scene('list-switch-models-agy-unavailable', 'agy-unavailable', 'acp'),
     scene('list-switch-models-claude', 'claude', 'claude'),
+    scene('list-switch-models-agy-closed', 'agy', 'acp', true),   // 收合版：實際畫面的下拉
   ],
   table: (scenario) => {
     const k = scenario.state?.dlsw

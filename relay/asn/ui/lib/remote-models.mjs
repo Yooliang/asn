@@ -7,7 +7,13 @@ import { isValidModelId } from './model-id.mjs'
  * Claude 沒有清單（CLI 沒有列型號的指令），所以只留別名：別名永遠指向最新版，不會過時（#2355 D1）。
  * 內容取自 `claude --help` 的 --model 說明；test/fixtures/claude-help-model.txt 存那段原文，CLI 說明一改測試就會紅。
  */
-export const CLAUDE_ALIASES = Object.freeze(['fable', 'opus', 'sonnet'])
+export const CLAUDE_HELP_ALIASES = Object.freeze(['fable', 'opus', 'sonnet'])
+/**
+ * 既有別名，保留：`claude --help` 的範例沒列 haiku，但 CLI 的 --model 一直認得它，原本切換模型與手機的按鈕也有它，
+ * 拿掉等於讓使用者少一個能選的型號（領隊一審要求）。不跟 fixture 比對；CLI 哪天不認得它再拿掉。
+ */
+export const CLAUDE_KEPT_ALIASES = Object.freeze(['haiku'])
+export const CLAUDE_ALIASES = Object.freeze([...CLAUDE_HELP_ALIASES, ...CLAUDE_KEPT_ALIASES])
 /** 畫面上標在 Claude 別名旁邊的說明 */
 export const CLAUDE_ALIAS_LABEL = '別名（最新版）'
 

@@ -2,7 +2,7 @@
 import { test, mock, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { CLAUDE_ALIASES, CLAUDE_ALIAS_LABEL, CODE_TEXT, NONE_TEXT, NONE_TEXT_LOCAL, PENDING_TEXT, PENDING_TIMEOUT_MS, UNKNOWN_FAILURE_TEXT, codeText, modelState } from '../ui/lib/remote-models.mjs'
+import { CLAUDE_ALIASES, CLAUDE_HELP_ALIASES, CLAUDE_KEPT_ALIASES, CLAUDE_ALIAS_LABEL, CODE_TEXT, NONE_TEXT, NONE_TEXT_LOCAL, PENDING_TEXT, PENDING_TIMEOUT_MS, UNKNOWN_FAILURE_TEXT, codeText, modelState } from '../ui/lib/remote-models.mjs'
 
 const logs = []
 mock.method(console, 'info', (...a) => { logs.push(a.join(' ')) })
@@ -139,10 +139,12 @@ test('CODE_TEXT：鍵＝Rust Code 的 8 個值（讀原始碼守門）', () => {
   assert.equal(CODE_TEXT.spawn_failed.remote, '讀取失敗')
 })
 
-test('Claude 別名：與 claude --help 的 --model 說明（fixture）完全一致，順序也一樣', () => {
+test('Claude 別名：help 範例（fixture）抓到的 = CLAUDE_ALIASES 去掉既有保留的別名（haiku）；haiku 另外保留', () => {
   const help = fs.readFileSync(new URL('./fixtures/claude-help-model.txt', import.meta.url), 'utf8')
   const found = [...help.matchAll(/'([a-z][a-z0-9-]*)'/g)].map(m => m[1])
-  assert.deepEqual(found, [...CLAUDE_ALIASES])
-  assert.deepEqual([...CLAUDE_ALIASES], ['fable', 'opus', 'sonnet'])
+  assert.deepEqual(found, CLAUDE_ALIASES.filter(a => !CLAUDE_KEPT_ALIASES.includes(a)))
+  assert.deepEqual([...CLAUDE_HELP_ALIASES], ['fable', 'opus', 'sonnet'])
+  assert.deepEqual([...CLAUDE_KEPT_ALIASES], ['haiku'])
+  assert.deepEqual([...CLAUDE_ALIASES], ['fable', 'opus', 'sonnet', 'haiku'], 'haiku 在選項裡')
   assert.equal(CLAUDE_ALIAS_LABEL, '別名（最新版）')
 })
