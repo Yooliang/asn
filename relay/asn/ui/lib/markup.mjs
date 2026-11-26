@@ -9,7 +9,7 @@ export const COLOR_LABEL = { '#e53935': '紅', '#fb8c00': '橙', '#fdd835': '黃
 export const SIZES = [1, 2, 3]   // 細／中／粗
 export const SIZE_LABEL = { 1: '細', 2: '中', 3: '粗' }
 export const TEXT_MAX = 200
-export const EXPORT_MAX_EDGE = 4096   // 輸出前長邊上限（超過先縮小，避免畫布過大；之後送出還會再縮到 2048）
+export const EXPORT_MAX_EDGE = 4096   // 輸出前長邊上限（超過先縮小，避免畫布過大；之後送出還會再依寄圖規則縮小：長邊 2048、短邊不足 1280 的長圖不縮）
 export const MARKER_ALPHA = 0.38
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v))

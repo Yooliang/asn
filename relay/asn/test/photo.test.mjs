@@ -9,7 +9,7 @@ import { AsnCore } from '../ui/lib/core.mjs'
 import {
   FILE_ACCEPT, FILE_MAX_BYTES, FILE_TYPES, fileMimeOf, noticeOf,
   PHOTO_MAX_BYTES, PHOTO_MAX_EDGE, THUMB_MAX_CHARS, cleanPhotoName, expiresAt, fitSize, formatBytes, friendlyPhotoError, isThumb,
-  fitPhoto, PHOTO_ROUNDS, PHOTO_MAX_PIXELS, PHOTO_HARD_EDGE,
+  fitPhoto, photoPlan, PHOTO_ROUNDS, PHOTO_MAX_PIXELS, PHOTO_HARD_EDGE,
   normalizePhotos, photoExpired, recentPhotos, shownPhotos, expiryMs, photoText, photoTitle, stripPhotoLines, webpName,
 } from '../ui/lib/photo.mjs'
 import { FAKE_KEY, startFakeRelay, U } from './fake-relay.mjs'
@@ -66,11 +66,90 @@ test('fitPhoto 後備輪次：最後三輪（short:0）就是舊規則的 2048�
   for (let i = 1; i < PHOTO_ROUNDS.length; i++) assert.ok(area(PHOTO_ROUNDS[i]) <= area(PHOTO_ROUNDS[i - 1]))
 })
 
-test('主圖寄出走 fitPhoto＋逐輪後備（守門：改回只看長邊 2048 會紅）', () => {
-  const src = read('ui/lib/photo-canvas.mjs')
-  assert.match(src, /for \(const round of PHOTO_ROUNDS\)/)
-  assert.match(src, /fitPhoto\(bmp\.width, bmp\.height, round\)/)
-  assert.doesNotMatch(src, /for \(const edge of \[PHOTO_MAX_EDGE/)
+test('fitPhoto（#2331）：長寬比大於 1.6 又長邊超過 2048 的圖（16:9 大圖）會比舊規則大，新值鎖住', () => {
+  assert.deepEqual(fitPhoto(3840, 2160), { w: 2276, h: 1280 })   // 舊規則 2048×1152
+  assert.deepEqual(fitSize(3840, 2160), { w: 2048, h: 1152 })
+  assert.deepEqual(fitPhoto(2560, 1440), { w: 2276, h: 1280 })
+  assert.deepEqual(fitPhoto(2400, 1080), { w: 2400, h: 1080 })   // 短邊 1080 < 1280：長邊不縮（舊規則 2048×922）
+  for (const [w, h] of [[3840, 2160], [2400, 1080]]) assert.ok(fitPhoto(w, h).w > fitSize(w, h).w, `${w}×${h} 比舊規則大`)
+})
+
+test('photoPlan：逐輪尺寸照實際去重、越後面越小（一般照片、16:9、長圖都一樣）', () => {
+  assert.deepEqual(photoPlan(4000, 3000), [{ w: 2048, h: 1536 }, { w: 1600, h: 1200 }, { w: 1200, h: 900 }])   // 第 3、4 輪與第 1、2 輪一樣大，不重複試
+  assert.deepEqual(photoPlan(3840, 2160).map(f => `${f.w}×${f.h}`), ['2276×1280', '1778×1000', '1600×900', '1200×675'])   // 舊規則 2048×1152 比第 2 輪大，略過
+  assert.deepEqual(photoPlan(1162, 3604).map(f => `${f.w}×${f.h}`), ['1162×3604', '1000×3102', '660×2048', '516×1600', '387×1200'])
+  for (const [w, h] of [[4000, 3000], [3000, 4000], [3840, 2160], [2400, 1080], [1920, 1080], [1162, 3604], [1080, 5000], [6000, 6000], [300, 200], [1500, 9000]]) {
+    const p = photoPlan(w, h)
+    assert.ok(p.length >= 1, `${w}×${h} 至少一輪`)
+    for (let i = 1; i < p.length; i++) assert.ok(p[i].w * p[i].h < p[i - 1].w * p[i - 1].h, `${w}×${h} 第 ${i + 1} 輪要比前一輪小`)
+  }
+  assert.deepEqual(photoPlan(0, 5), [])
+})
+
+// ---- 行為測試：imageFromBlob 在低階手機配不出大畫布時的後備輪次（stub createImageBitmap 與 canvas，不依賴瀏覽器） ----
+async function runImage({ w, h, failOver = Infinity, mode = 'getContextNull', type = 'image/webp' }) {
+  const g = globalThis
+  const saved = { createImageBitmap: g.createImageBitmap, document: g.document, warn: console.warn }
+  const attempts = []
+  const warns = []
+  const fails = cv => cv.width * cv.height > failOver
+  g.createImageBitmap = async () => ({ width: w, height: h, close() {} })
+  g.document = {
+    createElement: () => {
+      const cv = {
+        width: 0, height: 0,
+        getContext() {
+          if (cv.width * cv.height > 0 && fails(cv) && mode === 'getContextNull') { attempts.push(`${cv.width}×${cv.height}`); return null }
+          return { imageSmoothingQuality: '', drawImage() { if (fails(cv) && mode === 'drawThrows') { attempts.push(`${cv.width}×${cv.height}`); throw new Error('Out of memory') } } }
+        },
+        toBlob(cb) {
+          if (fails(cv) && mode === 'toBlobNull') { attempts.push(`${cv.width}×${cv.height}`); setTimeout(() => cb(null), 0); return }
+          if (fails(cv) && mode === 'toBlobThrows') { attempts.push(`${cv.width}×${cv.height}`); throw new Error('EncodingError') }
+          if (!fails(cv)) attempts.push(`${cv.width}×${cv.height}`)
+          setTimeout(() => cb(new Blob(['x'.repeat(100)], { type })), 0)
+        },
+        toDataURL: () => THUMB,
+      }
+      return cv
+    },
+  }
+  console.warn = (...a) => warns.push(a)
+  try {
+    const { imageFromBlob } = await import('../ui/lib/photo-canvas.mjs')
+    let res, err
+    try { res = await imageFromBlob(new Blob(['x'], { type: 'image/png' }), 'a.png') } catch (e) { err = e }
+    return { res, err, attempts, warns }
+  } finally { g.createImageBitmap = saved.createImageBitmap; g.document = saved.document; console.warn = saved.warn }
+}
+
+test('imageFromBlob 後備輪次：前兩輪配不出畫布（getContext 回 null／drawImage 丟例外／toBlob 回 null／toBlob 丟例外）→ 走到第三輪（長邊 2048 的舊規則），寄得出去', async () => {
+  for (const mode of ['getContextNull', 'drawThrows', 'toBlobNull', 'toBlobThrows']) {
+    const { res, err, attempts, warns } = await runImage({ w: 1162, h: 3604, failOver: 2_000_000, mode })
+    assert.equal(err, undefined, `${mode}：不該失敗 ${err?.message}`)
+    assert.deepEqual({ w: res.width, h: res.height }, fitSize(1162, 3604, 2048), `${mode}：落在長邊 2048 那一級`)
+    assert.ok(attempts.includes('1162×3604') && attempts.includes('1000×3102'), `${mode}：新規則兩輪確實試過並失敗 ${attempts}`)
+    assert.equal(warns.filter(a => String(a[0]).includes('這一輪畫布配不出來')).length, 2, `${mode}：每個失敗的輪次寫一筆 log`)
+  }
+})
+
+test('imageFromBlob 後備輪次：每輪都配不出來 → 白話說「這台裝置處理不了這麼大的圖」，原文進 log；不是「不能轉 webp」', async () => {
+  const { err, warns } = await runImage({ w: 1162, h: 3604, failOver: 0, mode: 'getContextNull' })
+  assert.match(err.message, /這台裝置處理不了這麼大的圖/)
+  assert.doesNotMatch(err.message, /webp/)
+  assert.equal(warns.length, photoPlan(1162, 3604).length)
+  assert.ok(warns.every(a => a.at(-1) instanceof Error), 'log 帶原始錯誤')
+})
+
+test('imageFromBlob 後備輪次：真的產出但不是 webp → 馬上說不能轉 webp，不再試其他輪', async () => {
+  const { err, attempts } = await runImage({ w: 1162, h: 3604, type: 'image/png' })
+  assert.match(err.message, /不能轉成 webp/)
+  assert.equal(attempts.length, 1)
+})
+
+test('imageFromBlob 後備輪次：一般照片不重複試同樣大小的尺寸', async () => {
+  const { res, attempts } = await runImage({ w: 4000, h: 3000, failOver: 1_500_000, mode: 'toBlobNull' })
+  assert.deepEqual({ w: res.width, h: res.height }, { w: 1200, h: 900 })
+  assert.deepEqual(attempts, ['2048×1536', '1600×1200', '1200×900'])   // 各試一次，沒有重複
 })
 
 test('檔名：控制字元、括號、引號、路徑與 shell 符號都清掉；webp 副檔名；空的退回預設', () => {

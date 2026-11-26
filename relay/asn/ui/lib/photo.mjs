@@ -59,6 +59,19 @@ export function fitPhoto(w, h, { long = PHOTO_MAX_EDGE, short = PHOTO_SHORT_EDGE
   return { w: Math.max(1, Math.floor(w * s)), h: Math.max(1, Math.floor(h * s)) }
 }
 
+// 實際要試的尺寸清單：照 PHOTO_ROUNDS 依序算，總像素沒比上一個小的就略過（例如 4000×3000 的第 3、4 輪與第 1、2 輪一樣大；16:9 的舊規則 2048 那輪比前一輪的 1000 短邊還大），
+// 所以一定是「越後面越小、沒有重複」。
+export function photoPlan(w, h) {
+  const out = []
+  let last = Infinity
+  for (const round of PHOTO_ROUNDS) {
+    const f = fitPhoto(w, h, round)
+    if (!(f.w > 0) || f.w * f.h >= last) continue
+    out.push(f); last = f.w * f.h
+  }
+  return out
+}
+
 // 檔名清理（同後端與 Rust）：控制字元、括號、引號、路徑與 shell 符號換成空白，至多 80 字
 const BAD = new RegExp('[\\x00-\\x1f\\x7f-\\x9f' + [0x2028, 0x2029, 0x200b, 0x200c, 0x200d, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069].map(c => String.fromCharCode(c)).join('') + '〔〕［］【】「」『』()（）\\[\\]{}<>《》`\'"“”‘’\\\\/|:*?;&$%!#^~=,]', 'g')
 export function cleanPhotoName(s, fallback = 'photo.webp') {
