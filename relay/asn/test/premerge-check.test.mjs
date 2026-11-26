@@ -103,6 +103,15 @@ test('#1972 trigger paths：真 workflow 檔（linux-build／ui-shots 有 paths�
   assert.equal(shouldTrigger(null, ['x']), true)   // 讀不到 workflow 檔 → 保守當會觸發
 })
 
+// auto-publish-daemon.test.mjs 會讀 docs/release/ 底下的運行手冊：只改手冊也要跑 Node 測試，不然 main 紅了沒人知道（#2360）
+test('改 docs/release/ 要觸發跑 Node 測試的 workflow（PR 和推 main 都要）', () => {
+  const build = fs.readFileSync(new URL('../../../.github/workflows/asn-linux-build.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  assert.equal(shouldTrigger(build, ['docs/release/自動發佈運行手冊.md']), true, 'PR 只改運行手冊要觸發')
+  const push = build.match(/^  push:\n([\s\S]*?)^  pull_request:/m)?.[1] ?? ''
+  assert.ok(push.includes("- 'relay/asn/**'"), '找得到 push 的 paths（防假綠）')
+  assert.ok(push.includes("- 'docs/release/**'"), '推 main 只改運行手冊也要觸發')
+})
+
 // ---------- 一審必修：監看清單不能漏 workflow ----------
 const WF_DIR = new URL('../../../.github/workflows/', import.meta.url)
 const realWorkflows = () => Object.fromEntries(fs.readdirSync(WF_DIR).filter(f => /\.ya?ml$/.test(f)).map(f => [f, fs.readFileSync(new URL(f, WF_DIR), 'utf8')]))
