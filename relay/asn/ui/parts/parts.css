@@ -1,0 +1,53 @@
+/* 共用零件的樣式（#1763 F2，規格 1.5 節）。零件規則一律只用 --asn-* 變數，不寫死顏色與尺寸（有守門測試：test/parts-u1.test.mjs）。
+   目前沒有任何頁面載入這個檔，也沒有任何頁面使用這些零件：加上它不會改變任何畫面。
+
+   token 與 #2105 的 kit.css 對齊：已經有的變數一律「指過去」（別名），不另外定義第二套；括號裡的第二個值是 Aero 現在的實際值，
+   只在 kit.css／style.css 沒載入時才會用到。
+     --asn-bg      → --panel        --asn-bg-soft → --panel-soft   --asn-fg    → --fg      --asn-muted → --muted
+     --asn-line    → --line         --asn-accent  → --accent       --asn-radius → --radius-1
+     --asn-gap     → --sp-3         --asn-gap-s   → --sp-2         --asn-fs    → --fs-2    --asn-fs-s  → --fs-1
+   外觀覆寫：S0（modern／line 共用部分抽出）還沒合併，#1763 規定合併前不動 modern.css／line.css，所以三套外觀各自的 token 區塊
+   （:root[data-skin="…"]{--asn-…}）等 S0 合併後再補；現在 modern、line 靠上面的別名自動跟著它們已有的 --panel／--fg 等變數走。 */
+:root{
+  --asn-bg:var(--panel,#ffffff); --asn-bg-soft:var(--panel-soft,#eef5fc);
+  --asn-fg:var(--fg,#1d2733); --asn-muted:var(--muted,#5b6d80);
+  --asn-line:var(--line,#bcd2e8); --asn-accent:var(--accent,#1f7ad6);
+  --asn-radius:var(--radius-1,4px);
+  --asn-gap:var(--sp-3,12px); --asn-gap-s:var(--sp-2,8px);
+  --asn-fs:var(--fs-2,12px); --asn-fs-s:var(--fs-1,11px);
+  --asn-check:16px;
+  --asn-card-pad:var(--sp-4,16px);
+  /* 最小點擊尺寸：沒設 data-input 時照指標（電腦）；觸控改成 44px，見下面兩條 */
+  --asn-hit:28px;
+}
+/* 平台屬性由殼設在 <html>（ui/shells/platform-attrs.mjs）：data-input 決定點擊尺寸，data-layout 決定少數間距 */
+:root[data-input="pointer"]{--asn-hit:28px}
+:root[data-input="touch"]{--asn-hit:44px}
+:root[data-layout="split"]{--asn-card-pad:var(--sp-4,16px)}
+:root[data-layout="stack"]{--asn-card-pad:var(--sp-3,12px)}
+
+/* ---- 設定卡片 ---- */
+.asn-card{box-sizing:border-box; display:flex; flex-direction:column; gap:var(--asn-gap); min-width:0; padding:var(--asn-card-pad); border:1px solid var(--asn-line); border-radius:var(--asn-radius); background:var(--asn-bg); color:var(--asn-fg)}
+.asn-card-title{margin:0; font-size:var(--asn-fs); font-weight:600}
+
+/* ---- 一列：左邊說明、右邊控制項；窄版放不下就換行 ---- */
+.asn-row{display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--asn-gap-s); min-width:0; min-height:var(--asn-hit)}
+.asn-row-label{display:flex; flex-direction:column; min-width:0; flex:1 1 auto; font-size:var(--asn-fs); overflow-wrap:anywhere}
+.asn-row-hint{font-size:var(--asn-fs-s); color:var(--asn-muted)}
+.asn-row-ctl{display:flex; align-items:center; gap:var(--asn-gap-s); min-width:0; flex:0 1 auto}
+
+/* ---- 開關（勾選） ---- */
+.asn-toggle{display:inline-flex; align-items:center; gap:var(--asn-gap-s); min-height:var(--asn-hit); font-size:var(--asn-fs); color:var(--asn-fg); cursor:pointer}
+.asn-toggle input{flex:none; width:var(--asn-check); height:var(--asn-check); margin:0; accent-color:var(--asn-accent)}
+.asn-toggle.is-disabled{color:var(--asn-muted); cursor:default}
+
+/* ---- 下拉與輸入框 ---- */
+.asn-select,.asn-text{box-sizing:border-box; min-width:0; min-height:var(--asn-hit); padding:0 var(--asn-gap-s); font:inherit; font-size:var(--asn-fs); color:var(--asn-fg); background:var(--asn-bg); border:1px solid var(--asn-line); border-radius:var(--asn-radius)}
+.asn-select:focus-visible,.asn-text:focus-visible{outline:2px solid var(--asn-accent); outline-offset:1px}
+.asn-select:disabled,.asn-text:disabled{color:var(--asn-muted); background:var(--asn-bg-soft)}
+
+/* ---- 按鈕：本體用 #2105 的 .asn-btn（三級與狀態不變），這裡只把最小高度換成點擊尺寸 ---- */
+.asn-btn.asn-part-btn{min-height:var(--asn-hit)}
+
+/* ---- 說明文字 ---- */
+.asn-note{margin:0; font-size:var(--asn-fs-s); line-height:1.5; color:var(--asn-muted); overflow-wrap:anywhere}

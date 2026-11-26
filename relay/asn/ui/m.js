@@ -4,6 +4,8 @@
 import { AsnCore } from './lib/core.mjs'
 import { capsAndroid } from './shells/caps-android.mjs'
 export const caps = capsAndroid   // 這個入口的平台能力表（#1763 F1）；目前還沒有元件使用
+import { ATTRS_ANDROID, applyPlatformAttrs } from './shells/platform-attrs.mjs'
+applyPlatformAttrs(document.documentElement, ATTRS_ANDROID)   // data-input／data-layout（#1763 F2）；目前沒有樣式用到
 import { watchInvite } from './lib/notice-events.mjs'
 import { getLocal } from './lib/local-prefs.mjs'
 import { plainMessage } from './lib/plain-errors.mjs'

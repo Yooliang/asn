@@ -17,6 +17,8 @@ import { FP_SHOW_TEXT, FP_SHOW_WINDOW_MS, applyFpShow, groupFp16 } from './lib/f
 import { AsnButton } from './lib/ui-kit.mjs'
 import { capsDesktop } from './shells/caps-desktop.mjs'
 export const caps = capsDesktop   // 這個入口的平台能力表（#1763 F1）；目前還沒有元件使用
+import { ATTRS_DESKTOP, applyPlatformAttrs } from './shells/platform-attrs.mjs'
+applyPlatformAttrs(document.documentElement, ATTRS_DESKTOP)   // data-input／data-layout（#1763 F2）；目前沒有樣式用到
 // 這個視窗的 [ASN] 記錄也寫進 ui.log（#2106 ⑥），行裡帶視窗名
 installUiLog({ source: 'panel' })
 
