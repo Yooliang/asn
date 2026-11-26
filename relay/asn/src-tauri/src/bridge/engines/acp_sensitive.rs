@@ -5,7 +5,7 @@
 //! 比對的是路徑，不是邊界：執行指令不經這裡。
 #![allow(dead_code)]
 
-use super::acp_policy::{agy_brain, inside_agy_conv_dir, resolve};
+use super::acp_policy::{agy_brain, inside_agy_conv_dir, resolve, valid_conv_id};
 use serde_json::Value;
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -45,8 +45,9 @@ fn std_canon(p: &Path) -> io::Result<PathBuf> {
 }
 
 /// 這次讀取是哪一類工具：單檔讀取、只列名字的列舉、會掃內容的遞迴搜尋
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ReadTool {
+    #[default]
     Single,
     List,
     Recursive,
@@ -64,7 +65,28 @@ impl ReadTool {
     }
 }
 
+/// 判定結果：可以讀、落在敏感位置、解析不了（偏向擋）
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadVerdict {
+    Allow,
+    Sensitive,
+    Unresolvable,
+}
+
+/// 要算敏感根的家目錄：工作者環境裡的使用者資料夾（沒有就不算）＋這台電腦實際的使用者資料夾（real_home，測試傳 None）
+pub fn homes_from(env: &[(String, String)], real_home: Option<PathBuf>) -> Vec<PathBuf> {
+    let get = |n: &str| env.iter().find(|(k, v)| k.eq_ignore_ascii_case(n) && !v.trim().is_empty()).map(|(_, v)| PathBuf::from(v));
+    let mut out: Vec<PathBuf> = get("USERPROFILE").or_else(|| get("HOME")).into_iter().collect();
+    if let Some(h) = real_home.filter(|h| !h.as_os_str().is_empty()) {
+        if !out.contains(&h) {
+            out.push(h);
+        }
+    }
+    out
+}
+
 /// 敏感根清單。啟動時算好（每個家目錄各算一次，字面與實際位置兩種形式），之後每次請求只比字串
+#[derive(Clone)]
 pub struct SensitiveRoots {
     roots: Vec<String>,
     homes: Vec<String>,
@@ -72,6 +94,13 @@ pub struct SensitiveRoots {
     brains: Vec<PathBuf>,
     env: Vec<(String, String)>,
     canon: Canon,
+}
+
+// 手寫 Debug：裡面存著環境變數（可能含金鑰），不能被印出來
+impl std::fmt::Debug for SensitiveRoots {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SensitiveRoots {{ roots: {}, homes: {} }}", self.roots.len(), self.homes.len())
+    }
 }
 
 pub struct ReadCtx<'a> {
@@ -388,8 +417,16 @@ fn under_home(f: &str, roots: &SensitiveRoots) -> bool {
     roots.homes.iter().any(|h| f == h || f.starts_with(&format!("{h}/")))
 }
 
-fn exempt_brain(f: &str, roots: &SensitiveRoots, base: &Path) -> bool {
-    roots.brains.iter().any(|b| inside_agy_conv_dir(&[f.to_string()], b, base))
+/// agy 自己的對話資料夾：裡面的檔放行；對話資料夾本身與 brain 本身只開給單檔與列舉（遞迴搜尋會掃進系統目錄，照擋）
+fn exempt_brain(f: &str, roots: &SensitiveRoots, base: &Path, tool: ReadTool) -> bool {
+    roots.brains.iter().any(|b| {
+        inside_agy_conv_dir(&[f.to_string()], b, base)
+            || (tool != ReadTool::Recursive && {
+                let mut forms = vec![nstr(&b.to_string_lossy())];
+                forms.extend(real_path_with(roots.canon, b).map(|r| nstr(&r.to_string_lossy())));
+                forms.iter().any(|d| f == d || f.strip_prefix(&format!("{d}/")).is_some_and(valid_conv_id))
+            })
+    })
 }
 
 fn join_base(base: &Path, p: &str) -> PathBuf {
@@ -401,9 +438,14 @@ fn join_base(base: &Path, p: &str) -> PathBuf {
 /// agy 自己的對話資料夾（brain/<編號>/，不含系統目錄）例外，且每個命中的形式都要各自符合例外才放行。
 /// 解析不了（含展開不了的變數）而字面落在使用者資料夾底下，偏向擋
 pub fn is_sensitive_read(path_raw: &str, ctx: &ReadCtx) -> bool {
+    read_verdict(path_raw, ctx) != ReadVerdict::Allow
+}
+
+/// 同 [`is_sensitive_read`]，但分得出是「落在敏感位置」還是「解析不了而偏向擋」（後者要另記一行 log）
+pub fn read_verdict(path_raw: &str, ctx: &ReadCtx) -> ReadVerdict {
     let raw = path_raw.trim();
     if raw.is_empty() {
-        return false;
+        return ReadVerdict::Allow;
     }
     let roots = ctx.roots;
     let (cands, mut failed) = expand(&strip_file_url(raw), &roots.home_paths, &roots.env);
@@ -426,12 +468,12 @@ pub fn is_sensitive_read(path_raw: &str, ctx: &ReadCtx) -> bool {
         literals.push(nstr(&folded.to_string_lossy()));
         literals.push(nstr(&joined.to_string_lossy()));
         for (f, may_exempt) in &forms {
-            if hits(f, ctx.tool, roots) && !(*may_exempt && exempt_brain(f, roots, ctx.base)) {
-                return true;
+            if hits(f, ctx.tool, roots) && !(*may_exempt && exempt_brain(f, roots, ctx.base, ctx.tool)) {
+                return ReadVerdict::Sensitive;
             }
         }
     }
-    failed && literals.iter().any(|l| under_home(l, roots))
+    if failed && literals.iter().any(|l| under_home(l, roots)) { ReadVerdict::Unresolvable } else { ReadVerdict::Allow }
 }
 
 // ---- 路徑抽取 ----
@@ -774,8 +816,17 @@ mod tests {
         for p in [c1.join("notes.md"), c1.join("sub").join("a.md"), brain.join("c3").join("new.md")] {
             assert!(!blocked(&r, &ps(&p)), "{}", p.display());
         }
-        for p in [g.join("oauth_creds.json"), g.join("antigravity-cli").join("x"), brain.join("x.md"), c1.join(".system_generated").join("x"), c1.join(".SYSTEM_GENERATED").join("x"), brain.join("a b").join("x"), g.clone(), brain.clone(), c1.clone()] {
+        for p in [g.join("oauth_creds.json"), g.join("antigravity-cli").join("x"), brain.join("x.md"), c1.join(".system_generated").join("x"), c1.join(".SYSTEM_GENERATED").join("x"), brain.join("a b").join("x"), g.clone()] {
             assert!(blocked(&r, &ps(&p)), "{}", p.display());
+        }
+        // 對話資料夾本身與 brain 本身：單檔與列舉放行，遞迴搜尋照擋（會掃進系統目錄）
+        for p in [&brain, &c1, &brain.join("c3")] {
+            assert!(!blocked(&r, &ps(p)), "{}", p.display());
+            assert!(!chk(&r, &ps(p), ReadTool::List), "{}", p.display());
+            assert!(chk(&r, &ps(p), ReadTool::Recursive), "{}", p.display());
+        }
+        for p in [&g, &g.join("antigravity-cli"), &c1.join(".system_generated"), &brain.join("a b")] {
+            assert!(chk(&r, &ps(p), ReadTool::List), "列舉也不能開到 {}", p.display());
         }
         // 往上跳出對話資料夾
         assert!(blocked(&r, &ps(&c1.join("sub").join("..").join("..").join("..").join("oauth_creds.json"))));
@@ -785,6 +836,18 @@ mod tests {
         assert!(blocked(&r, &ps(&c1.join("hop").join("oauth_creds.json"))));
         // 帶 .. 且還不存在的路徑不套例外
         assert!(blocked(&r, &ps(&c1.join("sub").join("..").join("not-yet.md"))));
+    }
+
+    #[test]
+    fn 家目錄來源_工作者環境的與這台電腦實際的都要算() {
+        let e = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();
+        let real = Some(PathBuf::from("/real"));
+        assert_eq!(homes_from(&e(&[("HOME", "/h"), ("UserProfile", "/p")]), real.clone()), vec![PathBuf::from("/p"), PathBuf::from("/real")]);
+        assert_eq!(homes_from(&e(&[("HOME", "/h"), ("USERPROFILE", " ")]), real.clone()), vec![PathBuf::from("/h"), PathBuf::from("/real")]);
+        assert_eq!(homes_from(&e(&[("HOME", "/real")]), real.clone()), vec![PathBuf::from("/real")], "同一個不重複");
+        assert_eq!(homes_from(&[], real), vec![PathBuf::from("/real")], "環境沒有就只有實際的");
+        assert!(homes_from(&[], None).is_empty());
+        assert!(homes_from(&e(&[("HOME", "/h")]), Some(PathBuf::new())).len() == 1, "空的實際家目錄不算");
     }
 
     #[test]

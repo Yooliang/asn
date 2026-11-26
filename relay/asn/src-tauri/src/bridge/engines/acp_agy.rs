@@ -1,9 +1,9 @@
 //! agy（Antigravity CLI）原生 stream-json 驅動：長駐一個 `agy --input-format stream-json --output-format stream-json`，
 //! 一行一則 NDJSON；每輪送 {"event":"user","message":{"content":"…"}}，讀到 {"event":"result"} 結束。同一個行程＝同一個 conversation。
-//! 對應 engines/acp-driver-agy.mjs。權限的現實（實測）：agy 無頭模式不能問人，指令會被它自己拒絕，但寫檔不問就直接寫，
-//! 所以看每個工具步驟的事件，違反政策就立刻殺掉行程（絆線：能擋住後續動作並明確回報，但那一次寫入可能已經發生）。
+//! 對應 engines/acp-driver-agy.mjs。權限的現實（實測）：agy 無頭模式不能問人；沒加放行旗標時，指令照樣會啟動（讀取在受限環境裡被擋，是 agy 的沙箱還是本機設定未確定），
+//! 讀檔與寫檔不問就直接做，所以看每個工具步驟的事件，違反政策就立刻殺掉行程（絆線：能擋住後續動作並明確回報，但那一次讀取或寫入可能已經發生）。
 use super::acp_config::WorkerCfg;
-use super::acp_policy::{agy_brain, agy_user_home, describe_agy_tool, redact, sensitive_write, WorkerError};
+use super::acp_policy::{agy_brain, agy_user_home, describe_agy_tool, is_registered_agy_tool, redact, sensitive_write, WorkerError};
 use super::acp_worker::{Denied, Driver, DriverArgs, TurnResult};
 use super::rpc::{Rpc, SpawnOpts};
 use super::{acp_clean_env, BoxFut};
@@ -156,8 +156,10 @@ fn on_step(sh: &Arc<Shared>, a: &DriverArgs, s: Value) {
         }
         return;
     }
-    if let Some(c) = sh.cur.lock().unwrap().as_mut() {
-        c.seen.insert(key);
+    let first_time = sh.cur.lock().unwrap().as_mut().map(|c| c.seen.insert(key)).unwrap_or(false);
+    // 沒登記的工具名：類別是用關鍵字猜的，不能默默放行，記一行 log（只記工具名，不記參數）
+    if first_time && !is_registered_agy_tool(&info.tool) {
+        (a.log)(format!("agy 工具名沒登記，類別暫以 {} 處理：{}", info.category, redact(&info.tool)));
     }
     let home = agy_user_home(&a.env);
     // 先過 check_tool：agy 自己的對話資料夾（brain/<編號>/ 底下，不含 .system_generated）的寫入在這裡就放行，不會走到下面的 sensitive_write。
@@ -302,5 +304,20 @@ impl Driver for AgyDriver {
         if self.sh.rpc.lock().unwrap().is_some() {
             self.kill("stop");
         }
+    }
+}
+
+/// 測試用：把一串 agy 事件依序餵給 on_event（等於一輪），回傳這一輪被政策中止時的錯誤；沒中止回 None
+#[cfg(test)]
+pub(crate) fn run_events_for_test(a: &DriverArgs, events: Vec<Value>) -> Option<WorkerError> {
+    let sh = Arc::new(Shared { sid: Mutex::new(String::new()), resume_lost: AtomicBool::new(false), rpc: Mutex::new(None), cur: Mutex::new(None), last_activity: AtomicU64::new(0) });
+    let (tx, mut rx) = oneshot::channel();
+    *sh.cur.lock().unwrap() = Some(Cur { tx: Some(tx), denied: vec![], seen: HashSet::new(), violation: None, tools: false });
+    for ev in events {
+        on_event(&sh, a, ev);
+    }
+    match rx.try_recv() {
+        Ok(Err(e)) => Some(e),
+        _ => None,
     }
 }

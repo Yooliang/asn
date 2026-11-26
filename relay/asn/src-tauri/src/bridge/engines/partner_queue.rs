@@ -772,18 +772,28 @@ mod tests {
         G.get_or_init(|| Mutex::new(vec![]))
     }
 
+    fn driver_args() -> &'static Mutex<Vec<(PathBuf, DriverArgs)>> {
+        static G: std::sync::OnceLock<Mutex<Vec<(PathBuf, DriverArgs)>>> = std::sync::OnceLock::new();
+        G.get_or_init(|| Mutex::new(vec![]))
+    }
+
     fn rec_engine(work: &Path, env: &Arc<FakeEnv>, agents: Option<Value>) -> (AcpEngine, Rec) {
+        rec_engine_with(work, env, agents, std::env::vars().collect(), Arc::new(|_| {}))
+    }
+
+    /// proc_env＝交給工作者的環境（測試用假的家目錄放在這裡）；log＝接記錄的地方
+    fn rec_engine_with(work: &Path, env: &Arc<FakeEnv>, agents: Option<Value>, proc_env: Vec<(String, String)>, log: crate::bridge::engines::rpc::Log) -> (AcpEngine, Rec) {
         if let Some(a) = agents {
             std::fs::write(work.join("agents.json"), a.to_string()).unwrap();
         }
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         std::mem::forget(_rx);
         let ctx = EngineCtx {
-            log: Arc::new(|_| {}),
+            log,
             work_dir: work.to_path_buf(),
             home: work.to_path_buf(),
             agents_file: work.join("agents.json"),
-            env: Arc::new(std::env::vars().collect()),
+            env: Arc::new(proc_env),
             events: tx,
             notify: Arc::new(|_| {}),
             pids: PidBook::new(work),
@@ -794,6 +804,7 @@ mod tests {
         let r2 = rec.clone();
         let md: MakeDriver = Arc::new(move |a: DriverArgs| {
             guards().lock().unwrap().push((a.cfg.cwd.clone(), a.guard.clone()));
+            driver_args().lock().unwrap().push((a.cfg.cwd.clone(), a.clone()));
             let flag = crate::bridge::engines::acp_agy::agy_args(&a.cfg, "", a.full_access).contains(&"--dangerously-skip-permissions".to_string());
             r2.lock().unwrap().push(Spawn {
                 name: a.cfg.name.clone(),
@@ -881,7 +892,7 @@ mod tests {
             std::fs::create_dir_all(brain.join(d)).unwrap();
         }
         let p = |x: &Path| x.display().to_string();
-        let w = |path: &Path| PReq { category: "write".into(), paths: vec![p(path)], summary: "寫檔".into() };
+        let w = |path: &Path| PReq { category: "write".into(), paths: vec![p(path)], summary: "寫檔".into(), ..Default::default() };
         let check = |path: &Path| guard.check_tool(&w(path), "DONE", true, Some(brain.as_path()));
         // 不中止：目前這段（含 scratch）、別段、工作資料夾
         for ok in [brain.join("c1").join("x.md"), brain.join("c1").join("scratch").join("a.md"), brain.join("c2").join("old.md"), PathBuf::from(&work_cwd).join("out.txt")] {
@@ -896,6 +907,75 @@ mod tests {
         // 中止：工作資料夾與 brain 以外
         let elsewhere = home.path().join("Documents").join("x.txt");
         assert!(check(&elsewhere).is_err());
+        eng.stop();
+    }
+
+    /// 接線：用實機樣本的事件形狀（read_file 的 `Path`、run_command 的 `CommandLine`），走真的守門員。
+    /// 讀取只擋敏感位置、命中整輪中止；指令照 execute 政策；沒登記的工具名記 log；寫入範圍不變；標準 ACP 的讀取請求也用同一個判定
+    #[tokio::test]
+    async fn 開夥伴開出的_讀取只擋敏感位置_用實機事件形狀() {
+        use crate::bridge::engines::acp_policy::describe_acp_request;
+        let work = tempfile::tempdir().unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let logs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+        let sink = logs.clone();
+        let env = env_for(cwd.path());
+        let proc_env = vec![("USERPROFILE".to_string(), home.path().display().to_string())];
+        let (eng, rec) = rec_engine_with(work.path(), &env, None, proc_env, Arc::new(move |m| sink.lock().unwrap().push(m)));
+        std::fs::write(work.path().join(QUEUE_FILE), format!("{}\n{}\n", queue_line("gemini", "小讀", cwd.path()), queue_line("grok", "小格讀", cwd.path()))).unwrap();
+        eng.poll();
+        wait_spawns(&rec, 2).await;
+        let work_cwd = std::fs::canonicalize(cwd.path()).map(|p| crate::launch::local::strip_verbatim_prefix(&p.to_string_lossy())).unwrap();
+        let args = |n: &str| driver_args().lock().unwrap().iter().rev().find(|(c, a)| c.to_string_lossy().eq_ignore_ascii_case(&work_cwd) && a.cfg.name == n).map(|(_, a)| a.clone()).expect("找得到驅動參數");
+        let a = args("小讀");
+        let p = |x: &Path| x.display().to_string();
+        let step = |idx: u32, tool: &str, params: Value| json!({"event": "step_update", "step_update": {"conversation_id": "c1", "step_index": idx, "state": "ACTIVE", "step_type": "tool", "tool_name": tool, "tool_info": {"name": tool, "parameters": params}}});
+        let run = |events: Vec<Value>| crate::bridge::engines::acp_agy::run_events_for_test(&a, events);
+        let read = |path: &str| run(vec![step(1, "read_file", json!({"Path": path}))]);
+        let ssh = home.path().join(".ssh").join("id");
+        // 一般檔可以讀（家目錄、工作資料夾外、工作資料夾內）
+        for ok in [home.path().join("Desktop").join("a.txt"), home.path().parent().unwrap().join("somewhere-else.txt"), PathBuf::from(&work_cwd).join("a.txt")] {
+            assert!(read(&p(&ok)).is_none(), "{}", ok.display());
+        }
+        // 敏感檔：整輪中止、不重導
+        let e = read(&p(&ssh)).expect("敏感檔要中止");
+        assert_eq!(e.code, "violation");
+        assert!(e.message.contains("讀取不被允許") && e.message.contains("不能讀"), "{}", e.message);
+        assert!(e.redirect.is_none(), "讀取不重導");
+        assert!(read("~/.ssh/id").is_some(), "~ 展開後一樣擋");
+        assert!(read(&p(&home.path().join(".gemini").join("oauth_creds.json"))).is_some());
+        // agy 自己的對話資料夾仍可讀
+        let brain = crate::bridge::engines::acp_policy::agy_brain(home.path());
+        std::fs::create_dir_all(brain.join("c1")).unwrap();
+        assert!(read(&p(&brain.join("c1").join("notes.md"))).is_none());
+        // 沒帶路徑：放行並記一行 log
+        assert!(run(vec![step(1, "read_file", json!({}))]).is_none());
+        assert!(logs.lock().unwrap().iter().any(|l| l.contains("沒有可辨識的路徑") && l.contains("read_file")), "{:?}", logs.lock().unwrap());
+        // 指令照 execute 政策（這個工作者是 allow）：路徑寫在指令字串裡，不當讀取判定
+        assert!(run(vec![step(1, "run_command", json!({"CommandLine": format!("Get-ChildItem -Force -Path '{}'", p(&ssh))}))]).is_none());
+        // 沒登記的工具名：不中止，但記 log（只記工具名）；已登記的不記
+        logs.lock().unwrap().clear();
+        assert!(run(vec![step(1, "update_steps", json!({"steps": [{"status": "done", "title": "x"}]})), step(2, "read_file", json!({"Path": work_cwd.clone()})), step(3, "mystery_tool", json!({"Path": "secret-looking"}))]).is_none());
+        let l = logs.lock().unwrap().clone();
+        assert!(l.iter().any(|x| x.contains("mystery_tool") && x.contains("沒登記")), "{l:?}");
+        assert!(!l.iter().any(|x| x.contains("update_steps") || x.contains("read_file") && x.contains("沒登記")), "{l:?}");
+        assert!(!l.iter().any(|x| x.contains("secret-looking")), "log 不記參數：{l:?}");
+        // 寫入範圍不變：工作資料夾內放行；家目錄裡的一般位置照舊要求改寫（redirect）；敏感位置整輪中止不重導
+        let write = |path: &Path| run(vec![step(1, "write_file", json!({"TargetFile": p(path)}))]);
+        assert!(write(&PathBuf::from(&work_cwd).join("out.txt")).is_none());
+        let e = write(&home.path().join("Desktop").join("x.txt")).expect("資料夾外的寫入要中止");
+        assert!(e.redirect.is_some(), "一般位置要求改寫");
+        let e = write(&ssh).expect("敏感位置寫入要中止");
+        assert!(e.redirect.is_none());
+        // 標準 ACP（Grok）：讀取請求用同一個判定
+        let guard = args("小格讀").guard;
+        let req = |kind: &str, path: &Path| describe_acp_request(&json!({"toolCall": {"kind": kind, "locations": [{"path": p(path)}], "rawInput": {"path": p(path)}}}));
+        assert!(guard.ask_permission(req("read", &home.path().join("Desktop").join("a.txt"))).await, "資料夾外的一般檔可以讀");
+        assert!(!guard.ask_permission(req("read", &ssh)).await, "敏感檔不能讀");
+        assert!(!guard.ask_permission(req("search", home.path())).await, "遞迴搜尋含敏感位置的上層資料夾不能讀");
+        assert!(guard.ask_permission(req("read", home.path())).await, "單檔類請求的上層資料夾本身不算");
+        assert!(!guard.ask_permission(req("edit", &home.path().join("Desktop").join("x.txt"))).await, "寫入仍限工作資料夾");
         eng.stop();
     }
 

@@ -1,11 +1,13 @@
 //! ACP 工作者的權限政策與錯誤分類（純函式，不碰檔案、不碰行程）。對應 engines/acp-policy.mjs、acp-errors.mjs。
-//! 政策＝每個「類別」一個決定 allow／deny／ask，外加「白名單資料夾」（有路徑的讀寫請求，路徑在白名單外一律拒絕）。
+//! 政策＝每個「類別」一個決定 allow／deny／ask，外加「白名單資料夾」（有路徑的寫入請求，路徑在白名單外一律拒絕）。
 //!   read 讀檔搜尋思考、write 寫刪搬、execute 執行指令、network 上網（預設都是 allow）；other 分不出類別（預設 deny）。
-//!   寫入以白名單資料夾（預設只有工作者自己的工作資料夾）為界；執行指令沒有路徑可查，邊界只靠工作資料夾與 agents.json 的明寫設定。
-use super::acp_sensitive::SENSITIVE_HOME_DIRS;
+//!   寫入以白名單資料夾（預設只有工作者自己的工作資料夾）為界；讀取不限資料夾，只擋敏感位置（登入資料、金鑰、各工具的設定，見 acp_sensitive.rs）。
+//!   執行指令沒有路徑可查，敏感位置清單不是邊界：邊界只靠 agents.json 的明寫設定（要完全封閉就把 execute 與 network 都設 deny）。
+use super::acp_sensitive::{extract_read_paths, read_verdict, ReadCtx, ReadTool, ReadVerdict, SensitiveRoots, SENSITIVE_HOME_DIRS};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 pub const CATEGORIES: [&str; 5] = ["read", "write", "execute", "network", "other"];
 
@@ -62,17 +64,28 @@ pub fn category_of_acp_kind(kind: &str) -> &'static str {
     }
 }
 
-const AGY_READ: [&str; 6] = ["view_file", "list_dir", "find_by_name", "grep_search", "read_resource", "list_resources"];
-const AGY_WRITE: [&str; 5] = ["write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"];
-const AGY_EXEC: [&str; 5] = ["run_command", "send_command_input", "command_status", "notebook_execution", "execute_browser_javascript"];
+// 實機看到的工具名（agy 1.5.18）：read_file（參數 Path）、run_command（CommandLine）、update_steps；列目錄與搜尋都走 run_command。
+// 舊版名字（view_file、write_to_file…）一併保留
+const AGY_READ: [&str; 7] = ["read_file", "view_file", "list_dir", "find_by_name", "grep_search", "read_resource", "list_resources"];
+const AGY_WRITE: [&str; 7] = ["write_file", "edit_file", "write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"];
+// 會啟動指令、子代理、工作流程，或把訊息、排程送出去的，都照執行類的政策
+const AGY_EXEC: [&str; 12] = [
+    "run_command", "send_command_input", "command_status", "notebook_execution", "execute_browser_javascript", "run_workflow", "swarm", "invoke_subagent", "define_subagent", "manage_subagents", "send_message", "schedule",
+];
 const AGY_NET: [&str; 8] = ["read_url_content", "search_web", "open_browser_url", "read_browser_page", "capture_browser_console_logs", "capture_browser_screenshot", "list_browser_pages", "get_browser_dom"];
 const AGY_INTERNAL: &[&str] = &[
-    "finish", "wait", "wait_5_seconds", "ask_question", "ask_permission", "ask_custom_permission", "list_permissions", "manage_task", "manage_inbox", "manage_subagents", "define_subagent", "invoke_subagent",
-    "send_message", "schedule", "run_workflow", "delete_knowledge", "search_marketplace", "list_plugin_accounts", "call_mcp_tool", "generate_image"
+    "finish", "wait", "wait_5_seconds", "ask_question", "ask_permission", "ask_custom_permission", "list_permissions", "manage_task", "update_steps", "manage_inbox", "delete_knowledge", "search_marketplace", "list_plugin_accounts",
+    "call_mcp_tool", "generate_image"
 ];
 
+/// 這個工具名登記過嗎（五張表裡有）。沒登記的會用關鍵字推測類別，但呼叫端要記一行 log，不能默默放行
+pub fn is_registered_agy_tool(name: &str) -> bool {
+    let n = name.to_lowercase();
+    [&AGY_READ[..], &AGY_WRITE[..], &AGY_EXEC[..], &AGY_NET[..], AGY_INTERNAL].iter().any(|t| t.contains(&n.as_str()))
+}
+
 /// agy 原生 stream-json 的工具名 → 類別。"internal"＝代理自己的內部控制（規劃、等待、結束…），一律放行。
-/// 沒列到的新工具名用關鍵字推測；推測不出來視為 internal
+/// 沒登記的新工具名用關鍵字推測；推測不出來視為 internal（呼叫端用 is_registered_agy_tool 判斷要不要記 log）
 pub fn category_of_agy_tool(name: &str) -> &'static str {
     let n = name.to_lowercase();
     let n = n.as_str();
@@ -112,6 +125,8 @@ pub struct Permissions {
     pub allow_dirs: Vec<PathBuf>,
     /// 寫入再多一層限制（可選）：有設時，寫檔的路徑還要在這些資料夾裡（同時也必須在 allow_dirs 裡）；沒設就只看 allow_dirs（#708）
     pub write_dirs: Option<Vec<PathBuf>>,
+    /// 讀取不能碰的敏感位置（#2356）：工作者建立時用兩個家目錄算好放進來；None＝不檢查讀取（只有單元測試會是 None）
+    pub sensitive: Option<Arc<SensitiveRoots>>,
 }
 impl Permissions {
     pub fn rule(&self, c: &str) -> Verdict {
@@ -180,7 +195,7 @@ pub fn normalize_permissions(raw: Option<&Value>, cwd: &Path) -> (Permissions, V
             }
         },
     };
-    (Permissions { rules, allow_dirs: dirs, write_dirs }, warnings)
+    (Permissions { rules, allow_dirs: dirs, write_dirs, sensitive: None }, warnings)
 }
 
 fn norm(p: &Path) -> String {
@@ -202,26 +217,51 @@ pub struct Req {
     pub category: String,
     pub paths: Vec<String>,
     pub summary: String,
+    /// 工具名（agy）或請求種類（ACP），只用來寫 log
+    pub tool: String,
+    /// 讀取類才用：單檔、列舉或遞迴搜尋
+    pub read_tool: ReadTool,
 }
 
-/// 回傳（決定, 原因）。內部控制一律放行；讀寫類請求有路徑在白名單外就拒絕
+/// 讀取沒有帶路徑時的提醒（寫進 log 的原因文字）
+pub const NO_READ_PATH_NOTE: &str = "讀取請求沒有可辨識的路徑，無法檢查敏感位置";
+
+/// 讀取請求逐一判定：回傳（擋下的原因）。沒有敏感位置清單（None）或沒有路徑時不擋
+pub fn read_block_reason(roots: &SensitiveRoots, req: &Req, base: &Path) -> Option<(ReadVerdict, String)> {
+    let ctx = ReadCtx { roots, base, tool: req.read_tool };
+    req.paths.iter().find_map(|p| match read_verdict(p, &ctx) {
+        ReadVerdict::Allow => None,
+        ReadVerdict::Sensitive => Some((ReadVerdict::Sensitive, format!("這個位置不能讀（登入資料、金鑰或設定）：{}", redact(p)))),
+        ReadVerdict::Unresolvable => Some((ReadVerdict::Unresolvable, format!("路徑無法解析，偏向不讀：{}", redact(p)))),
+    })
+}
+
+/// 回傳（決定, 原因）。內部控制一律放行；寫入有路徑在白名單外就拒絕；讀取不看白名單資料夾，只擋敏感位置（#2356）
 pub fn decide(policy: &Permissions, req: &Req, base: &Path) -> (Verdict, String) {
     if req.category == "internal" {
         return (Verdict::Allow, "內部控制".into());
     }
     let rule = policy.rule(&req.category);
-    if req.category == "read" || req.category == "write" {
+    if req.category == "read" {
+        if let Some(roots) = &policy.sensitive {
+            if req.paths.is_empty() {
+                return (rule, format!("{}的政策是 {}（{NO_READ_PATH_NOTE}）", category_label(&req.category), rule.name()));
+            }
+            if let Some((_, why)) = read_block_reason(roots, req, base) {
+                return (Verdict::Deny, why);
+            }
+        }
+    }
+    if req.category == "write" {
         if let Some(out) = req.paths.iter().find(|p| !inside_dirs(p, &policy.allow_dirs, base)) {
             return (Verdict::Deny, format!("路徑在白名單資料夾之外：{}", redact(out)));
         }
-        if req.category == "write" {
-            if let Some(wd) = &policy.write_dirs {
-                if req.paths.is_empty() {
-                    return (Verdict::Deny, "有設可寫入的資料夾，但這次寫入沒有帶路徑，拒絕".into());
-                }
-                if let Some(out) = req.paths.iter().find(|p| !inside_dirs(p, wd, base)) {
-                    return (Verdict::Deny, format!("路徑不在可寫入的資料夾裡：{}", redact(out)));
-                }
+        if let Some(wd) = &policy.write_dirs {
+            if req.paths.is_empty() {
+                return (Verdict::Deny, "有設可寫入的資料夾，但這次寫入沒有帶路徑，拒絕".into());
+            }
+            if let Some(out) = req.paths.iter().find(|p| !inside_dirs(p, wd, base)) {
+                return (Verdict::Deny, format!("路徑不在可寫入的資料夾裡：{}", redact(out)));
             }
         }
     }
@@ -371,6 +411,12 @@ pub fn describe_acp_request(params: &Value) -> Req {
             paths.push(p.to_string());
         }
     }
+    // 讀取：參數裡所有像路徑的字串（含陣列、巢狀）都要逐一判定，不只認固定幾個欄位
+    if category == "read" {
+        if let Some(raw) = tc.get("rawInput") {
+            paths.extend(extract_read_paths(raw));
+        }
+    }
     paths.retain(|p| !p.is_empty());
     let cmd = match tc.pointer("/rawInput/command") {
         Some(Value::String(s)) => s.clone(),
@@ -388,7 +434,8 @@ pub fn describe_acp_request(params: &Value) -> Req {
     } else {
         "（沒有說明）".into()
     };
-    Req { category: category.into(), paths, summary: format!("{}：{what}", category_label(category)) }
+    let kind = tc.get("kind").and_then(Value::as_str).unwrap_or("");
+    Req { category: category.into(), paths, summary: format!("{}：{what}", category_label(category)), tool: kind.into(), read_tool: ReadTool::of_acp_kind(kind) }
 }
 
 /// agy tool_info.parameters → 路徑與摘要
@@ -396,15 +443,21 @@ pub fn describe_agy_tool(tool_name: &str, parameters: Option<&Value>) -> Req {
     let category = category_of_agy_tool(tool_name);
     let empty = serde_json::Map::new();
     let p = parameters.and_then(Value::as_object).unwrap_or(&empty);
-    let paths: Vec<String> = uniq(
-        p.iter()
-            .filter(|(k, v)| {
-                let l = k.to_lowercase();
-                ["path", "file", "dir", "target"].iter().any(|w| l.contains(w)) && v.as_str().map(|s| !s.is_empty()).unwrap_or(false)
-            })
-            .filter_map(|(_, v)| v.as_str().map(String::from))
-            .collect(),
-    );
+    let mut paths: Vec<String> = p
+        .iter()
+        .filter(|(k, v)| {
+            let l = k.to_lowercase();
+            ["path", "file", "dir", "target"].iter().any(|w| l.contains(w)) && v.as_str().map(|s| !s.is_empty()).unwrap_or(false)
+        })
+        .filter_map(|(_, v)| v.as_str().map(String::from))
+        .collect();
+    // 讀取：所有字串值（含陣列、巢狀）裡像路徑的都要逐一判定
+    if category == "read" {
+        if let Some(v) = parameters {
+            paths.extend(extract_read_paths(v));
+        }
+    }
+    let paths = uniq(paths);
     let cmd = p.get("CommandLine").or_else(|| p.get("command")).and_then(Value::as_str).unwrap_or("");
     let what = if !cmd.is_empty() {
         format!("指令：{}", clip(cmd, 160))
@@ -413,7 +466,7 @@ pub fn describe_agy_tool(tool_name: &str, parameters: Option<&Value>) -> Req {
     } else {
         clip(tool_name, 60)
     };
-    Req { category: category.into(), paths, summary: format!("{}：{what}", category_label(category)) }
+    Req { category: category.into(), paths, summary: format!("{}：{what}", category_label(category)), tool: tool_name.into(), read_tool: ReadTool::of_agy(&tool_name.to_lowercase()) }
 }
 
 // ---- 錯誤分類 ----
@@ -588,14 +641,99 @@ mod tests {
     }
 
     #[test]
-    fn 預設政策_開放_白名單外一律拒絕() {
+    fn agy_工具分類_實機看到的名字與登記表() {
+        for (n, c) in [
+            ("read_file", "read"),
+            ("write_file", "write"),
+            ("edit_file", "write"),
+            ("run_command", "execute"),
+            ("run_workflow", "execute"),
+            ("swarm", "execute"),
+            ("invoke_subagent", "execute"),
+            ("define_subagent", "execute"),
+            ("manage_subagents", "execute"),
+            ("send_message", "execute"),
+            ("schedule", "execute"),
+            ("search_web", "network"),
+            ("manage_task", "internal"),
+            ("update_steps", "internal"),
+            ("ask_question", "internal"),
+            ("READ_FILE", "read"),
+        ] {
+            assert_eq!(category_of_agy_tool(n), c, "{n}");
+            assert!(is_registered_agy_tool(n), "{n} 要在登記表裡");
+        }
+        for n in ["totally_new_tool", "", "make_patch_x", "browser_click"] {
+            assert!(!is_registered_agy_tool(n), "{n:?} 沒登記");
+        }
+    }
+
+    #[test]
+    fn 敏感讀取_決定_讀取不看白名單資料夾_只擋敏感位置() {
+        let d = tempfile::tempdir().unwrap();
+        let (home, work) = (d.path().join("home"), d.path().join("work"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&work).unwrap();
+        let (mut p, _) = normalize_permissions(None, &work);
+        p.sensitive = Some(Arc::new(SensitiveRoots::build(&[home.clone()], &[])));
+        let rd = |path: &Path| Req { category: "read".into(), paths: vec![s(path)], ..Default::default() };
+        // 資料夾外的一般檔可以讀，寫入範圍不變
+        assert_eq!(decide(&p, &rd(&home.join("Desktop").join("a.txt")), &work).0, Verdict::Allow);
+        assert_eq!(decide(&p, &rd(&d.path().join("elsewhere.txt")), &work).0, Verdict::Allow);
+        let wr = |path: &Path| Req { category: "write".into(), paths: vec![s(path)], ..Default::default() };
+        assert_eq!(decide(&p, &wr(&home.join("Desktop").join("a.txt")), &work).0, Verdict::Deny);
+        assert_eq!(decide(&p, &wr(&work.join("a.txt")), &work).0, Verdict::Allow);
+        // 敏感位置擋，原因不含內部代號
+        let (v, why) = decide(&p, &rd(&home.join(".ssh").join("id")), &work);
+        assert_eq!(v, Verdict::Deny);
+        assert!(why.contains("不能讀"), "{why}");
+        // 多個路徑只要一個敏感就擋
+        let mut two = rd(&work.join("a.txt"));
+        two.paths.push(s(&home.join(".aws").join("credentials")));
+        assert_eq!(decide(&p, &two, &work).0, Verdict::Deny);
+        // 沒帶路徑：照規則放行，原因講明沒有可辨識的路徑
+        let none = Req { category: "read".into(), ..Default::default() };
+        let (v, why) = decide(&p, &none, &work);
+        assert_eq!(v, Verdict::Allow);
+        assert!(why.contains(NO_READ_PATH_NOTE), "{why}");
+        // 遞迴搜尋對上層資料夾要擋，列舉放行
+        let mut up = rd(&home);
+        up.read_tool = ReadTool::Recursive;
+        assert_eq!(decide(&p, &up, &work).0, Verdict::Deny);
+        up.read_tool = ReadTool::List;
+        assert_eq!(decide(&p, &up, &work).0, Verdict::Allow);
+        // 讀取規則本身仍照政策（deny 就是 deny）
+        let (mut p2, _) = normalize_permissions(Some(&json!({"read": "deny"})), &work);
+        p2.sensitive = p.sensitive.clone();
+        assert_eq!(decide(&p2, &rd(&work.join("a.txt")), &work).0, Verdict::Deny);
+    }
+
+    #[test]
+    fn 敏感讀取_請求描述_取出所有像路徑的字串與讀取類別() {
+        let g = describe_agy_tool("read_file", Some(&json!({"Path": "C:\\fake\\a.txt", "Extra": ["~/b.txt"]})));
+        assert_eq!((g.category.as_str(), g.tool.as_str(), g.read_tool), ("read", "read_file", ReadTool::Single));
+        assert!(g.paths.contains(&"C:\\fake\\a.txt".to_string()) && g.paths.contains(&"~/b.txt".to_string()), "{:?}", g.paths);
+        assert_eq!(describe_agy_tool("grep_search", Some(&json!({"SearchPath": "/x"}))).read_tool, ReadTool::Recursive);
+        assert_eq!(describe_agy_tool("list_dir", Some(&json!({"DirectoryPath": "/x"}))).read_tool, ReadTool::List);
+        // 寫入類不多抽路徑（寫入範圍不變）
+        let w = describe_agy_tool("write_file", Some(&json!({"TargetFile": "/w/a", "Note": "/other/b"})));
+        assert_eq!(w.paths, vec!["/w/a".to_string()]);
+        let a = describe_acp_request(&json!({"toolCall": {"kind": "search", "rawInput": {"roots": ["/a", "/b"], "pattern": "x"}}}));
+        assert_eq!((a.category.as_str(), a.read_tool), ("read", ReadTool::Recursive));
+        assert!(a.paths.contains(&"/a".to_string()) && a.paths.contains(&"/b".to_string()), "{:?}", a.paths);
+        let e = describe_acp_request(&json!({"toolCall": {"kind": "edit", "rawInput": {"roots": ["/a"]}}}));
+        assert!(e.paths.is_empty(), "寫入類只認原本的欄位");
+    }
+
+    #[test]
+    fn 預設政策_開放_讀取不限資料夾_寫入限白名單() {
         let cwd = Path::new("/w/Gemini");
         let (p, warn) = normalize_permissions(None, cwd);
         assert!(warn.is_empty());
-        let req = |c: &str, paths: &[&str]| Req { category: c.into(), paths: paths.iter().map(|s| s.to_string()).collect(), summary: String::new() };
+        let req = |c: &str, paths: &[&str]| Req { category: c.into(), paths: paths.iter().map(|s| s.to_string()).collect(), ..Default::default() };
         assert_eq!(decide(&p, &req("read", &["/w/Gemini/a.txt"]), cwd).0, Verdict::Allow);
-        assert_eq!(decide(&p, &req("read", &["/etc/passwd"]), cwd).0, Verdict::Deny);
-        assert_eq!(decide(&p, &req("read", &["/w/Gemini/../x"]), cwd).0, Verdict::Deny, ".. 逃出白名單");
+        assert_eq!(decide(&p, &req("read", &["/etc/passwd"]), cwd).0, Verdict::Allow, "讀取不再受白名單資料夾限制");
+        assert_eq!(decide(&p, &req("read", &["/w/Gemini/../x"]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("write", &["/w/Gemini/a.txt"]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("write", &["/etc/x"]), cwd).0, Verdict::Deny, "預設開放仍擋資料夾外的寫入");
         assert_eq!(decide(&p, &req("write", &["/w/Gemini/../x"]), cwd).0, Verdict::Deny);
@@ -606,18 +744,18 @@ mod tests {
     }
 
     #[test]
-    fn write_dirs_只收窄寫入_讀仍看_allow_dirs() {
+    fn write_dirs_只收窄寫入_讀取不受影響() {
         let cwd = Path::new("/w/Review");
         let raw = json!({"write": "allow", "allow_dirs": ["/w/Review"], "write_dirs": ["/w/Review/_preview"]});
         let (p, warn) = normalize_permissions(Some(&raw), cwd);
         assert!(warn.is_empty());
-        let req = |c: &str, paths: &[&str]| Req { category: c.into(), paths: paths.iter().map(|s| s.to_string()).collect(), summary: String::new() };
+        let req = |c: &str, paths: &[&str]| Req { category: c.into(), paths: paths.iter().map(|s| s.to_string()).collect(), ..Default::default() };
         assert_eq!(decide(&p, &req("write", &["/w/Review/_preview/a.html"]), cwd).0, Verdict::Allow);
         assert_eq!(decide(&p, &req("write", &["/w/Review/_patches/x.diff"]), cwd).0, Verdict::Deny, "_patches 不在可寫資料夾");
         assert_eq!(decide(&p, &req("write", &["/w/Review/_preview/../_patches/x"]), cwd).0, Verdict::Deny, ".. 逃出可寫資料夾");
         assert_eq!(decide(&p, &req("write", &["/w/Review/_preview/a", "/w/Review/b"]), cwd).0, Verdict::Deny, "多個路徑只要一個在外面就拒絕");
         assert_eq!(decide(&p, &req("read", &["/w/Review/_patches/x.diff"]), cwd).0, Verdict::Allow, "讀不受 write_dirs 影響");
-        assert_eq!(decide(&p, &req("read", &["/etc/passwd"]), cwd).0, Verdict::Deny);
+        assert_eq!(decide(&p, &req("read", &["/etc/passwd"]), cwd).0, Verdict::Allow, "讀取不看 allow_dirs");
         // write_dirs 設在 allow_dirs 外面也寫不進去（兩層都要過）
         let raw2 = json!({"write": "allow", "allow_dirs": ["/w/Review"], "write_dirs": ["/elsewhere"]});
         let (p2, _) = normalize_permissions(Some(&raw2), cwd);
@@ -644,7 +782,7 @@ mod tests {
         assert_eq!(p.rule("write"), Verdict::Ask);
         assert_eq!(p.rule("execute"), Verdict::Allow);
         assert_eq!(warn.len(), 2);
-        assert_eq!(decide(&p, &Req { category: "write".into(), paths: vec!["/shared/x".into()], summary: String::new() }, cwd).0, Verdict::Ask);
+        assert_eq!(decide(&p, &Req { category: "write".into(), paths: vec!["/shared/x".into()], ..Default::default() }, cwd).0, Verdict::Ask);
     }
 
     // 遮蔽規則的共用表格：Node 端（relay/machine/test/acp-policy.test.mjs）讀同一份檔
@@ -684,7 +822,7 @@ mod tests {
         let (v, reason) = decide(&p, &d, cwd);
         assert_eq!(v, Verdict::Deny);
         assert!(!reason.contains("FAKE") && reason.contains(MASK), "{reason}");
-        let rw = Req { category: "write".into(), paths: vec![bad.to_string()], summary: String::new() };
+        let rw = Req { category: "write".into(), paths: vec![bad.to_string()], ..Default::default() };
         let (p2, _) = normalize_permissions(Some(&json!({"allow_dirs": ["/other"], "write_dirs": ["/w/Review"]})), cwd);
         let (_, reason2) = decide(&p2, &rw, cwd);
         assert!(!reason2.contains("FAKE"), "{reason2}");
