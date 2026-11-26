@@ -783,6 +783,11 @@ mod tests {
 
     /// proc_env＝交給工作者的環境（測試用假的家目錄放在這裡）；log＝接記錄的地方
     fn rec_engine_with(work: &Path, env: &Arc<FakeEnv>, agents: Option<Value>, proc_env: Vec<(String, String)>, log: crate::bridge::engines::rpc::Log) -> (AcpEngine, Rec) {
+        rec_engine_home(work, env, agents, proc_env, log, work)
+    }
+
+    /// home＝引擎拿到的這台電腦實際的使用者資料夾（ctx.home）
+    fn rec_engine_home(work: &Path, env: &Arc<FakeEnv>, agents: Option<Value>, proc_env: Vec<(String, String)>, log: crate::bridge::engines::rpc::Log, home: &Path) -> (AcpEngine, Rec) {
         if let Some(a) = agents {
             std::fs::write(work.join("agents.json"), a.to_string()).unwrap();
         }
@@ -791,7 +796,7 @@ mod tests {
         let ctx = EngineCtx {
             log,
             work_dir: work.to_path_buf(),
-            home: work.to_path_buf(),
+            home: home.to_path_buf(),
             agents_file: work.join("agents.json"),
             env: Arc::new(proc_env),
             events: tx,
@@ -1042,6 +1047,62 @@ mod tests {
         assert!(g.ask_permission(req(&work.join("attachments").join("a.txt"))).await, "附件");
         assert!(!g.ask_permission(req(&home.join(".asn").join("claude-accounts").join("x"))).await);
         assert!(!g.ask_permission(req(&work.join("acp-workers.json"))).await);
+        eng.stop();
+    }
+
+    /// 自己的資料夾有兩個位置（ASN 資料夾底下、機器工作資料夾底下的 workers/<名字>），ASN 資料夾搬到別處也成立；別人的、整個 workers 都不算
+    #[tokio::test]
+    async fn 自己的資料夾兩個位置_搬位置後也放行_別人的與整個_workers_照擋() {
+        let d = tempfile::tempdir().unwrap();
+        let home = d.path().join("home");
+        let asn = d.path().join("elsewhere").join("asnhome");
+        let work = asn.join("machine-T");
+        let (a, b) = (asn.join("workers").join("位置甲"), work.join("workers").join("位置乙"));
+        let others = [asn.join("workers").join("別人"), work.join("workers").join("別人"), asn.join("workers"), work.join("workers"), asn.join("key.bin")];
+        for p in [&home, &a, &b].into_iter().chain(others.iter().take(4)) {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        let q = tempfile::tempdir().unwrap();
+        let env = env_for(q.path());
+        let mut proc_env = crate::bridge::engines::acp_sensitive::env_without_homes();
+        proc_env.push(("USERPROFILE".into(), home.display().to_string()));
+        proc_env.push(("ASN_HOME".into(), asn.display().to_string()));
+        let p = |x: &Path| x.display().to_string();
+        let agents = json!({ "workers": [
+            { "name": "位置甲", "engine": "acp", "roster_engine": "gemini", "protocol": "agy-stream", "command": "node", "cwd": p(&a) },
+            { "name": "位置乙", "engine": "acp", "roster_engine": "gemini", "protocol": "agy-stream", "command": "node" } ] });
+        let (eng, rec) = rec_engine_home(&work, &env, Some(agents), proc_env, Arc::new(|_| {}), &home);
+        wait_spawns(&rec, 2).await;
+        let step = |tool: &str, params: Value| json!({"event": "step_update", "step_update": {"conversation_id": "c1", "step_index": 1, "state": "ACTIVE", "step_type": "tool", "tool_name": tool, "tool_info": {"name": tool, "parameters": params}}});
+        for (name, own) in [("位置甲", &a), ("位置乙", &b)] {
+            let args = driver_args().lock().unwrap().iter().rev().find(|(_, x)| x.cfg.name == name).map(|(_, x)| x.clone()).expect("找得到驅動參數");
+            assert_eq!(&args.cfg.cwd, own);
+            let run = |path: &Path| crate::bridge::engines::acp_agy::run_events_for_test(&args, vec![step("read_file", json!({"Path": p(path)}))]);
+            assert!(run(&own.join("x.md")).is_none(), "{name}：自己的資料夾");
+            for o in &others {
+                assert!(run(&o.join("x.md")).is_some(), "{name}：{}", o.display());
+            }
+        }
+        eng.stop();
+    }
+
+    /// 使用者資料夾由引擎帶進來的「這台電腦實際的使用者資料夾」算，環境裡沒有家目錄變數也要擋
+    #[tokio::test]
+    async fn 環境沒有家目錄變數_仍擋引擎給的使用者資料夾裡的敏感位置() {
+        let d = tempfile::tempdir().unwrap();
+        let (home, work, cwd) = (d.path().join("home"), d.path().join("work"), d.path().join("proj"));
+        for p in [&home.join(".ssh"), &work, &cwd] {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        let env = env_for(&cwd);
+        let agents = hand_written("家目錄", &cwd, "allow");
+        let (eng, rec) = rec_engine_home(&work, &env, Some(agents), crate::bridge::engines::acp_sensitive::env_without_homes(), Arc::new(|_| {}), &home);
+        wait_spawns(&rec, 1).await;
+        let args = driver_args().lock().unwrap().iter().rev().find(|(_, x)| x.cfg.name == "家目錄").map(|(_, x)| x.clone()).expect("找得到驅動參數");
+        let step = |path: &Path| json!({"event": "step_update", "step_update": {"conversation_id": "c1", "step_index": 1, "state": "ACTIVE", "step_type": "tool", "tool_name": "read_file", "tool_info": {"name": "read_file", "parameters": {"Path": path.display().to_string()}}}});
+        let run = |path: &Path| crate::bridge::engines::acp_agy::run_events_for_test(&args, vec![step(path)]);
+        assert!(run(&home.join(".ssh").join("id")).is_some());
+        assert!(run(&cwd.join("a.txt")).is_none(), "一般檔放行");
         eng.stop();
     }
 

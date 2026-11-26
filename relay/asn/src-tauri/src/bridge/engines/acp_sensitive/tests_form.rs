@@ -636,3 +636,73 @@ fn 放行資料夾_asn_資料夾改了位置也成立() {
     let plain = roots_for_worker(&[], home.clone(), "甲", &[&own], &asn.join("machine-T"));
     assert_eq!(v_in(&plain, &own, &asn.join("key.bin"), ReadTool::Single), ReadVerdict::Allow);
 }
+
+#[test]
+fn 放行資料夾_自己的資料夾有兩個位置_ASN_資料夾與機器工作資料夾_搬位置後也成立() {
+    let d = tempfile::tempdir().unwrap();
+    let home = d.path().join("home");
+    for asn in [home.join(".asn"), d.path().join("elsewhere").join("asnhome")] {
+        let work = asn.join("machine-T");
+        let (a, b) = (asn.join("workers").join("甲"), work.join("workers").join("甲"));
+        let others = [asn.join("workers").join("乙"), work.join("workers").join("乙"), asn.join("workers"), work.join("workers"), work.clone()];
+        for p in [&a, &b].into_iter().chain(others.iter()) {
+            std::fs::create_dir_all(p).unwrap();
+        }
+        let e = if asn.ends_with(".asn") { vec![] } else { kv(&[("ASN_HOME", &ps(&asn))]) };
+        for own in [&a, &b] {
+            let r = roots_for_worker(&e, home.clone(), "甲", &[own], &work);
+            assert_eq!(v_in(&r, own, &own.join("x.md"), ReadTool::Single), ReadVerdict::Allow, "{}", own.display());
+            for o in &others {
+                assert_eq!(v_in(&r, own, &o.join("x.md"), ReadTool::Single), ReadVerdict::Sensitive, "{}", o.display());
+            }
+            // 另一個位置的自己的資料夾：沒列進資料夾清單就不放行
+            let r2 = roots_for_worker(&e, home.clone(), "甲", &[&work], &work);
+            assert_eq!(v_in(&r2, own, &own.join("x.md"), ReadTool::Single), ReadVerdict::Sensitive);
+        }
+    }
+}
+
+#[test]
+fn 放行資料夾_改名後_舊名字的資料夾不再算自己的() {
+    let e = ex();
+    let old = e.work_dir.join("workers").join("甲");
+    std::fs::create_dir_all(&old).unwrap();
+    // 改名只換名字、資料夾不動：用新名字算，原本的資料夾對不上，擋下（已知限制）
+    let r = roots_for_worker(&[], e.home.clone(), "甲改", &[&old], &e.work_dir);
+    assert_eq!(v_in(&r, &old, &old.join("a.md"), ReadTool::Single), ReadVerdict::Sensitive);
+    let before = roots_for_worker(&[], e.home.clone(), "甲", &[&old], &e.work_dir);
+    assert_eq!(v_in(&before, &old, &old.join("a.md"), ReadTool::Single), ReadVerdict::Allow);
+}
+
+#[test]
+fn 放行資料夾_實際位置經捷徑落到_asn_資料夾其他位置_不放行() {
+    let e = ex();
+    let other = e.asn.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    // 附件資料夾是捷徑，指到 ASN 資料夾裡的別處
+    std::fs::remove_dir_all(e.work_dir.join("attachments")).unwrap();
+    link(&e.work_dir.join("attachments"), &other);
+    let own = e.work_dir.join("workers").join("甲");
+    std::fs::create_dir_all(&own).unwrap();
+    let r = roots_for_worker(&[], e.home.clone(), "甲", &[&own], &e.work_dir);
+    assert_eq!(v_in(&r, &own, &e.work_dir.join("attachments").join("x"), ReadTool::Single), ReadVerdict::Sensitive);
+    assert_eq!(v_in(&r, &own, &other.join("x"), ReadTool::Single), ReadVerdict::Sensitive);
+    // 自己的資料夾本身是捷徑，指到 ASN 資料夾裡的別處
+    std::fs::remove_dir_all(&own).unwrap();
+    link(&own, &other);
+    let r2 = roots_for_worker(&[], e.home.clone(), "甲", &[&own], &e.work_dir);
+    assert_eq!(v_in(&r2, &own, &own.join("x"), ReadTool::Single), ReadVerdict::Sensitive);
+    assert_eq!(v_in(&r2, &own, &other.join("x"), ReadTool::Single), ReadVerdict::Sensitive);
+}
+
+#[test]
+fn 放行資料夾_含上一層寫法的路徑不套放行() {
+    let e = ex();
+    let own = e.work_dir.join("workers").join("甲");
+    std::fs::create_dir_all(&own).unwrap();
+    let r = roots_for_worker(&[], e.home.clone(), "甲", &[&own], &e.work_dir);
+    assert_eq!(v_in(&r, &own, &own.join("a.md"), ReadTool::Single), ReadVerdict::Allow);
+    // 從自己的資料夾繞出去再繞回來的寫法：照擋
+    let detour = own.join("..").join("甲").join("a.md");
+    assert_eq!(v_in(&r, &own, &detour, ReadTool::Single), ReadVerdict::Sensitive);
+}

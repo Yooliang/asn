@@ -1,7 +1,8 @@
 //! 敏感位置裡明確放行的資料夾，和工作者建立時算清單的正式做法。
 //! 放行只開在這幾處（每個形式——字面與實際位置——都要各自落在裡面，經捷徑跳出去的照擋）：
-//! - 這位工作者自己的資料夾（機器工作資料夾底下的 `workers/<自己的名字>`，名字要過名字驗證）：
-//!   工作資料夾、白名單資料夾、寫入資料夾各自要落在它本身或底下；它本身是敏感根、或底下含別的敏感根時不放行
+//! - 這位工作者自己的資料夾（`<ASN 資料夾>/workers/<自己的名字>` 或 `<機器工作資料夾>/workers/<自己的名字>`，名字要過名字驗證）：
+//!   工作資料夾、白名單資料夾、寫入資料夾各自要落在它本身或底下；實際位置也要在同一個預期位置，不能經捷徑落到別處；
+//!   它本身是敏感根、或底下含別的敏感根時不放行
 //! - 收信附件的下載資料夾（可以整個關掉，見 ATTACHMENTS_READABLE）
 //! - agy 的內建說明檔（`.gemini/antigravity-cli/builtin/skills`）
 use super::*;
@@ -60,12 +61,24 @@ impl SensitiveRoots {
                 push_forms(&mut asn, Path::new(v.trim()), canon);
             }
         }
-        // 自己的容器：機器工作資料夾底下的 workers/<這位的名字>（名字要先過名字驗證），而且本身要嚴格在 ASN 資料夾底下
+        // 容器的位置一律由「上層的各形式＋固定的下一層」組出來，不去解開容器自己：容器自己若是捷徑，它的實際位置就不在預期位置，不放行。
+        // 自己的容器有兩個位置（名字要先過名字驗證）：ASN 資料夾底下的 workers/<名字>、機器工作資料夾底下的 workers/<名字>
+        let mut work_forms: Vec<String> = vec![];
+        push_forms(&mut work_forms, work_dir, canon);
         let mut own: Vec<String> = vec![];
         if crate::bridge::engines::acp_config::valid_name(name) {
-            push_forms(&mut own, &work_dir.join("workers").join(name), canon);
+            let n = nstr(name);
+            for base in asn.iter().chain(work_forms.iter()) {
+                let c = format!("{base}/workers/{n}");
+                if !own.contains(&c) {
+                    own.push(c);
+                }
+            }
         }
-        own.retain(|c| asn.iter().any(|a| c.starts_with(&format!("{a}/"))));
+        let strictly_in_asn = |c: &String| asn.iter().any(|a| c.starts_with(&format!("{a}/")));
+        own.retain(strictly_in_asn);
+        let mut att: Vec<String> = work_forms.iter().map(|w| format!("{w}/attachments")).collect();
+        att.retain(strictly_in_asn);
         let mut dirs: Vec<String> = vec![];
         // 每個形式（字面、實際位置）各自要落在指定的容器資料夾裡（容器本身算不算由 or_equal 決定）、而且底下不含別的敏感根才算；捷徑指到別處的那一種形式不收
         let roots = self.roots.clone();
@@ -85,7 +98,7 @@ impl SensitiveRoots {
             add(d, &own, true);
         }
         if attachments {
-            add(&work_dir.join("attachments"), &asn, false);
+            add(&work_dir.join("attachments"), &att, true);
         }
         for h in &self.home_paths {
             if let Some(gemini) = agy_brain(h).parent().and_then(Path::parent) {
