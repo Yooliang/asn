@@ -42,6 +42,7 @@ mod lastlogin;
 mod names;
 // 系統通知與寄件名保留字的判斷（純函式，電腦與手機都編；橋、改名驗證、relay 都用）
 mod notice_name;
+mod model_id;   // 模型代號的統一格式（#2386）：各平台共用，不加 cfg
 mod nowin;
 mod timeutil;
 mod nowplaying;
