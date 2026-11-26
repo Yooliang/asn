@@ -54,35 +54,22 @@ pub async fn query(vendor: Option<&str>, force: bool) -> Result<Value, String> {
 }
 
 /// 各家「同時」讀（總時間約等於最慢那一家），回傳順序與 `vendors` 相同。
-/// 同一家的單一飛行旗標在 `probe` 內，所以同一家仍不會同時跑兩個 CLI。不新增依賴：自己輪詢一組 future
+/// 同一家的單一飛行旗標在 `probe` 內，所以同一家仍不會同時跑兩個 CLI。
+/// 每家各開一個背景工作，再照 `vendors` 的順序逐一等；某一家 panic 只讓那一家回 error，不拖垮整個命令
 async fn read_all<F, Fut>(vendors: &[Vendor], fetch: F) -> Vec<VendorModels>
 where
     F: Fn(Vendor) -> Fut,
-    Fut: std::future::Future<Output = VendorModels>,
+    Fut: std::future::Future<Output = VendorModels> + Send + 'static,
 {
-    let mut pending: Vec<Option<std::pin::Pin<Box<Fut>>>> = vendors.iter().map(|v| Some(Box::pin(fetch(*v)))).collect();
-    let mut done: Vec<Option<VendorModels>> = vendors.iter().map(|_| None).collect();
-    std::future::poll_fn(|cx| {
-        let mut all = true;
-        for (slot, out) in pending.iter_mut().zip(done.iter_mut()) {
-            if let Some(f) = slot {
-                match f.as_mut().poll(cx) {
-                    std::task::Poll::Ready(r) => {
-                        *out = Some(r);
-                        *slot = None;
-                    }
-                    std::task::Poll::Pending => all = false,
-                }
-            }
-        }
-        if all { std::task::Poll::Ready(()) } else { std::task::Poll::Pending }
-    })
-    .await;
-    vendors
-        .iter()
-        .zip(done)
-        .map(|(v, d)| d.unwrap_or_else(|| VendorModels::error(*v, super::Code::SpawnFailed, "讀取沒有結果")))
-        .collect()
+    let handles: Vec<_> = vendors.iter().map(|v| crate::rt::spawn(fetch(*v))).collect();
+    let mut out = Vec::with_capacity(handles.len());
+    for (v, h) in vendors.iter().zip(handles) {
+        out.push(match h.await {
+            Ok(r) => r,
+            Err(e) => VendorModels::error(*v, super::Code::SpawnFailed, format!("讀取工作中斷：{e}")),
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -110,6 +97,26 @@ mod tests {
         let want: Vec<&str> = Vendor::ALL.iter().map(|v| v.id()).collect();
         assert_eq!(order, want, "順序維持 Vendor 固定順序");
         assert!(got.iter().all(|v| v.models.len() == 2), "內容各家都在");
+    }
+
+    #[test]
+    fn 某一家_panic_其他家照常回結果_那一家回_error() {
+        let got = crate::rt::block_on(read_all(&Vendor::ALL, |v| async move {
+            if v == Vendor::Codex {
+                panic!("測試用：這一家讀到一半炸掉");
+            }
+            many(v, 2)
+        }));
+        assert_eq!(got.len(), Vendor::ALL.len());
+        for (v, r) in Vendor::ALL.iter().zip(&got) {
+            assert_eq!(r.vendor, v.id(), "順序不變");
+            if *v == Vendor::Codex {
+                assert_eq!((r.status, r.code), (Status::Error, Some(Code::SpawnFailed)));
+                assert!(r.models.is_empty());
+            } else {
+                assert_eq!((r.status, r.models.len()), (Status::Ok, 2), "其他家照常");
+            }
+        }
     }
 
     #[test]
