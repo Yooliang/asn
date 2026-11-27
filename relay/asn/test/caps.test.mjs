@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 import { capsDesktop } from '../ui/shells/caps-desktop.mjs'
 import { capsAndroid } from '../ui/shells/caps-android.mjs'
 import { capsWeb } from '../ui/shells/caps-web.mjs'
-import { CAT_NEEDS, ITEM_NEEDS, catsFor, settingNeeds } from '../ui/lib/setting-needs.mjs'
+import { CAT_NEEDS, ITEM_NEEDS, catsFor, isRegistered, missingCatNeeds, settingNeeds } from '../ui/lib/setting-needs.mjs'
 import { SETTING_CATS } from '../ui/lib/settings-cats.mjs'
 import { MOBILE_SETTING_KEYS } from '../ui/lib/mobile-settings.mjs'
 
@@ -54,6 +54,15 @@ test('needs 裡出現的每個能力名稱都在表裡；類別層每一類都�
   assert.deepEqual(settingNeeds('cat.window'), ['tray', 'desktopWindow'])
   for (const t of ['mode', 'dpMode', 'toolbar', 'bubble', 'tabDim', 'groupDim']) assert.deepEqual(settingNeeds(t), [], `${t} 是設計選擇，不放進能力表`)
   assert.deepEqual(settingNeeds('不存在的指令'), [])
+})
+
+test('沒登記就紅：SETTING_CATS 每一類都要在類別需求表明確出現；沒登記的類別不放行', () => {
+  assert.deepEqual(missingCatNeeds(catKeys), [])
+  const { 'cat.voice': _removed, ...noVoice } = CAT_NEEDS
+  assert.deepEqual(missingCatNeeds(catKeys, noVoice), ['cat.voice'], '刪掉一類登記要被抓到')
+  assert.deepEqual(missingCatNeeds([...catKeys, 'brandNew']), ['cat.brandNew'], 'SETTING_CATS 多一類沒登記要被抓到')
+  assert.ok(!catsFor(capsDesktop, [...catKeys, 'brandNew']).includes('brandNew'), '沒登記的類別預設不放行')
+  assert.ok(isRegistered('frame') && isRegistered('mode') && !isRegistered('不存在的指令'), '需求是 [] 也算登記')
 })
 
 test('手機的設定類別由 caps-android 算出來，等於 F1 之前的 8 類（順序一樣）', () => {

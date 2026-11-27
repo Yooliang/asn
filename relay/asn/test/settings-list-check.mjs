@@ -57,18 +57,21 @@ export function dropRow(text, token) {
   return lines.join('\n')
 }
 
-// 平台欄：只能是「有…」或「無：原因」「無（原因）」；空白、只寫「無」、原因是「同上」都不行
+// 平台欄：只能是「有…」「無（平台）：原因」「無（未做）：原因」。
+// 舊寫法「無：原因」「無（原因）」不再接受；空白、只寫「無」、原因是「同上」也不行。
+// kind：'platform'＝平台本來就做不到；'todo'＝平台做得到、只是還沒做（有的話是 undefined）。
 export function parsePlatform(raw) {
   const s = String(raw ?? '').trim()
   if (!s) return { ok: false, has: false, reason: '', why: '空白' }
   if (s.startsWith('有')) return { ok: true, has: true, reason: '' }
   if (s.startsWith('無')) {
-    const m = /^無[：:（(]\s*(.+?)\s*[）)]?$/.exec(s)
-    const reason = m ? m[1] : ''
+    const m = /^無（(平台|未做)）[：:]\s*(.+)$/.exec(s)
+    if (!m) return { ok: false, has: false, reason: '', why: '「無」要寫成「無（平台）：原因」或「無（未做）：原因」' }
+    const reason = m[2].trim()
     if (reason.length < 4 || /^(同上|同左|如上|無)$/.test(reason)) return { ok: false, has: false, reason, why: '「無」後面要寫原因（不能只寫「同上」）' }
-    return { ok: true, has: false, reason }
+    return { ok: true, has: false, kind: m[1] === '平台' ? 'platform' : 'todo', reason }
   }
-  return { ok: false, has: false, reason: '', why: '要以「有」或「無：原因」開頭' }
+  return { ok: false, has: false, reason: '', why: '要以「有」或「無（平台）：原因」「無（未做）：原因」開頭' }
 }
 
 // 錨點：《檔案＃一段程式內容》，檔案路徑從 relay/asn/ 起算；內容必須真的在那個檔案裡
@@ -259,6 +262,22 @@ export function checkList(text, truth) {
     }
     for (const t of r.tokens) entries.push({ token: t, cat: r.cat, platforms, line: r.line })
 
+    // 平台欄與能力表雙向比對：這一列的 needs（同一列所有標記都相同）跟各平台的能力表比
+    if (truth.needs) {
+      // 只看第一個代號就夠：同一列其他代號的 needs 由下方 needs-row-mismatch 保證與第一個一致
+      const needs = r.tokens.length ? truth.needs.of(r.tokens[0]) : []
+      for (const [k, name] of Object.entries(COLS)) {
+        const p = platforms[k]
+        const caps = truth.needs.caps[k]
+        if (!p?.ok || !caps) continue
+        const unmet = needs.filter(n => caps[n] !== true)
+        const tok = r.tokens[0]
+        if (p.has && unmet.length) err('platform-has-unmet', `${tok} 的「${name}」欄寫「有」，但需要的能力 ${unmet.join('、')} 在${name}的能力表裡沒有`, r, tok)
+        if (p.kind === 'platform' && !unmet.length) err('platform-not-platform', `${tok} 的「${name}」欄寫「無（平台）」，但需要的能力（${needs.join('、') || '沒有特別需求'}）${name}的能力表都有；做得到只是沒做，請改標「無（未做）」`, r, tok)
+        if (p.kind === 'todo' && unmet.length) err('platform-todo-unmet', `${tok} 的「${name}」欄寫「無（未做）」，但需要的能力 ${unmet.join('、')} 在${name}的能力表裡沒有；平台本來就做不到，請改標「無（平台）」`, r, tok)
+      }
+    }
+
     for (const c of r.cells) {
       const rest = c.replace(ANCHOR_RE, '')
       if (LINE_REF_RE.test(rest)) err('anchor-linenum', `${r.tokens[0]}：還有「檔案:行號」的寫法（${LINE_REF_RE.exec(rest)[0]}），請改成《檔案＃程式內容》`, r, r.tokens[0])
@@ -269,6 +288,19 @@ export function checkList(text, truth) {
       }
     }
     if (r.head.includes('誰會讀它') && anchorsOf(colOf(r, '誰會讀它')).length === 0) err('anchor-none', `${r.tokens[0]}：「誰會讀它」沒有任何錨點`, r, r.tokens[0])
+  }
+
+  // 8 needs 登記：每個標記都要明確登記（[] 也要寫）、登記了清單沒有的也紅、同一列的標記 needs 要相同、每個類別都要登記
+  const nd = truth.needs
+  if (!nd) err('needs-truth', '缺 needs 標準答案（truth.needs），平台欄沒辦法跟能力表比對')
+  else {
+    for (const r of rows) {
+      for (const t of r.tokens) if (!nd.registered(t)) err('needs-unregistered', `${t} 沒有在 needs 登記（ui/lib/setting-needs.mjs；沒有特殊需求也要寫 []）`, r, t)
+      const base = nd.of(r.tokens[0]).join(',')
+      for (const t of r.tokens.slice(1)) if (nd.of(t).join(',') !== base) err('needs-row-mismatch', `${r.tokens[0]} 與 ${t} 在同一列，needs 卻不同（${base || '空'} ／ ${nd.of(t).join(',') || '空'}）`, r, t)
+    }
+    for (const t of nd.itemKeys) if (!have.has(t)) err('needs-extra', `needs 登記了清單沒有的標記 ${t}`, null, t)
+    for (const t of nd.missingCats) err('needs-cat-missing', `分類 ${t} 沒有在 needs 登記（沒有特殊需求也要寫 []）`, null, t)
   }
   return { errors, entries }
 }
