@@ -3,6 +3,8 @@
 import { LineIcon } from './lib/line-icons.mjs'
 import { capsDesktop } from './shells/caps-desktop.mjs'
 export const caps = capsDesktop   // 這個入口的平台能力表（#1763 F1）；目前還沒有元件使用
+import { ATTRS_DESKTOP, applyPlatformAttrs } from './shells/platform-attrs.mjs'
+applyPlatformAttrs(document.documentElement, ATTRS_DESKTOP)   // data-input／data-layout（#1763 F2）；目前沒有樣式用到
 import { listTimeText } from './lib/line-chat.mjs'
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { AsnCore } from './lib/core.mjs'
