@@ -196,6 +196,9 @@ enum Wait {
 /// 等服務起來時，容忍「沒測成」（指令沒送出）的次數上限
 const UNSURE_MAX: u32 = 3;
 
+/// 清單指令送出了、但連不上終端服務（它沒有在回應）時的原因字樣（數窗格數 `pane_count` 與重啟核對共用）
+pub const NOT_RUNNING: &str = "終端服務沒有在跑";
+
 pub struct Mux<'a> {
     pub runner: &'a dyn Runner,
     /// wezterm.exe（cli）
@@ -233,7 +236,7 @@ impl Mux<'_> {
     pub fn pane_count(&self) -> Result<usize, String> {
         let o = self.cli(&["list", "--format", "json"])?;
         if !o.success {
-            return Err("終端服務沒有在跑".into());
+            return Err(NOT_RUNNING.into());
         }
         let v: serde_json::Value = serde_json::from_str(&o.stdout).map_err(|_| "終端服務回的清單看不懂".to_string())?;
         // 只數夥伴的窗格（workspace asn-N）。mux.lua 有 exit_behavior = "Hold"，窗格 0 的 cmd 結束後畫面會留著（workspace default），

@@ -1505,12 +1505,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 工作管理員的「重啟終端服務」：抓名單 → 停 → 起新的 → 名單交給 `resume`。流程與失敗處理見 `mux_restart::run_steps`。
     /// 呼叫端要放在背景執行緒（停與起各要等幾秒）
     /// `down`：起新的失敗、有夥伴斷線時呼叫（呼叫端排通知給本人）
-    pub fn restart_mux(&self, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
-        self.restart_mux_with(|m| m.ensure().map(|_| ()), resume, down)
+    /// `confirmed`：本人已確認「終端服務沒有回應也要重啟」（第一次呼叫給 false；回 `NeedConfirm` 後畫面問過本人，再帶 true 呼叫）
+    pub fn restart_mux(&self, confirmed: bool, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
+        self.restart_mux_with(confirmed, |m| m.ensure().map(|_| ()), resume, down)
     }
 
     /// 同 [`Self::restart_mux`]，「起新的」由外面給（測試用：數它被叫了幾次）
-    fn restart_mux_with(&self, ensure: impl FnOnce(&super::mux::Mux<'_>) -> Result<(), String>, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
+    fn restart_mux_with(&self, confirmed: bool, ensure: impl FnOnce(&super::mux::Mux<'_>) -> Result<(), String>, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
         use super::mux_restart::{run_steps, RestartError, STASH, STOP_NOT_RUNNING};
         let m = self.restart_mux_handle()?;
         let note = |l: &str| {
@@ -1534,12 +1535,22 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     let managed = self.managed_mux_panes(live);
                     if panes > managed { Err(RestartError::Unmanaged(panes - managed)) } else { Ok(()) }
                 }
-                // 數不出來＝無法確認沒有 ASN 沒記錄的視窗：不確定就不結束服務（排隊沒送出、逾時＝忙碌，請稍後再試；其他＝一般失敗）
+                // 數不出來＝無法確認沒有 ASN 沒記錄的視窗，分三種：
+                // 1. 排隊沒送出、被暫停略過（指令根本沒問到）＝忙碌，請稍後再試；就算本人確認過也一樣，沒有依據
+                // 2. 真的逾時、或連不上（服務沒有回應，卡住的服務最需要重啟）＝要本人確認一次；確認後照 ASN 的記錄重啟
+                // 3. 執行檔起不來、清單看不懂＝一般失敗，不重啟
                 Err(e) => {
-                    let busy = super::cli_gate::not_sent(&e) && !e.starts_with(super::wezterm::CANNOT_RUN) || e.contains("指令逾時");
-                    if busy {
-                        note("工作管理員重啟終端服務：核對時終端服務忙碌（沒送出或逾時），不重啟");
+                    let not_sent = super::cli_gate::not_sent(&e) && !e.starts_with(super::wezterm::CANNOT_RUN);
+                    let no_reply = e.contains("指令逾時") || e == super::mux::NOT_RUNNING;
+                    if not_sent {
+                        note("工作管理員重啟終端服務：核對時終端服務忙碌（指令沒送出），不重啟");
                         Err(RestartError::Busy(e))
+                    } else if no_reply && confirmed {
+                        note(&format!("工作管理員重啟終端服務：核對時終端服務沒有回應（{e}），本人已確認，照 ASN 的記錄重啟"));
+                        Ok(())
+                    } else if no_reply {
+                        note("工作管理員重啟終端服務：核對時終端服務沒有回應，等本人確認");
+                        Err(RestartError::NeedConfirm(e))
                     } else {
                         note("工作管理員重啟終端服務：數不出服務裡的視窗數，無法核對，不重啟");
                         Err(RestartError::Failed(e))
@@ -4431,6 +4442,8 @@ mod tests {
         gui_procs: RefCell<Vec<(u32, Vec<String>)>>,
         /// `cli list` 一律回這個錯（模擬排隊沒送出、逾時）
         list_err: RefCell<Option<String>>,
+        /// 真＝`cli list` 送出了但連不上服務（指令失敗退出）
+        list_down: RefCell<bool>,
     }
 
     fn default_list_clients_json() -> String {
@@ -4464,6 +4477,7 @@ mod tests {
             window_up: RefCell::new(false),
             gui_procs: RefCell::new(Vec::new()),
             list_err: RefCell::new(None),
+            list_down: RefCell::new(false),
         }
     }
 
@@ -4509,6 +4523,9 @@ mod tests {
             } else if kind == "list" {
                 if let Some(e) = self.inner.list_err.borrow().clone() {
                     return Err(e);
+                }
+                if *self.inner.list_down.borrow() {
+                    return Ok(wezterm::RunOutput { success: false, stdout: String::new(), stderr: "連不上".into(), code: None });
                 }
                 if let Some(f) = self.inner.on_list.borrow_mut().take() {
                     f();
@@ -6772,14 +6789,14 @@ mod tests {
             use crate::launch::mux_restart::RestartError;
             let (mut rig, _) = mux_rig();
             rig.svc.set_use_mux(false);
-            assert_eq!(rig.svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知")), Err(RestartError::NoMux), "沒開服務模式才是沒有服務");
+            assert_eq!(rig.svc.restart_mux(false, |_| panic!("不該接回"), |_| panic!("不該通知")), Err(RestartError::NoMux), "沒開服務模式才是沒有服務");
             // 開著服務模式、但找不到終端程式（拿不到控制）
             let d = tempfile::tempdir().unwrap();
             let fs = FakeFs { files: Rc::new(RefCell::new(HashSet::new())) };
             let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
             let mut svc = TermService::without_wezterm(d.path().join("wezterm-terms.json"), "H".into(), runner.clone(), fs);
             svc.set_use_mux(true);
-            let r = svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知"));
+            let r = svc.restart_mux(false, |_| panic!("不該接回"), |_| panic!("不該通知"));
             assert!(matches!(r, Err(RestartError::Failed(_))), "用了服務卻拿不到控制要回失敗：{r:?}");
             assert!(runner.killed().is_empty(), "什麼都不動");
         }
@@ -6794,6 +6811,7 @@ mod tests {
             let got = std::cell::RefCell::new(None::<Vec<String>>);
             let ensured = std::cell::Cell::new(0);
             let r = rig.svc.restart_mux_with(
+                false,
                 |_| {
                     ensured.set(ensured.get() + 1);
                     Ok(())
@@ -6812,28 +6830,84 @@ mod tests {
         fn _1860f_重啟終端服務_服務裡有_asn_沒記錄的窗格_不動手() {
             use crate::launch::mux_restart::{RestartError, UNMANAGED_TEXT};
             let (rig, _) = mux_rig();
-            let r = rig.svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知"));
+            let r = rig.svc.restart_mux(false, |_| panic!("不該接回"), |_| panic!("不該通知"));
             assert_eq!(r, Err(RestartError::Unmanaged(1)));
             assert_eq!(r.unwrap_err().text(), UNMANAGED_TEXT);
             assert!(rig.runner.killed().is_empty(), "核對不過不能停服務");
         }
 
-        /// 2429 複審：核對時數窗格數沒送出（排隊）或逾時＝不確定，中止重啟、不結束服務、不起新的、不接回，回白話的「忙碌」
+        /// 2429 複審：核對時指令根本沒送出（排隊沒位子、被暫停略過）＝沒問到，中止重啟、不結束服務、不起新的、不接回，回白話的「忙碌」；
+        /// 就算本人確認過也一樣（沒問到，確認沒有依據）
         #[test]
-        fn _2429_重啟終端服務_核對時沒送出或逾時_中止不殺() {
+        fn _2429_重啟終端服務_核對時沒送出_中止不殺_帶確認也一樣() {
             use crate::launch::mux_restart::{RestartError, SERVICE_BUSY_TEXT};
-            for err in [format!("{}（排隊等不到位子）", crate::launch::cli_gate::QUEUE_TIMEOUT), crate::launch::cli_gate::SKIPPED.to_string(), "WezTerm 指令逾時（15 秒），已結束該子行程".to_string()] {
-                let (rig, _) = mux_rig();
-                *rig.runner.inner.list_err.borrow_mut() = Some(err.clone());
-                let r = rig.svc.restart_mux_with(|_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
-                assert!(matches!(r, Err(RestartError::Busy(_))), "{err}：要回忙碌：{r:?}");
-                assert_eq!(r.unwrap_err().text(), SERVICE_BUSY_TEXT);
-                assert!(rig.runner.killed().is_empty(), "{err}：核對不到不能結束服務");
+            for err in [format!("{}（排隊等不到位子）", crate::launch::cli_gate::QUEUE_TIMEOUT), crate::launch::cli_gate::SKIPPED.to_string()] {
+                for confirmed in [false, true] {
+                    let (rig, _) = mux_rig();
+                    *rig.runner.inner.list_err.borrow_mut() = Some(err.clone());
+                    let r = rig.svc.restart_mux_with(confirmed, |_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+                    assert!(matches!(r, Err(RestartError::Busy(_))), "{err}（確認={confirmed}）：要回忙碌：{r:?}");
+                    assert_eq!(r.unwrap_err().text(), SERVICE_BUSY_TEXT);
+                    assert!(rig.runner.killed().is_empty(), "{err}：核對不到不能結束服務");
+                }
             }
-            // 清單看不懂（跟忙碌無關的失敗）：同樣不殺，回一般失敗
+        }
+
+        /// 2429 三審：真的逾時、或連不上（服務沒有回應）＝兩段確認。第一次不結束任何程序、回「需要確認」；
+        /// 帶確認再呼叫才照 ASN 的記錄走原流程（結束舊服務、起新的）
+        #[test]
+        fn _2429_重啟終端服務_逾時或連不上_兩段確認() {
+            use crate::launch::mux_restart::{RestartError, NEED_CONFIRM_TEXT};
+            for (what, down) in [("逾時", false), ("連不上", true)] {
+                let setup = || {
+                    let (rig, paths) = mux_rig();
+                    if down {
+                        *rig.runner.inner.list_down.borrow_mut() = true;
+                    } else {
+                        *rig.runner.inner.list_err.borrow_mut() = Some("WezTerm 指令逾時（15 秒），已結束該子行程".to_string());
+                    }
+                    (rig, paths)
+                };
+                let (rig, _) = setup();
+                let r = rig.svc.restart_mux_with(false, |_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+                assert!(matches!(r, Err(RestartError::NeedConfirm(_))), "{what}：第一次要回需要確認：{r:?}");
+                assert_eq!(r.unwrap_err().text(), NEED_CONFIRM_TEXT);
+                assert!(rig.runner.killed().is_empty(), "{what}：第一次不能結束任何程序");
+                // 本人確認後：照原流程
+                let ensured = std::cell::Cell::new(0);
+                let got = std::cell::RefCell::new(None::<Vec<String>>);
+                let r = rig.svc.restart_mux_with(
+                    true,
+                    |_| {
+                        ensured.set(ensured.get() + 1);
+                        Ok(())
+                    },
+                    |n| *got.borrow_mut() = Some(n),
+                    |_| panic!("起得來就不該通知斷線"),
+                );
+                assert_eq!(r, Ok(()), "{what}：確認後照原流程：{r:?}");
+                assert_eq!(ensured.get(), 1, "{what}：確認後要起新的");
+                assert!(got.borrow().is_some(), "{what}：起好後交出名單接回");
+                assert!(!rig.runner.killed().is_empty(), "{what}：確認後才結束舊服務");
+            }
+        }
+
+        /// 2429 三審：執行檔起不來、清單看不懂＝一般失敗，維持中止（帶確認也不重啟）
+        #[test]
+        fn _2429_重啟終端服務_起不來或看不懂_維持失敗() {
+            use crate::launch::mux_restart::RestartError;
+            for err in ["WezTerm cli 失敗：假的".to_string(), format!("{} W/wezterm.exe：找不到檔案", wezterm::CANNOT_RUN)] {
+                for confirmed in [false, true] {
+                    let (rig, _) = mux_rig();
+                    *rig.runner.inner.list_err.borrow_mut() = Some(err.clone());
+                    let r = rig.svc.restart_mux_with(confirmed, |_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+                    assert!(matches!(r, Err(RestartError::Failed(_))), "{err}（確認={confirmed}）：{r:?}");
+                    assert!(rig.runner.killed().is_empty(), "{err}：不能結束服務");
+                }
+            }
             let (rig, _) = mux_rig();
             *rig.runner.inner.list_err.borrow_mut() = Some("WezTerm cli 失敗：假的".into());
-            let r = rig.svc.restart_mux_with(|_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+            let r = rig.svc.restart_mux_with(false, |_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
             assert!(matches!(r, Err(RestartError::Failed(_))), "{r:?}");
             assert!(rig.runner.killed().is_empty());
         }
@@ -6845,6 +6919,7 @@ mod tests {
             *rig.runner.inner.list_json.borrow_mut() = "[]".into();
             let ensured = std::cell::Cell::new(0);
             let r = rig.svc.restart_mux_with(
+                false,
                 |_| {
                     ensured.set(ensured.get() + 1);
                     Ok(())
@@ -6862,7 +6937,7 @@ mod tests {
         fn _1860f_重啟終端服務_做完放掉開窗格的鎖() {
             let (rig, paths) = mux_rig();
             std::fs::remove_file(&paths.pid).unwrap();
-            let _ = rig.svc.restart_mux(|_| {}, |_| {});
+            let _ = rig.svc.restart_mux(false, |_| {}, |_| {});
             let m = rig.svc.restart_mux_handle().unwrap();
             assert!(m.open_lock().is_ok(), "鎖要放掉了");
         }

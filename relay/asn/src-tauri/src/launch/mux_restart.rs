@@ -114,6 +114,8 @@ pub enum RestartError {
     Unmanaged(usize),
     /// 核對時終端服務忙碌（指令排隊沒送出、或逾時沒回應），數不出裡面有幾個視窗：不確定就不結束服務（原因類別只寫 log）
     Busy(String),
+    /// 核對時終端服務真的沒有回應（逾時、或連不上）：數不出裡面的視窗，要本人再確認一次才照 ASN 的記錄重啟（原因只寫 log）
+    NeedConfirm(String),
     /// 舊服務已停、新的起不來：代理現在是斷線的（原因只寫 log）；名單已存，再按一次重啟會接回
     Down(String),
 }
@@ -127,10 +129,14 @@ pub const UNMANAGED_TEXT: &str = "終端服務裡有 ASN 沒有記錄的視窗�
 /// 核對時終端服務忙碌、沒有重啟：給畫面的白話字
 pub const SERVICE_BUSY_TEXT: &str = "終端服務暫時忙碌，沒有重啟。請稍後再試。";
 
+/// 核對時終端服務沒有回應、要本人再確認時給畫面的白話字（確認框的內文）
+pub const NEED_CONFIRM_TEXT: &str = "終端服務沒有回應，數不出裡面的視窗；仍要重啟的話，沒記錄的視窗也會一起關掉。";
+
 impl RestartError {
     /// 給畫面的白話字
     pub fn text(&self) -> &'static str {
         match self {
+            RestartError::NeedConfirm(_) => NEED_CONFIRM_TEXT,
             RestartError::NoMux => NO_MUX_TEXT,
             RestartError::Failed(_) => FAIL_TEXT,
             RestartError::Unmanaged(_) => UNMANAGED_TEXT,
@@ -321,6 +327,15 @@ mod tests {
         let (r, calls) = flow_full(&Stash::new(), two(), Err(RestartError::Unmanaged(2)), Ok(()), Ok(()));
         assert_eq!(r, Err(RestartError::Unmanaged(2)));
         assert_eq!(r.unwrap_err().text(), UNMANAGED_TEXT);
+        assert_eq!(calls, ["名單", "核對"]);
+    }
+
+    /// 2429 三審：核對時服務沒有回應＝需要確認：不停、不起、不接回、不通知；畫面是白話字
+    #[test]
+    fn _2429_核對要確認就不動服務() {
+        let (r, calls) = flow_full(&Stash::new(), two(), Err(RestartError::NeedConfirm("逾時".into())), Ok(()), Ok(()));
+        assert!(matches!(r, Err(RestartError::NeedConfirm(_))));
+        assert_eq!(r.unwrap_err().text(), NEED_CONFIRM_TEXT);
         assert_eq!(calls, ["名單", "核對"]);
     }
 
