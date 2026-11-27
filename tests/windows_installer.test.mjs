@@ -127,6 +127,70 @@ test('完整流程：註冊 → 金鑰與 node 檔 → 程式複製 → 再跑�
   await srv.close()
 })
 
+// 安裝後資料夾裡每個 .mjs 的相對 import 都要找得到檔案（bridge.mjs 會引用 ../shared/…）
+function missingImports(root) {
+  const missing = []
+  const walkDir = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => (e.isDirectory() ? walkDir(path.join(d, e.name)) : [path.join(d, e.name)]))
+  let checked = 0
+  for (const f of walkDir(path.join(root, 'app')).filter(x => x.endsWith('.mjs'))) {
+    const src = fs.readFileSync(f, 'utf8')
+    for (const m of src.matchAll(/(?:from\s+|import\s*\(\s*|import\s+|new URL\(\s*)['"](\.{1,2}\/[^'"]+)['"]/g)) {
+      checked++
+      const target = path.resolve(path.dirname(f), m[1])
+      if (!fs.existsSync(target)) missing.push(`${path.relative(root, f)} -> ${m[1]}`)
+    }
+  }
+  return { missing, checked }
+}
+
+test('shared 資料夾：安裝、更新都放到 app 旁邊（bridge 的 ../shared 引用找得到），解除安裝一併刪除', { skip: !WIN }, async () => {
+  const srv = await fakeRelay({ invites: { SH1: {} } })
+  const x = extracted(), home = tmp('irori-home-')
+  const root = irori(home), sh = path.join(root, 'shared')
+  const need = ['agent-tools-detect.mjs', 'launcher-profiles.mjs', 'sensitive-roots.json']
+
+  const pv = await ps(path.join(x, 'install.ps1'), ['-WhatIf', '-HomeDir', home, '-BaseUrl', srv.url])
+  assert.match(pv.out, /共用檔/, '第一次安裝的預覽要列出會複製 shared')
+
+  const r = await ps(path.join(x, 'install.ps1'), [...base, '-InviteCode', 'SH1', '-NodeId', 'S-pc1', '-DisplayName', 'n', '-HomeDir', home, '-BaseUrl', srv.url])
+  assert.equal(r.code, 0, r.out)
+  for (const f of need) assert.ok(fs.existsSync(path.join(sh, f)), `安裝後要有 shared/${f}`)
+  const a = missingImports(root)
+  assert.deepEqual(a.missing, [], '安裝後 bridge 等程式引用的檔案不能缺')
+  assert.ok(a.checked > 20)
+
+  // 更新路徑：shared 被刪掉、被塞了舊檔，更新後要補回並清掉殘留
+  fs.rmSync(sh, { recursive: true, force: true })
+  fs.mkdirSync(sh); fs.writeFileSync(path.join(sh, 'stale-old.mjs'), '// 舊的')
+  const pvUp = await ps(path.join(x, 'install.ps1'), ['-WhatIf', '-HomeDir', home, '-BaseUrl', srv.url])
+  assert.match(pvUp.out, /shared/, '更新的預覽要列出會換 shared')
+  assert.ok(fs.existsSync(path.join(sh, 'stale-old.mjs')), '預覽不能動 shared')
+  const up = await ps(path.join(x, 'install.ps1'), [...base, '-HomeDir', home, '-BaseUrl', srv.url])
+  assert.equal(up.code, 0, up.out); assert.match(up.out, /只更新程式/)
+  for (const f of need) assert.ok(fs.existsSync(path.join(sh, f)), `更新後要有 shared/${f}`)
+  assert.ok(!fs.existsSync(path.join(sh, 'stale-old.mjs')), '更新要清掉 shared 的舊殘留')
+  assert.deepEqual(missingImports(root).missing, [])
+
+  // 解除安裝：shared 一起刪
+  const un = await ps(path.join(root, 'uninstall', 'uninstall.ps1'), ['-NonInteractive', '-DeleteData', '-HomeDir', home, '-BaseUrl', srv.url])
+  assert.equal(un.code, 0, un.out)
+  assert.ok(!fs.existsSync(sh), '解除安裝後 shared 要被刪掉')
+  assert.ok(!fs.existsSync(path.join(root, 'app')))
+  await srv.close()
+})
+
+test('zip 缺 shared 資料夾：安裝停下來用白話說明，不註冊、不留任何檔案', { skip: !WIN }, async () => {
+  const srv = await fakeRelay({ invites: { NS1: {} } })
+  const x = extracted(), home = tmp('irori-home-')
+  fs.rmSync(path.join(x, 'shared'), { recursive: true, force: true })
+  const r = await ps(path.join(x, 'install.ps1'), [...base, '-InviteCode', 'NS1', '-NodeId', 'NS-1', '-DisplayName', 'n', '-HomeDir', home, '-BaseUrl', srv.url])
+  assert.equal(r.code, 1, r.out)
+  assert.match(r.out, /shared/); assert.match(r.out, /解壓縮/)
+  assert.deepEqual(dirEntries(irori(home)), [], '缺檔時不能留下任何東西')
+  assert.equal(srv.registers.length, 0, '缺檔時不能註冊')
+  await srv.close()
+})
+
 test('解除安裝：不刪資料時金鑰留著；pid 檔過期（pid 已被別的程式重用）不結束那個程序', { skip: !WIN }, async () => {
   const x = extracted(), home = tmp('irori-home-')
   const work = path.join(irori(home), 'machine-K1')
