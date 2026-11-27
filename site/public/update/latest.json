@@ -1,15 +1,11 @@
 {
-  "version": "0.2.102",
-  "notes": "- 改善：ASN 開出來的 Gemini、Grok 預設就能寫檔和執行指令，不用再到設定裡打開\n- 修正：Gemini 把文件存在自己的對話資料夾時，不會再被中止",
-  "pub_date": "2026-11-26T05:41:32.044Z",
+  "version": "0.2.103",
+  "notes": "- 改善：開新夥伴拿掉「運行」選項，選了廠牌就自動用最合適的開法\n- 新功能：開新夥伴和切換模型時可以選型號，清單由這台電腦實際偵測\n- 改善：背景夥伴可以讀這台電腦上的檔案，敏感檔仍然擋住；寫檔範圍不變\n- 修正：手機開 pi 夥伴時，選的型號會確實帶過去\n- 修正：寄出的長圖縮放後字看得清楚\n- 修正：停止 agy 夥伴時，它開出來的程式也會一起結束",
+  "pub_date": "2026-11-27T00:17:58.274Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnhjYTZndktPdlVUT3RqRkVaayt1bTJ4cDFpUHJ6WUhnbmZ2REl3N093Q1ltN2ZqTVRCUGhSYkRrNk53L3lseUU5REpyaHFRL1dSZE9KUFR3L085QkFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjcxNjkxCWZpbGU6QVNOXzAuMi4xMDJfeDY0LXNldHVwLmV4ZQpJMnlvN0l0WmptWkhUTVJ4dlQxTVNuQXBjVGRZckpoZ2ROMzBhWFZFRGZWRXJGUHZSZTBXdTJ2MVpjKzltMmdheWNFMjNVaklkb1p4cnp2Q1lpRzBBQT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.102_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjN2ekt3ekttcW1JV3NlU21vVzQ2eElPeGJMQTR0QytRNVdydDdlOWU1Z2l0MUpYZzJybk9FRDdXdG5rU0cvVzQ5Sk9PNnRQRGFvaW5OK2s5QjV1T2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NjcyMzA0CWZpbGU6QVNOXzAuMi4xMDJfYW1kNjQuQXBwSW1hZ2UKNUorTm9vMUFsY2ZJeW15SzZpdTVHSzNjbWdHd213cG5oZnhiUDBWd2c3NGJrdVo0dVVPdkFWbzloMi9zZDhlbTRCZ1FZbFFjQlRJT1Y3TkxWcVROQUE9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.102_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybnlXVURQRFhEcTRlcnhjNHRNVVlaZ3EydnBPb1ZaUThYMzE0M1VOWFFUQmRYblFxSUg4bkNPMG4rMVJSR28xOHNpZi9tTFZIbXFTQzZKTVJvN2RhMVFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NzM4Njc3CWZpbGU6QVNOXzAuMi4xMDNfeDY0LXNldHVwLmV4ZQpMT005NHhSWEM4aXp1WjJMc2dHdzlNR1draEl3eUd6VGV4SFJyczQvKy9LSzk4Zndnc3Z6UDNocXk1eENZRFg3S0RtSkpQaXRheTFGUm5SM1JTQkxCdz09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.103_x64-setup.exe"
     }
   }
 }
