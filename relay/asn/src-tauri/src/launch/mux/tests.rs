@@ -65,7 +65,7 @@ impl Runner for Fake {
         let n = self.tries.get();
         self.tries.set(n + 1);
         let up = self.alive_after.get().is_some_and(|k| n >= k) || (self.alive_once_started && !self.started.borrow().is_empty());
-        Ok(RunOutput { success: up, stdout: if up { self.list_json.clone() } else { String::new() }, stderr: String::new() })
+        Ok(RunOutput { success: up, stdout: if up { self.list_json.clone() } else { String::new() }, stderr: String::new(), code: None })
     }
     fn spawn(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>) -> Result<u32, String> {
         unreachable!("mux 一律用 spawn_detached 起")
@@ -1257,7 +1257,7 @@ mod stuck {
     struct Minimal;
     impl Runner for Minimal {
         fn run(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>, _t: Duration) -> Result<RunOutput, String> {
-            Ok(RunOutput { success: false, stdout: String::new(), stderr: String::new() })
+            Ok(RunOutput { success: false, stdout: String::new(), stderr: String::new(), code: None })
         }
         fn spawn(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>) -> Result<u32, String> {
             unreachable!()

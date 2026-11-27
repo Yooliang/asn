@@ -35,6 +35,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+/// 重開後認回先前的列與暫時接不回的列的重試（#2424）
+#[path = "term_reclaim.rs"]
+mod reclaim_rows;
+#[cfg(feature = "gui")]
+pub use reclaim_rows::start_reclaim_retry;
+
 /// ASN 自己的 WezTerm 設定檔內容（隔離，不讀使用者的 ~/.wezterm.lua）。
 /// exit_behavior = "Hold"：程式結束後視窗留著，讓人看得到最後的畫面；「程式已結束」由包裝殼印中文，WezTerm 自己的英文提示關掉。
 /// window_close_confirmation：按 X 直接關，不跳英文確認框（asn真 定案）
@@ -325,6 +331,8 @@ struct Inner {
     adopted: Vec<AdoptedSession>,
     /// 建立時間曾相符、但這次通訊檔不在（或 list 失敗），留在檔案裡下次再試。不放進可操作的對照表，也不對它們下 cli。
     parked: Vec<StoreTerm>,
+    /// parked 裡「暫時接不回」的列（終端編號 → 次數與原因，只放記憶體）：背景重試只動這些；有意先不碰的（開關關著）不在裡面（#2424）
+    parked_info: BTreeMap<String, reclaim_rows::ParkInfo>,
     /// 確定自己結束、已經收掉的夥伴名字，等監看拿走交給收發室（寄給它們的信馬上退回）
     exited: Vec<String>,
     /// 上一輪讀服務的窗格清單時，屬於現行 mux、但清單裡沒有窗格的列（終端編號）。連續兩輪都沒有才收（#923）
@@ -477,6 +485,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 last_sweep: None,
                 hb: Default::default(),
                 parked: Vec::new(),
+                parked_info: BTreeMap::new(),
                 viewers: Vec::new(),
             }),
             #[cfg(test)]
@@ -512,6 +521,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 last_sweep: None,
                 hb: Default::default(),
                 parked: Vec::new(),
+                parked_info: BTreeMap::new(),
                 viewers: Vec::new(),
             }),
             #[cfg(test)]
@@ -548,6 +558,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 last_sweep: None,
                 hb: Default::default(),
                 parked: Vec::new(),
+                parked_info: BTreeMap::new(),
                 viewers: Vec::new(),
             }),
             #[cfg(test)]
@@ -925,11 +936,12 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端再開一份）
         let ran = self.runner.run_clean(&dir.cli, &mux::spawn_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
         // 逾時：窗格可能還在開，放掉鎖之前記下來，收空 mux 才不會關到它
-        if matches!(&ran, Err(e) if !e.starts_with(wezterm::CANNOT_RUN)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err()) {
+        // 排隊等不到位子（cli_gate）時指令根本沒送出，跟執行檔起不來一樣：窗格一定沒開
+        if matches!(&ran, Err(e) if !super::cli_gate::not_sent(e)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err()) {
             m.note_spawn_unsure();
         }
         drop(open_guard);
-        let out = ran.map_err(|e| if e.starts_with(wezterm::CANNOT_RUN) { NotStarted(e) } else { Started(e) })?;
+        let out = ran.map_err(|e| if super::cli_gate::not_sent(&e) { NotStarted(e) } else { Started(e) })?;
         if !out.success {
             return Err(NotStarted(format!("終端服務開不出窗格：{}", out.stderr.trim())));
         }
@@ -2032,133 +2044,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(())
     }
 
-    /// ASN 重啟、記憶體對照表是空的時候，用檔案把先前自己開的視窗放回來。
-    /// 找不到 WezTerm、沒有檔案、或版本不認得：什麼都不改。這條路徑不呼叫 kill_tree。
-    pub fn reclaim(&self) -> Result<(), String> {
-        let loaded = self.load_store()?;
-        let file = match loaded {
-            Loaded::Ready(file) => file,
-            Loaded::Missing | Loaded::Foreign => return Ok(()),
-        };
-        let dir = match self.dir() {
-            Ok(d) => d,
-            Err(_) => return Ok(()),
-        };
-        let w = self.wez(&dir);
-        let mut restored: Vec<Session> = Vec::new();
-        let mut parked: Vec<StoreTerm> = Vec::new();
-        let mut exited_now: Vec<String> = Vec::new();
-        let mut probed_now: BTreeMap<String, Instant> = BTreeMap::new();
-        // 這一輪各通訊檔讀到的窗格清單（None＝讀失敗）
-        let mut lists: BTreeMap<PathBuf, Option<Vec<wezterm::PaneInfo>>> = BTreeMap::new();
-        for term in file.terms {
-            if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
-                continue;
-            }
-            // #611：開關關著（0.1.113 不認夥伴視窗的列）＝kind 不是空的列（第 1 階段留下的）一律 parked：留在檔案裡、不查不碰，等開關打開再認
-            if park_companion_row(self.hold_config, &term) {
-                parked.push(term);
-                continue;
-            }
-            if !reclaim_candidate(&term) {
-                continue;
-            }
-            let Some(saved) = term.started_ms else {
-                continue;
-            };
-            // 建立時間對不上、或程序已經不在：不認領，也不結束（編號可能已經是別人的）。
-            match self.runner.started_ms(term.pid) {
-                Some(now) if now == saved => {}
-                _ => continue,
-            }
-            let sock = if term.mux {
-                // mux 的列：連線檔是 mux 的，而且 pid 檔記的也要是同一個 mux（建立時間對得上），不然不認。
-                // 開關沒開時不碰（也不下 cli）：留在檔案裡，等開關打開再認
-                if !self.use_mux {
-                    parked.push(term);
-                    continue;
-                }
-                let Ok(m) = self.mux_handle(&dir, BTreeMap::new()) else {
-                    parked.push(term);
-                    continue;
-                };
-                if m.live_pid() != Some((term.pid, saved)) {
-                    continue;
-                }
-                m.paths.sock.clone()
-            } else {
-                wezterm::sock_path(&self.home, term.pid)
-            };
-            if !self.fs.exists(&sock) {
-                parked.push(term);
-                continue;
-            }
-            // 同一個通訊檔這一輪只讀一次清單（每一列各讀一次會多下好幾次 wezterm cli list）；讀失敗也記下，同檔的列一起 parked
-            let listed = lists.entry(sock.clone()).or_insert_with(|| w.list(&sock).ok());
-            let Some(panes) = listed.as_ref() else {
-                parked.push(term);
-                continue;
-            };
-            // 已結束的窗格（Hold 留著）不認領，順手收掉；讀不到畫面當作還活著
-            let saw_dead = std::cell::Cell::new(false);
-            let ended = |p: &wezterm::PaneInfo| {
-                let dead = w.pane_exit(&sock, p.pane_id, term.exit_nonce.as_deref()).is_some();
-                if dead && pane_is_ours(&term.id, p) {
-                    let _ = w.kill_pane(&sock, p.pane_id);
-                    saw_dead.set(true);
-                }
-                dead
-            };
-            let Some(pane) = pick_pane(panes, &term.id, term.pane_id, &ended) else {
-                // ASN 關著時夥伴自己結束了：記下名字，寄給它的信馬上退回，不當成還沒接回
-                if saw_dead.get() && !term.kind.is_empty() {
-                    if let Some(name) = partner_label(&term.id, &term.title) {
-                        exited_now.push(name.to_string());
-                    }
-                }
-                continue;
-            };
-            // pick_pane 只回 ended 判過「沒結束」的窗格，有暗號就表示剛讀過它的畫面：記下來，監看第一輪不重讀（#897）
-            if term.exit_nonce.is_some() {
-                probed_now.insert(term.id.clone(), Instant::now());
-            }
-            let title = if title_marks(&pane.tab_title, &term.id) { pane.tab_title.clone() } else { format!("ASN:{}", term.id) };
-            restored.push(Session {
-                id: term.id.clone(),
-                profile: term.profile.clone(),
-                window: Window {
-                    gui_pid: term.pid,
-                    sock,
-                    started_ms: Some(saved),
-                    mux: term.mux,
-                },
-                pane_id: pane.pane_id,
-                workspace: format!("asn-{}", term.id),
-                title,
-                cwd: term.cwd.clone(),
-                send_granted: term.send_granted,
-                kind: term.kind.clone(),
-                session_id: term.session_id.clone(),
-                exit_nonce: term.exit_nonce.clone(),
-            });
-        }
-        let mut next = file.next;
-        for id in restored.iter().map(|s| s.id.as_str()).chain(parked.iter().map(|s| s.id.as_str())) {
-            if let Ok(n) = id.parse::<u64>() {
-                next = next.max(n);
-            }
-        }
-        {
-            let mut g = self.inner.lock().unwrap();
-            g.next = next;
-            g.sessions = restored;
-            g.parked = parked;
-            g.exited.extend(exited_now);
-            g.probed = probed_now;
-        }
-        self.persist()?;
-        Ok(())
-    }
+    // reclaim（重開後認回先前的視窗）與暫時接不回的列的重試：見 term_reclaim.rs
 
     fn is_adopted_id(&self, id: &str) -> Result<bool, String> {
         let g = self.inner.lock().unwrap();
@@ -3392,7 +3278,13 @@ pub fn start_viewer_adopt(terms: std::sync::Arc<LiveTerms>) {
             }
             std::thread::sleep(std::time::Duration::from_secs(ADOPT_VIEWER_EVERY_SECS));
         }
-        view_log("mux-view adopt 等不到夥伴名單，這次不認回");
+        // 名單空著是因為終端列暫時接不回：不放棄，等重試接回（start_reclaim_retry）後會再掃一次
+        let waiting = terms.waiting_count();
+        if waiting > 0 {
+            view_log(&format!("mux-view adopt 暫時等不到夥伴名單（{waiting} 列還在等終端服務），夥伴接回後會再認一次"));
+        } else {
+            view_log("mux-view adopt 等不到夥伴名單，這次不認回");
+        }
     });
     if let Err(e) = spawned {
         elog!("認回終端畫面的執行緒開不了（不影響啟動）：{e}");
@@ -4623,6 +4515,7 @@ mod tests {
                 success: true,
                 stdout,
                 stderr: String::new(),
+                code: None,
             })
         }
         fn run_clean(&self, p: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<wezterm::RunOutput, String> {
@@ -6234,6 +6127,7 @@ mod tests {
         assert!(v["terms"].as_array().unwrap().is_empty(), "對不上的紀錄要從對照表拿掉，避免以後指到別人的程序");
 
         let rig = make(default_profiles(), vec![None]);
+        *rig.runner.inner.proc_dead.borrow_mut() = true; // 程序確定已結束（查不到建立時間、而且不在了）才算不在
         *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1", 7, 1);
         write_store(&rig.store, 1, &row("1", "agy", "1000", ""));
         rig.svc.reclaim().unwrap();
@@ -6245,8 +6139,8 @@ mod tests {
 
     #[test]
     fn 通訊檔不見就不認領且不執行_cli() {
-        let src = include_str!("term.rs");
-        let head = src.split("pub fn reclaim").nth(1).unwrap().split("pub fn ").next().unwrap();
+        let src = include_str!("term_reclaim.rs");
+        let head = src.split("fn reclaim_row(").nth(1).unwrap().split("\n/// 啟動後在背景").next().unwrap();
         let exists_at = head.find("self.fs.exists(&sock)").expect("認領要先看通訊檔");
         let list_at = head.find(".list(&sock)").expect("認領要 list");
         assert!(exists_at < list_at, "要先確認通訊檔再 list");
@@ -6671,6 +6565,10 @@ mod tests {
         use crate::launch::mux;
 
         const MUX_PID: u32 = 4000;
+
+        /// #2424 A：暫存的列重試接回（測試放在 launch/term_reclaim_tests.rs，路徑相對於 term/tests/mux_mode/）
+        #[path = "../../../term_reclaim_tests.rs"]
+        mod reclaim_retry;
 
         /// #1818 端到端：終端服務崩潰、ASN 自己還握著它的 handle（程序已結束、建立時間還讀得到）。
         /// 走真的 mux_snapshot（live_pid）→ 監看一輪（run_round）→ 事故、紀錄、通知 → 接回（resume_entries，和重開機接回同一套 run）。

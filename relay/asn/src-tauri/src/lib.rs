@@ -3488,6 +3488,9 @@ pub fn run() {
     // 重開 ASN 後認回還開著的看畫面視窗（#2309）；背景執行，不擋啟動
     #[cfg(desktop)]
     launch::term::start_viewer_adopt(terms.clone());
+    // 重開後終端服務一時沒回應而暫存的夥伴列：背景定期重試接回，前台／後台鈕才會恢復（#2424）
+    #[cfg(desktop)]
+    launch::term::start_reclaim_retry(terms.clone());
     // 電腦重開後自動接回夥伴（#767）：要在內建橋更新開機時間之前看存檔，所以放在橋啟動之前
     #[cfg(desktop)]
     if !is_shot && relay_obj.is_some() {

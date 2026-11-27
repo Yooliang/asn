@@ -70,6 +70,8 @@ pub struct RunOutput {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
+    /// 結束碼（被訊號結束或假的執行器沒給＝None）；只給 log 用
+    pub code: Option<i32>,
 }
 
 /// 執行外部程式的介面
@@ -183,13 +185,14 @@ impl Runner for RealRunner {
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
         let mut cmd = Command::new(program);
         cmd.no_window().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        exec_with_timeout(cmd, program, timeout)
+        // 所有 wezterm cli 的統一出口（#2424 D）：排隊、逾時後暫停例行讀畫面、失敗寫 log
+        super::cli_gate::gated(args, env, || exec_with_timeout(cmd, program, timeout))
     }
 
     fn run_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
         let mut cmd = Command::new(program);
         cmd.no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        exec_with_timeout(cmd, program, timeout)
+        super::cli_gate::gated(args, env, || exec_with_timeout(cmd, program, timeout))
     }
 
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
@@ -342,6 +345,7 @@ fn exec_with_timeout(mut cmd: Command, program: &Path, timeout: Duration) -> Res
                     success: st.success(),
                     stdout: String::from_utf8_lossy(&so).into_owned(),
                     stderr: String::from_utf8_lossy(&se).into_owned(),
+                    code: st.code(),
                 });
             }
             Ok(None) => {
@@ -1287,6 +1291,7 @@ mod tests {
                 success: true,
                 stdout: self.stdout.borrow().clone(),
                 stderr: String::new(),
+                code: None,
             })
         }
         fn spawn(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
