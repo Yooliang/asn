@@ -40,6 +40,13 @@ use std::time::{Duration, Instant};
 mod reclaim_rows;
 #[cfg(feature = "gui")]
 pub use reclaim_rows::start_reclaim_retry;
+/// 開窗格逾時後找回窗格（#2424 B）
+#[path = "term_spawn_recover.rs"]
+mod spawn_recover;
+/// 夥伴的終端狀態：已登記／暫時接不回／確定不在（#2424 C）
+#[path = "term_state.rs"]
+mod term_state;
+pub use term_state::{TermState, TermStateInfo};
 
 /// ASN 自己的 WezTerm 設定檔內容（隔離，不讀使用者的 ~/.wezterm.lua）。
 /// exit_behavior = "Hold"：程式結束後視窗留著，讓人看得到最後的畫面；「程式已結束」由包裝殼印中文，WezTerm 自己的英文提示關掉。
@@ -937,17 +944,47 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let ran = self.runner.run_clean(&dir.cli, &mux::spawn_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
         // 逾時：窗格可能還在開，放掉鎖之前記下來，收空 mux 才不會關到它
         // 排隊等不到位子（cli_gate）時指令根本沒送出，跟執行檔起不來一樣：窗格一定沒開
-        if matches!(&ran, Err(e) if !super::cli_gate::not_sent(e)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err()) {
+        let unsure = matches!(&ran, Err(e) if !super::cli_gate::not_sent(e)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err());
+        if unsure {
             m.note_spawn_unsure();
         }
-        drop(open_guard);
-        let out = ran.map_err(|e| if super::cli_gate::not_sent(&e) { NotStarted(e) } else { Started(e) })?;
-        if !out.success {
-            return Err(NotStarted(format!("終端服務開不出窗格：{}", out.stderr.trim())));
-        }
-        let pane_id: u64 = out.stdout.trim().parse().map_err(|_| Started(format!("無法解析新窗格編號：{}", out.stdout.trim())))?;
-        let win = Window { gui_pid: mux_pid, sock: paths.sock, started_ms: Some(mux_at), mux: true };
         let w = self.wez(dir);
+        // 結果不確定（逾時、回的不是窗格編號）：窗格多半其實已經開了，趁鎖還在手上用工作區把它找回來（#2424 B）
+        let recovered = if unsure { Some(spawn_recover::find_spawned(&w, &paths.sock, &id)) } else { None };
+        drop(open_guard);
+        let pane_id: u64 = match recovered {
+            Some(spawn_recover::Found::One(p)) => {
+                view_log(&format!("終端服務：開窗格回應不確定，用工作區找回窗格 {p}（編號 {id}）"));
+                p
+            }
+            Some(other) => {
+                let why = ran.err().unwrap_or_else(|| "回的不是窗格編號".into());
+                let row = StoreTerm {
+                    id: id.clone(),
+                    profile: profile.to_string(),
+                    pid: mux_pid,
+                    started_ms: Some(mux_at),
+                    pane_id: 0,
+                    workspace: workspace.clone(),
+                    title: title.clone(),
+                    cwd: cwd_s.clone(),
+                    send_granted: true,
+                    kind: extra.kind.clone(),
+                    session_id: extra.session_id.clone(),
+                    mux: true,
+                    exit_nonce: exit_nonce.clone(),
+                };
+                return Err(Started(self.settle_unsure_spawn(other, row, &why)));
+            }
+            None => {
+                let out = ran.map_err(|e| if super::cli_gate::not_sent(&e) { NotStarted(e) } else { Started(e) })?;
+                if !out.success {
+                    return Err(NotStarted(format!("終端服務開不出窗格：{}", out.stderr.trim())));
+                }
+                out.stdout.trim().parse().map_err(|_| Started(format!("無法解析新窗格編號：{}", out.stdout.trim())))?
+            }
+        };
+        let win = Window { gui_pid: mux_pid, sock: paths.sock, started_ms: Some(mux_at), mux: true };
         // 窗格已經開了：後面任何一步失敗都只關這一個窗格
         let close_pane = |why: String| -> super::win_term::WinOpenError {
             let r = match w.kill_pane(&win.sock, pane_id) {
@@ -3998,6 +4035,19 @@ pub(crate) fn mux_partner_in(mux: (u32, u64), name: &str) -> Option<String> {
     }
 }
 
+/// 這位夥伴的終端狀態（見 TermService::partner_term_state，詳情用）；沒有畫面的建置、測試＝None
+pub(crate) fn partner_term_state_of(name: &str) -> Option<term_state::TermStateInfo> {
+    #[cfg(all(feature = "gui", not(test)))]
+    {
+        GLOBAL.get().map(|t| t.partner_term_state(name))
+    }
+    #[cfg(not(all(feature = "gui", not(test))))]
+    {
+        let _ = name;
+        None
+    }
+}
+
 /// 對照表裡所有的夥伴視窗列（見 TermService::partner_rows）；沒有畫面的建置、測試＝空
 pub(crate) fn partner_rows() -> Vec<super::stuck_resume::PartnerRef> {
     #[cfg(all(feature = "gui", not(test)))]
@@ -6607,6 +6657,10 @@ mod tests {
             include!("term_reclaim_tests.rs");
         }
 
+        /// #2424 B／C：開窗逾時找回窗格、夥伴的終端三種狀態
+        #[path = "../../../term_spawn_recover_tests.rs"]
+        mod spawn_recover;
+
         /// #1818 端到端：終端服務崩潰、ASN 自己還握著它的 handle（程序已結束、建立時間還讀得到）。
         /// 走真的 mux_snapshot（live_pid）→ 監看一輪（run_round）→ 事故、紀錄、通知 → 接回（resume_entries，和重開機接回同一套 run）。
         /// 拿掉 live_pid 的 alive 檢查：崩潰後一直被當活著，沒有事故（紅）；拿掉接回或通知任一段也紅
@@ -7330,6 +7384,8 @@ mod tests {
             let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
             assert!(matches!(e, crate::launch::win_term::WinOpenError::NotStarted(_)), "窗格一定沒開：可以退到原生主控台");
             *rig.runner.inner.clean_err.borrow_mut() = Some("WezTerm 指令逾時（15 秒），已結束該子行程".into());
+            // 逾時後會去清單找剛開的窗格（#2424 B）；清單裡沒有，才是「已啟動的失敗」
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
             let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
             assert!(matches!(e, crate::launch::win_term::WinOpenError::Started(_)), "窗格可能已經開了：不退路");
         }
@@ -7404,6 +7460,8 @@ mod tests {
         fn 開窗格回的不是編號_當作已啟動_不退路再開一份_也不關任何東西() {
             let (rig, paths) = mux_rig();
             *rig.runner.inner.spawn_out.borrow_mut() = "不是編號".into();
+            // 清單裡找不到剛開的窗格（找得到就直接登記，見 term_spawn_recover_tests）
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
             let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
             assert!(matches!(e, crate::launch::win_term::WinOpenError::Started(_)), "窗格可能其實開了：不能讓呼叫端退到原生主控台再開一份");
             assert_eq!(count_sub(&rig.runner, "kill-pane"), 0);

@@ -105,14 +105,16 @@ impl Watch {
 
     /// 啟動時讀到的上次狀態（#1837）：寫進 mux.log，下次「新 ASN 沒接上舊狀態」才有依據。
     /// 只記程序編號與數量、存檔離現在多久，不記夥伴名字。`file_age_secs`＝狀態檔最後寫入距今幾秒（沒有檔案是 None）
-    pub fn startup_line(&self, file_age_secs: Option<u64>) -> String {
+    /// 夥伴幾位、還沒接回幾位，讀終端對照表（sessions＋parked，`counts`＝（已登記, 暫時接不回））那一份，
+    /// 不再讀這份監看檔自己記的名單（兩邊會不一致）；監看檔只提供記著的終端服務程序與已結束的數量
+    pub fn startup_line(&self, file_age_secs: Option<u64>, counts: (usize, usize)) -> String {
         let age = file_age_secs.map_or("沒有狀態檔".to_string(), |s| format!("狀態檔 {s} 秒前寫入"));
         let seen = match &self.seen {
-            Some(s) => format!("記著的終端服務=程序 {}（夥伴 {} 位）", s.mux.0, s.partners.len()),
+            Some(s) => format!("記著的終端服務=程序 {}", s.mux.0),
             None if self.dropped_by_reboot => "記著的終端服務=無（開機時間變了，已丟掉，交給開機接回）".to_string(),
             None => "記著的終端服務=無".to_string(),
         };
-        format!("ASN 啟動，讀到上次監看狀態：{seen}，還沒接回 {} 位，已結束 {} 位，{age}", self.lost.len(), self.exited.len())
+        format!("ASN 啟動，讀到上次監看狀態：{seen}，夥伴 {} 位，還沒接回 {} 位，已結束 {} 位，{age}", counts.0 + counts.1, counts.1, self.exited.len())
     }
 
     pub fn save(&self, file: &Path) {
@@ -781,8 +783,8 @@ impl super::mux_round::Sink for RealSink {
 
 /// 把啟動時讀到的上次狀態寫進程式紀錄與 mux.log
 #[cfg(feature = "gui")]
-fn log_startup_state(w: &Watch, file_age_secs: Option<u64>) {
-    let line = w.startup_line(file_age_secs);
+fn log_startup_state(w: &Watch, file_age_secs: Option<u64>, counts: (usize, usize)) {
+    let line = w.startup_line(file_age_secs, counts);
     elog!("{line}");
     if let Some(base) = super::mux::default_base() {
         super::mux::note(&base.join("ASN").join("m"), &line);
@@ -802,7 +804,7 @@ pub fn start(terms: std::sync::Arc<super::term::LiveTerms>, work_dir: &Path, dat
         let age = std::fs::metadata(&file).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map(|d| d.as_secs());
         let mut w = Watch::load(&file, super::auto_resume::boot_ms(crate::heartbeat::now_ms()));
         // 啟動時讀到的上次狀態留一行（#1837）：之後查「新 ASN 有沒有接上舊狀態」有依據
-        log_startup_state(&w, age);
+        log_startup_state(&w, age, terms.partner_term_counts());
         let mut first = true;
         let started = std::time::Instant::now();
         let mut tracker = Tracker::new(cfg!(windows));
@@ -956,11 +958,12 @@ mod tests {
         let mut w = Watch::default();
         w.tick(&obs(Some(M1), &["機密夥伴名", "乙"]), 0);
         w.save(&f);
-        let line = Watch::load(&f, None).startup_line(Some(42));
+        // 夥伴數與還沒接回數讀終端對照表（已登記 2、暫時接不回 1），不是監看檔自己記的名單（那份記了 2 位、沒有還沒接回）
+        let line = Watch::load(&f, None).startup_line(Some(42), (2, 1));
         assert!(line.contains(&format!("程序 {}", M1.0)), "{line}");
-        assert!(line.contains("夥伴 2 位") && line.contains("42 秒前"), "{line}");
+        assert!(line.contains("夥伴 3 位，還沒接回 1 位") && line.contains("42 秒前"), "{line}");
         assert!(!line.contains("機密夥伴名"), "不記名字：{line}");
-        assert!(Watch::default().startup_line(None).contains("無") && Watch::default().startup_line(None).contains("沒有狀態檔"));
+        assert!(Watch::default().startup_line(None, (0, 0)).contains("無") && Watch::default().startup_line(None, (0, 0)).contains("沒有狀態檔"));
     }
 
     /// #1837：重開機丟掉狀態的情況，紀錄要講得出來
@@ -971,9 +974,9 @@ mod tests {
         let mut w = Watch::load(&f, Some(5_000_000));
         w.tick(&obs(Some(M1), &["甲"]), 0);
         w.save(&f);
-        let line = Watch::load(&f, Some(9_999_999)).startup_line(Some(1));
+        let line = Watch::load(&f, Some(9_999_999)).startup_line(Some(1), (0, 0));
         assert!(line.contains("開機時間變了"), "{line}");
-        let same = Watch::load(&f, Some(5_000_100)).startup_line(Some(1));
+        let same = Watch::load(&f, Some(5_000_100)).startup_line(Some(1), (0, 0));
         assert!(same.contains(&format!("程序 {}", M1.0)) && !same.contains("開機時間變了"), "{same}");
     }
 

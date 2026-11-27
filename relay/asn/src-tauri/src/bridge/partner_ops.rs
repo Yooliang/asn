@@ -1315,7 +1315,17 @@ impl PartnerOps {
     fn info(&self, t: &switch::Target) -> OpResult {
         let os = self.env.os();
         let table = os.processes();
-        let asn = switch::opened_by_asn(os, &table, t.pid);
+        // 終端狀態（已登記／暫時接不回／確定不在）和聊天頁的按鈕同一份資料；暫時接不回的夥伴程序祖先鏈查得到終端服務、
+        // 但對照表暫時沒有它，單看祖先鏈會誤報「自己開的」，所以這兩種都算 ASN 開的（#2424）
+        #[cfg(desktop)]
+        let term = crate::launch::term::partner_term_state_of(&t.name);
+        #[cfg(not(desktop))]
+        let term: Option<()> = None;
+        #[cfg(desktop)]
+        let term_asn = term.as_ref().is_some_and(|s| s.state != crate::launch::term::TermState::Gone);
+        #[cfg(not(desktop))]
+        let term_asn = false;
+        let asn = term_asn || switch::opened_by_asn(os, &table, t.pid);
         let st = self.mod_status(&t.session_id);
         let model = st.as_ref().and_then(|s| s.get("model")).and_then(Value::as_str).filter(|m| switch::valid_model(m)).map(String::from).or_else(|| switch::current_model(&t.args));
         let mut chain: Vec<String> = switch::ancestors(&table, t.pid).into_iter().rev().filter_map(|p| table.iter().find(|x| x.pid == p)).map(|p| clean(&p.name, 60)).collect();
@@ -1335,6 +1345,12 @@ impl PartnerOps {
             "shell_chain": chain,
             "mod_installed": st.is_some(),
         });
+        #[cfg(desktop)]
+        if let Some(s) = &term {
+            r["term_state"] = json!(s.state);
+        }
+        #[cfg(not(desktop))]
+        let _ = term;
         if let Some(c) = st.as_ref().and_then(|s| s.get("context")).and_then(Value::as_object) {
             // 只收三個數字欄位：used、limit、percent（沒給 percent 且有 limit 就算出來）
             let num = |k: &str| c.get(k).and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 0.0);

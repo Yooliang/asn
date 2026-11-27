@@ -335,8 +335,15 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 Row::Absent("終端服務的窗格清單裡暫時沒有這一個，下一輪再確認".to_string())
             };
         };
-        let title = if title_marks(&pane.tab_title, &term.id) { pane.tab_title.clone() } else { format!("ASN:{}", term.id) };
         let probed = probes.borrow().get(&pane.pane_id) == Some(&PaneProbe::Alive);
+        // 分頁標題沒帶編號（開窗逾時、標題還沒設就接回的窗格）時，用記下來的標題，夥伴名字才不會掉
+        let title = if title_marks(&pane.tab_title, &term.id) {
+            pane.tab_title.clone()
+        } else if title_marks(&term.title, &term.id) {
+            term.title.clone()
+        } else {
+            format!("ASN:{}", term.id)
+        };
         Row::Restored {
             probed,
             session: Session {
@@ -396,25 +403,49 @@ pub fn run_retry_loop(
 /// 終端服務剛逾時（指令閘門暫停中）就先等，不去敲它。接回任何一列之後掃一次還開著的看畫面視窗（啟動時那一輪若因名單還空著而放棄，這裡接手）。全部處理完就結束
 #[cfg(feature = "gui")]
 pub fn start_reclaim_retry(terms: std::sync::Arc<super::LiveTerms>) {
+    use std::sync::atomic::Ordering;
     if std::env::args().any(|a| a == "--shot") || terms.waiting_count() == 0 {
         return;
     }
+    // 同一時間只留一條重試執行緒（開窗逾時後可能再叫一次）
+    if RETRY_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
     let spawned = std::thread::Builder::new().name("asn-reclaim-retry".into()).spawn(move || {
-        run_retry_loop(
-            &mut std::thread::sleep,
-            &|| crate::launch::cli_gate::global().longest_cooldown(),
-            &mut || terms.retry_parked(),
-            &mut || {
-                let (_, n) = terms.adopt_viewers();
-                if n > 0 {
-                    view_log(&format!("終端對照表：接回後認回 {n} 個還開著的終端畫面"));
-                }
-            },
-            &|| terms.waiting_count(),
-            &|l| view_log(l),
-        );
+        loop {
+            run_retry_loop(
+                &mut std::thread::sleep,
+                &|| crate::launch::cli_gate::global().longest_cooldown(),
+                &mut || terms.retry_parked(),
+                &mut || {
+                    let (_, n) = terms.adopt_viewers();
+                    if n > 0 {
+                        view_log(&format!("終端對照表：接回後認回 {n} 個還開著的終端畫面"));
+                    }
+                },
+                &|| terms.waiting_count(),
+                &|l| view_log(l),
+            );
+            // 先放掉旗標再看一眼：放掉的空檔裡若又有新列進來（開窗逾時後再叫一次），這裡接手，不留下沒人重試的列
+            RETRY_RUNNING.store(false, Ordering::SeqCst);
+            if terms.waiting_count() == 0 || RETRY_RUNNING.swap(true, Ordering::SeqCst) {
+                return;
+            }
+        }
     });
     if let Err(e) = spawned {
+        RETRY_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
         elog!("接回終端列的重試執行緒開不了（不影響啟動）：{e}");
+    }
+}
+
+#[cfg(feature = "gui")]
+static RETRY_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 開窗格逾時、把列記成暫時接不回之後，叫背景重試起來（已經在跑就不重複）。測試沒有全域的終端服務，什麼都不做
+#[cfg(feature = "gui")]
+pub(super) fn kick_retry() {
+    if let Some(t) = super::GLOBAL.get() {
+        start_reclaim_retry(t.clone());
     }
 }
