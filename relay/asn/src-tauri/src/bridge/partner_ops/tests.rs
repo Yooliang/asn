@@ -435,6 +435,24 @@ fn 詳情_注入終端狀態_確定不在不說_asn_開的_暫時接不回和已
     set_test_term_state(None);
 }
 
+#[cfg(desktop)]
+#[test]
+fn 詳情_沒有使用終端服務_照祖先鏈說開啟方式_不帶終端欄() {
+    use crate::launch::term::{set_test_term_state, TermState};
+    // 開關關著＋祖先鏈看得出 ASN 開的：說 ASN 開的，而且沒有終端狀態那一欄（畫面就不會寫「沒有接上」）
+    let r = rig(Opt { asn_host: true, ..Opt::default() });
+    set_test_term_state(Some(TermState::Off));
+    let v = r.run("info", json!({})).result.unwrap();
+    assert_eq!(v["opened_by"], "asn", "開關關著照祖先鏈");
+    assert!(v.get("term_state").is_none(), "不帶終端欄：{v}");
+    // 開關關著＋祖先鏈看不出來：自己開的，一樣沒有終端欄
+    let r = rig(Opt::default());
+    let v = r.run("info", json!({})).result.unwrap();
+    assert_eq!(v["opened_by"], "user");
+    assert!(v.get("term_state").is_none());
+    set_test_term_state(None);
+}
+
 #[test]
 fn 詳情_唯讀_不需要遠端開關_欄位齊全_外殼鏈只有程式名() {
     let r = rig(Opt { allow_first: 0, ..Opt::default() });

@@ -253,6 +253,18 @@ fn 三種狀態_已登記_暫時接不回_確定不在() {
 }
 
 #[test]
+fn 詳情用的狀態_開關關著是沒有使用終端服務_開著照三態_按鈕用的狀態不變() {
+    let rig = partner_rig();
+    open_partner(&rig);
+    assert_eq!(rig.svc.partner_term_state_for_info("小乙").state, TermState::Ok, "開關開著：照三態");
+    assert_eq!(rig.svc.partner_term_state_for_info("小甲").state, TermState::Gone, "開關開著、確定不在：照舊 Gone");
+    let off = restarted(&rig, false);
+    assert_eq!(off.partner_term_state_for_info("小乙").state, TermState::Off, "開關關著：沒有使用終端服務");
+    assert_eq!(off.partner_term_state("小乙").state, TermState::Gone, "聊天頁按鈕用的狀態維持原樣");
+    assert_eq!(serde_json::to_value(TermStateInfo { state: TermState::Off, reason: String::new() }).unwrap()["state"], "off");
+}
+
+#[test]
 fn 夥伴數與還沒接回數_和狀態讀同一份資料() {
     let rig = partner_rig();
     open_partner(&rig);

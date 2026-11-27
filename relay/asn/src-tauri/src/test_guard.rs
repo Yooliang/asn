@@ -304,6 +304,89 @@ mod tests {
         assert!(own_dir().ends_with(format!("asn-tm-{}", std::process::id())));
     }
 
+    // ---- 測試鉤子登記：正式版原始碼裡 `#[cfg(test)] thread_local!` 宣告的值，一律要在這裡登記並寫理由 ----
+
+    /// 鉤子的性質。「記錄」只數次數、記東西給測試看；「注入」只取代某個外部輸入（查到的狀態、環境變數名、失敗）的回傳值。
+    /// 兩種都不准改正式版自己的分支條件：正式版的判斷照舊跑，鉤子只換它讀到的值或旁邊記一筆
+    #[derive(PartialEq, Debug)]
+    enum Hook {
+        Record,
+        Inject,
+    }
+
+    /// 鉤子清單：(檔案結尾, 變數名, 性質, 理由)
+    const HOOKS: &[(&str, &str, Hook, &str)] = &[
+        ("src/launch/term_reclaim.rs", "KICKS", Hook::Record, "只在 kick_retry 裡加一，數「叫了幾次背景重試」；不影響是否要叫（#2424 B）"),
+        ("src/launch/term.rs", "TEST_TERM_STATE", Hook::Inject, "只取代 partner_term_state_of 查到的終端狀態；詳情後面怎麼判斷、怎麼顯示照正式版走（#2424 C）"),
+        ("src/launch/term.rs", "TEST_NONCE", Hook::Inject, "固定結束標記的暗號（正式版是隨機值），只換值不改流程"),
+        ("src/launch/term.rs", "TEST_REGISTRY_NAMES", Hook::Inject, "取代讀到的使用者環境變數名單，只換輸入值"),
+        ("src/launch/wezterm.rs", "OBSERVE_TICKS", Hook::Record, "只數監看了幾輪"),
+        ("src/agent_setup/login.rs", "WIPES", Hook::Record, "只數登入資料清掉幾次"),
+        ("src/settings/migrate.rs", "FAIL_RENAME", Hook::Inject, "讓搬移的改名動作回失敗（模擬磁碟錯誤），驗證失敗路徑"),
+        ("src/settings/migrate.rs", "FAIL_COPY", Hook::Inject, "讓搬移的複製動作回失敗（模擬磁碟錯誤），驗證失敗路徑"),
+        ("src/settings/mod.rs", "TEST_ROOTS", Hook::Inject, "把設定資料夾指到暫存位置，只換路徑"),
+        ("src/settings/mod.rs", "FAIL_WRITE", Hook::Inject, "讓寫入回失敗（模擬磁碟錯誤），驗證回給畫面的錯誤不含系統原文"),
+        ("src/settings/mod.rs", "PEEK_LOGS", Hook::Record, "只數唯讀讀取記了幾行 log"),
+        ("src/settings/mod.rs", "PEEK_CLOCK_SKEW", Hook::Inject, "假時鐘：只撥動讀到的「現在」，免得測節流要真的等"),
+    ];
+
+    /// 檔案文字裡每個 `#[cfg(test)]` 緊接 `thread_local!` 區塊宣告的變數名
+    fn hook_statics(text: &str) -> Vec<String> {
+        let t = text.replace("\r\n", "\n");
+        let lines: Vec<&str> = t.split('\n').collect();
+        let (mut out, mut off) = (Vec::new(), 0);
+        for (i, l) in lines.iter().enumerate() {
+            if l.trim() == "#[cfg(test)]" && lines.get(i + 1).is_some_and(|n| n.trim_start().starts_with("thread_local!")) {
+                let end = block_end(&t, off + l.len() + 1).unwrap_or(t.len());
+                // `'static` 生命週期不算宣告
+                for (j, _) in t[off..end].match_indices("static ").filter(|(j, _)| !t[..off + j].ends_with('\'')) {
+                    let name: String = t[off + j + 7..end].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+                    out.push(name);
+                }
+            }
+            off += l.len() + 1;
+        }
+        out
+    }
+
+    #[test]
+    fn 鉤子清單_抓得到宣告的變數名() {
+        let src = "#[cfg(test)]\nthread_local! {\n    pub(crate) static A_1: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };\n    static B: u8 = 0;\n}\nthread_local! {\n    static NOT_TEST: u8 = 0;\n}\n";
+        assert_eq!(hook_statics(src), vec!["A_1".to_string(), "B".to_string()]);
+    }
+
+    #[test]
+    fn 測試鉤子要登記_只准記錄或注入值() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut files = Vec::new();
+        rs_files(&root.join("src"), &mut files);
+        let texts: Vec<(String, String)> = files
+            .iter()
+            .filter_map(|f| Some((f.strip_prefix(root).ok()?.to_string_lossy().replace('\\', "/"), std::fs::read_to_string(f).ok()?)))
+            .collect();
+        let test_mods = declared_test_mods(&texts);
+        let (mut bad, mut used) = (Vec::new(), std::collections::BTreeSet::new());
+        for (rel, text) in &texts {
+            let name = rel.rsplit('/').next().unwrap_or(rel);
+            // 整份都是測試的檔案：鉤子到不了正式版，不用登記
+            if rel == "src/test_guard.rs" || rel.contains("/tests/") || test_mods.contains(rel) || ["tests.rs", "testsupport.rs", "term_live_mux.rs"].contains(&name) {
+                continue;
+            }
+            for var in hook_statics(text) {
+                match HOOKS.iter().position(|(p, v, _, _)| rel.ends_with(p) && *v == var) {
+                    Some(i) => {
+                        used.insert(i);
+                    }
+                    None => bad.push(format!("{rel}：測試鉤子 {var} 沒登記")),
+                }
+            }
+        }
+        assert!(bad.is_empty(), "正式版原始碼裡的 #[cfg(test)] 鉤子要到 HOOKS 登記，寫明是記錄還是注入、為什麼不改正式版的分支條件：\n{}", bad.join("\n"));
+        let stale: Vec<_> = (0..HOOKS.len()).filter(|i| !used.contains(i)).map(|i| (HOOKS[i].0, HOOKS[i].1)).collect();
+        assert!(stale.is_empty(), "鉤子清單有用不到的項目，請刪掉：{stale:?}");
+        assert!(HOOKS.iter().all(|(_, _, k, why)| !why.is_empty() && matches!(k, Hook::Record | Hook::Inject)));
+    }
+
     #[test]
     fn 測試碼不得直接用會碰真環境的入口() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"));

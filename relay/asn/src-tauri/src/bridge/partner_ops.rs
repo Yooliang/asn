@@ -1329,7 +1329,12 @@ impl PartnerOps {
         #[cfg(not(desktop))]
         let term: Option<()> = None;
         #[cfg(desktop)]
-        let term_live = term.as_ref().map(|s| s.state != crate::launch::term::TermState::Gone);
+        let term_live = term.as_ref().and_then(|s| match s.state {
+            // 沒有使用終端服務：沒有終端狀態可看，「開啟方式」照程序祖先鏈
+            crate::launch::term::TermState::Off => None,
+            crate::launch::term::TermState::Gone => Some(false),
+            _ => Some(true),
+        });
         #[cfg(not(desktop))]
         let term_live: Option<bool> = None;
         let asn = info_opened_by_asn(term_live, || switch::opened_by_asn(os, &table, t.pid));
@@ -1353,7 +1358,8 @@ impl PartnerOps {
             "mod_installed": st.is_some(),
         });
         #[cfg(desktop)]
-        if let Some(s) = &term {
+        if let Some(s) = term.as_ref().filter(|s| s.state != crate::launch::term::TermState::Off) {
+            // 沒有使用終端服務時不帶這欄，詳情就不列「終端」那一列（不能寫「沒有接上」）
             r["term_state"] = json!(s.state);
         }
         #[cfg(not(desktop))]

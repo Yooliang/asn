@@ -4062,7 +4062,7 @@ pub(crate) fn partner_term_state_of(name: &str) -> Option<term_state::TermStateI
     }
     #[cfg(all(feature = "gui", not(test)))]
     {
-        GLOBAL.get().map(|t| t.partner_term_state(name))
+        GLOBAL.get().map(|t| t.partner_term_state_for_info(name))
     }
     #[cfg(not(all(feature = "gui", not(test))))]
     {

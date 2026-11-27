@@ -20,6 +20,8 @@ pub enum TermState {
     Waiting,
     /// 確定不在終端服務裡
     Gone,
+    /// 沒有使用終端服務（共用終端開關關著）：只給詳情用，聊天頁的按鈕不走這一種
+    Off,
 }
 
 /// 給畫面的答案：狀態加上原因（原因只給 console 與 log，不直接顯示在畫面上）
@@ -50,6 +52,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             }
             None => gone("對照表裡沒有這位夥伴的終端"),
         }
+    }
+
+    /// 詳情用的終端狀態：共用終端開關關著就是 `Off`（沒有使用終端服務，不能說「沒有接上」），其餘照 `partner_term_state`
+    pub fn partner_term_state_for_info(&self, name: &str) -> TermStateInfo {
+        if !self.use_mux {
+            return TermStateInfo { state: TermState::Off, reason: "沒有使用共用終端服務".to_string() };
+        }
+        self.partner_term_state(name)
     }
 
     /// 夥伴視窗的數量：（已登記, 暫時接不回）。啟動紀錄與「還沒接回幾位」都讀這一份
