@@ -52,5 +52,4 @@
 /* ---- 按鈕：本體用 #2105 的 .asn-btn（三級與狀態不變），這裡只把最小高度換成點擊尺寸 ---- */
 .asn-btn.asn-part-btn{min-height:var(--asn-hit)}
 
-/* ---- 說明文字 ---- */
-.asn-note{margin:0; font-size:var(--asn-fs-s); line-height:1.5; color:var(--asn-muted); overflow-wrap:anywhere}
+/* ---- 說明文字：AsnNote 已併入共用元件，樣式在 kit.css（#2425） ---- */

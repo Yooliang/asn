@@ -48,6 +48,15 @@
 .asn-status.k-busy,.asn-status.k-empty,.asn-status.k-unreadable{color:var(--muted)}
 .asn-status.k-ok{color:var(--kit-ok)}
 .asn-status.k-fail{color:var(--kit-fail)}
+/* ---- 提示 AsnNote（#2425）：info 灰字、warn 警告色；warn 一定附動作；橫幅版給視窗頂端 ---- */
+.asn-note{display:flex; align-items:center; flex-wrap:wrap; gap:var(--sp-2); margin:0; font-size:var(--fs-2); line-height:1.5; min-width:0; overflow-wrap:anywhere}
+.asn-note-text{min-width:0}
+.asn-note-action{display:inline-flex; flex:none}
+.asn-note-info{color:var(--muted)}
+.asn-note-warn{color:var(--kit-warn)}
+.asn-note-banner{box-sizing:border-box; width:100%; padding:var(--sp-2) var(--sp-3); border-bottom:1px solid var(--line); background:var(--panel-soft)}
+.asn-note-banner .asn-note-text{flex:1 1 auto}
+.asn-note-banner.asn-note-warn{border-bottom-color:var(--kit-warn-line)}
 .asn-spin{display:inline-block; box-sizing:border-box; width:var(--fs-2); height:var(--fs-2); border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:asn-spin 1s linear infinite}
 @keyframes asn-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.asn-spin{animation:none}}

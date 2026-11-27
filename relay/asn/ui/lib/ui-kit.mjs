@@ -91,6 +91,46 @@ export const AsnStatus = {
   template: `<p :class="view.classes" role="status"><span v-if="view.spin" class="asn-spin" aria-hidden="true"></span><span>{{ text || (view.kind === 'busy' ? STATUS_TEXT.loading : '') }}</span><asn-button v-if="view.retry" level="text" @click="$emit('retry')">{{ STATUS_TEXT.retry }}</asn-button></p>`,
 }
 
+// ---------- 提示（#2425，規範見 docs/畫面規範.md〈四之一、訊息與提示的位置〉） ----------
+// 說的是「目前的狀況」：只有 info（一般說明）和 warn（要使用者處理）。warn 一定要附一個動作，沒有動作就不能用 warn。
+// 動作的結果與這一區的資料狀態（空、讀不到）用 AsnStatus，不用這個。
+export const NOTE_KINDS = Object.freeze(['info', 'warn'])
+/** 提示的畫法：種類不合法退回 info；warn 沒有動作時 valid 是 false（元件會 console.warn，守門測試會擋）。純函式，測試直接用 */
+export function noteView(kind = 'info', hasAction = false, banner = false) {
+  const kindOk = NOTE_KINDS.includes(kind)
+  const k = kindOk ? kind : 'info'
+  const action = hasAction === true
+  return {
+    kind: k, kindOk, banner: banner === true, action,
+    classes: ['asn-note', `asn-note-${k}`, ...(banner === true ? ['asn-note-banner'] : [])],
+    role: k === 'warn' ? 'status' : 'note',
+    valid: kindOk && (k !== 'warn' || action),
+  }
+}
+
+export const AsnNote = {
+  name: 'AsnNote',
+  components: { AsnButton },
+  props: {
+    kind: { type: String, default: 'info' },
+    banner: { type: Boolean, default: false },    // 橫幅版（位置 C：視窗頂端、整列寬）
+    actionLabel: { type: String, default: '' },   // 動作文字鈕；要別的動作內容就用 action 插槽
+  },
+  emits: ['action'],
+  setup(props, { slots }) {
+    const { computed, watchEffect } = globalThis.Vue
+    const hasAction = computed(() => !!slots.action || props.actionLabel !== '')
+    const view = computed(() => noteView(props.kind, hasAction.value, props.banner))
+    watchEffect(() => {
+      const v = view.value
+      if (!v.kindOk) console.warn(`AsnNote：不認得的種類「${props.kind}」，改用 info`)
+      else if (!v.valid) console.warn('AsnNote：warn 一定要附一個動作（actionLabel 或 action 插槽）')
+    })
+    return { view }
+  },
+  template: `<p :class="view.classes" :role="view.role"><span class="asn-note-text"><slot></slot></span><span class="asn-note-action" v-if="view.action"><slot name="action"><asn-button level="text" @click="$emit('action', $event)">{{ actionLabel }}</asn-button></slot></span></p>`,
+}
+
 // ---------- 「⋯」選單（#2111 ⑥） ----------
 // 卡片右上角的更多動作：項目是動作說法（danger＝危險色，要走原位確認）；沒有項目就不畫「⋯」。點外面、按 Esc、選了項目都會收起
 export const MORE_MENU_LABEL = '更多動作'
@@ -119,4 +159,4 @@ export const AsnMoreMenu = {
 }
 
 /** 要註冊進 app 的共用元件（電腦 list.js、手機 m.js 都用這一份） */
-export const UI_KIT = Object.freeze({ AsnButton, AsnActions, AsnConfirm, AsnStatus, AsnMoreMenu })
+export const UI_KIT = Object.freeze({ AsnButton, AsnActions, AsnConfirm, AsnStatus, AsnNote, AsnMoreMenu })

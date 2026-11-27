@@ -28,6 +28,7 @@ const Demo = {
     <asn-setting-row label="名稱"><asn-text v-model="name" inputmode="text" enterkeyhint="done" label="名稱"></asn-text></asn-setting-row>
     <asn-part-button level="primary" @click="hits++">儲存</asn-part-button>
     <asn-note>這是一行說明</asn-note>
+    <asn-note kind="warn" action-label="重開">要處理的狀況</asn-note>
   </asn-setting-card>`,
 }
 
@@ -53,6 +54,8 @@ for (const [pname, caps, attrs] of PLATFORMS) {
         assert.equal(tx.value, '甲')
         const bt = q('button.asn-btn.lv-primary.asn-part-btn'); assert.ok(bt, '按鈕用的是 #2105 的共用按鈕')
         assert.ok(q('p.asn-note'))
+        assert.ok(q('p.asn-note.asn-note-info[role=note]'), '說明文字是共用的 info 提示')
+        assert.ok(q('p.asn-note.asn-note-warn[role=status] button'), 'warn 提示附動作')
         // 互動：開關、下拉、按鈕
         await m.trigger(chk, "change", { checked: true })
         await m.trigger(bt, 'click')
@@ -94,6 +97,12 @@ test('U1 事件：開關、下拉、輸入框在確認時才送出；Enter 會�
   } finally { b.unmount() }
   assert.deepEqual(selectOptions([{ value: 1, label: 'a' }, { label: 'x' }, null, { value: 'k', label: 3 }]), [{ value: '1', label: 'a' }])
   assert.ok(UI_KIT.AsnButton, '共用按鈕仍由 ui-kit 提供')
+})
+
+test('#2425 AsnNote 只有一份：F2 轉出的就是共用元件，parts.css 沒有自己的 .asn-note 規則', () => {
+  assert.equal(PARTS_U1.AsnNote, UI_KIT.AsnNote)
+  assert.doesNotMatch(read('../ui/parts/setting-parts.mjs'), /name:\s*'AsnNote'/)
+  assert.doesNotMatch(CSS, /\.asn-note\s*\{/)
 })
 
 // ---- 尺寸：--asn-hit ----
