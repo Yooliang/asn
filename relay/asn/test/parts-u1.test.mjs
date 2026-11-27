@@ -173,6 +173,55 @@ test('別名重設守門的偵測是真的：拿掉 .m-body 那一行會被抓�
   assert.ok(miss.some(m => m.includes('--asn-fs')) && miss.some(m => m.includes('--asn-fs-s')), miss.join('\n'))
 })
 
+// ---- 守門：--asn-* 是別名，不是第二套值（#2398 二審） ----
+// 只有這兩個是新的值（沒有既有變數可指）；其他每一個都必須是 var(--既有變數, Aero 後備值)
+const OWN_VALUES = new Set(['--asn-hit', '--asn-check'])
+const rootDecls = css => [...css.replace(/\/\*[\s\S]*?\*\//g, '').match(/(?:^|\n)\s*:root\s*\{([^}]*)\}/)[1].matchAll(/(--asn-[\w-]+)\s*:\s*([^;]+);/g)].map(([, k, v]) => [k, v.trim()])
+const blockDecls = (css, sel) => {
+  const b = blocks(css).find(x => x.sel === sel)
+  if (!b) return []
+  const body = css.replace(/\/\*[\s\S]*?\*\//g, '').match(new RegExp(`(?:^|\\n)\\s*${sel.replace('.', '\\.')}\\s*\\{([^}]*)\\}`))[1]
+  return [...body.matchAll(/(--asn-[\w-]+)\s*:\s*([^;]+);/g)].map(([, k, v]) => [k, v.trim()])
+}
+const aliasProblems = (partsCss, knownVars) => {
+  const bad = []
+  const root = rootDecls(partsCss)
+  const srcOf = new Map()
+  for (const [k, v] of root) {
+    if (OWN_VALUES.has(k)) continue
+    const m = v.match(/^var\(\s*(--[\w-]+)\s*,[^()]*\)$/)
+    if (!m) { bad.push(`:root 的 ${k} 不是 var(--既有變數, 後備值)：${v}`); continue }
+    if (!knownVars.has(m[1])) bad.push(`:root 的 ${k} 指到 ${m[1]}，但 kit.css／style.css 沒有定義這個變數`)
+    srcOf.set(k, m[1])
+  }
+  for (const [k, v] of blockDecls(partsCss, '.m-body')) {
+    const m = v.match(/^var\(\s*(--[\w-]+)/)
+    if (!srcOf.has(k)) bad.push(`.m-body 重設了 ${k}，但 :root 沒有這個別名`)
+    else if (!m || m[1] !== srcOf.get(k)) bad.push(`.m-body 的 ${k} 指到 ${m ? m[1] : v}，跟 :root 的 ${srcOf.get(k)} 不一致`)
+  }
+  return { bad, count: srcOf.size }
+}
+const definedVars = () => new Set(['../ui/kit.css', '../ui/style.css'].flatMap(p => [...read(p).matchAll(/(--[\w-]+)\s*:/g)].map(m => m[1])))
+
+test('守門：parts.css 的 --asn-*（--asn-hit、--asn-check 以外）都是既有變數的別名；.m-body 重設的來源跟 :root 一致', () => {
+  const { bad, count } = aliasProblems(CSS, definedVars())
+  assert.ok(count >= 10, `前提：要讀得到 :root 的別名（只讀到 ${count} 個）`)
+  assert.deepEqual(bad, [])
+})
+
+test('別名守門的偵測是真的：改成字面值、指到不存在的變數、.m-body 指到別的來源，都會被抓到', () => {
+  const known = definedVars()
+  const lit = CSS.replace('--asn-fg:var(--fg,#1d2733)', '--asn-fg:#1d2733')
+  assert.notEqual(lit, CSS, '前提：替換有發生')
+  assert.ok(aliasProblems(lit, known).bad.some(b => b.includes('--asn-fg')), '字面值要被抓到')
+  const ghost = CSS.replace('--asn-line:var(--line,', '--asn-line:var(--no-such-var,')
+  assert.notEqual(ghost, CSS)
+  assert.ok(aliasProblems(ghost, known).bad.some(b => b.includes('--no-such-var')), '不存在的來源要被抓到')
+  const drift = CSS.replace('.m-body{--asn-fs:var(--fs-2,', '.m-body{--asn-fs:var(--fs-3,')
+  assert.notEqual(drift, CSS)
+  assert.ok(aliasProblems(drift, known).bad.some(b => b.includes('不一致')), '.m-body 來源不一致要被抓到')
+})
+
 // ---- 不改變現有畫面 ----
 test('data-input／data-layout：現有樣式沒有任何選擇器用到；parts.css 沒有被任何頁面載入', () => {
   const dir = new URL('../ui/', import.meta.url)
