@@ -9075,6 +9075,22 @@ mod tests {
         assert_eq!(env_notice_for("", true, &["ANTHROPIC_API_KEY".to_string()]), None, "沒有被擋的變數就沒有");
     }
 
+    /// 守門（#2454 二審）：mux_env_notice 的本體在 cfg(not(test)) 裡，上面那支單元測試跑不到它；
+    /// 曾經出事的「MUX_OFF_REASON 有值就提早回那句」就寫在這裡。讀正式碼確認本體只是把值交給 env_notice_for，
+    /// 沒有自己讀 MUX_OFF_REASON、也沒有提早 return。
+    #[test]
+    fn 守門_mux_env_notice_本體只交給_env_notice_for_不自己讀沒開的原因() {
+        // Windows 的工作樹是 CRLF，先統一換行，下面找函式結尾才找得到
+        let src = crate::settings::src_scan::prod_source_of("launch/term.rs", include_str!("term.rs")).replace("\r\n", "\n");
+        let head = "pub(crate) fn mux_env_notice() -> Option<String> {";
+        let start = src.find(head).expect("前提：找得到 mux_env_notice 的宣告（改名了就更新這支）");
+        let end = start + src[start..].find("\n}\n").expect("前提：找得到 mux_env_notice 的結尾");
+        let body = &src[start + head.len()..end];
+        assert!(body.contains("env_notice_for("), "mux_env_notice 要把判斷交給 env_notice_for（有單元測試守著）：{body}");
+        assert!(!body.contains("MUX_OFF_REASON"), "mux_env_notice 不准自己讀 MUX_OFF_REASON（沒開的原因由 term-server-why 講一次）：{body}");
+        assert!(!body.contains("return"), "mux_env_notice 不准提早 return（判斷只能在 env_notice_for 裡）：{body}");
+    }
+
     #[test]
     fn 對照表寫入_rename失敗時不會先刪掉目標() {
         // 目標是資料夾：rename 一定失敗。舊寫法會走「目標存在就先刪」，這裡要保證原內容還在、tmp 清掉。
