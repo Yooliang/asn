@@ -289,7 +289,7 @@ export const RemoteView = {
 <div class="term-view term-remote" :class="{ 'term-desk': !barInline }">
   <p class="term-view-ask" role="status" v-if="barInline && (phase === 'starting' || phase === 'waiting')">{{ TEXT.waiting }}</p>
   <p class="term-view-lost" role="status" v-if="barInline && soon && phase !== 'ended'">{{ TEXT.soon }}</p>
-  <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面" v-show="phase === 'waiting' || phase === 'watching'"></div>
+  <div class="term-view-screen" data-toast-anchor="chat" data-toast-edge="top" ref="host" aria-label="別台電腦上的畫面" v-show="phase === 'waiting' || phase === 'watching'"></div>
   <div class="term-remote-state" role="status" v-if="stateView && phase !== 'ended'"><p class="term-remote-state-t">{{ stateView.title }}</p><p class="term-remote-state-h">{{ stateView.hint }}</p></div>
   <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ stateView.title }}　{{ stateView.hint }}<button class="aero-btn" type="button" v-if="barInline || !expired" @click="again">{{ TEXT.again }}</button></p>
 </div>`,

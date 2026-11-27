@@ -161,17 +161,25 @@ const TOAST_GAP = 8   // 貼著錨點下緣往上留的距離（像素）
  * 電腦版的位置：給錨點的方框與視窗高度，回 { left, bottom, maxWidth }（都是 px 字串）；方框看不到（寬高 0）回 null。
  * 提示的下緣貼在錨點下緣往上 TOAST_GAP，水平置中在錨點內，寬度不超出錨點。純函式，測試直接用
  */
-export function toastPlace(rect, viewH) {
+export function toastPlace(rect, viewH, edge = 'bottom') {
   if (!rect || !(rect.width >= 1) || !(rect.height >= 1) || !(viewH > 0)) return null
-  return { left: `${Math.round(rect.left + rect.width / 2)}px`, bottom: `${Math.max(0, Math.round(viewH - rect.bottom + TOAST_GAP))}px`, maxWidth: `${Math.max(120, Math.round(rect.width - 2 * TOAST_GAP))}px` }
+  const left = `${Math.round(rect.left + rect.width / 2)}px`, maxWidth = `${Math.max(120, Math.round(rect.width - 2 * TOAST_GAP))}px`
+  // 貼上緣（終端或對方畫面：上緣是較舊的輸出，不擋正在打字的那一行）：提示的上緣貼在錨點上緣往下 TOAST_GAP，往下長
+  if (edge === 'top') return { left, top: `${Math.round(rect.top + TOAST_GAP)}px`, bottom: 'auto', maxWidth }
+  return { left, bottom: `${Math.max(0, Math.round(viewH - rect.bottom + TOAST_GAP))}px`, maxWidth }
 }
-/** 依 at 在目前畫面找錨點（指定的那區看不到就改找另一區）；找不到回 null */
+/**
+ * 依 at 在目前畫面找錨點（指定的那區看不到就改找另一區）；找不到回 null。
+ * 同一個名稱可能有好幾個（整合模式每個對話分頁各一個，沒作用中的藏起來），所以逐一看、取第一個看得到的（方框有寬高）。
+ * 錨點上的 data-toast-edge="top" 表示貼上緣（終端與對方畫面），沒有就貼下緣（訊息區、名單區）
+ */
 export function toastAnchorStyle(at, doc = globalThis.document, viewH = globalThis.innerHeight) {
-  if (!TOAST_AT.includes(at) || !doc?.querySelector) return null
+  if (!TOAST_AT.includes(at) || !doc?.querySelectorAll) return null
   for (const name of [at, ...TOAST_AT.filter(a => a !== at)]) {
-    const el = doc.querySelector(`[data-toast-anchor="${name}"]`)
-    const p = el ? toastPlace(el.getBoundingClientRect(), viewH) : null
-    if (p) return p
+    for (const el of doc.querySelectorAll(`[data-toast-anchor="${name}"]`)) {
+      const p = toastPlace(el.getBoundingClientRect(), viewH, el.getAttribute?.('data-toast-edge') === 'top' ? 'top' : 'bottom')
+      if (p) return p
+    }
   }
   return null
 }

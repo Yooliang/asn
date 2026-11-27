@@ -222,7 +222,7 @@ export const RemoteInput = {
     <button class="aero-btn" type="button" @click="pasteNo">{{ PASTE_TEXT.no }}</button>
   </p>
   <div class="term-wait-cover" role="status" v-if="snap !== null && (phase === 'starting' || phase === 'waiting')"><p class="term-wait-note">{{ TEXT.waitReply }}</p></div>
-  <div class="term-view-screen" ref="host" aria-label="別台電腦上的畫面（可以打字）" v-show="hostShown"></div>
+  <div class="term-view-screen" data-toast-anchor="chat" data-toast-edge="top" ref="host" aria-label="別台電腦上的畫面（可以打字）" v-show="hostShown"></div>
   <p class="term-view-lost" role="status" v-if="phase === 'ended'">{{ barInline ? note : '' }}
     <button class="aero-btn" type="button" @click="again">{{ TEXT.again }}</button>
     <button class="aero-btn" type="button" @click="back">{{ TEXT.back }}</button>

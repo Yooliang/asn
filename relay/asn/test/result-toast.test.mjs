@@ -155,6 +155,42 @@ test('#2425 toastAnchorStyle：對話視窗用訊息區、名單頁用名單區�
   } finally { m.unmount() }
 })
 
+test('#2425 toastPlace 貼上緣：提示的上緣貼在錨點上緣往下 8、不設 bottom（改成 auto）；沒給 edge 仍貼下緣', () => {
+  const r = { left: 450, right: 890, top: 140, bottom: 480, width: 440, height: 340 }
+  assert.deepEqual(toastPlace(r, 640, 'top'), { left: '670px', top: '148px', bottom: 'auto', maxWidth: '424px' })
+  assert.deepEqual(toastPlace(r, 640, 'bottom'), toastPlace(r, 640))
+  assert.equal(toastPlace({ ...r, width: 0 }, 640, 'top'), null)
+})
+
+test('#2425 錨點有好幾個（整合模式每個對話分頁各一個）：取第一個看得到的，不是第一個；藏起來的（方框全 0）略過', async () => {
+  const m = mountComponent({ template: '<div><div id="a" data-toast-anchor="chat"></div><div id="b" data-toast-anchor="chat"></div><div id="l" data-toast-anchor="list"></div></div>' }, {})
+  try {
+    const box = (el, r) => { el.getBoundingClientRect = () => ({ ...r, width: r.right - r.left, height: r.bottom - r.top }) }
+    const a = m.find('#a'), b = m.find('#b'), l = m.find('#l')
+    box(a, { left: 0, right: 0, top: 0, bottom: 0 })                           // 第一個分頁：藏起來
+    box(b, { left: 450, right: 890, top: 140, bottom: 480 })                    // 第二個分頁：目前看得到
+    box(l, { left: 10, right: 300, top: 180, bottom: 545 })
+    assert.equal(toastAnchorStyle('chat', m.document, 640).left, '670px', '選到第二個，不是退到名單區（155px）')
+    box(a, { left: 450, right: 890, top: 140, bottom: 480 }); box(b, { left: 0, right: 0, top: 0, bottom: 0 })
+    assert.equal(toastAnchorStyle('chat', m.document, 640).left, '670px', '第一個看得到就用第一個')
+    box(a, { left: 0, right: 0, top: 0, bottom: 0 })                            // 兩個都藏（寬 500 只顯示名單等）
+    assert.equal(toastAnchorStyle('chat', m.document, 640).left, '155px', '都藏起來才退到另一區')
+    // 終端或對方畫面的錨點：data-toast-edge="top"，貼上緣
+    b.setAttribute('data-toast-edge', 'top'); box(b, { left: 450, right: 890, top: 140, bottom: 480 })
+    assert.deepEqual(toastAnchorStyle('chat', m.document, 640), { left: '670px', top: '148px', bottom: 'auto', maxWidth: '424px' })
+  } finally { m.unmount() }
+})
+
+test('#2425 終端與對方畫面的錨點掛在 .term-view-screen（畫面本體），不是外層容器：貼上緣才會落在貼上確認列、停止列的下方', () => {
+  for (const f of ['lib/term-view.mjs', 'lib/term-remote.mjs', 'lib/term-remote-input.mjs']) {
+    const src = read(f)
+    assert.match(src, /<div class="term-view-screen" data-toast-anchor="chat" data-toast-edge="top"/, `${f}：畫面本體是貼上緣的對話錨點`)
+    assert.doesNotMatch(src, /<div class="term-view(?: [^"]*)?"[^>]*data-toast-anchor/, `${f}：外層容器不能是錨點`)
+  }
+  assert.match(read('lib/chatpane.mjs'), /<div class="msgs" data-toast-anchor="chat" ref/, '訊息區貼下緣（沒有 edge）')
+  assert.doesNotMatch(read('lib/chatpane.mjs'), /data-toast-edge/)
+})
+
 test('#2425 AsnToast 依 at 寫行內位置：給 at 才有，手機（沒給）沒有；換一則會重算', async () => {
   const anchor = mountComponent({ template: '<div data-toast-anchor="chat"></div>' }, {})
   const el = anchor.find('[data-toast-anchor]')
