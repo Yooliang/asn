@@ -34,4 +34,6 @@ jobs:
 
       - name: 單元測試（Node）
         working-directory: relay/asn
+        env:
+          ASN_REQUIRE_MAIN: '1'   # #2425：這個 job 抓了 main，基準檔子集比對一定要真的跑
         run: npm test

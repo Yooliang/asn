@@ -3,7 +3,7 @@
 //  - 找到基準裡沒有的新 class → 紅（新的提示樣式要用 AsnStatus／AsnNote）
 //  - 基準裡有、實際已找不到 → 也紅（把它從基準刪掉；所以基準只會減少）
 //  - 基準檔只准刪不准加：ASN_GOLDEN_UPDATE=1 只會把已消失的 class 移掉、刷新檔案清單，不會把新 class 放進去；
-//    另外現在的基準必須是 origin/main 上基準檔的子集（手改基準檔偷加會紅）；CI 的 workflow 會另外抓 main，CI 上抓不到就紅（不准空跑）
+//    另外現在的基準必須是 origin/main 上基準檔的子集（手改基準檔偷加會紅）；node-test 那個 job 會另外抓 main 並設 ASN_REQUIRE_MAIN=1，抓不到就紅（不准空跑）
 // 規範：docs/畫面規範.md〈四之一、訊息與提示的位置〉。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -61,14 +61,15 @@ test('#2425 棘輪：基準裡的 class 都還找得到；找不到就從基準�
   assert.deepEqual(gone, [], '這些 class 已經不見了，請從 test/golden/hint-classes.json 刪掉（ASN_GOLDEN_UPDATE=1 node --test test/hint-classes.test.mjs 會代刪）')
 })
 
-test('#2425 基準檔只准刪不准加：必須是 origin/main 上基準檔的子集（main 上還沒有基準檔時略過；CI 上找不到 origin/main 一律紅）', t => {
+test('#2425 基準檔只准刪不准加：必須是 origin/main 上基準檔的子集（main 上還沒有基準檔時略過；node-test 這個 job 找不到 origin/main 一律紅）', t => {
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
   let hasMain = true
   try { git(['rev-parse', '--verify', '--quiet', 'origin/main']) } catch { hasMain = false }
-  // CI 的 checkout 是淺層的，workflow 另外抓 main（asn-node-tests.yml）；抓不到就是守門沒在跑，不准悄悄略過
+  // CI 的 checkout 是淺層的。這條守門由 node-test 那個 job 負責：asn-node-tests.yml 另外抓 main，並設 ASN_REQUIRE_MAIN=1；
+  // 設了卻找不到 origin/main 就是守門沒在跑，不准悄悄略過。其他也會跑 Node 測試的 job（Linux 建置、發版）沒抓 main，就略過。
   if (!hasMain) {
-    assert.ok(!process.env.CI, 'CI 上找不到 origin/main：這條守門會空跑，請確認 workflow 有「取得 main」那一步')
-    t.skip('本機找不到 origin/main（沒有遠端）'); return
+    assert.ok(process.env.ASN_REQUIRE_MAIN !== '1', '找不到 origin/main：這條守門會空跑，請確認 asn-node-tests.yml 有「取得 main」那一步')
+    t.skip('找不到 origin/main（本機沒有遠端，或這個 job 沒抓 main；守門由 node-test 那個 job 負責）'); return
   }
   let main
   try { main = JSON.parse(git(['show', `origin/main:${GOLDEN_GIT}`])) } catch { t.skip('main 上還沒有基準檔（第一次加入）'); return }
