@@ -64,12 +64,25 @@ const LOG_POLL: Duration = Duration::from_millis(500);
 /// 建不起視窗時給人看的一句話（#595）
 pub const NO_WINDOW_MSG: &str = "這台電腦現在開不了圖形視窗（常見原因：遠端桌面已中斷），請先接回桌面再試";
 
+/// 讀窗格畫面判斷程式結束了沒的結果
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneProbe {
+    /// 看到帶暗號的結束標記（結束碼）
+    Exited(i32),
+    /// 讀到畫面，沒有結束標記：確認還活著
+    Alive,
+    /// 沒讀到畫面（失敗、被暫停略過）或沒有暗號：不知道
+    Unknown,
+}
+
 /// 外部程式的執行結果
 #[derive(Debug, Clone, Default)]
 pub struct RunOutput {
     pub success: bool,
     pub stdout: String,
     pub stderr: String,
+    /// 結束碼（被訊號結束或假的執行器沒給＝None）；只給 log 用
+    pub code: Option<i32>,
 }
 
 /// 執行外部程式的介面
@@ -183,13 +196,14 @@ impl Runner for RealRunner {
     fn run(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
         let mut cmd = Command::new(program);
         cmd.no_window().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        exec_with_timeout(cmd, program, timeout)
+        // 所有 wezterm cli 的統一出口（#2424 D）：排隊、逾時後暫停例行讀畫面、失敗寫 log
+        super::cli_gate::gated(args, env, || exec_typed(cmd, program, timeout))
     }
 
     fn run_clean(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<RunOutput, String> {
         let mut cmd = Command::new(program);
         cmd.no_window().env_clear().args(args).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        exec_with_timeout(cmd, program, timeout)
+        super::cli_gate::gated(args, env, || exec_typed(cmd, program, timeout))
     }
 
     fn spawn(&self, program: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {
@@ -321,9 +335,44 @@ impl Runner for RealRunner {
     }
 }
 
+/// 逾時後結束整棵樹的 `taskkill` 最多等多久。它在排隊位子內執行：卡住就整個連線檔的指令都塞死，所以要有上限
+const KILL_TREE_LIMIT: Duration = Duration::from_secs(5);
+
+/// 結束 `pid` 底下的整棵樹，最多等 `limit`；等不到就放棄那支 taskkill 並寫 log，絕不無限等
+fn kill_tree_bounded(pid: u32, limit: Duration) {
+    let spawned = Command::new("taskkill").no_window().args(["/PID", &pid.to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    // 起不來（例如沒有 taskkill 的平台）：交給後面的 child.kill()
+    let Ok(mut tk) = spawned else { return };
+    if !wait_bounded(&mut tk, limit) {
+        super::term::view_log(&format!("終端服務指令逾時後結束子程序樹的 taskkill 沒有在 {} 秒內完成，已放棄", limit.as_secs()));
+    }
+}
+
+/// 最多等 `limit` 讓 `child` 自己結束：結束了回 true；等不到（或等待失敗）就結束它、收屍，回 false。絕不無限等
+fn wait_bounded(child: &mut std::process::Child, limit: Duration) -> bool {
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return true,
+            Ok(None) if start.elapsed() < limit => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return false;
+            }
+        }
+    }
+}
+
 /// RealRunner::run／run_clean 共用：啟動、讀兩條管道、逾時就連整棵樹結束
-fn exec_with_timeout(mut cmd: Command, program: &Path, timeout: Duration) -> Result<RunOutput, String> {
-    let mut child = cmd.spawn().map_err(|e| format!("{CANNOT_RUN} {}：{e}", program.display()))?;
+fn exec_with_timeout(cmd: Command, program: &Path, timeout: Duration) -> Result<RunOutput, String> {
+    exec_typed(cmd, program, timeout).map_err(super::cli_gate::ExecErr::into_message)
+}
+
+/// 同 [`exec_with_timeout`]，失敗分型別（起不來、逾時、其他），給閘門分類用
+fn exec_typed(mut cmd: Command, program: &Path, timeout: Duration) -> Result<RunOutput, super::cli_gate::ExecErr> {
+    use super::cli_gate::ExecErr;
+    let mut child = cmd.spawn().map_err(|e| ExecErr::CannotRun(format!("{CANNOT_RUN} {}：{e}", program.display())))?;
     // 兩條管道各用一條執行緒邊讀邊放進共用緩衝：子程序結束後，孫程序（例如 cli 自己拉起的 mux-server）可能還握著管道的寫入端，
     // 讀取永遠不會結束，所以結束後最多等 [`PIPE_DRAIN`]，讀不完就拿目前讀到的（執行緒留著，等孫程序放掉管道自然結束）
     let (buf_out, t_out) = drain_pipe(child.stdout.take());
@@ -342,19 +391,25 @@ fn exec_with_timeout(mut cmd: Command, program: &Path, timeout: Duration) -> Res
                     success: st.success(),
                     stdout: String::from_utf8_lossy(&so).into_owned(),
                     stderr: String::from_utf8_lossy(&se).into_owned(),
+                    code: st.code(),
                 });
             }
             Ok(None) => {
                 if start.elapsed() >= timeout {
                     // cli 若在 socket 突然消失時自己拉起了 mux-server，那是它的子行程：連整棵樹一起結束（此刻 child 還活著，編號不會被回收）
-                    let _ = Command::new("taskkill").no_window().args(["/PID", &child.id().to_string(), "/T", "/F"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+                    kill_tree_bounded(child.id(), KILL_TREE_LIMIT);
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!("WezTerm 指令逾時（{} 秒），已結束該子行程", timeout.as_secs()));
+                    return Err(ExecErr::Timeout(format!("WezTerm 指令逾時（{} 秒），已結束該子行程", timeout.as_secs())));
                 }
                 std::thread::sleep(Duration::from_millis(20));
             }
-            Err(e) => return Err(format!("等待子行程失敗：{e}")),
+            Err(e) => {
+                // 等待失敗也要結束並收屍，不留著孤兒程序
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(ExecErr::Other(format!("等待子行程失敗：{e}")));
+            }
         }
     }
 }
@@ -1014,7 +1069,12 @@ impl<'a> WezTerm<'a> {
 
     /// 關掉共用 mux 裡的一個窗格（只結束那個窗格，不動 mux 與其他夥伴）
     pub fn kill_pane(&self, sock: &Path, pane_id: u64) -> Result<(), String> {
-        self.cli(sock, &["kill-pane".to_string(), "--pane-id".into(), pane_id.to_string()]).map(|_| ())
+        let r = self.cli(sock, &["kill-pane".to_string(), "--pane-id".into(), pane_id.to_string()]).map(|_| ());
+        if let Err(e) = &r {
+            // 失敗不能靜默：窗格可能還留著（呼叫端多半忽略這個結果）
+            super::term::view_log(&format!("終端服務：關閉窗格 {pane_id} 失敗：{e}"));
+        }
+        r
     }
 
     /// 整幅畫面，帶顏色。這是 WezTerm 重新產生的，不是程式的原始輸出；內容還是外部資料，用之前要過濾（`term_view::filter_frame`）
@@ -1039,9 +1099,21 @@ impl<'a> WezTerm<'a> {
     /// 這個窗格的程式是不是已經結束（窗格因 Hold 還留著）。回結束碼（見 [`pane_exit_from_screen`]）；
     /// 還在跑、讀不到畫面、或沒有 nonce（0.2.0 先前開的窗格，判斷不出來）＝None（當作還活著；沒有 nonce 就不讀畫面）
     pub fn pane_exit(&self, sock: &Path, pane_id: u64, nonce: Option<&str>) -> Option<i32> {
-        let nonce = nonce?;
-        let text = self.get_text(sock, pane_id, Some(-PANE_PROBE_LINES)).ok()?;
-        pane_exit_from_screen(&text, nonce)
+        match self.pane_probe(sock, pane_id, nonce) {
+            PaneProbe::Exited(code) => Some(code),
+            PaneProbe::Alive | PaneProbe::Unknown => None,
+        }
+    }
+
+    /// 同 [`Self::pane_exit`]，但分得出「確認還活著」與「沒讀到畫面（失敗、被暫停略過、沒有暗號）」：
+    /// 後者不能當成「剛確認過還活著」（重開認領用它決定監看第一輪要不要重讀）。
+    /// 是不是「例行」由呼叫端決定（背景掃描用 `cli_gate::routine` 包起來；開窗後的早退偵測是使用者動作，不能包）
+    pub fn pane_probe(&self, sock: &Path, pane_id: u64, nonce: Option<&str>) -> PaneProbe {
+        let Some(nonce) = nonce else { return PaneProbe::Unknown };
+        match self.get_text(sock, pane_id, Some(-PANE_PROBE_LINES)) {
+            Ok(text) => pane_exit_from_screen(&text, nonce).map_or(PaneProbe::Alive, PaneProbe::Exited),
+            Err(_) => PaneProbe::Unknown,
+        }
     }
 
     /// 送一行文字（不含 Enter）：先壓成單行，用 --no-paste
@@ -1160,6 +1232,26 @@ mod tests {
         let took = started.elapsed();
         assert!(r.is_ok(), "{r:?}");
         assert!(took < std::time::Duration::from_secs(4), "被孫程序拖住了 {took:?}");
+    }
+
+    /// M1：逾時後結束子程序樹的 taskkill 本身卡住時，最多等一個上限就放棄並收屍，不能無限等（它在排隊位子內，卡住會塞死整個連線檔）
+    #[test]
+    fn 等子程序_有上限_等不到就結束並收屍() {
+        use crate::nowin::NoWindow;
+        let spawn = |slow: bool| {
+            #[cfg(windows)]
+            let (prog, args): (&str, &[&str]) = if slow { ("ping.exe", &["-n", "30", "127.0.0.1"]) } else { ("cmd.exe", &["/c", "exit", "0"]) };
+            #[cfg(not(windows))]
+            let (prog, args): (&str, &[&str]) = if slow { ("sleep", &["30"]) } else { ("true", &[]) };
+            std::process::Command::new(prog).no_window().args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap()
+        };
+        let mut fast = spawn(false);
+        assert!(super::wait_bounded(&mut fast, std::time::Duration::from_secs(20)), "很快結束的要回 true");
+        let mut slow = spawn(true);
+        let t0 = std::time::Instant::now();
+        assert!(!super::wait_bounded(&mut slow, std::time::Duration::from_millis(300)), "等不到要回 false");
+        assert!(t0.elapsed() < std::time::Duration::from_secs(10), "要在上限附近就放棄，不能等到它自己結束：{:?}", t0.elapsed());
+        assert!(slow.try_wait().unwrap().is_some(), "放棄時已結束並收屍，不留殭屍");
     }
 
     #[test]
@@ -1287,6 +1379,7 @@ mod tests {
                 success: true,
                 stdout: self.stdout.borrow().clone(),
                 stderr: String::new(),
+                code: None,
             })
         }
         fn spawn(&self, _p: &Path, args: &[String], env: &BTreeMap<String, String>) -> Result<u32, String> {

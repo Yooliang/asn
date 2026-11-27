@@ -56,6 +56,8 @@ const WAKE_WITHIN_MS: u64 = 60_000;
 const WAKE_COOLDOWN_MS: u64 = 60_000;
 /// 讀失敗的退避上限
 const MAX_BACKOFF_MS: u64 = 300_000;
+/// 讀畫面被暫停略過後，多久再排一次
+const SKIP_RETRY_MS: u64 = 10_000;
 /// 退避等到這麼久（含）以上才寫一行紀錄，免得每次小失敗都洗版
 const BACKOFF_LOG_MS: u64 = 60_000;
 /// 空記憶體低於這個值就暫停
@@ -196,6 +198,12 @@ impl Schedule {
         let wait = pace.interval().saturating_mul(1u64 << fails.min(16)).min(MAX_BACKOFF_MS);
         self.next_at.insert(id.to_string(), now + wait);
         (wait >= BACKOFF_LOG_MS).then(|| backoff_line(id, fails, wait))
+    }
+
+    /// 這一次讀畫面被暫停略過（終端服務剛逾時，指令根本沒送出）：不算讀失敗，不累計、不退避加倍、不觸發「好幾扇讀不到」，
+    /// 只是稍後再排一次，所以服務恢復後權限提示的通知不會被延遲
+    pub fn skipped(&mut self, id: &str, now: u64) {
+        self.next_at.insert(id.to_string(), now + SKIP_RETRY_MS);
     }
 
     /// 該不該請終端服務監看馬上重看一次（#1887）：`WAKE_WITHIN_MS` 內有 `WAKE_WINDOWS` 扇以上的視窗讀失敗才算；
@@ -448,6 +456,24 @@ mod tests {
         s.done("w2", Pace::Frequent, false, NOW + 30_000);
         assert!(!s.take_wake(NOW + 30_000), "剛叫過，冷卻期內不再叫");
         assert!(s.take_wake(NOW + 20_000 + WAKE_COOLDOWN_MS), "冷卻過了、失敗還在，再叫一次");
+    }
+
+    /// #2424 X2：被終端服務的指令閘門略過的讀取不算失敗——不退避加倍、不計入「好幾扇讀不到」。
+    /// 若又改成呼叫 `done(.., false, ..)`，第三次略過就會退避到 80 秒以上、而且兩扇視窗會觸發叫監看重看（紅）
+    #[test]
+    fn t2424_讀畫面被暫停略過_不算失敗_不退避_不觸發重看() {
+        let mut s = Schedule::default();
+        let wins = w(2, Pace::Frequent);
+        let mut now = NOW;
+        for _ in 0..6 {
+            assert_eq!(s.due(now, &wins, FREE).len(), 2, "兩扇都該讀");
+            s.skipped("w0", now);
+            s.skipped("w1", now);
+            assert!(!s.take_wake(now), "略過不算讀不到，不叫監看重看");
+            now += SKIP_RETRY_MS;
+        }
+        assert_eq!(s.due(now, &wins, FREE).len(), 2, "連略過六次後，下一輪照樣在固定的短間隔後再試，沒有被退避拖長");
+        assert!(s.fails.is_empty() && s.failed_at.is_empty());
     }
 
     #[test]

@@ -142,6 +142,7 @@ mod tests {
         ("src/claude_mod.rs", "RealRunner", Scope::File, "claude_mod 自己的 RealRunner：只啟動測試自備的暫存腳本／逾時行為"),
         ("src/launch/pi_setup.rs", "RealRunner", Scope::File, "pi_setup 自己的 RealRunner（同名、與 wezterm 無關）：不碰 mux"),
         ("src/launch/config.rs", "RealRunner", Scope::File, "只做原始碼字串檢查（assert 內文），不執行"),
+        ("src/launch/cli_gate.rs", "RealRunner", Scope::File, "只做原始碼字串檢查（讀 wezterm.rs 的內文確認出口經過閘門），不執行"),
         // wezterm 真機測試：全部 #[ignore] 或在沒有 WezTerm 的機器上直接略過
         ("src/launch/wezterm.rs", "RealRunner", Scope::File, "wezterm 的 Runner 實作與它自己的真程序測試（只啟動測試自備的暫存程式）"),
         ("src/launch/term.rs", "RealRunner", Scope::IgnoredFnsOnly, "#[ignore] 的真機測試：用 TermService::fixed 指到暫存資料夾與獨立的 WezTerm，mux 資料夾已注入暫存位置"),

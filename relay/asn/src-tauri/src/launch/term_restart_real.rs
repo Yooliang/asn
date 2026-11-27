@@ -155,7 +155,7 @@ fn windows_real_mux_restart() {
 
     // (a) 正常重啟：舊的沒了、新的起來、名單全接回、STASH 空
     let got = RefCell::new(Vec::new());
-    let r = rig.svc.restart_mux(rig.resume(&got), |_| panic!("起得來就不該通知斷線"));
+    let r = rig.svc.restart_mux(false, rig.resume(&got), |_| panic!("起得來就不該通知斷線"));
     assert_eq!(r, Ok(()), "(a) 正常重啟");
     wait("(a) 舊 mux 程序已不在", || !crate::heartbeat::pid_alive(m1));
     let (m2, _) = rig.live().expect("(a) 新 mux 活著");
@@ -170,7 +170,7 @@ fn windows_real_mux_restart() {
     rig.hide_server();
     let got = RefCell::new(Vec::new());
     let downed = RefCell::new(Vec::<String>::new());
-    let r = rig.svc.restart_mux(rig.resume(&got), |d| {
+    let r = rig.svc.restart_mux(false, rig.resume(&got), |d| {
         downed.borrow_mut().extend(d.iter().cloned());
         mux_restart::notify_down(&rig.work(), d, crate::heartbeat::now_ms());
     });
@@ -187,7 +187,7 @@ fn windows_real_mux_restart() {
     // (c) 改回檔名再重啟：用 STASH 接回、STASH 清空、窗格都回來
     rig.restore_server();
     let got = RefCell::new(Vec::new());
-    let r = rig.svc.restart_mux(rig.resume(&got), |_| panic!("起得來就不該通知斷線"));
+    let r = rig.svc.restart_mux(false, rig.resume(&got), |_| panic!("起得來就不該通知斷線"));
     assert_eq!(r, Ok(()), "(c) 重按要成功");
     let (m3, _) = rig.live().expect("(c) 新 mux 活著");
     assert!(m3 != m1 && m3 != m2, "(c) 又是一個新的 mux");

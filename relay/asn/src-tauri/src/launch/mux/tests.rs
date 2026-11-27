@@ -65,7 +65,7 @@ impl Runner for Fake {
         let n = self.tries.get();
         self.tries.set(n + 1);
         let up = self.alive_after.get().is_some_and(|k| n >= k) || (self.alive_once_started && !self.started.borrow().is_empty());
-        Ok(RunOutput { success: up, stdout: if up { self.list_json.clone() } else { String::new() }, stderr: String::new() })
+        Ok(RunOutput { success: up, stdout: if up { self.list_json.clone() } else { String::new() }, stderr: String::new(), code: None })
     }
     fn spawn(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>) -> Result<u32, String> {
         unreachable!("mux 一律用 spawn_detached 起")
@@ -180,6 +180,56 @@ fn 連得上就沿用_不起新的() {
     r.alive_after.set(Some(0));
     assert_eq!(mux(&r, d.path()).ensure(), Ok(Ensure::Reused));
     assert!(r.started.borrow().is_empty());
+}
+
+/// #2424 H1／X1：排隊等不到位子（指令沒送出）不是「連不上」：不起新服務、不殺剛起的服務，也不長時間空等
+#[test]
+fn t2424_ensure_指令沒送出_不誤報_不起新的_不殺() {
+    let busy = format!("{}，排隊 20 秒仍輪不到，這次沒有送出", crate::launch::cli_gate::QUEUE_TIMEOUT);
+    // 一開始就排不到
+    let d = tempfile::tempdir().unwrap();
+    let r = Fake::new();
+    *r.run_err.borrow_mut() = Some(busy.clone());
+    let e = mux(&r, d.path()).ensure().unwrap_err();
+    assert!(e.contains("暫時忙碌"), "{e}");
+    assert!(r.started.borrow().is_empty() && r.killed.borrow().is_empty(), "沒測成不能起新的、不能殺");
+    // 記錄的服務還在起、一直排不到：回錯，試連次數有上限（不是每次都等滿），不起新的、不殺
+    let mut r2 = Fake::new();
+    r2.alive_once_started = false;
+    let m2 = mux(&r2, d.path());
+    std::fs::create_dir_all(&m2.paths.dir).unwrap();
+    std::fs::write(&m2.paths.pid, "3000 555").unwrap();
+    r2.birth.borrow_mut().insert(3000, 555);
+    r2.on_run.replace(Some(Box::new({
+        let busy = busy.clone();
+        move |f: &Fake| {
+            // 第一次（ensure 開頭、拿鎖後）正常答「連不上」，之後一律排不到
+            if f.calls.borrow().len() > 2 {
+                *f.run_err.borrow_mut() = Some(busy.clone());
+            }
+        }
+    })));
+    let e2 = m2.ensure().unwrap_err();
+    assert!(e2.contains("暫時忙碌"), "{e2}");
+    assert!(r2.cli_calls().len() <= 2 + super::UNSURE_MAX as usize, "沒測成的試連次數要有上限：{}", r2.cli_calls().len());
+    assert!(r2.started.borrow().is_empty() && r2.killed.borrow().is_empty());
+    // 剛起好的服務、等連線時一直排不到：不結束它，記錄留著
+    let mut r3 = Fake::new();
+    r3.alive_once_started = false;
+    let m3 = mux(&r3, d.path());
+    std::fs::remove_file(&m3.paths.pid).ok();
+    r3.on_run.replace(Some(Box::new({
+        let busy = busy.clone();
+        move |f: &Fake| {
+            if !f.started.borrow().is_empty() {
+                *f.run_err.borrow_mut() = Some(busy.clone());
+            }
+        }
+    })));
+    let e3 = m3.ensure().unwrap_err();
+    assert!(e3.contains("暫時忙碌"), "{e3}");
+    assert!(r3.killed.borrow().is_empty(), "不能因為沒測成就結束剛起的服務");
+    assert!(m3.paths.pid.exists(), "記錄留著，下次可以接手");
 }
 
 #[test]
@@ -1257,7 +1307,7 @@ mod stuck {
     struct Minimal;
     impl Runner for Minimal {
         fn run(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>, _t: Duration) -> Result<RunOutput, String> {
-            Ok(RunOutput { success: false, stdout: String::new(), stderr: String::new() })
+            Ok(RunOutput { success: false, stdout: String::new(), stderr: String::new(), code: None })
         }
         fn spawn(&self, _p: &Path, _a: &[String], _e: &BTreeMap<String, String>) -> Result<u32, String> {
             unreachable!()
@@ -1298,6 +1348,19 @@ mod stuck {
         r.cannot_run.set(false);
         *r.run_err.borrow_mut() = Some("執行逾時（10 秒）".into());
         assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
+    }
+
+    /// #2424 H1：指令排隊等不到位子（沒送出）不是「連不上」，不能走到結束終端服務；沒測成回忙碌（不進 5 分鐘冷卻）
+    #[test]
+    fn t2424_連線測試沒送出_排隊逾時_回忙碌_不結束終端服務() {
+        let d = tempfile::tempdir().unwrap();
+        let (r, m) = rig(d.path());
+        for e in [format!("{}，排隊 20 秒仍輪不到，這次沒有送出", crate::launch::cli_gate::QUEUE_TIMEOUT), format!("{}（約 30 秒後再試）", crate::launch::cli_gate::SKIPPED)] {
+            *r.run_err.borrow_mut() = Some(e);
+            assert!(matches!(m.alive_probe(), Probe::Inconclusive(_)), "沒送出＝沒測成");
+            assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Busy, "沒送出要回忙碌、不是取消");
+            assert!(r.killed.borrow().is_empty() && m.paths.pid.exists() && hb_of(&m).exists(), "終端服務與記錄都不能動");
+        }
     }
 
     #[test]

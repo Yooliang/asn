@@ -35,6 +35,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+/// 重開後認回先前的列與暫時接不回的列的重試（#2424）
+#[path = "term_reclaim.rs"]
+mod reclaim_rows;
+#[cfg(feature = "gui")]
+pub use reclaim_rows::start_reclaim_retry;
+
 /// ASN 自己的 WezTerm 設定檔內容（隔離，不讀使用者的 ~/.wezterm.lua）。
 /// exit_behavior = "Hold"：程式結束後視窗留著，讓人看得到最後的畫面；「程式已結束」由包裝殼印中文，WezTerm 自己的英文提示關掉。
 /// window_close_confirmation：按 X 直接關，不跳英文確認框（asn真 定案）
@@ -325,6 +331,8 @@ struct Inner {
     adopted: Vec<AdoptedSession>,
     /// 建立時間曾相符、但這次通訊檔不在（或 list 失敗），留在檔案裡下次再試。不放進可操作的對照表，也不對它們下 cli。
     parked: Vec<StoreTerm>,
+    /// parked 裡「暫時接不回」的列（終端編號 → 次數與原因，只放記憶體）：背景重試只動這些；有意先不碰的（開關關著）不在裡面（#2424）
+    parked_info: BTreeMap<String, reclaim_rows::ParkInfo>,
     /// 確定自己結束、已經收掉的夥伴名字，等監看拿走交給收發室（寄給它們的信馬上退回）
     exited: Vec<String>,
     /// 上一輪讀服務的窗格清單時，屬於現行 mux、但清單裡沒有窗格的列（終端編號）。連續兩輪都沒有才收（#923）
@@ -477,6 +485,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 last_sweep: None,
                 hb: Default::default(),
                 parked: Vec::new(),
+                parked_info: BTreeMap::new(),
                 viewers: Vec::new(),
             }),
             #[cfg(test)]
@@ -512,6 +521,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 last_sweep: None,
                 hb: Default::default(),
                 parked: Vec::new(),
+                parked_info: BTreeMap::new(),
                 viewers: Vec::new(),
             }),
             #[cfg(test)]
@@ -548,6 +558,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 last_sweep: None,
                 hb: Default::default(),
                 parked: Vec::new(),
+                parked_info: BTreeMap::new(),
                 viewers: Vec::new(),
             }),
             #[cfg(test)]
@@ -925,11 +936,12 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 逾時或回的不是窗格編號：窗格可能其實已經開了，當作已啟動（不讓呼叫端再開一份）
         let ran = self.runner.run_clean(&dir.cli, &mux::spawn_args(&sub), &mux::cli_env(&pane_env, &paths.sock), wezterm::CLI_TIMEOUT);
         // 逾時：窗格可能還在開，放掉鎖之前記下來，收空 mux 才不會關到它
-        if matches!(&ran, Err(e) if !e.starts_with(wezterm::CANNOT_RUN)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err()) {
+        // 排隊等不到位子（cli_gate）時指令根本沒送出，跟執行檔起不來一樣：窗格一定沒開
+        if matches!(&ran, Err(e) if !super::cli_gate::not_sent(e)) || matches!(&ran, Ok(o) if o.success && o.stdout.trim().parse::<u64>().is_err()) {
             m.note_spawn_unsure();
         }
         drop(open_guard);
-        let out = ran.map_err(|e| if e.starts_with(wezterm::CANNOT_RUN) { NotStarted(e) } else { Started(e) })?;
+        let out = ran.map_err(|e| if super::cli_gate::not_sent(&e) { NotStarted(e) } else { Started(e) })?;
         if !out.success {
             return Err(NotStarted(format!("終端服務開不出窗格：{}", out.stderr.trim())));
         }
@@ -1493,12 +1505,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 工作管理員的「重啟終端服務」：抓名單 → 停 → 起新的 → 名單交給 `resume`。流程與失敗處理見 `mux_restart::run_steps`。
     /// 呼叫端要放在背景執行緒（停與起各要等幾秒）
     /// `down`：起新的失敗、有夥伴斷線時呼叫（呼叫端排通知給本人）
-    pub fn restart_mux(&self, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
-        self.restart_mux_with(|m| m.ensure().map(|_| ()), resume, down)
+    /// `confirmed`：本人已確認「終端服務沒有回應也要重啟」（第一次呼叫給 false；回 `NeedConfirm` 後畫面問過本人，再帶 true 呼叫）
+    pub fn restart_mux(&self, confirmed: bool, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
+        self.restart_mux_with(confirmed, |m| m.ensure().map(|_| ()), resume, down)
     }
 
     /// 同 [`Self::restart_mux`]，「起新的」由外面給（測試用：數它被叫了幾次）
-    fn restart_mux_with(&self, ensure: impl FnOnce(&super::mux::Mux<'_>) -> Result<(), String>, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
+    fn restart_mux_with(&self, confirmed: bool, ensure: impl FnOnce(&super::mux::Mux<'_>) -> Result<(), String>, resume: impl FnOnce(Vec<String>), down: impl FnOnce(&[String])) -> Result<(), super::mux_restart::RestartError> {
         use super::mux_restart::{run_steps, RestartError, STASH, STOP_NOT_RUNNING};
         let m = self.restart_mux_handle()?;
         let note = |l: &str| {
@@ -1510,8 +1523,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let guard = std::cell::RefCell::new(Some(m.open_lock().map_err(|e| RestartError::Failed(format!("有視窗正在開啟，拿不到開窗格的鎖：{e}")))?));
         let names = || self.mux_snapshot().map(|o| o.partners);
         // 核對：服務還在時，它裡面夥伴窗格（asn-N）的數量不能比 ASN 記錄的多。多出來的是 ASN 沒記錄的視窗，
-        // 重啟會一起關掉又接不回，寧可不重啟（使用者先關掉它們）。數不出來（服務卡住）時照記錄的名單重啟並寫 log：
-        // 卡住的服務正是最需要重啟的，不能因為核對不到就擋住
+        // 重啟會一起關掉又接不回，寧可不重啟（使用者先關掉它們）。數不出來（沒送出、逾時、清單看不懂）＝無法核對，
+        // 不確定就不結束服務：中止重啟、寫 log，請使用者稍後再試
         let verify = || {
             let live = m.live_pid();
             if live.is_none() {
@@ -1522,9 +1535,26 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     let managed = self.managed_mux_panes(live);
                     if panes > managed { Err(RestartError::Unmanaged(panes - managed)) } else { Ok(()) }
                 }
+                // 數不出來＝無法確認沒有 ASN 沒記錄的視窗，分三種：
+                // 1. 排隊沒送出、被暫停略過（指令根本沒問到）＝忙碌，請稍後再試；就算本人確認過也一樣，沒有依據
+                // 2. 真的逾時、或連不上（服務沒有回應，卡住的服務最需要重啟）＝要本人確認一次；確認後照 ASN 的記錄重啟
+                // 3. 執行檔起不來、清單看不懂＝一般失敗，不重啟
                 Err(e) => {
-                    note(&format!("工作管理員重啟終端服務：數不出服務裡的視窗數（{e}），無法核對，照 ASN 的記錄重啟"));
-                    Ok(())
+                    let not_sent = super::cli_gate::not_sent(&e) && !e.starts_with(super::wezterm::CANNOT_RUN);
+                    let no_reply = e.contains("指令逾時") || e == super::mux::NOT_RUNNING;
+                    if not_sent {
+                        note("工作管理員重啟終端服務：核對時終端服務忙碌（指令沒送出），不重啟");
+                        Err(RestartError::Busy(e))
+                    } else if no_reply && confirmed {
+                        note(&format!("工作管理員重啟終端服務：核對時終端服務沒有回應（{e}），本人已確認，照 ASN 的記錄重啟"));
+                        Ok(())
+                    } else if no_reply {
+                        note("工作管理員重啟終端服務：核對時終端服務沒有回應，等本人確認");
+                        Err(RestartError::NeedConfirm(e))
+                    } else {
+                        note("工作管理員重啟終端服務：數不出服務裡的視窗數，無法核對，不重啟");
+                        Err(RestartError::Failed(e))
+                    }
                 }
             }
         };
@@ -1655,7 +1685,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return 0;
         }
         let w = self.wez(dir);
-        let dead: Vec<(String, u64, PathBuf, Option<String>)> = rows.into_iter().filter(|(_, pane, sock, nonce, _)| w.pane_exit(sock, *pane, Some(nonce)).is_some()).map(|(id, pane, sock, _, name)| (id, pane, sock, name)).collect();
+        let dead: Vec<(String, u64, PathBuf, Option<String>)> = rows.into_iter().filter(|(_, pane, sock, nonce, _)| super::cli_gate::routine(|| w.pane_exit(sock, *pane, Some(nonce))).is_some()).map(|(id, pane, sock, _, name)| (id, pane, sock, name)).collect();
         for (id, pane, sock, _) in &dead {
             let _ = w.kill_pane(sock, *pane);
             elog!("終端：夥伴自己結束了，收掉它的窗格（編號 {id}）");
@@ -2032,133 +2062,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         Ok(())
     }
 
-    /// ASN 重啟、記憶體對照表是空的時候，用檔案把先前自己開的視窗放回來。
-    /// 找不到 WezTerm、沒有檔案、或版本不認得：什麼都不改。這條路徑不呼叫 kill_tree。
-    pub fn reclaim(&self) -> Result<(), String> {
-        let loaded = self.load_store()?;
-        let file = match loaded {
-            Loaded::Ready(file) => file,
-            Loaded::Missing | Loaded::Foreign => return Ok(()),
-        };
-        let dir = match self.dir() {
-            Ok(d) => d,
-            Err(_) => return Ok(()),
-        };
-        let w = self.wez(&dir);
-        let mut restored: Vec<Session> = Vec::new();
-        let mut parked: Vec<StoreTerm> = Vec::new();
-        let mut exited_now: Vec<String> = Vec::new();
-        let mut probed_now: BTreeMap<String, Instant> = BTreeMap::new();
-        // 這一輪各通訊檔讀到的窗格清單（None＝讀失敗）
-        let mut lists: BTreeMap<PathBuf, Option<Vec<wezterm::PaneInfo>>> = BTreeMap::new();
-        for term in file.terms {
-            if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
-                continue;
-            }
-            // #611：開關關著（0.1.113 不認夥伴視窗的列）＝kind 不是空的列（第 1 階段留下的）一律 parked：留在檔案裡、不查不碰，等開關打開再認
-            if park_companion_row(self.hold_config, &term) {
-                parked.push(term);
-                continue;
-            }
-            if !reclaim_candidate(&term) {
-                continue;
-            }
-            let Some(saved) = term.started_ms else {
-                continue;
-            };
-            // 建立時間對不上、或程序已經不在：不認領，也不結束（編號可能已經是別人的）。
-            match self.runner.started_ms(term.pid) {
-                Some(now) if now == saved => {}
-                _ => continue,
-            }
-            let sock = if term.mux {
-                // mux 的列：連線檔是 mux 的，而且 pid 檔記的也要是同一個 mux（建立時間對得上），不然不認。
-                // 開關沒開時不碰（也不下 cli）：留在檔案裡，等開關打開再認
-                if !self.use_mux {
-                    parked.push(term);
-                    continue;
-                }
-                let Ok(m) = self.mux_handle(&dir, BTreeMap::new()) else {
-                    parked.push(term);
-                    continue;
-                };
-                if m.live_pid() != Some((term.pid, saved)) {
-                    continue;
-                }
-                m.paths.sock.clone()
-            } else {
-                wezterm::sock_path(&self.home, term.pid)
-            };
-            if !self.fs.exists(&sock) {
-                parked.push(term);
-                continue;
-            }
-            // 同一個通訊檔這一輪只讀一次清單（每一列各讀一次會多下好幾次 wezterm cli list）；讀失敗也記下，同檔的列一起 parked
-            let listed = lists.entry(sock.clone()).or_insert_with(|| w.list(&sock).ok());
-            let Some(panes) = listed.as_ref() else {
-                parked.push(term);
-                continue;
-            };
-            // 已結束的窗格（Hold 留著）不認領，順手收掉；讀不到畫面當作還活著
-            let saw_dead = std::cell::Cell::new(false);
-            let ended = |p: &wezterm::PaneInfo| {
-                let dead = w.pane_exit(&sock, p.pane_id, term.exit_nonce.as_deref()).is_some();
-                if dead && pane_is_ours(&term.id, p) {
-                    let _ = w.kill_pane(&sock, p.pane_id);
-                    saw_dead.set(true);
-                }
-                dead
-            };
-            let Some(pane) = pick_pane(panes, &term.id, term.pane_id, &ended) else {
-                // ASN 關著時夥伴自己結束了：記下名字，寄給它的信馬上退回，不當成還沒接回
-                if saw_dead.get() && !term.kind.is_empty() {
-                    if let Some(name) = partner_label(&term.id, &term.title) {
-                        exited_now.push(name.to_string());
-                    }
-                }
-                continue;
-            };
-            // pick_pane 只回 ended 判過「沒結束」的窗格，有暗號就表示剛讀過它的畫面：記下來，監看第一輪不重讀（#897）
-            if term.exit_nonce.is_some() {
-                probed_now.insert(term.id.clone(), Instant::now());
-            }
-            let title = if title_marks(&pane.tab_title, &term.id) { pane.tab_title.clone() } else { format!("ASN:{}", term.id) };
-            restored.push(Session {
-                id: term.id.clone(),
-                profile: term.profile.clone(),
-                window: Window {
-                    gui_pid: term.pid,
-                    sock,
-                    started_ms: Some(saved),
-                    mux: term.mux,
-                },
-                pane_id: pane.pane_id,
-                workspace: format!("asn-{}", term.id),
-                title,
-                cwd: term.cwd.clone(),
-                send_granted: term.send_granted,
-                kind: term.kind.clone(),
-                session_id: term.session_id.clone(),
-                exit_nonce: term.exit_nonce.clone(),
-            });
-        }
-        let mut next = file.next;
-        for id in restored.iter().map(|s| s.id.as_str()).chain(parked.iter().map(|s| s.id.as_str())) {
-            if let Ok(n) = id.parse::<u64>() {
-                next = next.max(n);
-            }
-        }
-        {
-            let mut g = self.inner.lock().unwrap();
-            g.next = next;
-            g.sessions = restored;
-            g.parked = parked;
-            g.exited.extend(exited_now);
-            g.probed = probed_now;
-        }
-        self.persist()?;
-        Ok(())
-    }
+    // reclaim（重開後認回先前的視窗）與暫時接不回的列的重試：見 term_reclaim.rs
 
     fn is_adopted_id(&self, id: &str) -> Result<bool, String> {
         let g = self.inner.lock().unwrap();
@@ -3392,7 +3296,13 @@ pub fn start_viewer_adopt(terms: std::sync::Arc<LiveTerms>) {
             }
             std::thread::sleep(std::time::Duration::from_secs(ADOPT_VIEWER_EVERY_SECS));
         }
-        view_log("mux-view adopt 等不到夥伴名單，這次不認回");
+        // 名單空著是因為終端列暫時接不回：不放棄，等重試接回（start_reclaim_retry）後會再掃一次
+        let waiting = terms.waiting_count();
+        if waiting > 0 {
+            view_log(&format!("mux-view adopt 暫時等不到夥伴名單（{waiting} 列還在等終端服務），夥伴接回後會再認一次"));
+        } else {
+            view_log("mux-view adopt 等不到夥伴名單，這次不認回");
+        }
     });
     if let Err(e) = spawned {
         elog!("認回終端畫面的執行緒開不了（不影響啟動）：{e}");
@@ -3715,7 +3625,12 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
             stuck.retain_windows(&all.iter().filter(|(id, _)| windows.iter().any(|(w, _)| w == id)).map(|(_, n)| n.clone()).collect::<Vec<_>>());
             for id in schedule.due(now, &windows, free_memory_bytes()) {
                 let Some(pace) = windows.iter().find(|(w, _)| *w == id).map(|(_, p)| *p) else { continue };
-                let view = terms.partner_screen_view(&id);
+                // 背景讀畫面是「例行」工作：終端服務剛逾時就略過這一次（不算讀失敗、不退避），使用者按的動作不受影響
+                let view = super::cli_gate::routine(|| terms.partner_screen_view(&id));
+                if matches!(&view, Err(e) if super::cli_gate::is_skipped(e)) {
+                    schedule.skipped(&id, now);
+                    continue;
+                }
                 // 保底（#2256）：畫面停在「Do you want to proceed?」加編號選項超過 5 分鐘，認不認得成權限框都要通知。
                 // 讀到畫面才比對；讀失敗不算框消失（不重置計時）
                 if let (Some((_, name)), Ok(seen)) = (all.iter().find(|(w, _)| *w == id), view.as_ref()) {
@@ -4525,6 +4440,10 @@ mod tests {
         window_up: RefCell<bool>,
         /// 假 runner 回報的本機 wezterm-gui 程序（pid, 命令列）
         gui_procs: RefCell<Vec<(u32, Vec<String>)>>,
+        /// `cli list` 一律回這個錯（模擬排隊沒送出、逾時）
+        list_err: RefCell<Option<String>>,
+        /// 真＝`cli list` 送出了但連不上服務（指令失敗退出）
+        list_down: RefCell<bool>,
     }
 
     fn default_list_clients_json() -> String {
@@ -4557,6 +4476,8 @@ mod tests {
             on_spawn: RefCell::new(None),
             window_up: RefCell::new(false),
             gui_procs: RefCell::new(Vec::new()),
+            list_err: RefCell::new(None),
+            list_down: RefCell::new(false),
         }
     }
 
@@ -4600,6 +4521,12 @@ mod tests {
             } else if kind == "spawn" {
                 self.inner.spawn_out.borrow().clone()
             } else if kind == "list" {
+                if let Some(e) = self.inner.list_err.borrow().clone() {
+                    return Err(e);
+                }
+                if *self.inner.list_down.borrow() {
+                    return Ok(wezterm::RunOutput { success: false, stdout: String::new(), stderr: "連不上".into(), code: None });
+                }
                 if let Some(f) = self.inner.on_list.borrow_mut().take() {
                     f();
                 }
@@ -4623,6 +4550,7 @@ mod tests {
                 success: true,
                 stdout,
                 stderr: String::new(),
+                code: None,
             })
         }
         fn run_clean(&self, p: &Path, args: &[String], env: &BTreeMap<String, String>, timeout: Duration) -> Result<wezterm::RunOutput, String> {
@@ -6234,6 +6162,7 @@ mod tests {
         assert!(v["terms"].as_array().unwrap().is_empty(), "對不上的紀錄要從對照表拿掉，避免以後指到別人的程序");
 
         let rig = make(default_profiles(), vec![None]);
+        *rig.runner.inner.proc_dead.borrow_mut() = true; // 程序確定已結束（查不到建立時間、而且不在了）才算不在
         *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1", 7, 1);
         write_store(&rig.store, 1, &row("1", "agy", "1000", ""));
         rig.svc.reclaim().unwrap();
@@ -6245,8 +6174,8 @@ mod tests {
 
     #[test]
     fn 通訊檔不見就不認領且不執行_cli() {
-        let src = include_str!("term.rs");
-        let head = src.split("pub fn reclaim").nth(1).unwrap().split("pub fn ").next().unwrap();
+        let src = include_str!("term_reclaim.rs");
+        let head = src.split("fn reclaim_row(").nth(1).unwrap().split("\n/// 啟動後在背景").next().unwrap();
         let exists_at = head.find("self.fs.exists(&sock)").expect("認領要先看通訊檔");
         let list_at = head.find(".list(&sock)").expect("認領要 list");
         assert!(exists_at < list_at, "要先確認通訊檔再 list");
@@ -6672,6 +6601,12 @@ mod tests {
 
         const MUX_PID: u32 = 4000;
 
+        /// #2424 A：暫存的列重試接回（測試放在 launch/term_reclaim_tests.rs）。
+        /// 用 `include!`（路徑相對於這支檔案所在的 launch/）而不是 `#[path]`：`#[path]` 在行內模組裡會穿過不存在的資料夾，Linux 編譯不過
+        mod reclaim_retry {
+            include!("term_reclaim_tests.rs");
+        }
+
         /// #1818 端到端：終端服務崩潰、ASN 自己還握著它的 handle（程序已結束、建立時間還讀得到）。
         /// 走真的 mux_snapshot（live_pid）→ 監看一輪（run_round）→ 事故、紀錄、通知 → 接回（resume_entries，和重開機接回同一套 run）。
         /// 拿掉 live_pid 的 alive 檢查：崩潰後一直被當活著，沒有事故（紅）；拿掉接回或通知任一段也紅
@@ -6854,14 +6789,14 @@ mod tests {
             use crate::launch::mux_restart::RestartError;
             let (mut rig, _) = mux_rig();
             rig.svc.set_use_mux(false);
-            assert_eq!(rig.svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知")), Err(RestartError::NoMux), "沒開服務模式才是沒有服務");
+            assert_eq!(rig.svc.restart_mux(false, |_| panic!("不該接回"), |_| panic!("不該通知")), Err(RestartError::NoMux), "沒開服務模式才是沒有服務");
             // 開著服務模式、但找不到終端程式（拿不到控制）
             let d = tempfile::tempdir().unwrap();
             let fs = FakeFs { files: Rc::new(RefCell::new(HashSet::new())) };
             let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
             let mut svc = TermService::without_wezterm(d.path().join("wezterm-terms.json"), "H".into(), runner.clone(), fs);
             svc.set_use_mux(true);
-            let r = svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知"));
+            let r = svc.restart_mux(false, |_| panic!("不該接回"), |_| panic!("不該通知"));
             assert!(matches!(r, Err(RestartError::Failed(_))), "用了服務卻拿不到控制要回失敗：{r:?}");
             assert!(runner.killed().is_empty(), "什麼都不動");
         }
@@ -6876,6 +6811,7 @@ mod tests {
             let got = std::cell::RefCell::new(None::<Vec<String>>);
             let ensured = std::cell::Cell::new(0);
             let r = rig.svc.restart_mux_with(
+                false,
                 |_| {
                     ensured.set(ensured.get() + 1);
                     Ok(())
@@ -6894,10 +6830,106 @@ mod tests {
         fn _1860f_重啟終端服務_服務裡有_asn_沒記錄的窗格_不動手() {
             use crate::launch::mux_restart::{RestartError, UNMANAGED_TEXT};
             let (rig, _) = mux_rig();
-            let r = rig.svc.restart_mux(|_| panic!("不該接回"), |_| panic!("不該通知"));
+            let r = rig.svc.restart_mux(false, |_| panic!("不該接回"), |_| panic!("不該通知"));
             assert_eq!(r, Err(RestartError::Unmanaged(1)));
             assert_eq!(r.unwrap_err().text(), UNMANAGED_TEXT);
             assert!(rig.runner.killed().is_empty(), "核對不過不能停服務");
+        }
+
+        /// 2429 複審：核對時指令根本沒送出（排隊沒位子、被暫停略過）＝沒問到，中止重啟、不結束服務、不起新的、不接回，回白話的「忙碌」；
+        /// 就算本人確認過也一樣（沒問到，確認沒有依據）
+        #[test]
+        fn _2429_重啟終端服務_核對時沒送出_中止不殺_帶確認也一樣() {
+            use crate::launch::mux_restart::{RestartError, SERVICE_BUSY_TEXT};
+            for err in [format!("{}（排隊等不到位子）", crate::launch::cli_gate::QUEUE_TIMEOUT), crate::launch::cli_gate::SKIPPED.to_string()] {
+                for confirmed in [false, true] {
+                    let (rig, _) = mux_rig();
+                    *rig.runner.inner.list_err.borrow_mut() = Some(err.clone());
+                    let r = rig.svc.restart_mux_with(confirmed, |_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+                    assert!(matches!(r, Err(RestartError::Busy(_))), "{err}（確認={confirmed}）：要回忙碌：{r:?}");
+                    assert_eq!(r.unwrap_err().text(), SERVICE_BUSY_TEXT);
+                    assert!(rig.runner.killed().is_empty(), "{err}：核對不到不能結束服務");
+                }
+            }
+        }
+
+        /// 2429 三審：真的逾時、或連不上（服務沒有回應）＝兩段確認。第一次不結束任何程序、回「需要確認」；
+        /// 帶確認再呼叫才照 ASN 的記錄走原流程（結束舊服務、起新的）
+        #[test]
+        fn _2429_重啟終端服務_逾時或連不上_兩段確認() {
+            use crate::launch::mux_restart::{RestartError, NEED_CONFIRM_TEXT};
+            for (what, down) in [("逾時", false), ("連不上", true)] {
+                let setup = || {
+                    let (rig, paths) = mux_rig();
+                    if down {
+                        *rig.runner.inner.list_down.borrow_mut() = true;
+                    } else {
+                        *rig.runner.inner.list_err.borrow_mut() = Some("WezTerm 指令逾時（15 秒），已結束該子行程".to_string());
+                    }
+                    (rig, paths)
+                };
+                let (rig, _) = setup();
+                let r = rig.svc.restart_mux_with(false, |_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+                assert!(matches!(r, Err(RestartError::NeedConfirm(_))), "{what}：第一次要回需要確認：{r:?}");
+                assert_eq!(r.unwrap_err().text(), NEED_CONFIRM_TEXT);
+                assert!(rig.runner.killed().is_empty(), "{what}：第一次不能結束任何程序");
+                // 本人確認後：照原流程
+                let ensured = std::cell::Cell::new(0);
+                let got = std::cell::RefCell::new(None::<Vec<String>>);
+                let r = rig.svc.restart_mux_with(
+                    true,
+                    |_| {
+                        ensured.set(ensured.get() + 1);
+                        Ok(())
+                    },
+                    |n| *got.borrow_mut() = Some(n),
+                    |_| panic!("起得來就不該通知斷線"),
+                );
+                assert_eq!(r, Ok(()), "{what}：確認後照原流程：{r:?}");
+                assert_eq!(ensured.get(), 1, "{what}：確認後要起新的");
+                assert!(got.borrow().is_some(), "{what}：起好後交出名單接回");
+                assert!(!rig.runner.killed().is_empty(), "{what}：確認後才結束舊服務");
+            }
+        }
+
+        /// 2429 三審：執行檔起不來、清單看不懂＝一般失敗，維持中止（帶確認也不重啟）
+        #[test]
+        fn _2429_重啟終端服務_起不來或看不懂_維持失敗() {
+            use crate::launch::mux_restart::RestartError;
+            for err in ["WezTerm cli 失敗：假的".to_string(), format!("{} W/wezterm.exe：找不到檔案", wezterm::CANNOT_RUN)] {
+                for confirmed in [false, true] {
+                    let (rig, _) = mux_rig();
+                    *rig.runner.inner.list_err.borrow_mut() = Some(err.clone());
+                    let r = rig.svc.restart_mux_with(confirmed, |_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+                    assert!(matches!(r, Err(RestartError::Failed(_))), "{err}（確認={confirmed}）：{r:?}");
+                    assert!(rig.runner.killed().is_empty(), "{err}：不能結束服務");
+                }
+            }
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.list_err.borrow_mut() = Some("WezTerm cli 失敗：假的".into());
+            let r = rig.svc.restart_mux_with(false, |_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+            assert!(matches!(r, Err(RestartError::Failed(_))), "{r:?}");
+            assert!(rig.runner.killed().is_empty());
+        }
+
+        /// 2429 複審對照組：數得出來而且對得上（沒有多出來的窗格）＝照原本流程停、起新的
+        #[test]
+        fn _2429_重啟終端服務_核對正常_照原流程() {
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            let ensured = std::cell::Cell::new(0);
+            let r = rig.svc.restart_mux_with(
+                false,
+                |_| {
+                    ensured.set(ensured.get() + 1);
+                    Ok(())
+                },
+                |_| {},
+                |_| {},
+            );
+            assert_eq!(r, Ok(()), "{r:?}");
+            assert_eq!(ensured.get(), 1);
+            assert!(!rig.runner.killed().is_empty(), "核對過了就照常結束舊服務");
         }
 
         /// 二審 2：整段（抓名單到起好）持著開窗格的鎖，做完放掉（接回要開窗格，要拿得到）
@@ -6905,7 +6937,7 @@ mod tests {
         fn _1860f_重啟終端服務_做完放掉開窗格的鎖() {
             let (rig, paths) = mux_rig();
             std::fs::remove_file(&paths.pid).unwrap();
-            let _ = rig.svc.restart_mux(|_| {}, |_| {});
+            let _ = rig.svc.restart_mux(false, |_| {}, |_| {});
             let m = rig.svc.restart_mux_handle().unwrap();
             assert!(m.open_lock().is_ok(), "鎖要放掉了");
         }
@@ -7300,6 +7332,26 @@ mod tests {
             *rig.runner.inner.clean_err.borrow_mut() = Some("WezTerm 指令逾時（15 秒），已結束該子行程".into());
             let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
             assert!(matches!(e, crate::launch::win_term::WinOpenError::Started(_)), "窗格可能已經開了：不退路");
+        }
+
+        /// #2424 X4：開窗時指令排隊沒送出（等不到位子、被暫停略過）窗格一定沒開：回「沒啟動」、不留「開窗結果不確定」的記號。
+        /// 若又改成只認「執行檔起不來」，排隊沒送出會被當成已啟動（紅）
+        #[test]
+        fn 開窗格排隊沒送出_是沒啟動_不留不確定記號() {
+            use crate::launch::cli_gate::{QUEUE_TIMEOUT, SKIPPED};
+            use crate::launch::win_term::WinOpenError;
+            let (rig, paths) = mux_rig();
+            for e in [format!("{QUEUE_TIMEOUT}，排隊 20 秒仍輪不到，這次沒有送出"), format!("{SKIPPED}（約 30 秒後再試）")] {
+                *rig.runner.inner.clean_err.borrow_mut() = Some(e);
+                let err = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+                assert!(matches!(err, WinOpenError::NotStarted(_)), "指令沒送出＝窗格一定沒開，可以退路");
+                assert!(!paths.dir.join("spawn-unsure").exists(), "沒送出不能留「結果不確定」的記號（會擋住收空 mux）");
+            }
+            // 對照：真的逾時（可能已經開了）要留記號
+            *rig.runner.inner.clean_err.borrow_mut() = Some("WezTerm 指令逾時（15 秒），已結束該子行程".into());
+            let err = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+            assert!(matches!(err, WinOpenError::Started(_)));
+            assert!(paths.dir.join("spawn-unsure").exists(), "逾時要留記號");
         }
 
         #[test]

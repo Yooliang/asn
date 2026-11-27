@@ -1119,7 +1119,8 @@ async fn task_manager_restart_asn(app: State<'_, App>, handle: AppHandle) -> Res
 #[cfg(feature = "gui")]
 #[cfg(desktop)]
 #[tauri::command]
-async fn task_manager_restart_mux(app: State<'_, App>, terms: State<'_, Arc<launch::term::LiveTerms>>) -> Result<(), String> {
+async fn task_manager_restart_mux(app: State<'_, App>, terms: State<'_, Arc<launch::term::LiveTerms>>, confirmed: Option<bool>) -> Result<Option<String>, String> {
+    let confirmed = confirmed.unwrap_or(false);
     let Some(mark) = launch::mux_restart::Restarting::begin() else { return Err(launch::mux_restart::BUSY_TEXT.to_string()) };
     let (work_dir, data_dir, terms) = (app.work_dir.clone(), app.data_dir.clone(), terms.inner().clone());
     let res = tokio::task::spawn_blocking(move || {
@@ -1127,6 +1128,7 @@ async fn task_manager_restart_mux(app: State<'_, App>, terms: State<'_, Arc<laun
         let (wd, dd) = (work_dir.clone(), data_dir);
         let down_dir = work_dir.clone();
         terms.restart_mux(
+            confirmed,
             move |names| {
                 if !launch::mux_watch::dispatch("asn-mux-restart-resume", move || launch::auto_resume::after_mux_restart(&wd, &dd, &names)) {
                     ui_log::log_info(&work_dir, "重啟終端服務後，接回夥伴的背景工作開不了");
@@ -1141,11 +1143,18 @@ async fn task_manager_restart_mux(app: State<'_, App>, terms: State<'_, Arc<laun
         ui_log::log_info(&app.work_dir, &format!("重啟終端服務的背景工作失敗：{e}"));
         launch::mux_restart::FAIL_TEXT.to_string()
     })?;
-    res.map_err(|e| {
+    // 終端服務沒有回應、數不出裡面的視窗：什麼都沒動，回確認框的字（Ok(Some)），畫面問過本人再帶 confirmed=true 呼叫
+    if let Err(launch::mux_restart::RestartError::NeedConfirm(why)) = &res {
+        ui_log::log_info(&app.work_dir, &format!("重啟終端服務還沒進行：核對時終端服務沒有回應（{why}），等本人確認"));
+        return Ok(Some(launch::mux_restart::NEED_CONFIRM_TEXT.to_string()));
+    }
+    res.map(|()| None).map_err(|e| {
         match &e {
+            launch::mux_restart::RestartError::NeedConfirm(_) => {}
             launch::mux_restart::RestartError::Failed(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務失敗：{why}")),
             launch::mux_restart::RestartError::Down(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有完成（舊的已停、新的起不來，代理斷線，名單已存）：{why}")),
             launch::mux_restart::RestartError::Unmanaged(n) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有進行：終端服務裡有 {n} 個視窗不在 ASN 的記錄上")),
+            launch::mux_restart::RestartError::Busy(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有進行：核對時終端服務忙碌（{why}），不確定就不結束服務")),
             launch::mux_restart::RestartError::NoMux => {}
         }
         e.text().to_string()
@@ -3488,6 +3497,9 @@ pub fn run() {
     // 重開 ASN 後認回還開著的看畫面視窗（#2309）；背景執行，不擋啟動
     #[cfg(desktop)]
     launch::term::start_viewer_adopt(terms.clone());
+    // 重開後終端服務一時沒回應而暫存的夥伴列：背景定期重試接回，前台／後台鈕才會恢復（#2424）
+    #[cfg(desktop)]
+    launch::term::start_reclaim_retry(terms.clone());
     // 電腦重開後自動接回夥伴（#767）：要在內建橋更新開機時間之前看存檔，所以放在橋啟動之前
     #[cfg(desktop)]
     if !is_shot && relay_obj.is_some() {

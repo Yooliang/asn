@@ -331,7 +331,7 @@ test('#1860F-3 畫面：重啟鈕送 act、確認框原位展開（取消在左�
 
 test('#1860F-3 接線：指令名、op 清單、設定值清單、文字只有一份', () => {
   assert.match(read('../ui/lib/tauri.mjs'), /taskManagerRestartAsn: \(\) => invoke\('task_manager_restart_asn'\)/)
-  assert.match(read('../ui/lib/tauri.mjs'), /taskManagerRestartMux: \(\) => invoke\('task_manager_restart_mux'\)/)
+  assert.match(read('../ui/lib/tauri.mjs'), /taskManagerRestartMux: \(confirmed = false\) => invoke\('task_manager_restart_mux', \{ confirmed \}\)/)
   const list = read('../ui/list.js')
   for (const [op, call] of [['tm-restart-ask', 'askRestart'], ['tm-restart-cancel', 'cancelRestart'], ['tm-restart-confirm', 'confirmRestart']]) {
     assert.ok(SETTING_OPS.includes(op), op)

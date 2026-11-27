@@ -59,7 +59,7 @@ export const transport = {
   list: () => invoke('relay_list'),
   taskManagerList: () => invoke('task_manager_list'),   // 電腦版工作管理員：這台電腦上 ASN 管的程式清單（只讀）→ { rows, known, now_ms }
   taskManagerRestartAsn: () => invoke('task_manager_restart_asn'),   // 工作管理員「重啟 ASN」：失敗回白話字串（成功後本程序會結束，ASN 自己重開）
-  taskManagerRestartMux: () => invoke('task_manager_restart_mux'),   // 工作管理員「重啟終端服務」：新服務起好就回；失敗回白話字串
+  taskManagerRestartMux: (confirmed = false) => invoke('task_manager_restart_mux', { confirmed }),   // 工作管理員「重啟終端服務」：新服務起好回 null；終端服務沒有回應、要本人再確認時回一句白話字（確認後帶 true 再呼叫）；失敗回白話字串
   localWindows: () => invoke('local_windows'),   // 電腦版：直接讀本機視窗狀態（手機沒有這個指令）
   partnerRepo: name => invoke('partner_repo', { name }),   // 電腦版：這個視窗工作資料夾對應的 GitHub 倉庫「擁有者/repo」（讀 .git 設定檔，不碰網路）；讀不到回 null（手機沒有這個指令，也不會有人叫）
   inbox: () => invoke('relay_inbox'),

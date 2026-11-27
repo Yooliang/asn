@@ -280,7 +280,7 @@ function confirmBody(r, rows, now) {
 // ---------- 控制器：頁面開著時才每 5 秒更新 ----------
 
 // restartAsk：正在原位確認重啟的節點鍵；restart：正在重啟的節點鍵；restartFrozen：重啟終端服務當下記的那一組（舊服務停了、清單找不到它時撐著畫面）；restartError：{ key, text }
-export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '', restartAsk: null, restart: null, restartFrozen: null, restartWant: null, restartError: null, restartUntil: null })
+export const initialState = () => ({ open: false, loading: false, error: '', snapshot: null, confirm: null, busy: false, note: '', wakeNote: '', restartAsk: null, restart: null, restartFrozen: null, restartWant: null, restartError: null, restartUntil: null, restartNeed: null })
 
 // 控制器的 view() 另外帶 tree（ASN ＞ 終端服務 ＞ 代理，見 task-tree.mjs）；rows 還是平的一份，找列、停止與測試都用它
 
@@ -379,6 +379,7 @@ export function createTaskManager(deps) {
 
   const treeUi = () => ({
     ask: state.restartAsk,
+    askText: state.restartNeed && state.restartNeed.key === state.restartAsk ? state.restartNeed.text : '',
     // 沒有本頁自己記的（例如頁面重新載入）就看電腦端回報：不知道是哪一個，所有終端服務都當作在重啟
     restarting: state.restart ?? (state.snapshot?.mux_restarting === true ? 'mux:*' : null),
     frozen: state.restartFrozen,
@@ -393,25 +394,34 @@ export function createTaskManager(deps) {
     if (state.restart || state.busy) return
     state.confirm = null
     state.restartError = null
+    state.restartNeed = null
     state.restartAsk = String(key ?? '') || null
   }
 
-  function cancelRestart() { state.restartAsk = null }
+  function cancelRestart() { state.restartAsk = null; state.restartNeed = null }
 
   async function confirmRestart() {
     const key = state.restartAsk
     if (!key || state.restart) return
     const isAsn = key === ROOT_KEY
+    // 上一次電腦端回「終端服務沒有回應」、確認框換成第二段問話，這次按的就是本人的確認：帶 true 再呼叫
+    const confirmed = !isAsn && state.restartNeed?.key === key
     state.restartAsk = null
+    state.restartNeed = null
     state.restartError = null
     state.restartUntil = null
     state.restart = key
     state.restartFrozen = isAsn ? null : liveTree().groups.find(g => g.key === key) ?? null
     // 佔位組（服務沒在跑）底下沒有代理可記：等接回的名字用電腦端回報的存下名單（舊版電腦端沒給就空，settleRestart 至少等到真的服務列出現）
     state.restartWant = state.restartFrozen?.placeholder ? (Array.isArray(state.snapshot?.restart_pending_names) ? state.snapshot.restart_pending_names.map(String) : []) : null
+    let needText = ''
     try {
       if (isAsn) await api.taskManagerRestartAsn()
-      else await api.taskManagerRestartMux()
+      else {
+        const res = await api.taskManagerRestartMux(confirmed)
+        // 電腦端什麼都沒動、回一句話＝終端服務沒有回應，要本人再確認一次
+        if (typeof res === 'string' && res) needText = res
+      }
     } catch (e) {
       // 電腦端回的是白話字串（原文已寫進它的 log）；其他錯誤用統一的白話字，原文寫 console
       log(`[工作管理員] 重啟失敗（${key}）：${e?.message ?? e}`)
@@ -422,6 +432,16 @@ export function createTaskManager(deps) {
       state.restartUntil = null
       // 失敗後馬上重讀清單：服務可能已經停了、名單變了；錯誤掛在一定存在的 ASN 列（見 task-tree 的 errorFor）
       await refresh()
+      return
+    }
+    if (needText) {
+      log(`[工作管理員] 重啟終端服務（${key}）：終端服務沒有回應，等本人再確認`)
+      state.restart = null
+      state.restartFrozen = null
+      state.restartWant = null
+      state.restartUntil = null
+      state.restartNeed = { key, text: needText }
+      state.restartAsk = key
       return
     }
     // 重啟 ASN 成功：本頁隨後會斷線，ASN 回來後重新載入，這裡維持「正在重啟…」；
