@@ -1,7 +1,7 @@
 // 退場清單（docs/退場清單.md）的守門測試（開發紀律第二之一節）。
 // 由來：10-23 就決定機器橋只維護 Rust 一份，但舊的 Node 版一直留著，11-27 還有新功能抄進去。
 // 規則：決定要被取代的舊實作登記進清單之後只能變小——不新增檔案、行數不增加，直到刪除。
-// 這支純讀檔：解析清單的三張表，照清單「怎麼數」那一節的數法實際數一次，再跟表一的基準比。
+// 這支純讀檔：解析清單的三張表，照清單「怎麼數」那一節的數法實際數一次，再跟「退場中」表的基準比。
 // 檢查核心是純函式（countRetiring、parseDoc、checkRetiring）；下半段是「還原驗證」：把清單故意改壞，確認每一種都會紅。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -83,7 +83,7 @@ const numAfter = (text, key) => {
   return nums ? Number(nums.at(-1).replace(/,/g, '')) : null
 }
 
-/** 檢查整份清單。root 是 repo 根目錄；回 { errors: [{ kind, msg }], rows: 表一各列（存在的會帶 actual 實際數字） } */
+/** 檢查整份清單。root 是 repo 根目錄；回 { errors: [{ kind, msg }], rows: 「退場中」表各列（存在的會帶 actual 實際數字） } */
 export function checkRetiring(md, root, count = countRetiring) {
   const t = parseDoc(md)
   const errors = []
@@ -91,17 +91,17 @@ export function checkRetiring(md, root, count = countRetiring) {
   const exists = rel => fs.existsSync(path.join(root, rel))
   const inRepo = rel => !path.isAbsolute(rel) && !/^[\\/]/.test(rel) && !rel.split(/[\\/]/).includes('..')
 
-  // 表一：退場中
+  // 「退場中」表
   const rows = []
   for (const { line, cells } of t.retiring) {
-    if (cells.length !== 7) { bad('row-shape', `表一第 ${line} 行不是七欄（現在 ${cells.length} 欄）：${cells.join(' | ')}`); continue }
+    if (cells.length !== 7) { bad('row-shape', `「退場中」表第 ${line} 行不是七欄（現在 ${cells.length} 欄）：${cells.join(' | ')}`); continue }
     const ps = ticks(cells[0])
-    if (ps.length !== 1 || !inRepo(ps[0])) { bad('row-shape', `表一第 ${line} 行的「路徑」欄要剛好一個反引號路徑，從 repo 根目錄起算：${cells[0]}`); continue }
+    if (ps.length !== 1 || !inRepo(ps[0])) { bad('row-shape', `「退場中」表第 ${line} 行的「路徑」欄要剛好一個反引號路徑，從 repo 根目錄起算：${cells[0]}`); continue }
     rows.push({ line, path: ps[0], by: cells[2], owner: cells[3], cond: cells[4], baseFiles: int(cells[5]), baseLines: int(cells[6]) })
   }
-  for (const r of rows) if (rows.some(o => o !== r && o.line < r.line && same(o.path) === same(r.path))) bad('dup', `表一重複登記：\`${r.path}\`（第 ${r.line} 行）`)
+  for (const r of rows) if (rows.some(o => o !== r && o.line < r.line && same(o.path) === same(r.path))) bad('dup', `「退場中」表重複登記：\`${r.path}\`（第 ${r.line} 行）`)
 
-  // 表三：已退場（刪掉之後搬過來的）
+  // 「已退場」表（刪掉之後搬過來的）
   const retired = []
   for (const { line, cells } of t.retired) {
     if (cells[0] === NONE_YET) continue
@@ -113,7 +113,7 @@ export function checkRetiring(md, root, count = countRetiring) {
   }
   if (rows.length + retired.length < MIN_ROWS) bad('row-count', `「退場中」${rows.length} 列＋「已退場」${retired.length} 列，合起來少於 ${MIN_ROWS} 列：登記過的列不能直接拿掉，程式刪掉之後是把那一列搬到「已退場」表（表頭被改掉也會讀不到列）`)
 
-  // 表二：基準調整紀錄
+  // 「基準調整紀錄」表
   if (t.log.length === 0) bad('log-empty', '「基準調整紀錄」一列都沒有：至少要有建立基準那一筆')
   for (const { line, cells } of t.log) {
     if (cells.length !== 5 || !/^\d{4}-\d{2}-\d{2}$/.test(cells[0]) || ticks(cells[1]).length !== 1 || blank(cells[2]) || blank(cells[3])) {
@@ -140,7 +140,7 @@ export function checkRetiring(md, root, count = countRetiring) {
 
     if (!exists(r.path)) { bad('path-missing', `${p} 不存在：已經刪掉的話，把這一列從「退場中」搬到「已退場」表（寫刪除日期和 PR）；只是搬家或改名，就把路徑改對`); continue }
     const a = r.actual = count(path.join(root, r.path))
-    const fix = `這個路徑已登記退場，只修不加：\n    新功能請做在取代它的那一邊（${r.by}）；\n    真的是修正才多出來的，在同一張 PR 把 ${DOC} 表一的基準調高，並在「基準調整紀錄」加一列寫原因。`
+    const fix = `這個路徑已登記退場，只修不加：\n    新功能請做在取代它的那一邊（${r.by}）；\n    真的是修正才多出來的，在同一張 PR 把 ${DOC} 「退場中」表的基準調高，並在「基準調整紀錄」加一列寫原因。`
     if (a.files > r.baseFiles) bad('files-over', `${p} 的檔數超過基準：基準 ${r.baseFiles} 個、實際 ${a.files} 個（多 ${a.files - r.baseFiles} 個）。${fix}\n    目前數到的 ${a.files} 個檔（測試、.md、.txt、node_modules 不算；本機若有沒進版控的檔也會被數到）：\n      ${a.list.join('\n      ')}`)
     if (a.lines > r.baseLines) bad('lines-over', `${p} 的行數超過基準：基準 ${r.baseLines} 行、實際 ${a.lines} 行（多 ${a.lines - r.baseLines} 行）。${fix}`)
   }
@@ -177,13 +177,13 @@ test('退場清單：每一列都有負責人和刪除條件', () => {
 
 test('退場清單棘輪：每一列的檔數、行數都不超過基準（只修不加）', t => {
   for (const r of real.rows.filter(x => x.actual)) {
-    const slack = r.actual.files < r.baseFiles || r.actual.lines < r.baseLines ? '。已經變少了，可以把基準調低（表一改數字，「基準調整紀錄」加一列）' : ''
+    const slack = r.actual.files < r.baseFiles || r.actual.lines < r.baseLines ? '。已經變少了，可以把基準調低（「退場中」表改數字，「基準調整紀錄」加一列）' : ''
     t.diagnostic(`${r.path}：實際 ${r.actual.files} 個檔、${r.actual.lines} 行（基準 ${r.baseFiles} 個檔、${r.baseLines} 行）${slack}`)
   }
   clean('base-bad', 'files-over', 'lines-over')
 })
 
-test('退場清單：基準調整紀錄至少有建立基準那一筆；表一的基準跟每個路徑最後一筆紀錄一致', () => {
+test('退場清單：基準調整紀錄至少有建立基準那一筆；「退場中」表的基準跟每個路徑最後一筆紀錄一致', () => {
   clean('log-empty', 'log-shape', 'log-missing', 'log-mismatch')
 })
 
@@ -229,10 +229,10 @@ test('數法：測試、Markdown、純文字說明、node_modules 不算，其�
 
 // ---- 還原驗證：把清單故意改壞，每一種都要紅 ----
 const COL = Object.fromEntries(HEADS.retiring.map((h, i) => [h, i]))
-const rowOf = (text, p) => parseDoc(text).retiring.find(r => ticks(r.cells[0])[0] === p) ?? assert.fail(`表一找不到 ${p}`)
+const rowOf = (text, p) => parseDoc(text).retiring.find(r => ticks(r.cells[0])[0] === p) ?? assert.fail(`「退場中」表找不到 ${p}`)
 const withLines = (text, fn) => { const lines = text.split('\n'); fn(lines); return lines.join('\n') }
 const toRow = cells => `| ${cells.join(' | ')} |`
-// 換掉表一某一列的某一欄
+// 換掉「退場中」表某一列的某一欄
 const setCell = (text, p, col, value) => {
   const row = rowOf(text, p)
   return withLines(text, lines => { lines[row.line - 1] = toRow(row.cells.map((c, i) => (i === COL[col] ? String(value) : c))) })
@@ -245,9 +245,9 @@ const headAt = (lines, table) => {
 }
 // 在某張表的表頭與分隔線後面插一列
 const addRow = (text, table, cells) => withLines(text, lines => { lines.splice(headAt(lines, table) + 2, 0, toRow(cells)) })
-// 拿表一第一個數得到的列來改；清單本身壞到沒有任何一列數得到時，還原驗證各自報錯，不讓整支檔在載入時就倒
+// 拿「退場中」表第一個數得到的列來改；清單本身壞到沒有任何一列數得到時，還原驗證各自報錯，不讓整支檔在載入時就倒
 const R = real.rows.find(r => r.actual)
-const mut = (name, fn) => test(name, () => { assert.ok(R, '表一沒有任何一列數得到（先修好上面幾項），還原驗證做不了'); fn() })
+const mut = (name, fn) => test(name, () => { assert.ok(R, '「退場中」表沒有任何一列數得到（先修好上面幾項），還原驗證做不了'); fn() })
 
 mut('還原驗證：基準行數比實際少 1 → 紅；剛好等於實際 → 不紅；訊息寫明路徑、數字和該怎麼辦', () => {
   const low = hits(setCell(doc, R.path, '基準行數', R.actual.lines - 1), 'lines-over', `\`${R.path}\``)
@@ -299,7 +299,7 @@ mut('還原驗證：改了基準（調高、調低）卻沒在「基準調整紀
   assert.ok(kinds(up).has('log-mismatch'))
   const logged = text => withLines(text, lines => { lines.splice(parseDoc(text).log.at(-1).line, 0, toRow(['2026-12-01', `\`${R.path}\``, `行數 ${R.baseLines} → ${R.baseLines + 14}`, '修正需要', '#1'])) })
   assert.equal(kinds(logged(up)).has('log-mismatch'), false)
-  assert.ok(kinds(logged(doc)).has('log-mismatch'), '紀錄寫了調高、表一卻沒改，也對不上')
+  assert.ok(kinds(logged(doc)).has('log-mismatch'), '紀錄寫了調高、「退場中」表卻沒改，也對不上')
   assert.ok(kinds(setCell(doc, R.path, '基準檔數', R.baseFiles + 1)).has('log-mismatch'))
   assert.ok(kinds(setCell(doc, R.path, '基準行數', R.baseLines - 1)).has('log-mismatch'))
   const logLines = new Set(parseDoc(doc).log.map(r => r.line - 1))
