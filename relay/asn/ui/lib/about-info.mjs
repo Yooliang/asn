@@ -20,6 +20,11 @@ export const ABOUT_ITEMS = [
 export const ABOUT_LINKS = ABOUT_ITEMS.filter(i => i.kind === 'link')
 export const ABOUT_URLS = ABOUT_LINKS.map(l => l.url)
 
+// 「關於」頁有沒有「記錄」卡（檢視記錄，指令 open-ui-log）：各平台有沒有，以設定值清單（docs/設定值清單.md）open-ui-log 那一列的平台欄為準
+// （電腦「有」、手機「無（未做）」）。這不是平台能力，所以不放 caps；殼把這裡的值傳給 AsnAboutPanel 的 showLogViewer。
+// test/about-panel.test.mjs 會拿清單比對這兩個值：清單改了、這裡沒跟上就會紅。
+export const ABOUT_LOG_VIEWER = Object.freeze({ desktop: true, mobile: false })
+
 /** 只放行「關於」頁上的那幾個網址（防止設定訊息被拿去開別的網址） */
 export const isAboutUrl = url => ABOUT_URLS.includes(url)
 

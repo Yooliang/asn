@@ -20,7 +20,9 @@ import { accountLine, INCOMPLETE_LABEL, INCOMPLETE_REASON, loginIncomplete, usab
 import { catByKey, lookShows, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
-import { aboutView } from './about-info.mjs'
+import { ABOUT_LOG_VIEWER, aboutView } from './about-info.mjs'
+import { AsnAboutPanel } from '../parts/about-panel.mjs'
+import { ATTRS_DESKTOP } from '../shells/platform-attrs.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { REPLACE_TEXT } from './device-replace.mjs'
 import { DEVICE_TEXT, canRemoveRow, canShowBackRow, deviceRowLine, dropAfter, visibleRows } from './device-order.mjs'
@@ -44,7 +46,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { ...UI_KIT, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpMark, DeviceIdentity, TaskTree },
+  components: { ...UI_KIT, AsnAboutPanel, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpMark, DeviceIdentity, TaskTree },
   props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -132,6 +134,7 @@ export const SettingsPanel = {
     }
     const act = (op, value) => emit('act', op, value)
     const about = computed(() => aboutView({ deviceName: props.st.deviceName }))
+    const aboutLayout = ATTRS_DESKTOP.layout, aboutLogViewer = ABOUT_LOG_VIEWER.desktop   // 「關於」頁版面與「記錄」卡（有沒有看設定值清單 open-ui-log 那一列）
     // 帳號卡片的設備列（#2111 ②）：一台一列，列的狀態由共用的 accountDeviceRows 決定（手機同一個函式）。
     // 按下「切換」＝交給樞紐（row-switch）：該列顯示「切換中…」，結果在那一列下方原位顯示（#2111 ③；狀態在 st.accounts.rowSwitch，手機用同一份流程與文字）
     const rowState = computed(() => (props.st.accounts && props.st.accounts.rowSwitch) || {})
@@ -203,7 +206,7 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, openTasks, KNOWN, deskFpMark, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
       accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
-      fileEl, act, about, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
+      fileEl, act, about, aboutLayout, aboutLogViewer, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       rp, REPLACE_TEXT, cat, catIcon, ROSTER_TEXT, usedOnText, DESK_RELOGIN_TEXT, switchTargets, devs, curDev, askRemove, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, lookShows,
@@ -742,27 +745,7 @@ export const SettingsPanel = {
         </div>
       </template>
       <template v-if="catKey === 'about'">
-        <p class="about-intro">{{ about.intro }}</p>
-        <small class="ver-line">版本 {{ st.version }}</small>
-        <small class="about-device" v-if="about.deviceLine">{{ about.deviceLine }}</small>
-        <section class="set-card about-links" aria-label="連結">
-          <div class="upd-row">
-            <template v-for="l in about.items" :key="l.key">
-              <asn-button :class="'about-' + l.key" v-if="l.kind === 'link'" @click="act('open-link', l.url)">{{ l.label }}</asn-button>
-              <asn-button :class="'about-' + l.key" v-else-if="l.kind === 'update'" @click="act('open-update')">{{ l.label }}</asn-button>
-              <asn-button :class="'about-' + l.key" v-else @click="act('open-guide')">{{ l.label }}</asn-button>
-            </template>
-          </div>
-        </section>
-        <section class="set-card" aria-label="記錄">
-          <b>記錄</b>
-          <small>出問題時可以看這份記錄</small>
-          <div class="upd-row">
-            <asn-button @click="act('open-ui-log')">檢視記錄</asn-button>
-          </div>
-          <small v-if="st.uiLogMsg" role="status">{{ st.uiLogMsg }}</small>
-        </section>
-        <small class="about-maker">{{ about.maker }}</small>
+        <asn-about-panel :about="about" :version="st.version" :layout="aboutLayout" :show-log-viewer="aboutLogViewer" :log-msg="st.uiLogMsg" @open-link="url => act('open-link', url)" @open-update="act('open-update')" @open-guide="act('open-guide')" @open-log="act('open-ui-log')"></asn-about-panel>
       </template>
       <asn-dialog v-if="forgetBox" :title="forgetBox.title" initial-focus=".forget-cancel" @close="forget.no">
         <p class="launch-notice-body">{{ forgetBox.text }}</p>

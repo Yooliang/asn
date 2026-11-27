@@ -15,7 +15,9 @@ test('版本號：package.json、tauri.conf.json、Cargo.toml 三處一致', () 
 test('版本號：標題列與設定頁都有顯示', () => {
   const html = read('ui/list.html')
   assert.match(html, /class="brand">[^<]*<span class="ver">\(\{\{ version \}\}\)<\/span>/)
-  assert.match(read('ui/lib/settings-panel.mjs'), /版本 \{\{ st\.version \}\}/)   // 設定聊天窗的「關於」
+  // 設定聊天窗的「關於」：settings-panel 把 st.version 傳給共用元件 AsnAboutPanel，元件兩種版面都把它畫成「版本 …」（#1763 C1）
+  assert.match(read('ui/lib/settings-panel.mjs'), /<asn-about-panel [^>]*:version="st\.version"/)
+  assert.equal((read('ui/parts/about-panel.mjs').match(/版本 \{\{ version \}\}/g) ?? []).length, 2, '元件的電腦、手機版面各畫一次版本號')
   assert.match(read('ui/list.js'), /version: info\.version/)
   assert.match(read('src-tauri/src/lib.rs'), /version: env!\("CARGO_PKG_VERSION"\)/)
 })

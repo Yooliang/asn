@@ -104,7 +104,8 @@ import { MEMBER_NOT_FRIEND, copyText, createGroupApi, memberFriendId } from './l
 import { createRoomHub } from './lib/room-hub.mjs'
 import { createRoomBellGate } from './lib/bell-rooms.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
-import { aboutView, isAboutUrl } from './lib/about-info.mjs'
+import { ABOUT_LOG_VIEWER, aboutView, isAboutUrl } from './lib/about-info.mjs'
+import { AsnAboutPanel } from './parts/about-panel.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
 import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, pageIcon, settingPage } from './lib/mobile-fourth.mjs'
@@ -837,7 +838,8 @@ const app = createApp({
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
     const about = computed(() => aboutView({ deviceName: info.window_name }))
     const openAboutLink = url => { if (isAboutUrl(url)) openLink(url)?.catch(e => console.info('[ASN] 開啟連結失敗', String(e?.message ?? e))) }   // 交給系統瀏覽器（Rust 端 open_link 只放行 http／https）
-    const aboutAct = l => (l.kind === 'link' ? openAboutLink(l.url) : l.kind === 'update' ? openSetting('update') : openGuides())   // 官網、隱私權政策開瀏覽器；版本紀錄＝「更新」頁、使用指引＝指引頁，都在 App 內
+    const aboutLayout = ATTRS_ANDROID.layout, aboutLogViewer = ABOUT_LOG_VIEWER.mobile   // 「關於」頁版面與「記錄」卡（手機沒有，見設定值清單 open-ui-log 那一列）
+    // 官網、隱私權政策開瀏覽器（openAboutLink）；版本紀錄＝「更新」頁（openSetting('update')）、使用指引＝指引頁（openGuides），都在 App 內；事件在 m.html 的 asn-about-panel 上接
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
     // 換內頁前先問一句：開新夥伴正在填第 2 步、還沒送出時，要換成別的內頁先問「要離開嗎？」（底部浮層，樣式沿用「⋯」選單；系統返回鍵＝留下）。
     // 選離開：先收起浮層，等浮層的記錄退掉（nav.sheet 變回空）才換；選留下就不動。單純切到前三頁不問（內容會保留 3 分鐘）
@@ -1819,7 +1821,7 @@ const app = createApp({
       GUIDE_TEXT, guideNode, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       SUB_LAPSED_TEXT, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLoginTargets, acctLoginPress, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, acctHead, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchAuto, lchPi, lchModel, reloadLchModels, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
-      openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
+      openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutLayout, aboutLogViewer, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
       leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, speakApi, readVoices, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
@@ -1839,6 +1841,7 @@ app.component('fp-mark', FpMark)
 app.component('device-identity', DeviceIdentity)
 app.component('ptr-zone', PtrZone)
 app.component('relogin-bar', ReloginBar)
+app.component('AsnAboutPanel', AsnAboutPanel)
 for (const [name, comp] of Object.entries(UI_KIT)) app.component(name, comp)
 app.mount('#app')
 // 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切

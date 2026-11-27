@@ -1,0 +1,17 @@
+/* 「關於」頁共用元件（ui/parts/about-panel.mjs，#1763 C1）的樣式。
+   這張只搬不改：下面每一條都是原本 style.css（電腦，.settings .about-*／.ver-line）與 mobile.css（手機，.m-about-*）裡 about 規則的原值與原優先序，
+   畫面零差異；顏色、尺寸暫時照原值，等「外觀」那一章再改成 --asn-* 變數。
+   載入位置也照原來的相對順序：電腦頁放在 style.css 之後，手機頁放在 mobile.css 之後。
+   電腦（is-split）原本優先序是 (0,2,0)，所以寫成 .類別.is-split；手機（is-stack）原本是 (0,1,0)，所以用 :where() 不增加優先序。 */
+
+/* 電腦（split） */
+.asn-about-ver.is-split { display: block; margin-top: 12px; color: #6b7a8c; }
+.asn-about-intro.is-split { margin: 0; line-height: 1.6; }
+.asn-about-device.is-split, .asn-about-maker.is-split { display: block; margin-top: 4px; color: #6b7a8c; }
+.asn-about-links.is-split { margin-top: 12px; }
+.asn-about-maker.is-split { margin-top: 12px; }
+
+/* 手機（stack） */
+.asn-about-intro:where(.is-stack){margin:0 0 8px;font-size:14px;line-height:1.6;text-align:left}
+.asn-about-links:where(.is-stack){margin-top:12px}
+.asn-about-maker:where(.is-stack){margin-top:12px}

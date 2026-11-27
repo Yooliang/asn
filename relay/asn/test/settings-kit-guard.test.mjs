@@ -5,6 +5,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { SettingsPanel } from '../ui/lib/settings-panel.mjs'
 import { accountMenuItems } from '../ui/lib/quota-readers.mjs'
+import { AsnAboutPanel } from '../ui/parts/about-panel.mjs'
+import { aboutView } from '../ui/lib/about-info.mjs'
 import { withIdentity } from './helpers/with-identity.mjs'
 import { mountComponent } from './helpers/render.mjs'
 
@@ -14,10 +16,28 @@ const panel = read('../ui/lib/settings-panel.mjs')
 const css = read('../ui/style.css')
 
 // ---------- 原始碼 ----------
+// 「關於」頁搬進共用元件 AsnAboutPanel（#1763 C1）後，電腦設定頁的按鈕有一部分在 parts/about-panel.mjs：掃描範圍加上它的電腦版面（split）那一段。
+// 手機版面（stack）那一段是名單式的列（m-row-btn，手機設定頁原本就是這樣寫，m-settings-kit-guard 只禁 m-btn），不算電腦設定頁的按鈕，另外只守「不能用舊 class」。
+const aboutPanel = read('../ui/parts/about-panel.mjs')
+const aboutSplit = aboutPanel.slice(aboutPanel.indexOf('<template v-if="!stack">'), aboutPanel.indexOf('<template v-else>'))
+const aboutStack = aboutPanel.slice(aboutPanel.indexOf('<template v-else>'))
+const panelAll = `${panel}\n${aboutSplit}`   // 設定頁實際用到的畫面原始碼：settings-panel 加上共用的「關於」元件（電腦版面）
+
 test('#2105 設定頁：舊按鈕（aero-btn）與裸 <button> 都不得再出現，全部走共用按鈕', () => {
-  assert.doesNotMatch(panel, /aero-btn/, '設定頁的按鈕不能再用舊 class')
-  assert.doesNotMatch(panel, /<button[\s>]/, '設定頁不再自己寫 <button>，一律 <asn-button>')
-  assert.ok((panel.match(/<asn-button[\s>]/g) ?? []).length >= 55, '原本約 75 顆按鈕都換成共用按鈕（#1860 拿掉設備詳情的帳號區之後剩約 59 顆）')
+  assert.ok(aboutSplit.includes('<asn-button') && aboutStack.includes('m-row-btn'), '前提：切得到「關於」元件的兩段（電腦、手機）')
+  assert.doesNotMatch(panelAll, /aero-btn/, '設定頁的按鈕不能再用舊 class')
+  assert.doesNotMatch(aboutStack, /aero-btn|m-btn/, '手機版面也不能用舊按鈕 class')
+  assert.doesNotMatch(panelAll, /<button[\s>]/, '設定頁不再自己寫 <button>，一律 <asn-button>')
+  // 門檻不變（55）。「關於」的連結三種寫法（link／update／guide）併成元件裡一個 v-for，原始碼的 <asn-button 字樣變少，
+  // 所以那一塊改算「真的畫出幾顆共用按鈕」（4 個連結＋檢視記錄＝5 顆，等於原本的連結 3 種寫法＋檢視記錄實際會畫出的按鈕）。
+  const m = mountComponent(AsnAboutPanel, { about: aboutView({ deviceName: 'x' }), version: '1', layout: 'split', showLogViewer: true })
+  let aboutBtns
+  try { aboutBtns = m.findAll('button.asn-btn').length; assert.equal(m.findAll('button').length, aboutBtns, '「關於」畫出的按鈕全是共用按鈕（asn-btn）') } finally { m.unmount() }
+  assert.equal(aboutBtns, 5)
+  const inPanel = (panel.match(/<asn-button[\s>]/g) ?? []).length
+  // 下限 57（#2455 二審收緊）：搬完 52＋5＝57 顆；下限留 55 的話從設定頁拿掉 2 顆還是綠。二審建議 56，但 56 只擋得住拿掉 2 顆，
+  // 要做到「拿掉 1 顆就紅」得是 57（目前實際顆數）。之後真的有意減按鈕要連這個數字一起改。
+  assert.ok(inPanel + aboutBtns >= 57, `原本約 75 顆按鈕都換成共用按鈕（#1860 拿掉設備詳情的帳號區之後剩約 59 顆）；現在 settings-panel ${inPanel} 顆＋「關於」元件 ${aboutBtns} 顆`)
 })
 
 test('#2105 設定頁：樣板不寫死字級與間距（px），尺寸只來自共用按鈕與設計變數', () => {

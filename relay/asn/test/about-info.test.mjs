@@ -34,7 +34,9 @@ test('電腦、手機都讀同一份（不各寫一次）', () => {
   assert.match(desk, /from '\.\/about-info\.mjs'/); assert.match(mob, /from '\.\/lib\/about-info\.mjs'/)
   assert.match(deskJs, /isAboutUrl/); assert.match(mob, /isAboutUrl/)
   for (const s of [desk, mob, mobHtml]) assert.ok(!s.includes('Agent Sync Network') && !s.includes('/log`') && !s.includes('web.app/log'), '文字與網址只寫在 about-info.mjs')
-  assert.match(desk, /act\('open-link', l\.url\)/); assert.match(desk, /'open-update'/); assert.match(mob, /l\.kind === 'link' \? openAboutLink\(l\.url\)/)
+  // 連結列改由共用元件 AsnAboutPanel 畫（#1763 C1）：電腦在元件事件上接 act，手機接 openAboutLink；元件依 kind 送出 open-link／open-update／open-guide
+  assert.match(desk, /@open-link="url => act\('open-link', url\)"/); assert.match(desk, /'open-update'/); assert.match(mobHtml, /@open-link="openAboutLink"/)
+  assert.match(read('../ui/parts/about-panel.mjs'), /l\.kind === 'link'\) emit\('open-link', l\.url\)/)
   assert.match(deskJs, /case 'open-link':[^\n]*linkApi\.openLink\(value\)/); assert.match(mob, /isAboutUrl\(url\)\) openLink\(url\)\?\.catch\(/)   // 指令名在出口 openLink（#2106 ⑪）
 })
 
@@ -42,7 +44,8 @@ test('使用指引、版本紀錄：開 App 內的頁，不開外部瀏覽器', 
   assert.match(read('../ui/lib/settings-panel.mjs'), /act\('open-update'\)[\s\S]*act\('open-guide'\)/)
   assert.match(read('../ui/list.js'), /case 'open-guide': await openPanel\('guide'/)
   assert.match(read('../ui/list.js'), /case 'open-update': await openPanel\('setting', 'update'\)/, '電腦：切到設定的更新類')
-  const m = read('../ui/m.js')
-  assert.match(m, /l\.kind === 'update' \? openSetting\('update'\) : openGuides\(\)/, '手機：版本紀錄切到更新頁、使用指引開內頁')
-  assert.match(read('../ui/m.html'), /@click="aboutAct\(l\)"/)
+  const mh = read('../ui/m.html')
+  assert.match(mh, /@open-update="openSetting\('update'\)"/, '手機：版本紀錄切到更新頁')
+  assert.match(mh, /@open-guide="openGuides\(\)"/, '手機：使用指引開內頁')
+  assert.match(read('../ui/parts/about-panel.mjs'), /@click="pick\(l\)"/)
 })
