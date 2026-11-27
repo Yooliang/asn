@@ -36,7 +36,7 @@ import { OnboardCard } from './lib/onboard-card.mjs'
 import { UI_KIT } from './lib/ui-kit.mjs'
 import { showResult } from './lib/ui-kit.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
-import { PUSH_TEXT, createPushSync, pushSettingView } from './lib/mobile-push.mjs'
+import { createPushSync, pushSettingView } from './lib/mobile-push.mjs'
 import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
 import { autoSpeakPlan, createMobileSpeaker } from './lib/mobile-speak.mjs'
 import { startCallPoll } from './lib/call-poll.mjs'
@@ -106,6 +106,7 @@ import { createRoomBellGate } from './lib/bell-rooms.mjs'
 import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createReloginWatch, roomsNoteText } from './lib/relogin-bar.mjs'
 import { ABOUT_LOG_VIEWER, aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { AsnAboutPanel } from './parts/about-panel.mjs'
+import { AsnNotifyPanel, notifyItems } from './parts/notify-panel.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
 import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, pageIcon, settingPage } from './lib/mobile-fourth.mjs'
@@ -838,6 +839,8 @@ const app = createApp({
     const openSetting = key => { if (ACCT_SETTING_KEYS.includes(key)) void openAcct({ tab: key }); else askBeforeLeave(settingPage(key), () => fourthNav.openPage(settingPage(key))) }
     const about = computed(() => aboutView({ deviceName: info.window_name }))
     const openAboutLink = url => { if (isAboutUrl(url)) openLink(url)?.catch(e => console.info('[ASN] 開啟連結失敗', String(e?.message ?? e))) }   // 交給系統瀏覽器（Rust 端 open_link 只放行 http／https）
+    const notifyList = notifyItems(capsAndroid), notifyLayout = ATTRS_ANDROID.layout   // 「提醒與聲音」頁的項目（由手機的能力表算出）與版面；prefs.vibrate*、推播開關的接線留在這裡（元件只發事件）
+    const setNotifyPref = ({ key, on }) => { prefs[key] = on === true }
     const aboutLayout = ATTRS_ANDROID.layout, aboutLogViewer = ABOUT_LOG_VIEWER.mobile   // 「關於」頁版面與「記錄」卡（手機沒有，見設定值清單 open-ui-log 那一列）
     // 官網、隱私權政策開瀏覽器（openAboutLink）；版本紀錄＝「更新」頁（openSetting('update')）、使用指引＝指引頁（openGuides），都在 App 內；事件在 m.html 的 asn-about-panel 上接
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
@@ -1811,7 +1814,7 @@ const app = createApp({
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin, reloginBar, dismissReloginBar, goLogin, backFromLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate, sideloadLast: sideloadLastText(bridge),
       pf, sw, pagerStyle, pagerMoved, indicator, swipeStart, swipeMove, swipeEnd, goTab, tabs, curTab, pages, TAB_LABEL, tabLabel, fourthPage, pageSlot, fourthTitle, closePage, myName, meForChat, lastOf,
-      pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), PUSH_TEXT, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
+      pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), notifyList, notifyLayout, setNotifyPref, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
       listTimeText, nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, MY_STATUS: MY_STATUS_OPTIONS, friendStatusText, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
@@ -1842,6 +1845,7 @@ app.component('device-identity', DeviceIdentity)
 app.component('ptr-zone', PtrZone)
 app.component('relogin-bar', ReloginBar)
 app.component('AsnAboutPanel', AsnAboutPanel)
+app.component('AsnNotifyPanel', AsnNotifyPanel)
 for (const [name, comp] of Object.entries(UI_KIT)) app.component(name, comp)
 app.mount('#app')
 // 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切

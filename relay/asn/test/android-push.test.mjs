@@ -155,7 +155,11 @@ test('設定頁（PR④）：開關接到 prefs.push 與同步；預設開；沒
   assert.match(mob, /DEFAULT_PREFS = \{[^}]*push: true/); assert.match(mob, /push: raw\?\.push !== false/)
   assert.match(js, /enabled: \(\) => prefs\.push !== false/, '關掉就不註冊')
   assert.match(js, /setPush: on => \{ prefs\.push = on === true; if \(on === true\) push\?\.enable\(\); else void push\?\.disable\(\) \}/)
-  assert.match(html, /<template v-if="pushView\.show">\s*<label class="m-check"><input type="checkbox" :checked="pushView\.checked" @change="setPush\(\$event\.target\.checked\)"> \{\{ PUSH_TEXT\.label \}\}<\/label>/)
-  assert.match(html, /v-if="pushView\.denied"/)
+  // 搬進共用元件 AsnNotifyPanel（#1763 C4）：畫面在元件裡，接線（pushView、setPush）留在殼；意圖不變——開關接 setPush、被拒才顯示權限提示
+  const panel = read('ui', 'parts', 'notify-panel.mjs')
+  assert.match(html, /<asn-notify-panel [^>]*:push="pushView"[^>]*@push="setPush"/)
+  assert.match(panel, /<template v-if="pushItem && push\.show">\s*<label class="m-check asn-notify-push"><input type="checkbox" :checked="push\.checked" @change="\$emit\('push', \$event\.target\.checked\)"> \{\{ pushItem\.label \}\}<\/label>/)
+  assert.match(panel, /v-if="push\.denied"/)
+  assert.match(panel, /label: PUSH_TEXT\.label/, '開關的字以 PUSH_TEXT.label 為準')
   assert.match(js, /push\?\.sync\(\); refreshPushSt\(\)/, '回到前景重讀權限狀態（使用者可能剛在系統設定裡改過）')
 })
