@@ -139,9 +139,10 @@ test('#2425 AsnNote：warn 沒有動作、或種類不認得，會 console.warn�
 // 守門：原始碼裡寫了 <asn-note kind="warn"> 就一定要有動作（action-label 或 #action／v-slot:action 插槽）
 export const warnNotesWithoutAction = src => {
   const bad = []
-  for (const m of src.matchAll(/<asn-note\b([^>]*)>([\s\S]*?)<\/asn-note>|<asn-note\b([^>]*?)\/>/g)) {
-    const attrs = m[1] ?? m[3] ?? ''; const body = m[2] ?? ''
-    if (!/(?:^|\s):?kind\s*=\s*"[^"]*warn[^"]*"/.test(attrs)) continue
+  // 標籤比對要認得引號（屬性值裡的 > 不算標籤結束）；自閉合的先比
+  for (const m of src.matchAll(/<asn-note\b((?:"[^"]*"|'[^']*'|[^<>"'])*?)\/>|<asn-note\b((?:"[^"]*"|'[^']*'|[^<>"'])*)>([\s\S]*?)<\/asn-note>/g)) {
+    const attrs = m[1] ?? m[2] ?? ''; const body = m[3] ?? ''
+    if (!/(?:^|\s):?kind\s*=\s*(?:"[^"]*warn[^"]*"|'[^']*warn[^']*')/.test(attrs)) continue
     if (/(?:^|\s):?action-label\s*=/.test(attrs) || /(?:^|\s):?actionLabel\s*=/.test(attrs) || /<template\s+(?:#action|v-slot:action)\b/.test(body)) continue
     bad.push(m[0].slice(0, 80))
   }
@@ -158,6 +159,33 @@ test('#2425 守門：ui 底下沒有「warn 卻沒附動作」的 <asn-note>；�
   assert.equal(warnNotesWithoutAction('<asn-note kind="warn" action-label="重開">字</asn-note>').length, 0)
   assert.equal(warnNotesWithoutAction('<asn-note kind="warn">字<template #action><button>x</button></template></asn-note>').length, 0)
   assert.equal(warnNotesWithoutAction('<asn-note>一般</asn-note>').length, 0)
+  assert.equal(warnNotesWithoutAction('<asn-note v-if="n > 0" kind="warn">只有字</asn-note>').length, 1, '屬性值裡有 > 也要抓到')
+  assert.equal(warnNotesWithoutAction(`<asn-note kind='warn'>只有字</asn-note>`).length, 1, '單引號')
+  assert.equal(warnNotesWithoutAction(`<asn-note :kind="'warn'">只有字</asn-note>`).length, 1, '綁定寫法')
+  assert.equal(warnNotesWithoutAction('<asn-note v-if="n > 0" kind="warn" action-label="重開">字</asn-note>').length, 0)
+})
+
+test('#2425 AsnNote：有條件的 #action 插槽會跟著出現／消失；消失時不留空按鈕並警告', async () => {
+  let setCan
+  const Host = {
+    components: { AsnNote },
+    setup() { const can = globalThis.Vue.ref(false); setCan = v => { can.value = v }; return { can } },
+    template: `<asn-note kind="warn">要處理<template v-if="can" #action><button class="act">去處理</button></template></asn-note>`,
+  }
+  const msgs = []
+  const orig = console.warn; console.warn = (...a) => msgs.push(a.join(' '))
+  const m = mountComponent(Host, {})
+  try {
+    await settle(m)
+    assert.ok(!m.find('.asn-note-action'), '一開始沒有動作，不畫動作區')
+    assert.ok(msgs.some(s => s.includes('warn 一定要附一個動作')), '沒動作要警告')
+    setCan(true); await settle(m)
+    assert.equal(m.find('.act')?.textContent, '去處理', '後來有了，按鈕要出現')
+    const n = msgs.length
+    setCan(false); await settle(m)
+    assert.ok(!m.find('.act') && !m.find('.asn-note-action') && !m.find('button'), '又沒有了，按鈕與空殼都要消失')
+    assert.ok(msgs.length > n, '從有變沒有要再警告')
+  } finally { console.warn = orig; m.unmount() }
 })
 
 test('#2105 設計變數守門：kit.css 的字級、間距、鈕高都走變數，不寫死 px（變數表本身除外）', () => {

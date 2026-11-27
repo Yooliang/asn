@@ -3,7 +3,8 @@
 //  - 找到基準裡沒有的新 class → 紅（新的提示樣式要用 AsnStatus／AsnNote）
 //  - 基準裡有、實際已找不到 → 也紅（把它從基準刪掉；所以基準只會減少）
 //  - 基準檔只准刪不准加：ASN_GOLDEN_UPDATE=1 只會把已消失的 class 移掉、刷新檔案清單，不會把新 class 放進去；
-//    另外現在的基準必須是 origin/main 上基準檔的子集（手改基準檔偷加會紅）；node-test 那個 job 會另外抓 main 並設 ASN_REQUIRE_MAIN=1，抓不到就紅（不准空跑）
+//    另外現在的基準必須是 PR base 上基準檔的子集（手改基準檔偷加會紅）；node-test 在 pull_request 時只抓 base 的 sha 並設 ASN_HINT_BASE，讀不到就紅（不准空跑）；
+//    沒設 ASN_HINT_BASE 時（本機、推 main）改比本機的 origin/main，沒有就略過
 // 規範：docs/畫面規範.md〈四之一、訊息與提示的位置〉。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -61,18 +62,23 @@ test('#2425 棘輪：基準裡的 class 都還找得到；找不到就從基準�
   assert.deepEqual(gone, [], '這些 class 已經不見了，請從 test/golden/hint-classes.json 刪掉（ASN_GOLDEN_UPDATE=1 node --test test/hint-classes.test.mjs 會代刪）')
 })
 
-test('#2425 基準檔只准刪不准加：必須是 origin/main 上基準檔的子集（main 上還沒有基準檔時略過；node-test 這個 job 找不到 origin/main 一律紅）', t => {
+test('#2425 基準檔只准刪不准加：必須是 PR base（或本機 origin/main）上基準檔的子集（該處還沒有基準檔時略過）', t => {
   const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-  let hasMain = true
-  try { git(['rev-parse', '--verify', '--quiet', 'origin/main']) } catch { hasMain = false }
-  // CI 的 checkout 是淺層的。這條守門由 node-test 那個 job 負責：asn-node-tests.yml 另外抓 main，並設 ASN_REQUIRE_MAIN=1；
-  // 設了卻找不到 origin/main 就是守門沒在跑，不准悄悄略過。其他也會跑 Node 測試的 job（Linux 建置、發版）沒抓 main，就略過。
-  if (!hasMain) {
-    assert.ok(process.env.ASN_REQUIRE_MAIN !== '1', '找不到 origin/main：這條守門會空跑，請確認 asn-node-tests.yml 有「取得 main」那一步')
-    t.skip('找不到 origin/main（本機沒有遠端，或這個 job 沒抓 main；守門由 node-test 那個 job 負責）'); return
+  const ok = args => { try { git(args); return true } catch { return false } }
+  // 比對對象：node-test 在 pull_request 時設 ASN_HINT_BASE＝PR 的 base 提交（workflow 只抓這個 sha）。
+  // 設了卻讀不到就是守門沒在跑，直接紅。沒設（本機、推 main、其他 job）就用本機的 origin/main，沒有就略過。
+  const base = (process.env.ASN_HINT_BASE || '').trim()
+  let ref
+  if (base) {
+    assert.ok(ok(['cat-file', '-e', `${base}^{commit}`]), `抓不到 PR 的 base（${base}）：請確認 asn-node-tests.yml 有「取得 PR 的 base」那一步`)
+    ref = base
+  } else {
+    if (!ok(['rev-parse', '--verify', '--quiet', 'origin/main'])) { t.skip('沒有指定 PR 的 base，本機也沒有 origin/main（守門由 node-test 的 pull_request 負責）'); return }
+    ref = 'origin/main'
   }
-  let main
-  try { main = JSON.parse(git(['show', `origin/main:${GOLDEN_GIT}`])) } catch { t.skip('main 上還沒有基準檔（第一次加入）'); return }
+  // 檔案不存在才是「第一次加入」；存在卻讀不出來或解析失敗要紅，不能略過
+  if (!ok(['cat-file', '-e', `${ref}:${GOLDEN_GIT}`])) { t.skip(`${ref} 上還沒有基準檔（第一次加入）`); return }
+  const main = JSON.parse(git(['show', `${ref}:${GOLDEN_GIT}`]))
   const extra = baselineNames.filter(n => !(n in main.classes))
   assert.deepEqual(extra, [], `基準檔只准減少，這些是新加的：${MSG}`)
 })
@@ -93,6 +99,9 @@ test('#2425 偵測是真的：新的 class、role 元素上的 class、CSS 選�
   assert.deepEqual([...scanText('<p class="asn-note asn-note-warn asn-status k-fail" role="status">', '.html')], [], '白名單')
   assert.deepEqual([...scanText(`const error = 1; log('note', warn)`, '.mjs')], [], '一般字眼不是 class')
   assert.deepEqual([...scanText(`<i :class="['tone-' + k]" role="status">`, '.html')], [], '動態前綴不算')
+  assert.deepEqual([...scanText('<span v-if="a > 1" role="status" class="x-count">', '.html')], ['x-count'], '屬性值裡有 > 也要抓到')
+  assert.deepEqual([...scanText(`<span v-if='a > 1' role='status' class='y-count'>`, '.html')], ['y-count'], '單引號')
+  assert.deepEqual([...scanText('<p class="x-warning">x</p><p class="a-notes b-errors c-tips">', '.html')].sort(), ['a-notes', 'b-errors', 'c-tips', 'x-warning'], 'warning 與複數')
 })
 
 test('#2425 比對的純邏輯：多出來的、消失的各自抓得到', () => {

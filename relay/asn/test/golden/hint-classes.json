@@ -111,6 +111,7 @@
   "permission-risk": ["ui/list.html"],
   "phone": ["ui/lib/relogin-bar.mjs"],
   "pin-note": ["ui/list.html","ui/style.css"],
+  "pv-count": ["ui/lib/chatpane.mjs"],
   "pv-msg": ["ui/lib/chatpane.mjs"],
   "relogin-bar": ["ui/lib/relogin-bar.mjs"],
   "set-note": ["ui/lib/settings-panel.mjs","ui/line.css"],

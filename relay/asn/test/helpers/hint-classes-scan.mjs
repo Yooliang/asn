@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 // 名稱以 - 分隔的片段裡有這幾個字，就算提示類
-export const HINT_RE = /(?:^|-)(note|hint|err|error|warn|why|tip|notice|banner|toast)(?:$|-)/
+export const HINT_RE = /(?:^|-)(note|hint|err|error|warn|warning|why|tip|notice|banner|toast)s?(?:$|-)/
 // 共用元件自己的 class（AsnStatus、AsnNote 和它們的修飾 class）不算
 export const ALLOW_RE = /^(?:asn-(?:status|note)(?:-|$)|k-(?:busy|ok|fail|empty|unreadable)$)/
 export const SCAN_EXT = new Set(['.html', '.js', '.mjs', '.css'])
@@ -46,7 +46,8 @@ export function scanText(text, ext) {
   for (const m of text.matchAll(/\bclass\s*:\s*(['"`])([^'"`]*)\1/g)) for (const n of words(m[2])) keep(n)
   for (const m of text.matchAll(/\bclassList\.(?:add|remove|toggle|replace)\(([^)]*)\)/g)) for (const s of m[1].matchAll(/['"`]([^'"`]*)['"`]/g)) for (const n of words(s[1])) keep(n)
   // role=status／alert／note 的元素：不管名字，掛的 class 都算
-  for (const t of text.matchAll(/<[A-Za-z][^<>]*>/g)) {
+  // 標籤比對要認得引號：屬性值裡的 > 不算標籤結束（例如 v-if="a > 1"）
+  for (const t of text.matchAll(/<[A-Za-z][\w-]*\b(?:"[^"]*"|'[^']*'|[^<>"'])*>/g)) {
     if (/\brole\s*=\s*["'](?:status|alert|note)["']/.test(t[0])) for (const n of attrClasses(t[0])) keepAny(n)
   }
   return found

@@ -26,14 +26,16 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      # #2425 提示樣式守門要跟 main 上的基準檔比（基準只准刪不准加）；淺層 checkout 沒有 origin/main，要另外抓
-      - name: 取得 main（給基準檔比對）
-        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+      # #2425 提示樣式守門要跟 PR 的 base 上的基準檔比（基準只准刪不准加）；淺層 checkout 沒有它，要另外抓。
+      # 只抓 sha、不寫進任何分支，所以連續合併時不會 non-fast-forward；推 main 時不比（沒有 base）
+      - name: 取得 PR 的 base（給基準檔比對）
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }}
 
       - uses: ./.github/actions/asn-node-setup
 
       - name: 單元測試（Node）
         working-directory: relay/asn
         env:
-          ASN_REQUIRE_MAIN: '1'   # #2425：這個 job 抓了 main，基準檔子集比對一定要真的跑
+          ASN_HINT_BASE: ${{ github.event.pull_request.base.sha }}   # #2425：pull_request 時是 base 的 sha（子集比對一定要真的跑）；推 main 時是空的
         run: npm test

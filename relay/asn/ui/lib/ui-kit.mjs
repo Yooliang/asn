@@ -118,17 +118,23 @@ export const AsnNote = {
   },
   emits: ['action'],
   setup(props, { slots }) {
-    const { computed, watchEffect } = globalThis.Vue
-    const hasAction = computed(() => !!slots.action || props.actionLabel !== '')
-    const view = computed(() => noteView(props.kind, hasAction.value, props.banner))
-    watchEffect(() => {
-      const v = view.value
-      if (!v.kindOk) console.warn(`AsnNote：不認得的種類「${props.kind}」，改用 info`)
-      else if (!v.valid) console.warn('AsnNote：warn 一定要附一個動作（actionLabel 或 action 插槽）')
-    })
+    const { onMounted, onUpdated } = globalThis.Vue
+    // slots 不是響應式的，不能用 computed 包：每次畫面重畫都重新判斷有沒有動作（有條件的 #action 插槽才會跟著出現／消失）
+    const view = () => noteView(props.kind, !!slots.action || props.actionLabel !== '', props.banner)
+    // 掛載與更新後檢查；同一句話不重複吵（狀況沒變就不再警告）
+    let last = ''
+    const check = () => {
+      const v = view()
+      const msg = !v.kindOk ? `AsnNote：不認得的種類「${props.kind}」，改用 info`
+        : !v.valid ? 'AsnNote：warn 一定要附一個動作（actionLabel 或 action 插槽）' : ''
+      if (msg && msg !== last) console.warn(msg)
+      last = msg
+    }
+    onMounted(check)
+    onUpdated(check)
     return { view }
   },
-  template: `<p :class="view.classes" :role="view.role"><span class="asn-note-text"><slot></slot></span><span class="asn-note-action" v-if="view.action"><slot name="action"><asn-button level="text" @click="$emit('action', $event)">{{ actionLabel }}</asn-button></slot></span></p>`,
+  template: `<p :class="view().classes" :role="view().role"><span class="asn-note-text"><slot></slot></span><span class="asn-note-action" v-if="view().action"><slot name="action"><asn-button level="text" @click="$emit('action', $event)">{{ actionLabel }}</asn-button></slot></span></p>`,
 }
 
 // ---------- 「⋯」選單（#2111 ⑥） ----------
