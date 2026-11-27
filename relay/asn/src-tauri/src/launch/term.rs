@@ -952,6 +952,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 結果不確定（逾時、回的不是窗格編號）：窗格多半其實已經開了，趁鎖還在手上用工作區把它找回來（#2424 B）
         let recovered = if unsure { Some(spawn_recover::find_spawned(&w, &paths.sock, &id, exit_nonce.as_deref())) } else { None };
         drop(open_guard);
+        let was_recovered = matches!(recovered, Some(spawn_recover::Found::One(_)));
         let pane_id: u64 = match recovered {
             Some(spawn_recover::Found::One(p)) => {
                 view_log(&format!("終端服務：開窗格回應不確定，用工作區找回窗格 {p}（編號 {id}）"));
@@ -996,7 +997,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             r
         };
         if let Err(e) = w.set_tab_title(&win.sock, pane_id, &title) {
-            return Err(close_pane(format!("無法設定終端標題：{e}")));
+            if was_recovered {
+                // 剛逾時的服務最容易在這一步再逾時：好不容易找回來的窗格不能因為標題沒設成就關掉。
+                // 照常登記（對照表記著標題，之後接回時用記下的標題），原因只進 log
+                view_log(&format!("終端服務：找回的窗格 {pane_id} 沒設成標題，照常登記（編號 {id}）：{e}"));
+            } else {
+                return Err(close_pane(format!("無法設定終端標題：{e}")));
+            }
         }
         // 夥伴視窗開了立刻以錯誤結束（claude 起不來等）：Hold 會讓窗格留著，但這不是「開成功」。
         // 短時間內看窗格有沒有已結束；有就收掉窗格、回失敗與原因
@@ -4035,8 +4042,24 @@ pub(crate) fn mux_partner_in(mux: (u32, u64), name: &str) -> Option<String> {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// 測試用：指定這條測試執行緒上 `partner_term_state_of` 回的狀態（沒指定＝None，跟沒有畫面的建置一樣）
+    static TEST_TERM_STATE: std::cell::Cell<Option<TermState>> = const { std::cell::Cell::new(None) };
+}
+
+/// 測試用：指定（或清掉）詳情讀到的終端狀態
+#[cfg(test)]
+pub(crate) fn set_test_term_state(state: Option<TermState>) {
+    TEST_TERM_STATE.with(|c| c.set(state));
+}
+
 /// 這位夥伴的終端狀態（見 TermService::partner_term_state，詳情用）；沒有畫面的建置、測試＝None
 pub(crate) fn partner_term_state_of(name: &str) -> Option<term_state::TermStateInfo> {
+    #[cfg(test)]
+    if let Some(state) = TEST_TERM_STATE.with(|c| c.get()) {
+        return Some(term_state::TermStateInfo { state, reason: String::new() });
+    }
     #[cfg(all(feature = "gui", not(test)))]
     {
         GLOBAL.get().map(|t| t.partner_term_state(name))
@@ -6658,8 +6681,10 @@ mod tests {
         }
 
         /// #2424 B／C：開窗逾時找回窗格、夥伴的終端三種狀態
-        #[path = "../../../term_spawn_recover_tests.rs"]
-        mod spawn_recover;
+        /// 同上用 `include!`（路徑相對於 launch/）
+        mod spawn_recover {
+            include!("term_spawn_recover_tests.rs");
+        }
 
         /// #1818 端到端：終端服務崩潰、ASN 自己還握著它的 handle（程序已結束、建立時間還讀得到）。
         /// 走真的 mux_snapshot（live_pid）→ 監看一輪（run_round）→ 事故、紀錄、通知 → 接回（resume_entries，和重開機接回同一套 run）。

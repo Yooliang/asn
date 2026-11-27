@@ -1,5 +1,7 @@
-//! #2424 B／C：開窗格逾時後找回窗格、夥伴的終端三種狀態。測試用假的 cli 執行器（term.rs 的 FakeRunner），不碰真的 WezTerm。
+// #2424 B／C：開窗格逾時後找回窗格、夥伴的終端三種狀態。測試用假的 cli 執行器（term.rs 的 FakeRunner），不碰真的 WezTerm。
+// 這支檔案由 term.rs 用 include! 放進 mux_mode::spawn_recover（所以不能有 //! 內層註解）
 
+use super::super::super::reclaim_rows::kick_count;
 use super::super::super::{TermState, TermStateInfo};
 use super::*;
 
@@ -49,8 +51,12 @@ fn 開窗逾時_清單裡同名但已結束的窗格_不認() {
     // 清單裡那個同名窗格畫面上已有帶暗號的結束標記：不是剛開的
     *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
     let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
-    assert!(matches!(&e, crate::launch::win_term::WinOpenError::Started(m) if m.contains("沒有開成功")), "{e:?}");
-    assert!(!rig.svc.partner_in_service("小乙"));
+    assert!(matches!(&e, crate::launch::win_term::WinOpenError::Started(m) if m.contains("稍後會自己接回來")), "{e:?}");
+    assert!(!rig.svc.partner_in_service("小乙"), "已結束的窗格沒被當成剛開的登記");
+    // 沒找到活的：記成暫時接不回，重試看到那個窗格已結束，確定不在才移除
+    let r = rig.svc.retry_parked();
+    assert_eq!((r.restored, r.waiting), (0, 0));
+    assert_eq!(state_of(&rig).state, TermState::Gone);
     assert!(ids_in_store(&rig.store).is_empty());
 }
 
@@ -72,8 +78,13 @@ fn 開窗逾時_編號只是前綴相同的窗格_不互認() {
     // 編號 12 的工作區與標題，不能被編號 1 認走
     *rig.runner.inner.list_json.borrow_mut() = two_listed(one_pane("asn-12", "", 9, 0), one_pane("default", "ASN:12 小乙", 10, 0));
     let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
-    assert!(matches!(&e, crate::launch::win_term::WinOpenError::Started(m) if m.contains("沒有開成功")), "{e:?}");
-    assert!(ids_in_store(&rig.store).is_empty());
+    assert!(matches!(&e, crate::launch::win_term::WinOpenError::Started(m) if m.contains("稍後會自己接回來")), "{e:?}");
+    assert!(!rig.svc.partner_in_service("小乙"), "別的編號的窗格沒被認走");
+    // 重試也不會把編號 12 的窗格認成編號 1：兩輪都沒有，才移除
+    let r = rig.svc.retry_parked();
+    assert_eq!((r.restored, r.waiting), (0, 0));
+    assert_eq!(state_of(&rig).state, TermState::Gone);
+    assert_eq!(count_sub(&rig.runner, "kill-pane"), 0, "別人的窗格不關");
 }
 
 #[test]
@@ -104,16 +115,62 @@ fn 開窗逾時_清單裡有好幾個對得上_不登記錯的() {
 }
 
 #[test]
-fn 開窗逾時_清單裡找不到_回失敗不登記() {
+fn 開窗逾時_清單這一刻沒看到_先記成暫時接不回_再看一輪還沒有才移除_不認走使用者的窗格() {
     let rig = partner_rig();
     *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
     // 只有使用者自己開的窗格（工作區不是 asn-），絕不能被認走
     *rig.runner.inner.list_json.borrow_mut() = one_pane("default", "我自己的", 3, 0);
     let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
-    assert!(matches!(&e, crate::launch::win_term::WinOpenError::Started(m) if m.contains("沒有開成功")), "{e:?}");
+    let crate::launch::win_term::WinOpenError::Started(m) = e else { panic!("應該是已啟動的失敗") };
+    assert!(m.contains("稍後會自己接回來") && m.contains("不用重開"), "不直接說失敗：{m}");
+    assert_eq!(state_of(&rig).state, TermState::Waiting, "不叫人重開");
+    assert_eq!(rig.svc.waiting_count(), 1);
+    assert_eq!(ids_in_store(&rig.store).len(), 1, "寫進對照表");
+    assert_eq!(kick_count(), 1, "放進暫時接不回之後要叫背景重試");
+    // 再看一輪（清單這次還是沒有）：連續兩輪沒有才移除，使用者的窗格仍沒被認走
+    let r = rig.svc.retry_parked();
+    assert_eq!((r.restored, r.waiting), (0, 0));
     assert_eq!(state_of(&rig).state, TermState::Gone);
-    assert_eq!(rig.svc.waiting_count(), 0);
     assert!(ids_in_store(&rig.store).is_empty());
+    assert_eq!(count_sub(&rig.runner, "kill-pane"), 0, "誰都不關");
+}
+
+#[test]
+fn 開窗逾時_第一次清單沒有_第二次才出現_被接回登記_不會多開一個() {
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+    rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+    assert!(!rig.svc.partner_in_service("小乙"));
+    // 窗格晚一點才出現
+    *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "", 9, 0);
+    let r = rig.svc.retry_parked();
+    assert_eq!((r.restored, r.waiting), (1, 0), "{:?}", state_of(&rig));
+    assert_eq!(state_of(&rig).state, TermState::Ok);
+    assert!(rig.svc.partner_in_service("小乙"), "名字還在，按鈕可按");
+    assert_eq!(count_sub(&rig.runner, "kill-pane"), 0);
+}
+
+#[test]
+fn 開窗逾時_清單讀不到也要叫背景重試() {
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    *rig.runner.inner.list_json.borrow_mut() = "不是 json".into();
+    rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+    assert_eq!(kick_count(), 1);
+}
+
+#[test]
+fn 找回的窗格設標題失敗_不關窗格_照常登記() {
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "", 9, 0);
+    // 剛逾時的服務最容易在設標題這一步再逾時
+    *rig.runner.inner.fail_substr.borrow_mut() = Some("set-tab-title".into());
+    let (id, _) = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).expect("找回的窗格設標題失敗也要登記");
+    assert_eq!(count_sub(&rig.runner, "kill-pane"), 0, "不能把好不容易找回的窗格關掉");
+    assert!(rig.svc.partner_in_service("小乙"), "標題用記下來的，夥伴名字不掉");
+    assert_eq!(ids_in_store(&rig.store), vec![id]);
 }
 
 #[test]
@@ -217,6 +274,9 @@ fn 接線_開窗逾時用工作區找回_監看啟動紀錄讀終端對照表() 
     let term = include_str!("term.rs").replace("\r\n", "\n");
     let open: String = term.split("fn open_mux(").nth(1).unwrap().chars().take(9000).collect();
     assert!(open.contains("spawn_recover::find_spawned("), "逾時後要去清單找窗格");
+    // 找窗格要在放開開窗鎖之前做：放開之後別的夥伴可能同時開窗，清單裡會混進別人剛開的窗格，也會與收空終端服務搶
+    let (find_at, drop_at) = (open.find("spawn_recover::find_spawned(").unwrap(), open.find("drop(open_guard)").expect("開窗鎖要明確放開"));
+    assert!(find_at < drop_at, "find_spawned 必須在 drop(open_guard) 之前（鎖內）");
     let watch = include_str!("mux_watch.rs").replace("\r\n", "\n");
     assert!(watch.contains("log_startup_state(&w, age, terms.partner_term_counts())"), "啟動紀錄讀終端對照表");
     let lib = include_str!("../lib.rs");

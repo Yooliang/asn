@@ -370,8 +370,12 @@ const PAUSE_WAITS_MAX: usize = 12;
 /// 先等 [`RETRY_FIRST`]；每輪之前若終端服務還在暫停（剛逾時）就先等暫停結束，**不叫任何指令**，這樣的等待不算一輪、不改間隔；
 /// 一輪有接回任何一列就從頭算間隔，否則加倍（最長 [`RETRY_MAX`]）；接回後呼叫 `on_restored`；沒有等待中的列就結束。
 /// 每輪的動作 panic 只記 log、下一輪再試，不讓這條執行緒悄悄死掉
+///
+/// `sleep` 可以被叫醒（見 [`RetryWake`]）；`kicked` 取走「有人叫過」的旗標。睡到一半被叫醒（新列剛放進來）就不等滿，
+/// 馬上進下一輪，這一輪之後的間隔也重設成 [`RETRY_FIRST`]，不讓新列等舊的長間隔
 pub fn run_retry_loop(
     sleep: &mut dyn FnMut(Duration),
+    kicked: &dyn Fn() -> bool,
     pause_left: &dyn Fn() -> Option<Duration>,
     round: &mut dyn FnMut() -> RetryReport,
     on_restored: &mut dyn FnMut(),
@@ -381,9 +385,12 @@ pub fn run_retry_loop(
     let mut wait = RETRY_FIRST;
     loop {
         sleep(wait);
+        let woken = kicked();
         for _ in 0..PAUSE_WAITS_MAX {
             let Some(left) = pause_left() else { break };
             sleep(left + Duration::from_secs(1));
+            // 暫停期間又被叫：旗標清掉，照樣等到暫停結束（不叫任何指令）
+            let _ = kicked();
         }
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| round())).unwrap_or_else(|_| {
             log("終端對照表：背景重試時發生內部錯誤，這一輪略過，稍後再試");
@@ -392,7 +399,7 @@ pub fn run_retry_loop(
         if r.restored > 0 {
             on_restored();
         }
-        wait = next_wait(wait, r.restored);
+        wait = if woken { RETRY_FIRST } else { next_wait(wait, r.restored) };
         if waiting() == 0 {
             return;
         }
@@ -414,7 +421,8 @@ pub fn start_reclaim_retry(terms: std::sync::Arc<super::LiveTerms>) {
     let spawned = std::thread::Builder::new().name("asn-reclaim-retry".into()).spawn(move || {
         loop {
             run_retry_loop(
-                &mut std::thread::sleep,
+                &mut |d| RETRY_WAKE.sleep(d),
+                &|| RETRY_WAKE.take(),
                 &|| crate::launch::cli_gate::global().longest_cooldown(),
                 &mut || terms.retry_parked(),
                 &mut || {
@@ -442,10 +450,58 @@ pub fn start_reclaim_retry(terms: std::sync::Arc<super::LiveTerms>) {
 #[cfg(feature = "gui")]
 static RETRY_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// 開窗格逾時、把列記成暫時接不回之後，叫背景重試起來（已經在跑就不重複）。測試沒有全域的終端服務，什麼都不做
-#[cfg(feature = "gui")]
+/// 重試執行緒的睡眠：睡最多一段時間，被 [`Self::kick`] 叫到就提早醒。旗標會留著（叫的時候執行緒不在睡，下一次睡就直接醒）
+pub struct RetryWake {
+    kicked: std::sync::Mutex<bool>,
+    cv: std::sync::Condvar,
+}
+
+impl RetryWake {
+    pub const fn new() -> Self {
+        RetryWake { kicked: std::sync::Mutex::new(false), cv: std::sync::Condvar::new() }
+    }
+
+    /// 叫醒（新列剛放進暫時接不回）
+    pub fn kick(&self) {
+        *self.kicked.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.cv.notify_all();
+    }
+
+    /// 睡最多 `d`；有人叫過（旗標已立起）就馬上回來。不清旗標，由 [`Self::take`] 取走
+    pub fn sleep(&self, d: Duration) {
+        let g = self.kicked.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = self.cv.wait_timeout_while(g, d, |k| !*k);
+    }
+
+    /// 取走旗標：回「剛才有人叫過」
+    pub fn take(&self) -> bool {
+        std::mem::take(&mut *self.kicked.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
+/// 全程式唯一的重試叫醒器（同一時間只有一條重試執行緒）
+static RETRY_WAKE: RetryWake = RetryWake::new();
+
+#[cfg(test)]
+thread_local! {
+    /// 測試用：這條測試執行緒叫了幾次 `kick_retry`
+    static KICKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// 這條測試執行緒到目前叫了幾次 `kick_retry`
+#[cfg(test)]
+pub(super) fn kick_count() -> usize {
+    KICKS.with(|k| k.get())
+}
+
+/// 開窗格逾時、把列記成暫時接不回之後，叫背景重試起來（已經在跑就叫醒它，馬上看一次、間隔重設成 30 秒）。
+/// 測試沒有全域的終端服務，只記次數
 pub(super) fn kick_retry() {
+    #[cfg(test)]
+    KICKS.with(|k| k.set(k.get() + 1));
+    #[cfg(feature = "gui")]
     if let Some(t) = super::GLOBAL.get() {
+        RETRY_WAKE.kick();
         start_reclaim_retry(t.clone());
     }
 }

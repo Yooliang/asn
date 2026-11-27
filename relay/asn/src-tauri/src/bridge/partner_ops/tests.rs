@@ -416,6 +416,25 @@ fn 詳情_終端狀態說確定不在時_不再看祖先鏈說_asn_開的() {
     assert!(!super::info_opened_by_asn(None, || false));
 }
 
+#[cfg(desktop)]
+#[test]
+fn 詳情_注入終端狀態_確定不在不說_asn_開的_暫時接不回和已登記說_asn_開的() {
+    use crate::launch::term::{set_test_term_state, TermState};
+    // 程序祖先鏈說是 ASN 開的（asn_host），但終端狀態是確定不在：「開啟方式」跟著狀態，不再看祖先鏈
+    let r = rig(Opt { asn_host: true, ..Opt::default() });
+    set_test_term_state(Some(TermState::Gone));
+    let v = r.run("info", json!({})).result.unwrap();
+    assert_eq!(v["term_state"], "gone");
+    assert_eq!(v["opened_by"], "user", "確定不在時不能同時說 ASN 開的又叫人重開");
+    // 暫時接不回、已登記：就算祖先鏈看不出來也算 ASN 開的
+    let r = rig(Opt::default());
+    set_test_term_state(Some(TermState::Waiting));
+    assert_eq!(r.run("info", json!({})).result.unwrap()["opened_by"], "asn");
+    set_test_term_state(Some(TermState::Ok));
+    assert_eq!(r.run("info", json!({})).result.unwrap()["opened_by"], "asn");
+    set_test_term_state(None);
+}
+
 #[test]
 fn 詳情_唯讀_不需要遠端開關_欄位齊全_外殼鏈只有程式名() {
     let r = rig(Opt { allow_first: 0, ..Opt::default() });

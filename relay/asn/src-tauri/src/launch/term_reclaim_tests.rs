@@ -236,6 +236,7 @@ impl LoopRig {
         let (results, waiting_after, pauses) = (RefCell::new(results), RefCell::new(waiting_after), RefCell::new(pauses));
         run_retry_loop(
             &mut |d| self.sleeps.borrow_mut().push(d.as_secs()),
+            &|| false,
             &|| {
                 let mut p = pauses.borrow_mut();
                 if p.is_empty() { None } else { p.remove(0).map(Duration::from_secs) }
@@ -286,6 +287,46 @@ fn 重試迴圈_閘門暫停期間不叫清單_等暫停結束才試() {
     let r2 = LoopRig::new();
     r2.run(vec![0, 0], vec![1, 0], vec![Some(10), None]);
     assert_eq!(*r2.sleeps.borrow(), vec![30, 11, 60], "暫停不算一輪：下一輪的間隔是 60 不是 120");
+}
+
+/// 新列放進來時重試執行緒正在睡：要馬上醒來試一次，且之後的間隔重設成 30 秒（不是接著加倍）。
+/// 時序用通道控制，不靠睡；叫醒壞掉時第一個 recv_timeout 會逾時而紅
+#[test]
+fn 重試執行緒正在睡_叫醒後馬上試_間隔重設成三十秒() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{mpsc, Arc};
+    let wake = Arc::new(super::super::super::reclaim_rows::RetryWake::new());
+    let (entered_tx, entered_rx) = mpsc::channel::<u64>();
+    let (round_tx, round_rx) = mpsc::channel::<()>();
+    let rounds = Arc::new(AtomicUsize::new(0));
+    let (w_sleep, w_take, rounds2) = (wake.clone(), wake.clone(), rounds.clone());
+    let handle = std::thread::spawn(move || {
+        run_retry_loop(
+            &mut |d| {
+                entered_tx.send(d.as_secs()).ok();
+                w_sleep.sleep(d)
+            },
+            &|| w_take.take(),
+            &|| None,
+            &mut || {
+                round_tx.send(()).ok();
+                rounds2.fetch_add(1, Ordering::SeqCst);
+                RetryReport { restored: 0, waiting: 1 }
+            },
+            &mut || {},
+            // 第一輪之後還有列在等，第二輪之後沒有了
+            &|| usize::from(rounds.load(Ordering::SeqCst) < 2),
+            &|_| {},
+        )
+    });
+    let limit = Duration::from_secs(10);
+    assert_eq!(entered_rx.recv_timeout(limit).unwrap(), 30, "第一次睡 30 秒");
+    wake.kick();
+    round_rx.recv_timeout(limit).expect("叫醒後要馬上試，不等睡完");
+    assert_eq!(entered_rx.recv_timeout(limit).unwrap(), 30, "被叫醒的那一輪之後間隔重設成 30，不是加倍成 60");
+    wake.kick();
+    round_rx.recv_timeout(limit).expect("第二次也一樣");
+    handle.join().unwrap();
 }
 
 /// LOW：每輪裡 panic 只記 log，這條執行緒不能死
