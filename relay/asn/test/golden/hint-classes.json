@@ -55,7 +55,7 @@
   "m-dv-replace-err": ["ui/m.html","ui/mobile.css"],
   "m-dv-replace-note": ["ui/m.html","ui/mobile.css"],
   "m-dv-why": ["ui/mobile.css"],
-  "m-err": ["ui/m.html","ui/mobile.css"],
+  "m-err": ["ui/m.html","ui/mobile.css","ui/parts/notify-panel.mjs"],
   "m-fine": ["ui/m.html"],
   "m-fps-msg": ["ui/m.html"],
   "m-fps-sub": ["ui/m.html"],
@@ -143,5 +143,8 @@
   "voice-install": ["ui/lib/chatpane.mjs"],
   "voice-note": ["ui/style.css"],
   "warn": ["ui/lib/chatpane.mjs","ui/lib/settings-panel.mjs","ui/m.html","ui/mobile.css","ui/style.css"]
+ },
+ "moved": {
+  "m-err（ui/parts/notify-panel.mjs）": {"note":"搬家帶進共用元件、待換","from":"ui/m.html"}
  }
 }
