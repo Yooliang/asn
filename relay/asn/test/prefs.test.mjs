@@ -124,9 +124,20 @@ test('守門：名單頁點大頭貼走上傳流程、設定頁兩處共用同�
   assert.match(js, /removeAvatarUpload\(avApi\)/)
 })
 
-test('守門：設定頁的通知是四個勾選、視窗外框是下拉，不再是按鈕', () => {
+test('守門：設定頁的通知是四個勾選、視窗外框是下拉，不再是按鈕', async () => {
+  // 通知那四個勾選已搬進共用元件 AsnNotifyPanel（#1763 C4）：改成真的掛載電腦設定頁，數畫出來的是四個勾選框、沒有任何按鈕，勾了會送 act('notify', { key, on })
+  const { SettingsPanel } = await import('../ui/lib/settings-panel.mjs')
+  const { mountComponent } = await import('./helpers/render.mjs')
+  const m = mountComponent(SettingsPanel, { st: { notify: { toast: true, msg: false, nudge: true, file: false } }, catKey: 'notify' })
+  try {
+    const boxes = m.findAll('input[type="checkbox"]')
+    assert.deepEqual(boxes.map(b => b.getAttribute('aria-label')), NOTIFY_ITEMS.map(i => i.label), '四個都是勾選框，字照 NOTIFY_ITEMS')
+    assert.equal(boxes.length, 4)
+    assert.equal(m.findAll('button').length, 0, '通知不再是按鈕')
+    await m.trigger(boxes[1], 'change', { checked: true })
+    assert.deepEqual(m.emitted('act'), [['notify', { key: 'msg', on: true }]])
+  } finally { m.unmount() }
   const html = read('ui/lib/settings-panel.mjs') + read('ui/list.html')
-  assert.match(html, /act\('notify', \{ key: i\.key, on: \$event\.target\.checked \}\)/)
   assert.match(html, /aria-label="視窗外框"/)
   assert.doesNotMatch(html, /aria-label="音效"/)
 })

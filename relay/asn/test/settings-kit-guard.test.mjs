@@ -21,7 +21,8 @@ const css = read('../ui/style.css')
 const aboutPanel = read('../ui/parts/about-panel.mjs')
 const aboutSplit = aboutPanel.slice(aboutPanel.indexOf('<template v-if="!stack">'), aboutPanel.indexOf('<template v-else>'))
 const aboutStack = aboutPanel.slice(aboutPanel.indexOf('<template v-else>'))
-const panelAll = `${panel}\n${aboutSplit}`   // 設定頁實際用到的畫面原始碼：settings-panel 加上共用的「關於」元件（電腦版面）
+const notifyPanel = read('../ui/parts/notify-panel.mjs')   // 「提醒與聲音」（#1763 C4）也搬進共用元件：目前整頁只有勾選、沒有按鈕，按鈕總數不變（下限不動），只掃舊 class 與裸 button
+const panelAll = `${panel}\n${aboutSplit}\n${notifyPanel}`   // 設定頁實際用到的畫面原始碼：settings-panel 加上共用的「關於」「提醒與聲音」元件（電腦版面）
 
 test('#2105 設定頁：舊按鈕（aero-btn）與裸 <button> 都不得再出現，全部走共用按鈕', () => {
   assert.ok(aboutSplit.includes('<asn-button') && aboutStack.includes('m-row-btn'), '前提：切得到「關於」元件的兩段（電腦、手機）')

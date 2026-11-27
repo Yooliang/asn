@@ -11,7 +11,7 @@ import { NAME_MAX, deviceNameError, joinKnown, removedDevices, shortFp } from '.
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
 import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
 import { SKINS, SKIN_LABEL } from './skin.mjs'
-import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS } from './prefs.mjs'
+import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL } from './prefs.mjs'
 import { DIMS, groupOptions } from './dims.mjs'
 import { LoginPanel, LogoutPanel } from './login-panel.mjs'
 import { CloudInvitePanel } from './cloud-invite.mjs'
@@ -22,6 +22,8 @@ import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { ABOUT_LOG_VIEWER, aboutView } from './about-info.mjs'
 import { AsnAboutPanel } from '../parts/about-panel.mjs'
+import { AsnNotifyPanel, notifyItems } from '../parts/notify-panel.mjs'
+import { capsDesktop } from '../shells/caps-desktop.mjs'
 import { ATTRS_DESKTOP } from '../shells/platform-attrs.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
 import { REPLACE_TEXT } from './device-replace.mjs'
@@ -46,7 +48,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { ...UI_KIT, AsnAboutPanel, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpMark, DeviceIdentity, TaskTree },
+  components: { ...UI_KIT, AsnAboutPanel, AsnNotifyPanel, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpMark, DeviceIdentity, TaskTree },
   props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -134,6 +136,7 @@ export const SettingsPanel = {
     }
     const act = (op, value) => emit('act', op, value)
     const about = computed(() => aboutView({ deviceName: props.st.deviceName }))
+    const notifyList = notifyItems(capsDesktop), notifyLayout = ATTRS_DESKTOP.layout   // 「提醒與聲音」頁的項目（由電腦的能力表算出）與版面
     const aboutLayout = ATTRS_DESKTOP.layout, aboutLogViewer = ABOUT_LOG_VIEWER.desktop   // 「關於」頁版面與「記錄」卡（有沒有看設定值清單 open-ui-log 那一列）
     // 帳號卡片的設備列（#2111 ②）：一台一列，列的狀態由共用的 accountDeviceRows 決定（手機同一個函式）。
     // 按下「切換」＝交給樞紐（row-switch）：該列顯示「切換中…」，結果在那一列下方原位顯示（#2111 ③；狀態在 st.accounts.rowSwitch，手機用同一份流程與文字）
@@ -206,11 +209,11 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, openTasks, KNOWN, deskFpMark, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
       accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
-      fileEl, act, about, aboutLayout, aboutLogViewer, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
+      fileEl, act, notifyList, notifyLayout, about, aboutLayout, aboutLogViewer, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       rp, REPLACE_TEXT, cat, catIcon, ROSTER_TEXT, usedOnText, DESK_RELOGIN_TEXT, switchTargets, devs, curDev, askRemove, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
       MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, lookShows,
-      CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, NOTIFY_ITEMS, DIMS,
+      CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, DIMS,
     }
   },
   template: `<div class="list settings panel-set">
@@ -238,9 +241,7 @@ export const SettingsPanel = {
         </div>
         <logout-panel></logout-panel>
       </template>
-      <template v-if="catKey === 'notify'">
-        <label v-for="i in NOTIFY_ITEMS" :key="i.key" class="chk"><input type="checkbox" :checked="st.notify[i.key]" @change="act('notify', { key: i.key, on: $event.target.checked })" :aria-label="i.label" /><span>{{ i.label }}</span></label>
-      </template>
+      <asn-notify-panel v-if="catKey === 'notify'" :items="notifyList" :values="st.notify" :layout="notifyLayout" @toggle="p => act('notify', p)"></asn-notify-panel>
       <template v-if="catKey === 'voice'">
         <div class="voice-set">
           <b>語音</b>
