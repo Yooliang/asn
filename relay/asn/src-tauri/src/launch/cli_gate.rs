@@ -365,6 +365,16 @@ mod tests {
         Limits { max, routine_max, wait: Duration::from_millis(wait_ms), cool_base: Duration::from_secs(30), cool_max: Duration::from_secs(300) }
     }
 
+    /// 放掉時（含測試中途 panic）送出 `n` 個放行訊號，免得卡在等放行的執行緒讓 `thread::scope` 永遠收不了尾
+    struct Release(std::sync::mpsc::Sender<()>, usize);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            for _ in 0..self.1 {
+                let _ = self.0.send(());
+            }
+        }
+    }
+
     /// 等到條件成立（只用 yield，不靠固定睡多久；最多等 10 秒，之後讓測試失敗而不是卡住）
     fn spin_until(what: &str, cond: impl Fn() -> bool) {
         let end = Instant::now() + Duration::from_secs(10);
@@ -398,6 +408,7 @@ mod tests {
         let (release_tx, release_rx) = channel::<()>();
         let release_rx = Mutex::new(release_rx);
         std::thread::scope(|s| {
+            let _release = Release(release_tx, 2);
             for _ in 0..2 {
                 let (g, b, rx) = (&g, both_in.clone(), &release_rx);
                 s.spawn(move || {
@@ -420,8 +431,6 @@ mod tests {
             assert!(e.starts_with(QUEUE_TIMEOUT) && not_sent(&e), "{e}");
             assert_eq!(ran.load(Ordering::SeqCst), 0, "排隊逾時時不能另外開程序去跑");
             assert!(f.lines().iter().any(|l| l.contains("list") && l.contains("排隊")), "{:?}", f.lines());
-            release_tx.send(()).unwrap();
-            release_tx.send(()).unwrap();
         });
     }
 
@@ -431,6 +440,7 @@ mod tests {
         let (started_tx, started_rx) = channel::<()>();
         let (release_tx, release_rx) = channel::<()>();
         std::thread::scope(|s| {
+            let _release = Release(release_tx, 1);
             let gr = &g;
             s.spawn(move || {
                 gr.run("a", "list", false, || {
@@ -443,7 +453,6 @@ mod tests {
             started_rx.recv().unwrap();
             assert!(g.run("b", "list", false, ok).is_ok(), "a 佔滿了，b 照樣進得去");
             assert!(g.run("a", "list", false, ok).is_err(), "同一個連線檔 a 滿了就是滿了");
-            release_tx.send(()).unwrap();
         });
     }
 
@@ -473,6 +482,7 @@ mod tests {
         let (started_tx, started_rx) = channel::<()>();
         let (release_tx, release_rx) = channel::<()>();
         std::thread::scope(|s| {
+            let _release = Release(release_tx, 1);
             let gr = &g;
             // 第一條慢的例行：佔住一個位子
             s.spawn(move || {
@@ -493,7 +503,6 @@ mod tests {
             for sub in ["spawn", "list", "kill-pane", "send-text"] {
                 assert!(g.run("k", sub, false, ok).is_ok(), "{sub} 不能被例行讀畫面擋住");
             }
-            release_tx.send(()).unwrap();
         });
         assert_eq!(g.waiting("k"), 0);
     }
