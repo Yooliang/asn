@@ -130,7 +130,7 @@ import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MO
 installUiLog({ invoke })
 
 const { createApp, reactive, ref, computed, watch, nextTick, onBeforeUnmount } = Vue
-const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線' }
+import { MY_STATUS_OPTIONS } from './lib/partner-status.mjs'   // 「我的狀態」下拉的字來自唯一的對照表（#2441）
 const CONN_LABEL = { connecting: '連線中…', on: '已連線', off: '連線中斷，重試中' }
 
 // ---------- 音效（WebAudio 合成） ----------
@@ -2356,7 +2356,7 @@ const app = createApp({
       openMember, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, selfDeviceName, CONN_LABEL, connWhy, TOP_TABS_LINE, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr,
+      MY_STATUS: MY_STATUS_OPTIONS, selfDeviceName, CONN_LABEL, connWhy, TOP_TABS_LINE, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       GUIDE_TEXT, guideRechecking, guideRecheck, guideHidden, guideMsg, guideRowList, guideOnPartners, guideOnChats, guideReshowPartners, guideReshowChats, setGuideHidden, guideAct, guideSite,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,

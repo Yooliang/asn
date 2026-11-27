@@ -275,7 +275,8 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
 
   return {
     name, cfg,
-    status: () => (running || queue.length ? 'busy' : health === 'login-required' || health === 'quota' ? health : 'idle'),
+    // 優先序：要重新登入、額度用完 > 忙碌 > 閒置（和電腦版 roster_status 一致；忙碌不能蓋掉登入失效）
+    status: () => (health === 'login-required' || health === 'quota' ? health : running || queue.length ? 'busy' : 'idle'),
     listed: () => health !== 'unavailable',
     health: () => ({ health, reason: healthReason, queued: queue.length, running: !!running }),
     start() { stopping = false; void warm() },

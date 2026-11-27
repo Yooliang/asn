@@ -297,6 +297,24 @@ test('agy：額度用完——回報並標示 quota', async () => {
   } finally { await r.done() }
 })
 
+test('agy：登入失效時後面還有信在跑——名單仍標「要重新登入」，不被忙碌蓋掉（#2441）', async () => {
+  const r = rig([agy()])
+  try {
+    const gate = path.join(r.dir, 'gate-auth')
+    r.mail(ID(1), '@@AUTH')
+    await r.waitFor(() => r.fails().length === 1, '第一封登入失敗回報')
+    await r.waitForAsync(async () => (await r.status()) === 'login-required', '名單標成要重新登入')
+    await sleep(500)                                                // 假 agy 登入失敗後行程隨即結束：等它收乾淨，下一封才會用新的行程
+    r.mail(ID(2), `接著的信\n@@GATE ${gate}`)               // 第二封卡在閘門：這段時間執行中不是空的，但登入失效還沒恢復
+    await sleep(300)
+    assert.equal(await r.status(), 'login-required', '第二封還在跑，名單仍是要重新登入（不是忙碌）')
+    assert.equal(r.replies().length, 0, '閘門沒放行：第二封一定還在跑')
+    fs.writeFileSync(gate, 'go')
+    await r.waitReplies(1)
+    await r.waitForAsync(async () => (await r.status()) === 'idle', '登入好、跑完之後恢復閒置')
+  } finally { await r.done() }
+})
+
 test('agy：太久沒動靜——中止這一輪並回報，之後仍可用', async () => {
   // 逾時要大於「負載下起一個 node 子程序到第一個事件」的時間，否則第二封正常的信也會被看門狗中止
   const r = rig([agy({ turn_timeout_ms: 3000 })])

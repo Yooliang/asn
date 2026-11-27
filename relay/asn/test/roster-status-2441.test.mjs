@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { AsnCore } from '../ui/lib/core.mjs'
 import { buildFriends, statusOf, isDeviceLiveStatus } from '../ui/lib/roster.mjs'
-import { SCREEN_STATUS, RAW_STATUS, announcesLogin } from '../ui/lib/partner-status.mjs'
+import { SCREEN_STATUS, RAW_STATUS, announcesLogin, friendStatusText, MY_STATUS_OPTIONS } from '../ui/lib/partner-status.mjs'
 import { loginNote, warnKind } from '../ui/lib/head-tone.mjs'
 import { nameplateView } from '../ui/lib/actionbar.mjs'
 import { statusNote } from '../ui/lib/tabs.mjs'
@@ -73,10 +73,11 @@ test('畫面：名單灰字、名牌、對話標題都看得到新狀態（用�
   assert.equal(infoRows({ status: 'limit' }).find(r => r.label === '狀態').value, '額度用完')
 })
 
-test('對話視窗：login-required 帶到 friend.status，「要重新登入」黃條真的出現；額度用完、狀態不明走一般的狀態說明', () => {
+test('對話視窗：login-required 帶到 friend.status，「要重新登入」黃條真的出現；額度用完、狀態不明不加「可能無法馬上回應」那一行', () => {
   assert.equal(warnKind('login-required'), 'login')
-  assert.equal(warnKind('quota'), 'status')
-  assert.equal(warnKind('unknown'), 'status')
+  assert.equal(warnKind('quota'), null, '額度用完：只留名牌與灰字')
+  assert.equal(warnKind('unknown'), null, '狀態不明：只留名牌與灰字')
+  assert.equal(warnKind('away'), 'status', '暫離照舊有說明')
   assert.equal(warnKind('online'), null)
   const friend = buildFriends([{ id: 'T', name: '甲機', agents: [{ name: 'Gemini', status: 'login-required', engine: 'gemini' }] }], { selfNode: 'X', selfName: 'X-ASN' })[0]
   assert.equal(warnKind(friend.status), 'login')
@@ -110,15 +111,48 @@ test('「已經登入」通知：只在從離線或要重新登入變成真的�
   assert.deepEqual(notes, ['T-甲:busy', 'T-甲:online'], '離線 → 上線：照舊發')
 })
 
-test('announcesLogin：判斷表', () => {
+test('announcesLogin：判斷表（用獨立的 announces 旗標；awaiting 發、running 與 stopped 不發）', () => {
   assert.equal(announcesLogin(undefined, 'online'), true)
   assert.equal(announcesLogin('offline', 'busy'), true)
   assert.equal(announcesLogin('login-required', 'away'), true)
+  assert.equal(announcesLogin('offline', 'awaiting'), true, '等你按確認：發')
+  assert.equal(announcesLogin('login-required', 'awaiting'), true)
+  assert.equal(announcesLogin('offline', 'running'), false, '程序掃描條目：每次本機啟動一個 CLI 都會出現，不發')
+  assert.equal(announcesLogin('login-required', 'running'), false)
+  assert.equal(announcesLogin('offline', 'stopped'), false)
   assert.equal(announcesLogin('offline', 'login-required'), false)
   assert.equal(announcesLogin('offline', 'quota'), false)
   assert.equal(announcesLogin('offline', 'unknown'), false)
+  assert.equal(announcesLogin('offline', 'unavailable'), false)
   assert.equal(announcesLogin('online', 'online'), false)
   assert.equal(announcesLogin('online', 'busy'), false)
+  assert.deepEqual(Object.keys(SCREEN_STATUS).filter(k => SCREEN_STATUS[k].announces).sort(), ['awaiting', 'away', 'busy', 'online'], '旗標與裁決一致')
+  for (const [k, v] of Object.entries(SCREEN_STATUS)) assert.equal(typeof v.announces, 'boolean', `${k} 要明寫 announces`)
+})
+
+test('手機對話標題副標（friendStatusText）：每一種狀態都有正確白話字，不再是空白', () => {
+  assert.equal(friendStatusText({ status: 'login-required' }), '要重新登入')
+  assert.equal(friendStatusText({ status: 'quota' }), '額度用完')
+  assert.equal(friendStatusText({ status: 'unknown' }), '狀態不明')
+  assert.equal(friendStatusText({ status: 'stopped' }), '已停止')
+  assert.equal(friendStatusText({ status: 'unavailable' }), '暫時不可用')
+  assert.equal(friendStatusText({ status: 'online' }), '線上')
+  assert.equal(friendStatusText({ status: 'busy' }), '忙碌')
+  assert.equal(friendStatusText({ status: 'away' }), '暫離')
+  assert.equal(friendStatusText({ status: 'offline' }), '顯示為離線')
+  assert.equal(friendStatusText({ status: 'running' }), '執行中・僅顯示')
+  assert.equal(friendStatusText({ status: 'online', awaiting: true }), '等你在那台電腦按確認')
+  assert.equal(friendStatusText({ status: 'constructor' }), '', '原型上的名字不算')
+  assert.equal(friendStatusText(null), '')
+  const m = rd('m.js')
+  assert.match(m, /import \{[^}]*friendStatusText[^}]*\} from '\.\/lib\/partner-status\.mjs'/, 'm.js 用的是共用那一支，不自己寫')
+  assert.doesNotMatch(m, /const friendStatusText/)
+  assert.doesNotMatch(m, /const STATUS = \{/)
+  assert.doesNotMatch(rd('list.js'), /const STATUS = \{/)
+})
+
+test('「我的狀態」下拉的選項字取自同一份對照表', () => {
+  assert.deepEqual(MY_STATUS_OPTIONS, { online: '線上', busy: '忙碌', running: '執行中・僅顯示', away: '暫離', offline: '顯示為離線' })
 })
 
 test('對照表自身一致：每個狀態都有字、都有圓點樣式；各檔不再各寫一份清單', () => {

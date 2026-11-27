@@ -40,7 +40,7 @@
         <div class="me-row">
           <span class="ghost nick-input nick-ro" title="要改名請到「設定 → 設備」" aria-label="這台設備的名字">{{ selfDeviceName }}</span>
           <select class="ghost status-sel" v-model="me.status" aria-label="我的狀態">
-            <option v-for="(label, key) in STATUS" :key="key" :value="key">({{ label }})</option>
+            <option v-for="(label, key) in MY_STATUS" :key="key" :value="key">({{ label }})</option>
           </select>
           <span class="me-this">這台電腦</span>
         </div>

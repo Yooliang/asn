@@ -2,7 +2,7 @@
 // 後台只回 3 分鐘內有回報的 ASN 視窗；這裡再擋一次格式（外部資料）。之後聽歌狀態會接在同一欄。
 
 const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.]{1,16})?$/
-const LABEL = { online: '線上', busy: '忙碌', away: '暫離' }
+import { STATUS_LABEL as LABEL } from './partner-status.mjs'   // 狀態字取自唯一的對照表（#2441）
 
 // 名單 members → { 節點: [{ window_name, version, status, psm }] }；格式不對的列丟掉，沒有 asn 的節點不列
 export function asnByNode(members) {
