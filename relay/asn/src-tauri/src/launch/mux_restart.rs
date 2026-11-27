@@ -480,6 +480,19 @@ mod tests {
         assert!(mux.contains("Restarting::begin()") && mux.contains("BUSY_TEXT"));
     }
 
+    /// 2429 二審：指令把呼叫端給的 confirmed 傳下去（不是固定 false）；需要確認時回確認框的字（Ok(Some)）
+    #[test]
+    fn _2429_指令把確認傳下去_需要確認時回確認框文字() {
+        let lib = include_str!("../lib.rs");
+        let cmd = lib.split("async fn task_manager_restart_mux").nth(1).unwrap().split("async fn ").next().unwrap();
+        assert!(cmd.contains("confirmed: Option<bool>") && cmd.contains("confirmed.unwrap_or(false)"), "要收呼叫端給的 confirmed");
+        let after = cmd.split("restart_mux(").nth(1).expect("要呼叫 restart_mux");
+        assert_eq!(after.split(',').next().unwrap().trim(), "confirmed", "要把 confirmed 傳下去，不能固定 false");
+        let arm = cmd.find("RestartError::NeedConfirm(why)").expect("要處理需要確認");
+        let ret = cmd[arm..].find("return Ok(Some(").expect("需要確認時要回 Ok(Some(確認框文字))");
+        assert!(cmd[arm + ret..].contains("NEED_CONFIRM_TEXT"), "回的是確認框的字");
+    }
+
     // 記號是全域的：測試同一時間只跑一條
     static TEST_LOCK: Mutex<()> = Mutex::new(());
 }
