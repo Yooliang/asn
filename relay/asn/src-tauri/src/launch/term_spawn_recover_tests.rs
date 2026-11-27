@@ -83,8 +83,8 @@ fn 開窗逾時_清單也讀不到_記成暫時接不回_恢復後自動認回_�
     assert_eq!(s.state, TermState::Waiting, "不叫人重開");
     assert!(!s.reason.is_empty(), "原因要記下來");
     assert!(!rig.svc.partner_in_service("小乙"), "還沒登記，按鈕先不能按");
-    // 同一位夥伴不會被開出第二個窗格：開窗只 spawn 一次
-    assert_eq!(count_sub(&rig.runner, "spawn"), 1);
+    // 找回與重試都不再叫開窗格：同一位夥伴不會被開出第二個窗格（逾時的那一次 spawn 假執行器沒記，之後也不該有新的）
+    assert_eq!(count_sub(&rig.runner, "spawn"), 0);
 
     // 終端服務恢復、窗格其實在：重試用工作區認回，夥伴名字不掉
     *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "", 9, 0);
@@ -92,6 +92,7 @@ fn 開窗逾時_清單也讀不到_記成暫時接不回_恢復後自動認回_�
     assert_eq!((r.restored, r.waiting), (1, 0), "{:?}", state_of(&rig));
     assert_eq!(state_of(&rig).state, TermState::Ok);
     assert!(rig.svc.partner_in_service("小乙"), "接回後鈕恢復，標題裡的夥伴名字還在");
+    assert_eq!(count_sub(&rig.runner, "spawn"), 0, "接回的過程沒有再開窗格");
 }
 
 #[test]
@@ -102,6 +103,10 @@ fn 暫時接不回的列_重試時只認_asn_自己命名的窗格_使用者自�
     rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
     // 清單讀得到了，但裡面只有使用者自己開的窗格：確定不在，列移除，不認走別人的
     *rig.runner.inner.list_json.borrow_mut() = one_pane("default", "ASN 以外的", 5, 0);
+    // 第一輪清單裡沒有：先留著待確認（仍算暫時接不回、不叫人重開），連續第二輪都沒有才移除
+    let r = rig.svc.retry_parked();
+    assert_eq!((r.restored, r.waiting), (0, 1));
+    assert_eq!(state_of(&rig).state, TermState::Waiting, "待確認不提示重開");
     let r = rig.svc.retry_parked();
     assert_eq!((r.restored, r.waiting), (0, 0));
     assert_eq!(state_of(&rig).state, TermState::Gone);
@@ -132,6 +137,8 @@ fn 三種狀態_已登記_暫時接不回_確定不在() {
     // 清單讀成功卻沒有這個窗格：確定不在
     *rig.runner.inner.fail_substr.borrow_mut() = None;
     *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+    svc2.retry_parked();
+    assert_eq!(svc2.partner_term_state("小乙").state, TermState::Waiting, "第一輪沒看到只是待確認，不提示重開");
     svc2.retry_parked();
     assert_eq!(svc2.partner_term_state("小乙").state, TermState::Gone);
     // 給畫面的是小寫字串

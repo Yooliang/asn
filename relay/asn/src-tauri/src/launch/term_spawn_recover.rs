@@ -50,7 +50,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     let id = row.id.clone();
                     g.parked.retain(|t| t.id != id);
                     g.parked.push(row);
-                    g.parked_info.insert(id, super::reclaim_rows::ParkInfo { attempts: 1, reason: format!("開窗格逾時，窗格還沒確認：{list_err}") });
+                    g.parked_info.insert(id, super::reclaim_rows::ParkInfo { attempts: 1, reason: format!("開窗格逾時，窗格還沒確認：{list_err}"), ..Default::default() });
                 }
                 if let Err(e) = self.persist() {
                     elog!("開窗格逾時後寫不進終端對照表：{e}");

@@ -24,22 +24,46 @@ export function termButtonView(shown, customLabel = '') {
   return { ...TERM_BTN_TERM }
 }
 export const TERM_REOPEN_NOTE = '重新開一次這位夥伴，就能在 ASN 裡看終端'
+/** 暫時接不回（背景重試中）：不叫人重開 */
+export const TERM_WAITING_NOTE = '正在重新連上終端，稍候會自己恢復'
+/** 詳情「終端」那一列的字（和上排第 2 格同一份狀態：已接上／暫時接不回／確定不在） */
+export const TERM_STATE_TEXT = { ok: '已接上', waiting: TERM_WAITING_NOTE, gone: '沒有接上，' + TERM_REOPEN_NOTE }
 
 /**
- * 終端入口要怎麼呈現。base：電腦版、本機、不是內建通道、不是離線（能問的夥伴）；inService：true／false／null（查不到）。
- * 回 { term：上面第 2 格放「終端」, note：大按鈕下方那行小字（只有確定不在服務裡才有） }
+ * 終端入口要怎麼呈現。base：電腦版、本機、不是內建通道、不是離線（能問的夥伴）；
+ * state：'ok'（已登記）／'waiting'（暫時接不回）／'gone'（確定不在）／null（查不到）；舊版只回 true／false 也認。
+ * 回 { term：上面第 2 格放「終端」,
+ *      waiting：暫時接不回——第 2 格反灰、說明寫正在重新連上,
+ *      note：確定不在時，附在第 2 格（前台／後台鈕）說明裡的那句，不再常駐在按鈕下方 }
  */
-export function termEntry(base, inService) {
+export function termEntry(base, state) {
   const ok = base === true
-  return { term: ok && inService === true, note: ok && inService === false ? TERM_REOPEN_NOTE : '' }
+  const st = state === true ? 'ok' : state === false ? 'gone' : state
+  return {
+    term: ok && st === 'ok',
+    waiting: ok && st === 'waiting',
+    note: ok && st === 'gone' ? TERM_REOPEN_NOTE : '',
+  }
 }
 
-/** 問電腦端這位夥伴在不在共用終端服務裡：true／false；問不到回 null（原因只進 console） */
+/** 問電腦端這位夥伴的終端狀態：'ok'／'waiting'／'gone'；問不到回 null（原因只進 console）。舊版電腦端沒有 state 指令時，退回「在不在」 */
 export async function askTermService(api, name) {
-  if (!api || typeof api.available !== 'function' || !name) return null
+  if (!api || !name) return null
   try {
+    if (typeof api.state === 'function') {
+      try {
+        const r = await api.state(name)
+        if (r && typeof r === 'object' && ['ok', 'waiting', 'gone'].includes(r.state)) {
+          if (r.reason) console.info('[ASN] 終端狀態', r.state, String(r.reason))
+          return r.state
+        }
+      } catch (e) {
+        console.info('[ASN] 查不到這位夥伴的終端狀態，改問在不在', String(e?.message ?? e))
+      }
+    }
+    if (typeof api.available !== 'function') return null
     const r = await api.available(name)
-    return typeof r === 'boolean' ? r : null
+    return typeof r === 'boolean' ? (r ? 'ok' : 'gone') : null
   } catch (e) {
     console.info('[ASN] 查不到這位夥伴在不在共用終端服務裡', String(e?.message ?? e))
     return null
