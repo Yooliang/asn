@@ -22,7 +22,7 @@ test('忙碌／暫離的純資訊標籤「可能無法馬上回應」拿掉（�
 test('已停止的黃條：AsnNote 的 warn 橫幅，附「重開」鈕並接到重開動作', () => {
   assert.match(pane, /<asn-note v-if="warn === 'stopped' && canReopen" kind="warn" banner action-label="重開" @action="reopenPartner">/)
   assert.doesNotMatch(pane, /<div class="warn" v-if="warn === 'stopped'">/, '舊的黃條拿掉')
-  assert.match(pane, /<action-bar ref="abEl"/, '重開走上方功能列（管理選單同一條路）')
+  assert.match(pane, /<action-bar\b[^>]*\sref="abEl"/, '重開走上方功能列（管理選單同一條路）')
   assert.match(pane, /const reopenPartner = \(\) => \{ abEl\.value\?\.restartPartner\?\.\(\) \}/)
 })
 
