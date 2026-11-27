@@ -318,7 +318,7 @@ export function changedFiles(base, cwd) {
  * --topo-order：預設的排法照提交時間交錯，分支上早就寫好、但發版之後才合進來的修正，會被排到那次發版前面，錯算成「修過又發過版」
  *   （2026-11-27 拿主線實測：不加有 42 筆修正排錯，加了是 0）。加了之後，分支上的提交緊跟在把它合進來的那筆前面，也就是照「進主線的先後」排。
  * --no-merges：合併提交本身不是修正，標題是機器產生的（「Merge pull request #編號 from 某人/fix/分支名」），
- *   分支名裡的 fix 和 PR 自己的編號會被認成「修過某張單」。發版提交沒有一筆是合併提交，拿掉不影響「發過版」的判斷。
+ *   分支名裡的 fix 和 PR 自己的編號會被認成「修過某張單」。主線上的發版提交沒有一筆是合併提交（同一天實測），拿掉不影響「發過版」的判斷。
  */
 export function historyLines(ref, { format = '%s', cwd } = {}) {
   return git(['log', '--reverse', '--topo-order', '--no-merges', `--format=${format}`, ref], cwd).split(/\r?\n/).filter(Boolean)
@@ -334,7 +334,7 @@ function main() {
   try {
     ;({ files, added } = changedFiles(base))
   } catch (e) {
-    console.log(`::warning::取不到改動的檔案清單（${String(e.message).split('\n')[0]}），豁免與復發檢查可能不準`)
+    console.log(`::warning::取不到改動的檔案清單（${String(e.message).split('\n')[0]}），豁免、只改一邊與復發檢查可能不準`)
   }
   // 取不到歷史只略過復發的自動比對（evaluate 會在報告裡寫明），不讓整個檢查因此紅
   let baseTitles = null

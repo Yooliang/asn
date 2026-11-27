@@ -1,4 +1,6 @@
 // PR 範本檢查（#1805）：三項必填檢查沒勾或沒說明就紅、豁免標籤不能放行程式變更、「復發」標籤要有以單號命名的守門測試
+// 另外兩項由機器主動發現（紀律 一.2、二.6、六.3）：只動到手機或電腦一邊的畫面檔要寫「只改一邊：原因」；
+// 同一張單修過、發過版又再修算復發，要寫復發單號並附守門測試，或寫「不是復發：原因」。
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -6,7 +8,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { ITEMS, addedLines, changedFiles, descOk, evaluate, exemption, isDocOrCi, isTestPath, parseChecklist, recurrence, stripComments } from '../../../.github/scripts/pr-checklist.mjs'
+import {
+  DESKTOP_UI, ITEMS, MOBILE_UI, SHARED_MOBILE_MODULES, addedLines, autoRecurrence, changedFiles, declared, descOk, evaluate, exemption, historyLines,
+  isDocOrCi, isFixTitle, isReleaseTitle, isTestPath, oneSided, oneSidedCheck, parseChecklist, recurrence, recurrenceHits, scanRecurrences, stripComments, ticketNumbers, uiSide,
+} from '../../../.github/scripts/pr-checklist.mjs'
 
 const root = new URL('../../../', import.meta.url)
 const TEMPLATE = fs.readFileSync(new URL('.github/pull_request_template.md', root), 'utf8').replace(/\r\n/g, '\n')
@@ -35,6 +40,10 @@ test('範本的關鍵字與檢查程式的三項一致（改了範本文字就�
   for (const it of ITEMS) assert.ok(TEMPLATE.includes(it.key), `範本找不到「${it.key}」`)
   assert.match(TEMPLATE, /復發單號/)
   assert.match(TEMPLATE, /免檢查表/)
+  // 機器主動發現的兩項：範本要教人怎麼寫（關鍵字和檢查程式認的一樣）
+  assert.match(TEMPLATE, /「只改一邊：原因」/)
+  assert.match(TEMPLATE, /「不是復發：原因」/)
+  assert.match(TEMPLATE, /「復發單號：#單號」/)
 })
 
 test('範本上方的 HTML 註解不算數；註解裡的勾選與說明不會被當成已填', () => {
@@ -46,7 +55,8 @@ test('範本上方的 HTML 註解不算數；註解裡的勾選與說明不會�
 test('三項都勾且寫了說明：通過', () => {
   const r = parseChecklist(FILLED)
   assert.deepEqual(r.map(x => x.ok), [true, true, true])
-  assert.equal(evaluate({ title: 'x', body: FILLED, headRef: 'fix/x', labels: [], files: ['relay/asn/ui/list.js'] }).pass, true)
+  // 說明寫的是「手機和電腦一起改了」，改到的檔也是兩邊都有（只有 list.js 的話，現在會被機器判定只改電腦）
+  assert.equal(evaluate({ title: 'x', body: FILLED, headRef: 'fix/x', labels: [], files: ['relay/asn/ui/list.js', 'relay/asn/ui/m.js'] }).pass, true)
 })
 
 test('沒勾、勾了但說明留「…」、說明太短、整項被刪掉，都紅，並說明是哪一項哪裡不對', () => {
@@ -163,4 +173,464 @@ test('中文檔名：取改動清單時保留原字，只改中文檔名文件�
     const r = evaluate({ title: 'docs', body: '', headRef: 'docs-x', labels: ['免檢查表'], files, added })
     assert.equal(r.pass, true, r.errors.join('；'))
   } finally { fs.rmSync(dir, { recursive: true, force: true }) }
+})
+
+// ---------- 只改一邊畫面：機器依改到的檔主動發現 ----------
+const UI = 'relay/asn/ui/'
+const uiDir = new URL(UI, root)
+
+test('只改一邊：只動手機的畫面檔、只動電腦的畫面檔，都抓得到，回報是哪一邊、哪幾個檔', () => {
+  assert.deepEqual(oneSided([UI + 'm.html', UI + 'mobile.css', UI + 'lib/mobile-nav.mjs', 'relay/asn/test/x.test.mjs']),
+    { side: 'mobile', files: [UI + 'm.html', UI + 'mobile.css', UI + 'lib/mobile-nav.mjs'] })
+  assert.deepEqual(oneSided([UI + 'list.html', UI + 'list.js', UI + 'lib/core.mjs']), { side: 'desktop', files: [UI + 'list.html', UI + 'list.js'] })
+  for (const f of ['m.html', 'm.js', 'mobile.css', 'lib/mobile-acct.mjs', 'lib/mobile-push.mjs']) assert.equal(oneSided([UI + f]).side, 'mobile', f)
+  for (const f of ['list.html', 'list.js', 'panel.html', 'panel.js', 'chat.html', 'chat.js', 'login.html', 'login.js', 'onboard.html', 'onboard.js']) assert.equal(oneSided([UI + f]).side, 'desktop', f)
+})
+
+test('只改一邊：兩邊都動、只動共用的檔、沒動畫面檔，都不算', () => {
+  assert.equal(oneSided([UI + 'm.html', UI + 'list.html']).side, '')
+  assert.equal(oneSided([UI + 'lib/mobile-acct.mjs', UI + 'panel.js']).side, '')
+  assert.equal(oneSided([UI + 'lib/chatpane.mjs', UI + 'lib/core.mjs', UI + 'parts/setting-parts.mjs', UI + 'parts/parts.css', UI + 'shells/caps-android.mjs', UI + 'shells/caps-desktop.mjs', UI + 'kit.css']).side, '')
+  assert.equal(oneSided(['relay/asn/src-tauri/src/auth.rs', 'docs/a.md', 'relay/asn/test/a.test.mjs']).side, '')
+  assert.equal(oneSided([]).side, '')
+  assert.equal(oneSidedCheck({ files: [UI + 'm.html', UI + 'list.html'], body: '' }).required, false)
+})
+
+test('只改一邊：兩邊都載入的 style.css、名字叫 mobile 但電腦也載入的模組算共用；別的資料夾裡同名的檔不算', () => {
+  assert.equal(uiSide(UI + 'style.css'), '')
+  for (const f of SHARED_MOBILE_MODULES) assert.equal(uiSide(UI + 'lib/' + f), '', f)
+  // 真的例子（#2209 在畫面資料夾改到的檔）：電腦的登入頁，加上三個共用模組。mobile.mjs 電腦也載入，所以這是只動電腦、不是兩邊都動
+  assert.deepEqual(oneSided(['lib/login-panel.mjs', 'lib/login.mjs', 'lib/mobile.mjs', 'login.html', 'login.js'].map(f => UI + f)), { side: 'desktop', files: [UI + 'login.html', UI + 'login.js'] })
+  // 真的例子（#1661 在畫面資料夾改到的檔）：全是兩邊共用的，mobile-rooms.mjs 不能因為名字就算成只改手機
+  assert.equal(oneSided(['group.css', 'lib/chatpane.mjs', 'lib/mobile-rooms.mjs', 'lib/room-hub.mjs'].map(f => UI + f)).side, '')
+  assert.equal(uiSide('site/public/m.html'), '')
+  assert.equal(uiSide('relay/asn/test/list.js'), '')
+  assert.equal(uiSide(UI + 'lib/sub/mobile-x.mjs'), '')
+  assert.equal(uiSide(UI + 'lib/automobile.mjs'), '')
+})
+
+test('只改一邊：沒寫「只改一邊：原因」就紅，訊息講明哪一邊、哪幾個檔、怎麼辦；寫了就過，原因印進報告', () => {
+  const files = [UI + 'list.html', UI + 'list.js', UI + 'lib/core.mjs', 'relay/asn/test/list.test.mjs']
+  const bad = evaluate({ title: 'x', body: FILLED, headRef: 'feat/x', labels: [], files })
+  assert.equal(bad.pass, false)
+  assert.equal(bad.errors.length, 1, bad.errors.join('；'))
+  const msg = bad.errors[0]
+  assert.match(msg, /只動到電腦的畫面檔（relay\/asn\/ui\/list\.html、relay\/asn\/ui\/list\.js）/)
+  assert.match(msg, /手機的畫面檔完全沒動/)
+  assert.match(msg, /補上手機那一邊/)
+  assert.match(msg, /「只改一邊：是哪個平台本來就沒有這個功能」/)
+  // 反過來：只動手機
+  const m = evaluate({ title: 'x', body: FILLED, headRef: 'feat/x', labels: [], files: [UI + 'm.js'] })
+  assert.match(m.errors.join('\n'), /只動到手機的畫面檔（relay\/asn\/ui\/m\.js），電腦的畫面檔完全沒動/)
+  assert.match(m.errors.join('\n'), /補上電腦那一邊/)
+  // 全形、半形冒號都收
+  for (const colon of ['：', ':', ' : ']) {
+    const ok = evaluate({ title: 'x', body: `${FILLED}\n只改一邊${colon}手機本來就沒有工作管理員這個畫面\n`, headRef: 'feat/x', labels: [], files })
+    assert.equal(ok.pass, true, ok.errors.join('；'))
+    assert.ok(ok.lines.some(l => l.includes('只改一邊') && l.includes('手機本來就沒有工作管理員這個畫面')), '原因要印進報告給審查的人看')
+  }
+})
+
+test('只改一邊：原因太短、留著「…」、寫在註解裡、沒有自成一行，都不算；清單符號、引言、粗體開頭的算', () => {
+  const files = [UI + 'm.html']
+  const run = extra => evaluate({ title: 'x', body: `${FILLED}\n${extra}\n`, headRef: 'feat/x', labels: [], files })
+  const short = run('只改一邊：沒有')
+  assert.equal(short.pass, false)
+  assert.match(short.errors.join('\n'), /「只改一邊：」後面的原因沒寫清楚/)
+  assert.equal(run('只改一邊：…').pass, false)
+  assert.equal(run('只改一邊：').pass, false)
+  assert.equal(run('<!-- 只改一邊：電腦本來就沒有推播設定這一頁 -->').pass, false, '寫在註解裡的不算')
+  assert.equal(run('這張是只改一邊：電腦本來就沒有推播設定這一頁').pass, false, '要自成一行')
+  assert.equal(run('只改一邊就要寫明：電腦本來就沒有推播設定這一頁').pass, false)
+  for (const line of ['- 只改一邊：電腦本來就沒有推播設定這一頁', '  * 只改一邊: 電腦本來就沒有推播設定這一頁', '> 只改一邊：電腦本來就沒有推播設定這一頁', '**只改一邊：**電腦本來就沒有推播設定這一頁', '**只改一邊**：電腦本來就沒有推播設定這一頁']) {
+    assert.equal(run(line).pass, true, line)
+  }
+  // 兩行都有：取原因寫清楚的那一行
+  assert.deepEqual(declared('只改一邊：…\n只改一邊：電腦本來就沒有推播設定這一頁', '只改一邊'), { found: true, ok: true, reason: '電腦本來就沒有推播設定這一頁' })
+  assert.deepEqual(declared('沒有這一行', '只改一邊'), { found: false, ok: false, reason: '' })
+})
+
+test('只改一邊：檔案最多列 5 個，多的寫總數', () => {
+  const files = ['m.html', 'm.js', 'mobile.css', 'lib/mobile-acct.mjs', 'lib/mobile-cloud.mjs', 'lib/mobile-nav.mjs', 'lib/mobile-push.mjs'].map(f => UI + f)
+  const why = oneSidedCheck({ files, body: '' }).why
+  for (const f of files.slice(0, 5)) assert.ok(why.includes(f), f)
+  for (const f of files.slice(5)) assert.ok(!why.includes(f), `${f} 不該列出來`)
+  assert.match(why, /等 7 個/)
+})
+
+test('只改一邊：豁免沿用既有的（臨時 CI 載具、release 分支、免檢查表）', () => {
+  const files = [UI + 'list.js']
+  assert.equal(evaluate({ title: 'tmp: CI for #1795', body: '', headRef: 'tmp/x', labels: [], files }).pass, true)
+  assert.equal(evaluate({ title: 'release: 0.2.35', body: '', headRef: 'release/0.2.35', labels: [], files }).pass, true)
+  // 免檢查表只放行文件與 CI 設定：改到畫面檔照樣紅，而且照樣要說明只改一邊
+  const abuse = evaluate({ title: 'x', body: FILLED, headRef: 'docs/x', labels: ['免檢查表'], files })
+  assert.equal(abuse.pass, false)
+  assert.ok(abuse.errors.some(e => e.includes('只動到電腦的畫面檔')))
+})
+
+// 把範本的三項必填填好，其他字一個都不動（教人怎麼寫的那幾句都還在）
+const TEMPLATE_FILLED = TEMPLATE.replace(/^- \[ \] (\*\*.+?\*\*) (說明|測試名稱)：….*$/gm, '- [x] $1 $2：這一項已經照實寫了完整的說明')
+
+test('範本原文不算已經申報：範本裡教人怎麼寫的那幾句，不會被當成「只改一邊」「不是復發」「復發單號」', () => {
+  assert.deepEqual(parseChecklist(TEMPLATE_FILLED).map(x => x.ok), [true, true, true])
+  assert.equal(declared(TEMPLATE, '只改一邊').found, false)
+  assert.equal(declared(TEMPLATE, '不是復發').found, false)
+  assert.equal(recurrence({ labels: ['復發'], body: TEMPLATE }).ok, false)
+  // 第一項底下那句提示在註解裡：不會被算進第一項的說明（否則說明只寫一個字也會過）
+  const oneWord = TEMPLATE_FILLED.replace('說明：這一項已經照實寫了完整的說明', '說明：有')
+  assert.equal(parseChecklist(oneWord)[0].ok, false)
+  const os = evaluate({ title: 'x', body: TEMPLATE_FILLED, headRef: 'feat/x', labels: [], files: [UI + 'm.html'] })
+  assert.equal(os.pass, false)
+  assert.ok(os.errors.every(e => e.includes('只動到手機的畫面檔')), os.errors.join('；'))
+  const rc = evaluate({ title: PR903, body: TEMPLATE_FILLED, headRef: 'fix/903', labels: [], files: ['relay/asn/src-tauri/src/term.rs'], baseTitles: H903 })
+  assert.equal(rc.pass, false)
+  assert.ok(rc.errors.every(e => e.includes('機器判定是復發')), rc.errors.join('；'))
+})
+
+test('守門：兩份畫面檔清單與共用例外清單上的檔都真的存在（清單不能留著已經刪掉、改名的檔）', () => {
+  for (const f of [...MOBILE_UI, ...DESKTOP_UI]) assert.ok(fs.existsSync(new URL(f, uiDir)), `relay/asn/ui/${f} 不存在，請更新 .github/scripts/pr-checklist.mjs 的畫面檔清單`)
+  for (const f of SHARED_MOBILE_MODULES) {
+    assert.match(f, /^mobile[^/]*\.mjs$/)
+    assert.ok(fs.existsSync(new URL('lib/' + f, uiDir)), `relay/asn/ui/lib/${f} 不存在，請從 .github/scripts/pr-checklist.mjs 的 SHARED_MOBILE_MODULES 拿掉`)
+  }
+  assert.equal(new Set(SHARED_MOBILE_MODULES).size, SHARED_MOBILE_MODULES.length)
+  assert.ok(!MOBILE_UI.some(f => DESKTOP_UI.includes(f)), '同一個檔不能兩邊都列')
+})
+
+// 從頁面的進入腳本出發，沿著 import 走，回走得到的所有檔（絕對路徑）。只看相對路徑的 import，註解行不算
+function reachableFrom(entries) {
+  const seen = new Set()
+  const todo = [...entries]
+  while (todo.length) {
+    const file = todo.pop()
+    if (seen.has(file) || !fs.existsSync(file)) continue
+    seen.add(file)
+    const src = fs.readFileSync(file, 'utf8').replace(/^\s*\/\/.*$/gm, '')
+    for (const m of src.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)['"](\.{1,2}\/[^'"]+)['"]/g)) todo.push(path.resolve(path.dirname(file), m[1]))
+  }
+  return seen
+}
+
+test('守門：「名字叫 mobile 但電腦也載入」的清單，和畫面資料夾實際的 import 關係一致', () => {
+  const dir = fileURLToPath(uiDir)
+  // 手機以外的每一頁（m.html 以外的 html）載入的腳本
+  const pages = fs.readdirSync(dir).filter(f => f.endsWith('.html') && f !== 'm.html')
+  assert.ok(pages.includes('list.html') && pages.length >= 3, '找到的頁面數不對，檢查規則可能失效')
+  const entries = pages.flatMap(p => [...fs.readFileSync(path.join(dir, p), 'utf8').matchAll(/<script[^>]*\ssrc="([^"]+\.m?js)"/g)].map(m => m[1]))
+    .filter(src => !src.startsWith('vendor/')).map(src => path.join(dir, src))
+  assert.ok(entries.some(e => e.endsWith('list.js')), '找不到 list.js，檢查規則可能失效')
+  const desktop = reachableFrom(entries)
+  assert.ok(desktop.size > 50, `電腦版只走到 ${desktop.size} 個檔，檢查規則可能失效`)
+  const actual = fs.readdirSync(path.join(dir, 'lib')).filter(f => /^mobile.*\.mjs$/.test(f) && desktop.has(path.join(dir, 'lib', f))).sort()
+  assert.deepEqual([...SHARED_MOBILE_MODULES].sort(), actual,
+    '電腦版頁面實際載入的 lib/mobile*.mjs 和 .github/scripts/pr-checklist.mjs 的 SHARED_MOBILE_MODULES 對不上：電腦版開始載入的要加進去、不再載入的要拿掉（這份清單決定「只改一邊」怎麼算）')
+  // 手機那一邊至少要有：列為手機的模組，m.js 真的載入得到
+  const mobile = reachableFrom([path.join(dir, 'm.js')])
+  for (const f of ['mobile-acct.mjs', 'mobile-nav.mjs']) assert.ok(mobile.has(path.join(dir, 'lib', f)) && !desktop.has(path.join(dir, 'lib', f)), f)
+})
+
+// ---------- 復發：機器比對歷史 ----------
+// 下面的標題都是這個 repo 主線上真的提交標題（2026-11-27 從 git log 取出，照進主線的先後；中間無關的提交略去），直接寫死當固定資料。
+
+// 一、同一張單修過、發過版、後來又修：#903（11-07 修、補修，發了 0.2.8～0.2.13，11-10 又修）
+const H903 = [
+  'release: 0.2.7',
+  '終端畫面：拿掉「回到訊息」按鈕、修游標差一到兩列（#901b／#903）',
+  '終端畫面游標落在輸入列下一列：整份結尾帶殘留顏色序列時沒去掉假列（#903 補修）',
+  'release: 0.2.8',
+  'release: 0.2.9',
+  'release: 0.2.10',
+  'release: 0.2.11（候選）',
+  'release: 0.2.11（官網檔）',
+  'release: 0.2.12（候選）',
+  'release: 0.2.12（官網檔；已知問題第 1 條改成橫向畫面）',
+  'release: 0.2.13',
+]
+const PR903 = '修 #903：終端畫面游標對位——emoji 字寬對齊 WezTerm、手機看終端跟著窗格欄列數'
+const PRIOR903 = '終端畫面游標落在輸入列下一列：整份結尾帶殘留顏色序列時沒去掉假列（#903 補修）'
+
+// 一之二、標題結尾帶合併時自動加的 PR 編號：#2161（3c 那張是修正、發了 0.2.90，之後 F1 那張又是修正）
+const H2161 = [
+  '#2161 第 3a 段：開窗清單與切換帳號待處理輪詢降到 60 秒（追啟動進度維持 15 秒） (#2224)',
+  '#2161 3b：term_view_pending 輪詢保底間隔 10 秒改 30 秒 (#2226)',
+  'fix(asn): #2161 3c term_req_take 輪詢有請求才快、閒置慢 (#2228)',
+  'release: 0.2.90',
+  'release: 0.2.91',
+  '#2161 第 3d-1 段：手機決定權限框／終端確認後，後台敲門鈴（migration＋Edge） (#2265)',
+  'release: 0.2.92',
+  '#2161 第 3d-2 段：權限框／終端請求改由門鈴叫醒領取（perm 保底 10 秒、term 有請求 10 秒） (#2269)',
+  'release: 0.2.93',
+]
+const PR2161 = 'fix(#2161 F1): node_update_status 輪詢改為依進行中狀態變速'   // 合進主線後的標題結尾多了「 (#2271)」
+const PRIOR2161 = 'fix(asn): #2161 3c term_req_take 輪詢有請求才快、閒置慢 (#2228)'
+
+// 二、同一張單連續好幾張 PR，但都不是修正：#2355（P1～P3，發了 0.2.103，再來 P4）
+const H2355 = [
+  'release: 0.2.102',
+  '#2355 P1：型號清單的前端純函式（remote-models.mjs），不改畫面 (#2396)',
+  '#2355 P2：新增本機讀型號清單的 Tauri 命令 agent_models（兩審） (#2397)',
+  '#2355 P3：電腦版本機接上型號清單（開新夥伴第 2 頁、切換模型），依賴 #2397 (#2399)',
+  'release: 0.2.103',
+]
+const PR2355 = '#2355 P4：替別台開窗帶型號、開好顯示實際型號、手機接上型號清單（兩審，等 #2393 發版）'
+
+// 二之二、這張標題有「修」字，但同一張單先前幾張都不是修正：#2038（PR-1～PR-4，發了 0.2.99，再來 PR-5）
+const H2038 = [
+  '#2038 PR-1：前端事件中心（EventHub）＋Rust 橋，先搬安裝視窗四種事件（Rust 不動） (#2334)',
+  '#2038 PR-2：進度類事件改從事件中心訂閱 (#2337)',
+  '#2038 PR-3：帳號登入類事件改從事件中心訂閱 (#2338)',
+  '#2038 PR-4：邀請碼、正在聽、被看提示改走 EventHub（兩種沒人接的只登記） (#2339)',
+  'release: 0.2.99',
+]
+const PR2038 = '#2038 PR-5：門鈴 relay-bell 6 個接收處改走 EventHub，修 poll-intervals 假綠（兩審）'
+
+// 三、修正了、還沒發版就又補一張：#1897（0.2.54 之後一審修正，還沒發下一版就二審修正；之後才發 0.2.55）
+const H1897 = [
+  'release: 0.2.54',
+  '#1897 ④ 終端服務心跳停了就判卡死，結束後接回',
+  '#1897 ④ 一審修正：核對判停那一輪的 mux 與 seq、事故文字依有沒有接回分兩句',
+  '#1897 ④ 沒有 seen 時不處置，只寫一次 mux.log，下一輪有 seen 才處置',
+]
+const PR1897 = '#1897 ④ 二審修正：結束前再驗、不殺 ASN 自己與祖先、cli 跑不起來不當成連不上、心跳恢復重設通知'
+const PRIOR1897 = '#1897 ④ 一審修正：核對判停那一輪的 mux 與 seq、事故文字依有沒有接回分兩句'
+
+test('修正字樣（真標題）：fix、修、復發算修正；prefix、fixture 這類別的字與一般功能標題不算', () => {
+  for (const t of [
+    'fix(#2412): 動態開背景夥伴與 start 共用帳本，不再 ReferenceError (#2421)',
+    'fix(asn): #2161 3c term_req_take 輪詢有請求才快、閒置慢 (#2228)',
+    'fix: 換班接手後新視窗不再因收空的終端服務而退回原生主控台 (#1867)',
+    '修正 #2307：重開機接回時，原本藏著的終端服務夥伴被開成可見視窗 (#2308)',
+    '#2197 修 relay/index.ts 型別錯，CI 加 deno check (#2390)',
+    '修 main 紅燈：運行手冊不寫裸的 --failed，改 docs/release/ 要觸發 Node 測試（#2360） (#2369)',
+    'test: #1808 復發防護守門測試（第 4、5、7、8、15 組）',
+    PR903, PR2161, PR2038, PR1897,
+  ]) assert.equal(isFixTitle(t), true, t)
+  for (const t of [
+    'test(fixtures): C1 終端畫面樣本（claude、pi，已遮罩）',
+    '群組自動收入（後端）：rooms.auto_prefixes、成員 joined_via；roster 回報與設定變更時比對視窗名開頭字串自動入群、視窗消失標離開；附測試',
+    'feat(asn): #2171 啟動時清掉崩潰後殘留的原子寫入暫存檔 (#2247)',
+    'release: 0.2.103',
+    PR2355,
+  ]) assert.equal(isFixTitle(t), false, t)
+  // 大小寫與變化形（這幾個是自己寫的短例子，只驗字樣規則）
+  for (const t of ['Fix: x', 'FIX x', 'fixes #12', 'fixed #12', 'hot-fix']) assert.equal(isFixTitle(t), true, t)
+  for (const t of ['prefix', 'hotfix', 'suffix 調整', 'fixture', '', null, undefined]) assert.equal(isFixTitle(t), false, String(t))
+  assert.equal(isReleaseTitle('release: 0.2.11（候選）'), true)
+  assert.equal(isReleaseTitle('發版 v0.2.103：更新 latest.json 與首頁下載連結'), false)
+  assert.equal(isReleaseTitle('docs: release: 流程說明'), false)
+})
+
+test('取單號（真標題）：標題裡的 #數字 都算，全形括號裡的也算；結尾括號的 PR 編號不算', () => {
+  assert.deepEqual(ticketNumbers('fix(#2412): 動態開背景夥伴與 start 共用帳本，不再 ReferenceError (#2421)'), ['2412'])
+  assert.deepEqual(ticketNumbers('手機核對指紋時，電腦自動跳出 QR Code；設定頁拿掉 QR 分頁（#1863） (#2285)'), ['1863'])
+  assert.deepEqual(ticketNumbers('#2355 P4：替別台開窗帶型號、開好顯示實際型號、手機接上型號清單（兩審，等 #2393 發版） (#2401)'), ['2355', '2393'])
+  assert.deepEqual(ticketNumbers('終端畫面：拿掉「回到訊息」按鈕、修游標差一到兩列（#901b／#903）'), ['901', '903'])
+  assert.deepEqual(ticketNumbers('紀律：同一條規則只有一個實作（復發統計最大宗）'), [])
+  // 同一個單號出現兩次只算一次
+  assert.deepEqual(ticketNumbers('#1548 審查修正：#1548 的上限只在設定頁改過才寫'), ['1548'])
+  // 結尾括號：歷史裡的標題一律當成合併時自動加的 PR 編號
+  const tail = 'fix: 換班接手後新視窗不再因收空的終端服務而退回原生主控台 (#1867)'
+  assert.deepEqual(ticketNumbers(tail), [])
+  // 檢查某一張 PR 時知道它自己的編號：結尾括號裡不是自己編號的，是作者寫的單號，照算；是自己的編號就不算
+  assert.deepEqual(ticketNumbers(tail, { own: 1870 }), ['1867'])
+  assert.deepEqual(ticketNumbers(tail, { own: 1867 }), [])
+  assert.deepEqual(ticketNumbers('fix(#2412): 動態開背景夥伴與 start 共用帳本，不再 ReferenceError (#2421)', { own: 2421 }), ['2412'])
+})
+
+test('復發判斷（真標題）：#903 修過、發過版、後來又修，命中並帶出先前那筆修正', () => {
+  assert.deepEqual(recurrenceHits(PR903, H903), [{ n: '903', prior: PRIOR903 }])
+  // 標題結尾的 PR 編號不是單號：命中的是 #2161，不是 #2228、#2271
+  assert.deepEqual(recurrenceHits(PR2161, H2161), [{ n: '2161', prior: PRIOR2161 }])
+  assert.deepEqual(recurrenceHits(`${PR2161} (#2271)`, H2161), [{ n: '2161', prior: PRIOR2161 }])
+  assert.deepEqual(recurrenceHits(PR2161, H2161, { own: 2271 }), [{ n: '2161', prior: PRIOR2161 }])
+  // 修的是別張單：不算
+  assert.deepEqual(recurrenceHits('修 #904：別的毛病', H903), [])
+  // 走一遍歷史的結果：#903、#901 都記成已經發過版的修正，取最近一筆
+  const { released, hits } = scanRecurrences(H903)
+  assert.equal(released.get('903'), PRIOR903)
+  assert.equal(released.get('901'), '終端畫面：拿掉「回到訊息」按鈕、修游標差一到兩列（#901b／#903）')
+  assert.deepEqual(hits, [], '這段歷史本身沒有復發（兩筆修正之間沒有發版）')
+})
+
+test('復發判斷（真標題）：同一張單連續好幾張 PR 但不是修正（#2355、#2038），不算復發', () => {
+  assert.deepEqual(recurrenceHits(PR2355, H2355), [], '這張和先前幾張都不是修正')
+  assert.equal(isFixTitle(PR2038), true)
+  assert.deepEqual(recurrenceHits(PR2038, H2038), [], '這張標題有「修」，但先前幾張不是修正')
+  // 反過來：先前修過又發過版，但這張不是修正，也不算
+  assert.deepEqual(recurrenceHits('終端字寬：emoji 只看 Emoji_Presentation，🖥 🌡 這類文字樣式符號照 1 格（#903 二審）', H903), [])
+})
+
+test('復發判斷（真標題）：#1897 修正還沒發版就又補一張，不算；發了版之後再修才算', () => {
+  assert.deepEqual(recurrenceHits(PR1897, H1897), [])
+  assert.deepEqual(recurrenceHits(PR1897, [...H1897, 'release: 0.2.55']), [{ n: '1897', prior: PRIOR1897 }])
+  // 發版在修正之前不算數：只有「修正之後」的發版才算發過版
+  assert.deepEqual(recurrenceHits(PR1897, ['release: 0.2.53', ...H1897]), [])
+  assert.deepEqual(recurrenceHits(PR903, []), [])
+})
+
+test('復發（機器比對）：命中就照「復發」標籤處理——沒寫復發單號紅、寫了沒有守門測試紅、兩樣都有才過', () => {
+  const base = { title: PR903, headRef: 'fix/903', labels: [], baseTitles: H903 }
+  const src = ['relay/asn/src-tauri/src/term.rs']
+  const none = evaluate({ ...base, body: FILLED, files: src })
+  assert.equal(none.pass, false)
+  assert.equal(none.errors.length, 1, none.errors.join('；'))
+  // 訊息：講明是哪張單、先前那筆修正的標題、兩條路怎麼走
+  assert.match(none.errors[0], /修的 #903 在主線上已經修過並且發過版/)
+  assert.ok(none.errors[0].includes(`先前那筆修正：「${PRIOR903}」`))
+  assert.match(none.errors[0], /一、是復發：在 PR 說明寫「復發單號：#903」，並在這張 PR 加一支以單號命名的守門測試/)
+  assert.match(none.errors[0], /二、確定不是復發：在 PR 說明另外加一行「不是復發：原因」/)
+  const body = FILLED.replace('（沒有）', '復發單號：#903')
+  const noTest = evaluate({ ...base, body, files: src })
+  assert.equal(noTest.pass, false)
+  assert.match(noTest.errors[0], /寫了復發單號 #903，但這張 PR 沒有以 903 命名的守門測試/)
+  const byName = evaluate({ ...base, body, files: [...src, 'relay/asn/test/term-cursor-903.test.mjs'] })
+  assert.equal(byName.pass, true, byName.errors.join('；'))
+  assert.ok(byName.lines.some(l => l.includes('照復發處理') && l.includes('term-cursor-903.test.mjs')))
+  const added = new Map([['relay/asn/test/term-cursor.test.mjs', ["test('#903 游標對位：emoji 字寬', () => {"]]])
+  assert.equal(evaluate({ ...base, body, files: [...src, 'relay/asn/test/term-cursor.test.mjs'], added }).pass, true)
+  // 純函式的回傳
+  assert.deepEqual(autoRecurrence({ title: PR2355, baseTitles: H2355, body: FILLED }), { required: false, ok: true, hits: [], waived: '', why: '' })
+})
+
+test('復發（機器比對）：「不是復發：原因」放行，原因印進報告給審查的人看；原因太短、寫在註解裡不放行', () => {
+  const base = { title: PR2161, number: 2271, headRef: 'fix/2161-f1', labels: [], baseTitles: H2161, files: ['relay/asn/ui/lib/remote-update.mjs'] }
+  assert.equal(evaluate({ ...base, body: FILLED }).pass, false)
+  const reason = '#2161 是分階段的降頻單，這張是其中一段，不是同一個毛病又壞'
+  for (const colon of ['：', ':']) {
+    const ok = evaluate({ ...base, body: `${FILLED}\n不是復發${colon}${reason}\n` })
+    assert.equal(ok.pass, true, ok.errors.join('；'))
+    const line = ok.lines.find(l => l.includes('不是復發'))
+    assert.ok(line?.includes(reason), '原因要印進報告')
+    assert.ok(line.includes(PRIOR2161), '先前那筆修正也要印出來，審查的人才有得對')
+    assert.match(line, /請審查的人確認這個原因/)
+  }
+  const short = evaluate({ ...base, body: `${FILLED}\n不是復發：不是\n` })
+  assert.equal(short.pass, false)
+  assert.match(short.errors[0], /「不是復發：」後面的原因沒寫清楚/)
+  assert.equal(evaluate({ ...base, body: `${FILLED}\n<!-- 不是復發：${reason} -->\n` }).pass, false)
+  assert.equal(evaluate({ ...base, body: `${FILLED}\n我覺得這張不是復發：${reason}\n` }).pass, false, '要自成一行')
+})
+
+test('復發（機器比對）：不是修正、先前不是修正、修過但還沒發版，都不要求任何東西', () => {
+  const files = ['relay/asn/src-tauri/src/term.rs']
+  for (const [title, baseTitles] of [[PR2355, H2355], [PR2038, H2038], [PR1897, H1897]]) {
+    const r = evaluate({ title, body: FILLED, headRef: 'feat/x', labels: [], files, baseTitles })
+    assert.equal(r.pass, true, `${title}：${r.errors.join('；')}`)
+    assert.ok(!r.lines.some(l => l.includes('復發')), title)
+  }
+  assert.equal(evaluate({ title: PR1897, body: FILLED, headRef: 'feat/x', labels: [], files, baseTitles: [...H1897, 'release: 0.2.55'] }).pass, false)
+})
+
+test('復發（機器比對）：取不到目標分支的歷史就略過這一項，不因此紅，報告寫明略過', () => {
+  const base = { title: PR903, body: FILLED, headRef: 'fix/903', labels: [], files: ['relay/asn/src-tauri/src/term.rs'] }
+  for (const baseTitles of [null, undefined]) {
+    const r = evaluate({ ...base, baseTitles })
+    assert.equal(r.pass, true, r.errors.join('；'))
+    assert.ok(r.lines.some(l => /略過/.test(l) && /復發的自動比對/.test(l) && /取不到目標分支的提交歷史/.test(l)))
+  }
+  // 對照：同一張 PR，歷史取得到就會紅
+  assert.equal(evaluate({ ...base, baseTitles: H903 }).pass, false)
+  // 歷史是空的（取得到，只是沒有提交）：不是略過，也沒有命中
+  const empty = evaluate({ ...base, baseTitles: [] })
+  assert.equal(empty.pass, true)
+  assert.ok(!empty.lines.some(l => /略過/.test(l)))
+})
+
+test('復發：貼了「復發」標籤的行為不變——照舊要復發單號與守門測試，「不是復發」那一行抵不掉標籤', () => {
+  const body = `${FILLED}\n不是復發：這張其實是分階段做的其中一段\n`
+  const labelled = evaluate({ title: PR903, body, headRef: 'fix/903', labels: ['復發'], files: ['relay/asn/src-tauri/src/term.rs'], baseTitles: H903 })
+  assert.equal(labelled.pass, false)
+  assert.deepEqual(labelled.errors, ['有「復發」標籤，PR 說明要寫「復發單號：#單號」'])
+  // 沒貼標籤、機器也沒命中：和以前一樣不要求
+  assert.equal(evaluate({ title: '新功能', body: FILLED, headRef: 'feat/x', labels: [], files: ['a.js'], baseTitles: H903 }).pass, true)
+})
+
+test('復發（機器比對）：豁免的 PR（臨時 CI 載具、release 分支、免檢查表）不比對', () => {
+  const files = ['relay/asn/src-tauri/src/term.rs']
+  assert.equal(evaluate({ title: `tmp: ${PR903}`, body: '', headRef: 'tmp/903', labels: [], files, baseTitles: H903 }).pass, true)
+  assert.equal(evaluate({ title: PR903, body: '', headRef: 'release/0.2.14', labels: [], files, baseTitles: H903 }).pass, true)
+  assert.equal(evaluate({ title: PR903, body: '', headRef: 'docs/903', labels: ['免檢查表'], files: ['docs/a.md'], baseTitles: H903 }).pass, true)
+  // 貼了免檢查表卻改了程式：不算豁免，照樣比對
+  const abuse = evaluate({ title: PR903, body: FILLED, headRef: 'fix/903', labels: ['免檢查表'], files, baseTitles: H903 })
+  assert.ok(abuse.errors.some(e => e.includes('機器判定是復發')))
+})
+
+test('復發（機器比對）：這張 PR 自己的編號不算單號；結尾括號裡別的編號是作者寫的單號，照算', () => {
+  // 真標題：先前那筆修正的單號寫在結尾半形括號裡（歷史裡當成 PR 編號，不記成修過的單）
+  const history = ['fix(#1867): 自動接回的視窗退回系統終端時，畫面也要講明是哪幾位', 'fix(#1867): pi 退回原生主控台的三處也寫進 ui.log', 'release: 0.2.37']
+  const title = 'fix: 換班接手後新視窗不再因收空的終端服務而退回原生主控台 (#1867)'
+  assert.deepEqual(recurrenceHits(title, history), [], '不知道自己的編號時，結尾括號一律當成 PR 編號')
+  assert.deepEqual(recurrenceHits(title, history, { own: 1870 }).map(h => h.n), ['1867'])
+  assert.deepEqual(recurrenceHits(title, history, { own: 1867 }), [])
+  const r = evaluate({ title, number: 1870, body: FILLED, headRef: 'fix/1867', labels: [], files: ['relay/asn/src-tauri/src/term.rs'], baseTitles: history })
+  assert.equal(r.pass, false)
+  assert.match(r.errors[0], /修的 #1867 在主線上已經修過並且發過版/)
+})
+
+// 臨時 repo：每筆提交指定時間（分支上的提交比主線的發版早寫好，才測得出排序）
+function tempRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prck-'))
+  let tick = 0
+  const g = (...a) => {
+    const when = `2026-01-01T00:${String(tick++).padStart(2, '0')}:00+08:00`
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } })
+    assert.equal(r.status, 0, r.stderr)
+    return r.stdout
+  }
+  const commit = (msg, file, text) => {
+    if (file) { fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true }); fs.writeFileSync(path.join(dir, file), text); g('add', '-A') }
+    g('commit', '-q', '--allow-empty', '-m', msg)
+  }
+  g('init', '-q', '-b', 'main')
+  return { dir, g, commit, done: () => fs.rmSync(dir, { recursive: true, force: true }) }
+}
+
+test('歷史的取法：照進主線的先後排——分支上早就寫好、發版後才合進來的修正，不會排到那次發版前面；合併提交不算', () => {
+  const { dir, g, commit, done } = tempRepo()
+  try {
+    commit('第一筆')
+    g('checkout', '-q', '-b', 'fix/9001-x')
+    commit('fix(#9001): 分支上先寫好的修正')          // 時間比下面那筆發版早
+    g('checkout', '-q', 'main')
+    commit('release: 0.0.1')                           // 這次發版不含上面那筆修正
+    g('merge', '-q', '--no-ff', 'fix/9001-x', '-m', 'Merge pull request #5 from someone/fix/9001-x')
+    const titles = historyLines('main', { cwd: dir })
+    assert.deepEqual(titles, ['第一筆', 'release: 0.0.1', 'fix(#9001): 分支上先寫好的修正'])
+    assert.deepEqual(recurrenceHits('fix(#9001): 再補一張', titles), [], '那筆修正還沒跟著任何一版發出去')
+    commit('release: 0.0.2')
+    assert.deepEqual(recurrenceHits('fix(#9001): 再補一張', historyLines('main', { cwd: dir })), [{ n: '9001', prior: 'fix(#9001): 分支上先寫好的修正' }])
+    // 合併提交的標題（分支名有 fix、帶 PR 編號）沒有被當成「修過 #5」
+    assert.equal(scanRecurrences(historyLines('main', { cwd: dir })).released.has('5'), false)
+  } finally { done() }
+})
+
+test('命令列：整條路跑一次（臨時 repo＋事件檔）——只改一邊與復發都會紅，補上說明就綠；取不到目標分支的歷史時略過、不紅', () => {
+  const { dir, g, commit, done } = tempRepo()
+  try {
+    commit(PRIOR903, 'relay/asn/ui/list.js', '// 一\n')
+    commit('release: 0.2.8')
+    g('update-ref', 'refs/remotes/origin/main', 'main')   // 腳本比的是 origin/<目標分支>
+    g('checkout', '-q', '-b', 'fix/903')
+    commit('再修一次', 'relay/asn/ui/list.js', '// 二\n')
+    const evPath = path.join(dir, 'event.json')
+    const run = body => {
+      fs.writeFileSync(evPath, JSON.stringify({ pull_request: { number: 1234, title: PR903, body, base: { ref: 'main' }, head: { ref: 'fix/903' }, labels: [] } }))
+      return spawnSync(process.execPath, [SCRIPT], { cwd: dir, encoding: 'utf8', env: { ...process.env, GITHUB_EVENT_PATH: evPath, GITHUB_STEP_SUMMARY: '' } })
+    }
+    const bad = run(FILLED)
+    assert.equal(bad.status, 1, bad.stdout + bad.stderr)
+    assert.match(bad.stdout, /::error::這張 PR 只動到電腦的畫面檔（relay\/asn\/ui\/list\.js）/)
+    assert.match(bad.stdout, /::error::這張 PR 的標題是修正，修的 #903 在主線上已經修過並且發過版/)
+    assert.ok(bad.stdout.includes(PRIOR903))
+    const good = run(`${FILLED}\n只改一邊：手機看終端沒有這個游標對位的設定\n不是復發：這次是 emoji 字寬，和上次的殘留顏色序列不是同一個毛病\n`)
+    assert.equal(good.status, 0, good.stdout + good.stderr)
+    assert.match(good.stdout, /通過。/)
+    assert.match(good.stdout, /不是復發：這次是 emoji 字寬/)
+    // 目標分支不見了（歷史取不到）：只印警告、略過，不因此紅
+    g('update-ref', '-d', 'refs/remotes/origin/main')
+    const skipped = run(FILLED)
+    assert.equal(skipped.status, 0, skipped.stdout + skipped.stderr)
+    assert.match(skipped.stdout, /::warning::取不到目標分支的提交歷史/)
+    assert.match(skipped.stdout, /（略過）復發的自動比對/)
+  } finally { done() }
 })
