@@ -91,6 +91,38 @@ where
     }
 }
 
+/// 處理 stdout：逐行讀、逐行處理；讀取本身出錯就走 `on_read_failed`（記 log、通知、結束行程）
+async fn drain_stdout<R: tokio::io::AsyncRead + Unpin>(
+    out: R,
+    r: Rpc,
+    inc: Arc<dyn Fn(Rpc, Value) + Send + Sync>,
+    raw: Option<Arc<dyn Fn(Value) + Send + Sync>>,
+    bad: Option<Arc<dyn Fn(UnparsedLine) + Send + Sync>>,
+    log: Log,
+) {
+    let failed = read_output_lines(
+        out,
+        |line_no, l| {
+            let l = l.trim();
+            if l.is_empty() {
+                return;
+            }
+            match &raw {
+                Some(f) => match serde_json::from_str::<Value>(l) {
+                    Ok(v) => f(v),
+                    Err(e) => report_unparsed(&log, &bad, true, UnparsedLine { line_no, len: l.chars().count(), kind: parse_error_kind(&e) }),
+                },
+                None => r.on_line(l, &inc, &log, line_no),
+            }
+        },
+        |u| report_unparsed(&log, &bad, raw.is_some(), u),
+    )
+    .await;
+    if let Some((line_no, e)) = failed {
+        r.on_read_failed(&log, &bad, line_no, &e);
+    }
+}
+
 pub struct SpawnOpts {
     pub command: String,
     pub args: Vec<String>,
@@ -180,27 +212,7 @@ impl Rpc {
             let (done_tx, done_rx) = oneshot::channel::<()>();
             drains.push(done_rx);
             crate::rt::spawn(async move {
-                let failed = read_output_lines(
-                    out,
-                    |line_no, l| {
-                        let l = l.trim();
-                        if l.is_empty() {
-                            return;
-                        }
-                        match &raw {
-                            Some(f) => match serde_json::from_str::<Value>(l) {
-                                Ok(v) => f(v),
-                                Err(e) => report_unparsed(&log, &bad, true, UnparsedLine { line_no, len: l.chars().count(), kind: parse_error_kind(&e) }),
-                            },
-                            None => r.on_line(l, &inc, &log, line_no),
-                        }
-                    },
-                    |u| report_unparsed(&log, &bad, raw.is_some(), u),
-                )
-                .await;
-                if let Some((line_no, e)) = failed {
-                    r.on_read_failed(&log, &bad, line_no, &e);
-                }
+                drain_stdout(out, r, inc, raw, bad, log).await;
                 let _ = done_tx.send(());
             });
         }
@@ -737,6 +749,51 @@ mod tests {
         assert_eq!(got.len(), 1, "{got:?}");
         assert_eq!((got[0].line_no, got[0].kind), (7, "讀取失敗"));
         assert!(logs.lock().unwrap().join("\n").contains("第 7 行讀取失敗"));
+    }
+
+    /// stdout 處理的接線：讀到一行後讀取失敗，要走到「通知呼叫端＋結束行程」，之前那一行照常處理
+    #[tokio::test]
+    async fn stdout_讀取失敗的接線_通知呼叫端並結束行程_之前的行照常處理() {
+        if node().is_none() {
+            return;
+        }
+        let got = Arc::new(Mutex::new(Vec::<UnparsedLine>::new()));
+        let (g2, g3) = (got.clone(), got.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            "setInterval(()=>{},1000)",
+            Arc::new(|_| {}),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.on_unparsed_line = Some(Arc::new(move |u| g2.lock().unwrap().push(u)));
+        let bad = o.on_unparsed_line.clone();
+        let raw: Option<Arc<dyn Fn(Value) + Send + Sync>> = Some(Arc::new(|_| {}));
+        let log = o.log.clone();
+        let rpc = Rpc::spawn(o).unwrap();
+        assert!(rpc.alive());
+        drain_stdout(FailAfterOneLine(false), rpc.clone(), Arc::new(|_, _| {}), raw, bad, log).await;
+        let mut done_rx = done_rx;
+        let waited = tokio::time::timeout(Duration::from_secs(10), &mut done_rx).await;
+        if waited.is_err() {
+            // 失敗時也收掉自己起的假程式：強制結束並等到它真的結束再判定
+            rpc.kill_now();
+            let t = Instant::now();
+            while rpc.alive() && t.elapsed() < Duration::from_secs(10) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+        assert!(waited.is_ok(), "行程要被結束（on_exit 被呼叫）");
+        assert!(!rpc.alive());
+        let got = g3.lock().unwrap().clone();
+        let got: Vec<(usize, &str)> = got.iter().map(|u| (u.line_no, u.kind)).collect();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(got[0].0, 1, "之前那一行照常處理（解析不了的行有通知）");
+        assert_eq!(got[1], (2, "讀取失敗"));
     }
 
     /// 正常結束（沒有被佔住的管線）不多等
