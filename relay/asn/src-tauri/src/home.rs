@@ -93,15 +93,19 @@ pub fn resolve_at(base: &Path, override_: Option<&str>) -> HomeInfo {
 }
 
 /// 從一組環境變數（名, 值）取 ASN_HOME 指定的資料夾：新名優先、沒有（或只有空白）才看舊名 IRORI_HOME，解析走 [`resolve_at`]；
-/// 相對值接在目前的工作資料夾上（跟程式實際開檔時的解法一致）。沒設回 None。給敏感位置清單用，不碰檔案系統
-pub fn override_dir_in(env: &[(String, String)]) -> Option<PathBuf> {
+/// 相對值接在 `base` 上；`base` 沒給就用目前的工作資料夾（跟程式實際開檔時的解法一致，正式路徑都不給）。
+/// 沒設回 None。給敏感位置清單用，不碰檔案系統
+pub fn override_dir_in(env: &[(String, String)], base: Option<&Path>) -> Option<PathBuf> {
     let get = |n: &str| env.iter().find(|(k, v)| k.eq_ignore_ascii_case(n) && !v.trim().is_empty()).map(|(_, v)| v.as_str());
     let v = get("ASN_HOME").or_else(|| get("IRORI_HOME"))?;
     let primary = resolve_at(Path::new(""), Some(v)).primary;
     if primary.is_absolute() {
         return Some(primary);
     }
-    std::env::current_dir().ok().map(|c| c.join(primary))
+    match base {
+        Some(b) => Some(b.join(primary)),
+        None => std::env::current_dir().ok().map(|c| c.join(primary)),
+    }
 }
 
 /// 本行程的解析結果（家目錄與 ASN_HOME 取自環境）

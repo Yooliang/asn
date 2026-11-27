@@ -640,14 +640,23 @@ fn 放行資料夾_asn_資料夾改了位置也成立() {
 // 相對路徑的 ASN_HOME 要看目前的工作資料夾，共用向量表達不了，所以電腦版與 Node 版各有一支同樣規則的測試
 #[test]
 fn 清單_asn_home_設成相對路徑_照_home_解成絕對位置_底下的檔判定為擋() {
+    // 相對值的基準資料夾改成注入的暫存資料夾：不依賴測試機目前的工作資料夾落在哪（例如家目錄底下會被別的規則擋掉）
     let rel = "asn-rel-home-test-dir";
-    let target = std::env::current_dir().unwrap().join(rel).join("key.bin");
-    for name in ["ASN_HOME", "IRORI_HOME"] {
-        let r = rig_with(&kv(&[(name, rel)]));
-        assert!(blocked(&r, &ps(&target)), "{name}");
-        assert!(!blocked(&r, &ps(&std::env::current_dir().unwrap().join("asn-other-dir").join("a.txt"))), "{name} 旁邊的資料夾放行");
+    let d = tempfile::tempdir().unwrap();
+    let (home, work, base) = (d.path().join("home"), d.path().join("work"), d.path().join("base"));
+    for p in [&home, &work, &base] {
+        std::fs::create_dir_all(p).unwrap();
     }
-    assert!(!blocked(&rig(), &ps(&target)), "沒設時不在清單裡");
+    let target = base.join(rel).join("key.bin");
+    let other = base.join("asn-other-dir").join("a.txt");
+    let verdict_of = |roots: &SensitiveRoots, p: &Path| read_verdict(&ps(p), &ReadCtx { roots, base: &work, tool: ReadTool::Single });
+    for name in ["ASN_HOME", "IRORI_HOME"] {
+        let roots = SensitiveRoots::build_rel_base(&[home.clone()], &kv(&[(name, rel)]), &base);
+        assert_ne!(verdict_of(&roots, &target), ReadVerdict::Allow, "{name}");
+        assert_eq!(verdict_of(&roots, &other), ReadVerdict::Allow, "{name} 旁邊的資料夾放行");
+    }
+    let none = SensitiveRoots::build_rel_base(&[home.clone()], &[], &base);
+    assert_eq!(verdict_of(&none, &target), ReadVerdict::Allow, "沒設時不在清單裡");
 }
 
 #[test]

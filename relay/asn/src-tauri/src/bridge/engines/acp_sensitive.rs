@@ -132,6 +132,8 @@ pub struct SensitiveRoots {
     exempt_dirs: Vec<String>,
     env: Vec<(String, String)>,
     canon: Canon,
+    /// 相對路徑的 ASN_HOME 的基準資料夾；None＝目前的工作資料夾（正式一律 None，只有測試會指定）
+    rel_base: Option<PathBuf>,
 }
 
 // 手寫 Debug：裡面存著環境變數（可能含金鑰），不能被印出來
@@ -154,6 +156,16 @@ impl SensitiveRoots {
     }
 
     fn build_with(homes: &[PathBuf], env: &[(String, String)], canon: Canon) -> SensitiveRoots {
+        Self::build_inner(homes, env, canon, None)
+    }
+
+    /// 測試用：指定相對路徑的 ASN_HOME 的基準資料夾（不依賴測試機的工作資料夾）
+    #[cfg(test)]
+    pub fn build_rel_base(homes: &[PathBuf], env: &[(String, String)], rel_base: &Path) -> SensitiveRoots {
+        Self::build_inner(homes, env, std_canon, Some(rel_base.to_path_buf()))
+    }
+
+    fn build_inner(homes: &[PathBuf], env: &[(String, String)], canon: Canon, rel_base: Option<PathBuf>) -> SensitiveRoots {
         let get = |n: &str| env.iter().find(|(k, v)| k.eq_ignore_ascii_case(n) && !v.trim().is_empty()).map(|(_, v)| PathBuf::from(v.trim()));
         let mut home_strs: Vec<String> = vec![];
         for h in homes {
@@ -167,7 +179,7 @@ impl SensitiveRoots {
         }
         let mut env_paths: Vec<PathBuf> = ENV_ROOTS.iter().filter_map(|n| get(n)).collect();
         // ASN 資料夾：跟 home 解析同一套（相對值接在目前工作資料夾上）；上面收的相對值會在下面因為不是絕對路徑被略過，這裡補上解成絕對路徑的那一份
-        if let Some(p) = crate::home::override_dir_in(env) {
+        if let Some(p) = crate::home::override_dir_in(env, rel_base.as_deref()) {
             env_paths.push(p);
         }
         if let Some(la) = get("LOCALAPPDATA") {
@@ -227,6 +239,7 @@ impl SensitiveRoots {
             exempt_dirs: vec![],
             env: env.to_vec(),
             canon,
+            rel_base,
         }
     }
 }

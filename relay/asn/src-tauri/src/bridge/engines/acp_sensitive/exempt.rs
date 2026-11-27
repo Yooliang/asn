@@ -61,7 +61,7 @@ impl SensitiveRoots {
                 push_forms(&mut asn, Path::new(v.trim()), canon);
             }
         }
-        if let Some(p) = crate::home::override_dir_in(&self.env) {
+        if let Some(p) = crate::home::override_dir_in(&self.env, self.rel_base.as_deref()) {
             push_forms(&mut asn, &p, canon); // 跟 home 解析同一套：相對值也算進來
         }
         // 容器的位置一律由「上層的各形式＋固定的下一層」組出來，不去解開容器自己：容器自己若是捷徑，它的實際位置就不在預期位置，不放行。
