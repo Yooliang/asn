@@ -998,6 +998,77 @@ mod tests {
         eng.stop();
     }
 
+    /// 工具步驟無法解讀（截斷的一行、巢狀超過深度上限的一行）時：記 log（不含內容）、這一輪整輪中止；正常的一輪照常。走真的驅動與子程序（node 假程式）
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn 工具步驟無法解讀時中止這一輪_正常的一輪照常() {
+        use crate::bridge::engines::acp_agy::AgyDriver;
+        use crate::bridge::engines::acp_worker::{Driver, DriverArgs};
+        let has_node = std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| ["node.exe", "node.cmd", "node"].iter().any(|n| d.join(n).is_file())));
+        if !has_node {
+            return;
+        }
+        let work = tempfile::tempdir().unwrap();
+        let cwd = tempfile::tempdir().unwrap();
+        let scripts = tempfile::tempdir().unwrap();
+        let env = env_for(cwd.path());
+        let (eng, _rec) = rec_engine_with(work.path(), &env, None, vec![], Arc::new(|_| {}));
+        std::fs::write(work.path().join(QUEUE_FILE), format!("{}\n", queue_line("gemini", "小解讀", cwd.path()))).unwrap();
+        eng.poll();
+        wait_spawns(&_rec, 1).await;
+        let base = driver_args().lock().unwrap().iter().rev().find(|(_, a)| a.cfg.name == "小解讀").map(|(_, a)| a.clone()).expect("找得到驅動參數");
+        // 假 agy：收到使用者那一行之後，依第一個參數輸出
+        let script = scripts.path().join("fake.js");
+        std::fs::write(
+            &script,
+            "const rl=require('readline').createInterface({input:process.stdin});const m=process.argv[2];\n\
+             rl.on('line',()=>{\n\
+               if(m==='cut')console.log('{\"event\":\"step_update\",\"step_update\":{\"tool_info\":{\"parameters\":');\n\
+               else if(m==='deep')console.log('['.repeat(300)+']'.repeat(300));\n\
+               else if(m==='fffd'){process.stdout.write(Buffer.from([0x7b,0x22,0x61,0x22,0x3a,0x22,0xef,0xbf,0xbd,0x22,0x7d,0x0a]));console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',response:'ok',conversation_id:'c1'}}));}\n\
+               else if(m==='enc'){process.stdout.write(Buffer.from([0x7b,0x22,0xff,0xfe,0x22,0x7d,0x0a]));console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',response:'ok',conversation_id:'c1'}}));}\n\
+               else console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',response:'ok',conversation_id:'c1'}}));\n\
+             });rl.on('close',()=>process.exit(0));setInterval(()=>{},1000);",
+        )
+        .unwrap();
+        let mut bad: Vec<String> = vec![];
+        for (mode, expect_abort) in [("cut", true), ("deep", true), ("enc", true), ("fffd", false), ("ok", false)] {
+            let logs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
+            let l2 = logs.clone();
+            let mut cfg = (*base.cfg).clone();
+            cfg.command = "node".into();
+            cfg.env_pass.extend(["SystemRoot", "SYSTEMROOT", "windir"].map(String::from)); // Windows 的 node 沒有它起不來
+            cfg.args = vec![script.display().to_string(), mode.to_string()];
+            let a = DriverArgs { cfg: Arc::new(cfg), log: Arc::new(move |m| l2.lock().unwrap().push(m)), session_id: String::new(), env: Arc::new(std::env::vars().collect()), ..base.clone() };
+            let d = AgyDriver::new(a);
+            d.start().await.expect("假 agy 要起得來");
+            let r = tokio::time::timeout(std::time::Duration::from_secs(15), d.turn("hi".into(), 5_000, 8_000)).await;
+            d.stop();
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await; // 結束行程的動作在背景任務裡做，給它時間，免得假程式留著
+            let l = logs.lock().unwrap().clone();
+            match (expect_abort, r) {
+                (true, Ok(Err(e))) => {
+                    if e.code != "violation" || !e.message.contains("無法解讀") {
+                        bad.push(format!("{mode}: 沒有因無法解讀而中止：{} {}", e.code, e.message));
+                    }
+                    if !l.iter().any(|x| x.contains("第 1 行解析不了") && x.contains("長度")) {
+                        bad.push(format!("{mode}: 沒記 log：{l:?}"));
+                    }
+                    if l.iter().any(|x| x.contains("step_update") || x.contains("tool_info") || x.contains("[[[")) {
+                        bad.push(format!("{mode}: log 不該記行內容：{l:?}"));
+                    }
+                }
+                (false, Ok(Ok(t))) => {
+                    if t.text != "ok" || l.iter().any(|x| x.contains("解析不了")) {
+                        bad.push(format!("{mode}: 正常的一輪不照常：{} {l:?}", t.text));
+                    }
+                }
+                (_, other) => bad.push(format!("{mode}: 結果不符預期：{:?}", other.map(|r| r.map(|t| t.text)))),
+            }
+        }
+        eng.stop(); // 先收尾再判定，失敗時才不會留著子程序卡住整個測試
+        assert!(bad.is_empty(), "{bad:#?}");
+    }
+
     /// 回歸：沒寫 cwd 的工作者預設在 ASN 資料夾底下，自己的資料夾、指令的 Cwd、收信附件要讀得到；ASN 資料夾其他東西仍擋。走真的守門員（agy 與標準 ACP）
     #[tokio::test]
     async fn 預設工作資料夾在_asn_資料夾底下_自己的檔與附件讀得到_其他照擋() {

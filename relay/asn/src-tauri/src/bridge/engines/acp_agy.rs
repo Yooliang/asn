@@ -5,7 +5,7 @@
 use super::acp_config::WorkerCfg;
 use super::acp_policy::{agy_brain, agy_user_home, describe_agy_tool, is_registered_agy_tool, redact, sensitive_write, WorkerError};
 use super::acp_worker::{Denied, Driver, DriverArgs, TurnResult};
-use super::rpc::{Rpc, SpawnOpts};
+use super::rpc::{Rpc, SpawnOpts, UnparsedLine};
 use super::{acp_clean_env, BoxFut};
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -131,6 +131,17 @@ fn on_event(sh: &Arc<Shared>, a: &DriverArgs, ev: Value) {
     }
 }
 
+/// 解析不了的一行：那一步沒經過任何檢查，當成沒通過、照違反政策的同一條路整輪中止（log 由 rpc 層記，這裡只記中止這件事）。
+/// 沒有進行中的一輪就只略過（沒有可中止的對象）
+fn on_unparsed(sh: &Arc<Shared>, a: &DriverArgs, u: UnparsedLine) {
+    let mut g = sh.cur.lock().unwrap();
+    let Some(c) = g.as_mut() else { return };
+    c.violation = Some(("工具步驟無法解讀，這一輪已中止".to_string(), "無法解讀的工具步驟".to_string(), None));
+    drop(g);
+    (a.log)(format!("policy violation: 輸出第 {} 行無法解讀（{}）→ kill agy", u.line_no, u.kind));
+    kill_with(sh, "violation");
+}
+
 fn on_step(sh: &Arc<Shared>, a: &DriverArgs, s: Value) {
     if let Some(conv) = s.get("conversation_id").and_then(Value::as_str).filter(|c| !c.is_empty()) {
         let mut g = sh.sid.lock().unwrap();
@@ -242,6 +253,7 @@ impl Driver for AgyDriver {
             let cfg = self.a.cfg.clone();
             let env = acp_clean_env(&self.a.env, &cfg.env_pass);
             let (sh_ev, a_ev) = (self.sh.clone(), self.a.clone());
+            let (sh_bad, a_bad) = (self.sh.clone(), self.a.clone());
             let (sh_exit, on_exit, rpc_cell) = (self.sh.clone(), self.a.on_exit.clone(), Arc::new(AtomicU64::new(0)));
             let (pids, rpc_cell2) = (self.a.pids.clone(), rpc_cell.clone());
             let rpc = Rpc::spawn(SpawnOpts {
@@ -253,6 +265,7 @@ impl Driver for AgyDriver {
                 log: self.a.log.clone(),
                 on_incoming: Arc::new(|_, _| {}),
                 on_json_line: Some(Arc::new(move |ev| on_event(&sh_ev, &a_ev, ev))),
+                on_unparsed_line: Some(Arc::new(move |u| on_unparsed(&sh_bad, &a_bad, u))),
                 on_exit: Arc::new(move |why| {
                     let rpc = sh_exit.rpc.lock().unwrap().clone();
                     let tail = rpc.map(|r| r.stderr_tail().join(" | ")).unwrap_or_default();
@@ -317,11 +330,20 @@ impl Driver for AgyDriver {
 /// 測試用：把一串 agy 事件依序餵給 on_event（等於一輪），回傳這一輪被政策中止時的錯誤；沒中止回 None
 #[cfg(test)]
 pub(crate) fn run_events_for_test(a: &DriverArgs, events: Vec<Value>) -> Option<WorkerError> {
+    run_lines_for_test(a, events.into_iter().map(Ok).collect())
+}
+
+/// 測試用：同上，但可以夾「解析不了的一行」（Err）
+#[cfg(test)]
+pub(crate) fn run_lines_for_test(a: &DriverArgs, lines: Vec<Result<Value, UnparsedLine>>) -> Option<WorkerError> {
     let sh = Arc::new(Shared { sid: Mutex::new(String::new()), resume_lost: AtomicBool::new(false), rpc: Mutex::new(None), cur: Mutex::new(None), last_activity: AtomicU64::new(0) });
     let (tx, mut rx) = oneshot::channel();
     *sh.cur.lock().unwrap() = Some(Cur { tx: Some(tx), denied: vec![], seen: HashSet::new(), violation: None, tools: false });
-    for ev in events {
-        on_event(&sh, a, ev);
+    for l in lines {
+        match l {
+            Ok(ev) => on_event(&sh, a, ev),
+            Err(u) => on_unparsed(&sh, a, u),
+        }
     }
     match rx.try_recv() {
         Ok(Err(e)) => Some(e),

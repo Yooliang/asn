@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader}; // stderr 仍用 lines()
 use tokio::sync::{mpsc, oneshot, Notify};
 
 pub type Log = Arc<dyn Fn(String) + Send + Sync>;
@@ -23,6 +23,104 @@ const DRAIN_MAX: std::time::Duration = std::time::Duration::from_millis(1500);
 pub struct RpcError {
     pub message: String,
     pub code: Option<i64>,
+}
+
+/// 一行解析不了的輸出：只描述它，不帶內容（可能含檔案內容或路徑）
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnparsedLine {
+    /// 第幾行（從 1 起，含空行）
+    pub line_no: usize,
+    /// 去掉頭尾空白後的字元數
+    pub len: usize,
+    /// 錯誤類別（白話）
+    pub kind: &'static str,
+}
+
+/// serde_json 錯誤的類別（只回固定字串，不帶原文）。巢狀超過 128 層會報 recursion limit
+fn parse_error_kind(e: &serde_json::Error) -> &'static str {
+    if e.to_string().contains("recursion limit") {
+        return "巢狀超過深度上限";
+    }
+    match e.classify() {
+        serde_json::error::Category::Eof => "內容被截斷",
+        serde_json::error::Category::Syntax => "語法錯誤",
+        serde_json::error::Category::Data => "資料型別不符",
+        serde_json::error::Category::Io => "讀取錯誤",
+    }
+}
+
+fn log_unparsed(log: &Log, u: &UnparsedLine) {
+    log(format!("輸出第 {} 行解析不了（長度 {}，{}），已略過", u.line_no, u.len, u.kind));
+}
+
+/// 解析不了的一行：一律記 log；`notify`（有 on_json_line）且呼叫端給了 on_unparsed_line 才通知。標準模式不通知，行為不變（只記 log）
+fn report_unparsed(log: &Log, bad: &Option<Arc<dyn Fn(UnparsedLine) + Send + Sync>>, notify: bool, u: UnparsedLine) {
+    log_unparsed(log, &u);
+    if notify {
+        if let Some(b) = bad {
+            b(u);
+        }
+    }
+}
+
+/// 逐位元組讀行：某一行不是有效的文字編碼時，照樣當成「解析不了的一行」處理並繼續讀後面的行。
+/// 讀到檔尾回 None；讀取本身出錯回 Some((出錯的行號, 錯誤))
+async fn read_output_lines<R, T, B>(out: R, mut on_text: T, mut on_bad: B) -> Option<(usize, std::io::Error)>
+where
+    R: tokio::io::AsyncRead + Unpin,
+    T: FnMut(usize, &str),
+    B: FnMut(UnparsedLine),
+{
+    let mut reader = BufReader::new(out);
+    let mut buf: Vec<u8> = Vec::new();
+    let mut line_no = 0usize;
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf).await {
+            Ok(0) => return None,
+            Ok(_) => {
+                line_no += 1;
+                match std::str::from_utf8(&buf) {
+                    Ok(s) => on_text(line_no, s),
+                    // 只看原始位元組是不是合法 UTF-8；合法的（含字面上的替換字元 U+FFFD）照常處理。這一類的長度以位元組計
+                    Err(_) => on_bad(UnparsedLine { line_no, len: buf.trim_ascii().len(), kind: "不是有效的文字編碼" }),
+                }
+            }
+            Err(e) => return Some((line_no + 1, e)),
+        }
+    }
+}
+
+/// 處理 stdout：逐行讀、逐行處理；讀取本身出錯就走 `on_read_failed`（記 log、通知、結束行程）
+async fn drain_stdout<R: tokio::io::AsyncRead + Unpin>(
+    out: R,
+    r: Rpc,
+    inc: Arc<dyn Fn(Rpc, Value) + Send + Sync>,
+    raw: Option<Arc<dyn Fn(Value) + Send + Sync>>,
+    bad: Option<Arc<dyn Fn(UnparsedLine) + Send + Sync>>,
+    log: Log,
+) {
+    let failed = read_output_lines(
+        out,
+        |line_no, l| {
+            let l = l.trim();
+            if l.is_empty() {
+                return;
+            }
+            match &raw {
+                Some(f) => match serde_json::from_str::<Value>(l) {
+                    Ok(v) => f(v),
+                    Err(e) => report_unparsed(&log, &bad, true, UnparsedLine { line_no, len: l.chars().count(), kind: parse_error_kind(&e) }),
+                },
+                None => r.on_line(l, &inc, &log, line_no),
+            }
+        },
+        |u| report_unparsed(&log, &bad, raw.is_some(), u),
+    )
+    .await;
+    if let Some((line_no, e)) = failed {
+        r.on_read_failed(&log, &bad, line_no, &e);
+    }
 }
 
 pub struct SpawnOpts {
@@ -40,6 +138,9 @@ pub struct SpawnOpts {
     pub on_exit: Arc<dyn Fn(String) + Send + Sync>,
     /// 有值＝每一行（已解析成 JSON）都直接交給它，不做請求／回應配對（agy 原生 stream-json 用）
     pub on_json_line: Option<Arc<dyn Fn(Value) + Send + Sync>>,
+    /// 有 `on_json_line` 時，解析不了的那一行交給它（只有行號、長度、錯誤類別，不含行內容）。
+    /// 解析不了的行沒經過任何檢查，呼叫端要自己決定怎麼處理；不給就只記 log
+    pub on_unparsed_line: Option<Arc<dyn Fn(UnparsedLine) + Send + Sync>>,
     /// 行程確實結束後一定呼叫（含被 stop 停掉的）：記錄 PID 的帳本在這裡劃掉
     pub on_end: Option<Arc<dyn Fn() + Send + Sync>>,
 }
@@ -107,24 +208,11 @@ impl Rpc {
         let mut drains: Vec<oneshot::Receiver<()>> = Vec::new();
         if let Some(out) = stdout {
             let (r, inc, raw) = (rpc.clone(), o.on_incoming.clone(), o.on_json_line.clone());
+            let (bad, log) = (o.on_unparsed_line.clone(), o.log.clone());
             let (done_tx, done_rx) = oneshot::channel::<()>();
             drains.push(done_rx);
             crate::rt::spawn(async move {
-                let mut lines = BufReader::new(out).lines();
-                while let Ok(Some(l)) = lines.next_line().await {
-                    let l = l.trim();
-                    if l.is_empty() {
-                        continue;
-                    }
-                    match &raw {
-                        Some(f) => {
-                            if let Ok(v) = serde_json::from_str::<Value>(l) {
-                                f(v);
-                            }
-                        }
-                        None => r.on_line(l, &inc),
-                    }
-                }
+                drain_stdout(out, r, inc, raw, bad, log).await;
                 let _ = done_tx.send(());
             });
         }
@@ -200,6 +288,17 @@ impl Rpc {
         self.0.stderr_tail.lock().unwrap().clone()
     }
 
+    /// 讀輸出時出了讀取錯誤（不是編碼問題）：後面的輸出再也收不到，沒有檢查就不能讓行程繼續跑。
+    /// 記 log、通知呼叫端（類別「讀取失敗」），並結束行程與它的子孫（行程結束後照常走 on_exit）
+    fn on_read_failed(&self, log: &Log, bad: &Option<Arc<dyn Fn(UnparsedLine) + Send + Sync>>, line_no: usize, e: &std::io::Error) {
+        log(format!("輸出第 {line_no} 行讀取失敗（{e}），結束行程"));
+        if let Some(b) = bad {
+            b(UnparsedLine { line_no, len: 0, kind: "讀取失敗" });
+        }
+        self.0.kill_tree.store(true, Ordering::SeqCst);
+        self.0.kill.notify_one();
+    }
+
     fn fail_all(&self, e: RpcError) {
         let all: Vec<_> = self.0.pending.lock().unwrap().drain().collect();
         for (_, (_, tx)) in all {
@@ -207,8 +306,15 @@ impl Rpc {
         }
     }
 
-    fn on_line(&self, line: &str, inc: &Arc<dyn Fn(Rpc, Value) + Send + Sync>) {
-        let Ok(m) = serde_json::from_str::<Value>(line) else { return };
+    /// 標準 JSON-RPC 模式：解析不了的行只記 log、照舊略過（權限請求要回覆才會執行，沒解析到＝沒回覆＝不會執行，不放行任何動作）
+    fn on_line(&self, line: &str, inc: &Arc<dyn Fn(Rpc, Value) + Send + Sync>, log: &Log, line_no: usize) {
+        let m = match serde_json::from_str::<Value>(line) {
+            Ok(m) => m,
+            Err(e) => {
+                log_unparsed(log, &UnparsedLine { line_no, len: line.chars().count(), kind: parse_error_kind(&e) });
+                return;
+            }
+        };
         if m.get("method").is_some() {
             inc(self.clone(), m);
             return;
@@ -326,6 +432,7 @@ mod tests {
             on_incoming: Arc::new(|_, _| {}),
             on_exit,
             on_json_line: Some(on_json),
+            on_unparsed_line: None,
             on_end: None,
         }
     }
@@ -427,6 +534,266 @@ mod tests {
         assert!(!rpc.alive(), "行程結束了：alive 要是 false");
         let (end, exit) = (ended_at.lock().unwrap().unwrap(), exit_at.lock().unwrap().unwrap());
         assert!(exit.duration_since(end) >= Duration::from_millis(500), "on_exit 要等管線（有上限），on_end 不等：on_end 比 on_exit 早 {:?}", exit.duration_since(end));
+    }
+
+    /// 解析不了的行：回呼被呼叫（行號、長度、類別）、log 有記且不含行內容；能解析的行照常交給 on_json_line
+    #[tokio::test]
+    async fn 解析不了的行_通知呼叫端並記_log_不含內容() {
+        if node().is_none() {
+            return;
+        }
+        let got = Arc::new(Mutex::new(Vec::<UnparsedLine>::new()));
+        let good = Arc::new(AtomicUsize::new(0));
+        let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (g2, ok2, l2) = (got.clone(), good.clone(), logs.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            // 第 1 行正常、第 2 行截斷、第 3 行巢狀 300 層（超過上限）
+            "console.log('{\"event\":\"x\"}'); console.log('{\"secret\":\"SECRETVALUE'); console.log('['.repeat(300)+']'.repeat(300)); process.exit(0)",
+            Arc::new(move |_| {
+                ok2.fetch_add(1, Ordering::SeqCst);
+            }),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.log = Arc::new(move |m| l2.lock().unwrap().push(m));
+        o.on_unparsed_line = Some(Arc::new(move |u| g2.lock().unwrap().push(u)));
+        let _rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        assert_eq!(good.load(Ordering::SeqCst), 1);
+        let got = got.lock().unwrap().clone();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!((got[0].line_no, got[0].kind), (2, "內容被截斷"));
+        assert_eq!((got[1].line_no, got[1].len, got[1].kind), (3, 600, "巢狀超過深度上限"));
+        let l = logs.lock().unwrap().join("\n");
+        assert!(l.contains("第 2 行解析不了") && l.contains("第 3 行解析不了"), "{l}");
+        assert!(!l.contains("SECRETVALUE") && !l.contains("[[["), "log 不記行內容：{l}");
+    }
+
+    /// 輸出含無效文字編碼的行時照樣檢查後面的行：壞行有回呼與 log（不含內容），後面的正常行照常收到
+    #[tokio::test]
+    async fn 輸出含無效編碼的行時_照樣處理並繼續讀後面的行() {
+        if node().is_none() {
+            return;
+        }
+        let got = Arc::new(Mutex::new(Vec::<UnparsedLine>::new()));
+        let good = Arc::new(AtomicUsize::new(0));
+        let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (g2, ok2, l2) = (got.clone(), good.clone(), logs.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            // 第 1 行正常、第 2 行夾著不是文字編碼的位元組、第 3 行正常
+            "const w=process.stdout; w.write('{\"event\":\"x\"}\\n'); w.write(Buffer.from([0x7b,0x22,0x61,0x22,0x3a,0x22,0xff,0xfe,0x22,0x7d,0x0a])); w.write('{\"event\":\"y\"}\\n', ()=>process.exit(0))",
+            Arc::new(move |_| {
+                ok2.fetch_add(1, Ordering::SeqCst);
+            }),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.log = Arc::new(move |m| l2.lock().unwrap().push(m));
+        o.on_unparsed_line = Some(Arc::new(move |u| g2.lock().unwrap().push(u)));
+        let _rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        assert_eq!(good.load(Ordering::SeqCst), 2, "壞行前後的正常行都要收到");
+        let got = got.lock().unwrap().clone();
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!((got[0].line_no, got[0].kind), (2, "不是有效的文字編碼"));
+        let l = logs.lock().unwrap().join("\n");
+        assert!(l.contains("第 2 行解析不了") && l.contains("不是有效的文字編碼"), "{l}");
+    }
+
+    /// 合法的 UTF-8（內容剛好是替換字元 U+FFFD，位元組 EF BF BD）不算無效編碼：照常交給 on_json_line、不通知、不記解析不了
+    #[tokio::test]
+    async fn 合法的替換字元_照常處理_不算無效編碼() {
+        if node().is_none() {
+            return;
+        }
+        let got = Arc::new(AtomicUsize::new(0));
+        let good = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (g2, ok2, l2) = (got.clone(), good.clone(), logs.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            "const w=process.stdout; w.write(Buffer.from([0x7b,0x22,0x61,0x22,0x3a,0x22,0xef,0xbf,0xbd,0x22,0x7d,0x0a]), ()=>process.exit(0))",
+            Arc::new(move |v| ok2.lock().unwrap().push(v)),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.log = Arc::new(move |m| l2.lock().unwrap().push(m));
+        o.on_unparsed_line = Some(Arc::new(move |_| {
+            g2.fetch_add(1, Ordering::SeqCst);
+        }));
+        let _rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        assert_eq!(got.load(Ordering::SeqCst), 0, "合法 UTF-8 不通知");
+        let good = good.lock().unwrap().clone();
+        assert_eq!(good.len(), 1, "{good:?}");
+        assert_eq!(good[0]["a"].as_str(), Some("\u{FFFD}"));
+        assert!(!logs.lock().unwrap().join("\n").contains("解析不了"));
+    }
+
+    /// 標準模式：解析不了的行（含無效編碼的行）只記 log、不呼叫 on_unparsed_line，後面的行照常處理
+    #[tokio::test]
+    async fn 標準模式解析不了的行只記_log_不呼叫通知_後面的行照常() {
+        if node().is_none() {
+            return;
+        }
+        let bad_calls = Arc::new(AtomicUsize::new(0));
+        let incoming = Arc::new(AtomicUsize::new(0));
+        let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (b2, i2, l2) = (bad_calls.clone(), incoming.clone(), logs.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            "const w=process.stdout; w.write('{\"secret\":\"SECRETVALUE\\n'); w.write(Buffer.from([0x7b,0xff,0x7d,0x0a])); w.write('{\"method\":\"m\"}\\n', ()=>process.exit(0))",
+            Arc::new(|_| {}),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.on_json_line = None;
+        o.log = Arc::new(move |m| l2.lock().unwrap().push(m));
+        o.on_unparsed_line = Some(Arc::new(move |_| {
+            b2.fetch_add(1, Ordering::SeqCst);
+        }));
+        o.on_incoming = Arc::new(move |_, _| {
+            i2.fetch_add(1, Ordering::SeqCst);
+        });
+        let _rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        assert_eq!(bad_calls.load(Ordering::SeqCst), 0, "標準模式不通知呼叫端");
+        assert_eq!(incoming.load(Ordering::SeqCst), 1, "後面的正常行照常處理");
+        let l = logs.lock().unwrap().join("\n");
+        assert!(l.contains("第 1 行解析不了") && l.contains("第 2 行解析不了"), "標準模式解析不了的行要記 log：{l}");
+        assert!(!l.contains("SECRETVALUE"), "log 不記行內容：{l}");
+    }
+
+    /// 一個先給一行、再讀取失敗的來源
+    struct FailAfterOneLine(bool);
+    impl tokio::io::AsyncRead for FailAfterOneLine {
+        fn poll_read(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> std::task::Poll<std::io::Result<()>> {
+            if self.0 {
+                return std::task::Poll::Ready(Err(std::io::Error::other("模擬讀取失敗")));
+            }
+            self.0 = true;
+            buf.put_slice(b"ok\n");
+            std::task::Poll::Ready(Ok(()))
+        }
+    }
+
+    /// 讀取本身出錯（不是編碼問題）：回報出錯的行號，之前的行照常處理
+    #[tokio::test]
+    async fn 讀取出錯時回報行號_之前的行照常處理() {
+        let mut seen: Vec<String> = vec![];
+        let r = read_output_lines(FailAfterOneLine(false), |_, l| seen.push(l.trim().to_string()), |_| {}).await;
+        assert_eq!(seen, vec!["ok".to_string()]);
+        let (line_no, e) = r.expect("讀取出錯要回報，不能當成檔尾");
+        assert_eq!(line_no, 2);
+        assert!(e.to_string().contains("模擬讀取失敗"));
+    }
+
+    /// 讀取出錯後：呼叫端收到「讀取失敗」通知、log 有記、行程被結束（on_exit 被呼叫），不會默默繼續活著
+    #[tokio::test]
+    async fn 讀取出錯後通知呼叫端並結束行程() {
+        if node().is_none() {
+            return;
+        }
+        let got = Arc::new(Mutex::new(Vec::<UnparsedLine>::new()));
+        let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (g2, l2) = (got.clone(), logs.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            "setInterval(()=>{},1000)",
+            Arc::new(|_| {}),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.log = Arc::new(move |m| l2.lock().unwrap().push(m));
+        o.on_unparsed_line = Some(Arc::new(move |u| g2.lock().unwrap().push(u)));
+        let bad = o.on_unparsed_line.clone();
+        let log = o.log.clone();
+        let rpc = Rpc::spawn(o).unwrap();
+        assert!(rpc.alive());
+        rpc.on_read_failed(&log, &bad, 7, &std::io::Error::other("模擬讀取失敗"));
+        let mut done_rx = done_rx;
+        let waited = tokio::time::timeout(Duration::from_secs(10), &mut done_rx).await;
+        if waited.is_err() {
+            // 失敗時也收掉自己起的假程式：強制結束並等到它真的結束再判定
+            rpc.kill_now();
+            let t = Instant::now();
+            while rpc.alive() && t.elapsed() < Duration::from_secs(10) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+        assert!(waited.is_ok(), "行程要被結束（on_exit 被呼叫）");
+        assert!(!rpc.alive());
+        let got = got.lock().unwrap().clone();
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!((got[0].line_no, got[0].kind), (7, "讀取失敗"));
+        assert!(logs.lock().unwrap().join("\n").contains("第 7 行讀取失敗"));
+    }
+
+    /// stdout 處理的接線：讀到一行後讀取失敗，要走到「通知呼叫端＋結束行程」，之前那一行照常處理
+    #[tokio::test]
+    async fn stdout_讀取失敗的接線_通知呼叫端並結束行程_之前的行照常處理() {
+        if node().is_none() {
+            return;
+        }
+        let got = Arc::new(Mutex::new(Vec::<UnparsedLine>::new()));
+        let (g2, g3) = (got.clone(), got.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            "setInterval(()=>{},1000)",
+            Arc::new(|_| {}),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.on_unparsed_line = Some(Arc::new(move |u| g2.lock().unwrap().push(u)));
+        let bad = o.on_unparsed_line.clone();
+        let raw: Option<Arc<dyn Fn(Value) + Send + Sync>> = Some(Arc::new(|_| {}));
+        let log = o.log.clone();
+        let rpc = Rpc::spawn(o).unwrap();
+        assert!(rpc.alive());
+        drain_stdout(FailAfterOneLine(false), rpc.clone(), Arc::new(|_, _| {}), raw, bad, log).await;
+        let mut done_rx = done_rx;
+        let waited = tokio::time::timeout(Duration::from_secs(10), &mut done_rx).await;
+        if waited.is_err() {
+            // 失敗時也收掉自己起的假程式：強制結束並等到它真的結束再判定
+            rpc.kill_now();
+            let t = Instant::now();
+            while rpc.alive() && t.elapsed() < Duration::from_secs(10) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+        assert!(waited.is_ok(), "行程要被結束（on_exit 被呼叫）");
+        assert!(!rpc.alive());
+        let got = g3.lock().unwrap().clone();
+        let got: Vec<(usize, &str)> = got.iter().map(|u| (u.line_no, u.kind)).collect();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!(got[0].0, 1, "之前那一行照常處理（解析不了的行有通知）");
+        assert_eq!(got[1], (2, "讀取失敗"));
     }
 
     /// 正常結束（沒有被佔住的管線）不多等
