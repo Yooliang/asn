@@ -57,6 +57,12 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, sen
   const approvals = createApprovals({ log })
   const workers = new Map()
   let handlers = { onSent() {}, onFail() {}, onReply() {} }
+  // 帳本在引擎層級只開一次、第一次用到才開：start() 與動態開夥伴（addPartnerWorker）共用同一份
+  let storeFactory = null
+  const store = cfg => {
+    storeFactory ??= openStore(path.join(workDir, 'acp-workers.json'), log)
+    return storeFactory(cfg)
+  }
 
   const notify = async m => { if (!send) throw new Error('橋沒有提供寄信函式'); await send(m) }
 
@@ -69,7 +75,6 @@ export function createEngine({ log, workDir, mailboxName, env = process.env, sen
     capabilities: () => ({ listWindows: true, deliver: true, openWindow: false, selfRecv: false, identity: false, fallbackByActivity: false }),
     start(h) {
       handlers = h
-      const store = openStore(path.join(workDir, 'acp-workers.json'), log)
       const conf = loadWorkersConfig({ file, workDir })
       for (const e of conf.errors) log(`acp: 設定有問題，已跳過：${e}`)
       for (const w of conf.warnings) log(`acp: 設定提醒：${w}`)
