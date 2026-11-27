@@ -1667,7 +1667,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return 0;
         }
         let w = self.wez(dir);
-        let dead: Vec<(String, u64, PathBuf, Option<String>)> = rows.into_iter().filter(|(_, pane, sock, nonce, _)| w.pane_exit(sock, *pane, Some(nonce)).is_some()).map(|(id, pane, sock, _, name)| (id, pane, sock, name)).collect();
+        let dead: Vec<(String, u64, PathBuf, Option<String>)> = rows.into_iter().filter(|(_, pane, sock, nonce, _)| super::cli_gate::routine(|| w.pane_exit(sock, *pane, Some(nonce))).is_some()).map(|(id, pane, sock, _, name)| (id, pane, sock, name)).collect();
         for (id, pane, sock, _) in &dead {
             let _ = w.kill_pane(sock, *pane);
             elog!("終端：夥伴自己結束了，收掉它的窗格（編號 {id}）");
@@ -3607,7 +3607,12 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
             stuck.retain_windows(&all.iter().filter(|(id, _)| windows.iter().any(|(w, _)| w == id)).map(|(_, n)| n.clone()).collect::<Vec<_>>());
             for id in schedule.due(now, &windows, free_memory_bytes()) {
                 let Some(pace) = windows.iter().find(|(w, _)| *w == id).map(|(_, p)| *p) else { continue };
-                let view = terms.partner_screen_view(&id);
+                // 背景讀畫面是「例行」工作：終端服務剛逾時就略過這一次（不算讀失敗、不退避），使用者按的動作不受影響
+                let view = super::cli_gate::routine(|| terms.partner_screen_view(&id));
+                if matches!(&view, Err(e) if super::cli_gate::is_skipped(e)) {
+                    schedule.skipped(&id, now);
+                    continue;
+                }
                 // 保底（#2256）：畫面停在「Do you want to proceed?」加編號選項超過 5 分鐘，認不認得成權限框都要通知。
                 // 讀到畫面才比對；讀失敗不算框消失（不重置計時）
                 if let (Some((_, name)), Ok(seen)) = (all.iter().find(|(w, _)| *w == id), view.as_ref()) {
@@ -6566,9 +6571,11 @@ mod tests {
 
         const MUX_PID: u32 = 4000;
 
-        /// #2424 A：暫存的列重試接回（測試放在 launch/term_reclaim_tests.rs，路徑相對於 term/tests/mux_mode/）
-        #[path = "../../../term_reclaim_tests.rs"]
-        mod reclaim_retry;
+        /// #2424 A：暫存的列重試接回（測試放在 launch/term_reclaim_tests.rs）。
+        /// 用 `include!`（路徑相對於這支檔案所在的 launch/）而不是 `#[path]`：`#[path]` 在行內模組裡會穿過不存在的資料夾，Linux 編譯不過
+        mod reclaim_retry {
+            include!("term_reclaim_tests.rs");
+        }
 
         /// #1818 端到端：終端服務崩潰、ASN 自己還握著它的 handle（程序已結束、建立時間還讀得到）。
         /// 走真的 mux_snapshot（live_pid）→ 監看一輪（run_round）→ 事故、紀錄、通知 → 接回（resume_entries，和重開機接回同一套 run）。
@@ -7198,6 +7205,26 @@ mod tests {
             *rig.runner.inner.clean_err.borrow_mut() = Some("WezTerm 指令逾時（15 秒），已結束該子行程".into());
             let e = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
             assert!(matches!(e, crate::launch::win_term::WinOpenError::Started(_)), "窗格可能已經開了：不退路");
+        }
+
+        /// #2424 X4：開窗時指令排隊沒送出（等不到位子、被暫停略過）窗格一定沒開：回「沒啟動」、不留「開窗結果不確定」的記號。
+        /// 若又改成只認「執行檔起不來」，排隊沒送出會被當成已啟動（紅）
+        #[test]
+        fn 開窗格排隊沒送出_是沒啟動_不留不確定記號() {
+            use crate::launch::cli_gate::{QUEUE_TIMEOUT, SKIPPED};
+            use crate::launch::win_term::WinOpenError;
+            let (rig, paths) = mux_rig();
+            for e in [format!("{QUEUE_TIMEOUT}，排隊 20 秒仍輪不到，這次沒有送出"), format!("{SKIPPED}（約 30 秒後再試）")] {
+                *rig.runner.inner.clean_err.borrow_mut() = Some(e);
+                let err = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+                assert!(matches!(err, WinOpenError::NotStarted(_)), "指令沒送出＝窗格一定沒開，可以退路");
+                assert!(!paths.dir.join("spawn-unsure").exists(), "沒送出不能留「結果不確定」的記號（會擋住收空 mux）");
+            }
+            // 對照：真的逾時（可能已經開了）要留記號
+            *rig.runner.inner.clean_err.borrow_mut() = Some("WezTerm 指令逾時（15 秒），已結束該子行程".into());
+            let err = rig.svc.start_pi_staged(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap_err();
+            assert!(matches!(err, WinOpenError::Started(_)));
+            assert!(paths.dir.join("spawn-unsure").exists(), "逾時要留記號");
         }
 
         #[test]
