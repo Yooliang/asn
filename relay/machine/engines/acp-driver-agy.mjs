@@ -48,7 +48,20 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
     if (ev.event === 'result' && cur) return onResult(ev.result ?? {})
   }
 
+  // 解讀工具步驟與檢查過程中出任何錯（例如參數巢狀太深）：當成沒通過、整輪中止（偏向擋，跟標準 ACP 那條路一樣）。
+  // log 只記工具名與例外類別，不記參數內容
   function onStep(s) {
+    try { handleStep(s) } catch (e) {
+      if (!cur) return
+      const name = redact(String(s?.tool_name ?? '')).slice(0, 60)
+      const kind = String(e?.name ?? 'Error')
+      cur.violation = { reason: '讀取檢查沒能完成，為了安全已中止', summary: `工具步驟檢查失敗：${name}` }
+      log(`agy 工具步驟解讀或檢查出錯，當成沒通過 → kill agy：${name}（${kind}）`)
+      kill('violation')
+    }
+  }
+
+  function handleStep(s) {
     if (s.conversation_id && !sid) sid = s.conversation_id
     if (s.step_type !== 'tool') return
     const info = describeAgyTool(s.tool_name, s.tool_info?.parameters)

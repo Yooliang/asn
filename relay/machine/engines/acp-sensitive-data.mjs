@@ -134,8 +134,16 @@ export const IS_WIN = process.platform === 'win32'
 // 一般文字的空白判定要跟 Rust 的 char::is_whitespace 一樣（JS 的 \s 多收了位元組順序記號）
 const WS = '\\t-\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000'
 export const RE_WS = new RegExp(`[${WS}]`)
-const RE_WS_EDGE = new RegExp(`^[${WS}]+|[${WS}]+$`, 'g')
-export const trimWs = s => s.replace(RE_WS_EDGE, '')
+const isWsCode = c => (c >= 0x09 && c <= 0x0d) || c === 0x20 || c === 0x85 || c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a)
+  || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000
+/** 去掉頭尾空白：從兩端逐字元往內看（線性時間；字串中間有大量連續空白時，不會像「^空白+|空白+$」的正規式那樣變成平方時間） */
+export const trimWs = s => {
+  let a = 0
+  let b = s.length
+  while (a < b && isWsCode(s.charCodeAt(a))) a += 1
+  while (b > a && isWsCode(s.charCodeAt(b - 1))) b -= 1
+  return a === 0 && b === s.length ? s : s.slice(a, b)
+}
 export const hasWs = s => RE_WS.test(s)
 /** UTF-8 位元組長度（長度上限是以位元組算的） */
 export const byteLen = s => Buffer.byteLength(s, 'utf8')

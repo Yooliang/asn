@@ -187,6 +187,28 @@ test('agy：讀取一般檔（含資料夾外）放行；敏感位置整輪中�
   } finally { await r.done() }
 })
 
+test('agy：參數裡有敏感路徑，另一個欄位是極深的巢狀陣列字串——整輪中止，不會回 tool-done', async () => {
+  const r = rig([agy()])
+  try {
+    const deep = '['.repeat(3000) + ']'.repeat(3000)
+    r.mail(ID(1), `@@TOOL read_file ${JSON.stringify({ Path: path.join(r.home, '.ssh', 'x'), Extra: deep })}`)
+    await r.waitFor(() => r.fails().length === 1, '整輪中止')
+    await sleep(300)
+    assert.equal(r.replies().length, 0, '不能回 tool-done')
+  } finally { await r.done() }
+})
+
+test('agy：只有極深的巢狀陣列字串（沒有別的敏感欄位）也中止，不會被略過', async () => {
+  const r = rig([agy()])
+  try {
+    const deep = '['.repeat(3000) + ']'.repeat(3000)
+    r.mail(ID(1), `@@TOOL read_file ${JSON.stringify({ Extra: deep })}`)
+    await r.waitFor(() => r.fails().length === 1, '整輪中止')
+    await sleep(300)
+    assert.equal(r.replies().length, 0, '不能回 tool-done')
+  } finally { await r.done() }
+})
+
 test('agy：execute 明寫 deny——回報「沒有回覆內容＋被政策拒絕的動作」', async () => {
   const r = rig([agy({ permissions: { execute: 'deny' } })])
   try {

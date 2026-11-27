@@ -545,15 +545,33 @@ fn hits(f: &str, tool: ReadTool, roots: &SensitiveRoots) -> bool {
     if is_host_key(f) || is_proc_environ(f) || SYSTEM_FILES.contains(&f) {
         return true;
     }
-    if recursive && (f == HOST_KEY_DIR || is_ancestor_of(f, HOST_KEY_DIR) || f == "/proc" || is_ancestor_of(f, "/proc") || f.strip_prefix("/proc/").is_some_and(|r| !r.contains('/')) || SYSTEM_FILES.iter().any(|s| is_ancestor_of(f, s))) {
+    if recursive && (f == HOST_KEY_DIR || is_ancestor_of(f, HOST_KEY_DIR) || f == "/proc" || is_ancestor_of(f, "/proc") || is_proc_environ_dir(f) || SYSTEM_FILES.iter().any(|s| is_ancestor_of(f, s))) {
         return true;
     }
     other_home_hit(f, tool, roots)
 }
 
-/// `/proc/<編號>/environ`
+/// `/proc/<編號>/environ`，以及執行緒形式 `/proc/<編號>/task/<執行緒編號>/environ`
 fn is_proc_environ(f: &str) -> bool {
-    f.strip_prefix("/proc/").and_then(|r| r.split_once('/')).is_some_and(|(pid, rest)| !pid.is_empty() && rest == "environ")
+    let Some(rest) = f.strip_prefix("/proc/") else { return false };
+    let segs: Vec<&str> = rest.split('/').collect();
+    match segs.as_slice() {
+        [pid, "environ"] => !pid.is_empty(),
+        [pid, "task", tid, "environ"] => !pid.is_empty() && !tid.is_empty(),
+        _ => false,
+    }
+}
+
+/// 底下含環境檔的 /proc 資料夾（遞迴搜尋會掃進去）：`/proc/<編號>`、`/proc/<編號>/task`、`/proc/<編號>/task/<執行緒編號>`
+fn is_proc_environ_dir(f: &str) -> bool {
+    let Some(rest) = f.strip_prefix("/proc/") else { return false };
+    let segs: Vec<&str> = rest.split('/').collect();
+    match segs.as_slice() {
+        [_] => true,
+        [pid, "task"] => !pid.is_empty(),
+        [pid, "task", tid] => !pid.is_empty() && !tid.is_empty(),
+        _ => false,
+    }
 }
 
 /// 別人的家目錄：`/root`，以及家目錄所在資料夾（`/home`、`C:\Users`…）底下不是自己家的子資料夾（共用的 Public 等不算）

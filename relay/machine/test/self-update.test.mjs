@@ -95,6 +95,30 @@ test('真的 git：上游改了 relay/machine/ → 本機 fast-forward；只改�
   }
 })
 
+test('真的 git：只改共用清單（relay/shared/）→ 更新；只改共用的測試向量 → 不動', { skip: !hasGit() }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'self-update-shared-'))
+  const git = (cwd, ...a) => execFileSync('git', ['-C', cwd, ...a], { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+  const up = path.join(dir, 'up.git'), dev = path.join(dir, 'dev'), node = path.join(dir, 'node')
+  const put = (rel, text) => { fs.mkdirSync(path.dirname(path.join(dev, rel)), { recursive: true }); fs.writeFileSync(path.join(dev, rel), text) }
+  const push = msg => { git(dev, 'add', '-A'); git(dev, 'commit', '-qm', msg); git(dev, 'push', '-q', 'origin', 'main') }
+  try {
+    execFileSync('git', ['init', '--bare', '-q', '-b', 'main', up])
+    execFileSync('git', ['clone', '-q', up, dev], { stdio: 'ignore' })
+    git(dev, 'config', 'user.email', 't@t'); git(dev, 'config', 'user.name', 't'); git(dev, 'checkout', '-q', '-b', 'main')
+    put('relay/machine/bridge.mjs', 'v1\n'); put('relay/shared/sensitive-roots.json', '{"a":1}\n'); put('relay/shared/test-vectors/v.json', '{"v":1}\n')
+    push('v1')
+    execFileSync('git', ['clone', '-q', up, node], { stdio: 'ignore' })
+    put('relay/shared/test-vectors/v.json', '{"v":2}\n'); push('vectors')
+    assert.equal((await checkAndUpdate(gitRunner(node))).action, 'none', '只改測試向量不更新')
+    put('relay/shared/sensitive-roots.json', '{"a":2}\n'); push('roots')
+    const r = await checkAndUpdate(gitRunner(node))
+    assert.equal(r.action, 'updated', '改共用清單要更新')
+    assert.deepEqual(r.changed, ['relay/shared/sensitive-roots.json'])
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 function hasGit() { try { execFileSync('git', ['--version'], { stdio: 'ignore' }); return true } catch { return false } }
 
 test('orphansOf：上一個橋不在了，父程序是它的才算孤兒；上一個橋還活著就都不碰', async () => {

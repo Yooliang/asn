@@ -87,12 +87,24 @@ const looksLikePath = s => s.includes('/') || s.includes('\\') || s.startsWith('
 
 const pushUnique = (out, s) => { if (trimWs(s) !== '' && !out.includes(s)) out.push(s) }
 
-function walk(v, underKey, out, depth) {
+/** 陣列、物件往裡走最多幾層；再深的那個值不再往下走，整段原樣收進來，判定那邊因為「像容器卻解不開」而擋（避免遞迴超出呼叫堆疊） */
+export const MAX_NEST = 64
+
+/** 超過層數上限的值轉成要檢查的字串：轉得出來就用原樣；深到連轉換都失敗，就給一個像容器的字串，判定一樣會擋 */
+function overDeepText(v) {
+  try {
+    const s = JSON.stringify(v)
+    if (typeof s === 'string' && containerLike(s)) return s
+  } catch { /* 太深，轉不出來 */ }
+  return Array.isArray(v) ? '[' : '{'
+}
+
+function walk(v, underKey, out, depth, nest = 0) {
   if (typeof v === 'string') {
     // 字串能解成物件或陣列：往裡面找（有層數上限，超過的原樣收進來由判定擋）
     const inner = jsonContainer(v)
     if (inner !== null) {
-      if (depth < DATA.maxJsonDepth) walk(inner, underKey, out, depth + 1)
+      if (depth < DATA.maxJsonDepth) walk(inner, underKey, out, depth + 1, nest)
       else pushUnique(out, v)
       return
     }
@@ -109,11 +121,14 @@ function walk(v, underKey, out, depth) {
     }
     return
   }
-  if (Array.isArray(v)) { v.forEach(x => walk(x, underKey, out, depth)); return }
+  if (Array.isArray(v) || isObj(v)) {
+    if (nest >= MAX_NEST) { pushUnique(out, overDeepText(v)); return }
+  }
+  if (Array.isArray(v)) { for (const x of v) walk(x, underKey, out, depth, nest + 1); return }
   if (isObj(v)) {
     for (const [k, x] of Object.entries(v)) {
       // 指令與程式碼欄位是整段命令，不是路徑，路徑判定管不到（敏感清單不是邊界）
-      if (keyIsPath(k) || !DATA.skipKeys.includes(k.toLowerCase())) walk(x, underKey || keyIsPath(k), out, depth)
+      if (keyIsPath(k) || !DATA.skipKeys.includes(k.toLowerCase())) walk(x, underKey || keyIsPath(k), out, depth, nest + 1)
     }
   }
 }

@@ -8,8 +8,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import util from 'node:util'
-import { DATA } from '../engines/acp-sensitive-data.mjs'
-import { containerLike, fragments, proseCandidates } from '../engines/acp-sensitive-extract.mjs'
+import { DATA, trimWs } from '../engines/acp-sensitive-data.mjs'
+import { MAX_NEST, containerLike, fragments, proseCandidates } from '../engines/acp-sensitive-extract.mjs'
 import { driveRelative, expand, nstr, opaqueDevicePath, stripFileUrl, wildcardPrefix, winClean } from '../engines/acp-sensitive-path.mjs'
 import {
   ATTACHMENTS_READABLE, ReadTool, ReadVerdict, buildRoots, extractReadPaths, homesFrom, paramKeys, readToolOfAcpKind, readToolOfAgy, readVerdict, rootsForWorker,
@@ -103,6 +103,44 @@ for (const c of V.pure.extract) {
     if (c.e.containerLike) assert.equal(containerLike(got[0]), true)
   })
 }
+test('extract：陣列、物件巢狀超過層數上限——那個值不再往下走，整段原樣收進來，判定結果是擋', () => {
+  mkdirs([P.HOME, P.WORK])
+  const ctx = { roots: buildRoots([P.HOME], []), base: P.WORK, tool: ReadTool.Single }
+  for (const wrap of [x => [x], x => ({ items: x })]) {
+    let v = ['a.txt']
+    for (let i = 0; i < MAX_NEST + 20; i += 1) v = wrap(v)
+    const got = extractReadPaths({ Path: 'ok.txt', Extra: v })
+    const over = got.filter(x => containerLike(x))
+    assert.equal(over.length, 1, JSON.stringify(got).slice(0, 200))
+    assert.notEqual(readVerdict(over[0], ctx), ReadVerdict.Allow)
+  }
+  // 層數內的照常往下抽
+  let ok = ['sub/a.txt']
+  for (let i = 0; i < MAX_NEST - 5; i += 1) ok = [ok]
+  assert.deepEqual(extractReadPaths({ Extra: ok }), ['sub/a.txt'])
+})
+
+test('extract：巢狀深到連轉成字串都失敗也不丟例外，照樣收一個像容器的字串', () => {
+  let huge = []
+  for (let i = 0; i < 200000; i += 1) huge = [huge]
+  const got = extractReadPaths({ Extra: huge })
+  assert.equal(got.length, 1)
+  assert.equal(containerLike(got[0]), true)
+})
+
+test('trimWs 與 extractReadPaths：中間有大量連續空白也是線性時間', () => {
+  const s = `a${' '.repeat(80000)}b`
+  const t0 = Date.now()
+  assert.equal(trimWs(s), s)
+  assert.equal(trimWs(`  　${s}  `), s)
+  assert.equal(trimWs(' \t\u0085﻿'), '﻿') // 位元組順序記號不算空白，跟電腦版一致
+  assert.ok(Date.now() - t0 < 200, `trimWs 花了 ${Date.now() - t0}ms`)
+  const t1 = Date.now()
+  extractReadPaths({ Extra: s })
+  extractReadPaths({ Path: s })
+  assert.ok(Date.now() - t1 < 200, `extractReadPaths 花了 ${Date.now() - t1}ms`)
+})
+
 test('向量 prose：夾在有空白文字裡的敏感位置片段', () => {
   for (const c of V.pure.prose) {
     const got = proseCandidates(c.line)

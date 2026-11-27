@@ -27,12 +27,20 @@ function isHostKey(f) {
   return f.slice(0, k) === DATA.hostKeyDir && n.startsWith('ssh_host_') && n.endsWith('_key')
 }
 
-/** `/proc/<編號>/environ` */
+/** `/proc/<編號>/environ`，以及執行緒形式 `/proc/<編號>/task/<執行緒編號>/environ` */
 function isProcEnviron(f) {
   if (!f.startsWith('/proc/')) return false
-  const rest = f.slice(6)
-  const k = rest.indexOf('/')
-  return k > 0 && rest.slice(k + 1) === 'environ'
+  const segs = f.slice(6).split('/')
+  if (segs.length === 2) return segs[0] !== '' && segs[1] === 'environ'
+  return segs.length === 4 && segs[0] !== '' && segs[1] === 'task' && segs[2] !== '' && segs[3] === 'environ'
+}
+
+/** 底下含環境檔的 /proc 資料夾（遞迴搜尋會掃進去）：`/proc/<編號>`、`/proc/<編號>/task`、`/proc/<編號>/task/<執行緒編號>` */
+function isProcEnvironDir(f) {
+  if (!f.startsWith('/proc/')) return false
+  const segs = f.slice(6).split('/')
+  if (segs.length === 1) return true
+  return (segs.length === 2 || segs.length === 3) && segs[0] !== '' && segs[1] === 'task' && (segs.length === 2 || segs[2] !== '')
 }
 
 /** 別人的家目錄：`/root`，以及家目錄所在資料夾（`/home`、`C:\Users`…）底下不是自己家的子資料夾（共用的 Public 等不算） */
@@ -66,8 +74,7 @@ function hits(f, tool, roots) {
   const systemFiles = DATA.systemFiles
   if (isHostKey(f) || isProcEnviron(f) || systemFiles.includes(f)) return true
   if (recursive) {
-    const procPid = f.startsWith('/proc/') && !f.slice(6).includes('/')
-    if (f === hostKeyDir || isAncestorOf(f, hostKeyDir) || f === '/proc' || isAncestorOf(f, '/proc') || procPid || systemFiles.some(s => isAncestorOf(f, s))) return true
+    if (f === hostKeyDir || isAncestorOf(f, hostKeyDir) || f === '/proc' || isAncestorOf(f, '/proc') || isProcEnvironDir(f) || systemFiles.some(s => isAncestorOf(f, s))) return true
   }
   return otherHomeHit(f, tool, roots)
 }
