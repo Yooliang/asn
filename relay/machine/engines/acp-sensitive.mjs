@@ -3,7 +3,7 @@
 // 判定本身只做路徑解析（解開捷徑），不讀檔案內容；acp-policy.mjs 的 decide（標準 ACP）與 acp-worker.mjs 的 checkTool（agy）呼叫它。
 // 比對的是路徑，不是邊界：執行指令的內容不經這裡。已知限制：大小寫不分的檔案系統（例如 macOS 預設）上，只有 Windows 會把比對轉成小寫。
 import { insideAgyConvDir, validConvId } from './acp-brain.mjs'
-import { HOST_KEY_DIR, IS_WIN, MAX_PATH_LEN, SHARED_HOME_NAMES, SYSTEM_FILES, byteLen, trimWs } from './acp-sensitive-data.mjs'
+import { DATA, IS_WIN, byteLen, sensitiveDataStatus, trimWs } from './acp-sensitive-data.mjs'
 import { isExempt } from './acp-sensitive-exempt.mjs'
 import { containerLike } from './acp-sensitive-extract.mjs'
 import {
@@ -24,7 +24,7 @@ function isHostKey(f) {
   const k = f.lastIndexOf('/')
   if (k < 0) return false
   const n = f.slice(k + 1)
-  return f.slice(0, k) === HOST_KEY_DIR && n.startsWith('ssh_host_') && n.endsWith('_key')
+  return f.slice(0, k) === DATA.hostKeyDir && n.startsWith('ssh_host_') && n.endsWith('_key')
 }
 
 /** `/proc/<編號>/environ` */
@@ -44,7 +44,7 @@ function otherHomeHit(f, tool, roots) {
     if (recursive && (f === parent || isAncestorOf(f, parent))) return true
     if (!f.startsWith(`${parent}/`)) continue
     const name = f.slice(parent.length + 1).split('/')[0]
-    if (name !== '' && !SHARED_HOME_NAMES.includes(name) && !mine(`${parent}/${name}`)) return true
+    if (name !== '' && !DATA.sharedHomeNames.includes(name) && !mine(`${parent}/${name}`)) return true
   }
   return false
 }
@@ -62,10 +62,12 @@ function hits(f, tool, roots) {
     const inDir = k >= 0 && f.slice(0, k) === dir && f.slice(k + 1).startsWith(pre)
     if (inDir || (recursive && (f === dir || isAncestorOf(f, dir)))) return true
   }
-  if (isHostKey(f) || isProcEnviron(f) || SYSTEM_FILES.includes(f)) return true
+  const hostKeyDir = DATA.hostKeyDir
+  const systemFiles = DATA.systemFiles
+  if (isHostKey(f) || isProcEnviron(f) || systemFiles.includes(f)) return true
   if (recursive) {
     const procPid = f.startsWith('/proc/') && !f.slice(6).includes('/')
-    if (f === HOST_KEY_DIR || isAncestorOf(f, HOST_KEY_DIR) || f === '/proc' || isAncestorOf(f, '/proc') || procPid || SYSTEM_FILES.some(s => isAncestorOf(f, s))) return true
+    if (f === hostKeyDir || isAncestorOf(f, hostKeyDir) || f === '/proc' || isAncestorOf(f, '/proc') || procPid || systemFiles.some(s => isAncestorOf(f, s))) return true
   }
   return otherHomeHit(f, tool, roots)
 }
@@ -93,10 +95,12 @@ const tryCanon = (canon, p) => { try { return canon(p) } catch { return null } }
  * 解析不了（含展開不了的變數）而字面落在使用者資料夾底下，偏向擋
  */
 export function readVerdict(pathRaw, ctx) {
+  // 清單載入失敗：什麼路徑都沒辦法判定，一律擋（連空路徑也不放行）
+  if (!sensitiveDataStatus().ok) return ReadVerdict.Unresolvable
   const raw = trimWs(String(pathRaw ?? ''))
   if (raw === '') return ReadVerdict.Allow
   // 超長或含換行的路徑欄位：沒辦法逐段判定，偏向擋
-  if (byteLen(pathRaw) > MAX_PATH_LEN || /[\n\r\0]/.test(pathRaw)) return ReadVerdict.Unresolvable
+  if (byteLen(pathRaw) > DATA.maxPathLen || /[\n\r\0]/.test(pathRaw)) return ReadVerdict.Unresolvable
   // 層數超過上限、還沒解開的巢狀 JSON 字串（抽取時原樣收進來的）：沒辦法判定，偏向擋
   if (containerLike(raw)) return ReadVerdict.Unresolvable
   const { roots, base } = ctx

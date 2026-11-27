@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { askText } from './acp-approvals.mjs'
 import { WorkerError } from './acp-errors.mjs'
 import { agyBrainDir, categoryLabel, decide, insideAgyConvDir, NO_READ_PATH_NOTE, pathsBlockReason, readBlockReason, redact } from './acp-policy.mjs'
-import { DATA } from './acp-sensitive-data.mjs'
+import { DATA, DATA_FAILED_TEXT, sensitiveDataStatus } from './acp-sensitive-data.mjs'
 import { ReadVerdict, rootsForWorker } from './acp-sensitive.mjs'
 
 const MAX_REPLY_CHARS = 18_000     // 仲介單封上限 20000 字
@@ -20,9 +20,11 @@ export const AGY_DOCS_NOTE = '你自己的對話資料夾（~/.gemini/antigravit
 
 // 讀取可以讀整台電腦（敏感檔除外）；寫檔、執行指令仍限工作資料夾內，兩件事分開講，別讓寫的限制被讀的放寬沖淡。
 // 這句話與電腦版 acp_worker.rs 的 READ_OK 逐字相同（存在 relay/shared/sensitive-roots.json，兩邊測試都比對）
-export const READ_OK = DATA.preambleReadOk
+// 清單在第一次用到才載入，所以是函式；載入失敗時這句會改成說明讀取暫時不可用
+export const readOkText = () => DATA.preambleReadOk
 
 export function preambleFor(cfg) {
+  const READ_OK = readOkText()
   const p = cfg.permissions.rules
   const caps = [['write', '寫檔', '寫檔（限工作資料夾內，資料夾外一律不要寫）'], ['execute', '執行指令', '執行指令（限工作資料夾內，資料夾外一律不要碰）']]
   const can = caps.filter(([c]) => p[c] === 'allow').map(([, , l]) => l)
@@ -44,6 +46,9 @@ export function preambleFor(cfg) {
 export function createWorker({ cfg, env, log, handlers, approvals, notify, store, makeDriver, now = Date.now, realHome, workDir = '' }) {
   if (typeof realHome !== 'string' || !realHome) throw new Error('createWorker 需要明確的 realHome（這台電腦實際的使用者資料夾）')
   const name = cfg.name
+  // 敏感位置清單（共用 JSON）在這裡第一次載入；讀不到或格式不合格時，這個引擎的讀取一律擋，其餘機器橋功能不受影響，原文寫進 log
+  const dataStatus = sensitiveDataStatus()
+  if (!dataStatus.ok) log(`[${name}] 讀取檢查設定載入失敗，背景夥伴讀取一律擋：${dataStatus.error.message}`)
   // 讀取的敏感位置清單：建立時用兩個家目錄（工作者環境的、realHome）加上這位的工作資料夾算好，放進政策（#2356）；正式與測試走同一條路
   const sensitive = rootsForWorker(env, realHome, name, [cfg.cwd, ...cfg.permissions.allowDirs], workDir)
   const policy = { ...cfg.permissions, sensitive }
@@ -103,6 +108,8 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
   // agy 原生：只能事後絆線（agy 無頭模式不能暫停等人）。回 { ok } 或 { ok:false, reason }
   function checkTool(info) {
     const c = info.category
+    // 清單載入失敗：除了寫入（只看白名單資料夾），都沒辦法檢查路徑，一律不放行
+    if (c !== 'write' && !sensitiveDataStatus().ok) return { ok: false, reason: `${categoryLabel(c)}不被允許：${DATA_FAILED_TEXT}` }
     // 不是讀取、寫入的工具（執行、網路、沒登記的）：參數裡抽得到路徑就照讀取判定，命中整輪中止
     if (c !== 'read' && c !== 'write' && info.scanPaths?.length) {
       const b = pathsBlockReason(sensitive, info.scanPaths, info.readTool, cfg.cwd)

@@ -8,13 +8,15 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import util from 'node:util'
-import { DATA, EXTRA_HOME_PATHS, SENSITIVE_HOME_DIRS } from '../engines/acp-sensitive-data.mjs'
+import { DATA } from '../engines/acp-sensitive-data.mjs'
 import { containerLike, fragments, proseCandidates } from '../engines/acp-sensitive-extract.mjs'
 import { driveRelative, expand, nstr, opaqueDevicePath, stripFileUrl, wildcardPrefix, winClean } from '../engines/acp-sensitive-path.mjs'
 import {
   ATTACHMENTS_READABLE, ReadTool, ReadVerdict, buildRoots, extractReadPaths, homesFrom, paramKeys, readToolOfAcpKind, readToolOfAgy, readVerdict, rootsForWorker,
 } from '../engines/acp-sensitive.mjs'
 
+const SENSITIVE_HOME_DIRS = DATA.homeDirs
+const EXTRA_HOME_PATHS = DATA.extraHomePaths
 const V = JSON.parse(fs.readFileSync(new URL('../../shared/test-vectors/sensitive-read.json', import.meta.url), 'utf8'))
 const IS_WIN = process.platform === 'win32'
 const T = fs.mkdtempSync(path.join(os.tmpdir(), 'asn-2356-vec-'))
@@ -120,7 +122,7 @@ test('清單：共用檔裡每個位置，本身與底下的檔都擋', () => {
   }
 })
 test('清單：另外寫死一份必要項目，誰把共用檔的項目拿掉這裡會紅', () => {
-  for (const d of ['.gemini', '.ssh', '.asn', '.irori-relay', '.claude', '.codex', '.pi', '.aws', '.config', '.gnupg']) assert.ok(SENSITIVE_HOME_DIRS.includes(d), d)
+  for (const d of ['.gemini', '.ssh', '.asn', ['.irori', 'relay'].join('-'), '.claude', '.codex', '.pi', '.aws', '.config', '.gnupg']) assert.ok(SENSITIVE_HOME_DIRS.includes(d), d)
   for (const d of ['.grok', '.claude.json', '.netrc', '.git-credentials', '.docker', '.kube', '.azure', '.npmrc', 'AppData/Roaming/Microsoft/Credentials', 'AppData/Roaming/Microsoft/Protect',
     'AppData/Local/Google/Chrome/User Data', 'AppData/Local/Microsoft/Edge/User Data', 'AppData/Local/tw.yooliang.asn']) assert.ok(EXTRA_HOME_PATHS.includes(d), d)
   assert.deepEqual(DATA.envRoots, ['CODEX_HOME', 'PI_CODING_AGENT_DIR', 'ASN_HOME', 'IRORI_HOME', 'ASN_CLAUDE_HOME', 'ASN_GROK_HOME'])

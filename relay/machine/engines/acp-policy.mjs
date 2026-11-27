@@ -8,7 +8,7 @@
 // ask＝問人：轉接器把請求摘要寄給指定的人，等回覆（見 acp-approvals.mjs）；逾時一律當拒絕。
 import path from 'node:path'
 import { agyBrainDir, insideAgyConvDir, norm, validConvId } from './acp-brain.mjs'
-import { DATA } from './acp-sensitive-data.mjs'
+import { DATA_FAILED_TEXT, currentSensitiveData, sensitiveDataStatus } from './acp-sensitive-data.mjs'
 import { ReadVerdict, extractReadPaths, paramKeys, readToolOfAcpKind, readToolOfAgy, readVerdict, ReadTool } from './acp-sensitive.mjs'
 
 // agy 自己各段對話的資料夾（#2351）在 acp-brain.mjs；從這裡也拿得到
@@ -35,12 +35,20 @@ export function categoryOfAcpKind(kind) {
 // agy 原生 stream-json 的工具名 → 類別（白名單；與電腦版 acp_policy.rs 同一份分類，表在 relay/shared/sensitive-roots.json 的 agyTools）。
 // 'internal'＝代理自己的內部控制（規劃、等待、結束…），一律放行；會啟動指令、子代理、工作流程、外部工具，或把訊息、排程送出去的，都照執行類的政策。
 // 沒登記的新工具名先用關鍵字推測（寫入、網路比預設更具體）；推測不出來照執行類處理，不再當內部控制放行（呼叫端用 isRegisteredAgyTool 判斷要不要記 log）
-const AGY_INDEX = new Map(['read', 'write', 'execute', 'network', 'internal'].flatMap(c => DATA.agyTools[c].map(n => [n, c])))
+// 第一次用到才建（清單不在匯入時讀）；清單換了一份（測試改讀別的檔）就重建
+let agyIndexCache = null
+function agyIndex() {
+  const data = currentSensitiveData()
+  if (agyIndexCache && agyIndexCache.data === data) return agyIndexCache.index
+  const index = new Map(['read', 'write', 'execute', 'network', 'internal'].flatMap(c => data.agyTools[c].map(n => [n, c])))
+  agyIndexCache = { data, index }
+  return index
+}
 /** 這個工具名登記過嗎。沒登記的會用關鍵字推測類別、推不出來照執行類處理，呼叫端要記一行 log，不能默默放行 */
-export const isRegisteredAgyTool = name => AGY_INDEX.has(String(name ?? '').toLowerCase())
+export const isRegisteredAgyTool = name => agyIndex().has(String(name ?? '').toLowerCase())
 export function categoryOfAgyTool(name) {
   const n = String(name ?? '').toLowerCase()
-  if (AGY_INDEX.has(n)) return AGY_INDEX.get(n)
+  if (agyIndex().has(n)) return agyIndex().get(n)
   if (n.startsWith('browser_')) return 'network'
   if (['write', 'edit', 'replace', 'delete', 'remove', 'move', 'create', 'patch', 'sed_'].some(k => n.includes(k))) return 'write'
   if (['run', 'exec', 'command', 'shell', 'terminal', 'bash'].some(k => n.includes(k))) return 'execute'
@@ -82,6 +90,9 @@ export const NO_READ_PATH_NOTE = '讀取請求沒有可辨識的路徑，無法�
 
 /** 路徑逐一判定（讀取類工具用 req.paths，其他工具用參數裡抽到的路徑）。回傳 { verdict, reason }（擋下的原因）或 null（都可以讀） */
 export function pathsBlockReason(roots, paths, tool, base) {
+  // 敏感位置清單載入失敗：連沒帶路徑的請求也擋（判定本身做不了）
+  if (!sensitiveDataStatus().ok) return { verdict: ReadVerdict.Unresolvable, reason: DATA_FAILED_TEXT }
+  // 敏感位置清單載入失敗：連沒帶路徑的請求也擋（判定本身做不了）
   const ctx = { roots, base, tool }
   for (const p of paths) {
     const shown = clip(p, 160)
@@ -99,6 +110,9 @@ export const readBlockReason = (roots, req, base) => pathsBlockReason(roots, req
 export function decide(policy, { category, paths = [], scanPaths = [], readTool, paramKeys: keys = [] }, base) {
   const rule = policy.rules[category] ?? policy.rules.other
   const roots = policy.sensitive
+  // 敏感位置清單載入失敗：讀取、執行、上網、分不出類別的請求都沒辦法檢查路徑，一律拒絕（寫入只看白名單資料夾，不受影響）
+  if (roots && category !== 'write' && !sensitiveDataStatus().ok) return { verdict: 'deny', reason: DATA_FAILED_TEXT }
+  // 敏感位置清單載入失敗：讀取、執行、上網、分不出類別的請求都沒辦法檢查路徑，一律拒絕（寫入只看白名單資料夾，不受影響）
   if (category !== 'read' && category !== 'write' && scanPaths.length && roots) {
     const why = pathsBlockReason(roots, scanPaths, readTool ?? ReadTool.Single, base)
     if (why) return { verdict: 'deny', reason: why.reason }

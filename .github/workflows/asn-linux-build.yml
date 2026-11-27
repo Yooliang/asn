@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'relay/asn/**'
+      - 'relay/shared/**'
       - 'docs/release/**'
       - 'supabase/migrations/**'
       - 'supabase/sql/**'
@@ -17,6 +18,7 @@ on:
   pull_request:
     paths:
       - 'relay/asn/**'
+      - 'relay/shared/**'
       - 'docs/release/**'
       - 'supabase/migrations/**'
       - 'supabase/sql/**'

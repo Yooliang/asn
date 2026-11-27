@@ -1,8 +1,5 @@
 // 讀取請求的參數 → 所有可能是路徑的字串（與 Rust 端 acp_sensitive.rs 的「路徑抽取」、fragments.rs、jsonstr.rs 對應）。
-import {
-  DATA, EXTRA_HOME_PATHS, HOST_KEY_DIR, MAX_JSON_DEPTH, MAX_PATH_LEN, PREFIX_HOME_FILES, SENSITIVE_HOME_DIRS, SYSTEM_FILES,
-  byteLen, hasWs, trimWs,
-} from './acp-sensitive-data.mjs'
+import { DATA, byteLen, currentSensitiveData, hasWs, trimWs } from './acp-sensitive-data.mjs'
 
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v)
 
@@ -27,13 +24,12 @@ export function containerLike(s) {
 // ---- 一般文字裡夾著敏感位置路徑 ----
 
 const norm = s => s.replaceAll('\\', '/').replace(/[A-Z]/g, c => c.toLowerCase())
-const { lead: LEAD, trail: TRAIL, trim: TRIM, maxHits: MAX_HITS, maxStarts: MAX_STARTS } = DATA.prose
-
-let fragCache = null
+let fragCache = null // { data, out }：清單換了一份（測試改讀別的檔）就重算
 /** 清單每一項的最後兩段（只有一段的就是那一段）。片段不手寫：清單加一項，這裡自動跟著認得 */
 export function fragments() {
-  if (fragCache) return fragCache
-  const rels = [...SENSITIVE_HOME_DIRS, ...EXTRA_HOME_PATHS, ...PREFIX_HOME_FILES.map(([d, p]) => `${d}/${p}`), ...SYSTEM_FILES, HOST_KEY_DIR]
+  const data = currentSensitiveData()
+  if (fragCache && fragCache.data === data) return fragCache.out
+  const rels = [...data.homeDirs, ...data.extraHomePaths, ...data.prefixHomeFiles.map(([d, p]) => `${d}/${p}`), ...data.systemFiles, data.hostKeyDir]
   const out = []
   for (const r of rels) {
     const segs = norm(r).split('/').filter(s => s !== '')
@@ -41,7 +37,7 @@ export function fragments() {
     const tail = segs.slice(Math.max(0, segs.length - 2)).join('/')
     if (!out.includes(tail)) out.push(tail)
   }
-  fragCache = out
+  fragCache = { data, out }
   return out
 }
 
@@ -55,6 +51,7 @@ const trimChars = (s, set) => {
 
 /** 一行有空白的文字：夾著敏感位置片段的，回傳可能的路徑候選（從幾個空白邊界到片段後面那段路徑結束），其餘回空 */
 export function proseCandidates(line) {
+  const { lead: LEAD, trail: TRAIL, trim: TRIM, maxHits: MAX_HITS, maxStarts: MAX_STARTS } = DATA.prose
   const n = norm(line)
   const out = []
   let hits = 0
@@ -95,14 +92,14 @@ function walk(v, underKey, out, depth) {
     // 字串能解成物件或陣列：往裡面找（有層數上限，超過的原樣收進來由判定擋）
     const inner = jsonContainer(v)
     if (inner !== null) {
-      if (depth < MAX_JSON_DEPTH) walk(inner, underKey, out, depth + 1)
+      if (depth < DATA.maxJsonDepth) walk(inner, underKey, out, depth + 1)
       else pushUnique(out, v)
       return
     }
     // 長得像 JSON 容器卻解不開（缺括號、多接文字、單引號、多重編碼…）：原樣收進來，判定那邊當解析不了
     if (containerLike(v)) { pushUnique(out, v); return }
     if (underKey) { pushUnique(out, v); return } // 路徑類欄位的字串一律收（超長、含換行的由判定那邊直接擋）
-    if (byteLen(v) <= MAX_PATH_LEN && !v.includes('\n')) {
+    if (byteLen(v) <= DATA.maxPathLen && !v.includes('\n')) {
       if (looksLikePath(v)) pushUnique(out, v)
       return
     }

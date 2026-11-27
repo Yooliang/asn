@@ -9,7 +9,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { categoryOfAgyTool, describeAcpRequest, describeAgyTool, isRegisteredAgyTool, normalizePermissions } from '../engines/acp-policy.mjs'
 import { DATA } from '../engines/acp-sensitive-data.mjs'
-import { READ_OK, createWorker, preambleFor } from '../engines/acp-worker.mjs'
+import { createWorker, preambleFor, readOkText } from '../engines/acp-worker.mjs'
+
+const READ_OK = readOkText()
 import { workerSpecFromProfile } from '../partner-background.mjs'
 
 const GEMINI = { command: 'agy', model: 'gemini', label: 'Gemini', acp: { protocol: 'agy-stream', roster_engine: 'gemini' } }

@@ -2,7 +2,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { agyBrainDir } from './acp-brain.mjs'
-import { DATA, ENV_ROOTS, EXTRA_HOME_PATHS, PREFIX_HOME_FILES, SENSITIVE_HOME_DIRS } from './acp-sensitive-data.mjs'
+import { DATA } from './acp-sensitive-data.mjs'
 import { nstr, realPathWith } from './acp-sensitive-path.mjs'
 
 /** 這次讀取是哪一類工具：單檔讀取、只列名字的列舉、會掃內容的遞迴搜尋 */
@@ -57,8 +57,8 @@ export function buildRoots(homes, envIn, canon = stdCanon) {
   const homeStrs = []
   for (const h of homes) pushForms(homeStrs, h, canon)
   const paths = []
-  for (const h of homes) for (const d of [...SENSITIVE_HOME_DIRS, ...EXTRA_HOME_PATHS]) paths.push(path.join(h, d))
-  const envPaths = ENV_ROOTS.map(n => getEnv(env, n)).filter(v => v !== null)
+  for (const h of homes) for (const d of [...DATA.homeDirs, ...DATA.extraHomePaths]) paths.push(path.join(h, d))
+  const envPaths = DATA.envRoots.map(n => getEnv(env, n)).filter(v => v !== null)
   const la = getEnv(env, 'LOCALAPPDATA')
   if (la !== null) for (const r of DATA.localAppDataRoots) envPaths.push(path.join(la, r))
   const ap = getEnv(env, 'APPDATA')
@@ -74,7 +74,7 @@ export function buildRoots(homes, envIn, canon = stdCanon) {
   for (const p of paths) pushForms(roots, p, canon)
   const prefixFiles = []
   for (const h of homes) {
-    for (const [d, pre] of PREFIX_HOME_FILES) {
+    for (const [d, pre] of DATA.prefixHomeFiles) {
       for (const dir of pushForms([], path.join(h, d), canon)) {
         if (!prefixFiles.some(([x, y]) => x === dir && y === pre)) prefixFiles.push([dir, pre])
       }
