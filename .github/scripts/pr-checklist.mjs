@@ -142,7 +142,7 @@ export function oneSidedCheck({ files = [], body = '' } = {}) {
   const seen = `只動到${here}的畫面檔（${listFiles(os.files)}），${other}的畫面檔完全沒動`
   const d = declared(body, ONE_SIDED_KEY)
   if (d.ok) return { required: true, ok: true, ...os, reason: d.reason, why: `${seen}；PR 說明寫的原因：${d.reason}` }
-  const how = `請補上${other}那一邊；如果${other}本來就沒有這個功能，在 PR 說明另外加一行「${ONE_SIDED_KEY}：是哪個平台本來就沒有這個功能」（${other}其實改在共用的檔，也在這一行寫明）`
+  const how = `怎麼辦：補上${other}那一邊；或在 PR 說明另外加一行「${ONE_SIDED_KEY}：是哪個平台本來就沒有這個功能」（${other}那一邊其實改在共用的檔，也寫在這一行）。`
   const why = d.found
     ? `這張 PR ${seen}。PR 說明裡「${ONE_SIDED_KEY}：」後面的原因沒寫清楚（太短，或還是範本的「…」）。${how}`
     : `這張 PR ${seen}。${how}`
@@ -251,8 +251,9 @@ export function recurrenceHits(title, baseTitles = [], { own } = {}) {
 export function autoRecurrence({ title = '', number, baseTitles = [], body = '', files = [], added = new Map() } = {}) {
   const hits = recurrenceHits(title, baseTitles, { own: number })
   if (!hits.length) return { required: false, ok: true, hits, waived: '', why: '' }
-  const what = hits.map(h => `#${h.n}（先前那筆修正：「${h.prior}」）`).join('、')
-  const seen = `標題是修正，修的 ${what} 在主線上已經修過並且發過版，機器判定是復發`
+  const nums = hits.map(h => `#${h.n}`).join('、')
+  const priors = hits.map(h => `${hits.length > 1 ? `#${h.n} ` : ''}「${h.prior}」`).join('；')
+  const seen = `標題是修正，修的 ${nums} 在主線上已經修過並且發過版（先前那筆修正：${priors}），機器判定是復發`
   const no = declared(body, NOT_RECUR_KEY)
   if (no.ok) return { required: true, ok: true, hits, waived: no.reason, why: `${seen}；PR 說明寫「${NOT_RECUR_KEY}：${no.reason}」，請審查的人確認這個原因` }
   const rc = recurrence({ labels: [RECUR_LABEL], body, files, added })
