@@ -61,7 +61,7 @@ export const rswitchProbeSource = ({ rswitch, mode, mail, label, open = '' }) =>
   if (next && next.getBoundingClientRect().top < r.bottom - 1) return { ok: false, why: '結果句和下一列重疊' };
   if (r.right > card.getBoundingClientRect().right + 0.5 || r.left < card.getBoundingClientRect().left - 0.5) return { ok: false, why: '結果句超出帳號卡' };
   if ([...document.querySelectorAll(S.res)].filter(vis).length !== 1) return { ok: false, why: '畫面上不只一句結果' };
-  if ([...document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"], .dlg, .m-sheet, .m-toast')].some(vis)) return { ok: false, why: '跳出了框或提示，結果應該只在原位顯示' };
+  if ([...document.querySelectorAll('dialog[open], [role="dialog"], [role="alertdialog"], .dlg, .m-sheet, .asn-toast')].some(vis)) return { ok: false, why: '跳出了框或提示，結果應該只在原位顯示' };
   const color = getComputedStyle(res).color;
   const rgb = (color.match(/[0-9]+/g) || []).map(Number);
   if (mode === 'ok' && !(rgb[1] > rgb[0] && rgb[1] > rgb[2])) return { ok: false, why: '成功句不是綠色：' + color };
