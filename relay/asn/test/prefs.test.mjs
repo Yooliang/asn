@@ -137,8 +137,13 @@ test('守門：設定頁的通知是四個勾選、視窗外框是下拉，不�
     await m.trigger(boxes[1], 'change', { checked: true })
     assert.deepEqual(m.emitted('act'), [['notify', { key: 'msg', on: true }]])
   } finally { m.unmount() }
+  // 視窗外框的下拉搬進共用元件 AsnLookPanel（#1763 C3）：改成真的掛載，視窗外框是下拉（select）不是按鈕
+  const look = mountComponent(SettingsPanel, { st: { skin: 'aero', frame: 'custom' }, catKey: 'look' })
+  try {
+    assert.equal(look.findAll('select[aria-label="視窗外框"]').length, 1, '視窗外框是下拉')
+    assert.equal(look.findAll('button').length, 0)
+  } finally { look.unmount() }
   const html = read('ui/lib/settings-panel.mjs') + read('ui/list.html')
-  assert.match(html, /aria-label="視窗外框"/)
   assert.doesNotMatch(html, /aria-label="音效"/)
 })
 

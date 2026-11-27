@@ -184,12 +184,15 @@ test('設定表單：認不得的類別不顯示任何表單項目', async () =>
   })
 })
 
-test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住；元件裡 act 的每個 op 都在清單裡', () => {
+test('守門：元件送出的每個指令，樞紐的 applySetting 都接得住；元件裡 act 的每個 op 都在清單裡', async () => {
   const comp = fs.readFileSync(new URL('../ui/lib/settings-panel.mjs', import.meta.url), 'utf8')
   // 工作管理員的樹（#1860 F）是設定頁的子元件，它往外送的 op 也經 settings-panel 的 act 交給樞紐
   const tree = fs.readFileSync(new URL('../ui/lib/task-tree-view.mjs', import.meta.url), 'utf8')
   assert.match(comp, /<task-tree[^>]*@act="act"/, '設定頁把樹的 act 接到同一個 act')
-  const used = new Set([...comp.matchAll(/act\('([a-zA-Z-]+)'/g), ...tree.matchAll(/emit\('act', *'([a-zA-Z-]+)'/g)].map(m => m[1]))
+  // 「外觀」頁的選單搬進共用元件（#1763 C3），op 名就是項目的 key，殼用 act(p.key, p.value) 轉送：這裡改列電腦殼傳給元件的項目 key（意圖不變）
+  assert.match(comp, /@pick="p => act\(p\.key, p\.value\)"/, '設定頁把外觀選單的 pick 接到 act')
+  const { lookItems } = await import('../ui/parts/look-panel.mjs'), { LOOK_CUSTOM } = await import('../ui/lib/look-info.mjs'), { capsDesktop } = await import('../ui/shells/caps-desktop.mjs')
+  const used = new Set([...comp.matchAll(/act\('([a-zA-Z-]+)'/g), ...tree.matchAll(/emit\('act', *'([a-zA-Z-]+)'/g)].map(m => m[1]).concat(lookItems(capsDesktop, LOOK_CUSTOM.desktop).map(i => i.key)))
   assert.deepEqual([...used].sort(), [...SETTING_OPS].sort(), '元件實際送出的 op 與 SETTING_OPS 一致')
   const hub = read('list.js')
   const fn = hub.slice(hub.indexOf('const applySetting'), hub.indexOf('const pushSettings'))
