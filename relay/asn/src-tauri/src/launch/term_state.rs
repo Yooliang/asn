@@ -40,9 +40,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         if g.sessions.iter().any(|s| s.window.mux && !s.kind.is_empty() && partner_label(&s.id, &s.title) == Some(name)) {
             return TermStateInfo { state: TermState::Ok, reason: String::new() };
         }
-        let waiting = g.parked.iter().filter(|t| t.mux && !t.kind.is_empty() && partner_label(&t.id, &t.title) == Some(name)).find_map(|t| g.parked_info.get(&t.id));
-        match waiting {
-            Some(info) => TermStateInfo { state: TermState::Waiting, reason: info.reason.clone() },
+        // 放在 parked 裡的列一律當「暫時接不回」：有記原因就用它，沒記（理論上不會發生）也不能叫人重開——
+        // 重開會再開出一個，而原本那個可能還在
+        let parked = g.parked.iter().find(|t| t.mux && !t.kind.is_empty() && partner_label(&t.id, &t.title) == Some(name));
+        match parked {
+            Some(t) => {
+                let reason = g.parked_info.get(&t.id).map_or_else(|| "對照表有這位夥伴的終端，還沒接回".to_string(), |i| i.reason.clone());
+                TermStateInfo { state: TermState::Waiting, reason }
+            }
             None => gone("對照表裡沒有這位夥伴的終端"),
         }
     }

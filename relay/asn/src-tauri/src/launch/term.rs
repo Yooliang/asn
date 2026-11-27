@@ -950,7 +950,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         }
         let w = self.wez(dir);
         // 結果不確定（逾時、回的不是窗格編號）：窗格多半其實已經開了，趁鎖還在手上用工作區把它找回來（#2424 B）
-        let recovered = if unsure { Some(spawn_recover::find_spawned(&w, &paths.sock, &id)) } else { None };
+        let recovered = if unsure { Some(spawn_recover::find_spawned(&w, &paths.sock, &id, exit_nonce.as_deref())) } else { None };
         drop(open_guard);
         let pane_id: u64 = match recovered {
             Some(spawn_recover::Found::One(p)) => {

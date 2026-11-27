@@ -4,7 +4,7 @@
 //! 就把這一列放進暫時接不回，交給背景重試（`term_reclaim`）用同一個工作區認回。
 #![cfg_attr(not(feature = "gui"), allow(dead_code))]
 
-use super::wezterm::{Fs, Runner, WezTerm};
+use super::wezterm::{Fs, PaneProbe, Runner, WezTerm};
 use super::{pane_is_ours, view_log, StoreTerm, TermService};
 use std::path::Path;
 
@@ -22,12 +22,18 @@ pub(super) enum Found {
 }
 
 /// 在這個通訊檔的窗格清單裡找屬於 `id` 的窗格：只看 ASN 自己取的名字（工作區 `asn-{編號}` 或分頁標題 `ASN:{編號}`），
-/// 使用者自己開的窗格不會對上（編號是剛配的，不會跟別的窗格重複）
-pub(super) fn find_spawned(w: &WezTerm<'_>, sock: &Path, id: &str) -> Found {
+/// 使用者自己開的窗格不會對上（編號是剛配的，不會跟別的窗格重複）。
+/// 前提：只認 `ASN:{編號}` 標題與 `asn-{編號}` 工作區；使用者若手動把分頁標題改成一模一樣的，可能撞到。
+/// 已結束的窗格（跟認領一樣，看畫面上帶暗號的結束標記）不算；讀不到畫面當作還活著
+pub(super) fn find_spawned(w: &WezTerm<'_>, sock: &Path, id: &str, exit_nonce: Option<&str>) -> Found {
     match w.list(sock) {
         Err(e) => Found::ListFailed(e),
         Ok(panes) => {
-            let ours: Vec<u64> = panes.iter().filter(|p| pane_is_ours(id, p)).map(|p| p.pane_id).collect();
+            let ours: Vec<u64> = panes
+                .iter()
+                .filter(|p| pane_is_ours(id, p) && !matches!(w.pane_probe(sock, p.pane_id, exit_nonce), PaneProbe::Exited(_)))
+                .map(|p| p.pane_id)
+                .collect();
             match ours.as_slice() {
                 [] => Found::Missing,
                 [one] => Found::One(*one),

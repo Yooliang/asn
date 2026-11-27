@@ -236,6 +236,94 @@ test('跨語言一致：前端的小字與逾時通知、Rust 端的句子用同
   assert.match(rs, /CODE_TRUST: &str = "trust"/)
   assert.match(rs, /CODE_BYPASS: &str = "bypass_warning"/)
 })
+// ---- 暫時接不回：定期重問，接回後按鈕自己亮起來 ----
+import { TERM_WAIT_POLL_MS, createWaitPoll } from '../ui/lib/term-entry.mjs'
+
+/** 假計時器：tick() 觸發所有還活著的計時器一次 */
+function fakeTimers() {
+  const live = new Map()
+  let n = 0
+  return {
+    setTimer: fn => { live.set(++n, fn); return n },
+    clearTimer: id => { live.delete(id) },
+    tick: () => { for (const fn of [...live.values()]) fn() },
+    count: () => live.size,
+  }
+}
+
+/** 照聊天頁的接法：狀態變了就依「是不是 waiting」同步計時器；探測回來的結果寫進狀態 */
+function pane(api) {
+  const t = fakeTimers()
+  const s = { state: null, calls: 0 }
+  const poll = createWaitPoll({
+    probe: async () => { s.calls++; const r = await askTermService(api, '小乙'); if (r !== null || s.state !== 'waiting') s.state = r; poll.sync(s.state === 'waiting') },
+    setTimer: t.setTimer, clearTimer: t.clearTimer,
+  })
+  return { t, s, poll, set(v) { s.state = v; poll.sync(v === 'waiting') } }
+}
+const settle = () => new Promise(r => setImmediate(r))
+
+test('暫時接不回：計時器每輪重問，後端接回（回 ok）後按鈕變可按、之後不再輪詢', async () => {
+  const answers = ['waiting', 'waiting', 'ok']
+  const p = pane({ state: async () => ({ state: answers.shift() ?? 'ok' }) })
+  p.set('waiting')
+  assert.equal(termEntry(true, p.s.state).term, false, '一開始灰的')
+  assert.equal(termEntry(true, p.s.state).waiting, true)
+  p.t.tick(); await settle()
+  assert.equal(termEntry(true, p.s.state).term, false, '還在接')
+  p.t.tick(); await settle()
+  p.t.tick(); await settle()
+  assert.equal(p.s.state, 'ok')
+  assert.equal(termEntry(true, p.s.state).term, true, '接回後可按')
+  assert.equal(p.t.count(), 0, '變 ok 就停')
+  const calls = p.s.calls
+  p.t.tick(); p.t.tick(); await settle()
+  assert.equal(p.s.calls, calls, '停了以後不再呼叫')
+})
+
+test('暫時接不回：變成確定不在也停；偶爾一次問不到不停也不誤判', async () => {
+  const seq = [new Error('逾時'), { state: 'gone' }]
+  const p = pane({ state: async () => { const v = seq.shift(); if (v instanceof Error) throw v; return v }, available: async () => { throw new Error('也問不到') } })
+  p.set('waiting')
+  p.t.tick(); await settle()
+  assert.equal(p.s.state, 'waiting', '問不到不改狀態')
+  assert.equal(p.t.count(), 1, '計時器還在')
+  p.t.tick(); await settle()
+  assert.equal(p.s.state, 'gone')
+  assert.equal(p.t.count(), 0)
+})
+
+test('暫時接不回：切換夥伴（狀態被清掉）或離開畫面後，舊計時器不再呼叫', async () => {
+  const p = pane({ state: async () => ({ state: 'waiting' }) })
+  p.set('waiting')
+  p.set('waiting')
+  assert.equal(p.t.count(), 1, '同時只有一個計時器')
+  p.t.tick(); await settle()
+  const calls = p.s.calls
+  p.set(null) // 切換夥伴：狀態清掉
+  assert.equal(p.t.count(), 0)
+  p.t.tick(); await settle()
+  assert.equal(p.s.calls, calls, '舊的不再呼叫')
+  p.set('waiting')
+  p.poll.stop() // 離開畫面
+  assert.equal(p.t.count(), 0)
+  assert.equal(p.poll.running(), false)
+  assert.equal(TERM_WAIT_POLL_MS, 10_000)
+})
+
+test('暫時接不回的說明經過 briefWhy 不會被截成 20 字', () => {
+  assert.ok(TERM_WAITING_NOTE.length <= 20, `長度 ${TERM_WAITING_NOTE.length}`)
+  const w = barSlots(friend({ status: 'online' }), { selfNode: 'H', api: true, term: false, termWaiting: true }).find(s => s.key === 'window')
+  assert.equal(w.reason, TERM_WAITING_NOTE, '完整保留，沒有「…」')
+})
+
+test('聊天頁接線：waiting 時才開重查計時器，離開畫面清掉', () => {
+  const src = read('ui', 'lib', 'chatpane.mjs')
+  assert.match(src, /createWaitPoll\(\{ probe: \(\) => probeTerm\(\) \}\)/)
+  assert.match(src, /waitPoll\.sync\(termInService\.value === 'waiting' && props\.active === true\)/)
+  assert.match(src, /onBeforeUnmount\(\(\) => waitPoll\.stop\(\)\)/)
+})
+
 test('第 2 格：離線卡在第一次問的畫面時是「終端」不是「喚醒」；沒有 term 的離線夥伴照舊是「喚醒」', () => {
   const off = ctx => barSlots(friend({ status: 'offline' }), { selfNode: 'H', api: true, ...ctx }).find(s => s.key === 'window')
   const t = off({ term: true, termStuck: true })

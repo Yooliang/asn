@@ -392,6 +392,12 @@ fn clean(s: &str, max: usize) -> String {
     s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().trim().chars().take(max).collect()
 }
 
+/// 詳情的「開啟方式」：查得到終端狀態（`Some`：true＝已登記或暫時接不回，false＝確定不在）就只照它說；
+/// 查不到（`None`）才用 `by_ancestors`（看程序祖先鏈）
+fn info_opened_by_asn(term_live: Option<bool>, by_ancestors: impl FnOnce() -> bool) -> bool {
+    term_live.unwrap_or_else(by_ancestors)
+}
+
 /// 一封信裡的 /指令
 #[derive(Clone, Debug)]
 pub(crate) struct CommandJob {
@@ -1315,17 +1321,18 @@ impl PartnerOps {
     fn info(&self, t: &switch::Target) -> OpResult {
         let os = self.env.os();
         let table = os.processes();
-        // 終端狀態（已登記／暫時接不回／確定不在）和聊天頁的按鈕同一份資料；暫時接不回的夥伴程序祖先鏈查得到終端服務、
-        // 但對照表暫時沒有它，單看祖先鏈會誤報「自己開的」，所以這兩種都算 ASN 開的（#2424）
+        // 終端狀態（已登記／暫時接不回／確定不在）和聊天頁的按鈕同一份資料：查得到狀態時，「開啟方式」也只照它說，
+        // 不再看程序祖先鏈（祖先鏈在「確定不在」時仍可能指向終端服務，會一邊說 ASN 開的、一邊叫人重開）（#2424）。
+        // 查不到狀態（沒有畫面的建置、測試）才退回看祖先鏈
         #[cfg(desktop)]
         let term = crate::launch::term::partner_term_state_of(&t.name);
         #[cfg(not(desktop))]
         let term: Option<()> = None;
         #[cfg(desktop)]
-        let term_asn = term.as_ref().is_some_and(|s| s.state != crate::launch::term::TermState::Gone);
+        let term_live = term.as_ref().map(|s| s.state != crate::launch::term::TermState::Gone);
         #[cfg(not(desktop))]
-        let term_asn = false;
-        let asn = term_asn || switch::opened_by_asn(os, &table, t.pid);
+        let term_live: Option<bool> = None;
+        let asn = info_opened_by_asn(term_live, || switch::opened_by_asn(os, &table, t.pid));
         let st = self.mod_status(&t.session_id);
         let model = st.as_ref().and_then(|s| s.get("model")).and_then(Value::as_str).filter(|m| switch::valid_model(m)).map(String::from).or_else(|| switch::current_model(&t.args));
         let mut chain: Vec<String> = switch::ancestors(&table, t.pid).into_iter().rev().filter_map(|p| table.iter().find(|x| x.pid == p)).map(|p| clean(&p.name, 60)).collect();

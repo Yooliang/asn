@@ -41,6 +41,56 @@ fn 開窗逾時_清單裡剛好一個對得上的窗格_照常登記() {
 }
 
 #[test]
+fn 開窗逾時_清單裡同名但已結束的窗格_不認() {
+    fix_nonce();
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "", 9, 0);
+    // 清單裡那個同名窗格畫面上已有帶暗號的結束標記：不是剛開的
+    *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
+    let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+    assert!(matches!(&e, crate::launch::win_term::WinOpenError::Started(m) if m.contains("沒有開成功")), "{e:?}");
+    assert!(!rig.svc.partner_in_service("小乙"));
+    assert!(ids_in_store(&rig.store).is_empty());
+}
+
+#[test]
+fn 開窗逾時_一個已結束一個還活著_認活的() {
+    fix_nonce();
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    *rig.runner.inner.list_json.borrow_mut() = two_listed(one_pane("asn-1", "", 9, 0), one_pane("asn-1", "", 10, 0));
+    *rig.runner.inner.screens.borrow_mut() = vec![DEAD_SCREEN.into(), "還在跑\n".into()];
+    rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).expect("死的不算，剩一個活的就認它");
+    assert!(rig.svc.partner_in_service("小乙"));
+}
+
+#[test]
+fn 開窗逾時_編號只是前綴相同的窗格_不互認() {
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    // 編號 12 的工作區與標題，不能被編號 1 認走
+    *rig.runner.inner.list_json.borrow_mut() = two_listed(one_pane("asn-12", "", 9, 0), one_pane("default", "ASN:12 小乙", 10, 0));
+    let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+    assert!(matches!(&e, crate::launch::win_term::WinOpenError::Started(m) if m.contains("沒有開成功")), "{e:?}");
+    assert!(ids_in_store(&rig.store).is_empty());
+}
+
+#[test]
+fn 放在暫時接不回裡卻沒有記原因的列_也當暫時接不回_不叫人重開() {
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    *rig.runner.inner.list_json.borrow_mut() = "不是 json".into();
+    rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+    assert_eq!(state_of(&rig).state, TermState::Waiting);
+    // 拿掉原因紀錄（理論上不會發生）：仍不能判成「確定不在」
+    rig.svc.inner.lock().unwrap().parked_info.clear();
+    let s = state_of(&rig);
+    assert_eq!(s.state, TermState::Waiting, "parked 沒有 info 也是暫時接不回");
+    assert!(!s.reason.is_empty());
+}
+
+#[test]
 fn 開窗逾時_清單裡有好幾個對得上_不登記錯的() {
     let rig = partner_rig();
     *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());

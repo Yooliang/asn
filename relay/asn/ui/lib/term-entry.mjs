@@ -113,3 +113,26 @@ export function stuckNote(stuck, hasTermEntry) {
 }
 /** 卡住的夥伴多久重查一次畫面提醒（毫秒）；後端讀畫面自己是 15 秒一輪 */
 export const STUCK_POLL_MS = 15_000
+
+/**
+ * 終端「暫時接不回」時多久重問一次（毫秒）：背景會自己重試接回，接回後第 2 格要自己亮起來，不用切換夥伴。
+ * 單獨一個計時器、只在 waiting 時開著（變 ok／gone 就停），不併進讀畫面提醒的輪詢（那個只管離線卡住的夥伴，且停不下來）
+ */
+export const TERM_WAIT_POLL_MS = 10_000
+
+/**
+ * 暫時接不回時的重查計時器。`sync(on)` 在「現在是 waiting 且畫面在前面」時為 true：還沒開就開，已開就維持；
+ * 為 false 就關掉。`stop()` 離開畫面時用。同一時間最多一個計時器；`setTimer`／`clearTimer` 可注入（測試用）
+ */
+export function createWaitPoll({ probe, intervalMs = TERM_WAIT_POLL_MS, setTimer = setInterval, clearTimer = clearInterval }) {
+  let timer = null
+  const stop = () => {
+    if (timer !== null) clearTimer(timer)
+    timer = null
+  }
+  const sync = on => {
+    if (!on) return stop()
+    if (timer === null) timer = setTimer(() => void probe(), intervalMs)
+  }
+  return { sync, stop, running: () => timer !== null }
+}

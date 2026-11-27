@@ -407,6 +407,16 @@ fn argv_has(argv: &[String], pair: &[&str]) -> bool {
 // ================================================================================================
 
 #[test]
+fn 詳情_終端狀態說確定不在時_不再看祖先鏈說_asn_開的() {
+    // 祖先鏈說是 ASN 開的，但終端狀態是「確定不在」：不能同時出現「ASN 開的」和「請重開」
+    assert!(!super::info_opened_by_asn(Some(false), || true), "Gone 時只照終端狀態");
+    assert!(super::info_opened_by_asn(Some(true), || false), "已登記或暫時接不回都算 ASN 開的");
+    // 查不到狀態（沒有畫面的建置）才退回祖先鏈
+    assert!(super::info_opened_by_asn(None, || true));
+    assert!(!super::info_opened_by_asn(None, || false));
+}
+
+#[test]
 fn 詳情_唯讀_不需要遠端開關_欄位齊全_外殼鏈只有程式名() {
     let r = rig(Opt { allow_first: 0, ..Opt::default() });
     let res = r.run("info", json!({}));
