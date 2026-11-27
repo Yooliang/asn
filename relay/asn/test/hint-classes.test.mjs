@@ -84,8 +84,30 @@ test('#2425 棘輪（檔案層）：舊 class 不准擴散到基準沒記錄的�
   assert.deepEqual(stale, [], '這些檔已經不用那個 class，請從 test/golden/hint-classes.json 刪掉（ASN_GOLDEN_UPDATE=1 會代刪）')
 })
 
+const gitAt = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+// 那個提交上有沒有基準檔。ls-tree 的路徑預設相對於 cwd（relay/asn），GOLDEN_GIT 是從 repo 根目錄算的，一定要 --full-tree，
+// 否則輸出永遠空白＝永遠當成「第一次加入」略過（#2428 二審抓到）
+const baseHasGolden = ref => gitAt(['ls-tree', '--full-tree', ref, '--', GOLDEN_GIT]).trim() !== ''
+// 現在的基準跟 base 上的基準比：回傳新加的 class、多記的檔
+const growthAgainst = (cur, base) => ({
+  extra: Object.keys(cur.classes).filter(n => !(n in base.classes)),
+  moreFiles: Object.keys(cur.classes).filter(n => n in base.classes).flatMap(n => cur.classes[n].filter(f => !base.classes[n].includes(f)).map(f => `${n}（${f}）`)),
+})
+
+test('#2425 子集比對真的讀得到提交上的基準檔（HEAD 一定有，否則比對會永遠略過）；拿 HEAD 的基準當 base，偷加 class、多記檔案都抓得到', () => {
+  assert.equal(baseHasGolden('HEAD'), true, 'HEAD 上讀不到基準檔：子集比對會永遠當成「第一次加入」略過')
+  const head = JSON.parse(gitAt(['show', `HEAD:${GOLDEN_GIT}`]))
+  assert.ok(Object.keys(head.classes).length >= 40, '前提：HEAD 上的基準讀得出內容')
+  const added = { ...head, classes: { ...head.classes, 'an-ghost-note': ['ui/x.html'] } }
+  assert.deepEqual(growthAgainst(added, head).extra, ['an-ghost-note'])
+  const [first] = Object.keys(head.classes)
+  const spread = { ...head, classes: { ...head.classes, [first]: [...head.classes[first], 'ui/new-file.mjs'] } }
+  assert.deepEqual(growthAgainst(spread, head).moreFiles, [`${first}（ui/new-file.mjs）`])
+  assert.deepEqual(growthAgainst(head, head), { extra: [], moreFiles: [] }, '自己跟自己比沒有增加')
+})
+
 test('#2425 基準檔只准刪不准加：必須是 PR base（或本機 origin/main）上基準檔的子集，含每個 class 用的檔（該處還沒有基準檔時略過）', t => {
-  const git = args => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+  const git = gitAt
   const ok = args => { try { git(args); return true } catch { return false } }
   // 比對對象：node-test 在 pull_request 時設 ASN_HINT_BASE＝PR 的 base 提交（workflow 只抓這個 sha）。
   // 設了卻讀不到就是守門沒在跑，直接紅。沒設（本機、推 main、其他 job）就用本機的 origin/main，沒有就略過。
@@ -100,11 +122,10 @@ test('#2425 基準檔只准刪不准加：必須是 PR base（或本機 origin/m
   }
   // 只有「那個提交裡真的沒有這個檔」才是第一次加入，用 ls-tree 判斷（找不到路徑＝輸出空白；git 本身出錯會丟例外＝紅）。
   // 檔案存在卻讀不出來或解析失敗，也一律紅，不能略過
-  if (git(['ls-tree', ref, '--', GOLDEN_GIT]).trim() === '') { t.skip(`${ref} 上還沒有基準檔（第一次加入）`); return }
+  if (!baseHasGolden(ref)) { t.skip(`${ref} 上還沒有基準檔（第一次加入）`); return }
   const main = JSON.parse(git(['show', `${ref}:${GOLDEN_GIT}`]))
-  const extra = baselineNames.filter(n => !(n in main.classes))
+  const { extra, moreFiles } = growthAgainst(golden, main)
   assert.deepEqual(extra, [], `基準檔只准減少，這些是新加的：${MSG}`)
-  const moreFiles = baselineNames.filter(n => n in main.classes).flatMap(n => golden.classes[n].filter(f => !main.classes[n].includes(f)).map(f => `${n}（${f}）`))
   assert.deepEqual(moreFiles, [], '基準檔只准減少，這些 class 多記了使用的檔')
 })
 
