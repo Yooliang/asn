@@ -25,6 +25,7 @@ import { canInviteFrom } from './groups.mjs'
 import { offlineView } from './group-offline.mjs'
 import { placeMenu } from './menu-place.mjs'
 import { TERM_BACK_TIP, TERM_LABEL, TERM_TIP, TERM_WAITING_NOTE, termButtonView } from './term-entry.mjs'
+import { PLATE_LABEL } from './partner-status.mjs'
 
 /** 這位代理用哪一家的指令（名單上沒寫就看啟動設定，再沒有就當 Claude）。 */
 export function friendEngine(friend) {
@@ -198,7 +199,7 @@ export function chatGroupItems(friend) {
 
 // ---------- 現代外觀的頂部（#1421）：置中名牌＋右上「終端」「更多」 ----------
 // 名牌的狀態字：離線寫「離線」（現代外觀把原本的收件人列藏起來，離線提示改由名牌承擔）
-const PLATE_STATUS = { online: '在線', busy: '忙碌', running: '執行中', awaiting: '等你按確認', away: '暫離', offline: '離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
+const PLATE_STATUS = PLATE_LABEL   // 狀態字來自 partner-status.mjs 的唯一對照表
 export function nameplateView(friend) {
   const room = friend?.room === true
   const name = String(friend?.nick ?? '')

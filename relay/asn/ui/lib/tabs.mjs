@@ -4,6 +4,7 @@ import { deviceNameOf, unnamedLabelOf } from './device-known.mjs'
 import { ACTIVITY_LEVELS, activityRank, levelOf } from './activity.mjs'
 import { applyDeviceOrder, deviceFriends, isDeviceHidden, isDeviceRemoved } from './device-order.mjs'
 import { modelVendorKey } from './vendor-icons.mjs'
+import { STATUS_NOTE } from './partner-status.mjs'
 
 // 名單上方的四個大分頁（0.2.18，和手機同樣的字、同樣的順序；#1429 起順序是夥伴、對話、設定、通知）：對話＝活動中的對話（夥伴與群組）；夥伴＝依設備分組的全部夥伴（左邊直排的設備頁籤在這一頁裡）；
 // 通知＝系統通知（方案 A：不出現在名單與對話分頁）；設定＝設定分類（使用指引是其中一列）。
@@ -33,8 +34,8 @@ export const DEVICE_TAB_MAX = 6   // 設備頁籤超過 6 個時，第 6 個起�
 export const MORE_KEY = 'more'
 
 // 名字後面的灰字狀態：線上不加
-const NOTE = { busy: '忙碌', running: '執行中・僅顯示', awaiting: '等你按確認', away: '暫離', offline: '離線' }
-export const statusNote = status => (NOTE[status] ? `(${NOTE[status]})` : '')
+// 狀態字來自 partner-status.mjs 的唯一對照表（要重新登入、額度用完、狀態不明也在這裡顯示）
+export const statusNote = status => (Object.prototype.hasOwnProperty.call(STATUS_NOTE, status) ? `(${STATUS_NOTE[status]})` : '')
 
 // 組標題（夥伴層級，不是設備層級：這裡數的是一位位夥伴，沒帶 status 的舊資料照舊當成線上，所以刻意保留「非離線」寫法，不用設備層級的在線白名單）：依狀態分的組只寫人數「線上 (3)」；其他組寫「名稱 (線上數/總數)」，線上＝非離線
 export function groupHeading(g) {

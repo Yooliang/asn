@@ -3,6 +3,7 @@
 // node 與瀏覽器都能跑，不碰 DOM、不碰 Tauri。給人看的文字純繁體中文；一律不顯示節點代號、視窗成員鍵與 x: 代號。
 import { isAsnWindow, isRelayRoom } from './roster.mjs'
 import { makeGroupActApi } from './tauri.mjs'
+import { STATUS_RANK } from './partner-status.mjs'
 
 export const SEED_DEFAULT = 40            // 一對一升級成群組時，複製最後幾則當開頭紀錄（預設）
 export const SEED_MAX = 50
@@ -65,7 +66,6 @@ export function groupErrorText(raw) {
 // ---------- 可帶進群組的夥伴（只限自己名下的 AI 視窗） ----------
 const SEP = '~'
 export const windowKeyOf = f => (f && typeof f.node === 'string' && f.node && typeof f.agent === 'string' && f.agent && !f.node.includes(SEP) && !f.agent.includes(SEP) ? `${f.node}${SEP}${f.agent}` : '')
-const STATUS_RANK = { online: 0, busy: 1, away: 2, offline: 3 }
 export function aiChoices(friends) {
   const out = []
   for (const f of Array.isArray(friends) ? friends : []) {

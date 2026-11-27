@@ -54,7 +54,7 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .dp.sm>span{font-size:15px}
 .dp.xl{width:104px;height:104px;padding:4px;border-radius:10px}
 .dp.xl>span{font-size:42px;border-radius:6px}
-.dp.st-online,.dot.st-online{--frame:var(--online)} .dp.st-busy,.dot.st-busy{--frame:var(--busy)} .dp.st-away,.dot.st-away{--frame:var(--away)} .dp.st-offline,.dot.st-offline,.dp.st-stopped,.dot.st-stopped{--frame:var(--offline)} .dp.st-running,.dot.st-running{--frame:var(--offline)} .dp.st-awaiting,.dot.st-awaiting{--frame:var(--offline)}
+.dp.st-online,.dot.st-online{--frame:var(--online)} .dp.st-busy,.dot.st-busy{--frame:var(--busy)} .dp.st-away,.dot.st-away{--frame:var(--away)} .dp.st-offline,.dot.st-offline,.dp.st-stopped,.dot.st-stopped{--frame:var(--offline)} .dp.st-running,.dot.st-running{--frame:var(--offline)} .dp.st-awaiting,.dot.st-awaiting{--frame:var(--offline)} .dp.st-login-required,.dot.st-login-required,.dp.st-quota,.dot.st-quota,.dp.st-unknown,.dot.st-unknown,.dp.st-unavailable,.dot.st-unavailable{--frame:var(--away)}
 /* 活躍度頁籤的燈（#372、擁有者 #950）：活躍綠、閒置黃、離線紅；用 lv- 跟上線狀態的 st-（離線＝灰）分開。封存的夥伴不分級，名單裡一律灰（list.html 已封存群組） */
 .dot.lv-active{--frame:var(--online)} .dot.lv-idle{--frame:var(--away)} .dot.lv-offline{--frame:var(--busy)}
 
@@ -1292,7 +1292,7 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 /* 釘選徽章要比頭像高、但一定要低於捲動時固定在頂端的搜尋列（.m-search 是 z-index:2，#1658：徽章同為 2 又排在後面，捲上去會浮在搜尋框上）；所以是 1 */
 /* 釘選徽章（#1479）：頭像右下角的藍色小圓圈＋圖釘；復古 Aero 的廠商小方塊也在右下角，有廠商圖示時徽章挪到左下角，現代與 line 外觀的廠商圖示在右上角，徽章留在右下角 */
 .pin-dot{--frame:var(--online);position:absolute;right:-4px;bottom:-4px;z-index:1;display:grid;place-items:center;box-sizing:border-box;width:15px;height:15px;padding:2.5px;border-radius:50%;background:var(--frame);color:#fff;box-shadow:0 0 0 1.5px #fff;pointer-events:none}
-.pin-dot.st-online{--frame:var(--online)} .pin-dot.st-busy{--frame:var(--busy)} .pin-dot.st-away{--frame:var(--away)} .pin-dot.st-offline,.pin-dot.st-stopped,.pin-dot.st-running,.pin-dot.st-awaiting{--frame:var(--offline)}
+.pin-dot.st-online{--frame:var(--online)} .pin-dot.st-busy{--frame:var(--busy)} .pin-dot.st-away{--frame:var(--away)} .pin-dot.st-offline,.pin-dot.st-stopped,.pin-dot.st-running,.pin-dot.st-awaiting{--frame:var(--offline)} .pin-dot.st-login-required,.pin-dot.st-quota,.pin-dot.st-unknown,.pin-dot.st-unavailable{--frame:var(--away)}
 /* 釘選的夥伴：狀態燈本身換成圖釘（#1729）——現代、line 外觀原本在右下角畫的狀態點（.dp::before）這時不畫，由圖釘接手，顏色照狀態 */
 .avb.pinned .dp::before,.room-av-wrap:has(.pin-dot) .dp::before{display:none}
 .avb.xl .pin-dot{width:22px;height:22px;padding:4px}
