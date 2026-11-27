@@ -35,12 +35,13 @@ test('名單頁不再有環境提醒黃條、封存提示樣式、換名紅字�
   assert.doesNotMatch(css, /archive-note|env-notice|nick-err/)
 })
 
-test('設定頁終端區：開關開著且有環境變數提醒時，顯示後端那一句（資訊級、不帶動作）', async () => {
+test('設定頁終端區：有環境變數提醒就顯示後端那一句（資訊級、不帶動作），不看開關', async () => {
   const on = await render({ ...base(), bridge: bridge({ envNotice: NOTICE }) })
   assert.ok(on.includes(NOTICE), '提醒要出現在設定頁')
   assert.match(on, /data-env-notice/)
   assert.ok(!(await render({ ...base(), bridge: bridge({ envNotice: '' }) })).includes('data-env-notice'), '沒有提醒就不放空框')
-  assert.ok(!(await render({ ...base(), bridge: bridge({ envNotice: NOTICE, termServer: false }) })).includes(NOTICE), '開關關著就不講')
+  // 後端本來就只在這次實際用終端服務時才回這句；剛關開關、還沒重開 ASN 時它仍然成立，畫面不再自己擋
+  assert.ok((await render({ ...base(), bridge: bridge({ envNotice: NOTICE, termServer: false }) })).includes(NOTICE), '只看有沒有值，不看開關')
   // 接線一路到底：載入結果寫進 bridge.envNotice → settingsState 的 bridge 物件傳 envNotice → 設定頁讀 st.bridge.envNotice
   // （「每個 st.bridge 欄位都有傳過去」另由 list-bridge-fields.test.mjs 守，那條只比欄位名；這裡補值的來源）
   const js = read('list.js')

@@ -138,7 +138,7 @@ export const AsnNote = {
 }
 
 // ---------- 結果提示（#2425 位置 D；規範見 docs/畫面規範.md〈四之一〉） ----------
-// 剛做完的動作結果（封存、釘選滿、切換帳號…）：成功 4 秒、失敗 6 秒後自己消失，同一時間只有一則（新的取代舊的），也可以按「×」關掉。
+// 剛做完的動作結果（封存、釘選滿、切換帳號…）：成功 4 秒、失敗 6 秒起（依字數延長到最多 12 秒，見 toastDuration）後自己消失，滑鼠停在上面暫停倒數，同一時間只有一則（新的取代舊的），也可以按「×」關掉。
 // 種類沿用 AsnStatus 的 ok／fail；純資訊不用這個。電腦與手機都呼叫 showResult(kind, text, { at })，頁面根部各掛一個 <asn-toast>（單一元件）。
 // 位置（asn真 二審原則：不准蓋到任何按得到的東西，只准蓋純文字）：
 //   手機：底部置中，浮在分頁列上方（沒給 at）。
@@ -148,6 +148,16 @@ export const AsnNote = {
 export const TOAST_KINDS = Object.freeze(['ok', 'fail'])
 export const TOAST_MS = Object.freeze({ ok: 4000, fail: 6000 })
 export const TOAST_CLOSE = '關閉'
+export const TOAST_FAIL_MAX_MS = 12000
+/**
+ * 停留多久（毫秒）：成功一律 4 秒（掃一眼就夠）；失敗 6 + max(0, ceil((字數 - 30) / 10)) 秒，上限 12 秒
+ * （失敗的訊息要看完才知道怎麼處理，要給足時間讀）。字數用 [...text].length，中文一個字算 1。不認得的種類當失敗。純函式
+ */
+export function toastDuration(kind, text) {
+  if (kind === 'ok') return TOAST_MS.ok
+  const n = [...String(text ?? '').trim()].length
+  return Math.min(TOAST_FAIL_MAX_MS, TOAST_MS.fail + Math.max(0, Math.ceil((n - 30) / 10)) * 1000)
+}
 /** 結果提示的畫法：種類不認得當失敗（不把問題畫成成功）。純函式，測試直接用 */
 export function toastView(kind = 'ok') {
   const kindOk = TOAST_KINDS.includes(kind)
@@ -186,13 +196,15 @@ export function toastAnchorStyle(at, doc = globalThis.document, viewH = globalTh
 
 let toastCur = { kind: 'ok', text: '', seq: 0, at: '' }
 let toastTimer = null
+let toastDeadline = 0   // 預定消失的時間（毫秒）
+let toastLeft = -1      // 暫停時剩下的毫秒；不在暫停中＝-1
 const toastSubs = new Set()
 const toastEmit = () => { for (const f of toastSubs) f({ ...toastCur }) }
 /** 目前顯示的那一則（沒有就是 text 空字串） */
 export const currentResult = () => ({ ...toastCur })
 /** 手動關掉 */
 export function dismissResult() {
-  globalThis.clearTimeout(toastTimer); toastTimer = null
+  globalThis.clearTimeout(toastTimer); toastTimer = null; toastLeft = -1
   if (!toastCur.text) return
   toastCur = { ...toastCur, text: '' }
   toastEmit()
@@ -202,10 +214,26 @@ export function showResult(kind, text, { at = '' } = {}) {
   const t = typeof text === 'string' ? text.trim() : ''
   if (!t) return
   const v = toastView(kind)
-  globalThis.clearTimeout(toastTimer)
+  const ms = toastDuration(v.kind, t)
+  globalThis.clearTimeout(toastTimer); toastLeft = -1
   toastCur = { kind: v.kind, text: t, seq: toastCur.seq + 1, at: TOAST_AT.includes(at) ? at : '' }
-  toastTimer = globalThis.setTimeout(dismissResult, v.ms)
+  toastDeadline = Date.now() + ms
+  toastTimer = globalThis.setTimeout(dismissResult, ms)
   toastEmit()
+}
+/** 滑鼠停在提示上：暫停倒數，記下剩下的時間 */
+export function pauseResult() {
+  if (!toastCur.text || toastLeft >= 0) return
+  globalThis.clearTimeout(toastTimer); toastTimer = null
+  toastLeft = Math.max(0, toastDeadline - Date.now())
+}
+/** 滑鼠移開：接著剩下的時間倒數，不重新計時 */
+export function resumeResult() {
+  if (!toastCur.text || toastLeft < 0) return
+  const ms = toastLeft
+  toastLeft = -1
+  toastDeadline = Date.now() + ms
+  toastTimer = globalThis.setTimeout(dismissResult, ms)
 }
 const watchResult = fn => { toastSubs.add(fn); return () => toastSubs.delete(fn) }
 
@@ -225,9 +253,12 @@ export const AsnToast = {
     watch(() => cur.value.seq, () => { replace(); void nextTick(replace) }, { immediate: true })
     onMounted(() => globalThis.addEventListener?.('resize', replace))
     onBeforeUnmount(() => globalThis.removeEventListener?.('resize', replace))
-    return { cur, view, place, dismissResult, TOAST_CLOSE }
+    // 滑鼠停在提示上就暫停倒數、移開接著剩下的時間；觸控沒有 hover（點一下也會送 pointerenter，所以只認滑鼠），不管
+    const hoverIn = e => { if (e?.pointerType === 'mouse') pauseResult() }
+    const hoverOut = e => { if (e?.pointerType === 'mouse') resumeResult() }
+    return { cur, view, place, dismissResult, TOAST_CLOSE, hoverIn, hoverOut }
   },
-  template: `<div v-if="cur.text" :key="cur.seq" :class="view.classes" :role="view.role" :style="place"><span class="asn-toast-text">{{ cur.text }}</span><button type="button" class="asn-toast-close" :aria-label="TOAST_CLOSE" @click="dismissResult()">×</button></div>`,
+  template: `<div v-if="cur.text" :key="cur.seq" :class="view.classes" :role="view.role" :style="place" @pointerenter="hoverIn" @pointerleave="hoverOut"><span class="asn-toast-text">{{ cur.text }}</span><button type="button" class="asn-toast-close" :aria-label="TOAST_CLOSE" @click="dismissResult()">×</button></div>`,
 }
 
 // ---------- 「⋯」選單（#2111 ⑥） ----------
