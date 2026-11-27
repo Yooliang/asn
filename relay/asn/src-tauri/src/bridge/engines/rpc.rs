@@ -82,10 +82,8 @@ where
                 line_no += 1;
                 match std::str::from_utf8(&buf) {
                     Ok(s) => on_text(line_no, s),
-                    Err(_) => {
-                        let len = String::from_utf8_lossy(&buf).trim().chars().count();
-                        on_bad(UnparsedLine { line_no, len, kind: "不是有效的文字編碼" });
-                    }
+                    // 只看原始位元組是不是合法 UTF-8；合法的（含字面上的替換字元 U+FFFD）照常處理。這一類的長度以位元組計
+                    Err(_) => on_bad(UnparsedLine { line_no, len: buf.trim_ascii().len(), kind: "不是有效的文字編碼" }),
                 }
             }
             Err(e) => return Some((line_no + 1, e)),
@@ -598,6 +596,40 @@ mod tests {
         assert_eq!((got[0].line_no, got[0].kind), (2, "不是有效的文字編碼"));
         let l = logs.lock().unwrap().join("\n");
         assert!(l.contains("第 2 行解析不了") && l.contains("不是有效的文字編碼"), "{l}");
+    }
+
+    /// 合法的 UTF-8（內容剛好是替換字元 U+FFFD，位元組 EF BF BD）不算無效編碼：照常交給 on_json_line、不通知、不記解析不了
+    #[tokio::test]
+    async fn 合法的替換字元_照常處理_不算無效編碼() {
+        if node().is_none() {
+            return;
+        }
+        let got = Arc::new(AtomicUsize::new(0));
+        let good = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (g2, ok2, l2) = (got.clone(), good.clone(), logs.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            "const w=process.stdout; w.write(Buffer.from([0x7b,0x22,0x61,0x22,0x3a,0x22,0xef,0xbf,0xbd,0x22,0x7d,0x0a]), ()=>process.exit(0))",
+            Arc::new(move |v| ok2.lock().unwrap().push(v)),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.log = Arc::new(move |m| l2.lock().unwrap().push(m));
+        o.on_unparsed_line = Some(Arc::new(move |_| {
+            g2.fetch_add(1, Ordering::SeqCst);
+        }));
+        let _rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        assert_eq!(got.load(Ordering::SeqCst), 0, "合法 UTF-8 不通知");
+        let good = good.lock().unwrap().clone();
+        assert_eq!(good.len(), 1, "{good:?}");
+        assert_eq!(good[0]["a"].as_str(), Some("\u{FFFD}"));
+        assert!(!logs.lock().unwrap().join("\n").contains("解析不了"));
     }
 
     /// 標準模式：解析不了的行（含無效編碼的行）只記 log、不呼叫 on_unparsed_line，後面的行照常處理
