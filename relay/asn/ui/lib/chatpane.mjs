@@ -260,6 +260,10 @@ export const ChatPane = {
     const composeLocked = computed(() => displayOnly.value && !termCompose.value)   // 輸入框與傳送鈕：僅顯示條目擋住，但終端打字模式（只有等你按確認的夥伴能進）放行
     // 看本機夥伴的終端時（電腦版，#1378）：一樣直接打進那個終端，按鈕字與提示字和看別台相同；本機不用對方同意，沒有確認框、寬限與重新看
     const tvEl = ref(null)
+    // 已停止的黃條「重開」鈕：呼叫上方功能列的「重開」（同一條路）；功能列不在或那項不能按，就只講白話說明、不放鈕
+    const abEl = ref(null)
+    const canReopen = computed(() => abEl.value?.canRestart === true)
+    const reopenPartner = () => { abEl.value?.restartPartner?.() }
     const localCompose = computed(() => termShown.value && Boolean(props.termViewApi?.input) && !displayOnly.value)
     const termCompose = computed(() => remoteCompose.value || localCompose.value)
     const composeHint = computed(() => (composeLocked.value ? displayOnlyHint(props.friend) : termCompose.value ? (remoteCompose.value && inputPhase.value !== 'typing' ? composeRemoteHint(termViewName.value, props.friend?.device || props.friend?.machine || props.friend?.nodeName || '') : composeTermHint(termViewName.value)) : composePlaceholder(props.winMode)))
@@ -857,11 +861,11 @@ export const ChatPane = {
     // 名字、頭像本身被點（不讓整則訊息的點擊（回覆選單）接著觸發）
     function onSpk(m, ev) { if (!canJump(m)) return; ev?.stopPropagation(); ev?.preventDefault(); jumpMember(m.fk) }
     const toPsm = computed(() => (props.friend?.room === true || props.noBar ? props.friend?.psm ?? '' : headerPsm(props.friend?.psm)))
-    return { opLine, opHold, opRelease, opPressHold, opPressRelease, opShown, barFirst, barClass, onOpNote,confirmNote, stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, spk, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, stepViewer, swipeDown, swipeUp, swipeCancel, photoTitle, foldLocked, zoom, zoomer, pvStyle, imgsOf, filesOf, picState, picSrc, picBox, picActs, picNote, picBig, gridCellPx, attItems, actPhoto, useGrid, wantInline }
+    return { abEl, canReopen, reopenPartner, opLine, opHold, opRelease, opPressHold, opPressRelease, opShown, barFirst, barClass, onOpNote,confirmNote, stuckNoteText, TERM_KEYS, KEYS_TEXT, keyRowShown, keysUsable, pressKey, copyScreen, copyNote, loginUrls, openLogin, onRemoteScreen, lineRow, composeFocus, lcToolsOpen, lcTyping, openLcTools, onComposeFocus, onComposeBlur, camEl, openCamera, pickCamera, cameraMissed, canJump, jumpLabel, jumpMember, onSpk, isLine, lrows, clockLabel, sentStateText, plusOpen, onToolbarClick, sendLabel, termCompose, inputPhase, waitSnap, onInputRefused, restoreDraft, tvEl, INPUT_TEXT, rvEl, restartView, typingEndedNote, GRACE_AGAIN_LABEL, remoteBar, rinEl, setRemoteBar, stopTyping, remoteLive, mSwitch, mToggle, showMsgs, showTerm, TERM_BTN_MSG, TERM_BTN_TERM, paneTermShown, remoteTyping, canRemoteInput, typingShown, INPUT_LABEL, INPUT_TIP, canRemote, remoteOn, remoteShown, termBar, canTermView, termViewOn, termShown, termEntryView, toggleTerm, termViewName, dupCloseLabel, closeDup, dupPressed, toPsm, displayOnly, composeLocked, DISPLAY_ONLY_TAG, actAt, tapMsg, replying, canReply, startReply, cancelReply, msgQuote, jumpTo, jumpNote, mention, menuEl, mentionMore, syncMore, MENTION_MORE_HINT, bodyHtml, onDraftInput, pickMention, onComposeKey, speakerAv, spkOff, spkVendorKey, isRoom, opsItems, groupItems, pickMenu, isVoiceMsg, showDictBtn, dictPhase, dictLabel, dictTip, dictClick, shownBody, CALL_END_NOTE, showCallBtn, isAsn, isNotice, showWaiting, noticeDevOf, warn, loginText, renderMarkdown, onBodyClick, onRefDown, onRefMove, onRefUp, onRefMenu, onRefKey, onEnter, call, callActive, startCall, hangUp, micClick, msgKey, msgTier, msgStatusTip, readLabel, readTitle, spk, speaking, speakTip, speak, micTip, voiceNote, docEl, FILE_ACCEPT, formatBytes, STATUS, EMO, sideCol, side, composeHint, composeTitle, collapsed, classes, lay, barArrow, foldTip, draft, pickerOpen, nudgeCooling, msgsEl, composeEl, noteText, onScroll, emo, plain, initial, fmt, fmtDate, send, nudge, insertEmo, fileEl, shotOk, annot, startShot, annotDone, annotCancel, photoBusy, photoMsg, savedHere, revealSaved, pickPhoto, onPaste, viewer, expired, openPhoto, saveViewer, closeViewer, stepViewer, swipeDown, swipeUp, swipeCancel, photoTitle, foldLocked, zoom, zoomer, pvStyle, imgsOf, filesOf, picState, picSrc, picBox, picActs, picNote, picBig, gridCellPx, attItems, actPhoto, useGrid, wantInline }
   },
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
-  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :op-line="true" @op-note="onOpNote" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')" @member="jumpMember"></action-bar>
+  <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" ref="abEl" :op-line="true" @op-note="onOpNote" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')" @member="jumpMember"></action-bar>
   <p class="term-reopen-note term-stuck-note" v-if="!noBar && !isRoom && stuckNoteText" role="note">{{ stuckNoteText }}</p>
   <p class="term-reopen-note term-confirm-note" v-if="confirmNote" role="note">{{ confirmNote }}</p>
   <div class="chatpane-body">
@@ -884,21 +888,15 @@ export const ChatPane = {
       <div class="to-line" :class="{ 'is-offline': !isRoom && friend.status === 'offline' }"><asn-avatar class="to-av" v-if="!isRoom" :src="friendAv" :friend="friend" :status="friend.status" :hue="friend.hue"></asn-avatar><span v-html="emo(friend.nick)"></span>
         <span class="to-psm" v-if="toPsm" v-html="emo(toPsm)"></span>
         <span class="to-busy to-readonly" v-if="displayOnly">{{ DISPLAY_ONLY_TAG }}</span>
-        <span class="to-busy" v-if="warn && warn !== 'offline' && warn !== 'stopped' && warn !== 'login'">{{ STATUS[friend.status] }}，可能無法馬上回應</span>
       </div>
       <confirm-cards v-if="isRoom" :cards="roomCards" @decide="(id, ok) => $emit('group-decide', id, ok)"></confirm-cards>
       <div class="warn" v-if="warn === 'offline'">
         <i>i</i>
         <span>{{ plain(friend.nick) }} 目前離線，訊息會先留在 ASN，對方上線後才收得到。</span>
       </div>
-      <div class="warn" v-if="warn === 'login'">
-        <i>i</i>
-        <span>{{ loginText }}</span>
-      </div>
-      <div class="warn" v-if="warn === 'stopped'">
-        <i>i</i>
-        <span>{{ plain(friend.nick) }} 已停止，寄來的信不會處理（會收到一則說明）。要恢復請在夥伴管理按「重開」。</span>
-      </div>
+      <asn-note v-if="warn === 'login'" banner>{{ loginText }}</asn-note>
+      <asn-note v-if="warn === 'stopped' && canReopen" kind="warn" banner action-label="重開" @action="reopenPartner">{{ plain(friend.nick) }} 已停止，寄來的信不會處理（會收到一則說明）。按「重開」就會恢復。</asn-note>
+      <asn-note v-else-if="warn === 'stopped'" banner>{{ plain(friend.nick) }} 已停止，寄來的信不會處理（會收到一則說明）。要恢復請在夥伴管理按「重開」。</asn-note>
       <div class="msgs" data-toast-anchor="chat" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
         <div class="older-note" v-if="noteText">{{ noteText }}</div>
         <template v-for="(m, i) in log" :key="i">
