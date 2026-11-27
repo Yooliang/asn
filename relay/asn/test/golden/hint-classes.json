@@ -7,6 +7,7 @@
   "ap-left": ["ui/askpass.html"],
   "ap-note": ["ui/askpass.html","ui/style.css"],
   "archive-note": ["ui/list.html","ui/style.css"],
+  "asn-note-fail": ["ui/kit.css","ui/lib/settings-panel.mjs","ui/m.html"],
   "asn-row-hint": ["ui/parts/parts.css","ui/parts/setting-parts.mjs"],
   "att-ov": ["ui/lib/att-photo.mjs"],
   "av-note": ["ui/list.html","ui/style.css"],

@@ -136,15 +136,38 @@ test('#2425 AsnNote：warn 沒有動作、或種類不認得，會 console.warn�
   assert.deepEqual(await withWarnCapture(() => mount({})), [])
 })
 
-// 守門：原始碼裡寫了 <asn-note kind="warn"> 就一定要有動作（action-label 或 #action／v-slot:action 插槽）
+// 守門：原始碼裡寫了 warn 的 AsnNote 就一定要有動作。涵蓋的寫法：
+//  - 模板：<asn-note>／<AsnNote>，kind="warn"、kind='warn'、:kind="'warn'"（也含三元裡的 'warn'），屬性值可含 >，可多行，可自閉合 <asn-note … />
+//  - 有動作＝action-label／actionLabel 有非空的值，或有 #action／v-slot:action 插槽（空的 action-label="" 不算）
+//  - 渲染函式：h(AsnNote, { kind: 'warn', … }, …)，要有非空的 actionLabel 或 action 插槽
+// 已知限制：kind 完全是變數（沒有 'warn' 字面值）看不出來，只靠執行時的 console.warn
+const TAG_ATTRS = '(?:"[^"]*"|\'[^\']*\'|[^<>"\'])'
+const NOTE_TAG = new RegExp(`<(?:asn-note|AsnNote)\\b(${TAG_ATTRS}*?)\\/>|<(asn-note|AsnNote)\\b(${TAG_ATTRS}*)>([\\s\\S]*?)<\\/\\2>`, 'g')
+const KIND_WARN = /(?:^|\s):?kind\s*=\s*(?:"[^"]*\bwarn\b[^"]*"|'[^']*\bwarn\b[^']*')/
+const LABEL_SET = /(?:^|\s):?(?:action-label|actionLabel)\s*=\s*(?:"[^"]+"|'[^']+')/
+const parenBody = (src, i) => { // i 在 '(' 之後；回傳到對應的 ')' 之前
+  let depth = 1
+  for (let j = i; j < src.length; j++) {
+    const c = src[j]
+    if (c === '"' || c === "'" || c === '`') { for (j++; j < src.length && src[j] !== c; j++) if (src[j] === '\\') j++; continue }
+    if (c === '(') depth++
+    else if (c === ')' && --depth === 0) return src.slice(i, j)
+  }
+  return src.slice(i)
+}
 export const warnNotesWithoutAction = src => {
   const bad = []
-  // 標籤比對要認得引號（屬性值裡的 > 不算標籤結束）；自閉合的先比
-  for (const m of src.matchAll(/<asn-note\b((?:"[^"]*"|'[^']*'|[^<>"'])*?)\/>|<asn-note\b((?:"[^"]*"|'[^']*'|[^<>"'])*)>([\s\S]*?)<\/asn-note>/g)) {
-    const attrs = m[1] ?? m[2] ?? ''; const body = m[3] ?? ''
-    if (!/(?:^|\s):?kind\s*=\s*(?:"[^"]*warn[^"]*"|'[^']*warn[^']*')/.test(attrs)) continue
-    if (/(?:^|\s):?action-label\s*=/.test(attrs) || /(?:^|\s):?actionLabel\s*=/.test(attrs) || /<template\s+(?:#action|v-slot:action)\b/.test(body)) continue
+  for (const m of src.matchAll(NOTE_TAG)) {
+    const attrs = m[1] ?? m[3] ?? ''; const body = m[4] ?? ''
+    if (!KIND_WARN.test(attrs)) continue
+    if (LABEL_SET.test(attrs) || /<template\s+(?:#action|v-slot:action)\b/.test(body)) continue
     bad.push(m[0].slice(0, 80))
+  }
+  for (const m of src.matchAll(/\bh\(\s*AsnNote\s*,/g)) {
+    const call = parenBody(src, m.index + m[0].length)
+    if (!/\bkind\s*:\s*(?:'[^']*\bwarn\b[^']*'|"[^"]*\bwarn\b[^"]*"|`[^`]*\bwarn\b[^`]*`)/.test(call)) continue
+    if (/\bactionLabel\s*:\s*(?!(?:''|""|``)\s*[,}])\S/.test(call) || /\baction\s*:/.test(call)) continue
+    bad.push(m[0] + call.slice(0, 70))
   }
   return bad
 }
@@ -163,6 +186,16 @@ test('#2425 守門：ui 底下沒有「warn 卻沒附動作」的 <asn-note>；�
   assert.equal(warnNotesWithoutAction(`<asn-note kind='warn'>只有字</asn-note>`).length, 1, '單引號')
   assert.equal(warnNotesWithoutAction(`<asn-note :kind="'warn'">只有字</asn-note>`).length, 1, '綁定寫法')
   assert.equal(warnNotesWithoutAction('<asn-note v-if="n > 0" kind="warn" action-label="重開">字</asn-note>').length, 0)
+  assert.equal(warnNotesWithoutAction('<AsnNote kind="warn">只有字</AsnNote>').length, 1, '大駝峰寫法')
+  assert.equal(warnNotesWithoutAction('<asn-note kind="warn" action-label="">只有字</asn-note>').length, 1, '空的 action-label 不算動作')
+  assert.equal(warnNotesWithoutAction('<asn-note\n  v-if="a > 1"\n  kind="warn"\n>只有字</asn-note>').length, 1, '多行標籤')
+  assert.equal(warnNotesWithoutAction('<asn-note kind="warn" />').length, 1, '自閉合')
+  assert.equal(warnNotesWithoutAction('<asn-note kind="warn" action-label="重開" />').length, 0, '自閉合附動作')
+  assert.equal(warnNotesWithoutAction('<p><asn-note kind="warn" /></p><asn-note>一般</asn-note>').length, 1, '自閉合後面接著別的 asn-note 不誤吞')
+  assert.equal(warnNotesWithoutAction(`h(AsnNote, { kind: 'warn' }, () => '字')`).length, 1, '渲染函式')
+  assert.equal(warnNotesWithoutAction(`h(AsnNote, { kind: 'warn', actionLabel: '重開' }, () => '字')`).length, 0)
+  assert.equal(warnNotesWithoutAction(`h(AsnNote, { kind: 'warn', actionLabel: '' }, () => '字')`).length, 1, '渲染函式空的 actionLabel')
+  assert.equal(warnNotesWithoutAction(`h(AsnNote, { kind: 'warn' }, { default: () => '字', action: () => h('b') })`).length, 0, '渲染函式的 action 插槽')
 })
 
 test('#2425 AsnNote：有條件的 #action 插槽會跟著出現／消失；消失時不留空按鈕並警告', async () => {
