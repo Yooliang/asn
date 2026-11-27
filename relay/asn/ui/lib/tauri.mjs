@@ -59,7 +59,7 @@ export const transport = {
   list: () => invoke('relay_list'),
   taskManagerList: () => invoke('task_manager_list'),   // 電腦版工作管理員：這台電腦上 ASN 管的程式清單（只讀）→ { rows, known, now_ms }
   taskManagerRestartAsn: () => invoke('task_manager_restart_asn'),   // 工作管理員「重啟 ASN」：失敗回白話字串（成功後本程序會結束，ASN 自己重開）
-  taskManagerRestartMux: () => invoke('task_manager_restart_mux'),   // 工作管理員「重啟終端服務」：新服務起好就回；失敗回白話字串
+  taskManagerRestartMux: (confirmed = false) => invoke('task_manager_restart_mux', { confirmed }),   // 工作管理員「重啟終端服務」：新服務起好回 null；終端服務沒有回應、要本人再確認時回一句白話字（確認後帶 true 再呼叫）；失敗回白話字串
   localWindows: () => invoke('local_windows'),   // 電腦版：直接讀本機視窗狀態（手機沒有這個指令）
   partnerRepo: name => invoke('partner_repo', { name }),   // 電腦版：這個視窗工作資料夾對應的 GitHub 倉庫「擁有者/repo」（讀 .git 設定檔，不碰網路）；讀不到回 null（手機沒有這個指令，也不會有人叫）
   inbox: () => invoke('relay_inbox'),
@@ -138,6 +138,7 @@ export const termViewApi = {
   // 分頁不在畫面上就暫停讀取窗格（連線和畫面留著），切回來再恢復並補推最新的一幅。舊版沒有這個指令，呼叫會失敗（畫面端吞掉）
   pause: (viewId, paused) => invoke('term_view_set', { viewId, paused: !!paused }),
   available: name => invoke('term_view_available', { name }),   // 這位夥伴在不在共用終端服務裡（#900）→ true／false
+  state: name => invoke('term_view_state', { name }),   // 終端狀態（#2424）→ { state: 'ok'|'waiting'|'gone', reason }
   // 在畫面裡打字（#597 D）：只有這個本機命令，Rust 端檢查開著的畫面、視窗在前景、窗格是 ASN 開的、授權
   input: (viewId, data, paste, ime) => invoke('term_view_input', { viewId, data, paste: !!paste, ime: !!ime }),
   // 往上看更早的內容（#904 B3）：一次回 { text, lines, truncated, meta }，text 最後 meta.rows 行是目前畫面、之前都是歷史；失敗丟字串

@@ -112,6 +112,10 @@ pub enum RestartError {
     Failed(String),
     /// 終端服務裡有 ASN 沒有記錄的視窗（數字是多出幾個）：重啟會把它們一起關掉又接不回，所以不重啟
     Unmanaged(usize),
+    /// 核對時終端服務忙碌（指令排隊沒送出、或逾時沒回應），數不出裡面有幾個視窗：不確定就不結束服務（原因類別只寫 log）
+    Busy(String),
+    /// 核對時終端服務真的沒有回應（逾時、或連不上）：數不出裡面的視窗，要本人再確認一次才照 ASN 的記錄重啟（原因只寫 log）
+    NeedConfirm(String),
     /// 舊服務已停、新的起不來：代理現在是斷線的（原因只寫 log）；名單已存，再按一次重啟會接回
     Down(String),
 }
@@ -122,13 +126,21 @@ pub const DOWN_TEXT: &str = "重啟終端服務沒有完成，底下的代理目
 /// 重啟前核對發現「終端服務裡有 ASN 沒記錄的視窗」時給畫面的白話字（使用者能做的事：先關掉那些視窗）
 pub const UNMANAGED_TEXT: &str = "終端服務裡有 ASN 沒有記錄的視窗，重啟會把它們一起關掉又接不回，所以沒有重啟。請先關掉那些視窗再試。";
 
+/// 核對時終端服務忙碌、沒有重啟：給畫面的白話字
+pub const SERVICE_BUSY_TEXT: &str = "終端服務暫時忙碌，沒有重啟。請稍後再試。";
+
+/// 核對時終端服務沒有回應、要本人再確認時給畫面的白話字（確認框的內文）
+pub const NEED_CONFIRM_TEXT: &str = "終端服務沒有回應，數不出裡面的視窗；仍要重啟的話，沒記錄的視窗也會一起關掉。";
+
 impl RestartError {
     /// 給畫面的白話字
     pub fn text(&self) -> &'static str {
         match self {
+            RestartError::NeedConfirm(_) => NEED_CONFIRM_TEXT,
             RestartError::NoMux => NO_MUX_TEXT,
             RestartError::Failed(_) => FAIL_TEXT,
             RestartError::Unmanaged(_) => UNMANAGED_TEXT,
+            RestartError::Busy(_) => SERVICE_BUSY_TEXT,
             RestartError::Down(_) => DOWN_TEXT,
         }
     }
@@ -318,6 +330,15 @@ mod tests {
         assert_eq!(calls, ["名單", "核對"]);
     }
 
+    /// 2429 三審：核對時服務沒有回應＝需要確認：不停、不起、不接回、不通知；畫面是白話字
+    #[test]
+    fn _2429_核對要確認就不動服務() {
+        let (r, calls) = flow_full(&Stash::new(), two(), Err(RestartError::NeedConfirm("逾時".into())), Ok(()), Ok(()));
+        assert!(matches!(r, Err(RestartError::NeedConfirm(_))));
+        assert_eq!(r.unwrap_err().text(), NEED_CONFIRM_TEXT);
+        assert_eq!(calls, ["名單", "核對"]);
+    }
+
     /// 二審 5：名單是空的（Some 空）不是讀不到：照常停、起、接回（接回空名單）
     #[test]
     fn _1860f_名單是空的_照常重啟() {
@@ -457,6 +478,19 @@ mod tests {
         assert!(asn.contains("BUSY_TEXT"), "拿不到回白話字");
         let mux = lib.split("async fn task_manager_restart_mux").nth(1).unwrap().split("async fn ").next().unwrap();
         assert!(mux.contains("Restarting::begin()") && mux.contains("BUSY_TEXT"));
+    }
+
+    /// 2429 二審：指令把呼叫端給的 confirmed 傳下去（不是固定 false）；需要確認時回確認框的字（Ok(Some)）
+    #[test]
+    fn _2429_指令把確認傳下去_需要確認時回確認框文字() {
+        let lib = include_str!("../lib.rs");
+        let cmd = lib.split("async fn task_manager_restart_mux").nth(1).unwrap().split("async fn ").next().unwrap();
+        assert!(cmd.contains("confirmed: Option<bool>") && cmd.contains("confirmed.unwrap_or(false)"), "要收呼叫端給的 confirmed");
+        let after = cmd.split("restart_mux(").nth(1).expect("要呼叫 restart_mux");
+        assert_eq!(after.split(',').next().unwrap().trim(), "confirmed", "要把 confirmed 傳下去，不能固定 false");
+        let arm = cmd.find("RestartError::NeedConfirm(why)").expect("要處理需要確認");
+        let ret = cmd[arm..].find("return Ok(Some(").expect("需要確認時要回 Ok(Some(確認框文字))");
+        assert!(cmd[arm + ret..].contains("NEED_CONFIRM_TEXT"), "回的是確認框的字");
     }
 
     // 記號是全域的：測試同一時間只跑一條

@@ -66,14 +66,15 @@ export function buildTree(rows) {
  */
 export function treeView(rows, mapRow, ui = {}) {
   const t = buildTree(rows)
-  const { ask = null, restarting = null, frozen = null, prefix = '', error = null, pending = 0, muxExpected = false } = ui
+  const { ask = null, askText = '', restarting = null, frozen = null, prefix = '', error = null, pending = 0, muxExpected = false } = ui
   // 重啟中：ASN 重啟整棵樹都斷線；終端服務重啟只有它底下的代理斷線（restarting 是節點鍵，'mux:*' 代表不知道是哪一個，全部終端服務）
   const hit = key => restarting === key || (restarting === 'mux:*' && key.startsWith('mux:'))
   const allDown = restarting === ROOT_KEY
   const down = a => ({ ...a, status: TREE_TEXT.disconnected, canStop: false, why: '', canHandover: false, canView: false, canAdopt: false })
   // 錯誤掛在一定存在的那一列：有 ASN 本體就掛在 ASN 列（終端服務那一列重啟後可能換了編號、下一輪就消失）；沒有 ASN 列才掛在原本那個節點
   const errorFor = key => (error ? (t.asn ? (key === ROOT_KEY ? error.text : '') : (error.key === key ? error.text : '')) : '')
-  const restartOf = (key, text) => ({ target: key, ask: ask === key ? text : '', busy: hit(key) || (key === ROOT_KEY && allDown), disabled: restarting !== null, error: errorFor(key) })
+  // askText：電腦端回「終端服務沒有回應」要本人再確認時，確認框改用它那句話（只對被問的那個節點）
+  const restartOf = (key, text) => ({ target: key, ask: ask === key ? (askText || text) : '', busy: hit(key) || (key === ROOT_KEY && allDown), disabled: restarting !== null, error: errorFor(key) })
   const root = t.asn ? { key: ROOT_KEY, node: mapRow(t.asn), statusText: TREE_TEXT.running, restart: restartOf(ROOT_KEY, restartAsnText(prefix, pending)) } : null
   const mapAgent = (a, isDown) => (isDown ? down(mapRow(a)) : mapRow(a))
   const groups = t.groups.map(g => {

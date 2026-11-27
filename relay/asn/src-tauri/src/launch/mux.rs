@@ -185,6 +185,20 @@ pub enum Ensure {
     Started { pid: u32 },
 }
 
+/// `wait_alive` 的結果：連上了、一直連不上、或指令一直沒送出（沒測成）
+#[derive(Debug, PartialEq, Eq)]
+enum Wait {
+    Up,
+    Down,
+    Unsure,
+}
+
+/// 等服務起來時，容忍「沒測成」（指令沒送出）的次數上限
+const UNSURE_MAX: u32 = 3;
+
+/// 清單指令送出了、但連不上終端服務（它沒有在回應）時的原因字樣（數窗格數 `pane_count` 與重啟核對共用）
+pub const NOT_RUNNING: &str = "終端服務沒有在跑";
+
 pub struct Mux<'a> {
     pub runner: &'a dyn Runner,
     /// wezterm.exe（cli）
@@ -203,7 +217,7 @@ impl Mux<'_> {
 
     /// 連得上就是活著（`--no-auto-start`，連不上不會順手起一個）
     pub fn alive(&self) -> bool {
-        self.cli(&["list", "--format", "json"]).map(|o| o.success).unwrap_or(false)
+        self.alive_probe() == Probe::Up
     }
 
     /// 同 [`Self::alive`]，但分得出「cli 根本跑不起來」（缺檔、被擋、權限）：那不是「連不上」，不能拿來當 mux 卡死的證據（卡死處置用）
@@ -211,6 +225,8 @@ impl Mux<'_> {
         match self.cli(&["list", "--format", "json"]) {
             Ok(o) if o.success => Probe::Up,
             Err(e) if e.starts_with(CANNOT_RUN) => Probe::CannotRun(e),
+            // 排隊等不到位子、被暫停略過：指令根本沒送出，沒測成，不是連不上
+            Err(e) if super::cli_gate::not_sent(&e) => Probe::Inconclusive(e),
             // 連線逾時、cli 回錯：都算連不上
             _ => Probe::Down,
         }
@@ -220,7 +236,7 @@ impl Mux<'_> {
     pub fn pane_count(&self) -> Result<usize, String> {
         let o = self.cli(&["list", "--format", "json"])?;
         if !o.success {
-            return Err("終端服務沒有在跑".into());
+            return Err(NOT_RUNNING.into());
         }
         let v: serde_json::Value = serde_json::from_str(&o.stdout).map_err(|_| "終端服務回的清單看不懂".to_string())?;
         // 只數夥伴的窗格（workspace asn-N）。mux.lua 有 exit_behavior = "Hold"，窗格 0 的 cmd 結束後畫面會留著（workspace default），
@@ -346,31 +362,58 @@ impl Mux<'_> {
     }
 
     /// 每隔 `POLL` 試連一次，最多 `d`（用次數算，等待一律經過 runner.sleep，測試不真的等）
-    fn wait_alive(&self, d: Duration) -> bool {
-        for _ in 0..tries(d) {
-            if self.alive() {
-                return true;
+    ///
+    /// 「沒測成」（指令沒送出）不算一次失敗，但最多容忍 [`UNSURE_MAX`] 次（每次可能排隊等 20 秒），超過就回 `Unsure`，不繼續空等
+    fn wait_alive(&self, d: Duration) -> Wait {
+        let (mut left, mut unsure) = (tries(d), 0u32);
+        loop {
+            match self.alive_probe() {
+                Probe::Up => return Wait::Up,
+                Probe::Inconclusive(_) => {
+                    unsure += 1;
+                    if unsure >= UNSURE_MAX {
+                        return Wait::Unsure;
+                    }
+                }
+                Probe::Down | Probe::CannotRun(_) => {
+                    if left == 0 {
+                        return Wait::Down;
+                    }
+                    left -= 1;
+                }
             }
             self.runner.sleep(POLL);
         }
-        self.alive()
+    }
+
+    /// 先試連一次：連得上＝`Ok(true)`、連不上＝`Ok(false)`、沒測成（指令沒送出）＝錯誤（不能當成服務沒在跑而去起新的）
+    fn alive_or_unsure(&self) -> Result<bool, String> {
+        match self.alive_probe() {
+            Probe::Up => Ok(true),
+            Probe::Inconclusive(e) => Err(format!("終端服務暫時忙碌，這次沒有確認連線（{e}）；請稍後再試")),
+            Probe::Down | Probe::CannotRun(_) => Ok(false),
+        }
     }
 
     /// 確保有一個 mux：先試連；連不上才拿啟動鎖、再試連一次、看 pid 檔記的那個是不是還在起，都不是才起新的
     pub fn ensure(&self) -> Result<Ensure, String> {
-        if self.alive() {
+        if self.alive_or_unsure()? {
             return Ok(Ensure::Reused);
         }
         std::fs::create_dir_all(&self.paths.dir).map_err(|e| format!("建立終端服務資料夾失敗：{e}"))?;
         let _lock = StartLock::acquire(&self.paths.lock, self.runner)?;
-        if self.alive() {
+        if self.alive_or_unsure()? {
             return Ok(Ensure::Reused);
         }
         // 要看程序真的還在（#1867）：只看建立時間的話，剛被收掉、但 ASN 自己還握著 handle 的 mux 會被當成「別人剛起」，
         // 白等 15 秒再報錯，換班接手開的新視窗就因此退回原生主控台
         if self.live_pid().is_some() {
             // 別的 ASN 剛起、還沒開始接受連線：等它，不起第二個
-            return if self.wait_alive(START_WAIT) { Ok(Ensure::Reused) } else { Err("終端服務已經在啟動，但一直連不上；請稍後再試".into()) };
+            return match self.wait_alive(START_WAIT) {
+                Wait::Up => Ok(Ensure::Reused),
+                Wait::Unsure => Err("終端服務暫時忙碌，這次沒有確認連線；請稍後再試".into()),
+                Wait::Down => Err("終端服務已經在啟動，但一直連不上；請稍後再試".into()),
+            };
         }
         std::fs::write(&self.paths.config, config_text(&self.paths.sock)).map_err(|e| format!("寫入終端服務設定失敗：{e}"))?;
         // 持著啟動鎖、確定要起新的了：先清舊心跳檔（#1897）
@@ -392,10 +435,15 @@ impl Mux<'_> {
             return Err("終端服務起來了，但查不到它的建立時間，無法確認之後停的是同一個，已結束它".into());
         };
         let _ = std::fs::write(&self.paths.pid, format!("{pid} {at}"));
-        if self.wait_alive(START_WAIT) {
-            // 窗格 0 的 cmd 已經結束，但 Hold 讓它的畫面留著：關掉（剛起的 mux 只有這一個窗格，不會關到夥伴；失敗也無妨）
-            let _ = self.cli(&["kill-pane", "--pane-id", "0"]);
-            return Ok(Ensure::Started { pid });
+        match self.wait_alive(START_WAIT) {
+            Wait::Up => {
+                // 窗格 0 的 cmd 已經結束，但 Hold 讓它的畫面留著：關掉（剛起的 mux 只有這一個窗格，不會關到夥伴；失敗也無妨）
+                let _ = self.cli(&["kill-pane", "--pane-id", "0"]);
+                return Ok(Ensure::Started { pid });
+            }
+            // 指令沒送出、沒測成：不能當成起不來而結束剛起的服務（它可能好好的），留著記錄讓下次接手
+            Wait::Unsure => return Err("終端服務已經起來，但暫時忙碌、這次沒有確認連線；請稍後再試".into()),
+            Wait::Down => {}
         }
         // 起不來：只清自己剛起的那一個（建立時間對得上才動）
         if self.runner.started_ms(pid) == Some(at) {

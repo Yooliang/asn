@@ -24,26 +24,58 @@ export function termButtonView(shown, customLabel = '') {
   return { ...TERM_BTN_TERM }
 }
 export const TERM_REOPEN_NOTE = '重新開一次這位夥伴，就能在 ASN 裡看終端'
+/** 暫時接不回（背景重試中）：不叫人重開 */
+export const TERM_WAITING_NOTE = '正在重新連上終端，稍候會自己恢復'
+/** 詳情「終端」那一列的字（和上排第 2 格同一份狀態：已接上／暫時接不回／確定不在） */
+export const TERM_STATE_TEXT = { ok: '已接上', waiting: TERM_WAITING_NOTE, gone: '沒有接上，' + TERM_REOPEN_NOTE }
 
 /**
- * 終端入口要怎麼呈現。base：電腦版、本機、不是內建通道、不是離線（能問的夥伴）；inService：true／false／null（查不到）。
- * 回 { term：上面第 2 格放「終端」, note：大按鈕下方那行小字（只有確定不在服務裡才有） }
+ * 終端入口要怎麼呈現。base：電腦版、本機、不是內建通道、不是離線（能問的夥伴）；
+ * state：'ok'（已登記）／'waiting'（暫時接不回）／'gone'（確定不在）／null（查不到）；舊版只回 true／false 也認。
+ * 回 { term：上面第 2 格放「終端」,
+ *      waiting：暫時接不回——第 2 格反灰、說明寫正在重新連上,
+ *      note：確定不在時，附在第 2 格（前台／後台鈕）說明裡的那句，不再常駐在按鈕下方 }
  */
-export function termEntry(base, inService) {
+export function termEntry(base, state) {
   const ok = base === true
-  return { term: ok && inService === true, note: ok && inService === false ? TERM_REOPEN_NOTE : '' }
+  const st = state === true ? 'ok' : state === false ? 'gone' : state
+  return {
+    term: ok && st === 'ok',
+    waiting: ok && st === 'waiting',
+    note: ok && st === 'gone' ? TERM_REOPEN_NOTE : '',
+  }
 }
 
-/** 問電腦端這位夥伴在不在共用終端服務裡：true／false；問不到回 null（原因只進 console） */
+/** 問電腦端這位夥伴的終端狀態：'ok'／'waiting'／'gone'；問不到回 null（原因只進 console）。舊版電腦端沒有 state 指令時，退回「在不在」 */
 export async function askTermService(api, name) {
-  if (!api || typeof api.available !== 'function' || !name) return null
+  if (!api || !name) return null
   try {
+    if (typeof api.state === 'function') {
+      try {
+        const r = await api.state(name)
+        if (r && typeof r === 'object' && ['ok', 'waiting', 'gone'].includes(r.state)) {
+          if (r.reason) console.info('[ASN] 終端狀態', r.state, String(r.reason))
+          return r.state
+        }
+      } catch (e) {
+        console.info('[ASN] 查不到這位夥伴的終端狀態，改問在不在', String(e?.message ?? e))
+      }
+    }
+    if (typeof api.available !== 'function') return null
     const r = await api.available(name)
-    return typeof r === 'boolean' ? r : null
+    return typeof r === 'boolean' ? (r ? 'ok' : 'gone') : null
   } catch (e) {
     console.info('[ASN] 查不到這位夥伴在不在共用終端服務裡', String(e?.message ?? e))
     return null
   }
+}
+
+/**
+ * 問完終端狀態後，畫面上的狀態要改成什麼：接不回的期間偶爾一次問不到（null）不改狀態——
+ * 改成 null 會讓重查計時器停掉，之後再也不會亮起來。其他情形照回答
+ */
+export function nextTermState(current, answer) {
+  return answer === null && current === 'waiting' ? current : answer
 }
 
 const BOTTOM_SLACK = 2
@@ -89,3 +121,26 @@ export function stuckNote(stuck, hasTermEntry) {
 }
 /** 卡住的夥伴多久重查一次畫面提醒（毫秒）；後端讀畫面自己是 15 秒一輪 */
 export const STUCK_POLL_MS = 15_000
+
+/**
+ * 終端「暫時接不回」時多久重問一次（毫秒）：背景會自己重試接回，接回後第 2 格要自己亮起來，不用切換夥伴。
+ * 單獨一個計時器、只在 waiting 時開著（變 ok／gone 就停），不併進讀畫面提醒的輪詢（那個只管離線卡住的夥伴，且停不下來）
+ */
+export const TERM_WAIT_POLL_MS = 10_000
+
+/**
+ * 暫時接不回時的重查計時器。`sync(on)` 在「現在是 waiting 且畫面在前面」時為 true：還沒開就開，已開就維持；
+ * 為 false 就關掉。`stop()` 離開畫面時用。同一時間最多一個計時器；`setTimer`／`clearTimer` 可注入（測試用）
+ */
+export function createWaitPoll({ probe, intervalMs = TERM_WAIT_POLL_MS, setTimer = setInterval, clearTimer = clearInterval }) {
+  let timer = null
+  const stop = () => {
+    if (timer !== null) clearTimer(timer)
+    timer = null
+  }
+  const sync = on => {
+    if (!on) return stop()
+    if (timer === null) timer = setTimer(() => void probe(), intervalMs)
+  }
+  return { sync, stop, running: () => timer !== null }
+}
