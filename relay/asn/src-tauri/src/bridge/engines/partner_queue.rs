@@ -1024,12 +1024,13 @@ mod tests {
              rl.on('line',()=>{\n\
                if(m==='cut')console.log('{\"event\":\"step_update\",\"step_update\":{\"tool_info\":{\"parameters\":');\n\
                else if(m==='deep')console.log('['.repeat(300)+']'.repeat(300));\n\
+               else if(m==='enc'){process.stdout.write(Buffer.from([0x7b,0x22,0xff,0xfe,0x22,0x7d,0x0a]));console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',response:'ok',conversation_id:'c1'}}));}\n\
                else console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',response:'ok',conversation_id:'c1'}}));\n\
              });rl.on('close',()=>process.exit(0));setInterval(()=>{},1000);",
         )
         .unwrap();
         let mut bad: Vec<String> = vec![];
-        for (mode, expect_abort) in [("cut", true), ("deep", true), ("ok", false)] {
+        for (mode, expect_abort) in [("cut", true), ("deep", true), ("enc", true), ("ok", false)] {
             let logs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
             let l2 = logs.clone();
             let mut cfg = (*base.cfg).clone();
