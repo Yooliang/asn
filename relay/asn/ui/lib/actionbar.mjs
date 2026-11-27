@@ -544,6 +544,9 @@ export const ActionBar = {
       }
       Object.assign(opDlg, { open: true, item: { key: op, ok: true, reason: '' } })
     }
+    // 已停止的黃條「重開」鈕（#2425）：和「管理」選單的「重開」同一條路（p:restart），不另寫流程；選單裡那項不能按時，黃條就不放這顆鈕
+    const canRestart = computed(() => Boolean(!lite.value && !isRoom.value && props.api && opsAll.value.find(i => i.key === 'p:restart')?.ok))
+    function restartPartner() { if (canRestart.value) void pickOps('p:restart') }
     function stopSubs() { if (subTimer) { clearInterval(subTimer); subTimer = null } }
     function startSubs() {
       stopSubs()
@@ -608,7 +611,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { headWake, onLaunchNew, root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { canRestart, restartPartner, headWake, onLaunchNew, root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">

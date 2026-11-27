@@ -49,8 +49,11 @@ test('接線守門：手機版傳 hide-busy-warn、標題列掛 is-busy、樣式
   const cp = read('lib/chatpane.mjs')
   assert.match(cp, /hideBusyWarn: \{ type: Boolean, default: false \}/)
   assert.match(cp, /<div class="warn" v-if="warn === 'offline'">/)   // 離線仍是整排說明條
-  assert.match(cp, /<span class="to-busy" v-if="warn && warn !== 'offline' && warn !== 'stopped' && warn !== 'login'">/)
-  assert.match(cp, /<div class="warn" v-if="warn === 'stopped'">/)   // 已停止（0.2 B3）：整排說明條，講清楚信不會處理、怎麼恢復   // 忙碌／離開改成頁首後面的黃色小標籤（手機版 warn 為 null 時不出現）
+  // 忙碌／暫離：狀態本來就在名字旁的頭像與名牌上，純資訊的「可能無法馬上回應」標籤拿掉了（#2425，畫面規範〈訊息與提示的位置〉）
+  assert.doesNotMatch(cp, /可能無法馬上回應/)
+  assert.doesNotMatch(cp, /<span class="to-busy" v-if="warn/)
+  // 已停止（0.2 B3）：整排說明條，講清楚信不會處理、怎麼恢復；現在是 AsnNote 的 warn 橫幅，附「重開」鈕（#2425）
+  assert.match(cp, /<asn-note v-if="warn === 'stopped' && canReopen" kind="warn" banner action-label="重開" @action="reopenPartner">/)
   assert.match(cp, /warnKind\(props\.friend\?\.status, \{ hideBusy: props\.hideBusyWarn \}\)/)   // 僅顯示條目另有專屬標籤（display-only.test.mjs）
   assert.doesNotMatch(read('chat.html'), /hide-busy-warn/)
 })
