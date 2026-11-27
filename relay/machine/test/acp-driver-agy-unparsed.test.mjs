@@ -45,6 +45,47 @@ test('agy 驅動：沒有進行中的一輪時收到無效編碼的行 → 只�
   } finally { d.stop() }
 })
 
+// 一行合法 JSON：{"event":"x","v":"ab<U+FFFD>cd"}，U+FFFD 是合法 UTF-8（EF BF BD）
+const HEX_FFFD = Buffer.from('{"event":"x","v":"ab').toString('hex') + 'efbfbd' + Buffer.from('cd"}').toString('hex')
+
+test('agy 驅動：合法 UTF-8 的替換字元出現在合法 JSON 行 → 照常處理、不中止', async () => {
+  const logs = []
+  const d = mk(logs)
+  await d.start()
+  try {
+    const r = await d.turn(`@@RAW_HEX ${HEX_FFFD} @@TOOL read_file {"Path":"/x/a"}`, { timeoutMs: 5000, maxMs: 8000 })
+    assert.match(r.text, /tool-done: read_file/)
+    assert.ok(!logs.some(l => l.includes('無法解讀')), logs.join('\n'))
+  } finally { d.stop() }
+})
+
+test('agy 驅動：多位元組字元被切在兩個資料塊之間 → 先累積到換行再解碼，照常處理', async () => {
+  const logs = []
+  const d = mk(logs)
+  await d.start()
+  try {
+    const cut = HEX_FFFD.indexOf('efbfbd') + 2   // 切在替換字元的第一個位元組之後
+    const hex = `${HEX_FFFD.slice(0, cut)}|${HEX_FFFD.slice(cut)}`
+    const r = await d.turn(`@@RAW_HEX ${hex} @@TOOL read_file {"Path":"/x/a"}`, { timeoutMs: 5000, maxMs: 8000 })
+    assert.match(r.text, /tool-done: read_file/)
+    assert.ok(!logs.some(l => l.includes('無法解讀')), logs.join('\n'))
+  } finally { d.stop() }
+})
+
+test('agy 驅動：不合法的 0xFF 位元組 → 整輪中止、有 log、不放行內容', async () => {
+  const logs = []
+  const d = mk(logs)
+  await d.start()
+  try {
+    const hex = Buffer.from('{"event":"x","v":"RAWSECRET').toString('hex') + 'ff' + Buffer.from('"}').toString('hex')
+    await assert.rejects(d.turn(`@@RAW_HEX ${hex} @@TOOL read_file {"Path":"/x/a"}`, { timeoutMs: 5000, maxMs: 8000 }), e => e.code === 'violation')
+    const line = logs.find(l => l.includes('無法解讀'))
+    assert.ok(line, logs.join('\n'))
+    assert.match(line, /InvalidEncoding/)
+    assert.ok(!logs.some(l => l.includes('RAWSECRET')))
+  } finally { d.stop() }
+})
+
 test('agy 驅動：全部是正常行時照常回覆（對照組）', async () => {
   const logs = []
   const d = mk(logs)

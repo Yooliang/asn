@@ -5,6 +5,7 @@
 //   @@RUN <指令>     送出執行指令步驟；沒帶 --dangerously-skip-permissions 就被「權限拒絕」（空回覆＋denied_actions）
 //   @@TOOL <工具名> <JSON 參數>  送出指定工具名與參數的工具步驟（讀取判定的測試用：路徑欄位、沒登記的工具名…），120ms 後才結束步驟；被絆線殺掉就不會有回覆
 //   @@RAW_JSON / @@RAW_UTF8  送一行截斷的 JSON／含無效編碼位元組的原文（不是合法事件），2 秒後才回覆
+//   @@RAW_HEX <十六進位>  原樣送出位元組再補換行（「|」分段寫出），之後照其餘暗號繼續
 //   @@AUTH / @@QUOTA 回 status=ERROR 的 result 並結束（結束碼 1）
 //   @@AUTH_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回登入失效，之後（檔案在了）照一般信處理：模擬「舊行程憑證過期、新行程正常」（#517）
 //   @@POISON         正常回覆，但把這段 conversation 標成壞掉：之後任何行程用 --conversation 接回它，每一輪都回登入失效（401）；開新對話才正常（#517：存著的舊對話綁著過期登入）
@@ -89,6 +90,17 @@ async function handle(line) {
   const flags = `${flag('--dangerously-skip-permissions') ? 'full' : 'normal'}${opt('--model') ? `/${opt('--model')}` : ''}`
 
   let t
+  // @@RAW_HEX <十六進位位元組>：原樣送出這些位元組再補一個換行，然後照訊息其餘的暗號繼續（例如後面接 @@TOOL）；
+  //   十六進位裡的「|」是分段：每段分開寫出（中間等 50ms），用來測一行被切在兩個資料塊之間
+  if ((t = /@@RAW_HEX\s+([0-9a-fA-F|]+)/.exec(body))) {
+    body = body.replace(t[0], '')
+    const parts = t[1].split('|')
+    for (let k = 0; k < parts.length; k++) {
+      process.stdout.write(Buffer.from(parts[k], 'hex'))
+      if (k < parts.length - 1) await sleep(50)
+    }
+    process.stdout.write('\n')
+  }
   // @@RAW_JSON／@@RAW_UTF8：送一行截斷的 JSON／一行含無效編碼位元組的原文，然後等 2 秒才回覆（被殺就不會有回覆）
   if (/@@RAW_JSON/.test(body)) { process.stdout.write('{"event":"step_update","step_update":{"step_type":"tool","tool_name":"read_file","tool_info":{"parameters":{"Path":"/x/RAWSECRET"\n'); await sleep(2000); return resultOf('raw-not-aborted') }
   if (/@@RAW_UTF8/.test(body)) { process.stdout.write(Buffer.concat([Buffer.from('{"event":"x","v":"RAWSECRET'), Buffer.from([0xff, 0xfe, 0xc3]), Buffer.from('"}\n')])); await sleep(2000); return resultOf('raw-not-aborted') }
