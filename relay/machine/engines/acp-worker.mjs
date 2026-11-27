@@ -23,13 +23,22 @@ export const AGY_DOCS_NOTE = '你自己的對話資料夾（~/.gemini/antigravit
 // 清單在第一次用到才載入，所以是函式；載入失敗時這句會改成說明讀取暫時不可用
 export const readOkText = () => DATA.preambleReadOk
 
+function failedCaption(can, cant) {
+  const note = '目前讀取檢查設定載入失敗，讀取檔案暫時不能用，請先不要讀檔。'
+  if (!can.length) return `${note}你目前不能寫檔、也不能執行指令；做不到的事就直說做不到。`
+  if (!cant.length) return `${note}你被允許：${can.join('、')}。`
+  return `${note}你被允許：${can.join('、')}；不被允許：${cant.join('、')}，做不到的事就直說做不到。`
+}
+
 export function preambleFor(cfg) {
-  const READ_OK = readOkText()
   const p = cfg.permissions.rules
   const caps = [['write', '寫檔', '寫檔（限工作資料夾內，資料夾外一律不要寫）'], ['execute', '執行指令', '執行指令（限工作資料夾內，資料夾外一律不要碰）']]
   const can = caps.filter(([c]) => p[c] === 'allow').map(([, , l]) => l)
   const cant = caps.filter(([c]) => p[c] !== 'allow').map(([, l]) => l)
-  const caption = !can.length
+  // 讀取檢查設定載入失敗：讀檔不在「允許」清單裡，另起一句說明讀取暫時不能用
+  const readOk = sensitiveDataStatus().ok
+  const READ_OK = readOkText()
+  const caption = !readOk ? failedCaption(can, cant) : !can.length
     ? `你目前是唯讀的：可以${READ_OK}，不要寫檔、不要執行指令；做不到的事就直說做不到。`
     : !cant.length ? `你被允許：${READ_OK}、${can.join('、')}。` : `你被允許：${READ_OK}、${can.join('、')}；不被允許：${cant.join('、')}，做不到的事就直說做不到。`
   return `你是 ASN 收發室替你啟動的背景工作者「${cfg.name}」，不是使用者開著的視窗。之後的每一則訊息都是經仲介轉來的信，第一行是 [RELAY 來信] 標頭（from＝寄件人）。`
@@ -109,7 +118,10 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
   function checkTool(info) {
     const c = info.category
     // 清單載入失敗：除了寫入（只看白名單資料夾），都沒辦法檢查路徑，一律不放行
-    if (c !== 'write' && !sensitiveDataStatus().ok) return { ok: false, reason: `${categoryLabel(c)}不被允許：${DATA_FAILED_TEXT}` }
+    if (c !== 'write' && !sensitiveDataStatus().ok) {
+      log(`[${name}] 讀取檢查設定載入失敗，工具 ${redact(info.tool ?? '')} 一律擋`)
+      return { ok: false, reason: `${categoryLabel(c)}不被允許：${DATA_FAILED_TEXT}` }
+    }
     // 不是讀取、寫入的工具（執行、網路、沒登記的）：參數裡抽得到路徑就照讀取判定，命中整輪中止
     if (c !== 'read' && c !== 'write' && info.scanPaths?.length) {
       const b = pathsBlockReason(sensitive, info.scanPaths, info.readTool, cfg.cwd)

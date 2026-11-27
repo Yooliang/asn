@@ -92,7 +92,6 @@ export const NO_READ_PATH_NOTE = '讀取請求沒有可辨識的路徑，無法�
 export function pathsBlockReason(roots, paths, tool, base) {
   // 敏感位置清單載入失敗：連沒帶路徑的請求也擋（判定本身做不了）
   if (!sensitiveDataStatus().ok) return { verdict: ReadVerdict.Unresolvable, reason: DATA_FAILED_TEXT }
-  // 敏感位置清單載入失敗：連沒帶路徑的請求也擋（判定本身做不了）
   const ctx = { roots, base, tool }
   for (const p of paths) {
     const shown = clip(p, 160)
@@ -111,8 +110,8 @@ export function decide(policy, { category, paths = [], scanPaths = [], readTool,
   const rule = policy.rules[category] ?? policy.rules.other
   const roots = policy.sensitive
   // 敏感位置清單載入失敗：讀取、執行、上網、分不出類別的請求都沒辦法檢查路徑，一律拒絕（寫入只看白名單資料夾，不受影響）
-  if (roots && category !== 'write' && !sensitiveDataStatus().ok) return { verdict: 'deny', reason: DATA_FAILED_TEXT }
-  // 敏感位置清單載入失敗：讀取、執行、上網、分不出類別的請求都沒辦法檢查路徑，一律拒絕（寫入只看白名單資料夾，不受影響）
+  // 沒帶 roots 也一樣擋（判定本身做不了）
+  if (category !== 'write' && !sensitiveDataStatus().ok) return { verdict: 'deny', reason: DATA_FAILED_TEXT }
   if (category !== 'read' && category !== 'write' && scanPaths.length && roots) {
     const why = pathsBlockReason(roots, scanPaths, readTool ?? ReadTool.Single, base)
     if (why) return { verdict: 'deny', reason: why.reason }

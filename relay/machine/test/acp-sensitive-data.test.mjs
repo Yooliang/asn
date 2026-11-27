@@ -14,7 +14,7 @@ import {
   DATA, DATA_FAILED_TEXT, SensitiveDataError, loadSensitiveData, sensitiveDataStatus, useSensitiveDataFile,
 } from '../engines/acp-sensitive-data.mjs'
 import { ReadTool, ReadVerdict, buildRoots, readVerdict } from '../engines/acp-sensitive.mjs'
-import { createWorker } from '../engines/acp-worker.mjs'
+import { createWorker, preambleFor } from '../engines/acp-worker.mjs'
 import { workerSpecFromProfile } from '../partner-background.mjs'
 
 const REAL_FILE = new URL('../../shared/sensitive-roots.json', import.meta.url)
@@ -178,6 +178,33 @@ for (const [label, make, field] of CASES) {
   })
 }
 
+test('載入失敗：政策沒帶敏感位置也擋讀取類請求，寫入不受影響', async () => {
+  await using(path.join(TMP, '沒有這個檔.json'), async () => {
+    const policy = normalizePermissions({}, '/work') // 沒有 sensitive
+    for (const category of ['read', 'execute', 'network', 'other']) {
+      const d = decide(policy, { category, paths: [] }, '/work')
+      assert.equal(d.verdict, 'deny', category)
+      assert.equal(d.reason, DATA_FAILED_TEXT)
+    }
+    assert.equal(decide(policy, { category: 'write', paths: ['/work/a.txt'] }, '/work').verdict, 'allow')
+  })
+  assert.equal(decide(normalizePermissions({}, '/work'), { category: 'read', paths: [] }, '/work').verdict, 'allow', '清單正常時照舊')
+})
+
+test('載入失敗：開場說明把讀取放在允許清單外另起一句；擋下的原因寫「讀取檢查設定載入失敗」並記 log', async () => {
+  await using(path.join(TMP, '沒有這個檔.json'), async () => {
+    const r = rig(GEMINI)
+    await wait(r)
+    const text = preambleFor(r.spec)
+    assert.ok(text.includes('目前讀取檢查設定載入失敗，讀取檔案暫時不能用，請先不要讀檔。你被允許：寫檔'), text)
+    assert.ok(!text.includes('你被允許：讀取'), '讀取不能接在「你被允許：」後面')
+    const v = r.guard.checkTool({ ...describeAgyTool('read_file', { Path: path.join(r.proj, 'src', 'main.rs') }), state: 'DONE' })
+    assert.equal(v.ok, false)
+    assert.ok(v.reason.includes('讀取檢查設定載入失敗') && !v.reason.includes('路徑無法解析'), v.reason)
+    assert.ok(r.logs.some(l => l.includes('讀取檢查設定載入失敗') && !l.includes('路徑無法解析')), r.logs.join('|'))
+  })
+})
+
 // ---- 機器橋與引擎模組照常載入 ----
 test('共用設定載入失敗時，引擎與橋的模組仍能匯入（不在匯入時丟錯）', async () => {
   await using(path.join(TMP, '沒有這個檔.json'), async () => {
@@ -189,14 +216,23 @@ test('共用設定載入失敗時，引擎與橋的模組仍能匯入（不在�
 })
 
 test('清單模組匯入時不讀檔，第一次用到才讀', async () => {
-  const spy = mock.method(fs, 'readFileSync', () => { throw Object.assign(new Error('讀不到'), { code: 'ENOENT' }) })
+  // 只攔共用 JSON 這一個檔；其他路徑（載入 ESM 原始碼等）一律交回原函式，所以不受 Node 版本載入方式影響
+  const original = fs.readFileSync
+  const sharedReads = []
+  const spy = mock.method(fs, 'readFileSync', function (p, ...rest) {
+    if (path.basename(String(p?.pathname ?? p)) === 'sensitive-roots.json') {
+      sharedReads.push(String(p))
+      throw Object.assign(new Error('讀不到'), { code: 'ENOENT' })
+    }
+    return original.call(this, p, ...rest)
+  })
   try {
     const fresh = await import('../engines/acp-sensitive-data.mjs?no-read-on-import')
-    assert.equal(spy.mock.callCount(), 0, '匯入時不該讀檔')
+    assert.equal(sharedReads.length, 0, '匯入時不該讀共用 JSON')
     assert.equal(fresh.sensitiveDataStatus().ok, false)
-    assert.equal(spy.mock.callCount(), 1)
+    assert.equal(sharedReads.length, 1)
     assert.ok(fresh.sensitiveDataStatus().error.message.includes('sensitive-roots.json'))
-    assert.equal(spy.mock.callCount(), 1, '只讀一次')
+    assert.equal(sharedReads.length, 1, '只讀一次')
   } finally { spy.mock.restore() }
 })
 
