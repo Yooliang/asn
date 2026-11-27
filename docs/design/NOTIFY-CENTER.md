@@ -32,7 +32,7 @@
 - **固定的寄件人**：`from_agent = 'ASN 通知'`。`from_node` 照舊用「出事的那台」，或後台的系統節點，讓舊用戶端照舊能顯示。
   - 名字裡不含「收發室」。過渡期內，舊用戶端會把它當成一位新聯絡人，所以要等新版普及後才切換（見 3.4）。
 - **新增信件類別** `kind`（文字，可以是 null）：
-  - 系統通知帶 `notice:<種類>`，例如 `notice:login`、`notice:quota`、`notice:mux_down`、`notice:waiting`、`notice:view`、`notice:device_key`、`notice:node_mismatch`、`notice:bridge`。
+  - 系統通知帶 `notice:<種類>`，例如 `notice:login`、`notice:quota`、`notice:mux_down`、`notice:waiting`、`notice:view`、`notice:device_key`、`notice:node_mismatch`、`notice:bridge`。種類清單以 [docs/通知種類.md](../通知種類.md) 為準，這裡只是舉例。
   - 一般信件是 null。
   - 用戶端判斷是不是系統通知**只信 `kind`**：開頭是 `notice:` 才算。寄件人名字（`ASN 通知`、結尾是「收發室」）和內文開頭 `[收發室]` 只用來相容**切換日期之前**的舊信，用信件的 `created_at` 切；切換日期定在 PR-C 上線那天，寫成用戶端的一個常數，PR-C 上線前先不設（照舊全部適用名字規則）。
   - `kind` 只能由後台寫：PR-C 的 Edge 寄信路徑（`send` 等用戶端可以呼叫的動作）一律把用戶端帶來的 `kind` 清成 null，只有後台的寄通知函式能寫 `notice:*`。
