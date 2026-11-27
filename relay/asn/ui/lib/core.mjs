@@ -12,6 +12,7 @@ import { WAKE_ENGINES, partnerEngine } from './partner-ops.mjs'
 import { coalesced, overlayLocal } from './local-status.mjs'
 import { isProcessName, archivedKeysOf, buildFriends, cleanPsm, expectsReplyTo, friendId, isAsnWindow, mergeFriends } from './roster.mjs'
 import { contextAlertText, createContextWatch } from './context-usage.mjs'
+import { announcesLogin } from './partner-status.mjs'
 import { routeMail, stubFriend } from './routing.mjs'
 import { NOTICE_ID, isLegacyNoticeFriend, isMergedAway, isNoticeFriend, isNoticeKind, isSystemNotice, noticeFriend } from './notice.mjs'
 import { hasNudge, hueOf, initial, noReplyNoticeOf, plain, stripNudge, stripReplyHead, unwrapShell } from './text.mjs'
@@ -199,7 +200,7 @@ export class AsnCore {
       const old = this.friends.get(m.id)
       const f = this.#decorate({ unread: 0, waiting: false, replyTo: null, ...(old ?? {}), ...m, contextPct: m.contextPct ?? null, modLoaded: m.modLoaded ?? null, deviceMod: m.deviceMod ?? null, elevated: m.elevated === true })   // 上下文用量每輪以名單為準，不沿用舊值
       next.set(m.id, f)
-      if (this.rosterLoaded && !isAsnWindow(f) && f.status !== 'offline' && (prev.get(m.id) ?? 'offline') === 'offline') {
+      if (this.rosterLoaded && !isAsnWindow(f) && announcesLogin(prev.get(m.id), f.status)) {   // 只有從離線或要重新登入、變成真的能用才發；轉成要重新登入、額度用完、狀態不明不發
         queueMicrotask(() => this.emit('notify', { kind: 'login', friend: f, line: '已經登入', sound: 'login', toast: true }))
       }
     }

@@ -1,4 +1,5 @@
 import { isDisplayOnly } from './display-only.mjs'
+import { warnKindOf } from './partner-status.mjs'
 // 對話標題列的底色與提醒條（純邏輯，瀏覽器與 node 共用）。
 // 手機版：對方忙碌時標題列改黃底，已經說了一次「忙碌」，就不再另外顯示黃色說明條。
 
@@ -21,10 +22,7 @@ export function loginNote(friend) {
 }
 
 export function warnKind(status, { hideBusy = false } = {}) {
-  if (status === 'online' || !status) return null
-  if (status === 'offline') return 'offline'
-  if (status === 'stopped') return 'stopped'
-  if (status === 'login-required') return 'login'
-  if (status === 'busy' && hideBusy) return null
-  return 'status'
+  const kind = warnKindOf(status)   // 對照在 partner-status.mjs（唯一一份）
+  if (kind === 'status' && status === 'busy' && hideBusy) return null
+  return kind
 }

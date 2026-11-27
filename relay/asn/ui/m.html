@@ -77,7 +77,7 @@
               <button class="m-me" type="button" aria-label="設定" @click="goTab('me')"><img class="m-pic" :class="'st-' + me.status" :src="meAv" alt="" width="44" height="44"></button>
               <div class="m-head-tx">
                 <div class="m-title">{{ myName }}</div>
-                <div class="m-conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span><span class="m-conn-tx">{{ conn === 'on' ? STATUS[me.status] : CONN_LABEL[conn] }}<template v-if="conn === 'on' && me.nick">・{{ me.nick }}</template><template v-if="conn === 'on' && me.psm"> · {{ me.psm }}</template></span></div>
+                <div class="m-conn"><span class="dot" :class="conn === 'on' ? 'st-online' : conn === 'off' ? 'st-busy' : 'st-away'"></span><span class="m-conn-tx">{{ conn === 'on' ? MY_STATUS[me.status] : CONN_LABEL[conn] }}<template v-if="conn === 'on' && me.nick">・{{ me.nick }}</template><template v-if="conn === 'on' && me.psm"> · {{ me.psm }}</template></span></div>
               </div>
               <div class="m-plus-wrap">
                 <button class="m-icon-btn" type="button" aria-label="新增" aria-haspopup="menu" :aria-expanded="plusOpen" @click="plusOpen = !plusOpen"><svg class="m-ic" viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M12 4.5v15M4.5 12h15" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg></button>
@@ -476,7 +476,7 @@
                         <p class="m-err" v-if="wakeErr" role="alert">{{ wakeErr }}</p>
                         <p class="m-acct">{{ accountText }}</p>
                         <p class="m-fine" v-if="sealNote">{{ sealNote }}</p>
-                        <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in STATUS" :key="key" :value="key">{{ label }}</option></select></label>
+                        <label>狀態<select class="set-sel" v-model="me.status"><option v-for="(label, key) in MY_STATUS" :key="key" :value="key">{{ label }}</option></select></label>
                         <label>個人訊息<input class="set-input" v-model="me.psm" maxlength="60" placeholder="輸入個人訊息" enterkeyhint="done" @keydown.enter="$event.target.blur()"></label>
                       </div>
                       <!-- 登出在「個人」內頁最下面（#1093：不放在設定列表） -->

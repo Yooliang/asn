@@ -49,11 +49,12 @@ import { keepScroll, olderNote, rearmed, wantsOlder } from './scrollback.mjs'
 import { clockLabel, composeFieldHeight, lineRows, sentStateText } from './line-chat.mjs'
 import { MEMBER_NOT_FRIEND } from './groups.mjs'
 import { githubUrl, linkRefs, parseRepo, refOf, refRange, refTip } from './msg-ref.mjs'
+import { STATUS_LABEL } from './partner-status.mjs'
 
 const { ref, computed, watch, nextTick, onMounted, onBeforeUnmount, onUpdated, reactive } = Vue
 // 看過的大圖：同一個畫面裡再點同一張不必再跨到 Rust（#1493）。登入、登出時清掉（photo.mjs）
 const recentShown = shownPhotos
-const STATUS = { online: '線上', busy: '忙碌', running: '執行中・僅顯示', awaiting: '等你在那台電腦按確認', away: '暫離', offline: '顯示為離線', stopped: '已停止', quota: '額度用完', unavailable: '暫時不可用' }
+const STATUS = STATUS_LABEL   // 狀態字來自 partner-status.mjs 的唯一對照表
 
 export const ChatPane = {
   name: 'ChatPane',

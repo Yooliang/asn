@@ -4,6 +4,7 @@ import { unnamedLabelOf } from './device-known.mjs'
 import { pctOf } from './context-usage.mjs'
 import { isLegacyNoticeName, isMergedAway, isNoticeFriend } from './notice.mjs'
 import { AWAITING_STATUS, awaitingName, isAwaitingEntry } from './awaiting.mjs'
+import { LIVE_SCREEN_STATUSES, screenStatusOf } from './partner-status.mjs'
 
 const PARTNER_ID = /^p_[0-9a-f]{20}$/
 // 後台給的這台電腦的 Claude 外掛狀態（claude_mod：state／version／reason）→ 乾淨的物件；舊後台沒有或格式不對＝null
@@ -24,7 +25,7 @@ export function modOf(m) {
  * **不能**拿來判斷「這個夥伴能不能收信、能不能叫醒」（stopped 的夥伴收不到信）。
  * 只有 device-order.mjs 與 partner-launch-ui.mjs 可以引用，守門測試 test/ghost-notice-1830.test.mjs 會檢查。
  */
-export const DEVICE_LIVE_STATUSES = Object.freeze(['online', 'busy', 'away', 'stopped', 'running', AWAITING_STATUS])
+export const DEVICE_LIVE_STATUSES = LIVE_SCREEN_STATUSES   // 清單來自 partner-status.mjs 的唯一對照表（要重新登入、額度用完、狀態不明的夥伴所在的設備一樣是活的）
 export const isDeviceLiveStatus = s => DEVICE_LIVE_STATUSES.includes(s)
 
 // 本機程序掃描的條目是暫時性的顯示（程式結束就該消失），不是會留下往來的好友：
@@ -44,14 +45,11 @@ export const withoutAsn = friends => (Array.isArray(friends) ? friends : []).fil
 export const expectsReplyTo = f => !isAsnWindow(f)
 export const showsWaiting = f => Boolean(f?.waiting) && !isAsnWindow(f)
 
-// 後端回報的視窗狀態 → 介面狀態（isProc＝本機程序條目：只顯示、不能收信，不分狀態一律 running＝「執行中・僅顯示」、灰點，不用代表可寄信的綠點）：busy/working/running 之類＝忙碌，waiting 之類（等人回應）＝暫離，stopped＝已停止（內建通道的工作者被「關閉」，0.2 B3），
-// 其餘（idle…）＝線上；不在名單＝離線（由 mergeFriends 決定）
-const BUSY = new Set(['busy', 'working', 'running', 'thinking'])
-const AWAY = new Set(['waiting', 'away', 'blocked', 'paused'])
+// 後端回報的視窗狀態 → 介面狀態（isProc＝本機程序條目：只顯示、不能收信，不分狀態一律 running＝「執行中・僅顯示」、灰點，不用代表可寄信的綠點）。
+// 對照表在 partner-status.mjs（唯一一份）：忙碌、暫離、已停止、要重新登入、額度用完；沒帶狀態＝線上；不認得的＝狀態不明（不再當成線上）。不在名單＝離線（由 mergeFriends 決定）
 export function statusOf(raw, isProc = false) {
-  const s = String(raw ?? '').trim().toLowerCase()
   if (isProc) return 'running'
-  return BUSY.has(s) ? 'busy' : AWAY.has(s) ? 'away' : s === 'stopped' ? 'stopped' : 'online'
+  return screenStatusOf(raw)
 }
 
 // 舊存檔的個人訊息是「節點／資料夾」或單獨節點名；設備已由頁籤表示，只留資料夾

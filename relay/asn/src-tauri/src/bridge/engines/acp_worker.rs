@@ -289,6 +289,19 @@ impl Health {
     }
 }
 
+/// 名單上的狀態字。優先序：使用者停的（stopped）＞登入失效、額度用完（信不會被處理，名單要看得到，不能被忙碌蓋掉）＞忙碌＞閒置
+fn roster_status(admin_stopped: bool, health: Health, busy: bool) -> &'static str {
+    if admin_stopped {
+        "stopped"
+    } else if health == Health::LoginRequired || health == Health::Quota {
+        health.name()
+    } else if busy {
+        "busy"
+    } else {
+        "idle"
+    }
+}
+
 struct St {
     health: Health,
     health_reason: String,
@@ -423,15 +436,7 @@ impl Worker {
     }
     pub fn status(&self) -> &'static str {
         let s = self.st.lock().unwrap();
-        if s.admin_stopped {
-            "stopped"
-        } else if s.running || !s.queue.is_empty() {
-            "busy"
-        } else if s.health == Health::LoginRequired || s.health == Health::Quota {
-            s.health.name()
-        } else {
-            "idle"
-        }
+        roster_status(s.admin_stopped, s.health, s.running || !s.queue.is_empty())
     }
     /// 名單上看得到嗎：起不來的不列；被「關閉」的照樣列（狀態「已停止」），才點得到「重開」「移除」
     pub fn listed(&self) -> bool {
@@ -1160,3 +1165,23 @@ impl Guard for WorkerGuard {
 
 // 遠端管理夥伴（詳情、重開、換班接手）用的方法放在子模組，才能讀這裡的私有欄位
 pub mod admin;
+
+#[cfg(test)]
+mod status_priority_tests {
+    use super::{roster_status, Health};
+
+    #[test]
+    fn 登入失效與額度用完優先於忙碌_停止仍最優先() {
+        // 登入失效時佇列有信、正在跑：名單要送 login-required，不能被 busy 蓋掉（#2441）
+        assert_eq!(roster_status(false, Health::LoginRequired, true), "login-required");
+        assert_eq!(roster_status(false, Health::Quota, true), "quota");
+        assert_eq!(roster_status(false, Health::LoginRequired, false), "login-required");
+        // 使用者停的最優先
+        assert_eq!(roster_status(true, Health::LoginRequired, true), "stopped");
+        assert_eq!(roster_status(true, Health::Ok, true), "stopped");
+        // 健康時照舊：忙碌、閒置
+        assert_eq!(roster_status(false, Health::Ok, true), "busy");
+        assert_eq!(roster_status(false, Health::Ok, false), "idle");
+        assert_eq!(roster_status(false, Health::Unavailable, true), "busy");
+    }
+}

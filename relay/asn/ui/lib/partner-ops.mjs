@@ -5,6 +5,7 @@ import { NAME_RE } from './mobile-launch.mjs'
 import { isRelayRoom } from './roster.mjs'
 import { closedReasonOf } from './partner-launch-ui.mjs'
 import { TERM_STATE_TEXT } from './term-entry.mjs'
+import { DETAIL_TEXT } from './partner-status.mjs'
 
 export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove']
 // Claude 視窗：在線的五項；離線的只有「喚醒」
@@ -469,7 +470,7 @@ export function progressView(row, { op = row?.op, sentAt = 0, now = Date.now() }
 // ---------- 詳情 ----------
 
 const ENGINE_TEXT = { claude: 'Claude', codex: 'Codex', gemini: 'Gemini', pi: 'Pi' }
-const STATUS_TEXT = { idle: '閒置', online: '閒置', busy: '忙碌', working: '忙碌', running: '忙碌', thinking: '忙碌', waiting: '等你回應', away: '等你回應', blocked: '等你回應', paused: '暫停', stopped: '已停止' }
+const STATUS_TEXT = DETAIL_TEXT   // 狀態字來自 partner-status.mjs 的唯一對照表
 const pad = n => String(n).padStart(2, '0')
 function timeText(v) {
   const d = new Date(typeof v === 'number' && v < 1e12 ? v * 1000 : v)
