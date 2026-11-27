@@ -205,6 +205,18 @@ test('載入失敗：開場說明把讀取放在允許清單外另起一句；�
   })
 })
 
+test('載入失敗：開場說明不把執行指令列進「你被允許」，並講明執行與上網暫時不能用', async () => {
+  await using(path.join(TMP, '沒有這個檔.json'), async () => {
+    const r = rig(GEMINI)
+    await wait(r)
+    const spec = { ...r.spec, permissions: { ...r.spec.permissions, rules: { ...r.spec.permissions.rules, write: 'allow', execute: 'allow' } } }
+    const text = preambleFor(spec)
+    assert.ok(!/你被允許：[^；。]*執行指令/.test(text), text)
+    assert.ok(text.includes('不被允許：執行指令、上網'), text)
+    assert.ok(text.includes('讀取檔案、執行指令、上網這段期間暫時不能用'), text)
+  })
+})
+
 // ---- 機器橋與引擎模組照常載入 ----
 test('共用設定載入失敗時，引擎與橋的模組仍能匯入（不在匯入時丟錯）', async () => {
   await using(path.join(TMP, '沒有這個檔.json'), async () => {

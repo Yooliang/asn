@@ -23,11 +23,12 @@ export const AGY_DOCS_NOTE = '你自己的對話資料夾（~/.gemini/antigravit
 // 清單在第一次用到才載入，所以是函式；載入失敗時這句會改成說明讀取暫時不可用
 export const readOkText = () => DATA.preambleReadOk
 
-function failedCaption(can, cant) {
+// 載入失敗時引擎擋掉讀取、執行指令、上網，只有寫檔照工作資料夾規則；writeLabel 是寫檔的說法（不允許寫檔時為空）
+function failedCaption(writeLabel) {
   const note = '目前讀取檢查設定載入失敗，讀取檔案暫時不能用，請先不要讀檔。'
-  if (!can.length) return `${note}你目前不能寫檔、也不能執行指令；做不到的事就直說做不到。`
-  if (!cant.length) return `${note}你被允許：${can.join('、')}。`
-  return `${note}你被允許：${can.join('、')}；不被允許：${cant.join('、')}，做不到的事就直說做不到。`
+  const down = '讀取檔案、執行指令、上網這段期間暫時不能用'
+  if (!writeLabel) return `${note}${down}，寫檔也不被允許，所以你目前什麼都不能做；做不到的事就直說做不到。`
+  return `${note}你被允許：${writeLabel}；不被允許：執行指令、上網，${down}，做不到的事就直說做不到。`
 }
 
 export function preambleFor(cfg) {
@@ -38,7 +39,7 @@ export function preambleFor(cfg) {
   // 讀取檢查設定載入失敗：讀檔不在「允許」清單裡，另起一句說明讀取暫時不能用
   const readOk = sensitiveDataStatus().ok
   const READ_OK = readOkText()
-  const caption = !readOk ? failedCaption(can, cant) : !can.length
+  const caption = !readOk ? failedCaption(p.write === 'allow' ? caps[0][2] : '') : !can.length
     ? `你目前是唯讀的：可以${READ_OK}，不要寫檔、不要執行指令；做不到的事就直說做不到。`
     : !cant.length ? `你被允許：${READ_OK}、${can.join('、')}。` : `你被允許：${READ_OK}、${can.join('、')}；不被允許：${cant.join('、')}，做不到的事就直說做不到。`
   return `你是 ASN 收發室替你啟動的背景工作者「${cfg.name}」，不是使用者開著的視窗。之後的每一則訊息都是經仲介轉來的信，第一行是 [RELAY 來信] 標頭（from＝寄件人）。`
