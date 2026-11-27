@@ -999,7 +999,7 @@ mod tests {
     }
 
     /// 工具步驟無法解讀（截斷的一行、巢狀超過深度上限的一行）時：記 log（不含內容）、這一輪整輪中止；正常的一輪照常。走真的驅動與子程序（node 假程式）
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn 工具步驟無法解讀時中止這一輪_正常的一輪照常() {
         use crate::bridge::engines::acp_agy::AgyDriver;
         use crate::bridge::engines::acp_worker::{Driver, DriverArgs};
@@ -1025,9 +1025,10 @@ mod tests {
                if(m==='cut')console.log('{\"event\":\"step_update\",\"step_update\":{\"tool_info\":{\"parameters\":');\n\
                else if(m==='deep')console.log('['.repeat(300)+']'.repeat(300));\n\
                else console.log(JSON.stringify({event:'result',result:{status:'SUCCESS',response:'ok',conversation_id:'c1'}}));\n\
-             });setInterval(()=>{},1000);",
+             });rl.on('close',()=>process.exit(0));setInterval(()=>{},1000);",
         )
         .unwrap();
+        let mut bad: Vec<String> = vec![];
         for (mode, expect_abort) in [("cut", true), ("deep", true), ("ok", false)] {
             let logs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
             let l2 = logs.clone();
@@ -1038,21 +1039,32 @@ mod tests {
             let a = DriverArgs { cfg: Arc::new(cfg), log: Arc::new(move |m| l2.lock().unwrap().push(m)), session_id: String::new(), env: Arc::new(std::env::vars().collect()), ..base.clone() };
             let d = AgyDriver::new(a);
             d.start().await.expect("假 agy 要起得來");
-            let r = tokio::time::timeout(std::time::Duration::from_secs(30), d.turn("hi".into(), 20_000, 25_000)).await.expect("不能卡住");
+            let r = tokio::time::timeout(std::time::Duration::from_secs(15), d.turn("hi".into(), 5_000, 8_000)).await;
             d.stop();
+            tokio::time::sleep(std::time::Duration::from_millis(800)).await; // 結束行程的動作在背景任務裡做，給它時間，免得假程式留著
             let l = logs.lock().unwrap().clone();
-            if expect_abort {
-                let e = r.expect_err(mode);
-                assert_eq!(e.code, "violation", "{mode}: {} {l:?}", e.message);
-                assert!(e.message.contains("無法解讀"), "{mode}: {}", e.message);
-                assert!(l.iter().any(|x| x.contains("第 1 行解析不了") && x.contains("長度")), "{mode}: {l:?}");
-                assert!(!l.iter().any(|x| x.contains("step_update") || x.contains("tool_info") || x.contains("[[[")), "log 不記行內容：{l:?}");
-            } else {
-                assert_eq!(r.expect("正常的一輪照常").text, "ok");
-                assert!(!l.iter().any(|x| x.contains("解析不了")), "{l:?}");
+            match (expect_abort, r) {
+                (true, Ok(Err(e))) => {
+                    if e.code != "violation" || !e.message.contains("無法解讀") {
+                        bad.push(format!("{mode}: 沒有因無法解讀而中止：{} {}", e.code, e.message));
+                    }
+                    if !l.iter().any(|x| x.contains("第 1 行解析不了") && x.contains("長度")) {
+                        bad.push(format!("{mode}: 沒記 log：{l:?}"));
+                    }
+                    if l.iter().any(|x| x.contains("step_update") || x.contains("tool_info") || x.contains("[[[")) {
+                        bad.push(format!("{mode}: log 不該記行內容：{l:?}"));
+                    }
+                }
+                (false, Ok(Ok(t))) => {
+                    if t.text != "ok" || l.iter().any(|x| x.contains("解析不了")) {
+                        bad.push(format!("{mode}: 正常的一輪不照常：{} {l:?}", t.text));
+                    }
+                }
+                (_, other) => bad.push(format!("{mode}: 結果不符預期：{:?}", other.map(|r| r.map(|t| t.text)))),
             }
         }
-        eng.stop();
+        eng.stop(); // 先收尾再判定，失敗時才不會留著子程序卡住整個測試
+        assert!(bad.is_empty(), "{bad:#?}");
     }
 
     /// 回歸：沒寫 cwd 的工作者預設在 ASN 資料夾底下，自己的資料夾、指令的 Cwd、收信附件要讀得到；ASN 資料夾其他東西仍擋。走真的守門員（agy 與標準 ACP）

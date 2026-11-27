@@ -336,7 +336,7 @@ pub(crate) fn run_events_for_test(a: &DriverArgs, events: Vec<Value>) -> Option<
 /// 測試用：同上，但可以夾「解析不了的一行」（Err）
 #[cfg(test)]
 pub(crate) fn run_lines_for_test(a: &DriverArgs, lines: Vec<Result<Value, UnparsedLine>>) -> Option<WorkerError> {
-    let sh =Arc::new(Shared { sid: Mutex::new(String::new()), resume_lost: AtomicBool::new(false), rpc: Mutex::new(None), cur: Mutex::new(None), last_activity: AtomicU64::new(0) });
+    let sh = Arc::new(Shared { sid: Mutex::new(String::new()), resume_lost: AtomicBool::new(false), rpc: Mutex::new(None), cur: Mutex::new(None), last_activity: AtomicU64::new(0) });
     let (tx, mut rx) = oneshot::channel();
     *sh.cur.lock().unwrap() = Some(Cur { tx: Some(tx), denied: vec![], seen: HashSet::new(), violation: None, tools: false });
     for l in lines {
