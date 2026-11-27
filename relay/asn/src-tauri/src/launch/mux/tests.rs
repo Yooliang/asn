@@ -1350,16 +1350,15 @@ mod stuck {
         assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Done);
     }
 
-    /// #2424 H1：指令排隊等不到位子（沒送出）不是「連不上」，不能走到結束終端服務
+    /// #2424 H1：指令排隊等不到位子（沒送出）不是「連不上」，不能走到結束終端服務；沒測成回忙碌（不進 5 分鐘冷卻）
     #[test]
-    fn t2424_連線測試沒送出_排隊逾時_取消_不結束終端服務() {
+    fn t2424_連線測試沒送出_排隊逾時_回忙碌_不結束終端服務() {
         let d = tempfile::tempdir().unwrap();
         let (r, m) = rig(d.path());
         for e in [format!("{}，排隊 20 秒仍輪不到，這次沒有送出", crate::launch::cli_gate::QUEUE_TIMEOUT), format!("{}（約 30 秒後再試）", crate::launch::cli_gate::SKIPPED)] {
             *r.run_err.borrow_mut() = Some(e);
             assert!(matches!(m.alive_probe(), Probe::Inconclusive(_)), "沒送出＝沒測成");
-            let Disposal::Cancelled(why) = m.dispose_stuck((4000, 777), 50, &hb_still(4000)) else { panic!("沒送出要取消") };
-            assert!(why.contains("沒有送出"), "{why}");
+            assert_eq!(m.dispose_stuck((4000, 777), 50, &hb_still(4000)), Disposal::Busy, "沒送出要回忙碌、不是取消");
             assert!(r.killed.borrow().is_empty() && m.paths.pid.exists() && hb_of(&m).exists(), "終端服務與記錄都不能動");
         }
     }

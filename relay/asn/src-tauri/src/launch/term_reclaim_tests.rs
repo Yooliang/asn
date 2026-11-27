@@ -307,6 +307,11 @@ fn 例行標記的接線_只在背景工作_使用者動作不標() {
     assert!(prod.contains("cli_gate::routine(|| terms.partner_screen_view(&id))"), "背景監看讀畫面要標例行");
     assert!(prod.contains("cli_gate::routine(|| w.pane_exit(sock, *pane, Some(nonce)))"), "掃已結束窗格要標例行");
     assert_eq!(prod.matches("cli_gate::routine(").count(), 2, "例行標記只有這兩處（認領的在 term_reclaim.rs）");
+    // 背景讀畫面被略過：要告訴排程（schedule.skipped，不算讀失敗、不退避）然後 continue，不能往下當成讀到或讀失敗
+    let after = prod.split("cli_gate::routine(|| terms.partner_screen_view(&id))").nth(1).unwrap();
+    let skip_block = after.split("\n                }\n").next().unwrap();
+    let (a, b, c) = (skip_block.find("cli_gate::is_skipped(e)"), skip_block.find("schedule.skipped(&id, now);"), skip_block.find("continue;"));
+    assert!(matches!((a, b, c), (Some(a), Some(b), Some(c)) if a < b && b < c), "背景讀畫面被略過要 schedule.skipped 後 continue：{skip_block}");
     for f in ["fn partner_screen_checked", "fn permission_checked", "fn early_exit", "pub fn answer", "pub fn partner_term_id"] {
         let body = prod.split(f).nth(1).unwrap_or_else(|| panic!("找不到 {f}"));
         let body = body.split("\n    }\n").next().unwrap();
