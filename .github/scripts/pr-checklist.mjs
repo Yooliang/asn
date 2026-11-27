@@ -1,8 +1,9 @@
 // PR 範本檢查（#1805）：PR 說明裡三項必填檢查沒勾、或沒附說明就紅；加「復發」標籤的 PR 要有以單號命名的守門測試。
 // 另外兩項由機器主動發現、不等人申報（紀律 一.2、二.6、六.3）：
-//  - 只改一邊畫面：只動到手機或電腦其中一邊的畫面檔，PR 說明要有一行「只改一邊：原因」。
-//  - 復發：標題是修正、修的那張單在目標分支上已經修過並且發過版，就照「復發」標籤處理；確定不是，寫一行「不是復發：原因」。
+//  - 只改一邊畫面：只動到手機或電腦其中一邊的頁面與樣式檔（腳本檔不算），PR 說明要有一行「只改一邊：原因」。
+//  - 復發：標題是修正、修的那張單在目標分支上已經修過並且發過版，就照「復發」標籤處理，復發單號要寫機器比對到的那一張；確定不是，寫一行「不是復發：原因」。
 // 檢查邏輯都是純函式（test 在 relay/asn/test/pr-checklist.test.mjs）；直接執行時讀 GitHub 的事件檔與本機 git，沒有任何外部相依、不打 API。
+// 直接執行（CI 的 PR 事件）時，改動的檔案清單或目標分支的歷史取不到就紅燈：檢查做不了，不能當成通過。
 import fs from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -71,9 +72,6 @@ export function exemption({ title = '', headRef = '', labels = [], files = [] } 
   return { exempt: false, why: '' }
 }
 
-/** 最多列 5 個檔名，多的寫總數 */
-const listFiles = list => `${list.slice(0, 5).join('、')}${list.length > 5 ? ` 等 ${list.length} 個` : ''}`
-
 /**
  * 找 PR 說明裡自成一行的「關鍵字：原因」（全形、半形冒號都收）。回 { found, ok, reason }：
  * found＝有這一行；ok＝原因過得了 descOk；有好幾行時取第一個原因寫清楚的。
@@ -92,39 +90,32 @@ export function declared(body, key) {
 }
 
 // ---------- 只改一邊畫面 ----------
-// 清單依 relay/asn/ui/ 的實際載入關係訂（2026-11-27 盤點）。原則：只有那一邊會載入的才算那一邊，兩邊都載入的是共用、不算任何一邊。
+// 只看「頁面與樣式檔」：只有那一邊會載入的 html 與 css。兩邊都載入的（style.css、其他外觀樣式）是共用，不算任何一邊。
+// 腳本檔（.js、.mjs）一律不算，包括 list.js、m.js 與 lib/mobile*.mjs：它們多半是邏輯，不是畫面。
+// 領隊一審拿主線實測（2026-11-27）：把腳本檔也算進來時，主線最近 75 筆（不含發版提交）有 9 筆被判只改一邊，
+// 其中 6 筆只動了 list.js、panel.js，是純邏輯的改動；只算頁面與樣式檔是 4 筆。
+// 代價：只改腳本或共用畫面模組（ui/lib、ui/parts、style.css）的單邊改動，這一項看不出來，要靠審查的人看，報告那一行會寫明這個範圍。
 const UI_DIR = 'relay/asn/ui/'
-/** 手機畫面檔：只有手機版（m.html）載入的頁面、腳本、樣式；另加 lib/mobile*.mjs（扣掉下面那份例外） */
-export const MOBILE_UI = ['m.html', 'm.js', 'mobile.css']
+/** 手機的頁面與樣式檔：只有手機版載入 */
+export const MOBILE_UI = ['m.html', 'mobile.css']
 /**
- * 名字叫 mobile、但電腦版的頁面也載入的模組：算共用，不算手機那一邊。
- * 例如 mobile-rooms.mjs 是手機和電腦共用的群組邏輯；把它算成手機，「只改 list.html＋mobile-rooms.mjs」會被當成兩邊都改了。
- * 這份清單有守門測試拿實際的 import 關係比對（pr-checklist.test.mjs）：電腦版開始或不再載入某個 mobile*.mjs 時，測試會紅，照訊息改這裡。
+ * 電腦的頁面檔：只有電腦版載入、而且手機在 m.html 裡有對應畫面的頁面（名單、設定與指引、聊天窗、登入、首次引導）。
+ * 電腦沒有自己專屬的樣式檔。通知小窗、密碼框、安裝進度、截圖（toast／askpass／setup-progress／shot）是電腦才有的小視窗，手機沒有對應的頁面，不列。
  */
-export const SHARED_MOBILE_MODULES = [
-  'mobile-call.mjs', 'mobile-dictation.mjs', 'mobile-fourth.mjs', 'mobile-guides.mjs', 'mobile-launch.mjs',
-  'mobile-ops.mjs', 'mobile-rooms.mjs', 'mobile-settings.mjs', 'mobile-setup.mjs', 'mobile.mjs',
-]
-/**
- * 電腦畫面檔：只有電腦版載入、而且手機在 m.html 裡有對應畫面的頁面與它的腳本（名單、設定與指引、聊天窗、登入、首次引導）。
- * - style.css 不在這裡：m.html 也載入它（mobile.css 只在它上面改尺寸與排法），是共用的樣式。
- * - 通知小窗、密碼框、安裝進度、截圖（toast／askpass／setup-progress／shot）是電腦才有的小視窗，手機沒有對應的頁面，不列。
- */
-export const DESKTOP_UI = ['list.html', 'list.js', 'panel.html', 'panel.js', 'chat.html', 'chat.js', 'login.html', 'login.js', 'onboard.html', 'onboard.js']
+export const DESKTOP_UI = ['list.html', 'panel.html', 'chat.html', 'login.html', 'onboard.html']
 const SIDE_NAME = { mobile: '手機', desktop: '電腦' }
+/** 報告那一行最後一定帶這一句，讓審查的人知道這一項看了什麼、沒看什麼 */
+export const ONE_SIDED_SCOPE = '這項只看頁面與樣式檔；腳本檔與共用的畫面模組（ui/lib、ui/parts、style.css）不在檢查範圍，要靠審查的人看。'
 
-/** 這個檔算哪一邊的畫面：'mobile'、'desktop'，或 ''（共用的檔、不是畫面檔） */
+/** 這個檔算哪一邊的頁面或樣式：'mobile'、'desktop'，或 ''（腳本檔、共用的檔、不是畫面檔） */
 export function uiSide(f) {
   const p = String(f ?? '')
   if (!p.startsWith(UI_DIR)) return ''
   const rel = p.slice(UI_DIR.length)
-  if (MOBILE_UI.includes(rel)) return 'mobile'
-  if (DESKTOP_UI.includes(rel)) return 'desktop'
-  const m = /^lib\/(mobile[^/]*\.mjs)$/.exec(rel)
-  return m && !SHARED_MOBILE_MODULES.includes(m[1]) ? 'mobile' : ''
+  return MOBILE_UI.includes(rel) ? 'mobile' : DESKTOP_UI.includes(rel) ? 'desktop' : ''
 }
 
-/** 這張 PR 是不是只動到一邊的畫面檔：回 { side, files }；side＝'mobile'／'desktop'，兩邊都動或都沒動是 '' */
+/** 這張 PR 是不是只動到一邊的頁面與樣式檔：回 { side, files }；side＝'mobile'／'desktop'，兩邊都動或都沒動是 '' */
 export function oneSided(files = []) {
   const mobile = files.filter(f => uiSide(f) === 'mobile')
   const desktop = files.filter(f => uiSide(f) === 'desktop')
@@ -133,19 +124,19 @@ export function oneSided(files = []) {
   return { side: '', files: [] }
 }
 
-/** 只改一邊的檢查：只動到一邊時，PR 說明要有一行「只改一邊：原因」。回 { required, ok, side, files, reason, why } */
+/** 只改一邊的檢查：只動到一邊時，PR 說明要有一行「只改一邊：原因」。回 { required, ok, side, files, reason, why }；why 最後一定帶檢查範圍那一句 */
 export function oneSidedCheck({ files = [], body = '' } = {}) {
   const os = oneSided(files)
   if (!os.side) return { required: false, ok: true, side: '', files: [], reason: '', why: '' }
   const here = SIDE_NAME[os.side]
   const other = SIDE_NAME[os.side === 'mobile' ? 'desktop' : 'mobile']
-  const seen = `只動到${here}的畫面檔（${listFiles(os.files)}），${other}的畫面檔完全沒動`
+  const seen = `只動到${here}的頁面與樣式檔（${os.files.join('、')}），${other}的頁面與樣式檔完全沒動`   // 清單上每邊最多 5 個檔，全部列出
   const d = declared(body, ONE_SIDED_KEY)
-  if (d.ok) return { required: true, ok: true, ...os, reason: d.reason, why: `${seen}；PR 說明寫的原因：${d.reason}` }
-  const how = `怎麼辦：補上${other}那一邊；或在 PR 說明另外加一行「${ONE_SIDED_KEY}：是哪個平台本來就沒有這個功能」（${other}那一邊其實改在共用的檔，也寫在這一行）。`
+  if (d.ok) return { required: true, ok: true, ...os, reason: d.reason, why: `${seen}；PR 說明寫的原因：${d.reason.replace(/[。.]+$/, '')}。${ONE_SIDED_SCOPE}` }
+  const how = `怎麼辦：補上${other}那一邊；或在 PR 說明另外加一行「${ONE_SIDED_KEY}：是哪個平台本來就沒有這個功能」（${other}那一邊其實改在腳本檔或共用的檔，也寫在這一行）。`
   const why = d.found
-    ? `這張 PR ${seen}。PR 說明裡「${ONE_SIDED_KEY}：」後面的原因沒寫清楚（太短，或還是範本的「…」）。${how}`
-    : `這張 PR ${seen}。${how}`
+    ? `這張 PR ${seen}。PR 說明裡「${ONE_SIDED_KEY}：」後面的原因沒寫清楚（太短，或還是範本的「…」）。${how}${ONE_SIDED_SCOPE}`
+    : `這張 PR ${seen}。${how}${ONE_SIDED_SCOPE}`
   return { required: true, ok: false, ...os, reason: d.reason, why }
 }
 
@@ -245,6 +236,7 @@ export function recurrenceHits(title, baseTitles = [], { own } = {}) {
 
 /**
  * 機器比對出來的復發：沒貼「復發」標籤也照復發處理（要寫復發單號、要有以單號命名的守門測試）。
+ * 復發單號必須是機器比對到的單號之一：隨便寫一張別的單、附一支以那張單命名的測試，不能過。
  * 退路：PR 說明自成一行的「不是復發：原因」，放行，並把原因印進報告給審查的人看。
  * 回 { required, ok, hits, waived（放行時的原因）, why }
  */
@@ -257,14 +249,20 @@ export function autoRecurrence({ title = '', number, baseTitles = [], body = '',
   const no = declared(body, NOT_RECUR_KEY)
   if (no.ok) return { required: true, ok: true, hits, waived: no.reason, why: `${seen}；PR 說明寫「${NOT_RECUR_KEY}：${no.reason}」，請審查的人確認這個原因` }
   const rc = recurrence({ labels: [RECUR_LABEL], body, files, added })
-  if (rc.ok) return { required: true, ok: true, hits, waived: '', why: `${seen}，照復發處理；復發單號 #${rc.n}，${rc.why}` }
+  // 申報的單號要是機器比對到的其中一張
+  const same = rc.n != null && hits.some(h => h.n === rc.n)
+  if (rc.ok && same) return { required: true, ok: true, hits, waived: '', why: `${seen}，照復發處理；復發單號 #${rc.n}，${rc.why}` }
   const ways = `兩條路擇一：一、是復發：在 PR 說明寫「復發單號：#${hits[0].n}」，並在這張 PR 加一支以單號命名的守門測試（檔名含單號，或新增的測試裡寫上單號）。二、確定不是復發：在 PR 說明另外加一行「${NOT_RECUR_KEY}：原因」，審查的人會看這一句。`
-  const lack = rc.n ? `PR 說明寫了復發單號 #${rc.n}，但這張 PR 沒有以 ${rc.n} 命名的守門測試。`
+  const lack = rc.n != null && !same ? `機器比對到的是 ${nums}，PR 說明寫的復發單號是 #${rc.n}，不是同一張；復發單號要寫機器比對到的那一張，守門測試也要用那個單號命名。`
+    : rc.n != null ? `PR 說明寫了復發單號 #${rc.n}，但這張 PR 沒有以 ${rc.n} 命名的守門測試。`
     : no.found ? `PR 說明裡「${NOT_RECUR_KEY}：」後面的原因沒寫清楚（太短，或還是範本的「…」）。` : ''
   return { required: true, ok: false, hits, waived: '', why: `這張 PR 的${seen}。${lack}${ways}` }
 }
 
-/** 整合：回 { pass, lines（報告）, errors }。baseTitles＝目標分支的提交標題（由舊到新）；沒給（取不到歷史）就略過復發的自動比對 */
+/**
+ * 整合：回 { pass, lines（報告）, errors }。baseTitles＝目標分支的提交標題（由舊到新）。
+ * 沒給 baseTitles 就略過復發的自動比對、報告裡寫明略過：這是給本機與測試直接呼叫用的。CI 上取不到歷史時，main 會直接紅燈，不會走到這裡。
+ */
 export function evaluate({ title, number, body, headRef, labels = [], files = [], added = new Map(), baseTitles }) {
   const errors = []
   const lines = []
@@ -282,20 +280,20 @@ export function evaluate({ title, number, body, headRef, labels = [], files = []
       else { lines.push(`- ❌ 只改一邊：${os.why}`); errors.push(os.why) }
     }
   }
-  // 復發：貼了標籤的照舊（豁免的 PR 也要）；沒貼標籤、也不是豁免的 PR，由機器比對歷史
-  const rc = recurrence({ labels, body, files, added })
-  if (rc.required) {
-    if (rc.ok) lines.push(`- ✅ 復發：${rc.why}`)
-    else { lines.push(`- ❌ 復發：${rc.why}`); errors.push(rc.why) }
-  } else if (!ex.exempt) {
-    if (!Array.isArray(baseTitles)) lines.push('- （略過）復發的自動比對：取不到目標分支的提交歷史')
-    else {
-      const auto = autoRecurrence({ title, number, baseTitles, body, files, added })
-      if (auto.required) {
-        if (auto.ok) lines.push(`- ✅ 復發：${auto.why}`)
-        else { lines.push(`- ❌ 復發：${auto.why}`); errors.push(auto.why) }
-      }
-    }
+  // 復發。不是豁免的 PR 先由機器比對歷史：
+  //  - 機器有命中、也沒寫「不是復發：原因」：不管有沒有貼標籤，復發單號都要是機器比對到的那一張（否則貼個標籤就能換成別張單）。
+  //  - 機器沒命中，或寫了「不是復發：原因」放行：貼了「復發」標籤的照舊（寫復發單號、附守門測試）；豁免的 PR 也只走這條。
+  const auto = !ex.exempt && Array.isArray(baseTitles) ? autoRecurrence({ title, number, baseTitles, body, files, added }) : null
+  if (auto?.required && !auto.waived) {
+    if (auto.ok) lines.push(`- ✅ 復發：${auto.why}`)
+    else { lines.push(`- ❌ 復發：${auto.why}`); errors.push(auto.why) }
+  } else {
+    if (auto?.required) lines.push(`- ✅ 復發：${auto.why}`)
+    const rc = recurrence({ labels, body, files, added })
+    if (rc.required) {
+      if (rc.ok) lines.push(`- ✅ 復發：${rc.why}`)
+      else { lines.push(`- ❌ 復發：${rc.why}`); errors.push(rc.why) }
+    } else if (!ex.exempt && !Array.isArray(baseTitles)) lines.push('- （略過）復發的自動比對：沒有目標分支的提交歷史')
   }
   return { pass: errors.length === 0, lines, errors }
 }
@@ -324,24 +322,35 @@ export function historyLines(ref, { format = '%s', cwd } = {}) {
   return git(['log', '--reverse', '--topo-order', '--no-merges', `--format=${format}`, ref], cwd).split(/\r?\n/).filter(Boolean)
 }
 
+/** 資料取不到、檢查做不了時給人看的話 */
+const CANNOT_CHECK = '檢查沒辦法做，不是你的 PR 有問題。請重跑這個檢查；一直這樣請回報領隊。'
+
 function main() {
   const evPath = process.env.GITHUB_EVENT_PATH
   const ev = evPath && fs.existsSync(evPath) ? JSON.parse(fs.readFileSync(evPath, 'utf8')) : null
   const pr = ev?.pull_request
   if (!pr) { console.log('不是 pull_request 事件，略過'); return 0 }
   const base = `origin/${pr.base.ref}`
-  let files = [], added = new Map()
+  // 資料取不到就紅燈：少了檔案清單，豁免、只改一邊、守門測試都判不了；少了歷史，復發比不了。
+  // 只印警告、照樣綠的話，檢查等於沒做卻顯示通過。訊息要講明不是 PR 的問題，原文留在括號裡方便查。
+  const missing = []
+  let files = [], added = new Map(), baseTitles = []
   try {
     ;({ files, added } = changedFiles(base))
   } catch (e) {
-    console.log(`::warning::取不到改動的檔案清單（${String(e.message).split('\n')[0]}），豁免、只改一邊與復發檢查可能不準`)
+    missing.push(`取不到這張 PR 改動的檔案清單（${String(e.message).split('\n')[0]}）`)
   }
-  // 取不到歷史只略過復發的自動比對（evaluate 會在報告裡寫明），不讓整個檢查因此紅
-  let baseTitles = null
   try {
     baseTitles = historyLines(base)
   } catch (e) {
-    console.log(`::warning::取不到目標分支的提交歷史（${String(e.message).split('\n')[0]}），這次略過復發的自動比對`)
+    missing.push(`取不到目標分支的提交歷史（${String(e.message).split('\n')[0]}）`)
+  }
+  if (missing.length) {
+    const md = ['## PR 範本檢查', '', `**${CANNOT_CHECK}**`, '', ...missing.map(m => `- ❌ ${m}`), ''].join('\n')
+    console.log(md)
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + '\n')
+    for (const m of missing) console.log(`::error::${m}。${CANNOT_CHECK}`)
+    return 1
   }
   const labels = (pr.labels ?? []).map(l => l.name)
   const res = evaluate({ title: pr.title, number: pr.number, body: pr.body, headRef: pr.head?.ref ?? '', labels, files, added, baseTitles })
