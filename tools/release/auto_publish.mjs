@@ -3,6 +3,8 @@
 // 發版收尾補貼群組（發版視窗跑、從乾淨的 main 簽出）：node tools/release/auto_publish.mjs --post-pending [--state <檔>]
 // 用法：node tools/release/auto_publish.mjs [--once] [--interval 120] [--state <檔>] [--room <群組代號>] [--dry-run-only]
 //   播種：--seed <版號>（或 --seed-desktop／--seed-linux）--yes；人工確認一筆失敗：--ack <平台@版號>（同版告警一起清）；人工清一類告警：--ack-alert <類別>
+// 巡檢（#2436，排程每 10 分鐘跑）：node tools/release/auto_publish.mjs --check-alive [--room <群組代號>] [--state <檔>]
+//   常駐程式在跑就什麼都不做；沒在跑就寫告警、貼群組並以不掛主控台的方式重新啟動（也是第一次啟動的方式）
 // 判斷規則全在 auto_publish_core.mjs；這支只負責呼叫端：取鎖、讀 gh、準備工作樹、跑子程序、存 state、貼群組。
 // 所有相對路徑與子程序（git、gh、node）都以 repo 根目錄為基準，不受啟動目錄影響；--state 給相對路徑則以啟動目錄解析成絕對路徑。
 // 必須在專用 worktree 內執行，不可在主 checkout。不用 gh run watch（它會每 3 秒查一次、燒光 API 額度）。
@@ -10,7 +12,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, spawn as spawnChild } from 'node:child_process'
+import { checkAlive, writeHeartbeat, installStopHandlers } from './auto_publish_alive.mjs'
 import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail, parsePostFailedMarker } from './asn_cli.mjs'
 import { enqueuePending } from './post_pending.mjs'
@@ -38,10 +41,10 @@ export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
 export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 
 // 告警檔裡會出現的類別（--ack-alert 只認這些）
-export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad', 'pending-write-failed']
+export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad', 'pending-write-failed', 'daemon-stopped', 'daemon-dead']
 
 export function parseArgs(argv) {
-  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, postPending: false, error: null }
+  const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, postPending: false, checkAlive: false, error: null }
   for (let i = 0; i < argv.length && !o.error; i++) {
     const a = argv[i]
     const val = () => { const v = argv[++i]; if (v === undefined || v.startsWith('--')) { o.error = `${a} 後面要有值`; return null } return v }
@@ -57,6 +60,7 @@ export function parseArgs(argv) {
     else if (a === '--ack-alert') o.ackAlert = val()
     else if (a === '--yes') o.yes = true
     else if (a === '--post-pending') o.postPending = true
+    else if (a === '--check-alive') o.checkAlive = true
     else o.error = `不認得的參數：${a}`
   }
   // 代貼只讀自己的設定檔，不收命令列的群組代號，也不和其他子命令或常駐參數混用
@@ -64,6 +68,8 @@ export function parseArgs(argv) {
     if (o.room !== null) o.error = '--post-pending 不接受 --room（群組代號只從代貼端自己的設定檔讀）'
     else if (o.ack || o.ackAlert || o.seedDesktop || o.seedLinux || o.yes || o.once || o.dryRunOnly) o.error = '--post-pending 只能搭配 --state 使用'
   }
+  // 巡檢只能搭配 --state、--room、--interval、--dry-run-only（後三者是巡檢要重啟常駐程式時帶過去的）
+  if (!o.error && o.checkAlive && (o.postPending || o.ack || o.ackAlert || o.seedDesktop || o.seedLinux || o.yes || o.once)) o.error = '--check-alive 不能和其他子命令或 --once 同時給'
   if (!o.error && o.ack && (o.seedDesktop || o.seedLinux)) o.error = '--ack 和 --seed 不能同時給'
   if (!o.error && o.ackAlert !== null) {
     if (o.ack || o.seedDesktop || o.seedLinux) o.error = '--ack-alert 不能和 --ack、--seed 同時給'
@@ -322,7 +328,7 @@ function enqueueOrAlert(opts, deps, alerts, input, ref) {
 
 // 貼群組：只准傳固定文案（不可含 git／子程序原文，remote URL 可能帶 token）
 // 失敗時寫告警檔 post-failed（getRef 給目前處理的版本；noAlert 給沒持鎖的分支，免得和持鎖者搶寫告警檔）
-function makePost(opts, deps, alerts, getRef = () => null) {
+export function makePost(opts, deps, alerts, getRef = () => null) {
   return (text, { noAlert = false } = {}) => {
     if (!opts.room) { deps.log(`（沒有 --room，未貼群組）${text}`); return true }
     let r
@@ -664,10 +670,23 @@ export function realDeps(opts, repoRoot = REPO_ROOT) {
       } catch { return null }
     },
     pidAlive: (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } },
+    // 以「不掛任何主控台」的方式啟動常駐程式本體（#2436）：detached 在 Windows 會用 DETACHED_PROCESS 建立，
+    // 沒有主控台就收不到主控台關閉事件／Ctrl+C，對它送不加 /F 的 taskkill 也沒有視窗可以收 WM_CLOSE；windowsHide 避免閃出視窗。
+    // stdio 全丟掉（log 自己寫檔）。回子程序 pid。
+    startDaemon: (o) => {
+      const args = [fileURLToPath(import.meta.url), '--state', o.state, '--interval', String(o.interval)]
+      if (o.room) args.push('--room', o.room)
+      if (o.dryRunOnly) args.push('--dry-run-only')
+      const c = spawnChild(process.execPath, args, { cwd: repoRoot, detached: true, windowsHide: true, stdio: 'ignore' })
+      c.on('error', () => { /* 起不來由下一次巡檢發現 */ })
+      c.unref()
+      return c.pid
+    },
     log: (m) => {
       const line = `[${new Date().toISOString()}] ${m}\n`
       try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.appendFileSync(logPath, line) } catch { /* ignore */ }
-      process.stdout.write(line)
+      // 無主控台啟動時 stdout 是空的，寫失敗不能讓程式掛掉
+      try { process.stdout.write(line) } catch { /* ignore */ }
     },
   }
 }
@@ -688,6 +707,11 @@ async function main() {
     for (const l of r.lines) (r.code === 0 ? console.log : console.error)(l)
     process.exit(r.code)
   }
+  if (opts.checkAlive) {
+    const r = checkAlive(opts, deps)
+    ;(r.code === 0 ? console.log : console.error)(r.msg)
+    process.exit(r.code)
+  }
   if (opts.ack || opts.ackAlert || opts.seedDesktop || opts.seedLinux) {
     const r = await runCommand(opts, deps)
     ;(r.code === 0 ? console.log : console.error)(r.msg)
@@ -704,9 +728,11 @@ async function main() {
     if (inst.tookOver) deps.log(`發現殘留的 pid 檔（pid ${inst.tookOver} 已不在或不是自動發佈），已接手`)
     const cleanup = () => releaseInstance(opts, deps, inst.content)
     process.on('exit', cleanup)
-    for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(sig, () => process.exit(0))
+    // 收到結束訊號：先寫 daemon-stopped 告警再結束（#2436）
+    installStopHandlers(opts, deps, process)
   }
   do {
+    if (!opts.once) writeHeartbeat(opts, deps)
     try { await runOnce(opts, deps) } catch (e) { deps.log(`這一輪發生例外：${e.stack || e.message}`) }
     if (opts.once) break
     await new Promise((r) => setTimeout(r, opts.interval * 1000))
