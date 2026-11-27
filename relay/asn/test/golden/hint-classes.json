@@ -1,7 +1,6 @@
 {
  "note": "提示類 class 的基準（#2425，棘輪）。這是舊畫面還在用的提示樣式，只准減少：搬完頁面、class 消失了就從這裡刪掉。新的提示樣式要用 AsnStatus／AsnNote，不准加進這份。規則見 docs/畫面規範.md〈四之一、訊息與提示的位置〉。更新（只會刪掉已消失的）：ASN_GOLDEN_UPDATE=1 node --test test/hint-classes.test.mjs",
  "classes": {
-  "ab-note": ["ui/lib/actionbar.mjs","ui/skin-common.css","ui/style.css"],
   "acct-warn": ["ui/lib/settings-panel.mjs","ui/list.html","ui/style.css"],
   "an-msg": ["ui/lib/annotator.mjs"],
   "ap-left": ["ui/askpass.html"],
@@ -48,7 +47,6 @@
   "login-err": ["ui/lib/connect-tools.mjs","ui/lib/onboard-card.mjs","ui/login.html","ui/m.html","ui/mobile.css","ui/onboard.html","ui/style.css"],
   "login-note": ["ui/lib/onboard-card.mjs","ui/login.html","ui/m.html","ui/mobile.css","ui/style.css"],
   "login-sub": ["ui/lib/onboard-card.mjs"],
-  "m-archive-note": ["ui/m.html","ui/mobile.css"],
   "m-banner": ["ui/m.html","ui/mobile.css","ui/skin-common.css"],
   "m-banner-act": ["ui/m.html","ui/mobile.css"],
   "m-banner-tx": ["ui/m.html","ui/mobile.css"],
@@ -82,7 +80,6 @@
   "m-room-note": ["ui/m.html","ui/mobile.css"],
   "m-rooms-note": ["ui/m.html","ui/mobile.css"],
   "m-term-copied": ["ui/lib/chatpane.mjs"],
-  "m-toast": ["ui/m.html","ui/mobile.css"],
   "m-upd": ["ui/lib/relogin-bar.mjs","ui/m.html"],
   "m-upd-hint": ["ui/m.html","ui/mobile.css"],
   "m-upd-last": ["ui/m.html"],
@@ -111,7 +108,6 @@
   "permission-hold-tip": ["ui/list.html","ui/style.css"],
   "permission-risk": ["ui/list.html"],
   "phone": ["ui/lib/relogin-bar.mjs"],
-  "pin-note": ["ui/list.html","ui/style.css"],
   "pv-count": ["ui/lib/chatpane.mjs"],
   "pv-msg": ["ui/lib/chatpane.mjs"],
   "relogin-bar": ["ui/lib/relogin-bar.mjs"],

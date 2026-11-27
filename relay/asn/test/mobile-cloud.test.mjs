@@ -192,7 +192,7 @@ test('內頁「關閉」與頁面過期都走金鑰的判斷（接線）', () =>
   const js = read('ui/m.js')
   assert.match(js, /const closePage = \(\) => askBeforeLeave\(null, \(\) => fourthNav\.closePage\(\)\)/, '關閉先問')
   assert.match(js, /checkFourth = \(\) => \{ if \(cloudSt\.created && fourthExpired\(.*?CLOUD_KEY_KEEP_MS\)\) cloud\.markExpired\(\); return fourthNav\.check\(fourthKeepMs\(\)\) \}/)
-  assert.match(js, /cloud\.leave\(\)\.then\(\(\) => \{ if \(cloudSt\.msg\) showToast\(cloudSt\.msg\) \}\)/, '頁面關了就用一句話提示')
+  assert.match(js, /cloud\.leave\(\)\.then\(\(\) => \{ if \(cloudSt\.msg\) showResult\('fail', cloudSt\.msg\) \}\)/, '頁面關了就用一句話提示')
 })
 
 test('代理連上來就顯示已加入', async () => {

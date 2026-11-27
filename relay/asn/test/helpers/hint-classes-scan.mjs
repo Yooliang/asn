@@ -10,6 +10,7 @@ export const HINT_RE = /(?:^|-)(note|hint|err|error|warn|warning|why|tip|notice|
 export const ALLOW_CLASSES = Object.freeze(new Set([
   'asn-status', 'k-busy', 'k-ok', 'k-fail', 'k-empty', 'k-unreadable',
   'asn-note', 'asn-note-info', 'asn-note-warn', 'asn-note-banner', 'asn-note-text', 'asn-note-action',
+  'asn-toast', 'asn-toast-text', 'asn-toast-close',   // AsnToast（#2425 位置 D）；種類沿用 k-ok、k-fail
 ]))
 export const ALLOW_RE = { test: n => ALLOW_CLASSES.has(n) }
 export const SCAN_EXT = new Set(['.html', '.js', '.mjs', '.css'])

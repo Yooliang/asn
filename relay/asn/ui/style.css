@@ -227,7 +227,6 @@ textarea,input{user-select:text;-webkit-user-select:text}
 .ab-badge{position:absolute;top:-3px;right:-8px;min-width:16px;height:16px;padding:0 4px;box-sizing:border-box;border-radius:8px;background:#d9534f;color:#fff;font-size:11px;line-height:16px;font-weight:bold;text-align:center}
 .ab-menu{position:absolute;top:100%;left:0;z-index:20;list-style:none;margin:2px 0 0;padding:3px;min-width:150px;background:var(--panel);border:1px solid #7a9ec4;border-radius:4px;box-shadow:0 6px 18px rgba(0,30,70,.25)}
 .ab-sep{height:1px;margin:3px 4px;background:var(--line);list-style:none}
-.ab-note{align-self:center;margin-left:8px;font-size:12px;color:var(--muted);max-width:320px}
 .ab-ops{position:fixed;z-index:70;margin:0;max-height:calc(100vh - 16px);overflow:auto}
 .ab-menu button{display:block;width:100%;text-align:left;border:0;background:none;padding:4px 10px;border-radius:3px;cursor:pointer;white-space:nowrap}
 .ab-menu button:hover:not(:disabled){background:linear-gradient(#f2f9ff,#cfe6fb)}
@@ -1299,7 +1298,6 @@ html.askpass-page,html.askpass-page body{margin:0;background:var(--panel)}
 .avb.xl .pin-dot{width:22px;height:22px;padding:4px}
 .avb-v~.pin-dot{right:auto;left:-4px}
 .m-av-wrap .pin-dot{width:17px;height:17px;right:-3px;bottom:-3px}
-.pin-note{margin:4px 10px;font-size:12px;color:#8a3b3b}
 .menu-title{padding:6px 14px;font-weight:700;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-bottom:1px solid rgba(0,0,0,.12);cursor:default}
 .room-av-wrap{position:relative;display:inline-flex;flex:none;vertical-align:middle}
 

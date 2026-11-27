@@ -137,6 +137,59 @@ export const AsnNote = {
   template: `<p :class="view().classes" :role="view().role"><span class="asn-note-text"><slot></slot></span><span class="asn-note-action" v-if="view().action"><slot name="action"><asn-button level="text" @click="$emit('action', $event)">{{ actionLabel }}</asn-button></slot></span></p>`,
 }
 
+// ---------- 結果提示（#2425 位置 D；規範見 docs/畫面規範.md〈四之一〉） ----------
+// 剛做完的動作結果（封存、釘選滿、切換帳號…）：畫面底部浮出一則，成功 4 秒、失敗 6 秒後自己消失，同一時間只有一則（新的取代舊的），也可以按「×」關掉。
+// 種類沿用 AsnStatus 的 ok／fail；純資訊不用這個。電腦與手機都呼叫 showResult(kind, text)，頁面根部各掛一個 <asn-toast>。
+// 失敗的原文由呼叫端先進 log，這裡只放白話一句。
+export const TOAST_KINDS = Object.freeze(['ok', 'fail'])
+export const TOAST_MS = Object.freeze({ ok: 4000, fail: 6000 })
+export const TOAST_CLOSE = '關閉'
+/** 結果提示的畫法：種類不認得當失敗（不把問題畫成成功）。純函式，測試直接用 */
+export function toastView(kind = 'ok') {
+  const kindOk = TOAST_KINDS.includes(kind)
+  const k = kindOk ? kind : 'fail'
+  return { kind: k, kindOk, ms: TOAST_MS[k], classes: ['asn-toast', `k-${k}`], role: 'status' }
+}
+
+let toastCur = { kind: 'ok', text: '', seq: 0 }
+let toastTimer = null
+const toastSubs = new Set()
+const toastEmit = () => { for (const f of toastSubs) f({ ...toastCur }) }
+/** 目前顯示的那一則（沒有就是 text 空字串） */
+export const currentResult = () => ({ ...toastCur })
+/** 手動關掉 */
+export function dismissResult() {
+  globalThis.clearTimeout(toastTimer); toastTimer = null
+  if (!toastCur.text) return
+  toastCur = { ...toastCur, text: '' }
+  toastEmit()
+}
+/** 顯示一則結果；新的直接取代舊的並重新計時。沒有文字就什麼都不做 */
+export function showResult(kind, text) {
+  const t = typeof text === 'string' ? text.trim() : ''
+  if (!t) return
+  const v = toastView(kind)
+  globalThis.clearTimeout(toastTimer)
+  toastCur = { kind: v.kind, text: t, seq: toastCur.seq + 1 }
+  toastTimer = globalThis.setTimeout(dismissResult, v.ms)
+  toastEmit()
+}
+const watchResult = fn => { toastSubs.add(fn); return () => toastSubs.delete(fn) }
+
+export const AsnToast = {
+  name: 'AsnToast',
+  setup() {
+    const { ref, computed, onMounted, onBeforeUnmount } = globalThis.Vue
+    const cur = ref(currentResult())
+    let off = null
+    onMounted(() => { cur.value = currentResult(); off = watchResult(v => { cur.value = v }) })
+    onBeforeUnmount(() => { if (off) off() })
+    const view = computed(() => toastView(cur.value.kind))
+    return { cur, view, dismissResult, TOAST_CLOSE }
+  },
+  template: `<div v-if="cur.text" :key="cur.seq" :class="view.classes" :role="view.role"><span class="asn-toast-text">{{ cur.text }}</span><button type="button" class="asn-toast-close" :aria-label="TOAST_CLOSE" @click="dismissResult()">×</button></div>`,
+}
+
 // ---------- 「⋯」選單（#2111 ⑥） ----------
 // 卡片右上角的更多動作：項目是動作說法（danger＝危險色，要走原位確認）；沒有項目就不畫「⋯」。點外面、按 Esc、選了項目都會收起
 export const MORE_MENU_LABEL = '更多動作'
@@ -165,4 +218,4 @@ export const AsnMoreMenu = {
 }
 
 /** 要註冊進 app 的共用元件（電腦 list.js、手機 m.js 都用這一份） */
-export const UI_KIT = Object.freeze({ AsnButton, AsnActions, AsnConfirm, AsnStatus, AsnNote, AsnMoreMenu })
+export const UI_KIT = Object.freeze({ AsnButton, AsnActions, AsnConfirm, AsnStatus, AsnNote, AsnToast, AsnMoreMenu })

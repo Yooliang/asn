@@ -260,7 +260,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 .m-archived-row{position:relative}
 .m-archived-row .m-buddy{padding-right:96px}
 .m-unarchive{position:absolute;right:12px;top:50%;transform:translateY(-50%);min-height:36px;padding:0 12px;border:1px solid var(--line);border-radius:18px;background:#fff;color:var(--title-fg);font-size:13px;cursor:pointer}
-.m-archive-note{margin:6px 14px;padding:8px 12px;border-radius:8px;background:#e4f5e6;font-size:13px}
 .m-rooms-note{margin:6px 14px;padding:8px 12px;border-radius:8px;background:#fff5bf;color:#3b3200;font-size:13px}
 .m-buddy.offline .b-nick{color:var(--muted)}
 .m-buddy .b-nick{font-size:16px}
@@ -315,7 +314,6 @@ body.m-body{font-size:16px;user-select:none;-webkit-user-select:none}
 @keyframes m-drop{from{transform:translateY(-120%);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.m-banner{animation:none}}
 /* 一句話的提示：底部置中、讓出手勢列，深底白字；點一下就關 */
-.m-toast{position:fixed;z-index:calc(var(--z-mask) + 10);left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 72px);padding:12px 14px;border-radius:10px;background:rgba(28,36,48,.92);color:#fff;font-size:15px;line-height:1.4;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 
 /* 開新夥伴：蓋滿整個畫面的表單 */
 .m-sheet{position:fixed;z-index:70;inset:0;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px);background:linear-gradient(180deg,var(--glass-top),var(--glass-bottom) 55%,#a9cdee)}

@@ -2,6 +2,7 @@
 import { LineIcon } from './lib/line-icons.mjs'
 import { blockContextMenu } from './lib/nomenu.mjs'
 import { ChatPane } from './lib/chatpane.mjs'
+import { AsnToast } from './lib/ui-kit.mjs'
 import { avatarSrc, selfAvatarSrc } from './lib/avatar.mjs'
 import { normalizeLook } from './lib/merge.mjs'
 import { effectiveLook, initSkin, normalizeSkin } from './lib/skin.mjs'
@@ -105,6 +106,7 @@ const app = createApp({
   },
 })
 app.component('chat-pane', ChatPane)
+app.component('AsnToast', AsnToast)   // 結果提示（封存結果等）：頁面根部掛一個，呼叫端用 showResult
 app.component('line-icon', LineIcon)
 app.mount('#app')
 blockContextMenu(document)

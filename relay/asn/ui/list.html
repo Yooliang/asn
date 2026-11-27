@@ -104,7 +104,6 @@
             </span>
             <button class="search-plus" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
           </div>
-          <p class="archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
           <partner-op-strip :runner="opRunner" :runs="opRun.runs"></partner-op-strip>
           <p class="archive-note env-notice" v-if="envNotice" role="status">{{ envNotice }}</p>
           <div class="list">
@@ -150,7 +149,6 @@
             <input v-model="chatQuery" placeholder="搜尋對話..." aria-label="搜尋對話">
             <button class="search-plus" type="button" :title="termWaitCount ? `新增（${termWaitCount} 個終端等你回答）` : '新增'" :aria-label="termWaitCount ? `新增，${termWaitCount} 個終端等你回答` : '新增'" @click.stop="openLaunchPicker"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span class="term-badge" v-if="termWaitCount" aria-hidden="true">{{ termWaitCount }}</span></button>
           </div>
-          <p class="archive-note pin-note" v-if="pinNote" role="status">{{ pinNote }}</p>
           <ul>
             <li v-for="x in chatRowsPinned" :key="x.id" :class="[x.kind === 'room' ? 'room-item' : '', { 'is-pinned': isChatPinned(x.id) }]" @contextmenu.prevent="x.kind === 'friend' ? openBuddyMenu(x.friend, $event) : openRoomMenu(x.room, $event)">
               <button v-if="x.kind === 'room'" class="room-btn" :class="{ on: ui.mode === 'merged' && view === 'chat' && ui.active === x.room.chatId }" type="button" @click="openChat(x.room.chatId)">
@@ -655,6 +653,7 @@
   </div>
 
 <group-sheet :flow="groupFlow"></group-sheet>
+<asn-toast></asn-toast>
 </div>
 <script src="vendor/vue.global.prod.js"></script>
 <script type="module" src="list.js"></script>
