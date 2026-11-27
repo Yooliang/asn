@@ -11,7 +11,12 @@ import { STALE_MS } from './auto_publish_core.mjs'
 
 export const HEARTBEAT_FILE = 'auto-publish.heartbeat'
 export const HEARTBEAT_STALE_MS = 10 * 60 * 1000
-export const heartbeatPathOf = (opts) => path.join(path.dirname(opts.state), HEARTBEAT_FILE)
+// 「巡檢剛重啟過、還沒確認它活著」的標記；巡檢看到常駐程式在跑就刪
+export const RESTART_MARKER_FILE = 'auto-publish.restart'
+export const restartMarkerPathOf = (opts) => path.join(path.dirname(opts.state), RESTART_MARKER_FILE)
+// 啟動後等這麼久再確認新程序還活著
+export const STARTUP_SETTLE_MS = 4000
+export const heartbeatPathOf =(opts) => path.join(path.dirname(opts.state), HEARTBEAT_FILE)
 
 export const DEAD_MESSAGE = '自動發佈常駐程式沒有在執行，已嘗試重新啟動；請確認它有起來，並查 log 看為什麼停止'
 export const STUCK_MESSAGE = '自動發佈常駐程式還在，但超過 10 分鐘沒有動靜（可能卡住），請查 log；確定卡死時只停它自己的 pid 再由巡檢拉起'
@@ -75,8 +80,14 @@ export function checkAlive(opts, deps) {
     }
   }
 
+  const markerPath = restartMarkerPathOf(opts)
+  const hasMarker = () => deps.exists(markerPath)
+  const clearMarker = () => { try { if (hasMarker()) deps.unlink(markerPath) } catch { /* 刪不掉不影響 */ } }
+
   const pid = daemonPid(opts, deps)
   if (pid !== null) {
+    // 常駐程式在跑：上一次重啟成功站住了，清掉「剛重啟過」的標記
+    clearMarker()
     let hb = NaN
     try { hb = Number(deps.readFile(heartbeatPathOf(opts))) } catch { /* 沒有心跳檔＝沒有心跳 */ }
     const now = deps.now()
@@ -96,11 +107,26 @@ export function checkAlive(opts, deps) {
   }
 
   notify('daemon-dead', 'not-running', DEAD_MESSAGE)
+  // 上一次巡檢重啟過、之後一直沒看到它活著（標記還在），這次又不在：重啟沒有成功，升成 daemon-start-failed
+  const retry = hasMarker()
+  if (retry) {
+    deps.log('巡檢：上一次重啟之後常駐程式仍然沒有在跑（連續兩次起不來），原因請看 log 裡常駐程式自己寫的「啟動失敗」')
+    notify('daemon-start-failed', 'start-failed', START_FAILED_MESSAGE)
+  }
   deps.log('巡檢：找不到執行中的自動發佈常駐程式，重新啟動')
   try {
     const started = deps.startDaemon(opts)
     deps.log(`巡檢：已啟動常駐程式（pid ${started ?? '未知'}）`)
-    alerts.resolve('daemon-start-failed')
+    try { atomicWrite(deps, markerPath, String(deps.now())) } catch (e) { deps.log(`寫重啟標記失敗：${e.message}`) }
+    // 等幾秒再看一眼：程序當場就結束（啟動檢查沒過、缺相依、語法錯）就不用等下一次巡檢
+    if (typeof deps.waitMs === 'function' && Number.isFinite(started)) {
+      deps.waitMs(STARTUP_SETTLE_MS)
+      if (!deps.pidAlive(started)) {
+        deps.log(`巡檢：新啟動的常駐程式（pid ${started}）幾秒內就結束了`)
+        notify('daemon-start-failed', 'start-failed', START_FAILED_MESSAGE)
+        return { code: 1, outcome: 'start-failed', msg: START_FAILED_MESSAGE }
+      }
+    }
     return { code: 0, outcome: 'restarted', msg: `${DEAD_MESSAGE}（新 pid ${started ?? '未知'}）` }
   } catch (e) {
     deps.log(`巡檢：啟動常駐程式失敗：${e.message}`)

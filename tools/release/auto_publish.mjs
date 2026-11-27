@@ -42,7 +42,7 @@ export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
 export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 
 // 告警檔裡會出現的類別（--ack-alert 只認這些）
-export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad', 'pending-write-failed', 'daemon-stopped', 'daemon-dead', 'daemon-start-failed']
+export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad', 'pending-write-failed', 'daemon-stopped', 'daemon-dead', 'daemon-start-failed', 'daemon-startup-failed']
 
 export function parseArgs(argv) {
   const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, postPending: false, checkAlive: false, error: null }
@@ -636,6 +636,12 @@ export function resolveStatePath(state, cwd) {
   return { state: abs, note: `--state 給的是相對路徑 ${state}，以啟動目錄 ${cwd} 解析，實際使用：${abs}` }
 }
 
+// 命令列是不是「常駐程式本體」：要是「node … auto_publish.mjs」，而且不是 --post-pending／--check-alive／--ack 這類一次性子命令
+// （編輯器開著這支檔也不算）。WMI 啟動時每個參數都被加上雙引號（"--check-alive"），所以參數後面接空白、引號或結尾都算
+export function isAutoPublishCmdline(out) {
+  return /node(\.exe)?["']?\s+.*auto_publish\.mjs/i.test(out) && !/--(post-pending|check-alive|ack|ack-alert|seed|seed-desktop|seed-linux)(["'\s]|$)/.test(out)
+}
+
 export function realDeps(opts, repoRoot = REPO_ROOT, inject = {}) {
   const cmd = (bin) => (args, o = {}) => {
     const r = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: repoRoot, ...o })
@@ -667,8 +673,7 @@ export function realDeps(opts, repoRoot = REPO_ROOT, inject = {}) {
           : spawnSync('ps', ['-p', String(Number(pid)), '-o', 'args='], { encoding: 'utf8', timeout: 15000 })
         const out = String(r.stdout ?? '').trim()
         if (r.status !== 0 || !out) return null
-        // 命令列要是「node … auto_publish.mjs」，而且不是 --post-pending／--check-alive／--ack 這類一次性子命令（編輯器開著這支檔也不算）
-        return /node(\.exe)?["']?\s+.*auto_publish\.mjs/i.test(out) && !/--(post-pending|check-alive|ack|ack-alert|seed|seed-desktop|seed-linux)(\s|$)/.test(out)
+        return isAutoPublishCmdline(out)
       } catch { return null }
     },
     pidAlive: (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } },
@@ -680,6 +685,8 @@ export function realDeps(opts, repoRoot = REPO_ROOT, inject = {}) {
       if (o.dryRunOnly) args.push('--dry-run-only')
       return startViaWmi({ execPath: process.execPath, args, cwd: repoRoot }, inject.start)
     },
+    // 同步等幾毫秒（巡檢啟動常駐程式後等它站穩再確認還活著）
+    waitMs: (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) },
     log: (m) => {
       const line = `[${new Date().toISOString()}] ${m}\n`
       try { fs.mkdirSync(path.dirname(logPath), { recursive: true }); fs.appendFileSync(logPath, line) } catch { /* ignore */ }
@@ -689,12 +696,31 @@ export function realDeps(opts, repoRoot = REPO_ROOT, inject = {}) {
   }
 }
 
-async function main() {
-  const opts = parseArgs(process.argv.slice(2))
-  if (opts.error) { console.error(opts.error); process.exit(2) }
-  const rs = resolveStatePath(opts.state, process.cwd())
+// 常駐程式一起來就結束時沒有主控台可看（WMI 啟動），所以原因一定要進 log 與告警（#2436 二審）
+export const STARTUP_FAILED_MESSAGE = '自動發佈常駐程式啟動時就結束了，沒有在跑，原因見 auto-publish.log'
+function startupFailed(opts, deps, why, code) {
+  deps.log(`啟動失敗：${why}`)
+  makeAlerts(opts, deps).raise('daemon-startup-failed', 'startup-failed', STARTUP_FAILED_MESSAGE)
+  console.error(why)
+  return { code }
+}
+
+// 進入點；回 { code }，呼叫端據此結束。deps、cwd 讓測試注入
+export async function runMain(argv, { deps: injected, cwd = process.cwd(), proc = process } = {}) {
+  const opts = parseArgs(argv)
+  if (opts.error) { console.error(opts.error); return { code: 2 } }
+  const rs = resolveStatePath(opts.state, cwd)
   opts.state = rs.state
-  const deps = realDeps(opts)
+  const deps = injected ?? realDeps(opts)
+  try {
+    return await dispatch(opts, deps, rs, proc)
+  } catch (e) {
+    // 沒攔到的例外：沒有主控台，不留下就沒人知道
+    return startupFailed(opts, deps, `未預期的例外：${e.stack || e.message}`, 1)
+  }
+}
+
+async function dispatch(opts, deps, rs, proc) {
   if (rs.note) deps.log(rs.note)
   if (opts.postPending) {
     // 送出與讀群組各有逾時（認領逾時要大於它們的總和，見 post_pending_rules.mjs）
@@ -703,24 +729,23 @@ async function main() {
     deps.asnCli = (args) => (args[0] === 'room' || args.includes('--whoami') ? readCli(args) : sendCli(args))
     const r = runPostPending(opts, deps)
     for (const l of r.lines) (r.code === 0 ? console.log : console.error)(l)
-    process.exit(r.code)
+    return { code: r.code }
   }
   if (opts.checkAlive) {
     const r = checkAlive(opts, deps)
     ;(r.code === 0 ? console.log : console.error)(r.msg)
-    process.exit(r.code)
+    return { code: r.code }
   }
   if (opts.ack || opts.ackAlert || opts.seedDesktop || opts.seedLinux) {
     const r = await runCommand(opts, deps)
     ;(r.code === 0 ? console.log : console.error)(r.msg)
-    process.exit(r.code)
+    return { code: r.code }
   }
   const wt = checkWorktree(deps.git)
-  if (!wt.ok) { console.error(wt.why); process.exit(2) }
+  if (!wt.ok) return startupFailed(opts, deps, wt.why, 2)
   const st = checkStartup(opts, deps)
-  if (!st.ok) { console.error(st.why); process.exit(2) }
-  const r = await runDaemon(opts, deps)
-  if (r.code) process.exit(r.code)
+  if (!st.ok) return startupFailed(opts, deps, st.why, 2)
+  return await runDaemon(opts, deps, { proc })
 }
 
 // 常駐（或 --once）主迴圈。proc、rounds、sleep 讓測試注入；rounds 是最多跑幾輪（預設不設限）
@@ -729,6 +754,7 @@ export async function runDaemon(opts, deps, { proc = process, rounds = Infinity,
   if (!opts.once) {
     inst = claimInstance(opts, deps)
     if (!inst.got) return { code: 3 }
+    makeAlerts(opts, deps).resolve('daemon-startup-failed')
     if (inst.tookOver) deps.log(`發現殘留的 pid 檔（pid ${inst.tookOver} 已不在或不是自動發佈），已接手`)
     proc.on('exit', () => releaseInstance(opts, deps, inst.content))
     // 收到結束訊號：先寫 daemon-stopped 告警再結束（#2436）
@@ -743,4 +769,6 @@ export async function runDaemon(opts, deps, { proc = process, rounds = Infinity,
   return { code: 0 }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  runMain(process.argv.slice(2)).then((r) => { if (r.code) process.exit(r.code) })
+}

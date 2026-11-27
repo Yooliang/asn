@@ -4,7 +4,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
-import { parseArgs, ALERT_CAUSES, realDeps, runDaemon } from '../../../tools/release/auto_publish.mjs'
+import fs from 'node:fs'
+import { parseArgs, ALERT_CAUSES, realDeps, runDaemon, runMain, isAutoPublishCmdline } from '../../../tools/release/auto_publish.mjs'
 import { startViaWmi, buildCommandLine, WMI_ENV_CMDLINE, WMI_ENV_CWD } from '../../../tools/release/auto_publish_start.mjs'
 import { checkAlive, handleStopSignal, installStopHandlers, writeHeartbeat, heartbeatPathOf, HEARTBEAT_STALE_MS, DEAD_MESSAGE, STUCK_MESSAGE, STOP_SIGNALS } from '../../../tools/release/auto_publish_alive.mjs'
 import { env, STATE, ALERT, alertOf, lk, T0, opts, seededState } from './helpers/auto-publish-env.mjs'
@@ -149,7 +150,9 @@ test('巡檢：同一原因連續巡檢不重複貼群組，告警次數累加�
   const e = aliveEnv({ alive: [] })
   checkAlive(opts, e.deps)
   checkAlive(opts, e.deps)
-  assert.equal(e.calls.posts.length, 1)
+  // 沒在跑只貼一則；第二次仍沒在跑是「連續兩次起不來」，另升成 daemon-start-failed 貼一則
+  assert.equal(e.calls.posts.length, 2)
+  assert.equal(e.calls.posts[0], DEAD_MESSAGE)
   assert.equal(alertOf(e).alerts['daemon-dead'].count, 2)
   // 程式被拉起來、心跳也新鮮了
   e.deps.pidAlive = (p) => p === 7000
@@ -301,6 +304,103 @@ test('parseArgs：--check-alive 可搭配 --room、--state、--interval；不能
   assert.ok(ALERT_CAUSES.includes('daemon-stopped'))
   assert.ok(ALERT_CAUSES.includes('daemon-dead'))
   assert.equal(parseArgs(['--ack-alert', 'daemon-dead']).error, null)
+})
+
+// ---- 二審補強
+
+test('runMain --check-alive：進入點真的走巡檢（沒在跑就啟動常駐程式、回 0），不會掉下去變成常駐程式', async () => {
+  const e = aliveEnv({ pid: null })
+  const r = await runMain(['--check-alive', '--state', STATE, '--room', 'r1'], { deps: e.deps, proc: new EventEmitter() })
+  assert.equal(r.code, 0)
+  assert.equal(e.starts.length, 1, '巡檢要呼叫 startDaemon')
+  assert.equal(e.calls.git.length, 0, '巡檢不該去跑常駐程式的工作樹檢查')
+  assert.ok(e.fsMap.has(ALERT))
+})
+
+test('isAutoPublishCmdline：只認常駐程式本體；子命令、編輯器、WMI 加了引號的參數都要判對', () => {
+  const yes = [
+    'node tools/release/auto_publish.mjs --room r1',
+    '"C:\\Program Files\\nodejs\\node.exe" "C:\\w\\tools\\release\\auto_publish.mjs" "--state" "C:\\s\\state.json" "--interval" "120" "--room" "r1"',
+  ]
+  const no = [
+    'node tools/release/auto_publish.mjs --check-alive --room r1',
+    '"C:\\Program Files\\nodejs\\node.exe" "C:\\w\\tools\\release\\auto_publish.mjs" "--check-alive"',
+    'node tools/release/auto_publish.mjs --post-pending',
+    'node tools/release/auto_publish.mjs --ack desktop@0.2.1',
+    'node tools/release/auto_publish.mjs --ack-alert post-failed',
+    'node tools/release/auto_publish.mjs --seed 0.2.1 --yes',
+    'node tools/release/auto_publish.mjs --seed-desktop 0.2.1',
+    'code C:\\w\\tools\\release\\auto_publish.mjs',
+  ]
+  for (const c of yes) assert.equal(isAutoPublishCmdline(c), true, c)
+  for (const c of no) assert.equal(isAutoPublishCmdline(c), false, c)
+})
+
+test('啟動檢查沒過（主 checkout）：原因寫進 log 與 daemon-startup-failed 告警，回 2（沒有主控台可看）', async () => {
+  const e = env()
+  const r = await runMain(['--state', STATE], { deps: e.deps, proc: new EventEmitter() })
+  assert.equal(r.code, 2)
+  assert.ok(e.calls.logs.some((l) => l.includes('啟動失敗') && l.includes('主 checkout')))
+  assert.equal(alertOf(e).alerts['daemon-startup-failed'].status, 'active')
+})
+
+test('啟動時沒攔到的例外：寫進 log 與告警，回 1', async () => {
+  const e = env()
+  e.deps.git = () => { throw new Error('git 壞了') }
+  const r = await runMain(['--state', STATE], { deps: e.deps, proc: new EventEmitter() })
+  assert.equal(r.code, 1)
+  assert.ok(e.calls.logs.some((l) => l.includes('未預期的例外') && l.includes('git 壞了')))
+  assert.equal(alertOf(e).alerts['daemon-startup-failed'].status, 'active')
+})
+
+test('常駐程式站穩後（取到單例鎖）把 daemon-startup-failed 標成已恢復', async () => {
+  const e = env()
+  await runMain(['--state', STATE], { deps: e.deps, proc: new EventEmitter() }) // 主 checkout → 失敗
+  e.deps.git = (args) => ({ status: 0, stdout: args.includes('--absolute-git-dir') ? '/g/wt' : '/g', stderr: '' })
+  await runDaemon({ ...opts, interval: 120, once: false }, e.deps, { proc: new EventEmitter(), rounds: 1, sleep: async () => {} })
+  assert.equal(alertOf(e).alerts['daemon-startup-failed'].status, 'resolved')
+})
+
+test('巡檢：啟動後幾秒內新程序就不在了 → 立刻 daemon-start-failed 並貼群組', () => {
+  const e = aliveEnv({ alive: [], started: 7001 })
+  e.deps.waitMs = () => {}
+  const r = checkAlive(opts, e.deps)
+  assert.equal(r.outcome, 'start-failed')
+  assert.equal(r.code, 1)
+  assert.equal(alertOf(e).alerts['daemon-start-failed'].status, 'active')
+  assert.equal(e.calls.posts.length, 2)
+})
+
+test('巡檢：啟動後新程序還活著 → restarted，並留下「剛重啟」標記', () => {
+  const e = aliveEnv({ alive: [7001], started: 7001 })
+  e.deps.waitMs = () => {}
+  assert.equal(checkAlive(opts, e.deps).outcome, 'restarted')
+  assert.equal(e.fsMap.has(path.join(path.dirname(STATE), 'auto-publish.restart')), true)
+})
+
+test('巡檢：上一次重啟過、這次仍然沒在跑 → 升成 daemon-start-failed 並貼群組（只貼一次）；看到它活著後標記清掉、告警恢復', () => {
+  const e = aliveEnv({ alive: [], started: 7001 }) // 沒有 waitMs：不做當場檢查，只靠兩次巡檢判斷
+  checkAlive(opts, e.deps)
+  assert.equal(alertOf(e).alerts['daemon-start-failed'], undefined, '第一次只是重啟')
+  checkAlive(opts, e.deps)
+  assert.equal(alertOf(e).alerts['daemon-start-failed'].status, 'active')
+  assert.equal(e.calls.posts.length, 2)
+  checkAlive(opts, e.deps)
+  assert.equal(e.calls.posts.length, 2, '第三次不重貼')
+  e.deps.pidAlive = (p) => p === 7000
+  e.fsMap.set(PID_FILE, lk(7000))
+  e.fsMap.set(HB, String(T0))
+  assert.equal(checkAlive(opts, e.deps).outcome, 'alive')
+  assert.equal(e.fsMap.has(path.join(path.dirname(STATE), 'auto-publish.restart')), false)
+  assert.equal(alertOf(e).alerts['daemon-start-failed'].status, 'resolved')
+})
+
+test('手冊第 9 節：新排程用 -Force 直接覆蓋、不先 Unregister；不用工作排程器不收的 MaxValue', () => {
+  const doc = fs.readFileSync(new URL('../../../docs/release/自動發佈運行手冊.md', import.meta.url), 'utf8')
+  const sec = doc.slice(doc.indexOf('## 9.'))
+  assert.ok(!sec.includes('MaxValue'), '-RepetitionDuration MaxValue 工作排程器不收')
+  assert.ok(!sec.includes('Unregister-ScheduledTask'), '換排程與回退都用 Register-ScheduledTask -Force 覆蓋')
+  assert.ok(/Register-ScheduledTask[^\n]*-Force/.test(sec))
 })
 
 test('ALERT_CAUSES 含 daemon-start-failed', () => {
