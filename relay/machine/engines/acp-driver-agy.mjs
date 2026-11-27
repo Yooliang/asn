@@ -8,6 +8,7 @@
 // 但寫檔（write_to_file…）在無頭模式下不問就直接寫，連工作資料夾之外也寫得進去。所以這裡看每個工具步驟的事件，
 // 違反政策就立刻殺掉行程（絆線：能擋住後續動作並明確回報，但那一次寫入可能已經發生）。
 import { spawn } from 'node:child_process'
+import { isUtf8 } from 'node:buffer'
 import { cleanEnv } from './acp-client.mjs'
 import { classifyFailure, WorkerError } from './acp-errors.mjs'
 import { describeAgyTool, isRegisteredAgyTool, redact } from './acp-policy.mjs'
@@ -24,12 +25,13 @@ export function agyArgs({ cfg, sessionId, fullAccess }) {
 }
 
 // guard.checkTool({category, paths, summary, state}) → { ok: true } | { ok: false, reason }
-export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = false, guard }) {
+export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = false, guard, spawnFn = spawn }) {
   let proc = null
   let sid = sessionId
   let resumeLost = false
   let cur = null
-  let buf = ''
+  let buf = Buffer.alloc(0)   // 還沒收到換行的位元組：行在位元組層切，換行之後才解碼，多位元組字元被切在兩個 data 事件之間也不會壞
+  let lineNo = 0
   let stderrTail = []
   let exitCb = () => {}
   let killedBy = null
@@ -59,6 +61,14 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
       log(`agy 工具步驟解讀或檢查出錯，當成沒通過 → kill agy：${name}（${kind}）`)
       kill('violation')
     }
+  }
+
+  // 解析不了的行：事後才看工具步驟，這一行的步驟沒經過讀取檢查，當成沒通過、整輪中止。只記行號、長度、類別，不記內容
+  function onUnparsed(len, kind) {
+    log(`agy 輸出第 ${lineNo} 行無法解讀（長度 ${len}，${kind}）${cur ? ' → kill agy' : '，目前沒有進行中的一輪，略過'}`)
+    if (!cur) return
+    if (!cur.violation) cur.violation = { reason: '工具步驟無法解讀，這一輪已中止', summary: '工具步驟無法解讀' }
+    kill('violation')
   }
 
   function handleStep(s) {
@@ -109,18 +119,27 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
       const childEnv = cleanEnv(env)
       for (const n of cfg.envPass) if (env[n] !== undefined) childEnv[n] = env[n]
       await new Promise((resolve, reject) => {
-        const p = spawn(cfg.command, agyArgs({ cfg, sessionId, fullAccess }), { cwd: cfg.cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+        const p = spawnFn(cfg.command, agyArgs({ cfg, sessionId, fullAccess }), { cwd: cfg.cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
         proc = p
-        p.stdout.setEncoding('utf8')
         p.stdout.on('data', d => {
-          buf += d
+          buf = buf.length ? Buffer.concat([buf, d]) : d
           let i
-          while ((i = buf.indexOf('\n')) >= 0) {
-            const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1)
-            if (!line) continue
-            try { onEvent(JSON.parse(line)) } catch (e) { if (!(e instanceof SyntaxError)) log(`agy event handler failed: ${e.message}`) }
+          while ((i = buf.indexOf(0x0a)) >= 0) {
+            const bytes = buf.subarray(0, i); buf = buf.subarray(i + 1)
+            // 這一行的位元組不是有效的 UTF-8 才算無效編碼，跟解析失敗同樣處理；
+            // 合法 UTF-8 裡的替換字元（agy 讀到別的編碼的檔時寫進去的）是正常內容，照常解析
+            const valid = isUtf8(bytes)
+            const line = valid ? bytes.toString('utf8').trim() : ''
+            if (valid && !line) continue
+            lineNo++
+            let ev
+            if (!valid) { onUnparsed(bytes.length, 'InvalidEncoding'); continue }
+            try { ev = JSON.parse(line) } catch (e) { onUnparsed(line.length, String(e?.name ?? 'Error')); continue }
+            try { onEvent(ev) } catch (e) { log(`agy event handler failed: ${e.message}`) }
           }
         })
+        // 讀取串流本身出錯：記 log、結束這一輪與行程，不能讀取停了行程還活著
+        p.stdout.on('error', e => { log(`agy 輸出讀取出錯 → kill agy（${String(e?.name ?? 'Error')}）`); kill('stream') })
         p.stderr.on('data', d => { stderrTail = [...stderrTail, String(d).trim().slice(0, 300)].slice(-5) })
         p.stdin.on('error', () => {})
         p.once('spawn', resolve)
