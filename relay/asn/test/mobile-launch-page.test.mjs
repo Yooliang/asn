@@ -165,9 +165,9 @@ test('帳號切換的結果提示：離開進行中的畫面後，完成或失�
   const submit = /async function submitAcct\(\) \{([\s\S]*?)\n    \}\n/.exec(js)[1]
   assert.match(submit, /cancelled: \(\) => run !== acctRunSeq/, '離開畫面不停止等結果')
   assert.match(submit, /onUpdate: v => \{ if \(token === acctToken\) acctSw\.view = v \}/, '還在畫面上才更新畫面')
-  assert.match(submit, /if \(run === acctRunSeq && \(token !== acctToken \|\| nav\.tab !== PAGE_TAB\)\) showToast\(acctResultToast\(v, \{ label, email \}\)\)/, '離開了（或切到別的分頁）才跳提示')
+  assert.match(submit, /if \(run === acctRunSeq && \(token !== acctToken \|\| nav\.tab !== PAGE_TAB\)\) showResult\(v\.phase === 'done' \? 'ok' : 'fail', acctResultToast\(v, \{ label, email \}\)\)/, '離開了（或切到別的分頁）才跳提示')
   assert.match(js, /if \(old\?\.kind === 'acct' && old\.node\) acctToken\+\+/, '細部退回列表＝離開進行中的畫面')
-  assert.match(html, /<div class="m-toast" v-if="toast" role="status"[^>]*>\{\{ toast \}\}<\/div>/)
+  assert.match(html, /<asn-toast><\/asn-toast>/, '結果提示走共用元件（#2425）')   // 原本斷言舊的 m-toast 元素存在；現在由共用 AsnToast 接手
 })
 
 test('舊的 nav（sheet=launch、step）經 normalizeNav 轉成內頁，不會壞', () => {

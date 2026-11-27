@@ -98,7 +98,7 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
         if (!document.querySelector('.m-dv-headtx .m-title')?.textContent.includes(${JSON.stringify(NAME_M)})) return { ok: false, why: '改名失敗，名字不該變' };
         return { ok: true, why: '' };
       }
-      const toast = await wait(() => { const t = document.querySelector('.m-toast'); return t && t.textContent.includes('寄信時用的名字沒有換成功') ? t : null }, 40);
+      const toast = await wait(() => { const t = document.querySelector('.asn-toast'); return t && t.textContent.includes('寄信時用的名字沒有換成功') ? t : null }, 40);
       await sleep(200);
       if (!check) return { ok: true, why: '' };
       if (!toast) return { ok: false, why: '名字被規則擋下，畫面沒有說明' };

@@ -39,6 +39,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
 import { TermView } from './lib/term-view.mjs'
 import { ActionBar } from './lib/actionbar.mjs'
+import { AsnToast, showResult } from './lib/ui-kit.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
@@ -186,15 +187,11 @@ const savedMe = (await meStore.load()) ?? {}
 const devPrefs = reactive(deviceFieldsFromSaved(savedMe))
 // 對話釘選（#1479）：目前只存本機（asn-me.json 的 chatPins），格式就是之後帳號層同步要用的那一份 { pins, unpinned, rev }
 const chatPins = ref(normalizePins(savedMe.chatPins))
-const pinNote = ref('')
 const isChatPinned = id => chatIsPinned(chatPins.value, id)
-let pinNoteTimer = null
 function togglePinChat(id) {
   const r = togglePin(chatPins.value, id)
   if (r.ok) chatPins.value = r.state
-  pinNote.value = r.ok ? '' : r.text   // 滿 50 個：在名單上方說明，不動原本的釘選
-  clearTimeout(pinNoteTimer)
-  if (pinNote.value) pinNoteTimer = setTimeout(() => { pinNote.value = '' }, 6000)
+  else showResult('fail', r.text, { at: 'list' })   // 滿 50 個：名單區下緣的結果提示說明，不動原本的釘選
 }
 // 設備順序同步到帳號層（lib/device-sync.mjs）：有登入才同步，整份以 rev 較新的為準；沒登入或後台還沒部署就只用本機檔。--shot 截圖模式不動
 const devSync = createDeviceSync({ prefs: devPrefs, api: { get: authApi.getDevicePrefs, set: authApi.setDevicePrefs }, canSync: async () => (await authApi.status().catch(() => null))?.signed_in === true })
@@ -914,14 +911,10 @@ const envNotice = ref('')
 void loadEnvNotice(transport).then(t => { envNotice.value = t })
 setInterval(() => void loadEnvNotice(transport).then(t => { envNotice.value = t }), 10 * 60_000)
 setLocalArchiver((f, a) => core.setLocalArchived(f, a))
-const archiveNote = ref('')
-let archiveNoteTimer = null
 async function setArchived(f, archived) {
   const r = await runArchive(transport, f, archived)
   if (r.ok) await core.refreshRoster()
-  archiveNote.value = r.text
-  clearTimeout(archiveNoteTimer)
-  archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
+  showResult(r.ok ? 'ok' : 'fail', r.text, { at: 'list' })
 }
 function closeOpDlg() { opDlg.open = false }
 // 夥伴操作的進度：對話框送出後收起，進度就地顯示在名單上方的提示列（#1800）；改名完成要讓釘選跟著換位址
@@ -2363,7 +2356,7 @@ const app = createApp({
       openMember, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      STATUS, selfDeviceName, CONN_LABEL, connWhy, TOP_TABS_LINE, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, pinNote, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr,
+      STATUS, selfDeviceName, CONN_LABEL, connWhy, TOP_TABS_LINE, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       GUIDE_TEXT, guideRechecking, guideRecheck, guideHidden, guideMsg, guideRowList, guideOnPartners, guideOnChats, guideReshowPartners, guideReshowChats, setGuideHidden, guideAct, guideSite,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
@@ -2379,7 +2372,7 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission, permHold, permPress, permHoldStart, permHoldKey, HOLD_TIP,
-      opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, buddyOpItems, openPartnerOp, archiveNote, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, buddyOpItems, openPartnerOp, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdMsg, saveLaunchPrefs,
@@ -2389,6 +2382,7 @@ const app = createApp({
 app.component('chat-pane', ChatPane)
 app.component('term-view', TermView)
 app.component('action-bar', ActionBar)
+app.component('AsnToast', AsnToast)   // 結果提示（封存結果、釘選滿）：頁面根部掛一個，呼叫端用 showResult
 app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
 app.component('asn-avatar', AsnAvatar)

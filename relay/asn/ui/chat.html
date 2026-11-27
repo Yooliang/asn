@@ -25,6 +25,7 @@
     </span>
   </header>
   <chat-pane :open-member="openMember" :friend="f" :me="me" :log="log" :friend-av="friendAv" :me-av="meAv" :event-hub="eventHub" :skin="skin" :dp-mode="look.dpMode" :bubble="look.bubble" :toolbar="look.toolbar" :dp-collapsed="look.collapsed" :photo-api="photoApi" :shot-api="shotApi" :voice="voice" :hint-names="roster" :agent-api="transport" :self-node="selfNode" :term-view-api="termViewApi" :load-older="loadOlder" :room-cards="cards" :group-menu="true" @group-menu="groupMenu" @group-decide="groupDecide" @send="send" @nudge="nudge" @attach="attach" @toggle-dp="toggleDp" @call-state="callState"></chat-pane>
+  <asn-toast></asn-toast>
 </div>
 <script src="vendor/vue.global.prod.js"></script>
 <script type="module" src="chat.js"></script>

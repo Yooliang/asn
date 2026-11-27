@@ -74,7 +74,7 @@ export function followSelfRename(ctx, r, notify = () => {}, log = console.info) 
   if (typeof r?.window_rename_failed === 'string' && r.window_rename_failed) {
     const text = windowRenameFailedNote(String(r.name ?? ''), r.window_rename_failed)
     log('[ASN] 設備改名：後台已改、本機寄信名字沒換成', r.window_rename_failed)
-    notify(text)
+    notify(text, 'fail')   // 第二個參數是結果提示的種類（ok／fail）
     return false
   }
   if (r?.self_renamed === true && typeof r.window_name === 'string' && r.window_name) { applyRename(ctx, r.window_name); return true }
@@ -89,10 +89,10 @@ export function followSelfRename(ctx, r, notify = () => {}, log = console.info) 
 export async function alignDeviceName(invoke, ctx, notify = () => {}, log = console.info) {
   let r
   try { r = await makeDeviceNameApi(invoke).align() } catch (e) { log('[ASN] 對齊設備名沒成功', String(e?.message ?? e ?? '')); return null }
-  if (r?.state === 'adopted' && typeof r.name === 'string' && r.name) { applyRename(ctx, r.name); notify(alignNote(r.name)) }
+  if (r?.state === 'adopted' && typeof r.name === 'string' && r.name) { applyRename(ctx, r.name); notify(alignNote(r.name), 'ok') }
   else if (r?.state === 'failed') {
     log('[ASN] 對齊設備名：本機寄信名字沒換成', String(r.reason ?? ''))
-    notify(alignFailedNote(String(r.name ?? ''), String(r.reason ?? '') || '名字不符合規則'))
+    notify(alignFailedNote(String(r.name ?? ''), String(r.reason ?? '') || '名字不符合規則'), 'fail')
   }
   return r
 }

@@ -51,8 +51,8 @@
       <span class="m-banner-tx" :class="{ wrap: banner.handover }"><b v-html="emo(banner.nick)"></b><small>{{ banner.line }}</small></span>
       <button class="m-banner-act" type="button" v-if="banner.handover" @click.stop="bannerHandover">換班接手</button>
     </div>
-    <!-- 一句話的提示（底部，幾秒後自己消失，點一下就關）：例如離開進行中的畫面後，帳號切換完成或失敗 -->
-    <div class="m-toast" v-if="toast" role="status" @click="toast = ''">{{ toast }}</div>
+    <!-- 結果提示（共用 AsnToast，電腦同一份）：底部幾秒後自己消失，可按 × 關掉。例如封存結果、釘選滿、離開進行中的畫面後帳號切換完成或失敗 -->
+    <asn-toast></asn-toast>
 
     <!-- 四個大分頁：夥伴／對話／設定／通知（#1429；和電腦版同樣的字、同樣的順序；section 的先後就是滑動的順序，要和 TABS 一致）。左右滑動切換（跟手，放開吸附到最近的分頁），也可以點上方分頁；內頁暫時佔第四格；下拉重整只在夥伴頁 -->
     <section class="m-page" :style="{ '--pages': pages }" :data-line-chat="lineChat ? '' : null">
@@ -91,7 +91,6 @@
             </header>
             <ptr-zone :ptr="pf.ptr"></ptr-zone>
             <div class="m-scroll" :ref="el => (pf.ptr.el = el)" @touchstart.passive="pf.start" @touchmove="pf.move" @touchend="pf.end" @touchcancel="pf.end">
-              <p class="m-archive-note" v-if="archiveNote" role="status">{{ archiveNote }}</p>
               <div class="m-search"><input v-model="query" type="search" placeholder="搜尋聯絡人..." aria-label="搜尋聯絡人" enterkeyhint="search"></div>
               <!-- 未讀（#1438，擁有者定）：只放有未讀的夥伴與群組，最新的在前，每一列標未讀數字；讀完就離開這一組，全部讀完整組不顯示。「夥伴」分頁的紅點用同一份算 -->
               <div class="m-group m-recent" :class="grp.cls" v-for="grp in topGroups" :key="grp.key">

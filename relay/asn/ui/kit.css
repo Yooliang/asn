@@ -7,12 +7,14 @@
   --kit-ok:#2e7d32; --kit-fail:#b3261e; --kit-current:#4b5058;
   --radius-1:4px; --shadow-pop:0 4px 14px rgba(0,0,0,.18);   /* 圓角、浮出層（選單）的陰影 */
   --kit-warn:#a86f00; --kit-warn-line:#d9b25a;   /* 警告色（登入已失效的提示與標籤）；黃色鈕另用 --kit-relogin-* */
+  --kit-toast-bg:#1c2430; --kit-toast-fg:#fff; --toast-bottom:var(--sp-5); --toast-max:480px;   /* 結果提示（AsnToast）：深底白字、預設離底部的距離（手機與找不到錨點時用）、最寬 */
   --kit-relogin-bg:#ffd84d; --kit-relogin-fg:#3b2c00; --kit-relogin-line:#c79a00;
 }
 /* 手機：字級各加大一檔、鈕高 40（最小觸控目標） */
 .m-body{
   --fs-1:12px; --fs-2:14px; --fs-3:16px; --fs-4:18px;
   --btn-h:40px; --menu-h:44px; --btn-px:14px;
+  --toast-bottom:calc(env(safe-area-inset-bottom,0px) + 72px);   /* 手機：浮在底部分頁列上方 */
 }
 
 /* ---- 按鈕：三級（primary／secondary／text），尺寸固定，不依所在位置覆寫 ---- */
@@ -57,6 +59,14 @@
 .asn-note-banner{box-sizing:border-box; width:100%; padding:var(--sp-2) var(--sp-3); border-bottom:1px solid var(--line); background:var(--panel-soft)}
 .asn-note-banner .asn-note-text{flex:1 1 auto}
 .asn-note-banner.asn-note-warn{border-bottom-color:var(--kit-warn-line)}
+/* ---- 結果提示 AsnToast（#2425 位置 D）：成功 4 秒、失敗 6 秒自己消失；成功綠邊、失敗紅邊；字級與觸控尺寸跟著 .m-body 走。
+   位置：手機在底部、浮在分頁列上方（下面的預設）；電腦由 ui-kit 依錨點寫行內的 left／bottom／max-width——對話視窗在輸入區上方（訊息區下緣）、名單頁在名單區下緣，不蓋到按鈕、輸入區、分頁 ---- */
+.asn-toast{position:fixed; z-index:calc(var(--z-mask, 100) + 10); left:50%; bottom:var(--toast-bottom); transform:translateX(-50%); box-sizing:border-box; display:flex; align-items:center; gap:var(--sp-2); width:max-content; max-width:min(var(--toast-max), calc(100vw - 2 * var(--sp-4))); padding:var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3); border-radius:var(--radius-1); border-left:var(--sp-1) solid var(--kit-ok); background:var(--kit-toast-bg); color:var(--kit-toast-fg); font-size:var(--fs-3); line-height:1.4; box-shadow:var(--shadow-pop); overflow-wrap:anywhere}
+.asn-toast.k-fail{border-left-color:var(--kit-fail)}
+.asn-toast-text{min-width:0; flex:1 1 auto}
+.asn-toast-close{flex:none; box-sizing:border-box; min-width:var(--btn-h); min-height:var(--btn-h); padding:0; border:0; border-radius:var(--radius-1); background:transparent; color:inherit; font:inherit; font-size:var(--fs-4); line-height:1; cursor:pointer}
+.asn-toast-close:hover{background:rgba(255,255,255,.16)}
+.asn-toast-close:focus-visible{outline:2px solid var(--kit-toast-fg); outline-offset:-2px}
 .asn-spin{display:inline-block; box-sizing:border-box; width:var(--fs-2); height:var(--fs-2); border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:asn-spin 1s linear infinite}
 @keyframes asn-spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.asn-spin{animation:none}}

@@ -86,7 +86,6 @@
 :root[data-skin="modern"] .actionbar .abtn,:root[data-skin="line"] .actionbar .abtn{display:none}
 :root[data-skin="modern"] .actionbar .ab-wrap,:root[data-skin="line"] .actionbar .ab-wrap{position:static;display:block;height:0}
 :root[data-skin="modern"] .actionbar .ab-wrap > .ab-menu,:root[data-skin="line"] .actionbar .ab-wrap > .ab-menu{position:absolute;z-index:20;left:auto;right:16px;top:56px;margin:0;border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,.14)}
-:root[data-skin="modern"] .actionbar .ab-note,:root[data-skin="line"] .actionbar .ab-note{position:absolute;z-index:20;left:50%;top:58px;transform:translateX(-50%);padding:3px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:12px}
 /* 三欄：名牌置中；視窗窄時左欄讓到最小、右欄留給兩顆圓鈕，名牌往左靠而不被蓋住 */
 :root[data-skin="modern"] .mbar,:root[data-skin="line"] .mbar{position:relative;z-index:6;flex:none;display:grid;grid-template-columns:minmax(12px,1fr) auto minmax(104px,1fr);align-items:center;height:60px;padding:0 16px;background:var(--panel-soft)}
 :root[data-skin="modern"] .mbar:has(.mbar-offline),:root[data-skin="line"] .mbar:has(.mbar-offline){grid-template-columns:minmax(12px,1fr) minmax(0,auto) minmax(max-content,1fr);column-gap:8px}

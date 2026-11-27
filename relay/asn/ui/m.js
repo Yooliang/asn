@@ -34,6 +34,7 @@ import { LAUNCH_GIVE_UP_MS, LAUNCH_POLL_MS, PI_REMOTE_VERSION_NOTE, modelUsedOf,
 import { autoRunFor, loggedOutFromStates, vendorStatesOf } from './lib/auto-run.mjs'
 import { OnboardCard } from './lib/onboard-card.mjs'
 import { UI_KIT } from './lib/ui-kit.mjs'
+import { showResult } from './lib/ui-kit.mjs'
 import { MOBILE_PHASE_TEXT, createMobileCall } from './lib/mobile-call.mjs'
 import { PUSH_TEXT, createPushSync, pushSettingView } from './lib/mobile-push.mjs'
 import { canDictate, createMobileDictation } from './lib/mobile-dictation.mjs'
@@ -66,7 +67,7 @@ import { NewGuideCard } from './lib/new-computer-guide-view.mjs'
 import { STATE } from './lib/device-state.mjs'
 import { createSwitchTracker, switchRowKey, switchResultOf, switchBusyNode } from './lib/switch-result.mjs'
 import { createReportScheduler, reportsDue } from './lib/report-reload.mjs'
-import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctHeadView, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TOAST_MS, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport, acctReportEntry } from './lib/mobile-acct.mjs'
+import { isSwitchTarget, ACCT_TEXT, acctPageTitle, acctHeadView, acctButtonDevices, acctRosterView, acctClaudeRemote, acctDeviceTree, acctNeedsLoad, acctPickDevice, acctErrorText, acctSheetView, confirmText as acctConfirmText, runAcctSwitch, acctResultToast, ACCT_TABS, acctTabOf, acctSwitchTargets as acctSwitchTargetsOf, createReportPrefetch, isFailedReport, acctReportEntry } from './lib/mobile-acct.mjs'
 import { createDeviceSync } from './lib/device-sync.mjs'
 import { deviceFieldsFromSaved, deviceFieldsToSave, dropSlot, moveDevice, deviceRowLine, pruneRemoved, removeDevice, reorderDevice, restoreDevice, showDevice, visibleRows, canRemoveRow, canShowBackRow, DEVICE_TEXT } from './lib/device-order.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, manageItems, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
@@ -210,12 +211,9 @@ const devPrefs = reactive({ deviceOrder: [], deviceShown: [], deviceRemoved: [],
 const logs = reactive({})
 const avatars = ref({})
 const query = ref(''), collapsed = reactive({ [ARCHIVE_GROUP_KEY]: true })   // 「已封存」群組預設收合
-const archiveNote = ref('')
 const banner = ref(null), shake = ref(false), refreshing = ref(false)
-// 一句話的提示（底部，幾秒後自己消失）：例如離開進行中的畫面後，帳號切換完成或失敗
-const toast = ref('')
-let toastTimer = 0
-const showToast = (text, ms = ACCT_TOAST_MS) => { if (!text) return; toast.value = text; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.value = '' }, ms) }
+// 結果提示走共用的 showResult（ui-kit，電腦同一份；成功 4 秒、失敗 6 秒自己消失）。給只傳「文字（、種類）」的 lib 回呼用，預設成功
+const notifyResult = (text, kind = 'ok') => showResult(kind, text)
 // 自動更新（自行安裝版才有；Rust 端與外殼都沒編進 Google Play 版）。測試用的清單網址只收 127.0.0.1（Rust 端再擋一次）
 const upd = reactive(initialUpdate())
 const ownerName = ref('')   // 帳號層的名字（租戶稱呼）
@@ -329,7 +327,7 @@ watch([me, prefs, devPrefs, ownerName, lastChat, () => nav.tab, () => nav.chat],
     if (nav.tab === 'chats' && lastChat.value) { core.markRead(lastChat.value); void core.syncHistory(lastChat.value) }
     else if (viewedChatId({ tab: nav.tab, chat: nav.chat, lastChat: '' }) === NOTICE_ID) { core.markRead(NOTICE_ID); logs[NOTICE_ID] = core.viewOf(NOTICE_ID) }
   })
-  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync(); void (async () => { await syncPendingDeviceName(invoke, store(ONBOARD_STORE), { info, core, me }, { node: info.node, phone: true, notify: showToast }); await alignDeviceName(invoke, { info, core, me }, showToast) })() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
+  startCore = async () => { void (shouldAutoCheck(upd, prefs) && checkUpdate()); await core.start(); sync(); push?.sync(); void (async () => { await syncPendingDeviceName(invoke, store(ONBOARD_STORE), { info, core, me }, { node: info.node, phone: true, notify: notifyResult }); await alignDeviceName(invoke, { info, core, me }, notifyResult) })() }   // 掛上畫面之後才開始（第一次收信要連網，不能讓畫面空等）
 }
 
 // ---------- 導覽：每往下一層就推一筆瀏覽記錄，系統返回鍵＝上一頁（對話清單層再按才退到背景）；分頁與內頁的規則在 lib/mobile-nav.mjs ----------
@@ -419,7 +417,7 @@ const app = createApp({
     function togglePinChat(id) {
       const r = togglePin(prefs.chatPins, id)
       if (r.ok) prefs.chatPins = r.state
-      else showToast(r.text)   // 滿 50 個：底部一句話說明，不動原本的釘選
+      else showResult('fail', r.text)   // 滿 50 個：結果提示說明，不動原本的釘選
     }
     // 搜尋時照搜尋條件過濾、仍排最上面（跟電腦版一致，#1479）；封存優先：已封存的不顯示（activeFriends 已排除），釘選紀錄照留
     const pinnedRowsM = computed(() => {
@@ -678,7 +676,7 @@ const app = createApp({
         const r = await knownPeers.rename(node, dn.text)
         if (!r) { dn.err = KNOWN_TEXT.failed; return }   // 沒拿到成功的回覆：編輯框留著、顯示失敗，不讓人以為改好了
         Object.assign(dn, { node: '', text: '', err: '' })
-        if (node === info.node) followSelfRename({ info, core, me }, { name: r.name, self_renamed: r.selfRenamed === true, window_name: r.windowName, window_rename_failed: r.windowRenameFailed }, showToast)   // 改的是這支手機：本機視窗名 Rust 也換了，畫面就地跟上
+        if (node === info.node) followSelfRename({ info, core, me }, { name: r.name, self_renamed: r.selfRenamed === true, window_name: r.windowName, window_rename_failed: r.windowRenameFailed }, notifyResult)   // 改的是這支手機：本機視窗名 Rust 也換了，畫面就地跟上
         await Promise.allSettled([core.refreshRoster(), loadKnown()])
       } catch (e) { console.info('[ASN] 改名沒成功', String(e?.message ?? e)); dn.err = renameErrorText(e) } finally { dn.busy = false }
     }
@@ -831,7 +829,7 @@ const app = createApp({
         clearInterval(cloudTimer); cloudTimer = setInterval(() => void cloud.load(), CLOUD_POLL_MS)
       } else if (old === 'cloud') {
         clearInterval(cloudTimer); cloudTimer = null
-        void cloud.leave().then(() => { if (cloudSt.msg) showToast(cloudSt.msg) })   // 頁面已關：丟金鑰、清不掉的提示改用一句話提示
+        void cloud.leave().then(() => { if (cloudSt.msg) showResult('fail', cloudSt.msg) })   // 頁面已關：丟金鑰、清不掉的提示改用一句話提示
       }
     })
     fourthKeepMs = () => (cloudSt.created ? CLOUD_KEY_KEEP_MS : FOURTH_KEEP_MS)   // 金鑰還在畫面上時，內頁切走後最多留 30 分鐘
@@ -1294,7 +1292,7 @@ const app = createApp({
       // 離開進行中的畫面（退回列表、離開設備與帳號）後：指令照樣送出、照樣等結果，只是不再更新畫面；送出另一個切換才停止等這一個
       const v = await runAcctSwitch(acctTransport, node, email, { onUpdate: v => { if (token === acctToken) acctSw.view = v }, cancelled: () => run !== acctRunSeq })
       // 結果出來時使用者已經不在那個畫面（離開了，或切到別的分頁）：跳一句提示；還在畫面上就照原本在畫面上顯示
-      if (run === acctRunSeq && (token !== acctToken || nav.tab !== PAGE_TAB)) showToast(acctResultToast(v, { label, email }))
+      if (run === acctRunSeq && (token !== acctToken || nav.tab !== PAGE_TAB)) showResult(v.phase === 'done' ? 'ok' : 'fail', acctResultToast(v, { label, email }))
     }
     // 第 2 步才去讀型號清單（切回第 1 步再回來不重讀；要重讀按「再查一次」）。放在這裡：廠牌卡要用到後面才宣告的 acctAllDevs，watch 一建立就會算一次
     watch(() => [lchStep2.value, lch.node, lchModelChoice.value.kind === 'list' ? lchModelChoice.value.vendor : ''], ([step2, , vendor]) => { if (step2 && vendor) lchModelLoader.ensure(vendor) })
@@ -1464,13 +1462,10 @@ const app = createApp({
     // 送出並顯示進度（#1800）：詳情的進度留在選單裡；其他動作就地顯示在對話頁頂端，成功幾秒後自己消失、失敗附「重試」。
     // 非詳情的操作（含封存）與電腦版共用同一份 createOpRunner：連按只認最後一次、重試、自動消失都在那裡
     const opsRunState = { get runs() { return opsRuns.value }, set runs(v) { opsRuns.value = v } }
-    let archiveNoteTimer = null
-    // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果也用名單上方的一行字說明
+    // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用共用的結果提示說明
     const onArchived = async r => {
       if (r.ok) await core.refreshRoster()
-      archiveNote.value = r.text
-      clearTimeout(archiveNoteTimer)
-      archiveNoteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
+      showResult(r.ok ? 'ok' : 'fail', r.text)
     }
     const opRunner = createOpRunner({ api: opsTransport, state: opsRunState, run: makeOpRun({ onArchived }), onDone: d => { void afterOpDone(d) } })
     async function afterOpDone({ op, view, friend: f, input }) {
@@ -1822,12 +1817,12 @@ const app = createApp({
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
       tq, TERMREQ_TEXT, tqCountdown, decideTermReq, laterTermReq,
       KNOWN_TEXT, IDENTITY_TEXT, ACTION_TEXT, phoneFpMark, NAME_MAX, kp, forgetKnown, reaccept, reacceptAsk, reacceptNo, reacceptYes, dn, dnBad, dnHint, devRenameStart, devRenameCancel, devRenameSave, removedBlock, acctRowLine, joined, curKnown, openAcctInfo, vp, peerStrip, onRemoteStarted, onRemoteEnded, openPeerSheet, closePeerSheet, choosePeer, openMethodSheet, closeMethodSheet, confirmKnown, methodPickInstead, scanPeer, peerSheetTitle, peerSheetBody, fs, FP_SHOW_TEXT, fpShowStart, fpShowRetry, fpShowEnd, fpShowScan,
-      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, opsAcpNote, opsAcpReading, opsAcpCanRetry, opsAcpRetryLabel, reloadOpsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, archiveNote, photoApi, emo, groupHeading, statusNote,
+      avOf, avById, meAv, chatFriend, chatEmptyText, chatPlate, chatPaneEl, onPhotoViewer, headTerm, toggleHeadTerm, headWake, chatOffline, lineChat, offlineOpen, toggleOffline, closeOffline, chatLog, opsItems, opsRows, opsView, opsAcp, opsAcpNote, opsAcpReading, opsAcpCanRetry, opsAcpRetryLabel, reloadOpsAcp, ops, opsText, opsTitle, opsModels, opsModelNote, opsIsPi, opsPiNote, opsPiChoices, opsBanner, openOps, pickOp, submitOp, retryInfo, OP_PROGRESS_TEXT, holdRun, releaseRun, setArchived, photoApi, emo, groupHeading, statusNote,
       GUIDE_TEXT, guideNode, guideOn, guideReshow, guideRowList, guideHintView, setGuideHidden, guideAct, guideSite,
       SUB_LAPSED_TEXT, setupSt, setupAsk, setupNo, setupYes, setupClose, SETUP_TEXT, RELOGIN_TEXT, loginSt, loginAsk, loginNo, loginYes, loginClose, LOGIN_TEXT, LOGIN_VENDORS, acctSw, setAcctTab, acctSwitchOn, acctCanSwitchTo, ACCT_TABS, acctSwitchTargets: (vendor, a) => acctSwitchTargetsOf(acctDevs.value, vendor, a, info.node), acctDevRows, acctLoginTargets, acctLoginPress, accountCardKey, accountStatusOf, acctInUseOf, acctLoginLostOf, acctLoginNotices, acctReloginHere, acctReloginPress, LOGIN_LOST_TEXT, acctDevPress, acctRowResult, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT, usedOnText, ROSTER_TEXT, acctMy, acctDevs, acctCanRemove, acctCanShowBack, acctDrag, acctShowBack, acctAskRemove, acctRemoveText, acctRemoveNow, acctRestore, acctBackToList, openAcctDevice, gripDown, gripMove, gripUp, gripKey, acctMove, DEVICE_TEXT, acctCur, acctRep, acctView, acctConfirm, ACCT_TEXT, acctTitle, acctHead, vendorIconSvg, acctKeys, openAcct, startAcctSwitch, acctBackToPick, submitAcct, planLabel, PLAN_UNKNOWN, INCOMPLETE_LABEL, INCOMPLETE_REASON, LOGIN_FAILED_LABEL, CURRENT_LABEL, CURRENT_FAILED_ARIA,
       lch, lchData, lchDevices, lchElig, lchFormErr, lchChoices, lchVendors, lchRow, lchAuto, lchPi, lchModel, reloadLchModels, pickLaunchVendor, PI_REMOTE_VERSION_NOTE, lchStep2, lchTitle, lchCanNext, nextLaunch, closeLaunch, openLaunch, pickLaunchDevice, submitLaunch, openLaunched,
       openMember, pickOffline, topGroups, rowPressOf, opsClickGuard, isChatPinned, opsTargetId, opsPinLabel, pickPin, unreadRows, unreadShown, UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, plusOpen, pickPlus, rooms, roomRows, roomsNote, roomsErr, roomsLoaded, refreshRooms, roomNote, openRoom, ROOM_GROUP_KEY, ROOM_GROUP_LABEL, roomEmptyText, groupFlow, groupItems, pickGroup, chatCards, decideCard, guides, guideOpen, openGuides, openGuide, about, openAboutLink, aboutAct, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB,
-      toast, leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
+      leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, speakApi, readVoices, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
       SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGos, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,

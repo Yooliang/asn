@@ -899,7 +899,7 @@ export const ChatPane = {
         <i>i</i>
         <span>{{ plain(friend.nick) }} 已停止，寄來的信不會處理（會收到一則說明）。要恢復請在夥伴管理按「重開」。</span>
       </div>
-      <div class="msgs" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
+      <div class="msgs" data-toast-anchor="chat" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
         <div class="older-note" v-if="noteText">{{ noteText }}</div>
         <template v-for="(m, i) in log" :key="i">
           <div class="l-day" v-if="isLine && lrows[i] && lrows[i].pill">{{ lrows[i].pill }}</div>

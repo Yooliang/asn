@@ -481,7 +481,7 @@ export const TermView = {
   template: `
 <div class="term-view">
   <p class="term-view-ask" v-if="askHint" role="status">{{ askHint }}</p>
-  <div class="term-view-screen" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @wheel.passive="onPullUp" @click="focusTerm" @paste.capture="onPaste"></div>
+  <div class="term-view-screen" data-toast-anchor="chat" data-toast-edge="top" ref="host" aria-label="終端畫面" @scroll.passive="onScroll" @wheel.passive="onPullUp" @click="focusTerm" @paste.capture="onPaste"></div>
   <p class="term-view-loading" v-if="histLoading" role="status">讀取更早的內容…</p>
   <button class="aero-btn term-view-latest" type="button" v-if="behind" @click="jumpLatest">{{ TERM_VIEW_LATEST }}</button>
   <p class="term-view-paste" v-if="pendingPaste" role="alert">{{ pasteNote }}<button class="aero-btn" type="button" @click="confirmPaste">{{ PASTE_TEXT.yes }}</button><button class="aero-btn" type="button" @click="cancelPaste">{{ PASTE_TEXT.no }}</button></p>

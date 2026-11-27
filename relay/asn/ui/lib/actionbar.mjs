@@ -16,6 +16,7 @@ import { CONSOLE_QUERY_TIMEOUT_MS, consoleReq, engineForProfile, withTimeout } f
 import { opLineNote, runFor } from './mobile-ops.mjs'
 import { WAKE_ENGINES, initialOpsCtx, menuItems, partnerEngine, sharedWhy } from './partner-ops.mjs'
 import { runArchive } from './archive.mjs'
+import { showResult } from './ui-kit.mjs'
 import { WHY_MAX, briefWhy, buildPartnerMenu } from './partner-menu.mjs'
 export { WHY_MAX, briefWhy }   // 反灰原因縮短搬到 partner-menu.mjs（#1559），這裡照舊轉出
 import { AsnAvatar } from './avatar-badge.mjs'
@@ -428,7 +429,6 @@ export const ActionBar = {
     const root = ref(null)
     const opsCtx = reactive(initialOpsCtx())
     const opDlg = reactive({ open: false, item: null })   // 夥伴管理的對話框（第 2 格的喚醒、ACP／pi 的切換模型也用這個）
-    const archiveNote = ref('')
     // 夥伴操作的進度就地顯示在功能列上（#1800），不再用擋畫面的對話框
     const opRun = reactive({ runs: {} })
     const opRunner = createOpRunner({ api: props.api, state: opRun })
@@ -531,7 +531,6 @@ export const ActionBar = {
       // 查詢失敗（登入狀態或電腦設定）：幾秒後自動再查，直到查到為止
       if (ctx.signedIn === null || !ctx.loaded) { clearTimeout(opsRetry); opsRetry = setTimeout(() => { if (props.friend) void loadOps() }, 5000) }
     }
-    let noteTimer = null
     async function pickOps(key) {
       if (!key.startsWith('p:')) { emit('ops', key); return }
       const wakeItem = slot.value.window   // 喚醒不在「管理」選單裡（在第 2 格），可不可以按看第 2 格
@@ -540,8 +539,7 @@ export const ActionBar = {
       const op = key.slice(2)
       if (op === 'archive' || op === 'unarchive') {
         const r = await runArchive(props.api, props.friend, op === 'archive')
-        archiveNote.value = r.text
-        clearTimeout(noteTimer); noteTimer = setTimeout(() => { archiveNote.value = '' }, 6000)
+        showResult(r.ok ? 'ok' : 'fail', r.text, { at: 'chat' })   // 對話視窗：放在訊息區下緣、輸入區上方
         return
       }
       Object.assign(opDlg, { open: true, item: { key: op, ok: true, reason: '' } })
@@ -610,7 +608,7 @@ export const ActionBar = {
     watch(() => props.friend?.status, () => { void loadConsole(); void loadOps() })
     watch(showSubs, () => startSubs())
     watch(() => slot.value.tasks.ok, ok => { if (!ok) tasks.open = false })
-    return { headWake, onLaunchNew, root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, archiveNote, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
+    return { headWake, onLaunchNew, root, plate, offlineNames, termReady, moreItems, pickMore, onWindow, termOn, termTip, termBtn, isRoom, showBar, showGroup, groupAll, pickGroup, onTasks, tasks, taskList, TASKS_TIP, slot, opsAll, pickOps, opRun, opRunner, onOpRun, opDlg, piModels, startCall, cons, model, subs, subView, toggleSubs, onModel, dlg, consoleView, dlgText, toggleConsole, pick, closeDlg, submit, copyManual, CALL_TIP, MODEL_TIP, WAKE_TIP }
   },
   template: `
 <div class="actionbar" ref="root" v-if="showBar" role="toolbar" aria-label="代理功能列">
@@ -670,7 +668,6 @@ export const ActionBar = {
   <teleport :to="opSlot" :disabled="!opSlot" v-if="!opLine"><partner-op-strip :runner="opRunner" :runs="opRun.runs" :only="friend && friend.id"></partner-op-strip></teleport>
   <ops-menu-button v-if="showGroup" slot-key="group" label="群組" icon="img/ab-group.svg" tip="邀請、加 AI、成員與設定" :items="groupAll" @pick="pickGroup"></ops-menu-button>
   <ops-menu-button v-if="(!isRoom && api) || opsAll.length" :items="opsAll" :disabled="!isRoom && !slot.manage.ok" :reason="slot.manage.reason" @pick="pickOps"></ops-menu-button>
-  <span class="ab-note" v-if="archiveNote" role="status">{{ archiveNote }}</span>
   <asn-dialog v-if="dlg.open" :title="dlgText.title" @close="closeDlg">
     <p class="launch-notice-body" v-if="!dlg.done">{{ dlgText.lead }}</p>
     <ul class="model-points" v-if="!dlg.done && !dlg.error"><li v-for="p in dlgText.points" :key="p">{{ p }}</li></ul>
