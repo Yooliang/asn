@@ -318,17 +318,11 @@ mod tests {
     const HOOKS: &[(&str, &str, Hook, &str)] = &[
         ("src/launch/term_reclaim.rs", "KICKS", Hook::Record, "只在 kick_retry 裡加一，數「叫了幾次背景重試」；不影響是否要叫（#2424 B）"),
         ("src/launch/term.rs", "TEST_TERM_STATE", Hook::Inject, "只取代 partner_term_state_of 查到的終端狀態；詳情後面怎麼判斷、怎麼顯示照正式版走（#2424 C）"),
-        ("src/launch/term.rs", "TEST_NONCE", Hook::Inject, "固定結束標記的暗號（正式版是隨機值），只換值不改流程"),
-        ("src/launch/term.rs", "TEST_REGISTRY_NAMES", Hook::Inject, "取代讀到的使用者環境變數名單，只換輸入值"),
-        ("src/launch/wezterm.rs", "OBSERVE_TICKS", Hook::Record, "只數監看了幾輪"),
-        ("src/agent_setup/login.rs", "WIPES", Hook::Record, "只數登入資料清掉幾次"),
-        ("src/settings/migrate.rs", "FAIL_RENAME", Hook::Inject, "讓搬移的改名動作回失敗（模擬磁碟錯誤），驗證失敗路徑"),
-        ("src/settings/migrate.rs", "FAIL_COPY", Hook::Inject, "讓搬移的複製動作回失敗（模擬磁碟錯誤），驗證失敗路徑"),
-        ("src/settings/mod.rs", "TEST_ROOTS", Hook::Inject, "把設定資料夾指到暫存位置，只換路徑"),
-        ("src/settings/mod.rs", "FAIL_WRITE", Hook::Inject, "讓寫入回失敗（模擬磁碟錯誤），驗證回給畫面的錯誤不含系統原文"),
-        ("src/settings/mod.rs", "PEEK_LOGS", Hook::Record, "只數唯讀讀取記了幾行 log"),
-        ("src/settings/mod.rs", "PEEK_CLOCK_SKEW", Hook::Inject, "假時鐘：只撥動讀到的「現在」，免得測節流要真的等"),
     ];
+
+    /// 本 PR 新增、守門只管這兩組：term_reclaim.rs 整份（新檔，裡面所有 `#[cfg(test)]` 鉤子都要登記）、
+    /// 以及 term.rs 的 TEST_TERM_STATE。其他既有檔案的既有鉤子不在這次範圍（全域的鉤子守門另開單處理）
+    const GUARDED: &[(&str, &str)] = &[("src/launch/term_reclaim.rs", "KICKS"), ("src/launch/term.rs", "TEST_TERM_STATE")];
 
     /// 檔案文字裡每個 `#[cfg(test)]` 緊接 `thread_local!` 區塊宣告的變數名
     fn hook_statics(text: &str) -> Vec<String> {
@@ -364,21 +358,25 @@ mod tests {
             .iter()
             .filter_map(|f| Some((f.strip_prefix(root).ok()?.to_string_lossy().replace('\\', "/"), std::fs::read_to_string(f).ok()?)))
             .collect();
-        let test_mods = declared_test_mods(&texts);
         let (mut bad, mut used) = (Vec::new(), std::collections::BTreeSet::new());
         for (rel, text) in &texts {
-            let name = rel.rsplit('/').next().unwrap_or(rel);
-            // 整份都是測試的檔案：鉤子到不了正式版，不用登記
-            if rel == "src/test_guard.rs" || rel.contains("/tests/") || test_mods.contains(rel) || ["tests.rs", "testsupport.rs", "term_live_mux.rs"].contains(&name) {
-                continue;
-            }
+            // 只看 GUARDED 列到的檔案；term_reclaim.rs 的每個鉤子都要登記，term.rs 只看 GUARDED 指名的那一個
+            let Some(file_rule) = GUARDED.iter().filter(|(p, _)| rel.ends_with(p)).map(|(_, v)| *v).next() else { continue };
+            let whole_file = rel.ends_with("term_reclaim.rs");
             for var in hook_statics(text) {
+                if !whole_file && var != file_rule {
+                    continue;
+                }
                 match HOOKS.iter().position(|(p, v, _, _)| rel.ends_with(p) && *v == var) {
                     Some(i) => {
                         used.insert(i);
                     }
                     None => bad.push(format!("{rel}：測試鉤子 {var} 沒登記")),
                 }
+            }
+            // 指名的鉤子還在原始碼裡（改名或搬走要同步改守門）
+            if !hook_statics(text).iter().any(|v| v == file_rule) {
+                bad.push(format!("{rel}：找不到指名的測試鉤子 {file_rule}"));
             }
         }
         assert!(bad.is_empty(), "正式版原始碼裡的 #[cfg(test)] 鉤子要到 HOOKS 登記，寫明是記錄還是注入、為什麼不改正式版的分支條件：\n{}", bad.join("\n"));

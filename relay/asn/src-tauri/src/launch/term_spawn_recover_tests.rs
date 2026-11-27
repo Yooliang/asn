@@ -137,7 +137,7 @@ fn 開窗逾時_清單這一刻沒看到_先記成暫時接不回_再看一輪�
 
 /// 滿 [`RETRY_FIRST`] 之後的一個時間點（測試注入時間，不真的等）
 fn after_first() -> std::time::Instant {
-    std::time::Instant::now() + std::time::Duration::from_secs(31)
+    std::time::Instant::now() + super::super::super::reclaim_rows::RETRY_FIRST + std::time::Duration::from_secs(1)
 }
 
 /// 二審：「再看一輪」要真的隔一段時間。停放後立刻跑一輪（例如叫醒馬上重試）不能移除；
@@ -150,8 +150,10 @@ fn 開窗逾時_清單沒看到_立刻再跑一輪不能移除_滿三十秒仍�
     rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
     let now = std::time::Instant::now();
     // 停放後立刻一輪（叫醒讓睡眠提早結束的情形）、以及未滿 30 秒：都不能移除
-    for secs in [0, 1, 29] {
-        let r = rig.svc.retry_parked_at(now + std::time::Duration::from_secs(secs));
+    let rf = super::super::super::reclaim_rows::RETRY_FIRST;
+    for early in [std::time::Duration::ZERO, std::time::Duration::from_secs(1), rf - std::time::Duration::from_secs(1)] {
+        let secs = early.as_secs();
+        let r = rig.svc.retry_parked_at(now + early);
         assert_eq!((r.restored, r.waiting), (0, 1), "第 {secs} 秒不能移除");
         assert_eq!(state_of(&rig).state, TermState::Waiting);
         assert_eq!(ids_in_store(&rig.store).len(), 1);
