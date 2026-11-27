@@ -15,6 +15,9 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const FAKE_AGY = path.join(here, 'fake-agy.mjs')
 const FAKE_ACP = path.join(here, 'fake-acp-worker.mjs')
 const sleep = ms => new Promise(r => setTimeout(r, ms))
+// 目前的環境變數，拿掉所有會指到使用者資料夾與各工具資料夾的變數（對應電腦版測試的 env_without_homes）
+const DROP = ['USERPROFILE', 'HOME', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'CODEX_HOME', 'PI_CODING_AGENT_DIR', 'ASN_HOME', 'IRORI_HOME', 'ASN_CLAUDE_HOME', 'ASN_GROK_HOME']
+const envWithoutHomes = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !DROP.includes(k.toUpperCase())))
 const PASS = ['FAKE_AGY_STATE', 'FAKE_ACP_STATE', 'FAKE_ACP_LOAD', 'FAKE_ACP_AUTH']
 
 const agy = (extra = {}) => ({ name: 'Gemini', engine: 'acp', roster_engine: 'gemini', protocol: 'agy-stream', command: process.execPath, args: [FAKE_AGY], env_pass: PASS, ...extra })
@@ -31,17 +34,21 @@ function rig(workers, { env = {} } = {}) {
     onFail: (id, reason) => events.push({ t: 'fail', id, reason }),
     onReply: (from, text) => events.push({ t: 'reply', from, text }),
   }
+  // 讀取的敏感位置清單會把家目錄算進去（對那些位置做解析）：測試的引擎環境一律用暫存資料夾裡的假家目錄，不碰真的使用者資料夾
+  const home = path.join(dir, 'home')
+  fs.mkdirSync(home)
   const make = () => {
     const e = createEngine({
       log: m => logs.push(m), workDir: dir, mailboxName: 'T-收發室',
-      env: { ...process.env, IRORI_AGENTS_FILE: file, FAKE_AGY_STATE: path.join(dir, 'st'), FAKE_ACP_STATE: path.join(dir, 'st'), ...env },
+      env: { ...envWithoutHomes(), USERPROFILE: home, HOME: home, IRORI_AGENTS_FILE: file, FAKE_AGY_STATE: path.join(dir, 'st'), FAKE_ACP_STATE: path.join(dir, 'st'), ...env },
       send: async m => { sent.push(m) },
+      deps: { realHome: home },
     })
     e.start(handlers)
     return e
   }
   const r = {
-    dir, events, sent, logs, engine: make(),
+    dir, home, events, sent, logs, engine: make(),
     restart() { r.engine.stop(); r.engine = make() },
     mail(id, body, { from = 'W/政策', to = 'Gemini', reply } = {}) {
       r.engine.deliver({ id, to, text: `[RELAY 來信] trust=member from=${from} to=${to} id=${id} engine=gemini${reply ? ` reply=${reply}` : ''}\n${body}` })
@@ -153,6 +160,52 @@ test('agy：write=allow 時資料夾內可寫；資料夾外仍被擋（白名�
     await r.waitFor(() => r.fails().length === 1, '資料夾外被擋')
     assert.match(r.fails()[0].reason, /路徑在白名單資料夾之外/)
     await sleep(300); assert.equal(fs.existsSync(outside), false)
+  } finally { await r.done() }
+})
+
+test('agy：讀取一般檔（含資料夾外）放行；敏感位置整輪中止；指令的 Cwd 在敏感位置也中止；沒登記的工具名記 log', async () => {
+  const r = rig([agy()])
+  try {
+    const own = path.join(r.dir, 'workers', 'Gemini')
+    const tool = (name, params) => `@@TOOL ${name} ${JSON.stringify(params)}`
+    r.mail(ID(1), tool('read_file', { Path: path.join(own, 'a.txt') })); await r.waitReplies(1)
+    assert.match(r.replies()[0], /tool-done: read_file/)
+    r.mail(ID(2), tool('read_file', { Path: path.join(r.dir, 'elsewhere.txt') })); await r.waitReplies(2)
+    assert.match(r.replies()[1], /tool-done: read_file/, '資料夾外的一般檔')
+    r.mail(ID(3), tool('run_command', { CommandLine: 'ls', Cwd: own })); await r.waitReplies(3)
+    assert.match(r.replies()[2], /tool-done: run_command/, '指令的 Cwd 是自己的資料夾')
+    r.mail(ID(4), tool('totally_new_tool', { note: 'x' })); await r.waitReplies(4)
+    assert.ok(r.logs.some(l => l.includes('工具名沒登記') && l.includes('totally_new_tool')), r.logs.join('\n'))
+    r.mail(ID(5), tool('read_file', { Path: path.join(r.home, '.ssh', 'id') }))
+    await r.waitFor(() => r.fails().length === 1, '敏感位置被擋')
+    assert.match(r.fails()[0].reason, /讀取不被允許.*不能讀/)
+    r.mail(ID(6), tool('run_command', { CommandLine: 'ls', Cwd: path.join(r.home, '.claude') }))
+    await r.waitFor(() => r.fails().length === 2, '指令的 Cwd 在敏感位置被擋')
+    assert.match(r.fails()[1].reason, /讀取不被允許.*不能讀/)
+    r.mail(ID(7), '還在嗎'); await r.waitReplies(5)
+    assert.match(r.replies()[4], /還在嗎/, '中止之後下一封仍正常')
+  } finally { await r.done() }
+})
+
+test('agy：參數裡有敏感路徑，另一個欄位是極深的巢狀陣列字串——整輪中止，不會回 tool-done', async () => {
+  const r = rig([agy()])
+  try {
+    const deep = '['.repeat(3000) + ']'.repeat(3000)
+    r.mail(ID(1), `@@TOOL read_file ${JSON.stringify({ Path: path.join(r.home, '.ssh', 'x'), Extra: deep })}`)
+    await r.waitFor(() => r.fails().length === 1, '整輪中止')
+    await sleep(300)
+    assert.equal(r.replies().length, 0, '不能回 tool-done')
+  } finally { await r.done() }
+})
+
+test('agy：只有極深的巢狀陣列字串（沒有別的敏感欄位）也中止，不會被略過', async () => {
+  const r = rig([agy()])
+  try {
+    const deep = '['.repeat(3000) + ']'.repeat(3000)
+    r.mail(ID(1), `@@TOOL read_file ${JSON.stringify({ Extra: deep })}`)
+    await r.waitFor(() => r.fails().length === 1, '整輪中止')
+    await sleep(300)
+    assert.equal(r.replies().length, 0, '不能回 tool-done')
   } finally { await r.done() }
 })
 
@@ -327,7 +380,7 @@ test('agy：抬頭 reply=no → 內文沒標記也不寄回；reply=yes → 內�
 
 // ---- 標準 ACP（備援／其他 agent）-------------------------------------------------------------------------
 
-test('acp：收信回覆；write 明寫 deny——edit 被拒、讀資料夾內放行、資料夾外被拒；回信附上被拒動作的備註', async () => {
+test('acp：收信回覆；write 明寫 deny——edit 被拒、讀資料夾內放行、一般資料夾外也能讀、敏感位置被拒；回信附上被拒動作的備註', async () => {
   const r = rig([acp({ permissions: { write: 'deny' } })])
   try {
     const inside = path.join(r.dir, 'workers', 'Gemini', 'a.txt')
@@ -335,11 +388,13 @@ test('acp：收信回覆；write 明寫 deny——edit 被拒、讀資料夾內�
     assert.match(r.replies()[0], /edit:denied,read:allowed/)
     assert.match(r.replies()[0], /想做的這些動作依這個工作者的政策被拒絕了：\n- 寫入：檔案：/)
     r.mail(ID(2), `@@READ ${path.join(r.dir, 'elsewhere.txt')}`); await r.waitReplies(2)
-    assert.match(r.replies()[1], /read:denied/)
+    assert.match(r.replies()[1], /read:allowed/, '讀取不限白名單資料夾')
+    r.mail(ID(3), `@@READ ${path.join(r.home, '.ssh', 'id')}`); await r.waitReplies(3)
+    assert.match(r.replies()[2], /read:denied/, '敏感位置照擋')
   } finally { await r.done() }
 })
 
-test('acp：全用預設——資料夾內讀寫與執行放行，資料夾外的讀寫仍拒', async () => {
+test('acp：全用預設——資料夾內讀寫與執行放行，資料夾外的寫仍拒、讀只擋敏感位置', async () => {
   const r = rig([acp()])
   try {
     const inside = path.join(r.dir, 'workers', 'Gemini', 'a.txt')
@@ -350,7 +405,9 @@ test('acp：全用預設——資料夾內讀寫與執行放行，資料夾外�
     r.mail(ID(3), `@@EDIT ${path.join(r.dir, 'x.txt')}`); await r.waitReplies(3)
     assert.match(r.replies()[2], /edit:denied/)
     r.mail(ID(4), `@@READ ${path.join(r.dir, 'elsewhere.txt')}`); await r.waitReplies(4)
-    assert.match(r.replies()[3], /read:denied/)
+    assert.match(r.replies()[3], /read:allowed/)
+    r.mail(ID(5), `@@READ ${path.join(r.home, '.claude', 'x.json')}`); await r.waitReplies(5)
+    assert.match(r.replies()[4], /read:denied/)
   } finally { await r.done() }
 })
 

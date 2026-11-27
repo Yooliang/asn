@@ -3,6 +3,7 @@
 //   @@ECHO_ALL       回整則訊息原文（看換班接手說明與帶進來的前情）
 //   @@WRITE <路徑>   送出寫檔工具步驟，150ms 後才真的寫（絆線測試：被殺就不會有檔案）；FAKE_AGY_STUBBORN=1 時收到「這個位置不能寫」的提醒也照寫
 //   @@RUN <指令>     送出執行指令步驟；沒帶 --dangerously-skip-permissions 就被「權限拒絕」（空回覆＋denied_actions）
+//   @@TOOL <工具名> <JSON 參數>  送出指定工具名與參數的工具步驟（讀取判定的測試用：路徑欄位、沒登記的工具名…），120ms 後才結束步驟；被絆線殺掉就不會有回覆
 //   @@AUTH / @@QUOTA 回 status=ERROR 的 result 並結束（結束碼 1）
 //   @@AUTH_ONCE <路徑>  第一次（那個檔案還不存在）建檔並回登入失效，之後（檔案在了）照一般信處理：模擬「舊行程憑證過期、新行程正常」（#517）
 //   @@POISON         正常回覆，但把這段 conversation 標成壞掉：之後任何行程用 --conversation 接回它，每一輪都回登入失效（401）；開新對話才正常（#517：存著的舊對話綁著過期登入）
@@ -112,6 +113,14 @@ async function handle(line) {
     }
     out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ERROR', step_type: 'tool', tool_name: 'run_command', tool_info: { ...tool, error: { type: 'TOOL_ERROR', message: `permission check failed for command "${t[1].trim()}": user denied permission` } } } })
     return resultOf('', { denied_actions: [{ action: 'command', display_name: 'RunCommand' }] })
+  }
+  if ((t = /@@TOOL\s+(\S+)\s+(\{.*\})/.exec(body))) {
+    const si = step++
+    const tool = { name: t[1], parameters: JSON.parse(t[2]) }
+    out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'ACTIVE', step_type: 'tool', tool_name: t[1], tool_info: tool } })
+    await sleep(120)   // 被絆線殺掉的話走不到下面
+    out({ event: 'step_update', step_update: { conversation_id: conv, step_index: si, state: 'DONE', step_type: 'tool', tool_name: t[1], tool_info: tool } })
+    return resultOf(`tool-done: ${t[1]}`)
   }
   if (/@@MISSING/.test(body)) {
     const si = step++

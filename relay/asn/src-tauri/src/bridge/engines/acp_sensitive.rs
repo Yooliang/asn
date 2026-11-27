@@ -55,6 +55,13 @@ pub const EXTRA_HOME_PATHS: [&str; 33] = [
 /// 檔名只寫前綴的位置：（資料夾, 檔名前綴），相對於使用者資料夾
 pub const PREFIX_HOME_FILES: [(&str, &str); 2] = [(".cargo", "credentials"), (".terraform.d", "credentials")];
 
+/// 本機應用資料夾（環境變數 LOCALAPPDATA 底下）與漫遊資料夾（APPDATA 底下）裡的敏感位置
+const LOCALAPPDATA_ROOTS: [&str; 3] = [crate::appdir::PACKAGE, "Google/Chrome/User Data", "Microsoft/Edge/User Data"];
+const APPDATA_ROOTS: [&str; 2] = ["Microsoft/Credentials", "Microsoft/Protect"];
+
+/// 參數是整段指令或程式碼的欄位名（小寫）：路徑判定管不到，抽取時略過（名字裡有路徑字眼的不略過）
+const SKIP_KEYS: [&str; 9] = ["command", "commandline", "command_line", "commands", "cmd", "script", "scripts", "scriptblock", "script_block"];
+
 /// 環境變數指定的位置（絕對路徑才算）
 const ENV_ROOTS: [&str; 6] = ["CODEX_HOME", "PI_CODING_AGENT_DIR", "ASN_HOME", "IRORI_HOME", "ASN_CLAUDE_HOME", "ASN_GROK_HOME"];
 
@@ -125,6 +132,8 @@ pub struct SensitiveRoots {
     exempt_dirs: Vec<String>,
     env: Vec<(String, String)>,
     canon: Canon,
+    /// 相對路徑的 ASN_HOME 的基準資料夾；None＝目前的工作資料夾（正式一律 None，只有測試會指定）
+    rel_base: Option<PathBuf>,
 }
 
 // 手寫 Debug：裡面存著環境變數（可能含金鑰），不能被印出來
@@ -147,6 +156,16 @@ impl SensitiveRoots {
     }
 
     fn build_with(homes: &[PathBuf], env: &[(String, String)], canon: Canon) -> SensitiveRoots {
+        Self::build_inner(homes, env, canon, None)
+    }
+
+    /// 測試用：指定相對路徑的 ASN_HOME 的基準資料夾（不依賴測試機的工作資料夾）
+    #[cfg(test)]
+    pub fn build_rel_base(homes: &[PathBuf], env: &[(String, String)], rel_base: &Path) -> SensitiveRoots {
+        Self::build_inner(homes, env, std_canon, Some(rel_base.to_path_buf()))
+    }
+
+    fn build_inner(homes: &[PathBuf], env: &[(String, String)], canon: Canon, rel_base: Option<PathBuf>) -> SensitiveRoots {
         let get = |n: &str| env.iter().find(|(k, v)| k.eq_ignore_ascii_case(n) && !v.trim().is_empty()).map(|(_, v)| PathBuf::from(v.trim()));
         let mut home_strs: Vec<String> = vec![];
         for h in homes {
@@ -159,14 +178,15 @@ impl SensitiveRoots {
             }
         }
         let mut env_paths: Vec<PathBuf> = ENV_ROOTS.iter().filter_map(|n| get(n)).collect();
+        // ASN 資料夾：跟 home 解析同一套（相對值接在目前工作資料夾上）；上面收的相對值會在下面因為不是絕對路徑被略過，這裡補上解成絕對路徑的那一份
+        if let Some(p) = crate::home::override_dir_in(env, rel_base.as_deref()) {
+            env_paths.push(p);
+        }
         if let Some(la) = get("LOCALAPPDATA") {
-            env_paths.push(la.join(crate::appdir::PACKAGE));
-            env_paths.push(la.join("Google/Chrome/User Data"));
-            env_paths.push(la.join("Microsoft/Edge/User Data"));
+            env_paths.extend(LOCALAPPDATA_ROOTS.iter().map(|r| la.join(r)));
         }
         if let Some(ap) = get("APPDATA") {
-            env_paths.push(ap.join("Microsoft/Credentials"));
-            env_paths.push(ap.join("Microsoft/Protect"));
+            env_paths.extend(APPDATA_ROOTS.iter().map(|r| ap.join(r)));
         }
         for p in env_paths {
             if !p.is_absolute() && !p.to_string_lossy().starts_with('/') {
@@ -219,6 +239,7 @@ impl SensitiveRoots {
             exempt_dirs: vec![],
             env: env.to_vec(),
             canon,
+            rel_base,
         }
     }
 }
@@ -541,15 +562,33 @@ fn hits(f: &str, tool: ReadTool, roots: &SensitiveRoots) -> bool {
     if is_host_key(f) || is_proc_environ(f) || SYSTEM_FILES.contains(&f) {
         return true;
     }
-    if recursive && (f == HOST_KEY_DIR || is_ancestor_of(f, HOST_KEY_DIR) || f == "/proc" || is_ancestor_of(f, "/proc") || f.strip_prefix("/proc/").is_some_and(|r| !r.contains('/')) || SYSTEM_FILES.iter().any(|s| is_ancestor_of(f, s))) {
+    if recursive && (f == HOST_KEY_DIR || is_ancestor_of(f, HOST_KEY_DIR) || f == "/proc" || is_ancestor_of(f, "/proc") || is_proc_environ_dir(f) || SYSTEM_FILES.iter().any(|s| is_ancestor_of(f, s))) {
         return true;
     }
     other_home_hit(f, tool, roots)
 }
 
-/// `/proc/<編號>/environ`
+/// `/proc/<編號>/environ`，以及執行緒形式 `/proc/<編號>/task/<執行緒編號>/environ`
 fn is_proc_environ(f: &str) -> bool {
-    f.strip_prefix("/proc/").and_then(|r| r.split_once('/')).is_some_and(|(pid, rest)| !pid.is_empty() && rest == "environ")
+    let Some(rest) = f.strip_prefix("/proc/") else { return false };
+    let segs: Vec<&str> = rest.split('/').collect();
+    match segs.as_slice() {
+        [pid, "environ"] => !pid.is_empty(),
+        [pid, "task", tid, "environ"] => !pid.is_empty() && !tid.is_empty(),
+        _ => false,
+    }
+}
+
+/// 底下含環境檔的 /proc 資料夾（遞迴搜尋會掃進去）：`/proc/<編號>`、`/proc/<編號>/task`、`/proc/<編號>/task/<執行緒編號>`
+fn is_proc_environ_dir(f: &str) -> bool {
+    let Some(rest) = f.strip_prefix("/proc/") else { return false };
+    let segs: Vec<&str> = rest.split('/').collect();
+    match segs.as_slice() {
+        [_] => true,
+        [pid, "task"] => !pid.is_empty(),
+        [pid, "task", tid] => !pid.is_empty() && !tid.is_empty(),
+        _ => false,
+    }
 }
 
 /// 別人的家目錄：`/root`，以及家目錄所在資料夾（`/home`、`C:\Users`…）底下不是自己家的子資料夾（共用的 Public 等不算）
@@ -741,7 +780,7 @@ fn walk(v: &Value, under_key: bool, out: &mut Vec<String>, depth: usize) {
         Value::Object(m) => m.iter().for_each(|(k, x)| {
             // 指令與程式碼欄位是整段命令，不是路徑，路徑判定管不到（敏感清單不是邊界）
             let l = k.to_lowercase();
-            if key_is_path(k) || !matches!(l.as_str(), "command" | "commandline" | "command_line" | "commands" | "cmd" | "script" | "scripts" | "scriptblock" | "script_block") {
+            if key_is_path(k) || !SKIP_KEYS.contains(&l.as_str()) {
                 walk(x, under_key || key_is_path(k), out, depth)
             }
         }),
@@ -779,3 +818,5 @@ use jsonstr::{container_like, json_container};
 mod tests;
 #[cfg(test)]
 mod tests_form;
+#[cfg(test)]
+mod tests_shared;

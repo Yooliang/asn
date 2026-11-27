@@ -1,13 +1,18 @@
 // 收發室自己更新、自己重啟（擁有者 10/05：收發室不要再靠別的 AI 來更新重啟，那個 AI 又得靠收發室傳指令，會互相卡住）。
 // 橋每隔一段時間（ASN_SELF_UPDATE_MS，預設 10 分鐘；0＝關掉）到 origin/main 看 relay/machine/ 有沒有新版：
 //   - 只在「乾淨、在 main、沒有本機 commit」時用 fast-forward 拉下來，不碰有人正在改的工作樹（髒、別的分支、有本機 commit 都跳過並記 log）
-//   - 只看 relay/machine/ 的變動：別的目錄有新 commit 不動（那是開發視窗的事，不替他們拉）
+//   - 只看 relay/machine/ 與 relay/shared/（共用清單；測試向量除外）的變動：別的目錄有新 commit 不動（那是開發視窗的事，不替他們拉）
 //   - 拉好之後由橋自己收尾：不再收新信、等手上「轉交中」的信送完（最多 RESTART_DRAIN_MS），停掉收發室與工作者再結束；
 //     run-bridge.ps1 的迴圈 15 秒後用新版重新啟動。
 // 這支只放決定規則與 git 呼叫（git 由呼叫端注入，好測試）；收尾流程在 bridge.mjs。
 import { execFile } from 'node:child_process'
 
-export const WATCH_PATH = 'relay/machine/'
+// 看這幾處：機器橋自己的程式，以及它讀的共用清單（relay/shared/，例如敏感位置清單）；共用的測試向量只給測試用，不算
+export const WATCH_PATHS = ['relay/machine/', 'relay/shared/']
+export const WATCH_EXCLUDE = ['relay/shared/test-vectors/']
+export const WATCH_PATH = WATCH_PATHS.join(', ')
+/** git 的路徑限定：要看的資料夾，加上排除的資料夾 */
+export const watchPathspec = () => [...WATCH_PATHS, ...WATCH_EXCLUDE.map(p => `:(exclude)${p}`)]
 export const RESTART_DRAIN_MS = 5 * 60_000
 
 /**
@@ -46,7 +51,7 @@ export async function checkAndUpdate(run) {
     // 只看追蹤中的檔案；沒追蹤的檔（log、暫存）不算髒，fast-forward 也不會動到它們（真的衝突時 merge 會自己拒絕）
     const dirty = (await must(['status', '--porcelain', '--untracked-files=no'], 'status')) !== ''
     const [ahead, behind] = (await must(['rev-list', '--left-right', '--count', 'HEAD...origin/main'], 'rev-list')).split(/\s+/).map(Number)
-    const changed = (await must(['diff', '--name-only', 'HEAD', 'origin/main', '--', WATCH_PATH], 'diff')).split('\n').filter(Boolean)
+    const changed = (await must(['diff', '--name-only', 'HEAD', 'origin/main', '--', ...watchPathspec()], 'diff')).split('\n').filter(Boolean)
     const plan = planUpdate({ branch, dirty, ahead, behind, changed })
     if (plan.action !== 'update') return plan
     const from = await must(['rev-parse', '--short', 'HEAD'], 'rev-parse')

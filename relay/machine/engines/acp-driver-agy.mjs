@@ -10,7 +10,7 @@
 import { spawn } from 'node:child_process'
 import { cleanEnv } from './acp-client.mjs'
 import { classifyFailure, WorkerError } from './acp-errors.mjs'
-import { describeAgyTool, redact } from './acp-policy.mjs'
+import { describeAgyTool, isRegisteredAgyTool, redact } from './acp-policy.mjs'
 
 // cfg.args 放最前面（可放額外旗標；測試時放假 agy 的腳本路徑），後面才是這個驅動需要的旗標
 export function agyArgs({ cfg, sessionId, fullAccess }) {
@@ -48,7 +48,20 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
     if (ev.event === 'result' && cur) return onResult(ev.result ?? {})
   }
 
+  // 解讀工具步驟與檢查過程中出任何錯（例如參數巢狀太深）：當成沒通過、整輪中止（偏向擋，跟標準 ACP 那條路一樣）。
+  // log 只記工具名與例外類別，不記參數內容
   function onStep(s) {
+    try { handleStep(s) } catch (e) {
+      if (!cur) return
+      const name = redact(String(s?.tool_name ?? '')).slice(0, 60)
+      const kind = String(e?.name ?? 'Error')
+      cur.violation = { reason: '讀取檢查沒能完成，為了安全已中止', summary: `工具步驟檢查失敗：${name}` }
+      log(`agy 工具步驟解讀或檢查出錯，當成沒通過 → kill agy：${name}（${kind}）`)
+      kill('violation')
+    }
+  }
+
+  function handleStep(s) {
     if (s.conversation_id && !sid) sid = s.conversation_id
     if (s.step_type !== 'tool') return
     const info = describeAgyTool(s.tool_name, s.tool_info?.parameters)
@@ -60,6 +73,11 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
     }
     const first = !cur.seen.has(key)
     cur.seen.add(key)
+    // 沒登記的工具名：類別是用關鍵字猜的、猜不出來就照執行處理，記一行 log（只記工具名，不記參數）
+    if (first && !isRegisteredAgyTool(info.tool)) {
+      const how = { execute: '執行', write: '寫入', network: '網路', read: '讀取' }[info.category] ?? '內部控制'
+      log(`agy 工具名沒登記，類別以${how}處理：${redact(info.tool)}`)
+    }
     const verdict = guard.checkTool({ ...info, state: s.state, firstSight: first })
     if (verdict && verdict.ok === false) {
       cur.violation = { reason: verdict.reason, summary: info.summary }

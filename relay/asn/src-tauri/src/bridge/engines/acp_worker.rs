@@ -235,10 +235,12 @@ pub fn redirect_note(path: &str, cwd: &std::path::Path) -> String {
 /// agy 能寫檔時的補充（#2351）：它自己的對話資料夾（brain 底下各段，含之前幾段留下的文件）也可以存、可以改，只有 .system_generated 不行
 const AGY_DOCS_NOTE: &str = "你自己的對話資料夾（~/.gemini/antigravity-cli/brain/ 底下各段對話的資料夾，包括之前幾段留下的文件）也可以存、可以改；裡面的 .system_generated 不要碰。";
 
+/// 開場說明裡「可以讀什麼」那一句：Linux 版（relay/machine 的 acp-worker.mjs）逐字相同，存在 relay/shared/sensitive-roots.json，兩邊測試都比對
+pub(super) const READ_OK: &str = "讀取這台電腦上的檔（登入資料、金鑰、各工具的設定等敏感檔除外）";
+
 pub fn preamble_for(cfg: &WorkerCfg) -> String {
     let docs_note = if cfg.protocol == "agy-stream" && cfg.permissions.rule("write") == Verdict::Allow { AGY_DOCS_NOTE } else { "" };
     // 讀取可以讀整台電腦（敏感檔除外）；寫檔、執行指令仍限工作資料夾內，兩件事分開講，別讓寫的限制被讀的放寬沖淡
-    const READ_OK: &str = "讀取這台電腦上的檔（登入資料、金鑰、各工具的設定等敏感檔除外）";
     let caps = [("write", "寫檔", "寫檔（限工作資料夾內，資料夾外一律不要寫）"), ("execute", "執行指令", "執行指令（限工作資料夾內，資料夾外一律不要碰）")];
     let can: Vec<&str> = caps.iter().filter(|(c, _, _)| cfg.permissions.rule(c) == Verdict::Allow).map(|(_, _, l)| *l).collect();
     let cant: Vec<&str> = caps.iter().filter(|(c, _, _)| cfg.permissions.rule(c) != Verdict::Allow).map(|(_, l, _)| *l).collect();
@@ -345,13 +347,20 @@ pub struct Worker {
 
 pub type WorkerHandle = Arc<Worker>;
 
+/// 讀取判定算「自己的資料夾」放行用的三組資料夾：工作資料夾、白名單資料夾、寫入資料夾（#2356）
+pub(super) fn own_dirs_of(cfg: &WorkerCfg) -> Vec<std::path::PathBuf> {
+    let mut out = vec![cfg.cwd.clone()];
+    out.extend(cfg.permissions.allow_dirs.iter().cloned());
+    out.extend(cfg.permissions.write_dirs.iter().flatten().cloned());
+    out
+}
+
 impl Worker {
     pub fn new(mut i: WorkerInit) -> WorkerHandle {
         // 讀取的敏感位置清單：啟動時用兩個家目錄（工作者環境的、real_home）加上這位的工作資料夾算好，放進政策（#2356）。
         // 一律重算（接手等會換 cwd）；正式與測試走同一條路，差別只在 real_home 由呼叫端給
-        let mut own_dirs: Vec<&std::path::Path> = vec![i.cfg.cwd.as_path()];
-        own_dirs.extend(i.cfg.permissions.allow_dirs.iter().map(|p| p.as_path()));
-        own_dirs.extend(i.cfg.permissions.write_dirs.iter().flatten().map(|p| p.as_path()));
+        let own = own_dirs_of(&i.cfg);
+        let own_dirs: Vec<&std::path::Path> = own.iter().map(|p| p.as_path()).collect();
         let roots = roots_for_worker(&i.env, i.real_home.clone(), &i.cfg.name, &own_dirs, &i.work_dir);
         let mut c = (*i.cfg).clone();
         c.permissions.sensitive = Some(Arc::new(roots));

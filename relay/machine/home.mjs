@@ -27,10 +27,16 @@ function kindOf(p) {
 }
 function nonEmptyDir(p) { try { return fs.readdirSync(p).length > 0 } catch { return false } }
 
+/** ASN_HOME（舊名 IRORI_HOME）指定的資料夾，解成絕對路徑（相對值接在目前的工作資料夾上）；沒設或只有空白回 null。log 可注入（不想記舊名用量時傳自己的） */
+export function overrideDir(env, log) {
+  const override = String(envGet(env, 'HOME', log) ?? '').trim()
+  return override ? path.resolve(override) : null
+}
+
 /** 回傳 { primary, fallback, state }；state：override／fresh／legacy／new／linked／pending。base、env 可注入（測試用）。 */
 export function resolveHome({ base = os.homedir(), env = process.env } = {}) {
-  const override = String(envGet(env, 'HOME') ?? '').trim()
-  if (override) return { primary: path.resolve(override), fallback: null, state: 'override' }
+  const override = overrideDir(env)
+  if (override) return { primary: override, fallback: null, state: 'override' }
   const fresh = path.join(base, NEW_DIR_NAME)
   const legacy = path.join(base, LEGACY_DIR_NAME)
   const kn = kindOf(fresh)

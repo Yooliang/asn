@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 import { createApprovals, parseMailText, parseVerdict } from '../engines/acp-approvals.mjs'
 import { loadWorkersConfig, normalizeWorker } from '../engines/acp-config.mjs'
 import { classifyFailure } from '../engines/acp-errors.mjs'
-import { categoryOfAcpKind, categoryOfAgyTool, decide, describeAcpRequest, describeAgyTool, normalizePermissions, redact } from '../engines/acp-policy.mjs'
+import { categoryOfAcpKind, categoryOfAgyTool, decide, describeAcpRequest, describeAgyTool, isRegisteredAgyTool, normalizePermissions, redact } from '../engines/acp-policy.mjs'
 
 const WORK = path.join(os.tmpdir(), 'irori-acp-policy-test')
 const base = { name: 'Gemini', engine: 'acp', protocol: 'agy-stream', command: 'agy' }
@@ -93,16 +93,19 @@ test('政策：類別對照', () => {
   assert.equal(categoryOfAgyTool('browser_click_element'), 'network')
   assert.equal(categoryOfAgyTool('manage_task'), 'internal')
   assert.equal(categoryOfAgyTool('apply_patch_v2'), 'write')       // 新工具名用關鍵字推測
-  assert.equal(categoryOfAgyTool('totally_new_thing'), 'internal')
+  assert.equal(categoryOfAgyTool('totally_new_thing'), 'execute', '沒登記又推不出類別：照執行類處理，不再當內部控制放行')
+  assert.equal(categoryOfAgyTool(''), 'execute')
+  assert.equal(isRegisteredAgyTool('read_file') && isRegisteredAgyTool('update_steps'), true)
+  assert.equal(isRegisteredAgyTool('totally_new_thing') || isRegisteredAgyTool('apply_patch_v2'), false)
 })
 
-test('政策：decide——預設開放；白名單資料夾外的讀寫一律拒絕；ask 原樣回傳', () => {
+test('政策：decide——預設開放；白名單資料夾外的寫入拒絕、讀取不看白名單；ask 原樣回傳', () => {
   const cwd = path.resolve(WORK, 'w')
   const p = normalizePermissions({ write: 'ask', execute: 'allow' }, cwd)
   assert.equal(decide(p, { category: 'read', paths: [path.join(cwd, 'a.txt')] }, cwd).verdict, 'allow')
   assert.equal(decide(p, { category: 'read', paths: ['a.txt'] }, cwd).verdict, 'allow')             // 相對路徑以工作資料夾為準
-  assert.equal(decide(p, { category: 'read', paths: [path.resolve(WORK, 'other', 'x')] }, cwd).verdict, 'deny')
-  assert.equal(decide(p, { category: 'read', paths: [path.join(cwd, '..', 'x')] }, cwd).verdict, 'deny')
+  assert.equal(decide(p, { category: 'read', paths: [path.resolve(WORK, 'other', 'x')] }, cwd).verdict, 'allow', '讀取不限資料夾')
+  assert.equal(decide(p, { category: 'read', paths: [path.join(cwd, '..', 'x')] }, cwd).verdict, 'allow')
   assert.equal(decide(p, { category: 'write', paths: [path.join(cwd, 'a.txt')] }, cwd).verdict, 'ask')
   assert.equal(decide(p, { category: 'write', paths: [path.resolve(WORK, 'x')] }, cwd).verdict, 'deny')
   assert.equal(decide(p, { category: 'execute', paths: [] }, cwd).verdict, 'allow')
@@ -111,7 +114,7 @@ test('政策：decide——預設開放；白名單資料夾外的讀寫一律�
   const dflt = normalizePermissions(undefined, cwd)
   assert.equal(decide(dflt, { category: 'write', paths: [path.join(cwd, 'a.txt')] }, cwd).verdict, 'allow')
   assert.equal(decide(dflt, { category: 'write', paths: [path.resolve(WORK, 'x')] }, cwd).verdict, 'deny', '預設開放仍擋資料夾外的寫入')
-  assert.equal(decide(dflt, { category: 'read', paths: ['/etc/passwd'] }, cwd).verdict, 'deny')
+  assert.equal(decide(dflt, { category: 'read', paths: ['/etc/passwd'] }, cwd).verdict, 'allow', '一般檔放行（敏感位置的判定見 acp-sensitive.test.mjs）')
   assert.equal(decide(dflt, { category: 'execute', paths: [] }, cwd).verdict, 'allow')
   assert.equal(decide(dflt, { category: 'other', paths: [] }, cwd).verdict, 'deny')
   assert.equal(decide(dflt, { category: 'network', paths: [] }, cwd).verdict, 'allow')
