@@ -285,8 +285,8 @@ test('#2425 第 2 處 電腦封存結果：封存／取消封存做完都提示�
   const fn = src.slice(src.indexOf('async function setArchived'), src.indexOf('function closeOpDlg'))
   assert.match(fn, /const r = await runArchive\(transport, f, archived\)\s*\n\s*if \(r\.ok\) await core\.refreshRoster\(\)\s*\n\s*showResult\(r\.ok \? 'ok' : 'fail', r\.text, \{ at: 'list' \}\)/)
   assert.doesNotMatch(src, /archiveNote/)
-  // env-notice 是 PR-4 的事，這張不動它
-  assert.match(read('list.html'), /<p class="archive-note env-notice" v-if="envNotice" role="status">\{\{ envNotice \}\}<\/p>/)
+  // env-notice 已在 PR-4 搬去設定頁終端區（見 list-notes-pr4.test.mjs）；名單上不再有它
+  assert.doesNotMatch(read('list.html'), /env-notice|archive-note/)
 })
 
 test('#2425 第 3 處 對話視窗功能列封存結果：封存／取消封存做完提示，ok／fail 照結果；功能列不再有 ab-note', () => {

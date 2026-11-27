@@ -201,8 +201,8 @@ test('守門：元件依 paneClasses／msgLayout／foldArrow 排版；樞紐用 
   const psmRow = htmlTab.slice(htmlTab.indexOf('class="me-psm-row"'), htmlTab.indexOf('class="me-np"'))
   assert.ok(psmRow.includes('psm-input') && psmRow.includes('@click.stop="openLaunchPicker"'), '個人訊息右邊要有「＋」')
   // 現代外觀才顯示的 .search-plus（#1421：Aero 下預設 display:none）不算
-  // #2425：封存結果搬去共用結果提示後，搜尋列下面第一個提示類元素是環境提醒（env-notice），截到那裡為止
-  const searchBar = htmlTab.slice(htmlTab.indexOf('<div class="search">'), htmlTab.indexOf('class="archive-note env-notice"')).replace(/<button class="search-plus"[\s\S]*?<\/button>/, '')
+  // #2425：封存結果、環境提醒都搬走後，搜尋列下面緊接著就是名單本體（class="list"），截到那裡為止
+  const searchBar = htmlTab.slice(htmlTab.indexOf('<div class="search">'), htmlTab.indexOf('<div class="list">')).replace(/<button class="search-plus"[\s\S]*?<\/button>/, '')
   assert.ok(!searchBar.includes('openLaunchPicker') && !searchBar.includes('term-ic'), '搜尋列不再放「＋」和終端按鈕')
   for (const label of ['關閉', '關閉其他', '關閉右側', '全部關閉']) assert.ok(htmlTab.includes(label), `list.html 缺 ${label}`)
   assert.ok(htmlTab.includes('menuTogglePin') && htmlTab.includes('tabPinLabel'))

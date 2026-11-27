@@ -69,12 +69,14 @@ export async function runArchive(api, friend, archived, local = localArchiver) {
   if (typeof api?.partnerArchive !== 'function') return { ok: false, text: '這個版本還不能封存，請先更新' }
   try {
     const r = await api.partnerArchive(buildArchiveRequest(friend, archived))
-    if (r && r.ok === false) return { ok: false, text: '封存失敗，請稍後再試' }
+    if (r && r.ok === false) { console.warn('[ASN]', `封存${archived === true ? '' : '（取消）'}失敗：${friend?.agent ?? ''}`, JSON.stringify(r)); return { ok: false, text: '封存失敗，請稍後再試' } }
     if (archived !== true && friend?.localArchived === true && local) local(friend, false)   // 取消封存：本機標記也一併拿掉
     return { ok: true, text: DONE_TEXT[archived === true] }
   } catch (e) {
     // 後台名單裡沒有這個名字（程序關掉、夥伴被移除、只剩本機存檔的舊好友）：只動本機標記
     if (NOT_FOUND.test(String(e?.message ?? '')) && local && local(friend, archived === true)) return { ok: true, text: DONE_TEXT[archived === true] }
+    // 畫面講白話，原文寫進 log（不准靜默失敗）
+    console.warn('[ASN]', `封存${archived === true ? '' : '（取消）'}失敗：${friend?.agent ?? ''}`, String(e?.message ?? e ?? ''))
     return { ok: false, text: opErrorText(e?.message) }
   }
 }
