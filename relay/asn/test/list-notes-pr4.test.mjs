@@ -41,7 +41,13 @@ test('設定頁終端區：開關開著且有環境變數提醒時，顯示後�
   assert.match(on, /data-env-notice/)
   assert.ok(!(await render({ ...base(), bridge: bridge({ envNotice: '' }) })).includes('data-env-notice'), '沒有提醒就不放空框')
   assert.ok(!(await render({ ...base(), bridge: bridge({ envNotice: NOTICE, termServer: false }) })).includes(NOTICE), '開關關著就不講')
-  assert.match(read('list.js'), /termServerWhy: bridge\.termServerWhy, envNotice: envNotice\.value/, '樞紐把提醒交給設定頁')
+  // 接線一路到底：載入結果寫進 bridge.envNotice → settingsState 的 bridge 物件傳 envNotice → 設定頁讀 st.bridge.envNotice
+  // （「每個 st.bridge 欄位都有傳過去」另由 list-bridge-fields.test.mjs 守，那條只比欄位名；這裡補值的來源）
+  const js = read('list.js')
+  assert.match(js, /loadEnvNotice\(transport\)\.then\(t => \{ bridge\.envNotice = t \}\)/, '查到的值寫進 bridge.envNotice')
+  assert.match(js, /bridge: bridge\.shown \? \{[^}]*envNotice: bridge\.envNotice/, '樞紐把提醒交給設定頁')
+  assert.match(js, /const bridge = reactive\(\{[^}]*envNotice: ''/, 'bridge 有初值')
+  assert.doesNotMatch(js, /envNotice\.value/, '不留舊的獨立 ref')
 })
 
 test('電腦換名失敗與啟動對齊的說明走結果提示（at: list），種類跟著 device-rename 給的 ok／fail', () => {
