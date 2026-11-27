@@ -112,6 +112,8 @@ pub enum RestartError {
     Failed(String),
     /// 終端服務裡有 ASN 沒有記錄的視窗（數字是多出幾個）：重啟會把它們一起關掉又接不回，所以不重啟
     Unmanaged(usize),
+    /// 核對時終端服務忙碌（指令排隊沒送出、或逾時沒回應），數不出裡面有幾個視窗：不確定就不結束服務（原因類別只寫 log）
+    Busy(String),
     /// 舊服務已停、新的起不來：代理現在是斷線的（原因只寫 log）；名單已存，再按一次重啟會接回
     Down(String),
 }
@@ -122,6 +124,9 @@ pub const DOWN_TEXT: &str = "重啟終端服務沒有完成，底下的代理目
 /// 重啟前核對發現「終端服務裡有 ASN 沒記錄的視窗」時給畫面的白話字（使用者能做的事：先關掉那些視窗）
 pub const UNMANAGED_TEXT: &str = "終端服務裡有 ASN 沒有記錄的視窗，重啟會把它們一起關掉又接不回，所以沒有重啟。請先關掉那些視窗再試。";
 
+/// 核對時終端服務忙碌、沒有重啟：給畫面的白話字
+pub const SERVICE_BUSY_TEXT: &str = "終端服務暫時忙碌，沒有重啟。請稍後再試。";
+
 impl RestartError {
     /// 給畫面的白話字
     pub fn text(&self) -> &'static str {
@@ -129,6 +134,7 @@ impl RestartError {
             RestartError::NoMux => NO_MUX_TEXT,
             RestartError::Failed(_) => FAIL_TEXT,
             RestartError::Unmanaged(_) => UNMANAGED_TEXT,
+            RestartError::Busy(_) => SERVICE_BUSY_TEXT,
             RestartError::Down(_) => DOWN_TEXT,
         }
     }

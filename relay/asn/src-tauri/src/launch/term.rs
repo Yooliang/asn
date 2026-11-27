@@ -1522,8 +1522,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let guard = std::cell::RefCell::new(Some(m.open_lock().map_err(|e| RestartError::Failed(format!("有視窗正在開啟，拿不到開窗格的鎖：{e}")))?));
         let names = || self.mux_snapshot().map(|o| o.partners);
         // 核對：服務還在時，它裡面夥伴窗格（asn-N）的數量不能比 ASN 記錄的多。多出來的是 ASN 沒記錄的視窗，
-        // 重啟會一起關掉又接不回，寧可不重啟（使用者先關掉它們）。數不出來（服務卡住）時照記錄的名單重啟並寫 log：
-        // 卡住的服務正是最需要重啟的，不能因為核對不到就擋住
+        // 重啟會一起關掉又接不回，寧可不重啟（使用者先關掉它們）。數不出來（沒送出、逾時、清單看不懂）＝無法核對，
+        // 不確定就不結束服務：中止重啟、寫 log，請使用者稍後再試
         let verify = || {
             let live = m.live_pid();
             if live.is_none() {
@@ -1534,9 +1534,16 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     let managed = self.managed_mux_panes(live);
                     if panes > managed { Err(RestartError::Unmanaged(panes - managed)) } else { Ok(()) }
                 }
+                // 數不出來＝無法確認沒有 ASN 沒記錄的視窗：不確定就不結束服務（排隊沒送出、逾時＝忙碌，請稍後再試；其他＝一般失敗）
                 Err(e) => {
-                    note(&format!("工作管理員重啟終端服務：數不出服務裡的視窗數（{e}），無法核對，照 ASN 的記錄重啟"));
-                    Ok(())
+                    let busy = super::cli_gate::not_sent(&e) && !e.starts_with(super::wezterm::CANNOT_RUN) || e.contains("指令逾時");
+                    if busy {
+                        note("工作管理員重啟終端服務：核對時終端服務忙碌（沒送出或逾時），不重啟");
+                        Err(RestartError::Busy(e))
+                    } else {
+                        note("工作管理員重啟終端服務：數不出服務裡的視窗數，無法核對，不重啟");
+                        Err(RestartError::Failed(e))
+                    }
                 }
             }
         };
@@ -4422,6 +4429,8 @@ mod tests {
         window_up: RefCell<bool>,
         /// 假 runner 回報的本機 wezterm-gui 程序（pid, 命令列）
         gui_procs: RefCell<Vec<(u32, Vec<String>)>>,
+        /// `cli list` 一律回這個錯（模擬排隊沒送出、逾時）
+        list_err: RefCell<Option<String>>,
     }
 
     fn default_list_clients_json() -> String {
@@ -4454,6 +4463,7 @@ mod tests {
             on_spawn: RefCell::new(None),
             window_up: RefCell::new(false),
             gui_procs: RefCell::new(Vec::new()),
+            list_err: RefCell::new(None),
         }
     }
 
@@ -4497,6 +4507,9 @@ mod tests {
             } else if kind == "spawn" {
                 self.inner.spawn_out.borrow().clone()
             } else if kind == "list" {
+                if let Some(e) = self.inner.list_err.borrow().clone() {
+                    return Err(e);
+                }
                 if let Some(f) = self.inner.on_list.borrow_mut().take() {
                     f();
                 }
@@ -6803,6 +6816,45 @@ mod tests {
             assert_eq!(r, Err(RestartError::Unmanaged(1)));
             assert_eq!(r.unwrap_err().text(), UNMANAGED_TEXT);
             assert!(rig.runner.killed().is_empty(), "核對不過不能停服務");
+        }
+
+        /// 2429 複審：核對時數窗格數沒送出（排隊）或逾時＝不確定，中止重啟、不結束服務、不起新的、不接回，回白話的「忙碌」
+        #[test]
+        fn _2429_重啟終端服務_核對時沒送出或逾時_中止不殺() {
+            use crate::launch::mux_restart::{RestartError, SERVICE_BUSY_TEXT};
+            for err in [format!("{}（排隊等不到位子）", crate::launch::cli_gate::QUEUE_TIMEOUT), crate::launch::cli_gate::SKIPPED.to_string(), "WezTerm 指令逾時（15 秒），已結束該子行程".to_string()] {
+                let (rig, _) = mux_rig();
+                *rig.runner.inner.list_err.borrow_mut() = Some(err.clone());
+                let r = rig.svc.restart_mux_with(|_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+                assert!(matches!(r, Err(RestartError::Busy(_))), "{err}：要回忙碌：{r:?}");
+                assert_eq!(r.unwrap_err().text(), SERVICE_BUSY_TEXT);
+                assert!(rig.runner.killed().is_empty(), "{err}：核對不到不能結束服務");
+            }
+            // 清單看不懂（跟忙碌無關的失敗）：同樣不殺，回一般失敗
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.list_err.borrow_mut() = Some("WezTerm cli 失敗：假的".into());
+            let r = rig.svc.restart_mux_with(|_| panic!("不該起新的"), |_| panic!("不該接回"), |_| panic!("不該通知"));
+            assert!(matches!(r, Err(RestartError::Failed(_))), "{r:?}");
+            assert!(rig.runner.killed().is_empty());
+        }
+
+        /// 2429 複審對照組：數得出來而且對得上（沒有多出來的窗格）＝照原本流程停、起新的
+        #[test]
+        fn _2429_重啟終端服務_核對正常_照原流程() {
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            let ensured = std::cell::Cell::new(0);
+            let r = rig.svc.restart_mux_with(
+                |_| {
+                    ensured.set(ensured.get() + 1);
+                    Ok(())
+                },
+                |_| {},
+                |_| {},
+            );
+            assert_eq!(r, Ok(()), "{r:?}");
+            assert_eq!(ensured.get(), 1);
+            assert!(!rig.runner.killed().is_empty(), "核對過了就照常結束舊服務");
         }
 
         /// 二審 2：整段（抓名單到起好）持著開窗格的鎖，做完放掉（接回要開窗格，要拿得到）

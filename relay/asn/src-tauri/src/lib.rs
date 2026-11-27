@@ -1146,6 +1146,7 @@ async fn task_manager_restart_mux(app: State<'_, App>, terms: State<'_, Arc<laun
             launch::mux_restart::RestartError::Failed(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務失敗：{why}")),
             launch::mux_restart::RestartError::Down(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有完成（舊的已停、新的起不來，代理斷線，名單已存）：{why}")),
             launch::mux_restart::RestartError::Unmanaged(n) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有進行：終端服務裡有 {n} 個視窗不在 ASN 的記錄上")),
+            launch::mux_restart::RestartError::Busy(why) => ui_log::log_info(&app.work_dir, &format!("重啟終端服務沒有進行：核對時終端服務忙碌（{why}），不確定就不結束服務")),
             launch::mux_restart::RestartError::NoMux => {}
         }
         e.text().to_string()
