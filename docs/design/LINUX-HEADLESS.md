@@ -1,6 +1,6 @@
 # ASN Linux 版（無視窗）規劃
 
-狀態：規劃（勘查日 2026-10-23，未部署）。階段 0 的第一步「核心不連 Tauri 也能編譯執行」已實作，見最前面的「實作進度」。
+狀態（2026-11-27 對照主線更新；勘查日 2026-10-23）：程式已在主線，還沒部署到任何正式節點。已在主線的有：無視窗版執行檔 `asn-bridge`（`src/headless.rs`）、僅引擎模式、Aegis 引擎（`src/bridge/engines/aegis.rs`）、收件匣模式（`src/inbox_mode.rs`）與 `asn-cli inbox`、自動回信模式、`asn-bridge login`、Aegis 並行試跑的腳本與單元、本機交叉編譯，細節見最前面的「實作進度」與後面各節。真的還沒做的是：正式節點的部署、試跑（階段 1、2）、切換，以及刪除 Node 版（階段 3）；另外 `--check`（preflight）和 CI 的 musl 建置也還沒有。退場的負責人與刪除條件以 [docs/退場清單.md](../退場清單.md) 為準。
 
 ## 0. 實作進度
 
@@ -14,7 +14,7 @@
 - 新增執行檔 `asn-bridge`（`src/bin/asn_bridge.rs`，主體在 `src/headless.rs`）：`asn-bridge run [--engine-only]`、`--version`、`--help`。資料夾解析沿用 `home.rs`（與 `relay/machine/home.mjs` 同一套規則）；結束碼 0／2（設定錯）／3（另一個收信者在跑）。無視窗模式關閉主控台切換、UI 自動化、遠端開視窗、系統匣，並在 log 記一行。
 - TLS：Linux 一律改用 `rustls-tls-webpki-roots`（同安卓，不用 OpenSSL）。**注意：這會改變 Linux 電腦版（deb／AppImage）的憑證驗證來源**（由系統憑證改為內建根憑證）；Windows 與 macOS 維持系統內建加密連線。若要讓 Linux 視窗版繼續用系統憑證，要另拆功能旗標，需評估安卓建置（預設功能會一併開啟）。
 - 驗證：`cargo check --no-default-features --bin asn-bridge`、預設 `cargo check`、`--target x86_64-unknown-linux-gnu`（本機沒有 Linux C 交叉編譯器，`ring` 的建置腳本需要 C 編譯器，檢查時以假的 CC／AR 略過；真正連結留給 CI 的 ubuntu 與 musl）。Linux 目標的相依樹不含 tauri／webkit／openssl。
-- 尚未做：Aegis 引擎、CI 的 musl 建置與靜態連結檢查、`--check`（preflight）、任何部署。
+- 尚未做（2026-11-27 對照主線更新）：正式節點的部署、試跑、切換、刪除 Node 版；`--check`（preflight）；CI 的 musl 建置與靜態連結檢查（CI 目前只對 `asn-bridge` 做 `cargo check`、跑無畫面測試，靜態連結的檢查在本機腳本 `npm run build:linux-bridge` 裡）。原本列在這裡的 Aegis 引擎已在主線（`src/bridge/engines/aegis.rs`，見 §5.3）。
 
 收件匣模式（對應 §4 第 6～12、20 項；分支 `worktree-agent-a0167dc1ae690c409`，未部署）：
 

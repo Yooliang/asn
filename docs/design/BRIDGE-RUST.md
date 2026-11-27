@@ -2,7 +2,7 @@
 
 issue #12 第二期。目標：打開 ASN ＝ 這台設備的收發室就上線，不用另外裝、另外管 Node 的收發室橋；ASN 縮在系統匣保持活動（#61 已有）。別台的 ASN 看得到這台上線，之後可以遠端替這台開新的 Claude 視窗並對談。
 
-決策沿革：`ONBOARDING.md` 3.5 原本推薦「隨附 Node 執行檔」（方案甲），之後擁有者改裁**全 Rust、不帶 Node**（D1）。本文件是那個裁決的實作設計。方向更新（2026-10-23）：Linux 雲端環境（Grok）與 Aegis 主機的 Node 橋，也改由同一份 Rust 內建橋取代，做成不連 Tauri 的「無視窗版」`asn-bridge`（cargo 功能旗標 `gui` 關掉即可），以後只維護 Rust 一份。規劃與階段見 `LINUX-HEADLESS.md`；Node 橋（`relay/machine/bridge.mjs`、`bridge-aegis.mjs`、`relay/cloud-agent/`）在 Rust 版於各環境驗收通過前繼續存在、隨時可切回，之後依該文件的階段 3 刪除。
+決策沿革：`ONBOARDING.md` 3.5 原本推薦「隨附 Node 執行檔」（方案甲），之後擁有者改裁**全 Rust、不帶 Node**（D1）。本文件是那個裁決的實作設計。方向更新（2026-10-23）：Linux 雲端環境（Grok）與 Aegis 主機的 Node 橋，也改由同一份 Rust 內建橋取代，做成不連 Tauri 的「無視窗版」`asn-bridge`（cargo 功能旗標 `gui` 關掉即可），以後只維護 Rust 一份。規劃與階段見 `LINUX-HEADLESS.md`；Node 橋（`relay/machine/bridge.mjs`、`bridge-aegis.mjs`、`relay/cloud-agent/`）在 Rust 版於各環境驗收通過前繼續存在、隨時可切回，之後依該文件的階段 3 刪除。退場的負責人與刪除條件以 [docs/退場清單.md](../退場清單.md) 為準。
 
 ## 1. 分段計畫
 
