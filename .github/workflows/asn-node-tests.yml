@@ -26,6 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
+      # #2425 提示樣式守門要跟 main 上的基準檔比（基準只准刪不准加）；淺層 checkout 沒有 origin/main，要另外抓
+      - name: 取得 main（給基準檔比對）
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+
       - uses: ./.github/actions/asn-node-setup
 
       - name: 單元測試（Node）
