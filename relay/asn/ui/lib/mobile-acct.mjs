@@ -125,7 +125,6 @@ export { acctErrorText }
 // 送出切換並等結果。transport：{ acctSwitch(node, email) → { id }, acctStatus(ids) → { switches } }
 // 每次狀態變化都用 onUpdate 回報 { phase: sending|waiting|done|failed, text, done }；最後也回傳最後一個
 // 帳號切換的結果提示：使用者已經離開進行中的畫面（退回設備列表、離開設備與帳號、切到別的分頁）時，完成或失敗都跳一句告訴他；還在畫面上就照原本在畫面上顯示
-export const ACCT_TOAST_MS = 6000
 export function acctResultToast(v, { label = '', email = '' } = {}) {
   if (!v?.done) return ''
   const where = label ? `${label}：` : ''

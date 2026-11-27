@@ -539,7 +539,7 @@ export const ActionBar = {
       const op = key.slice(2)
       if (op === 'archive' || op === 'unarchive') {
         const r = await runArchive(props.api, props.friend, op === 'archive')
-        showResult(r.ok ? 'ok' : 'fail', r.text)
+        showResult(r.ok ? 'ok' : 'fail', r.text, { at: 'chat' })   // 對話視窗：放在訊息區下緣、輸入區上方
         return
       }
       Object.assign(opDlg, { open: true, item: { key: op, ok: true, reason: '' } })

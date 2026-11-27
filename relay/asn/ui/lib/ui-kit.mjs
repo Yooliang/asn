@@ -138,8 +138,12 @@ export const AsnNote = {
 }
 
 // ---------- 結果提示（#2425 位置 D；規範見 docs/畫面規範.md〈四之一〉） ----------
-// 剛做完的動作結果（封存、釘選滿、切換帳號…）：畫面底部浮出一則，成功 4 秒、失敗 6 秒後自己消失，同一時間只有一則（新的取代舊的），也可以按「×」關掉。
-// 種類沿用 AsnStatus 的 ok／fail；純資訊不用這個。電腦與手機都呼叫 showResult(kind, text)，頁面根部各掛一個 <asn-toast>。
+// 剛做完的動作結果（封存、釘選滿、切換帳號…）：成功 4 秒、失敗 6 秒後自己消失，同一時間只有一則（新的取代舊的），也可以按「×」關掉。
+// 種類沿用 AsnStatus 的 ok／fail；純資訊不用這個。電腦與手機都呼叫 showResult(kind, text, { at })，頁面根部各掛一個 <asn-toast>（單一元件）。
+// 位置（asn真 二審原則：不准蓋到任何按得到的東西，只准蓋純文字）：
+//   手機：底部置中，浮在分頁列上方（沒給 at）。
+//   電腦：呼叫端用 at 說這個動作發生在哪一區——'chat'＝對話視窗，放在訊息區下緣、輸入區正上方（錨點是 data-toast-anchor="chat"）；
+//   'list'＝名單頁，放在名單區下緣（錨點是 data-toast-anchor="list"，離搜尋框與分頁列最遠）。指定的那區看不到就改用另一區；都沒有就退回底部置中。
 // 失敗的原文由呼叫端先進 log，這裡只放白話一句。
 export const TOAST_KINDS = Object.freeze(['ok', 'fail'])
 export const TOAST_MS = Object.freeze({ ok: 4000, fail: 6000 })
@@ -151,7 +155,28 @@ export function toastView(kind = 'ok') {
   return { kind: k, kindOk, ms: TOAST_MS[k], classes: ['asn-toast', `k-${k}`], role: 'status' }
 }
 
-let toastCur = { kind: 'ok', text: '', seq: 0 }
+export const TOAST_AT = Object.freeze(['chat', 'list'])
+const TOAST_GAP = 8   // 貼著錨點下緣往上留的距離（像素）
+/**
+ * 電腦版的位置：給錨點的方框與視窗高度，回 { left, bottom, maxWidth }（都是 px 字串）；方框看不到（寬高 0）回 null。
+ * 提示的下緣貼在錨點下緣往上 TOAST_GAP，水平置中在錨點內，寬度不超出錨點。純函式，測試直接用
+ */
+export function toastPlace(rect, viewH) {
+  if (!rect || !(rect.width >= 1) || !(rect.height >= 1) || !(viewH > 0)) return null
+  return { left: `${Math.round(rect.left + rect.width / 2)}px`, bottom: `${Math.max(0, Math.round(viewH - rect.bottom + TOAST_GAP))}px`, maxWidth: `${Math.max(120, Math.round(rect.width - 2 * TOAST_GAP))}px` }
+}
+/** 依 at 在目前畫面找錨點（指定的那區看不到就改找另一區）；找不到回 null */
+export function toastAnchorStyle(at, doc = globalThis.document, viewH = globalThis.innerHeight) {
+  if (!TOAST_AT.includes(at) || !doc?.querySelector) return null
+  for (const name of [at, ...TOAST_AT.filter(a => a !== at)]) {
+    const el = doc.querySelector(`[data-toast-anchor="${name}"]`)
+    const p = el ? toastPlace(el.getBoundingClientRect(), viewH) : null
+    if (p) return p
+  }
+  return null
+}
+
+let toastCur = { kind: 'ok', text: '', seq: 0, at: '' }
 let toastTimer = null
 const toastSubs = new Set()
 const toastEmit = () => { for (const f of toastSubs) f({ ...toastCur }) }
@@ -165,12 +190,12 @@ export function dismissResult() {
   toastEmit()
 }
 /** 顯示一則結果；新的直接取代舊的並重新計時。沒有文字就什麼都不做 */
-export function showResult(kind, text) {
+export function showResult(kind, text, { at = '' } = {}) {
   const t = typeof text === 'string' ? text.trim() : ''
   if (!t) return
   const v = toastView(kind)
   globalThis.clearTimeout(toastTimer)
-  toastCur = { kind: v.kind, text: t, seq: toastCur.seq + 1 }
+  toastCur = { kind: v.kind, text: t, seq: toastCur.seq + 1, at: TOAST_AT.includes(at) ? at : '' }
   toastTimer = globalThis.setTimeout(dismissResult, v.ms)
   toastEmit()
 }
@@ -185,9 +210,16 @@ export const AsnToast = {
     onMounted(() => { cur.value = currentResult(); off = watchResult(v => { cur.value = v }) })
     onBeforeUnmount(() => { if (off) off() })
     const view = computed(() => toastView(cur.value.kind))
-    return { cur, view, dismissResult, TOAST_CLOSE }
+    // 電腦版：出現時（與視窗大小改變時）依 at 量錨點的位置；手機沒給 at，沒有行內位置，走 kit.css 的底部置中
+    const place = ref(null)
+    const replace = () => { place.value = cur.value.text ? toastAnchorStyle(cur.value.at) : null }
+    const { watch, nextTick } = globalThis.Vue
+    watch(() => cur.value.seq, () => { replace(); void nextTick(replace) }, { immediate: true })
+    onMounted(() => globalThis.addEventListener?.('resize', replace))
+    onBeforeUnmount(() => globalThis.removeEventListener?.('resize', replace))
+    return { cur, view, place, dismissResult, TOAST_CLOSE }
   },
-  template: `<div v-if="cur.text" :key="cur.seq" :class="view.classes" :role="view.role"><span class="asn-toast-text">{{ cur.text }}</span><button type="button" class="asn-toast-close" :aria-label="TOAST_CLOSE" @click="dismissResult()">×</button></div>`,
+  template: `<div v-if="cur.text" :key="cur.seq" :class="view.classes" :role="view.role" :style="place"><span class="asn-toast-text">{{ cur.text }}</span><button type="button" class="asn-toast-close" :aria-label="TOAST_CLOSE" @click="dismissResult()">×</button></div>`,
 }
 
 // ---------- 「⋯」選單（#2111 ⑥） ----------

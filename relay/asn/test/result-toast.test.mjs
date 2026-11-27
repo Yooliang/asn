@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AsnToast, TOAST_KINDS, TOAST_MS, UI_KIT, currentResult, dismissResult, showResult, toastView } from '../ui/lib/ui-kit.mjs'
+import { AsnToast, TOAST_KINDS, TOAST_MS, UI_KIT, currentResult, dismissResult, showResult, toastAnchorStyle, toastPlace, toastView } from '../ui/lib/ui-kit.mjs'
 import { mountComponent } from './helpers/render.mjs'
 
 const UI = fileURLToPath(new URL('../ui/', import.meta.url))
@@ -130,21 +130,63 @@ test('#2425 AsnToast 在 UI_KIT 裡；樣式只用變數（字級、間距、顏
   assert.match(css, /\.m-body\{[^}]*--toast-bottom:/, '手機把提示放在底部分頁列上方')
 })
 
-test('#2425 電腦版 toast 在右上角、不貼底：不會蓋到輸入區（使用者按完封存常接著打字）；手機維持底部', () => {
+// ---- 位置（asn真 二審原則：不准蓋到任何按得到的東西，只准蓋純文字）----
+test('#2425 toastPlace：提示的下緣貼在錨點下緣往上 8、水平置中、寬度不超出錨點；看不到的錨點回 null', () => {
+  const p = toastPlace({ left: 450, right: 890, top: 140, bottom: 480, width: 440, height: 340 }, 640)
+  assert.deepEqual(p, { left: '670px', bottom: '168px', maxWidth: '424px' })   // 640 - 480 + 8
+  assert.equal(toastPlace({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }, 640), null)
+  assert.equal(toastPlace(null, 640), null)
+  assert.equal(toastPlace({ left: 0, right: 10, top: 0, bottom: 10, width: 10, height: 10 }, 0), null)
+})
+
+test('#2425 toastAnchorStyle：對話視窗用訊息區、名單頁用名單區；指定的那區看不到改用另一區；沒給 at（手機）不給行內位置', async () => {
+  const m = mountComponent({ template: '<div><div data-toast-anchor="chat"></div><div data-toast-anchor="list"></div></div>' }, {})
+  try {
+    const [chat, list] = m.findAll('[data-toast-anchor]')
+    const box = (el, r) => { el.getBoundingClientRect = () => ({ ...r, width: r.right - r.left, height: r.bottom - r.top }) }
+    box(chat, { left: 450, right: 890, top: 140, bottom: 480 }); box(list, { left: 10, right: 300, top: 180, bottom: 545 })
+    assert.equal(toastAnchorStyle('chat', m.document, 640).left, '670px')
+    assert.equal(toastAnchorStyle('list', m.document, 640).left, '155px')
+    assert.equal(toastAnchorStyle('list', m.document, 640).bottom, '103px')
+    box(chat, { left: 0, right: 0, top: 0, bottom: 0 })   // 對話區看不到（例如沒開對話）
+    assert.equal(toastAnchorStyle('chat', m.document, 640).left, '155px', '改用名單區')
+    assert.equal(toastAnchorStyle('', m.document, 640), null, '沒給 at＝手機，走 CSS 的底部置中')
+    assert.equal(toastAnchorStyle('nowhere', m.document, 640), null)
+  } finally { m.unmount() }
+})
+
+test('#2425 AsnToast 依 at 寫行內位置：給 at 才有，手機（沒給）沒有；換一則會重算', async () => {
+  const anchor = mountComponent({ template: '<div data-toast-anchor="chat"></div>' }, {})
+  const el = anchor.find('[data-toast-anchor]')
+  el.getBoundingClientRect = () => ({ left: 450, right: 890, top: 140, bottom: 480, width: 440, height: 340 })
+  Object.defineProperty(globalThis, 'innerHeight', { value: 640, configurable: true, writable: true })
+  const m = mountComponent(AsnToast, {})
+  try {
+    await settle(m)
+    const clock = fakeClock()
+    try { showResult('ok', '已封存', { at: 'chat' }) } finally { clock.restore() }
+    await settle(m)
+    const st = m.find('.asn-toast').getAttribute('style') || ''
+    assert.match(st, /bottom:\s*168px/); assert.match(st, /left:\s*670px/)
+    const c2 = fakeClock()
+    try { showResult('fail', '釘選滿') } finally { c2.restore() }   // 手機：沒給 at
+    await settle(m)
+    assert.doesNotMatch(m.find('.asn-toast').getAttribute('style') || '', /left|bottom/, '沒給 at 就沒有行內位置')
+  } finally { dismissResult(); m.unmount(); anchor.unmount() }
+})
+
+test('#2425 電腦版位置的接線：訊息區與名單區各有錨點；封存／釘選滿的呼叫端各自說 at；CSS 預設只給手機與找不到錨點時用（底部）', () => {
+  assert.match(read('lib/chatpane.mjs'), /<div class="msgs" data-toast-anchor="chat"/, '訊息區（輸入區正上方）是對話錨點')
+  assert.match(read('list.html'), /<div class="content" role="tabpanel" data-toast-anchor="list">/, '名單區（搜尋框與分頁列下面）是名單錨點')
+  assert.match(read('lib/actionbar.mjs'), /showResult\(r\.ok \? 'ok' : 'fail', r\.text, \{ at: 'chat' \}\)/, '功能列的封存：對話視窗')
+  assert.match(read('list.js'), /showResult\(r\.ok \? 'ok' : 'fail', r\.text, \{ at: 'list' \}\)/, '名單的封存：名單區')
+  assert.match(read('list.js'), /showResult\('fail', r\.text, \{ at: 'list' \}\)/, '名單的釘選滿：名單區')
+  assert.doesNotMatch(read('m.js'), /\bat: '(?:chat|list)'/, '手機不給 at，維持底部')
   const css = read('kit.css')
   const base = css.split('\n').find(l => /^\.asn-toast\{/.test(l))
-  assert.ok(base, '找得到 .asn-toast 基本規則')
-  assert.match(base, /position:fixed/)
-  assert.match(base, /top:var\(--toast-top\)/, '電腦版從上面算位置')
-  assert.match(base, /right:var\(--sp-/, '靠右')
-  assert.doesNotMatch(base, /(?:^|[;{\s])bottom\s*:/, '電腦版不能貼底（輸入區在底部）')
-  // 離頂端要夠遠，才不蓋到 32 高的自訂標題列（最小化、最大化、關閉鈕在右上角）
-  assert.match(css, /--toast-top:calc\(var\(--sp-5\) \+ var\(--sp-4\)\)/, '24 + 16 = 40，在 32 高的標題列下面')
-  assert.match(css, /--sp-5:24px/); assert.match(css, /--sp-4:16px/)
-  assert.match(read('style.css'), /\.titlebar\{[^}]*height:32px/, '標題列高度是 32，toast 的離頂端距離要大於它')
-  const phone = css.split('\n').find(l => /^\.m-body \.asn-toast\{/.test(l))
-  assert.ok(phone, '手機另有規則')
-  assert.match(phone, /bottom:var\(--toast-bottom\)/); assert.match(phone, /top:auto/)
+  assert.match(base, /bottom:var\(--toast-bottom\)/, '預設在底部（手機）')
+  assert.doesNotMatch(base, /(?:^|[;{\s])top\s*:/, '不再靠右上角（會蓋到功能列與分頁）')
+  assert.match(css, /\.m-body\{[^}]*--toast-bottom:calc\(env\(safe-area-inset-bottom/, '手機浮在分頁列上方')
 })
 
 // ---- 唯一出口守門：結果提示只能從 showResult 出去 ----
@@ -182,7 +224,7 @@ test('#2425 三個頁面根部各掛一個 <asn-toast>，並註冊元件（電�
 test('#2425 第 1 處 電腦釘選滿：togglePin 失敗（滿 50 個）才提示，種類 fail、字用 togglePin 回的原文；成功不提示', () => {
   const src = read('list.js')
   const fn = src.slice(src.indexOf('function togglePinChat'), src.indexOf('// 設備順序同步到帳號層'))
-  assert.match(fn, /if \(r\.ok\) chatPins\.value = r\.state\s*\n\s*else showResult\('fail', r\.text\)/)
+  assert.match(fn, /if \(r\.ok\) chatPins\.value = r\.state\s*\n\s*else showResult\('fail', r\.text, \{ at: 'list' \}\)/)
   assert.doesNotMatch(src, /pinNote/, '舊的常駐 pin-note 不留')
   assert.doesNotMatch(read('list.html'), /pin-note/)
 })
@@ -190,7 +232,7 @@ test('#2425 第 1 處 電腦釘選滿：togglePin 失敗（滿 50 個）才提�
 test('#2425 第 2 處 電腦封存結果：封存／取消封存做完都提示，成功 ok、失敗 fail，字用 runArchive 回的原文', () => {
   const src = read('list.js')
   const fn = src.slice(src.indexOf('async function setArchived'), src.indexOf('function closeOpDlg'))
-  assert.match(fn, /const r = await runArchive\(transport, f, archived\)\s*\n\s*if \(r\.ok\) await core\.refreshRoster\(\)\s*\n\s*showResult\(r\.ok \? 'ok' : 'fail', r\.text\)/)
+  assert.match(fn, /const r = await runArchive\(transport, f, archived\)\s*\n\s*if \(r\.ok\) await core\.refreshRoster\(\)\s*\n\s*showResult\(r\.ok \? 'ok' : 'fail', r\.text, \{ at: 'list' \}\)/)
   assert.doesNotMatch(src, /archiveNote/)
   // env-notice 是 PR-4 的事，這張不動它
   assert.match(read('list.html'), /<p class="archive-note env-notice" v-if="envNotice" role="status">\{\{ envNotice \}\}<\/p>/)
@@ -199,7 +241,7 @@ test('#2425 第 2 處 電腦封存結果：封存／取消封存做完都提示�
 test('#2425 第 3 處 對話視窗功能列封存結果：封存／取消封存做完提示，ok／fail 照結果；功能列不再有 ab-note', () => {
   const src = read('lib/actionbar.mjs')
   const fn = src.slice(src.indexOf("if (op === 'archive' || op === 'unarchive') {"), src.indexOf("Object.assign(opDlg, { open: true, item: { key: op"))
-  assert.match(fn, /const r = await runArchive\(props\.api, props\.friend, op === 'archive'\)\s*\n\s*showResult\(r\.ok \? 'ok' : 'fail', r\.text\)\s*\n\s*return/)
+  assert.match(fn, /const r = await runArchive\(props\.api, props\.friend, op === 'archive'\)\s*\n\s*showResult\(r\.ok \? 'ok' : 'fail', r\.text, \{ at: 'chat' \}\)[^\n]*\n\s*return/)
   assert.doesNotMatch(src, /archiveNote|ab-note|noteTimer/)
   assert.match(src, /import \{ showResult \} from '\.\/ui-kit\.mjs'/)
 })

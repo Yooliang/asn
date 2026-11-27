@@ -191,7 +191,7 @@ const isChatPinned = id => chatIsPinned(chatPins.value, id)
 function togglePinChat(id) {
   const r = togglePin(chatPins.value, id)
   if (r.ok) chatPins.value = r.state
-  else showResult('fail', r.text)   // 滿 50 個：結果提示說明，不動原本的釘選
+  else showResult('fail', r.text, { at: 'list' })   // 滿 50 個：名單區下緣的結果提示說明，不動原本的釘選
 }
 // 設備順序同步到帳號層（lib/device-sync.mjs）：有登入才同步，整份以 rev 較新的為準；沒登入或後台還沒部署就只用本機檔。--shot 截圖模式不動
 const devSync = createDeviceSync({ prefs: devPrefs, api: { get: authApi.getDevicePrefs, set: authApi.setDevicePrefs }, canSync: async () => (await authApi.status().catch(() => null))?.signed_in === true })
@@ -914,7 +914,7 @@ setLocalArchiver((f, a) => core.setLocalArchived(f, a))
 async function setArchived(f, archived) {
   const r = await runArchive(transport, f, archived)
   if (r.ok) await core.refreshRoster()
-  showResult(r.ok ? 'ok' : 'fail', r.text)
+  showResult(r.ok ? 'ok' : 'fail', r.text, { at: 'list' })
 }
 function closeOpDlg() { opDlg.open = false }
 // 夥伴操作的進度：對話框送出後收起，進度就地顯示在名單上方的提示列（#1800）；改名完成要讓釘選跟著換位址

@@ -11,9 +11,9 @@ const PIN_FULL = '最多只能釘選 50 個對話，請先取消一些再釘選�
 
 // old.set＝舊的 ref 名稱；old.has＝認那個元件用的另一個名稱（setup 回傳裡一定有），避免設到名字相同的別的元件
 const CASES = {
-  'desk-archive': { kind: 'ok', text: ARCHIVED, old: { set: 'archiveNote', has: 'envNotice' }, sel: '.archive-note' },
-  'desk-pin-full': { kind: 'fail', text: PIN_FULL, old: { set: 'pinNote', has: 'isChatPinned', tab: '對話' }, sel: '.pin-note' },
-  'chat-archive': { kind: 'ok', text: ARCHIVED, old: { set: 'archiveNote', has: 'pickOps' }, sel: '.ab-note' },
+  'desk-archive': { kind: 'ok', text: ARCHIVED, at: 'list', old: { set: 'archiveNote', has: 'envNotice' }, sel: '.archive-note' },
+  'desk-pin-full': { kind: 'fail', text: PIN_FULL, at: 'list', old: { set: 'pinNote', has: 'isChatPinned', tab: '對話' }, sel: '.pin-note' },
+  'chat-archive': { kind: 'ok', text: ARCHIVED, at: 'chat', old: { set: 'archiveNote', has: 'pickOps' }, sel: '.ab-note' },
   'phone-archive': { kind: 'ok', text: ARCHIVED, old: { set: 'archiveNote', has: 'setArchived' }, sel: '.m-archive-note' },
   'phone-pin-full': { kind: 'fail', text: PIN_FULL, old: { set: 'toast', has: 'leaveAsk' }, sel: '.m-toast' },
 }
@@ -27,12 +27,24 @@ export const resultToastProbeSource = mode => `(async () => {
   let kit = null;
   try { kit = await import(new URL('./lib/ui-kit.mjs', document.baseURI).href) } catch (e) { kit = null }
   if (kit && typeof kit.showResult === 'function') {
-    kit.showResult(c.kind, c.text);
-    await sleep(250);
+    kit.showResult(c.kind, c.text, c.at ? { at: c.at } : undefined);
+    await sleep(300);
     const t = document.querySelector('.asn-toast');
     if (!vis(t)) return { ok: false, why: '沒有出現結果提示' };
     if (!t.classList.contains('k-' + c.kind)) return { ok: false, why: '種類不對：' + t.className };
     if ((t.querySelector('.asn-toast-text')?.textContent || '') !== c.text) return { ok: false, why: '字不對' };
+    // 電腦版（asn真 二審原則）：提示不准蓋到任何按得到的東西——按鈕、輸入框、分頁、功能列、搜尋框、輸入區；只准蓋純文字。手機維持底部，不在這裡量
+    if (c.at) {
+      const tr = t.getBoundingClientRect();
+      const hit = r => r.width > 0 && r.height > 0 && r.left < tr.right && r.right > tr.left && r.top < tr.bottom && r.bottom > tr.top;
+      const bad = [];
+      const sel = 'button, input, textarea, select, a[href], [role="tab"], [role="button"], .actionbar, .top-tabs, .tabbar, .compose-row, .composer, .search';
+      for (const e of document.querySelectorAll(sel)) {
+        if (t.contains(e) || !vis(e)) continue;
+        if (hit(e.getBoundingClientRect())) bad.push((e.className && String(e.className).split(' ')[0]) || e.tagName.toLowerCase());
+      }
+      if (bad.length) return { ok: false, why: '提示蓋到了按得到的東西：' + [...new Set(bad)].join('、') };
+    }
     return { ok: true, why: '' };
   }
   // 舊版：把舊的 ref 設上值
