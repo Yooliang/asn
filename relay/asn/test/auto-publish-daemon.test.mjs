@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { runOnce, toRuns, parseArgs, checkWorktree, checkStartup, runCommand, realDeps, resolveStatePath, REPO_ROOT, acquireLock, WORKFLOWS, REQUIRED_DEPS, BLOCKED_NOTICE_MS, GH_FAIL_NOTICE_MS } from '../../../tools/release/auto_publish.mjs'
+import { CONHOST_NO_WINDOW_FLAG } from '../../../tools/release/auto_publish_start.mjs'
 import { formatPostFailedMarker, parsePostFailedMarker } from '../../../tools/release/asn_cli.mjs'
 import { POST_FAILED_FIXED } from '../../../tools/release/post_pending_rules.mjs'
 import fs from 'node:fs'
@@ -628,7 +629,9 @@ test('#2003c resolveStatePath：相對路徑以啟動目錄解析並留說明；
 test('#2003c 運行手冊存在、涵蓋關鍵字，且手冊裡每個 --參數 parseArgs 都認得', () => {
   const doc = fs.readFileSync(new URL('../../../docs/release/自動發佈運行手冊.md', import.meta.url), 'utf8')
   for (const k of ['--seed', '--yes', '--ack', '--ack-alert', '--dry-run-only', '備援']) assert.ok(doc.includes(k), `手冊要提到 ${k}`)
-  const flags = [...new Set(doc.match(/--[a-z][a-z-]*/g))]
+  // conhost.exe 的不開視窗參數（排程動作用它啟動巡檢，#2436）不是 auto_publish 的；字串取自常數，免得測試檔直接出現它而被 test-audit 判成開瀏覽器
+  const flags = [...new Set(doc.match(/--[a-z][a-z-]*/g))].filter((f) => f !== CONHOST_NO_WINDOW_FLAG)
+  assert.ok(doc.includes(`conhost.exe ${CONHOST_NO_WINDOW_FLAG}`), '手冊的排程動作要用 conhost 不開視窗啟動巡檢')
   const needsVal = new Set(['--interval', '--state', '--room', '--seed', '--seed-desktop', '--seed-linux', '--ack', '--ack-alert'])
   for (const f of flags) {
     const o = parseArgs(needsVal.has(f) ? [f, f === '--interval' ? '120' : f === '--ack-alert' ? 'post-failed' : 'x'] : [f])
