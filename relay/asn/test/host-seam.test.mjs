@@ -16,16 +16,27 @@ const all = walk(UI).filter(f => /\.(m?js|html)$/.test(f))
 const src = f => fs.readFileSync(f, 'utf8')
 const ALLOW = { 'lib/host.mjs': '主機接縫本身', 'skin-boot.js': '不經打包的純腳本，不能 import' }
 
-test('守門前提：掃得到足夠多的檔案，且 host.mjs 與 skin-boot.js 確實含 __TAURI__（不然守門是空跑）', () => {
+// 與 arch-guard.test.mjs 的 tauriGlobal 同一個樣式：__TAURI__、__TAURI_INTERNALS__、__TAURI_IPC__ 都算
+const TAURI_GLOBAL = /\b__TAURI(?:_[A-Z]+)*__\b/
+const hasTauri = s => TAURI_GLOBAL.test(s)
+
+test('守門前提：掃得到足夠多的檔案，且 host.mjs 與 skin-boot.js 確實命中樣式（不然守門是空跑）', () => {
   assert.ok(all.length > 50, `只掃到 ${all.length} 個檔`)
   const names = all.map(rel)
   for (const n of Object.keys(ALLOW)) assert.ok(names.includes(n), `找不到 ${n}`)
-  assert.ok(src(path.join(UI, 'lib/host.mjs')).includes('__TAURI__'), 'host.mjs 應該含 __TAURI__')
-  assert.ok(src(path.join(UI, 'skin-boot.js')).includes('__TAURI__'), 'skin-boot.js 應該含 __TAURI__')
+  assert.ok(hasTauri(src(path.join(UI, 'lib/host.mjs'))), 'host.mjs 應該命中主機物件樣式')
+  assert.ok(hasTauri(src(path.join(UI, 'skin-boot.js'))), 'skin-boot.js 應該命中主機物件樣式')
 })
 
-test('除了 lib/host.mjs 與 skin-boot.js，ui/ 底下（含註解）都不准出現 __TAURI__', () => {
-  const bad = all.filter(f => !(rel(f) in ALLOW)).filter(f => src(f).includes('__TAURI__')).map(rel)
+test('守門樣式：字面、INTERNALS、IPC、括號取值、寫在字串或註解裡都抓得到；名稱只是一部分的不算', () => {
+  for (const code of ['globalThis.__TAURI__.core', 'globalThis.__TAURI_INTERNALS__.invoke', 'window.__TAURI_IPC__.x', "globalThis['__TAURI__']", "const s = 'a __TAURI__ here'", '// 讀 __TAURI__ 的註解']) {
+    assert.equal(hasTauri(code), true, `要抓到：${code}`)
+  }
+  assert.equal(hasTauri('const x = my__TAURI__thing'), false)
+})
+
+test('除了 lib/host.mjs 與 skin-boot.js，ui/ 底下（含註解）都不准出現 __TAURI__ 一類的主機物件', () => {
+  const bad = all.filter(f => !(rel(f) in ALLOW)).filter(f => hasTauri(src(f))).map(rel)
   assert.deepEqual(bad, [], `這些檔直接碰了主機物件：${bad.join('、')}（改走 lib/tauri.mjs，底層是 lib/host.mjs）`)
 })
 
@@ -87,6 +98,13 @@ test('makeHost：emit、emitTo 照 Tauri 簽名轉送；window 有就轉 startRe
   assert.equal(h.window.startResizeDragging('North'), 'ok')
   assert.deepEqual(calls.at(-1), ['resize', 'North'])
   assert.equal(h.hasEvent, true)
+})
+
+test('makeHost：emitTo(target, evt, payload) 依序轉給 raw.event.emitTo，參數順序一致', async () => {
+  const got = []
+  const h = makeHost({ event: { emitTo: async (...args) => { got.push(args) } } })
+  await h.emitTo('w1', 'evt', { a: 1 })
+  assert.deepEqual(got, [['w1', 'evt', { a: 1 }]])
 })
 
 test('makeHost：沒有主機物件時 available 是 false、window 是 null、hasEvent 是 false', () => {
