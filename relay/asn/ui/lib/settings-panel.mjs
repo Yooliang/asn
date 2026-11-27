@@ -595,6 +595,7 @@ export const SettingsPanel = {
             <label class="chk"><input type="checkbox" :checked="st.bridge.termServer" :disabled="st.bridge.busy || st.bridge.termServerLocked" @change="act('bridge-term-server', $event.target.checked)" aria-label="夥伴共用同一個終端服務" /><span>夥伴共用同一個終端服務</span></label>
             <small>{{ termServerNote(st.bridge) }}</small>
             <small v-if="termServerWhyLine(st.bridge)" class="term-server-why" role="note">{{ termServerWhyLine(st.bridge) }}</small>
+            <asn-note kind="info" data-env-notice v-if="st.bridge.envNotice">{{ st.bridge.envNotice }}</asn-note>
             <template v-if="termFetchLine(st.bridge).text">
               <small role="status">{{ termFetchLine(st.bridge).text }}</small>
               <span class="pair-btns" v-if="termFetchLine(st.bridge).canRetry"><asn-button level="text" :disabled="st.bridge.busy" @click="act('bridge-term-fetch-retry')">重試</asn-button></span>

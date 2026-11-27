@@ -203,7 +203,8 @@ watch(chatPins, () => pinsSync.noteLocal(), { deep: true })
 if (!info.shot) pinsSync.start()
 // 暱稱＝視窗名＝對外名字；以 Rust 端現用名為準，不再從存檔讀
 const me = reactive({ psm: '', status: 'online', ...savedMe.me, nick: info.window_name })
-const nickErr = ref('')   // 左上角設備名的提示（改名失敗、啟動對齊後說明）
+// 設備名改名失敗、啟動對齊後的說明：走共用結果提示（kind 由 device-rename 給 ok／fail），手機版 notifyResult 同一寫法
+const nickNotice = (text, kind = 'ok') => showResult(kind, text, { at: 'list' })
 const notifyPrefs = ref(notifyFromSaved(savedMe))   // 通知四開關（舊存檔的 sound 在這裡轉過來）
 const skin = ref(applySkin(savedMe.skin))   // 外觀（lib/skin.mjs）：復古 Aero／現代，存在 me 存檔；套用時也記到本機偏好，其他視窗跟著換
 watch(skin, v => { applySkin(v); void emit('asn:skin', normalizeSkin(v)) })   // 其他視窗：storage 事件之外再送一次 Tauri 事件（skin-boot.js 兩條都聽）
@@ -227,7 +228,7 @@ try {
 } catch { /* 沒有這些指令（舊版後端）就不顯示 */ }
 settingsApi.guardGet().then(applyGuard).catch(() => { /* 舊版後端沒有這個指令：不顯示 */ })
 // 內建收發室橋（預設關）：狀態以 Rust 端為準，不存檔。程式在 bridge/
-const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, compactHandoff: true, compactN: 3, screenWatch: true, permPhone: true, mobileView: true, remoteInput: true, termServer: true, termServerSupported: false, termServerMissing: false, termFetch: '', termFetchKind: '', termFetchDetail: '', keyProtection: '', termServerActive: true, termServerWhy: '', termServerLocked: false, termServerBackground: 0, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
+const bridge = reactive({ enabled: false, running: false, legacy: false, takeoverAllowed: false, remoteLaunch: false, autoResume: true, compactHandoff: true, compactN: 3, screenWatch: true, permPhone: true, mobileView: true, remoteInput: true, termServer: true, termServerSupported: false, termServerMissing: false, termFetch: '', termFetchKind: '', termFetchDetail: '', keyProtection: '', termServerActive: true, termServerWhy: '', envNotice: '', termServerLocked: false, termServerBackground: 0, unaddressedTo: '', error: '', busy: false, confirm: false, shown: false })
 const applyBridgeStatus = s => {
   Object.assign(bridge, { enabled: s.enabled === true, running: s.running === true, legacy: s.legacy === true, takeoverAllowed: s.takeover_allowed === true, remoteLaunch: s.remote_launch === true, autoResume: s.auto_resume !== false, compactHandoff: s.compact_handoff !== false, compactN: clampCompactN(s.compact_handoff_n, 3), screenWatch: s.screen_watch !== false, permPhone: s.perm_phone !== false, mobileView: s.mobile_view !== false, remoteInput: s.remote_input !== false, termServer: s.term_server !== false, termServerSupported: s.term_server_supported === true, termServerMissing: s.term_server_missing === true, termFetch: typeof s.term_fetch === 'string' ? s.term_fetch : '', termFetchKind: typeof s.term_fetch_kind === 'string' ? s.term_fetch_kind : '', termFetchDetail: typeof s.term_fetch_detail === 'string' ? s.term_fetch_detail : '', keyProtection: typeof s.key_protection === 'string' ? s.key_protection : '', termServerActive: s.term_server_active !== false, termServerWhy: typeof s.term_server_why === 'string' ? s.term_server_why : '', termServerLocked: s.term_server_locked === true, termServerBackground: Number.isInteger(s.term_server_background) ? s.term_server_background : 0, unaddressedTo: typeof s.unaddressed_to === 'string' ? s.unaddressed_to : '', error: s.error || '', shown: true })
 }
@@ -522,7 +523,7 @@ async function renameDevice(node, name) {
   try {
     r = await renameDeviceFromPage(invoke, store(ONBOARD_STORE), { node, name })
     known.renameError = ''
-    if (node === info.node) followSelfRename({ info, core, me }, r, t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) })   // 改的是這台：本機視窗名 Rust 也換了，畫面就地跟上
+    if (node === info.node) followSelfRename({ info, core, me }, r, nickNotice)   // 改的是這台：本機視窗名 Rust 也換了，畫面就地跟上
   } catch (e) {
     console.info('[ASN] 改名沒成功', String(e?.message ?? e ?? ''))
     known.renameError = String(e?.message ?? e ?? '') || '改名沒有成功，請稍後再試。'
@@ -907,9 +908,10 @@ function openPartnerOp(it) {
 }
 // 封存／取消封存：記在帳號層（後台），立刻重新拉名單；結果用名單上方的一行字說明
 // 使用者環境變數裡有看起來像金鑰的變數時的提醒（共用終端服務開著才有；只含變數名字）。查不到、舊版後端沒有這個命令都當沒有
-const envNotice = ref('')
-void loadEnvNotice(transport).then(t => { envNotice.value = t })
-setInterval(() => void loadEnvNotice(transport).then(t => { envNotice.value = t }), 10 * 60_000)
+// 顯示在設定頁終端區（settingsState.bridge.envNotice），不再放名單上方（#2425 PR-4）
+// 值放在 bridge.envNotice，settingsState 組 bridge 物件時一起交給設定頁（list-bridge-fields 守這條）
+void loadEnvNotice(transport).then(t => { bridge.envNotice = t })
+setInterval(() => void loadEnvNotice(transport).then(t => { bridge.envNotice = t }), 10 * 60_000)
 setLocalArchiver((f, a) => core.setLocalArchived(f, a))
 async function setArchived(f, archived) {
   const r = await runArchive(transport, f, archived)
@@ -2204,7 +2206,7 @@ const app = createApp({
       closeTo: closeTo.value, trayOk: trayOk.value, autostart: { supported: autostart.supported, on: autostart.on, busy: autostart.busy, blocked: autostart.blocked }, guard: { supported: guard.supported, on: guard.on, busy: guard.busy, paused: guard.paused, blocked: guard.blocked },
       replace: { cards: replaceFlow.view(), busy: replaceSt.busy, error: replaceSt.error, note: replaceSt.note },
       known: known.shown ? { peers: known.peers, busy: known.busy, error: known.error, ownFp: known.ownFp } : null,
-      bridge: bridge.shown ? { compactHandoff: bridge.compactHandoff, compactN: bridge.compactN, enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, remoteInput: bridge.remoteInput, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerWhy: bridge.termServerWhy, termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, termFetchDetail: bridge.termFetchDetail, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
+      bridge: bridge.shown ? { compactHandoff: bridge.compactHandoff, compactN: bridge.compactN, enabled: bridge.enabled, running: bridge.running, legacy: bridge.legacy, takeoverAllowed: bridge.takeoverAllowed, remoteLaunch: bridge.remoteLaunch, autoResume: bridge.autoResume, screenWatch: bridge.screenWatch, permPhone: bridge.permPhone, mobileView: bridge.mobileView, remoteInput: bridge.remoteInput, termServer: bridge.termServer, termServerSupported: bridge.termServerSupported, termServerMissing: bridge.termServerMissing, keyProtection: bridge.keyProtection, termServerActive: bridge.termServerActive, termServerWhy: bridge.termServerWhy, envNotice: bridge.envNotice,termServerLocked: bridge.termServerLocked, termServerBackground: bridge.termServerBackground, termFetch: bridge.termFetch, termFetchKind: bridge.termFetchKind, termFetchDetail: bridge.termFetchDetail, unaddressedTo: bridge.unaddressedTo, error: bridge.error, busy: bridge.busy, confirm: bridge.confirm } : null,
       askpass: askpassInfo.shown ? { path: askpassInfo.path, example: askpassInfo.example, copied: askpassInfo.copied } : null,
       autoCheck: autoCheck.value, upd: { checking: upd.checking, installing: upd.phase === 'installing', manual: upd.manual, status: updateStatus({ checking: upd.checking, phase: upd.phase, info: upd.info, lastCheck: upd.lastCheck, error: upd.checkErr, current: info.version }) },
       usage: { loading: usage.state.loading, error: usage.state.error, data: usage.state.data, updated: usage.state.updated },
@@ -2356,7 +2358,7 @@ const app = createApp({
       openMember, ui, MODES, MODE_LABEL, setMode, tabItems, mergedTabs, logs, sendTo: sendMsg, nudgeTo, sendAttachTo, loadOlder, photoApi, shotApi, activateTab, closeChatTab: closeOneChatTab, toggleDp, plain,
       chatTabMenu, chatTabMenuPanel, chatTabMenuPos, openChatTabMenu, closeChatTabMenu, tabPinLabel, menuCloseTab, menuCloseOther, menuCloseRight, menuCloseAll, menuCloseIdle, hasIdleTabs, setPaneCall, menuTogglePin, isChatTabPinned,
       onTabDragStart, onTabDragEnd, onTabDragOver, onTabDrop, tabDragClass,
-      MY_STATUS: MY_STATUS_OPTIONS, selfDeviceName, CONN_LABEL, connWhy, TOP_TABS_LINE, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed, nickErr,
+      MY_STATUS: MY_STATUS_OPTIONS, selfDeviceName, CONN_LABEL, connWhy, TOP_TABS_LINE, FIXED_TABS, TOP_TABS, top, goTop, chatRows, chatQuery, chatsUnreadN, partnersUnread, listTimeText, chatRowsPinned, isChatPinned, buddyMenuTitle, buddyPinLabel, buddyMenuTogglePin, roomMenu, roomMenuPos, roomMenuEl, roomMenuItems, roomPinLabel, openRoomMenu, roomMenuTogglePin, roomMenuPick, onPartnerOpDone, GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, ads, adImageSrc, pageSrc, pageDone, pageBroken, DIMS, dims, setTabDim, groupOptions, dev, dimTab: computed(() => dims.tabDim), isDevice, moreOn, moreOpen, moreWrap, moreUnreadN, me, nowPlayingText: computed(() => nowPlayingLine(nowPlaying.value)), notifyPrefs, friends, conn, shown, query, collapsed,
       deviceDrag, deviceDrop, onDeviceDragStart, onDeviceDragOver, onDeviceDrop, onDeviceTabKey, clearDeviceDrag,
       GUIDE_TEXT, guideRechecking, guideRecheck, guideHidden, guideMsg, guideRowList, guideOnPartners, guideOnChats, guideReshowPartners, guideReshowChats, setGuideHidden, guideAct, guideSite,
       tab, adI, hub, roomRows, roomHue, roomInitial, groupFlow, openGroupMenu, decideCard, emptyText, openAd, stepAd, jumpAd, groupHeading, statusNote, asnBadge, remoteBtn, requestRemoteUpdate,
@@ -2372,7 +2374,7 @@ const app = createApp({
       openPartnerDlg, closePartnerDlg, partnerDlg, partnerFgOnly, partnerModels, dlgModels, partnerCwdChoices, browsePartnerCwd, CWD_EMPTY_HINT, pickPartnerModel, submitPartnerDlg,
       launchNotice, closeLaunchNotice, openLaunchLogFolder,
       ruleSegs, permissionDlg, permissionDlgView, closePermissionDlg, answerPermission, permHold, permPress, permHoldStart, permHoldKey, HOLD_TIP,
-      opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, buddyOpItems, openPartnerOp, envNotice, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
+      opDlg, closeOpDlg, launchNewFromOp, opRun, opRunner, onOpRun, buddyOpItems, openPartnerOp, buddyMenuEl, buddySubEl, buddyModelBtn, buddySubPos, buddySubEnabled, subEvent,
       buddyMenu, buddyMenuPos, openBuddyMenu, closeBuddyMenu, buddySlots, buddyModelItem, buddyMenuOpenChat, toggleBuddyConsole,
       buddyModel, buddyModelOp, buddyModelLabel, buddyModelWhy, buddyMenuView, buddyWhyOf, pickBuddyModel, modelDlg, modelDlgText, closeModelDlg, submitModelDlg, copyModelManual,
       launchToolRows, launchPrefs, launchCwdMsg, saveLaunchPrefs,
@@ -2397,7 +2399,6 @@ app.component('relogin-bar', ReloginBar)
 const root = app.mount('#app')
 
 await core.start()
-const nickNotice = t => { nickErr.value = t; setTimeout(() => { nickErr.value = '' }, 12000) }
 if (!info.shot) void (async () => { await syncPendingDeviceName(invoke, store(ONBOARD_STORE), { info, core, me }, { node: info.node, notify: nickNotice }); await alignDeviceName(invoke, { info, core, me }, nickNotice) })()   // 啟動後對齊一次：本機視窗名以後台的設備名為準
 pushLog(NOTICE_ID)   // 「通知」分頁讀這份（之後有新通知時 core 的 log 事件會再推）
 sync()

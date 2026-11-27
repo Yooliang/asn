@@ -23,12 +23,12 @@ test('沒有、空字串、不是字串、命令不存在、丟錯，一律當�
   assert.equal(await loadEnvNotice({ termEnvNotice: async () => { throw new Error('unknown command') } }), '')
 })
 
-test('接線：transport 有 termEnvNotice、電腦版註冊 term_env_notice、名單上有這一行', () => {
+test('接線：transport 有 termEnvNotice、電腦版註冊 term_env_notice、設定頁終端區有這一行', () => {
   assert.match(read('ui/lib/tauri.mjs'), /termEnvNotice: \(\) => invoke\('term_env_notice'\)/)
   const lib = read('src-tauri/src/lib.rs')
   const desktop = lib.slice(lib.indexOf('.invoke_handler('), lib.indexOf('.invoke_handler(', lib.indexOf('.invoke_handler(') + 1))
   assert.match(desktop, /[\s,]term_env_notice[\s,]/, 'term_env_notice 沒註冊在電腦版的指令清單')
-  assert.match(read('ui/list.html'), /v-if="envNotice"/)
+  assert.match(read('ui/lib/settings-panel.mjs'), /st\.bridge\.envNotice/, '#2425 PR-4：提醒搬到設定頁終端區')
   assert.match(read('ui/list.js'), /envNotice/)
 })
 

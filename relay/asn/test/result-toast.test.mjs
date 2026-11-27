@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AsnToast, TOAST_KINDS, TOAST_MS, UI_KIT, currentResult, dismissResult, showResult, toastAnchorStyle, toastPlace, toastView } from '../ui/lib/ui-kit.mjs'
+import { AsnToast, TOAST_KINDS, TOAST_MS, UI_KIT, currentResult, dismissResult, pauseResult, resumeResult, showResult, toastAnchorStyle, toastDuration, toastPlace, toastView } from '../ui/lib/ui-kit.mjs'
 import { mountComponent } from './helpers/render.mjs'
 
 const UI = fileURLToPath(new URL('../ui/', import.meta.url))
@@ -73,6 +73,57 @@ test('#2425 會自動消失：成功 4 秒、失敗 6 秒（假時鐘）；時�
       assert.equal(currentResult().text, '')
     }
   } finally { dismissResult(); m.unmount() }
+})
+
+test('#2425 toastDuration：成功一律 4 秒；失敗 6 + max(0, ceil((字數-30)/10)) 秒、上限 12 秒；字數用 [...text].length', () => {
+  for (const n of [0, 1, 30, 31, 80, 500]) assert.equal(toastDuration('ok', '字'.repeat(n)), 4000, `ok ${n} 字`)
+  const fail = n => toastDuration('fail', '字'.repeat(n))
+  assert.deepEqual([0, 30, 31, 40, 80, 200].map(fail), [6000, 6000, 7000, 7000, 11000, 12000])
+  assert.equal(toastDuration('fail', '😀'.repeat(31)), 7000, '一個表情符號算 1 個字（不是 2 個 UTF-16 單位）')
+  assert.equal(toastDuration('weird', '字'.repeat(80)), 11000, '不認得的種類當失敗')
+  assert.equal(toastDuration('fail', undefined), 6000)
+})
+
+test('#2425 失敗的停留時間依字數：showResult 排的計時就是 toastDuration（假時鐘）', () => {
+  for (const [n, ms] of [[10, 6000], [80, 11000], [300, 12000]]) {
+    const clock = fakeClock()
+    try { showResult('fail', '字'.repeat(n)) } finally { clock.restore() }
+    assert.equal(clock.live()[0].ms, ms, `${n} 字 → ${ms}`)
+    dismissResult()
+  }
+})
+
+test('#2425 滑鼠停在提示上暫停倒數，移開後接著剩下的時間，不重新計時（假時鐘）', async () => {
+  const clock = fakeClock()
+  const realNow = Date.now
+  let now = 1_000_000
+  Date.now = () => now
+  try {
+    showResult('fail', '字'.repeat(80))   // 11 秒
+    assert.equal(clock.live().length, 1); assert.equal(clock.live()[0].ms, 11000)
+    now += 4000
+    pauseResult()
+    assert.equal(clock.live().length, 0, '暫停：計時取消')
+    now += 60_000   // 停很久
+    assert.equal(currentResult().text.length, 80, '暫停中不消失')
+    pauseResult()   // 重複暫停不改剩餘時間
+    resumeResult()
+    assert.equal(clock.live().length, 1); assert.equal(clock.live()[0].ms, 7000, '接著剩下的 7 秒，不是重來的 11 秒')
+    now += 2000
+    pauseResult(); resumeResult()
+    assert.equal(clock.live().at(-1).ms, 5000, '再暫停一次也是接著算')
+    clock.fire()
+    assert.equal(currentResult().text, '', '時間到自己消失')
+    resumeResult()   // 沒有提示時什麼都不做
+    assert.equal(clock.live().length, 0)
+  } finally { Date.now = realNow; clock.restore(); dismissResult() }
+})
+
+test('#2425 元件接線：pointerenter／pointerleave 只認滑鼠（觸控點一下也會送 pointerenter，不能因此停住倒數）', () => {
+  const src = read('lib/ui-kit.mjs')
+  assert.match(src, /@pointerenter="hoverIn" @pointerleave="hoverOut"/)
+  assert.match(src, /const hoverIn = e => \{ if \(e\?\.pointerType === 'mouse'\) pauseResult\(\) \}/)
+  assert.match(src, /const hoverOut = e => \{ if \(e\?\.pointerType === 'mouse'\) resumeResult\(\) \}/)
 })
 
 test('#2425 同一時間只有一則：新的取代舊的，舊的計時作廢、新的重新計時', async () => {
@@ -285,8 +336,8 @@ test('#2425 第 2 處 電腦封存結果：封存／取消封存做完都提示�
   const fn = src.slice(src.indexOf('async function setArchived'), src.indexOf('function closeOpDlg'))
   assert.match(fn, /const r = await runArchive\(transport, f, archived\)\s*\n\s*if \(r\.ok\) await core\.refreshRoster\(\)\s*\n\s*showResult\(r\.ok \? 'ok' : 'fail', r\.text, \{ at: 'list' \}\)/)
   assert.doesNotMatch(src, /archiveNote/)
-  // env-notice 是 PR-4 的事，這張不動它
-  assert.match(read('list.html'), /<p class="archive-note env-notice" v-if="envNotice" role="status">\{\{ envNotice \}\}<\/p>/)
+  // env-notice 已在 PR-4 搬去設定頁終端區（見 list-notes-pr4.test.mjs）；名單上不再有它
+  assert.doesNotMatch(read('list.html'), /env-notice|archive-note/)
 })
 
 test('#2425 第 3 處 對話視窗功能列封存結果：封存／取消封存做完提示，ok／fail 照結果；功能列不再有 ab-note', () => {

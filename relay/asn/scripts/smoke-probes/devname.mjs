@@ -125,10 +125,19 @@ export const devnameProbeSource = ({ devname, skin = '' }) => `(async () => {
     }
     // ---- 電腦：啟動對齊換不成時，左上角名字下面說明原因 ----
     if (kind === 'd-note') {
-      const note = await wait(() => [...document.querySelectorAll('.nick-err')].find(vis), 60);
+      // 結果提示是 position:fixed，offsetParent 永遠是 null，所以這裡不用上面那個 vis，改看有沒有排版框
+      // 真的看得到：有排版框、不是 visibility:hidden、框在可視範圍內、框中心點打到的是提示本身或它的子元素（沒被別的東西蓋住、沒移出畫面）
+      const shown = e => {
+        if (!e || e.getClientRects().length === 0 || getComputedStyle(e).visibility === 'hidden') return false;
+        const r = e.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1 || r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) return false;
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return !!hit && (hit === e || e.contains(hit));
+      };
+      const note = await wait(() => [...document.querySelectorAll('.asn-toast.k-fail')].find(shown), 60);
       await sleep(300);
       if (!check) return { ok: true, why: '' };
-      if (!note || !note.textContent.includes('寄信時用的名字沒有換成功')) return { ok: false, why: '對齊換不成時，左上角沒有說明：' + (note?.textContent ?? '') };
+      if (!note || !note.textContent.includes('寄信時用的名字沒有換成功')) return { ok: false, why: '對齊換不成時，沒有出現結果提示：' + (note?.textContent ?? '') };
       if (document.querySelector('.me-row input.nick-input')) return { ok: false, why: '電腦左上角的名字還是輸入欄' };
       return { ok: true, why: '' };
     }

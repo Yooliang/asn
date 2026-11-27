@@ -4331,7 +4331,7 @@ pub fn text_only(data: &str) -> String {
     out
 }
 
-/// 想開 mux 但因工作群組關掉的原因（夥伴清單上講一次）
+/// 想開 mux 但因工作群組關掉的原因（設定頁 term-server-why 講一次，不再由環境變數提醒重複回）
 #[cfg(feature = "gui")]
 static MUX_OFF_REASON: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
@@ -4346,15 +4346,21 @@ pub(crate) fn mux_off_reason() -> String {
     String::new()
 }
 
-/// B2c：夥伴清單上「使用者環境變數裡有金鑰類變數」的一句話（只有開了 mux 模式、而且真的有才回）。只讀名字，不改登錄檔
+/// 「使用者環境變數裡有金鑰類變數」的一句話，只講這一件事。沒有在用終端服務（含 off_reason 有值：因啟動方式改開一般視窗）就沒有。
+/// 沒開的原因另有 mux_off_reason()（設定頁 term-server-why）講一次，這裡不重複回那句（#2425 PR-4：同一句曾在設定頁講兩遍）
+pub(crate) fn env_notice_for(off_reason: &str, use_mux: bool, names: &[String]) -> Option<String> {
+    if !off_reason.is_empty() || !use_mux {
+        return None;
+    }
+    super::mux::secret_notice(names)
+}
+
+/// 設定頁終端區：環境變數那一句（只有這次實際在用終端服務、而且真的有才回）。只讀名字，不改登錄檔
 pub(crate) fn mux_env_notice() -> Option<String> {
     #[cfg(all(feature = "gui", not(test)))]
     {
-        if let Some(why) = MUX_OFF_REASON.get() {
-            return Some(why.clone());
-        }
-        GLOBAL.get().filter(|t| t.use_mux)?;
-        super::mux::secret_notice(&super::mux::user_env_names())
+        let use_mux = GLOBAL.get().map(|t| t.use_mux).unwrap_or(false);
+        env_notice_for(&mux_off_reason(), use_mux, &super::mux::user_env_names())
     }
     #[cfg(not(all(feature = "gui", not(test))))]
     {
@@ -9053,6 +9059,36 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "新");
         let left = std::fs::read_dir(d.path()).unwrap().filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().ends_with(".tmp")).count();
         assert_eq!(left, 0);
+    }
+
+    #[test]
+    fn 環境變數提醒_沒開終端服務的原因有值時不回那句原因_只講環境變數() {
+        // #2425 PR-4：mux_env_notice 曾在 MUX_OFF_REASON 有值時直接回那句原因，設定頁同一個開關底下就講兩遍
+        let why = "這次的啟動方式會讓夥伴跟著 ASN 一起關閉，所以夥伴開在一般視窗";
+        let names = vec!["CLAUDE_X".to_string()];
+        assert_eq!(env_notice_for(why, false, &names), None, "有原因時，這句不回原因，也不回環境變數提醒");
+        assert_eq!(env_notice_for(why, false, &[]), None);
+        assert_eq!(env_notice_for("", false, &names), None, "沒在用終端服務就沒有");
+        let t = env_notice_for("", true, &names).expect("在用終端服務又有被擋的變數：要回環境變數那句");
+        assert!(t.contains("CLAUDE_X") && t.contains("Claude 夥伴不會收到"), "{t}");
+        assert!(!t.contains("一般視窗"), "不能混進沒開的原因：{t}");
+        assert_eq!(env_notice_for("", true, &["ANTHROPIC_API_KEY".to_string()]), None, "沒有被擋的變數就沒有");
+    }
+
+    /// 守門（#2454 二審）：mux_env_notice 的本體在 cfg(not(test)) 裡，上面那支單元測試跑不到它；
+    /// 曾經出事的「MUX_OFF_REASON 有值就提早回那句」就寫在這裡。讀正式碼確認本體只是把值交給 env_notice_for，
+    /// 沒有自己讀 MUX_OFF_REASON、也沒有提早 return。
+    #[test]
+    fn 守門_mux_env_notice_本體只交給_env_notice_for_不自己讀沒開的原因() {
+        // Windows 的工作樹是 CRLF，先統一換行，下面找函式結尾才找得到
+        let src = crate::settings::src_scan::prod_source_of("launch/term.rs", include_str!("term.rs")).replace("\r\n", "\n");
+        let head = "pub(crate) fn mux_env_notice() -> Option<String> {";
+        let start = src.find(head).expect("前提：找得到 mux_env_notice 的宣告（改名了就更新這支）");
+        let end = start + src[start..].find("\n}\n").expect("前提：找得到 mux_env_notice 的結尾");
+        let body = &src[start + head.len()..end];
+        assert!(body.contains("env_notice_for("), "mux_env_notice 要把判斷交給 env_notice_for（有單元測試守著）：{body}");
+        assert!(!body.contains("MUX_OFF_REASON"), "mux_env_notice 不准自己讀 MUX_OFF_REASON（沒開的原因由 term-server-why 講一次）：{body}");
+        assert!(!body.contains("return"), "mux_env_notice 不准提早 return（判斷只能在 env_notice_for 裡）：{body}");
     }
 
     #[test]
