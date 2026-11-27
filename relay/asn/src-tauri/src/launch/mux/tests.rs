@@ -341,9 +341,15 @@ fn 停之前數得出有幾個窗格_停只停_pid_檔記的那一個() {
 
 #[test]
 fn lua_長字串避開收尾記號() {
-    assert_eq!(config_text(Path::new(r"C:\a\sock")).lines().nth(1).unwrap(), r#"return { exit_behavior = "Hold", exit_behavior_messaging = "None", scrollback_lines = 3500, unix_domains = { { name = 'asn', socket_path = [[C:\a\sock]], no_serve_automatically = true } } }"#, "看畫面的 GUI 連不上時不能自己起 mux");
+    assert_eq!(config_text(Path::new(r"C:\a\sock")).lines().nth(1).unwrap(), r#"return { automatically_reload_config = false, exit_behavior = "Hold", exit_behavior_messaging = "None", scrollback_lines = 3500, unix_domains = { { name = 'asn', socket_path = [[C:\a\sock]], no_serve_automatically = true } } }"#, "看畫面的 GUI 連不上時不能自己起 mux");
     let t = config_text(Path::new(r"C:\a]]b\sock"));
     assert!(t.contains(r"[=[C:\a]]b\sock]=]"), "{t}");
+}
+
+#[test]
+fn 設定檔關掉自動重讀_心跳檔與連線檔變動不觸發重讀() {
+    let t = config_text(Path::new(r"C:\a\sock"));
+    assert!(t.contains("automatically_reload_config = false"), "設定檔所在資料夾的心跳檔、連線檔一變動就會觸發重讀並留下控制代碼（#2427）：{t}");
 }
 
 #[test]
