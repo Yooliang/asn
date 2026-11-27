@@ -38,13 +38,13 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 
 | 路徑 | 內容 |
 |---|---|
-| `relay/machine/` | 每台電腦上的收發室橋（bridge）、收寄信指令、各引擎轉接器（Claude／Codex／ACP／agy）、Windows 安裝程式 |
-| `relay/cloud-agent/` | 雲端 Linux 代理人用的收寄信腳本（Grok 等） |
+| `relay/machine/` | Node 版的收發室橋（bridge）、收寄信指令、各引擎轉接器、Windows 安裝程式。**退場中，只修不加**：電腦版已改用內建的 Rust 橋，見 [docs/退場清單.md](docs/退場清單.md) |
+| `relay/cloud-agent/` | 雲端 Linux 代理人用的收寄信腳本（Grok 等）。**退場中，只修不加**，見 [docs/退場清單.md](docs/退場清單.md) |
 | `relay/asn/` | ASN 桌面程式（Tauri：名單、聊天、通知） |
 | `supabase/functions/relay/` | 新後台的仲介 Edge Function（HTTP 動作）；`irori-relay/` 是舊後台用的版本，切換後移除 |
 | `supabase/functions/_shared/` | 仲介用到的共用邏輯（房間、信箱、名單、啟動器、頭像、訊號）與測試 |
 | `supabase/migrations/` | 新後台的 migration |
-| `supabase/sql/` | 舊後台用的編號 SQL；`rollback/` 是對應的回復檔（切換後移除） |
+| `supabase/sql/` | 最上層的編號 SQL 是舊後台用的（舊後台停用後移除）；`rollback/` 是每支 migration 的回復檔，新後台也還在用，不會移除 |
 | `supabase/provision_*.py` | 手動建立節點／邀請碼的備援腳本 |
 | `site/` | 官網（純靜態，Firebase Hosting） |
 | `tools/migrate/` | 舊後台到新後台的資料複製腳本 |
@@ -57,6 +57,10 @@ ASN 是讓人與各家 AI 夥伴（Claude Code、Codex、Gemini、Grok、agy…�
 
 | 文件 | 內容 |
 |---|---|
+| [docs/開發紀律.md](docs/開發紀律.md) | 開發、審查、合併、發版的規則（流程規則只有這一份），文末有每條規則是機器擋還是靠人的對照表 |
+| [docs/唯一出口.md](docs/唯一出口.md) | 動手前先查：要做的事該走哪個檔、哪些還有沒收掉的副本 |
+| [docs/退場清單.md](docs/退場清單.md) | 已決定被取代、只修不加的舊實作，誰負責、什麼條件刪 |
+| [docs/通知種類.md](docs/通知種類.md) | 系統通知的種類登記表與訊息前綴的現況 |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | 交接入口：現況、元件位置、下一步、常用指令、紅線 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 收發室如何運作、各種用戶端怎麼接 |
 | [docs/BACKEND.md](docs/BACKEND.md) | 新後台結構、權限、排程、部署與 migration |
@@ -90,5 +94,5 @@ ASN 以 [MIT](LICENSE) 授權釋出。例外：`cloudflare/edge-tts/drm.js` 移�
 - [x] **main 分支保護**：已禁止強制推送與刪除分支。
 - [x] **`.gitignore`**：已涵蓋 `.env`、`*.key`、`.asn/`、`.irori-relay/`、`supabase/.temp/`、`site/.firebase/`。
 - [ ] **清理既有檔案中的私人資訊**：文件裡的本機絕對路徑已陸續換成泛用寫法；個人暱稱、內部工作階段名稱、設備與使用者的對應等仍散見於交接與設計文件，繼續分批清理。
-- [ ] **移除舊後台殘留**：後台已在 2026-10-21 切換到新專案（見 [docs/MIGRATION.md](docs/MIGRATION.md)），但 `supabase/functions/irori-relay/`、`supabase/sql/` 還在，要等舊後台停用後清掉。
+- [ ] **移除舊後台殘留**：後台已在 2026-10-21 切換到新專案（見 [docs/MIGRATION.md](docs/MIGRATION.md)），但 `supabase/functions/irori-relay/`、`supabase/sql/` 最上層的編號 SQL 還在（`supabase/sql/rollback/` 新後台仍在用，不算殘留；退場的登記與負責人見 [docs/退場清單.md](docs/退場清單.md)），要等舊後台停用後清掉。
 - [ ] 補 `CONTRIBUTING`、行為準則；確認官網隱私權政策與條款與開源後的實際行為一致。
