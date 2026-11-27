@@ -407,6 +407,99 @@ fn argv_has(argv: &[String], pair: &[&str]) -> bool {
 // ================================================================================================
 
 #[test]
+fn 詳情_開啟方式與終端列的判斷_四種情況() {
+    // 已登記、暫時接不回：算 ASN 開的、放終端列（祖先鏈說什麼都不管）
+    assert_eq!(super::info_open_view(Some(true), || false, || false), (true, true));
+    // 確定不在：開啟方式照祖先鏈；在終端服務裡才放終端列
+    assert_eq!(super::info_open_view(Some(false), || true, || true), (true, true), "ASN 開的與重開提示可以並存");
+    assert_eq!(super::info_open_view(Some(false), || true, || false), (false, true));
+    assert_eq!(super::info_open_view(Some(false), || false, || true), (true, false), "不在終端服務裡的視窗不放終端列");
+    // 沒有終端狀態（沒開共用終端模式等）：照祖先鏈、不放終端列
+    assert_eq!(super::info_open_view(None, || true, || true), (true, false));
+    assert_eq!(super::info_open_view(None, || true, || false), (false, false));
+}
+
+/// 讓 220 掛在 wezterm-mux-server 底下、而且對照表認得它是 ASN 開的窗格
+#[cfg(desktop)]
+fn put_in_mux(r: &Rig, asn_opened: bool) {
+    let os = r.os();
+    let mut t = os.table.lock().unwrap();
+    t.push(p(500, 1, "wezterm-mux-server.exe"));
+    let i = t.iter().position(|x| x.pid == 220).unwrap();
+    t[i] = p(220, 500, "claude.exe");
+    drop(t);
+    if asn_opened {
+        os.mux_sess.lock().unwrap().insert(220, "7".into());
+    }
+}
+
+#[cfg(desktop)]
+#[test]
+fn 詳情_注入終端狀態_已登記和暫時接不回_說_asn_開的並帶終端列() {
+    use crate::launch::term::{set_test_term_state, TermState};
+    for (st, want) in [(TermState::Ok, "ok"), (TermState::Waiting, "waiting")] {
+        // 祖先鏈看不出來也算 ASN 開的
+        let r = rig(Opt::default());
+        set_test_term_state(Some(st));
+        let v = r.run("info", json!({})).result.unwrap();
+        assert_eq!(v["opened_by"], "asn", "{want}");
+        assert_eq!(v["term_state"], want);
+    }
+    set_test_term_state(None);
+}
+
+#[cfg(desktop)]
+#[test]
+fn 詳情_注入終端狀態_確定不在且在終端服務裡_開啟方式照祖先鏈_終端列照放() {
+    use crate::launch::term::{set_test_term_state, TermState};
+    set_test_term_state(Some(TermState::Gone));
+    // 祖先鏈是 ASN 開的：說 ASN 開的，同時叫人重開
+    let r = rig(Opt::default());
+    put_in_mux(&r, true);
+    let v = r.run("info", json!({})).result.unwrap();
+    assert_eq!(v["opened_by"], "asn", "祖先鏈說是 ASN 開的");
+    assert_eq!(v["term_state"], "gone");
+    // 在終端服務裡、但祖先鏈看不出是 ASN 開的：自己開的
+    let r = rig(Opt::default());
+    put_in_mux(&r, false);
+    let v = r.run("info", json!({})).result.unwrap();
+    assert_eq!(v["opened_by"], "user");
+    assert_eq!(v["term_state"], "gone");
+    set_test_term_state(None);
+}
+
+#[cfg(desktop)]
+#[test]
+fn 詳情_注入終端狀態_視窗不在終端服務裡_不放終端列_開啟方式照祖先鏈() {
+    use crate::launch::term::{set_test_term_state, TermState};
+    // 舊式主控台承載殼（asn_host）：模式開著但這位不在終端服務裡（Gone），不放終端列、說 ASN 開的
+    let r = rig(Opt { asn_host: true, ..Opt::default() });
+    set_test_term_state(Some(TermState::Gone));
+    let v = r.run("info", json!({})).result.unwrap();
+    assert_eq!(v["opened_by"], "asn");
+    assert!(v.get("term_state").is_none(), "不放終端列：{v}");
+    set_test_term_state(None);
+}
+
+#[cfg(desktop)]
+#[test]
+fn 詳情_沒有使用終端服務_照祖先鏈說開啟方式_不帶終端欄() {
+    use crate::launch::term::{set_test_term_state, TermState};
+    // 開關關著＋祖先鏈看得出 ASN 開的：說 ASN 開的，而且沒有終端狀態那一欄（畫面就不會寫「沒有接上」）
+    let r = rig(Opt { asn_host: true, ..Opt::default() });
+    set_test_term_state(Some(TermState::Off));
+    let v = r.run("info", json!({})).result.unwrap();
+    assert_eq!(v["opened_by"], "asn", "開關關著照祖先鏈");
+    assert!(v.get("term_state").is_none(), "不帶終端欄：{v}");
+    // 開關關著＋祖先鏈看不出來：自己開的，一樣沒有終端欄
+    let r = rig(Opt::default());
+    let v = r.run("info", json!({})).result.unwrap();
+    assert_eq!(v["opened_by"], "user");
+    assert!(v.get("term_state").is_none());
+    set_test_term_state(None);
+}
+
+#[test]
 fn 詳情_唯讀_不需要遠端開關_欄位齊全_外殼鏈只有程式名() {
     let r = rig(Opt { allow_first: 0, ..Opt::default() });
     let res = r.run("info", json!({}));

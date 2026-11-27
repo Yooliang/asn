@@ -26,7 +26,7 @@ import { GRACE_AGAIN_LABEL, TYPING_ENDED_TEXT, createGrace } from './term-grace.
 import { RemoteInput, INPUT_LABEL, INPUT_TIP, INPUT_TEXT } from './term-remote-input.mjs'
 import { TERM_KEYS, KEYS_TEXT, joinWrapped, findLoginUrls } from './term-keys.mjs'
 import { confirmKindOf, confirmNoteOf } from './confirm-kind.mjs'
-import { STUCK_POLL_MS, TERM_BTN_MSG, TERM_BTN_TERM, askTermService, mTermToggle, restoreTop, scrollMemo, stuckCodeOf, stuckNote, termBaseOk, termEntry } from './term-entry.mjs'
+import { STUCK_POLL_MS, TERM_BTN_MSG, createWaitPoll, TERM_BTN_TERM, askTermService, mTermToggle, nextTermState, restoreTop, scrollMemo, stuckCodeOf, stuckNote, termBaseOk, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
@@ -153,7 +153,7 @@ export const ChatPane = {
     const stuckCode = ref('')
     const termBase = computed(() => termBaseOk({ hasApi: !!props.termViewApi, canOffer: canOfferConsole(props.friend, props.selfNode), status: props.friend?.status, stuck: stuckCode.value }))
     const termViewName = computed(() => props.friend?.awaitName || props.friend?.agent || props.friend?.nick || '')   // 視窗開著、還沒進到對話的夥伴（#1635）：名單條目名字不是視窗名，看畫面要用夥伴名
-    const termInService = ref(null)   // true／false／null（還沒查或查不到）
+    const termInService = ref(null)   // 'ok'／'waiting'／'gone'／null（還沒查或查不到）
     const termEntryView = computed(() => termEntry(termBase.value, termInService.value))
     const canTermView = computed(() => termEntryView.value.term)
     const stuckNoteText = computed(() => (props.friend?.awaiting === true ? (canTermView.value ? AWAITING_NOTE : AWAITING_NOTE_NO_TERM) : props.friend?.status === 'offline' ? stuckNote(stuckCode.value, canTermView.value) : ''))
@@ -178,8 +178,12 @@ export const ChatPane = {
       if (!termBase.value) { termInService.value = null; return }
       if (!props.active) return
       const r = await askTermService(props.termViewApi, termViewName.value)
-      if (sameFriend(props.friend, f)) termInService.value = r
+      if (sameFriend(props.friend, f)) termInService.value = nextTermState(termInService.value, r)
     }
+    // 暫時接不回時定期重問：背景接回後，終端那格自己亮起來（變 ok／gone、切換夥伴、離開畫面都會停掉計時器）
+    const waitPoll = createWaitPoll({ probe: () => probeTerm() })
+    watch(() => [termInService.value, props.active, props.friend?.id].join('\n'), () => waitPoll.sync(termInService.value === 'waiting' && props.active === true), { immediate: true })
+    onBeforeUnmount(() => waitPoll.stop())
     // 看別台電腦上的夥伴（#597）：那台在本人帳號底下、這台能發起才有入口，同樣放在第 2 格
     const remoteAvail = ref(null)
     // 背景夥伴（內建通道的 Gemini、Grok）沒有終端畫面：看畫面入口、打字列、「送進終端」都不給（#2354）
@@ -228,7 +232,7 @@ export const ChatPane = {
       // 正在看的時候一時問不到（null），不要把這一格收掉：收掉會中斷剛開始的觀看
       if (sameFriend(props.friend, f) && !(r === null && remoteOn.value)) remoteAvail.value = r
     }
-    const termBar = computed(() => (canRemote.value ? { ready: true, on: remoteShown.value, label: REMOTE_LABEL, tip: REMOTE_TIP } : { ready: canTermView.value, on: termShown.value, stuck: Boolean(stuckNoteText.value) }))
+    const termBar = computed(() => (canRemote.value ? { ready: true, on: remoteShown.value, label: REMOTE_LABEL, tip: REMOTE_TIP } : { ready: canTermView.value, on: termShown.value, stuck: Boolean(stuckNoteText.value), waiting: termEntryView.value.waiting, note: termEntryView.value.note }))
     const toggleTerm = () => {
       if (canRemote.value) { remoteOn.value = !remoteOn.value; remoteTyping.value = false; return }
       if (canTermView.value) termViewOn.value = !termViewOn.value
@@ -858,7 +862,6 @@ export const ChatPane = {
   template: `
 <div class="pane chatpane" :class="classes" v-if="friend">
   <action-bar :friend="friend" :self-node="selfNode" :api="agentApi" :op-line="true" @op-note="onOpNote" :active="active" :callable="!!call && !callApi" :term="termBar" v-if="!noBar && !isNotice && (!isRoom || opsItems.length || groupItems.length)" :ops="opsItems" :group="groupItems" :pi-models-for="piModelsFor" @ops="pickMenu" @call="startCall" @term="toggleTerm" :avatar="friendAv" :skin="skin" :show-back="showBack" @back="$emit('back')" @member="jumpMember"></action-bar>
-  <p class="term-reopen-note" v-if="!noBar && !isRoom && termEntryView.note" role="note">{{ termEntryView.note }}</p>
   <p class="term-reopen-note term-stuck-note" v-if="!noBar && !isRoom && stuckNoteText" role="note">{{ stuckNoteText }}</p>
   <p class="term-reopen-note term-confirm-note" v-if="confirmNote" role="note">{{ confirmNote }}</p>
   <div class="chatpane-body">

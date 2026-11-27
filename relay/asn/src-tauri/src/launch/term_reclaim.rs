@@ -43,8 +43,9 @@ pub(super) struct ParkInfo {
     /// 已經試過幾次（啟動時那一次算第 1 次）
     pub attempts: u32,
     pub reason: String,
-    /// 上一輪清單讀成功、但裡面沒有這個窗格（連續兩輪都沒有才移除；其他原因的接不回會把它清掉）
-    pub absent_once: bool,
+    /// 第一次「清單讀成功、但裡面沒有這個窗格」的時間。要距此已滿 [`RETRY_FIRST`]、而且這一輪仍沒看到才移除；
+    /// 時間條件放在列上，叫醒（kick）能讓重試提早跑，但不能讓移除提早。其他原因的接不回會把它清掉
+    pub absent_since: Option<Instant>,
     /// 從什麼時候開始接不回
     pub since: Instant,
     /// 上次寫「已經很久接不回」提醒的時間
@@ -53,7 +54,7 @@ pub(super) struct ParkInfo {
 
 impl Default for ParkInfo {
     fn default() -> Self {
-        ParkInfo { attempts: 0, reason: String::new(), absent_once: false, since: Instant::now(), last_notice: None }
+        ParkInfo { attempts: 0, reason: String::new(), absent_since: None, since: Instant::now(), last_notice: None }
     }
 }
 
@@ -122,7 +123,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
                 continue;
             }
-            match self.reclaim_row(&w, &dir, &term, false, &mut lists) {
+            match self.reclaim_row(&w, &dir, &term, None, Instant::now(), &mut lists) {
                 Row::Restored { session, probed } => {
                     if probed {
                         probed_now.insert(term.id.clone(), Instant::now());
@@ -130,13 +131,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     restored.push(session);
                 }
                 r @ (Row::Waiting(_) | Row::Absent(_)) => {
-                    let (why, absent_once) = match r {
-                        Row::Absent(why) => (why, true),
-                        Row::Waiting(why) => (why, false),
+                    let (why, absent_since) = match r {
+                        Row::Absent(why) => (why, Some(Instant::now())),
+                        Row::Waiting(why) => (why, None),
                         _ => unreachable!(),
                     };
                     view_log(&format!("終端對照表：{}暫時接不回（第 1 次），保留這一列、稍後再試：{why}", row_label(&term)));
-                    infos.insert(term.id.clone(), ParkInfo { attempts: 1, reason: why, absent_once, ..ParkInfo::default() });
+                    infos.insert(term.id.clone(), ParkInfo { attempts: 1, reason: why, absent_since, ..ParkInfo::default() });
                     parked.push(term);
                 }
                 Row::Parked => parked.push(term),
@@ -173,9 +174,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 把暫時接不回的列再試一次。接回的從 parked 搬進 sessions（和啟動時認回同一個登記方式，前台／後台鈕就會恢復）；
     /// 確定不在的才移除；仍接不回的留著、累計次數、log 一行原因。同一個通訊檔這一輪只讀一次清單
     pub fn retry_parked(&self) -> RetryReport {
-        let rows: Vec<(StoreTerm, bool)> = {
+        self.retry_parked_at(Instant::now())
+    }
+
+    /// 同 [`Self::retry_parked`]，「現在」由呼叫端給（測試注入時間用，不用真的等）
+    pub(super) fn retry_parked_at(&self, now: Instant) -> RetryReport {
+        let rows: Vec<(StoreTerm, Option<Instant>)> = {
             let g = self.inner.lock().unwrap();
-            g.parked.iter().filter_map(|t| g.parked_info.get(&t.id).map(|i| (t.clone(), i.absent_once))).collect()
+            g.parked.iter().filter_map(|t| g.parked_info.get(&t.id).map(|i| (t.clone(), i.absent_since))).collect()
         };
         if rows.is_empty() {
             return RetryReport::default();
@@ -191,8 +197,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let mut lists: BTreeMap<PathBuf, Result<Vec<wezterm::PaneInfo>, String>> = BTreeMap::new();
         let outcomes: Vec<(StoreTerm, Row)> = rows
             .into_iter()
-            .map(|(t, absent_once)| {
-                let r = self.reclaim_row(&w, &dir, &t, absent_once, &mut lists);
+            .map(|(t, absent_since)| {
+                let r = self.reclaim_row(&w, &dir, &t, absent_since, now, &mut lists);
                 (t, r)
             })
             .collect();
@@ -221,8 +227,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                         let info = g.parked_info.entry(term.id.clone()).or_default();
                         info.attempts += 1;
                         info.reason = why.clone();
-                        // 連續兩輪都沒有才算；中間有別種接不回（例如讀不到清單）就重新數
-                        info.absent_once = absent;
+                        // 第一次沒看到的時間留著不動（滿 RETRY_FIRST 才移除）；中間有別種接不回（例如讀不到清單）就重新計時
+                        info.absent_since = if absent { info.absent_since.or(Some(now)) } else { None };
                         lines.push(format!("終端對照表：{}仍接不回（第 {} 次）：{why}", row_label(&term), info.attempts));
                         lines.extend(info.stale_note(&row_label(&term)));
                         report.waiting += 1;
@@ -255,10 +261,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 3. 終端服務（mux）的 pid 檔記的已經是另一個服務，或原來那個服務確定已結束：窗格跟著服務結束了。
     /// 4. 窗格已結束（讀到帶暗號的結束標記）：正面證據，立刻移除。
     /// 5. 清單讀成功、裡面沒有這個窗格：清單是服務自己答的，但剛開的窗格一輪可能還沒出現、清單也可能剛好讀到一半，
-    ///    所以照 `sweep_missing` 的做法**連續兩輪**都沒有才移除（`prev_absent`＝上一輪就沒有）；第一輪只回 [`Row::Absent`]。
+    ///    所以要「距第一次沒看到已滿 [`RETRY_FIRST`]、而且這一輪仍沒看到」才移除（`absent_since`＝第一次沒看到的時間，`now`＝這一輪的時間）；
+    ///    未滿只回 [`Row::Absent`]（叫醒只會讓重試提早跑，不會讓移除提早）。
     ///
     /// 其餘（讀清單失敗或逾時、通訊檔暫時不在、pid 檔讀不到、查不到程序狀態、找不到終端服務的資料夾）都是暫時接不回。
-    pub(super) fn reclaim_row(&self, w: &WezTerm<'_>, dir: &WezTermDir, term: &StoreTerm, prev_absent: bool, lists: &mut BTreeMap<PathBuf, Result<Vec<wezterm::PaneInfo>, String>>) -> Row {
+    pub(super) fn reclaim_row(&self, w: &WezTerm<'_>, dir: &WezTermDir, term: &StoreTerm, absent_since: Option<Instant>, now: Instant, lists: &mut BTreeMap<PathBuf, Result<Vec<wezterm::PaneInfo>, String>>) -> Row {
         let gone = |why: &str| Row::Gone { why: why.to_string(), exited: None };
         // #611：開關關著（0.1.113 不認夥伴視窗的列）＝kind 不是空的列（第 1 階段留下的）一律 parked：留在檔案裡、不查不碰，等開關打開再認
         if park_companion_row(self.hold_config, term) {
@@ -328,15 +335,23 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 let exited = if !term.kind.is_empty() { partner_label(&term.id, &term.title).map(str::to_string) } else { None };
                 return Row::Gone { why: "窗格已經結束".to_string(), exited };
             }
-            // 只是清單裡沒有：連續兩輪才移除，第一輪先留著
-            return if prev_absent {
-                Row::Gone { why: "連續兩輪終端服務的窗格清單裡都沒有這一個".to_string(), exited: None }
+            // 只是清單裡沒有：距第一次沒看到滿 RETRY_FIRST 才移除，未滿先留著
+            let aged = absent_since.is_some_and(|t| now.saturating_duration_since(t) >= RETRY_FIRST);
+            return if aged {
+                Row::Gone { why: "終端服務的窗格清單裡持續沒有這一個".to_string(), exited: None }
             } else {
                 Row::Absent("終端服務的窗格清單裡暫時沒有這一個，下一輪再確認".to_string())
             };
         };
-        let title = if title_marks(&pane.tab_title, &term.id) { pane.tab_title.clone() } else { format!("ASN:{}", term.id) };
         let probed = probes.borrow().get(&pane.pane_id) == Some(&PaneProbe::Alive);
+        // 分頁標題沒帶編號（開窗逾時、標題還沒設就接回的窗格）時，用記下來的標題，夥伴名字才不會掉
+        let title = if title_marks(&pane.tab_title, &term.id) {
+            pane.tab_title.clone()
+        } else if title_marks(&term.title, &term.id) {
+            term.title.clone()
+        } else {
+            format!("ASN:{}", term.id)
+        };
         Row::Restored {
             probed,
             session: Session {
@@ -363,8 +378,12 @@ const PAUSE_WAITS_MAX: usize = 12;
 /// 先等 [`RETRY_FIRST`]；每輪之前若終端服務還在暫停（剛逾時）就先等暫停結束，**不叫任何指令**，這樣的等待不算一輪、不改間隔；
 /// 一輪有接回任何一列就從頭算間隔，否則加倍（最長 [`RETRY_MAX`]）；接回後呼叫 `on_restored`；沒有等待中的列就結束。
 /// 每輪的動作 panic 只記 log、下一輪再試，不讓這條執行緒悄悄死掉
+///
+/// `sleep` 可以被叫醒（見 [`RetryWake`]）；`kicked` 取走「有人叫過」的旗標。睡到一半被叫醒（新列剛放進來）就不等滿，
+/// 馬上進下一輪，這一輪之後的間隔也重設成 [`RETRY_FIRST`]，不讓新列等舊的長間隔
 pub fn run_retry_loop(
     sleep: &mut dyn FnMut(Duration),
+    kicked: &dyn Fn() -> bool,
     pause_left: &dyn Fn() -> Option<Duration>,
     round: &mut dyn FnMut() -> RetryReport,
     on_restored: &mut dyn FnMut(),
@@ -374,9 +393,12 @@ pub fn run_retry_loop(
     let mut wait = RETRY_FIRST;
     loop {
         sleep(wait);
+        let woken = kicked();
         for _ in 0..PAUSE_WAITS_MAX {
             let Some(left) = pause_left() else { break };
             sleep(left + Duration::from_secs(1));
+            // 暫停期間又被叫：旗標清掉，照樣等到暫停結束（不叫任何指令）
+            let _ = kicked();
         }
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| round())).unwrap_or_else(|_| {
             log("終端對照表：背景重試時發生內部錯誤，這一輪略過，稍後再試");
@@ -385,7 +407,7 @@ pub fn run_retry_loop(
         if r.restored > 0 {
             on_restored();
         }
-        wait = next_wait(wait, r.restored);
+        wait = if woken { RETRY_FIRST } else { next_wait(wait, r.restored) };
         if waiting() == 0 {
             return;
         }
@@ -396,25 +418,98 @@ pub fn run_retry_loop(
 /// 終端服務剛逾時（指令閘門暫停中）就先等，不去敲它。接回任何一列之後掃一次還開著的看畫面視窗（啟動時那一輪若因名單還空著而放棄，這裡接手）。全部處理完就結束
 #[cfg(feature = "gui")]
 pub fn start_reclaim_retry(terms: std::sync::Arc<super::LiveTerms>) {
+    use std::sync::atomic::Ordering;
     if std::env::args().any(|a| a == "--shot") || terms.waiting_count() == 0 {
         return;
     }
+    // 同一時間只留一條重試執行緒（開窗逾時後可能再叫一次）
+    if RETRY_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
     let spawned = std::thread::Builder::new().name("asn-reclaim-retry".into()).spawn(move || {
-        run_retry_loop(
-            &mut std::thread::sleep,
-            &|| crate::launch::cli_gate::global().longest_cooldown(),
-            &mut || terms.retry_parked(),
-            &mut || {
-                let (_, n) = terms.adopt_viewers();
-                if n > 0 {
-                    view_log(&format!("終端對照表：接回後認回 {n} 個還開著的終端畫面"));
-                }
-            },
-            &|| terms.waiting_count(),
-            &|l| view_log(l),
-        );
+        loop {
+            run_retry_loop(
+                &mut |d| RETRY_WAKE.sleep(d),
+                &|| RETRY_WAKE.take(),
+                &|| crate::launch::cli_gate::global().longest_cooldown(),
+                &mut || terms.retry_parked(),
+                &mut || {
+                    let (_, n) = terms.adopt_viewers();
+                    if n > 0 {
+                        view_log(&format!("終端對照表：接回後認回 {n} 個還開著的終端畫面"));
+                    }
+                },
+                &|| terms.waiting_count(),
+                &|l| view_log(l),
+            );
+            // 先放掉旗標再看一眼：放掉的空檔裡若又有新列進來（開窗逾時後再叫一次），這裡接手，不留下沒人重試的列
+            RETRY_RUNNING.store(false, Ordering::SeqCst);
+            if terms.waiting_count() == 0 || RETRY_RUNNING.swap(true, Ordering::SeqCst) {
+                return;
+            }
+        }
     });
     if let Err(e) = spawned {
+        RETRY_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
         elog!("接回終端列的重試執行緒開不了（不影響啟動）：{e}");
+    }
+}
+
+#[cfg(feature = "gui")]
+static RETRY_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 重試執行緒的睡眠：睡最多一段時間，被 [`Self::kick`] 叫到就提早醒。旗標會留著（叫的時候執行緒不在睡，下一次睡就直接醒）
+pub struct RetryWake {
+    kicked: std::sync::Mutex<bool>,
+    cv: std::sync::Condvar,
+}
+
+impl RetryWake {
+    pub const fn new() -> Self {
+        RetryWake { kicked: std::sync::Mutex::new(false), cv: std::sync::Condvar::new() }
+    }
+
+    /// 叫醒（新列剛放進暫時接不回）
+    pub fn kick(&self) {
+        *self.kicked.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.cv.notify_all();
+    }
+
+    /// 睡最多 `d`；有人叫過（旗標已立起）就馬上回來。不清旗標，由 [`Self::take`] 取走
+    pub fn sleep(&self, d: Duration) {
+        let g = self.kicked.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = self.cv.wait_timeout_while(g, d, |k| !*k);
+    }
+
+    /// 取走旗標：回「剛才有人叫過」
+    pub fn take(&self) -> bool {
+        std::mem::take(&mut *self.kicked.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
+/// 全程式唯一的重試叫醒器（同一時間只有一條重試執行緒）
+static RETRY_WAKE: RetryWake = RetryWake::new();
+
+#[cfg(test)]
+thread_local! {
+    /// 測試用：這條測試執行緒叫了幾次 `kick_retry`
+    static KICKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// 這條測試執行緒到目前叫了幾次 `kick_retry`
+#[cfg(test)]
+pub(super) fn kick_count() -> usize {
+    KICKS.with(|k| k.get())
+}
+
+/// 開窗格逾時、把列記成暫時接不回之後，叫背景重試起來（已經在跑就叫醒它，馬上看一次、間隔重設成 30 秒）。
+/// 測試沒有全域的終端服務，只記次數
+pub(super) fn kick_retry() {
+    #[cfg(test)]
+    KICKS.with(|k| k.set(k.get() + 1));
+    #[cfg(feature = "gui")]
+    if let Some(t) = super::GLOBAL.get() {
+        RETRY_WAKE.kick();
+        start_reclaim_retry(t.clone());
     }
 }

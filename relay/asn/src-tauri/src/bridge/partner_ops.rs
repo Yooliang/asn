@@ -392,6 +392,24 @@ fn clean(s: &str, max: usize) -> String {
     s.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().trim().chars().take(max).collect()
 }
 
+/// 這個程序是不是掛在 wezterm-mux-server（共用終端服務）底下：往上 8 層內有沒有
+fn in_mux_server(table: &[crate::launch::switch::Proc], pid: u32) -> bool {
+    crate::launch::switch::ancestors(table, pid).into_iter().take(8).any(|a| table.iter().any(|p| p.pid == a && p.name.starts_with("wezterm-mux-server")))
+}
+
+/// 詳情的「開啟方式」與要不要放「終端」那一列，回 `(ASN 開的, 放終端列)`。
+/// `term_live`：`Some(true)`＝已登記或暫時接不回（算 ASN 開的、放終端列）；`Some(false)`＝在共用終端服務模式下確定不在；
+/// `None`＝沒有終端狀態可看（沒開共用終端模式、關掉伺服器終端、沒有畫面的建置）。
+/// 確定不在時照程序祖先鏈判斷開啟方式（「ASN 開的」和「重開一次就能在 ASN 裡看」可以並存）；
+/// 而且只有這位夥伴的視窗確實在終端服務裡（`in_mux`）才放終端列，自帶終端、舊式主控台的視窗不在終端服務裡，不放（叫人重開也沒用）
+fn info_open_view(term_live: Option<bool>, in_mux: impl FnOnce() -> bool, by_ancestors: impl FnOnce() -> bool) -> (bool, bool) {
+    match term_live {
+        Some(true) => (true, true),
+        Some(false) => (by_ancestors(), in_mux()),
+        None => (by_ancestors(), false),
+    }
+}
+
 /// 一封信裡的 /指令
 #[derive(Clone, Debug)]
 pub(crate) struct CommandJob {
@@ -1315,7 +1333,22 @@ impl PartnerOps {
     fn info(&self, t: &switch::Target) -> OpResult {
         let os = self.env.os();
         let table = os.processes();
-        let asn = switch::opened_by_asn(os, &table, t.pid);
+        // 終端狀態（已登記／暫時接不回／確定不在）和聊天頁的按鈕同一份資料：查得到狀態時，「開啟方式」也只照它說，
+        // 已登記／暫時接不回算 ASN 開的；確定不在照程序祖先鏈（#2424）。沒有終端狀態可看、或這位的視窗不在終端服務裡：不放「終端」列
+        #[cfg(desktop)]
+        let term = crate::launch::term::partner_term_state_of(&t.name);
+        #[cfg(not(desktop))]
+        let term: Option<()> = None;
+        #[cfg(desktop)]
+        let term_live = term.as_ref().and_then(|s| match s.state {
+            // 沒有使用終端服務：沒有終端狀態可看，「開啟方式」照程序祖先鏈
+            crate::launch::term::TermState::Off => None,
+            crate::launch::term::TermState::Gone => Some(false),
+            _ => Some(true),
+        });
+        #[cfg(not(desktop))]
+        let term_live: Option<bool> = None;
+        let (asn, show_term) = info_open_view(term_live, || in_mux_server(&table, t.pid), || switch::opened_by_asn(os, &table, t.pid));
         let st = self.mod_status(&t.session_id);
         let model = st.as_ref().and_then(|s| s.get("model")).and_then(Value::as_str).filter(|m| switch::valid_model(m)).map(String::from).or_else(|| switch::current_model(&t.args));
         let mut chain: Vec<String> = switch::ancestors(&table, t.pid).into_iter().rev().filter_map(|p| table.iter().find(|x| x.pid == p)).map(|p| clean(&p.name, 60)).collect();
@@ -1335,6 +1368,13 @@ impl PartnerOps {
             "shell_chain": chain,
             "mod_installed": st.is_some(),
         });
+        #[cfg(desktop)]
+        if let Some(s) = term.as_ref().filter(|s| show_term && s.state != crate::launch::term::TermState::Off) {
+            // 沒有使用終端服務、或這位的視窗不在終端服務裡時不帶這欄，詳情就不列「終端」那一列（不能寫「沒有接上」）
+            r["term_state"] = json!(s.state);
+        }
+        #[cfg(not(desktop))]
+        let _ = (term, show_term);
         if let Some(c) = st.as_ref().and_then(|s| s.get("context")).and_then(Value::as_object) {
             // 只收三個數字欄位：used、limit、percent（沒給 percent 且有 limit 就算出來）
             let num = |k: &str| c.get(k).and_then(Value::as_f64).filter(|n| n.is_finite() && *n >= 0.0);

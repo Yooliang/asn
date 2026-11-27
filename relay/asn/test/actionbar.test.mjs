@@ -43,7 +43,7 @@ test('功能列按鈕都有中文 aria-label 與提示（能用放說明、反�
   const t = read('ui/lib/actionbar.mjs')
   assert.match(t, /aria-label="切換模型" :title="slot\.model\.ok \? MODEL_TIP : slot\.model\.reason"/)
   assert.match(t, /const MODEL_TIP = '[^']*[一-鿿]/)
-  assert.match(t, /:aria-label="slot\.window\.term \? termBtn\.label : slot\.window\.label" :title="slot\.window\.ok \? \(slot\.window\.wake \? WAKE_TIP : slot\.window\.term \? termTip : consoleView\.tip\) : slot\.window\.reason"/)
+  assert.match(t, /:aria-label="slot\.window\.term \? termBtn\.label : slot\.window\.label" :title="slot\.window\.ok \? \(slot\.window\.wake \? WAKE_TIP : slot\.window\.term \? termTip : slot\.window\.note \? consoleView\.tip \+ '（' \+ slot\.window\.note \+ '）' : consoleView\.tip\) : slot\.window\.reason"/)
   assert.match(t, /aria-label="工作項目" :title="slot\.tasks\.ok \? TASKS_TIP : slot\.tasks\.reason"/)
   assert.match(t, /role="toolbar" aria-label="代理功能列"/)
   const imgs = [...t.matchAll(/(?:src="|icon: \{ type: String, default: '|icon="|\? ')(img\/[^"']+)["']/g)].map(m => m[1])

@@ -23,7 +23,7 @@ import { PartnerOpDialog, PartnerOpStrip, createOpRunner, loadOpsContext } from 
 import { canInviteFrom } from './groups.mjs'
 import { offlineView } from './group-offline.mjs'
 import { placeMenu } from './menu-place.mjs'
-import { TERM_BACK_TIP, TERM_LABEL, TERM_TIP, termButtonView } from './term-entry.mjs'
+import { TERM_BACK_TIP, TERM_LABEL, TERM_TIP, TERM_WAITING_NOTE, termButtonView } from './term-entry.mjs'
 
 /** 這位代理用哪一家的指令（名單上沒寫就看啟動設定，再沒有就當 Claude）。 */
 export function friendEngine(friend) {
@@ -103,10 +103,13 @@ function windowSlot(f, engine, ctx) {
   if (ctx.phone) return slot('window', WINDOW_LABEL.idle, PHONE_WHY.window)
   // 在共用終端服務裡的夥伴：這一格改成「終端」（#902，按下在 ASN 裡看終端）；名單右鍵、手機不傳 term，照舊
   if (ctx.term === true) return { ...slot('window', ctx.termLabel || TERM_LABEL, ''), term: true }
+  // 終端暫時接不回（背景重試中）：前台／後台鈕先反灰，說明寫正在重新連上，不叫人重開（#2424）
+  if (ctx.termWaiting === true) return slot('window', WINDOW_LABEL.idle, TERM_WAITING_NOTE)
   const c = ctx.console ?? {}
   const why = consoleBlock(f, ctx.selfNode) || (f.status === 'offline' ? OFFLINE_WHY : '') || (ctx.api ? '' : '這個畫面不能切換視窗') || consoleStateWhy(c)
   const label = why ? WINDOW_LABEL.idle : c.visible ? WINDOW_LABEL.hide : WINDOW_LABEL.show
-  return slot('window', label, why)
+  // 確定不在終端裡：說明多帶一句怎麼辦（不再常駐在按鈕下方）
+  return { ...slot('window', label, why), note: !why && ctx.termNote ? String(ctx.termNote) : '' }
 }
 // 切換模型的查詢結果（Claude 視窗；右鍵選單開選單時就查）：沒給就只看查詢前的條件
 function modelQueryWhy(q) {
@@ -448,7 +451,7 @@ export const ActionBar = {
     const slotList = computed(() => barSlots(props.friend, {
       selfNode: props.selfNode, api: Boolean(props.api), callable: props.callable, console: cons,
       subagents: Boolean(props.api?.subagentsQuery), tasks: Boolean(props.api?.tasksQuery), subLabel: subView.value.label, ops: opsCtx, manageCount: opsAll.value.length,
-      term: !lite.value && props.term?.ready === true, termStuck: props.term?.ready === true && props.term?.stuck === true, termLabel: props.term?.label || '',
+      term: !lite.value && props.term?.ready === true, termStuck: props.term?.ready === true && props.term?.stuck === true, termLabel: props.term?.label || '', termWaiting: props.term?.waiting === true, termNote: props.term?.note || '',
     }).map(s => (props.blocked?.[s.key] ? { ...s, ok: false, reason: props.blocked[s.key], wake: false, ...(s.key === 'tasks' ? { count: 0, idle: 0 } : {}) } : s)))
     const slot = computed(() => Object.fromEntries(slotList.value.map(s => [s.key, s])))
     const showBar = computed(() => Boolean(props.api) || opsAll.value.length > 0 || (isRoom.value && props.group.length > 0))
@@ -615,7 +618,7 @@ export const ActionBar = {
     <button class="abtn" type="button" data-slot="call" :aria-disabled="slot.call.ok ? null : 'true'" aria-label="通話" :title="slot.call.ok ? CALL_TIP : slot.call.reason" @click="startCall">
       <img src="img/ab-call.svg" alt="" width="32" height="32"><span class="ab-name">通話</span>
     </button>
-    <button class="abtn" type="button" data-slot="window" :class="{ on: slot.window.term && termOn }" :aria-pressed="slot.window.term ? String(termOn) : null" :aria-disabled="slot.window.ok && (slot.window.wake || slot.window.term || !cons.busy) ? null : 'true'" :aria-label="slot.window.term ? termBtn.label : slot.window.label" :title="slot.window.ok ? (slot.window.wake ? WAKE_TIP : slot.window.term ? termTip : consoleView.tip) : slot.window.reason" @click="onWindow">
+    <button class="abtn" type="button" data-slot="window" :class="{ on: slot.window.term && termOn }" :aria-pressed="slot.window.term ? String(termOn) : null" :aria-disabled="slot.window.ok && (slot.window.wake || slot.window.term || !cons.busy) ? null : 'true'" :aria-label="slot.window.term ? termBtn.label : slot.window.label" :title="slot.window.ok ? (slot.window.wake ? WAKE_TIP : slot.window.term ? termTip : slot.window.note ? consoleView.tip + '（' + slot.window.note + '）' : consoleView.tip) : slot.window.reason" @click="onWindow">
       <img :src="slot.window.wake ? 'img/ab-wake.svg' : slot.window.term ? termBtn.icon : 'img/ab-window.svg'" alt="" width="32" height="32"><span class="ab-name">{{ slot.window.term ? termBtn.label : slot.window.label }}</span>
     </button>
     <div class="ab-wrap">

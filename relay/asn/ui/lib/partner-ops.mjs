@@ -4,6 +4,7 @@
 import { NAME_RE } from './mobile-launch.mjs'
 import { isRelayRoom } from './roster.mjs'
 import { closedReasonOf } from './partner-launch-ui.mjs'
+import { TERM_STATE_TEXT } from './term-entry.mjs'
 
 export const OPS = ['info', 'rename', 'model', 'close', 'handover', 'resume', 'restart', 'remove']
 // Claude 視窗：在線的五項；離線的只有「喚醒」
@@ -534,6 +535,9 @@ export function infoRows(result, friend = null) {
   const by = pick(r, 'opened_by', 'origin', 'launched_by')
   const byAsn = typeof r.by_asn === 'boolean' ? r.by_asn : by != null ? /^asn$/i.test(String(by)) : null
   if (byAsn != null) add('開啟方式', byAsn ? 'ASN 開的' : '自己開的')
+  // 終端狀態：和聊天頁上排第 2 格同一份（已接上／暫時接不回／確定不在），不會一邊說 ASN 開的、一邊叫人重開
+  const ts = pick(r, 'term_state')
+  if (typeof ts === 'string' && Object.hasOwn(TERM_STATE_TEXT, ts)) add('終端', TERM_STATE_TEXT[ts])
   const chain = pick(r, 'shell_chain', 'shell', 'ancestors')
   const names = (Array.isArray(chain) ? chain : typeof chain === 'string' ? chain.split(/\s*(?:→|>)\s*/) : [])
     .filter(x => typeof x === 'string' && x.trim()).slice(0, 8)
