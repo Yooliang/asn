@@ -51,7 +51,10 @@ pub use term_state::{TermState, TermStateInfo};
 /// ASN 自己的 WezTerm 設定檔內容（隔離，不讀使用者的 ~/.wezterm.lua）。
 /// exit_behavior = "Hold"：程式結束後視窗留著，讓人看得到最後的畫面；「程式已結束」由包裝殼印中文，WezTerm 自己的英文提示關掉。
 /// window_close_confirmation：按 X 直接關，不跳英文確認框（asn真 定案）
-pub(crate) const ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", window_close_confirmation = \"NeverPrompt\" }\n";
+/// automatically_reload_config = false：設定檔所在資料夾的 log、狀態檔一直在寫，WezTerm 的自動重讀監看會一直留下控制代碼（#2427）；ASN 的視窗不需要自動重讀。
+pub(crate) const ISOLATED_CONFIG: &str = "return { automatically_reload_config = false, exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", window_close_confirmation = \"NeverPrompt\" }\n";
+/// 0.2.105 以前寫的隔離設定：一個字不差才升級
+const PREV2_ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", window_close_confirmation = \"NeverPrompt\" }\n";
 /// 上一版寫的隔離設定：一個字不差才升級
 const PREV_ISOLATED_CONFIG: &str = "return { exit_behavior = \"Hold\" }\n";
 /// 0.1.113 寫的隔離設定（開關 ASN_TERM_WEZTERM 關著時照舊寫這份）
@@ -630,15 +633,20 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         WezTerm::new(dir.clone(), self.config_file.clone(), self.home.clone(), &self.runner, &self.fs)
     }
 
-    /// 隔離用的 WezTerm 設定。沒有才寫一份（避免吃到使用者的 `~/.wezterm.lua`）；舊版寫的空設定升級成帶 exit_behavior 的；
+    /// 隔離用的 WezTerm 設定。沒有才寫一份（避免吃到使用者的 `~/.wezterm.lua`）；舊版寫的空設定與 ASN 以前各版寫的隔離設定（一字不差才算，含 0.2.105 以前那版）升級成現在的；
     /// 其他已存在的內容不覆蓋（避免改到實驗中途寫過的內容）。
     #[cfg_attr(not(any(feature = "gui", test)), allow(dead_code))]
     fn ensure_config(&self) -> Result<(), String> {
         if self.config_file.is_file() {
             // 開關關著（hold_config=false）＝0.1.113 的空設定：已存在的不升級；
-            // 唯一例外（#611）：內容剛好等於第 1 階段寫的 ISOLATED_CONFIG（一個字不差）才改回空設定，其他內容（使用者改過的）一律不動
+            // 唯一例外（#611）：內容剛好等於 ASN 寫過的任一版隔離設定（一個字不差）才改回空設定，其他內容（使用者改過的）一律不動
+            // 開關開著：空設定或舊版隔離設定（含 0.2.105 以前那版）升級成現在的 ISOLATED_CONFIG
             let old = std::fs::read_to_string(&self.config_file).unwrap_or_default();
-            let ours_to_rewrite = if self.hold_config { old.trim() == OLD_DEFAULT_CONFIG || old == PREV_ISOLATED_CONFIG } else { old == ISOLATED_CONFIG || old == PREV_ISOLATED_CONFIG };
+            let ours_to_rewrite = if self.hold_config {
+                old.trim() == OLD_DEFAULT_CONFIG || old == PREV_ISOLATED_CONFIG || old == PREV2_ISOLATED_CONFIG
+            } else {
+                old == ISOLATED_CONFIG || old == PREV_ISOLATED_CONFIG || old == PREV2_ISOLATED_CONFIG
+            };
             if !ours_to_rewrite {
                 return Ok(());
             }
@@ -5867,6 +5875,42 @@ mod tests {
     }
 
     #[test]
+    fn 隔離設定與備援設定都關掉設定檔自動重讀_避免監看一直留下控制代碼() {
+        let want = "automatically_reload_config = false";
+        assert!(ISOLATED_CONFIG.contains(want), "#2427：設定檔資料夾的 log 一直在寫，自動重讀監看會一直留下控制代碼");
+        assert!(with_webgpu(ISOLATED_CONFIG).contains(want), "#2427：備援設定也要關掉自動重讀");
+    }
+
+    #[test]
+    fn 零點二一零五以前的隔離設定_開關開著升級成新版_關著改回空設定() {
+        for (hold, want) in [(true, ISOLATED_CONFIG), (false, LEGACY_CONFIG)] {
+            let d = tempfile::tempdir().unwrap();
+            let path = d.path().join("wezterm-term.lua");
+            std::fs::write(&path, PREV2_ISOLATED_CONFIG).unwrap();
+            let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
+            let mut svc = TermService::fixed(wezterm::WezTermDir { gui: Some("g".into()), cli: "c".into() }, path.clone(), d.path().join("t.json"), d.path().into(), runner, wezterm::RealFs);
+            svc.set_hold_config(hold);
+            svc.ensure_config().unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), want, "hold_config={hold}");
+        }
+    }
+
+    #[test]
+    fn 零點二一零五以前的隔離設定多一個鍵_視為使用者改過_不覆蓋() {
+        let mine = "return { exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", window_close_confirmation = \"NeverPrompt\", font_size = 12 }\n";
+        for hold in [true, false] {
+            let d = tempfile::tempdir().unwrap();
+            let path = d.path().join("wezterm-term.lua");
+            std::fs::write(&path, mine).unwrap();
+            let runner = FakeRunner { inner: Rc::new(fake_inner(vec![], "[]".into(), String::new())) };
+            let mut svc = TermService::fixed(wezterm::WezTermDir { gui: Some("g".into()), cli: "c".into() }, path.clone(), d.path().join("t.json"), d.path().into(), runner, wezterm::RealFs);
+            svc.set_hold_config(hold);
+            svc.ensure_config().unwrap();
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), mine, "使用者改過的不動，hold_config={hold}");
+        }
+    }
+
+    #[test]
     fn 開窗點開的_claude_視窗_對照表寫入_kind_與_session_id_參數原樣() {
         let rig = make(default_profiles(), vec![]);
         let spec = claude_spec(Some("sid-123"));
@@ -6050,7 +6094,7 @@ mod tests {
 
     #[test]
     fn 備援設定從隔離設定產生_只多一個_front_end() {
-        assert_eq!(with_webgpu(ISOLATED_CONFIG), "return { exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", window_close_confirmation = \"NeverPrompt\", front_end = \"WebGpu\" }\n");
+        assert_eq!(with_webgpu(ISOLATED_CONFIG), "return { automatically_reload_config = false, exit_behavior = \"Hold\", exit_behavior_messaging = \"None\", window_close_confirmation = \"NeverPrompt\", front_end = \"WebGpu\" }\n");
         assert_eq!(with_webgpu(LEGACY_CONFIG), "return { front_end = \"WebGpu\" }\n");
         // 隔離設定以後加了別的項目，備援設定要一起有（拿掉 front_end 就等於原本那份）
         let future = "return { exit_behavior = \"Hold\", enable_tab_bar = false }\n";
@@ -7703,6 +7747,7 @@ mod tests {
             rig.svc.view(&id).unwrap();
             let cfg = std::fs::read_to_string(&paths.config).unwrap();
             assert_eq!(cfg, mux::config_text(&paths.sock));
+            assert!(cfg.contains("automatically_reload_config = false"), "補寫後的設定檔也要關掉自動重讀，否則心跳檔變動會讓看畫面的程序一直留下控制代碼（#2427）");
             assert!(cfg.contains("no_serve_automatically = true"), "wezterm connect 不吃 --no-auto-start，要靠設定擋");
             assert!(cfg.contains("exit_behavior = \"Hold\"") && cfg.contains("exit_behavior_messaging = \"None\""), "結束時不印整串包裝指令，免得擠掉結束標記");
         }
