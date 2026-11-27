@@ -5,6 +5,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { AsnNote } from '../ui/lib/ui-kit.mjs'
+import { loginNote } from '../ui/lib/head-tone.mjs'
+import { mountComponent } from './helpers/render.mjs'
+
 const ui = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ui')
 const read = f => fs.readFileSync(path.join(ui, f), 'utf8').replace(/\r\n/g, '\n')
 const pane = read('lib/chatpane.mjs')
@@ -24,6 +28,23 @@ test('已停止的黃條：AsnNote 的 warn 橫幅，附「重開」鈕並接到
 
 test('已停止的黃條：重開不能按時退成不帶鈕的 info 說明，原本的說明字照舊看得到', () => {
   assert.match(pane, /<asn-note v-else-if="warn === 'stopped'" banner>[^<]*已停止，寄來的信不會處理（會收到一則說明）。要恢復請在夥伴管理按「重開」。<\/asn-note>/)
+})
+
+test('要重新登入：AsnNote 的 info 橫幅，沒有動作鈕，字說清楚到哪台電腦做什麼', async () => {
+  assert.match(pane, /<asn-note v-if="warn === 'login'" banner>\{\{ loginText \}\}<\/asn-note>/)
+  assert.doesNotMatch(pane, /<div class="warn" v-if="warn === 'login'">/, '舊的黃條拿掉')
+  const text = loginNote({ nick: '小明', device: '工作機', engine: 'gemini' })
+  assert.match(text, /請到「工作機」/)
+  assert.match(text, /agy/)
+  const m = mountComponent(AsnNote, { banner: true }, { slots: { default: () => text } })
+  try {
+    for (let i = 0; i < 4; i++) { await new Promise(r => setTimeout(r, 0)); await m.nextTick() }
+    const p = m.find('p.asn-note')
+    assert.ok(p.className.includes('asn-note-info') && p.className.includes('asn-note-banner'))
+    assert.equal(p.getAttribute('role'), 'note')
+    assert.ok(!p.querySelector('button'), '沒有動作鈕')
+    assert.match(p.textContent, /請到「工作機」/)
+  } finally { m.unmount() }
 })
 
 test('功能列的重開：只有管理選單那項「重開」能按才算，並且呼叫的就是 p:restart', () => {

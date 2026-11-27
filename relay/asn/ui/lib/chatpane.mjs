@@ -894,10 +894,7 @@ export const ChatPane = {
         <i>i</i>
         <span>{{ plain(friend.nick) }} 目前離線，訊息會先留在 ASN，對方上線後才收得到。</span>
       </div>
-      <div class="warn" v-if="warn === 'login'">
-        <i>i</i>
-        <span>{{ loginText }}</span>
-      </div>
+      <asn-note v-if="warn === 'login'" banner>{{ loginText }}</asn-note>
       <asn-note v-if="warn === 'stopped' && canReopen" kind="warn" banner action-label="重開" @action="reopenPartner">{{ plain(friend.nick) }} 已停止，寄來的信不會處理（會收到一則說明）。按「重開」就會恢復。</asn-note>
       <asn-note v-else-if="warn === 'stopped'" banner>{{ plain(friend.nick) }} 已停止，寄來的信不會處理（會收到一則說明）。要恢復請在夥伴管理按「重開」。</asn-note>
       <div class="msgs" data-toast-anchor="chat" ref="msgsEl" aria-live="polite" @scroll.passive="onScroll">
