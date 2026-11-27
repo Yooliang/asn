@@ -26,7 +26,7 @@ import { GRACE_AGAIN_LABEL, TYPING_ENDED_TEXT, createGrace } from './term-grace.
 import { RemoteInput, INPUT_LABEL, INPUT_TIP, INPUT_TEXT } from './term-remote-input.mjs'
 import { TERM_KEYS, KEYS_TEXT, joinWrapped, findLoginUrls } from './term-keys.mjs'
 import { confirmKindOf, confirmNoteOf } from './confirm-kind.mjs'
-import { STUCK_POLL_MS, TERM_BTN_MSG, createWaitPoll, TERM_BTN_TERM, askTermService, mTermToggle, restoreTop, scrollMemo, stuckCodeOf, stuckNote, termBaseOk, termEntry } from './term-entry.mjs'
+import { STUCK_POLL_MS, TERM_BTN_MSG, createWaitPoll, TERM_BTN_TERM, askTermService, mTermToggle, nextTermState, restoreTop, scrollMemo, stuckCodeOf, stuckNote, termBaseOk, termEntry } from './term-entry.mjs'
 import { headerPsm } from './tasks.mjs'
 import { CallView } from './call-view.mjs'
 import { ConfirmCards } from './group-sheet.mjs'
@@ -178,8 +178,7 @@ export const ChatPane = {
       if (!termBase.value) { termInService.value = null; return }
       if (!props.active) return
       const r = await askTermService(props.termViewApi, termViewName.value)
-      // 接不回的期間偶爾一次問不到（null）不改狀態：改成 null 會讓重查計時器停掉，之後再也不會亮起來
-      if (sameFriend(props.friend, f) && !(r === null && termInService.value === 'waiting')) termInService.value = r
+      if (sameFriend(props.friend, f)) termInService.value = nextTermState(termInService.value, r)
     }
     // 暫時接不回時定期重問：背景接回後，終端那格自己亮起來（變 ok／gone、切換夥伴、離開畫面都會停掉計時器）
     const waitPoll = createWaitPoll({ probe: () => probeTerm() })

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { TERM_BACK_TIP, TERM_LABEL, TERM_REOPEN_NOTE, TERM_STATE_TEXT, TERM_TIP, TERM_WAITING_NOTE, askTermService, restoreTop, scrollMemo, termButtonView, termEntry } from '../ui/lib/term-entry.mjs'
+import { TERM_BACK_TIP, TERM_LABEL, TERM_REOPEN_NOTE, TERM_STATE_TEXT, TERM_TIP, TERM_WAITING_NOTE, askTermService, nextTermState, restoreTop, scrollMemo, termButtonView, termEntry } from '../ui/lib/term-entry.mjs'
 import { infoRows } from '../ui/lib/partner-ops.mjs'
 import { WINDOW_LABEL, barSlots } from '../ui/lib/actionbar.mjs'
 import { TERM_VIEW_LOST } from '../ui/lib/term-view.mjs'
@@ -256,7 +256,7 @@ function pane(api) {
   const t = fakeTimers()
   const s = { state: null, calls: 0 }
   const poll = createWaitPoll({
-    probe: async () => { s.calls++; const r = await askTermService(api, '小乙'); if (r !== null || s.state !== 'waiting') s.state = r; poll.sync(s.state === 'waiting') },
+    probe: async () => { s.calls++; const r = await askTermService(api, '小乙'); s.state = nextTermState(s.state, r); poll.sync(s.state === 'waiting') },
     setTimer: t.setTimer, clearTimer: t.clearTimer,
   })
   return { t, s, poll, set(v) { s.state = v; poll.sync(v === 'waiting') } }
@@ -291,6 +291,24 @@ test('暫時接不回：變成確定不在也停；偶爾一次問不到不停�
   p.t.tick(); await settle()
   assert.equal(p.s.state, 'gone')
   assert.equal(p.t.count(), 0)
+})
+
+test('暫時接不回期間 api 回 null：狀態仍 waiting、輪詢不停；之後回 ok 變可按（聊天頁用同一個 nextTermState）', async () => {
+  const seq = [null, null, { state: 'ok' }]
+  const p = pane({ state: async () => seq.shift() ?? null })
+  p.set('waiting')
+  p.t.tick(); await settle()
+  p.t.tick(); await settle()
+  assert.equal(p.s.state, 'waiting', '問不到（null）不改狀態')
+  assert.equal(termEntry(true, p.s.state).waiting, true)
+  assert.equal(p.t.count(), 1, '輪詢不停')
+  p.t.tick(); await settle()
+  assert.equal(p.s.state, 'ok')
+  assert.equal(termEntry(true, p.s.state).term, true, '回 ok 後按鈕可按')
+  assert.equal(p.t.count(), 0)
+  assert.equal(nextTermState('waiting', null), 'waiting')
+  assert.equal(nextTermState('ok', null), null, '不在 waiting 時照回答')
+  assert.match(read('ui', 'lib', 'chatpane.mjs'), /termInService\.value = nextTermState\(termInService\.value, r\)/, '聊天頁用同一份')
 })
 
 test('暫時接不回：切換夥伴（狀態被清掉）或離開畫面後，舊計時器不再呼叫', async () => {

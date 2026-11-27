@@ -81,7 +81,7 @@ fn 開窗逾時_編號只是前綴相同的窗格_不互認() {
     assert!(matches!(&e, crate::launch::win_term::WinOpenError::Started(m) if m.contains("稍後會自己接回來")), "{e:?}");
     assert!(!rig.svc.partner_in_service("小乙"), "別的編號的窗格沒被認走");
     // 重試也不會把編號 12 的窗格認成編號 1：兩輪都沒有，才移除
-    let r = rig.svc.retry_parked();
+    let r = rig.svc.retry_parked_at(after_first());
     assert_eq!((r.restored, r.waiting), (0, 0));
     assert_eq!(state_of(&rig).state, TermState::Gone);
     assert_eq!(count_sub(&rig.runner, "kill-pane"), 0, "別人的窗格不關");
@@ -127,12 +127,52 @@ fn 開窗逾時_清單這一刻沒看到_先記成暫時接不回_再看一輪�
     assert_eq!(rig.svc.waiting_count(), 1);
     assert_eq!(ids_in_store(&rig.store).len(), 1, "寫進對照表");
     assert_eq!(kick_count(), 1, "放進暫時接不回之後要叫背景重試");
-    // 再看一輪（清單這次還是沒有）：連續兩輪沒有才移除，使用者的窗格仍沒被認走
-    let r = rig.svc.retry_parked();
+    // 再看一輪（隔滿 30 秒、清單這次還是沒有）：才移除，使用者的窗格仍沒被認走
+    let r = rig.svc.retry_parked_at(after_first());
     assert_eq!((r.restored, r.waiting), (0, 0));
     assert_eq!(state_of(&rig).state, TermState::Gone);
     assert!(ids_in_store(&rig.store).is_empty());
     assert_eq!(count_sub(&rig.runner, "kill-pane"), 0, "誰都不關");
+}
+
+/// 滿 [`RETRY_FIRST`] 之後的一個時間點（測試注入時間，不真的等）
+fn after_first() -> std::time::Instant {
+    std::time::Instant::now() + std::time::Duration::from_secs(31)
+}
+
+/// 二審：「再看一輪」要真的隔一段時間。停放後立刻跑一輪（例如叫醒馬上重試）不能移除；
+/// 滿 30 秒後仍沒看到才移除；滿 30 秒前窗格出現就接回
+#[test]
+fn 開窗逾時_清單沒看到_立刻再跑一輪不能移除_滿三十秒仍沒有才移除() {
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+    rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+    let now = std::time::Instant::now();
+    // 停放後立刻一輪（叫醒讓睡眠提早結束的情形）、以及未滿 30 秒：都不能移除
+    for secs in [0, 1, 29] {
+        let r = rig.svc.retry_parked_at(now + std::time::Duration::from_secs(secs));
+        assert_eq!((r.restored, r.waiting), (0, 1), "第 {secs} 秒不能移除");
+        assert_eq!(state_of(&rig).state, TermState::Waiting);
+        assert_eq!(ids_in_store(&rig.store).len(), 1);
+    }
+    let r = rig.svc.retry_parked_at(after_first() + std::time::Duration::from_secs(1));
+    assert_eq!((r.restored, r.waiting), (0, 0), "滿 30 秒仍沒有才移除");
+    assert_eq!(state_of(&rig).state, TermState::Gone);
+}
+
+#[test]
+fn 開窗逾時_未滿三十秒窗格出現_接回() {
+    let rig = partner_rig();
+    *rig.runner.inner.clean_err.borrow_mut() = Some(TIMEOUT.into());
+    *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+    rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+    let now = std::time::Instant::now();
+    assert_eq!(rig.svc.retry_parked_at(now).waiting, 1);
+    *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "", 9, 0);
+    let r = rig.svc.retry_parked_at(now + std::time::Duration::from_secs(20));
+    assert_eq!((r.restored, r.waiting), (1, 0));
+    assert_eq!(state_of(&rig).state, TermState::Ok);
 }
 
 #[test]
@@ -214,7 +254,7 @@ fn 暫時接不回的列_重試時只認_asn_自己命名的窗格_使用者自�
     let r = rig.svc.retry_parked();
     assert_eq!((r.restored, r.waiting), (0, 1));
     assert_eq!(state_of(&rig).state, TermState::Waiting, "待確認不提示重開");
-    let r = rig.svc.retry_parked();
+    let r = rig.svc.retry_parked_at(after_first());
     assert_eq!((r.restored, r.waiting), (0, 0));
     assert_eq!(state_of(&rig).state, TermState::Gone);
     assert!(ids_in_store(&rig.store).is_empty());
@@ -246,7 +286,7 @@ fn 三種狀態_已登記_暫時接不回_確定不在() {
     *rig.runner.inner.list_json.borrow_mut() = "[]".into();
     svc2.retry_parked();
     assert_eq!(svc2.partner_term_state("小乙").state, TermState::Waiting, "第一輪沒看到只是待確認，不提示重開");
-    svc2.retry_parked();
+    svc2.retry_parked_at(after_first());
     assert_eq!(svc2.partner_term_state("小乙").state, TermState::Gone);
     // 給畫面的是小寫字串
     assert_eq!(serde_json::to_value(TermStateInfo { state: TermState::Waiting, reason: String::new() }).unwrap()["state"], "waiting");

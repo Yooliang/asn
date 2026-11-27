@@ -43,8 +43,9 @@ pub(super) struct ParkInfo {
     /// 已經試過幾次（啟動時那一次算第 1 次）
     pub attempts: u32,
     pub reason: String,
-    /// 上一輪清單讀成功、但裡面沒有這個窗格（連續兩輪都沒有才移除；其他原因的接不回會把它清掉）
-    pub absent_once: bool,
+    /// 第一次「清單讀成功、但裡面沒有這個窗格」的時間。要距此已滿 [`RETRY_FIRST`]、而且這一輪仍沒看到才移除；
+    /// 時間條件放在列上，叫醒（kick）能讓重試提早跑，但不能讓移除提早。其他原因的接不回會把它清掉
+    pub absent_since: Option<Instant>,
     /// 從什麼時候開始接不回
     pub since: Instant,
     /// 上次寫「已經很久接不回」提醒的時間
@@ -53,7 +54,7 @@ pub(super) struct ParkInfo {
 
 impl Default for ParkInfo {
     fn default() -> Self {
-        ParkInfo { attempts: 0, reason: String::new(), absent_once: false, since: Instant::now(), last_notice: None }
+        ParkInfo { attempts: 0, reason: String::new(), absent_since: None, since: Instant::now(), last_notice: None }
     }
 }
 
@@ -122,7 +123,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             if restored.iter().any(|s| s.id == term.id) || parked.iter().any(|s| s.id == term.id) {
                 continue;
             }
-            match self.reclaim_row(&w, &dir, &term, false, &mut lists) {
+            match self.reclaim_row(&w, &dir, &term, None, Instant::now(), &mut lists) {
                 Row::Restored { session, probed } => {
                     if probed {
                         probed_now.insert(term.id.clone(), Instant::now());
@@ -130,13 +131,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                     restored.push(session);
                 }
                 r @ (Row::Waiting(_) | Row::Absent(_)) => {
-                    let (why, absent_once) = match r {
-                        Row::Absent(why) => (why, true),
-                        Row::Waiting(why) => (why, false),
+                    let (why, absent_since) = match r {
+                        Row::Absent(why) => (why, Some(Instant::now())),
+                        Row::Waiting(why) => (why, None),
                         _ => unreachable!(),
                     };
                     view_log(&format!("終端對照表：{}暫時接不回（第 1 次），保留這一列、稍後再試：{why}", row_label(&term)));
-                    infos.insert(term.id.clone(), ParkInfo { attempts: 1, reason: why, absent_once, ..ParkInfo::default() });
+                    infos.insert(term.id.clone(), ParkInfo { attempts: 1, reason: why, absent_since, ..ParkInfo::default() });
                     parked.push(term);
                 }
                 Row::Parked => parked.push(term),
@@ -173,9 +174,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 把暫時接不回的列再試一次。接回的從 parked 搬進 sessions（和啟動時認回同一個登記方式，前台／後台鈕就會恢復）；
     /// 確定不在的才移除；仍接不回的留著、累計次數、log 一行原因。同一個通訊檔這一輪只讀一次清單
     pub fn retry_parked(&self) -> RetryReport {
-        let rows: Vec<(StoreTerm, bool)> = {
+        self.retry_parked_at(Instant::now())
+    }
+
+    /// 同 [`Self::retry_parked`]，「現在」由呼叫端給（測試注入時間用，不用真的等）
+    pub(super) fn retry_parked_at(&self, now: Instant) -> RetryReport {
+        let rows: Vec<(StoreTerm, Option<Instant>)> = {
             let g = self.inner.lock().unwrap();
-            g.parked.iter().filter_map(|t| g.parked_info.get(&t.id).map(|i| (t.clone(), i.absent_once))).collect()
+            g.parked.iter().filter_map(|t| g.parked_info.get(&t.id).map(|i| (t.clone(), i.absent_since))).collect()
         };
         if rows.is_empty() {
             return RetryReport::default();
@@ -191,8 +197,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let mut lists: BTreeMap<PathBuf, Result<Vec<wezterm::PaneInfo>, String>> = BTreeMap::new();
         let outcomes: Vec<(StoreTerm, Row)> = rows
             .into_iter()
-            .map(|(t, absent_once)| {
-                let r = self.reclaim_row(&w, &dir, &t, absent_once, &mut lists);
+            .map(|(t, absent_since)| {
+                let r = self.reclaim_row(&w, &dir, &t, absent_since, now, &mut lists);
                 (t, r)
             })
             .collect();
@@ -221,8 +227,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                         let info = g.parked_info.entry(term.id.clone()).or_default();
                         info.attempts += 1;
                         info.reason = why.clone();
-                        // 連續兩輪都沒有才算；中間有別種接不回（例如讀不到清單）就重新數
-                        info.absent_once = absent;
+                        // 第一次沒看到的時間留著不動（滿 RETRY_FIRST 才移除）；中間有別種接不回（例如讀不到清單）就重新計時
+                        info.absent_since = if absent { info.absent_since.or(Some(now)) } else { None };
                         lines.push(format!("終端對照表：{}仍接不回（第 {} 次）：{why}", row_label(&term), info.attempts));
                         lines.extend(info.stale_note(&row_label(&term)));
                         report.waiting += 1;
@@ -255,10 +261,11 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// 3. 終端服務（mux）的 pid 檔記的已經是另一個服務，或原來那個服務確定已結束：窗格跟著服務結束了。
     /// 4. 窗格已結束（讀到帶暗號的結束標記）：正面證據，立刻移除。
     /// 5. 清單讀成功、裡面沒有這個窗格：清單是服務自己答的，但剛開的窗格一輪可能還沒出現、清單也可能剛好讀到一半，
-    ///    所以照 `sweep_missing` 的做法**連續兩輪**都沒有才移除（`prev_absent`＝上一輪就沒有）；第一輪只回 [`Row::Absent`]。
+    ///    所以要「距第一次沒看到已滿 [`RETRY_FIRST`]、而且這一輪仍沒看到」才移除（`absent_since`＝第一次沒看到的時間，`now`＝這一輪的時間）；
+    ///    未滿只回 [`Row::Absent`]（叫醒只會讓重試提早跑，不會讓移除提早）。
     ///
     /// 其餘（讀清單失敗或逾時、通訊檔暫時不在、pid 檔讀不到、查不到程序狀態、找不到終端服務的資料夾）都是暫時接不回。
-    pub(super) fn reclaim_row(&self, w: &WezTerm<'_>, dir: &WezTermDir, term: &StoreTerm, prev_absent: bool, lists: &mut BTreeMap<PathBuf, Result<Vec<wezterm::PaneInfo>, String>>) -> Row {
+    pub(super) fn reclaim_row(&self, w: &WezTerm<'_>, dir: &WezTermDir, term: &StoreTerm, absent_since: Option<Instant>, now: Instant, lists: &mut BTreeMap<PathBuf, Result<Vec<wezterm::PaneInfo>, String>>) -> Row {
         let gone = |why: &str| Row::Gone { why: why.to_string(), exited: None };
         // #611：開關關著（0.1.113 不認夥伴視窗的列）＝kind 不是空的列（第 1 階段留下的）一律 parked：留在檔案裡、不查不碰，等開關打開再認
         if park_companion_row(self.hold_config, term) {
@@ -328,9 +335,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 let exited = if !term.kind.is_empty() { partner_label(&term.id, &term.title).map(str::to_string) } else { None };
                 return Row::Gone { why: "窗格已經結束".to_string(), exited };
             }
-            // 只是清單裡沒有：連續兩輪才移除，第一輪先留著
-            return if prev_absent {
-                Row::Gone { why: "連續兩輪終端服務的窗格清單裡都沒有這一個".to_string(), exited: None }
+            // 只是清單裡沒有：距第一次沒看到滿 RETRY_FIRST 才移除，未滿先留著
+            let aged = absent_since.is_some_and(|t| now.saturating_duration_since(t) >= RETRY_FIRST);
+            return if aged {
+                Row::Gone { why: "終端服務的窗格清單裡持續沒有這一個".to_string(), exited: None }
             } else {
                 Row::Absent("終端服務的窗格清單裡暫時沒有這一個，下一輪再確認".to_string())
             };

@@ -70,6 +70,14 @@ export async function askTermService(api, name) {
   }
 }
 
+/**
+ * 問完終端狀態後，畫面上的狀態要改成什麼：接不回的期間偶爾一次問不到（null）不改狀態——
+ * 改成 null 會讓重查計時器停掉，之後再也不會亮起來。其他情形照回答
+ */
+export function nextTermState(current, answer) {
+  return answer === null && current === 'waiting' ? current : answer
+}
+
 const BOTTOM_SLACK = 2
 
 /** 打開終端前記下訊息列表的捲動位置（在底部的話記「在底部」，回來時新訊息也看得到） */

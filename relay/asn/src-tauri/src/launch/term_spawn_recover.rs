@@ -80,7 +80,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             let id = row.id.clone();
             g.parked.retain(|t| t.id != id);
             g.parked.push(row);
-            g.parked_info.insert(id, super::reclaim_rows::ParkInfo { attempts: 1, reason, absent_once, ..Default::default() });
+            g.parked_info.insert(id, super::reclaim_rows::ParkInfo { attempts: 1, reason, absent_since: absent_once.then(std::time::Instant::now), ..Default::default() });
         }
         if let Err(e) = self.persist() {
             elog!("開窗格逾時後寫不進終端對照表：{e}");

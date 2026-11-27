@@ -113,9 +113,9 @@ fn 原本直接丟掉的三種情況_現在保留並記原因_確定不在才移
     rig.svc.reclaim().unwrap();
     assert_eq!(rig.svc.waiting_count(), 1, "③第一輪沒有：先留著");
     assert_eq!(ids_in_store(&rig.store).len(), 1);
-    assert_eq!(rig.svc.retry_parked(), RetryReport { restored: 0, waiting: 0 });
+    assert_eq!(rig.svc.retry_parked_at(std::time::Instant::now() + RETRY_FIRST + Duration::from_secs(1)), RetryReport { restored: 0, waiting: 0 });
     assert_eq!(rig.svc.waiting_count(), 0);
-    assert!(ids_in_store(&rig.store).is_empty(), "③連續兩輪清單裡都沒有＝才移除");
+    assert!(ids_in_store(&rig.store).is_empty(), "③隔滿一段時間清單裡仍沒有＝才移除");
 }
 
 /// M3：清單讀成功但沒有那個窗格，照 `sweep_missing` 連續兩輪才移除；中間讀不到清單要重新數；中間又出現就接回
@@ -129,9 +129,10 @@ fn 清單沒有該窗格_連續兩輪才移除_中間讀不到清單重新數_�
     *rig.runner.inner.fail_substr.borrow_mut() = Some("list".into());
     assert_eq!(rig.svc.retry_parked(), RetryReport { restored: 0, waiting: 1 });
     *rig.runner.inner.fail_substr.borrow_mut() = None;
-    // 第 3 輪：又是第一次沒有，不能移除
-    assert_eq!(rig.svc.retry_parked(), RetryReport { restored: 0, waiting: 1 });
-    assert_eq!(ids_in_store(&rig.store).len(), 1, "中間讀不到清單過，不能算連續兩輪");
+    // 第 3 輪：又是第一次沒有（重新計時），即使離啟動已滿 30 秒也不能移除
+    let late = std::time::Instant::now() + RETRY_FIRST + Duration::from_secs(1);
+    assert_eq!(rig.svc.retry_parked_at(late), RetryReport { restored: 0, waiting: 1 });
+    assert_eq!(ids_in_store(&rig.store).len(), 1, "中間讀不到清單過，要重新計時");
     // 第 4 輪：窗格出現了：接回
     *rig.runner.inner.list_json.borrow_mut() = one_pane("asn-1", "ASN:1", 7, 1);
     assert_eq!(rig.svc.retry_parked(), RetryReport { restored: 1, waiting: 0 });
