@@ -27,6 +27,8 @@ import { LOCAL_KEYS } from '../ui/lib/local-prefs.mjs'
 import { LAUNCH_PREFS_FIELDS, ME_FIELDS_DESKTOP, ME_FIELDS_MOBILE, ME_FIELDS_PENDING, ONBOARD_FIELDS } from '../ui/lib/storage-keys.mjs'
 import { ITEM_NEEDS, isRegistered, missingCatNeeds, settingNeeds } from '../ui/lib/setting-needs.mjs'
 import { capsDesktop } from '../ui/shells/caps-desktop.mjs'
+import { lookItems } from '../ui/parts/look-panel.mjs'
+import { LOOK_CUSTOM } from '../ui/lib/look-info.mjs'
 import { capsAndroid } from '../ui/shells/caps-android.mjs'
 import { capsWeb } from '../ui/shells/caps-web.mjs'
 import { COLS, bridgeDefault, checkList, colOf, diffOps, dropRow, editRow, fmtErrors, parseList, parsePlatform, rustConst, rustDocs, scanOpLiterals } from './settings-list-check.mjs'
@@ -165,6 +167,9 @@ test('#1853 SETTING_OPS 跟元件原始碼實際送出的指令一致（含 tm-*
     ...scanOpLiterals(src('ui/lib/settings-panel.mjs')),
     ...scanOpLiterals(src('ui/lib/task-tree-view.mjs')),
     ...scanOpLiterals(src('ui/lib/quota-readers.mjs'), { opProps: true }),   // 帳號卡「⋯」選單的項目是 { op: '…' } 物件
+    // 「外觀」頁搬進共用元件 AsnLookPanel（#1763 C3）：選單的 op 名就是項目的 key，殼用 act(p.key, p.value) 轉送（test/look-panel.test.mjs 守著那一行）。
+    // 所以這裡改列「電腦殼實際傳給元件的項目」的 key，意圖不變：元件會送的指令都要登記在 SETTING_OPS
+    ...lookItems(capsDesktop, LOOK_CUSTOM.desktop).map(i => i.key),
   ])
   for (const op of ['tm-handover', 'tm-ask', 'tm-adopt', 'tm-view', 'tm-restart-ask', 'tm-restart-cancel', 'tm-restart-confirm']) assert.ok(sent.has(op), `掃不到 ${op}`)
   assert.deepEqual(diffOps(sent, SETTING_OPS), [])

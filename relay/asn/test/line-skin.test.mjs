@@ -51,13 +51,25 @@ test('設定頁摘要（#1547）：LINE 外觀不列被藏起來的頭像、底�
   assert.match(modern, /^現代/); assert.match(modern, /頭像左/); assert.doesNotMatch(modern, /工具列/)
 })
 
-test('設定頁（#1547）：被當前外觀用不到的選項整個藏起來，不再變灰加說明；選單顯示存檔的原值', () => {
+test('設定頁（#1547）：被當前外觀用不到的選項整個藏起來，不再變灰加說明；選單顯示存檔的原值', async () => {
   const panel = read('ui/lib/settings-panel.mjs')
   assert.doesNotMatch(panel, /:disabled="st\.skin === '(line|modern)'"/, '不再用變灰')
   assert.doesNotMatch(panel, /set-note-(dp|bubble|toolbar)/, '不再有變灰的說明')
-  for (const [label, key] of [['頭像模式', 'dpMode'], ['工具列位置', 'toolbar'], ['文字底色', 'bubble'], ['分頁依', 'tabDim']]) assert.ok(panel.includes(`<label v-if="lookShows(st.skin, '${key}')">${label}
-`), `${label} 依外觀藏起來`)
-  assert.match(panel, /:value="st\.dpMode"/); assert.match(panel, /:value="st\.bubble"/)
+  // 「外觀」頁已搬進共用元件 AsnLookPanel（#1763 C3）：原本比對原始碼字串的那幾行，改成真的掛載電腦設定頁，數畫出來的選單（意圖不變：LINE 藏頭像、底色、分頁依；選單顯示存檔的原值）
+  const { SettingsPanel } = await import('../ui/lib/settings-panel.mjs')
+  const { mountComponent } = await import('./helpers/render.mjs')
+  const st0 = { skin: 'line', frame: 'custom', mode: 'merged', dpMode: 'right', toolbar: 'bottom', bubble: 'color', tabDim: 'engine', groupDim: 'device' }
+  const ml = mountComponent(SettingsPanel, { st: st0, catKey: 'look' })
+  try {
+    for (const label of ['頭像模式', '文字底色', '分頁依']) assert.equal(ml.find(`select[aria-label="${label}"]`), null, `${label} 在 LINE 下藏起來`)
+    for (const label of ['視窗外框', '視窗模式', '工具列位置', '分組依']) assert.ok(ml.find(`select[aria-label="${label}"]`), `${label} 在 LINE 下還在`)
+  } finally { ml.unmount() }
+  const ma = mountComponent(SettingsPanel, { st: { ...st0, skin: 'aero' }, catKey: 'look' })
+  try {
+    assert.equal(ma.find('select[aria-label="頭像模式"]').value, 'right', '選單顯示存檔的原值（頭像模式）')
+    assert.equal(ma.find('select[aria-label="文字底色"]').value, 'color', '選單顯示存檔的原值（文字底色）')
+  } finally { ma.unmount() }
+  assert.match(read('ui/parts/look-panel.mjs'), /lookShows\(props\.skin, i\.key\)/, '藏起來的規則是 settings-cats 的 lookShows，沒有另寫一份')
   const st = { skin: 'line', dpMode: 'left', bubble: 'none' }
   assert.deepEqual([effectiveLook(st.skin, st).dpMode, effectiveLook(st.skin, st).bubble], ['inline', 'auto'], '對話畫面仍用 effectiveLook 的有效值')
   assert.deepEqual(st, { skin: 'line', dpMode: 'left', bubble: 'none' }, '快照沒被改')

@@ -60,13 +60,15 @@ test('樣式表：modern.css 每一條規則都限定在 :root[data-skin="modern
 
 test('設定接線：電腦「設定 → 外觀」最上面二選一、存在 me 存檔、選了馬上套用；手機「設定」多一類「外觀」，存在 mobilePrefs', () => {
   const panel = read('ui/lib/settings-panel.mjs'), list = read('ui/list.js'), m = read('ui/m.js'), mh = read('ui/m.html')
-  assert.match(panel, /<template v-if="catKey === 'look'">\n\s*<!--[^\n]*-->\n\s*<fieldset class="skin-pick" aria-label="外觀">/, '外觀選項在外觀分類的最上面')
-  assert.match(panel, /@change="act\('skin', k\)"/)
+  // 外觀頁搬進共用元件 AsnLookPanel（#1763 C3）：原本比對原始碼的兩行，改成殼接線（外觀頁用元件、選外觀送 act('skin', k)）加真的掛載（外觀三選一在最上面、選了送 skin）
+  assert.match(panel, /<template v-if="catKey === 'look'">\n\s*<!--[^\n]*-->\n\s*<asn-look-panel [^>]*@skin="k => act\('skin', k\)"/, '外觀選項在外觀分類的最上面')
+  assert.match(read('ui/parts/look-panel.mjs'), /<asn-skin-picker v-if="hasSkin"[^\n]*\n\s*<label v-for="o in shown"/, '元件裡外觀三選一排在其他選單之前')
   assert.match(list, /const skin = ref\(applySkin\(savedMe\.skin\)\)/); assert.match(list, /watch\(skin, v => \{ applySkin\(v\); void emit\('asn:skin', normalizeSkin\(v\)\) \}\)/)
   assert.match(list, /case 'skin': skin\.value = normalizeSkin\(value\); break/)
   assert.match(list, /skin: skin\.value, frame: frame\.value, mode: ui\.mode/, '設定快照帶外觀（分離模式的設定視窗也看得到）')
   assert.match(m, /watch\(\(\) => prefs\.skin, v => applySkin\(v\), \{ immediate: true \}\)/)
-  assert.match(mh, /<template v-else-if="settingCat === 'look'">[\s\S]*?v-model="prefs\.skin"/)
+  assert.match(mh, /<template v-else-if="settingCat === 'look'">[\s\S]*?<asn-look-panel [^>]*:skin="prefs\.skin"[^>]*@skin="setSkin"/)
+  assert.match(m, /setSkin = k => \{ prefs\.skin = k \}/, '選外觀寫 prefs.skin（跟原本的 v-model 一樣）')
 })
 
 test('skin-boot.js 認得的外觀清單與 lib/skin.mjs 的 SKINS 一致（兩份各自維護，加外觀漏改一邊就會紅）', () => {

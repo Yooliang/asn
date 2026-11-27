@@ -83,7 +83,7 @@ import { REPLACE_TEXT, createReplaceFlow, newReplaceState, syncAfterReplace } fr
 import { HOME_TAB, chatNav, isNewNotice, noticeLastAt, noticeUnread, tabDot, viewedChatId } from './lib/mobile.mjs'
 import { emo, plain } from './lib/text.mjs'
 import { headTone } from './lib/head-tone.mjs'
-import { applySkin, SKINS, SKIN_LABEL } from './lib/skin.mjs'
+import { applySkin } from './lib/skin.mjs'
 import { UNREAD_GROUP_KEY, UNREAD_GROUP_LABEL, chatListRows, lastTrafficAt, chatRowsUnread, showUnreadGroup, unreadChatRows } from './lib/recent.mjs'
 import { friendMatchesQuery, normalizeSearchQuery } from './lib/search.mjs'
 import { watchAndroidUpdateProgress } from './lib/progress-events.mjs'
@@ -107,6 +107,8 @@ import { ReloginBar, ROSTER_CONNECTING_TEXT, ROSTER_LOAD_FAIL_TEXT, createRelogi
 import { ABOUT_LOG_VIEWER, aboutView, isAboutUrl } from './lib/about-info.mjs'
 import { AsnAboutPanel } from './parts/about-panel.mjs'
 import { AsnNotifyPanel, notifyItems } from './parts/notify-panel.mjs'
+import { AsnLookPanel, lookItems } from './parts/look-panel.mjs'
+import { LOOK_CUSTOM, MOBILE_FIXED_LOOK } from './lib/look-info.mjs'
 import { GUIDE_ENTRY_LABEL, GUIDE_ENTRY_SUB, phoneGuide, phoneGuideList } from './lib/mobile-guides.mjs'
 import { ACCT_SETTING_KEYS, mobileSettingRows, mobileSettingTitle } from './lib/mobile-settings.mjs'
 import { PAGE_TAB, FOURTH_KEEP_MS, LEAVE_ASK_TEXT, acctPage, fourthExpired, fourthMsLeft, guidePage, launchPage, needsLeaveAsk, pageIcon, settingPage } from './lib/mobile-fourth.mjs'
@@ -841,6 +843,9 @@ const app = createApp({
     const openAboutLink = url => { if (isAboutUrl(url)) openLink(url)?.catch(e => console.info('[ASN] 開啟連結失敗', String(e?.message ?? e))) }   // 交給系統瀏覽器（Rust 端 open_link 只放行 http／https）
     const notifyList = notifyItems(capsAndroid), notifyLayout = ATTRS_ANDROID.layout   // 「提醒與聲音」頁的項目（由手機的能力表算出）與版面；prefs.vibrate*、推播開關的接線留在這裡（元件只發事件）
     const setNotifyPref = ({ key, on }) => { prefs[key] = on === true }
+    // 「外觀」頁：項目由手機的能力表與 LOOK_CUSTOM.mobile（設定值清單：自訂選項手機「無（未做）」，所以只有外觀三選一）算出；選外觀直接寫 prefs.skin。
+    // 對話窗固定的三個值（頭像模式、文字底色、工具列位置）原本寫死在 m.html，現在取自 MOBILE_FIXED_LOOK（值照舊）
+    const lookList = lookItems(capsAndroid, LOOK_CUSTOM.mobile), lookLayout = ATTRS_ANDROID.layout, setSkin = k => { prefs.skin = k }, fixedLook = MOBILE_FIXED_LOOK
     const aboutLayout = ATTRS_ANDROID.layout, aboutLogViewer = ABOUT_LOG_VIEWER.mobile   // 「關於」頁版面與「記錄」卡（手機沒有，見設定值清單 open-ui-log 那一列）
     // 官網、隱私權政策開瀏覽器（openAboutLink）；版本紀錄＝「更新」頁（openSetting('update')）、使用指引＝指引頁（openGuides），都在 App 內；事件在 m.html 的 asn-about-panel 上接
     const openGuides = () => askBeforeLeave(guidePage(), () => fourthNav.openPage(guidePage()))
@@ -1814,7 +1819,7 @@ const app = createApp({
       screen, fatal, login, loginNote, PROVIDERS, canStart, startLogin, cancelLogin, reloginBar, dismissReloginBar, goLogin, backFromLogin,
       upd, updText: computed(() => bannerText(upd)), updButton: computed(() => buttonLabel(upd)), startUpdate, checkUpdate, sideloadLast: sideloadLastText(bridge),
       pf, sw, pagerStyle, pagerMoved, indicator, swipeStart, swipeMove, swipeEnd, goTab, tabs, curTab, pages, TAB_LABEL, tabLabel, fourthPage, pageSlot, fourthTitle, closePage, myName, meForChat, lastOf,
-      pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), notifyList, notifyLayout, setNotifyPref, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
+      pushView: computed(() => pushSettingView(pushSt.state, prefs.push)), notifyList, notifyLayout, setNotifyPref, lookList, lookLayout, setSkin, fixedLook, setPush: on => { prefs.push = on === true; if (on === true) push?.enable(); else void push?.disable() },
       listTimeText, nav, me, prefs, conn, query, collapsed, groups, unreadTotal, emptyText, MY_STATUS: MY_STATUS_OPTIONS, friendStatusText, headTone, CONN_LABEL, info, banner, shake, refreshing,
       sec, SECRET_TEXT, secCountdown, answerSecret, laterSecret,
       pq, PERMREQ_TEXT, permSegs, permOpts, permRisk, permTrunc, permHold, permPress, permHoldStart, permHoldKey, permReqTitle, permShownTitle, permHeld, HELD_HINT, decidePermReq, laterPermReq,
@@ -1828,7 +1833,7 @@ const app = createApp({
       leaveAsk, answerLeave, LEAVE_ASK_TEXT, leaveText,
       friends, callApi, dictApi, speakApi, readVoices, onCallState, openChat, back, openBanner, bannerHandover, contextLabel, elevatedBadge, sendTo, nudgeTo, sendAttachTo, loadOlder, refreshAll,
       cloud, cloudSt, CLOUD_TEXT, CLOUD_COPY_NOTE, CLOUD_INVITE_NOTE,
-      SKINS, SKIN_LABEL, settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGos, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
+      settingRows, settingCat, settingTitle, openSetting, replaceSt, replaceCards, replacePick, replaceDo, replaceKeep, REPLACE_TEXT, noticeGos, goNotice, noticeChat, noticeLog, tabHasDot, rel, relLog, relNote, loadRel, RETRY_LABEL, playView, playNewText, rowHasDot, openPlay, PLAY_BUTTON_LABEL, PLAY_LATEST_TEXT, PLAY_NOTICE_NOT_AUTO, avBusy, avMsg, avFile, selfHasUpload, pickAvatar, removeAvatar, accountText, loggingOut, doLogout,
     }
   },
 })
@@ -1846,6 +1851,7 @@ app.component('ptr-zone', PtrZone)
 app.component('relogin-bar', ReloginBar)
 app.component('AsnAboutPanel', AsnAboutPanel)
 app.component('AsnNotifyPanel', AsnNotifyPanel)
+app.component('AsnLookPanel', AsnLookPanel)
 for (const [name, comp] of Object.entries(UI_KIT)) app.component(name, comp)
 app.mount('#app')
 // 根元素（#app）自己的屬性不在 Vue 編譯的樣板裡，:class 綁不上去；登入畫面的背景類別在這裡手動切

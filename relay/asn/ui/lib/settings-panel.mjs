@@ -9,20 +9,19 @@ import { ACTION_TEXT } from './device-order.mjs'
 import { AsnDialog } from './dialog.mjs'
 import { NAME_MAX, deviceNameError, joinKnown, removedDevices, shortFp } from './device-known.mjs'
 import { AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL } from './voice-prefs.mjs'
-import { BUBBLES, BUBBLE_LABEL, DP_LABEL, DP_MODES, MODES, MODE_LABEL, TOOLBARS, TOOLBAR_LABEL } from './merge.mjs'
-import { SKINS, SKIN_LABEL } from './skin.mjs'
-import { CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL } from './prefs.mjs'
-import { DIMS, groupOptions } from './dims.mjs'
+import { CLOSE_CHOICES, CLOSE_LABEL } from './prefs.mjs'
 import { LoginPanel, LogoutPanel } from './login-panel.mjs'
 import { CloudInvitePanel } from './cloud-invite.mjs'
 import { modStatusLine } from './mod-line.mjs'
 import { accountLine, INCOMPLETE_LABEL, INCOMPLETE_REASON, loginIncomplete, usableAtText } from './claude-accounts.mjs'
-import { catByKey, lookShows, normalizeCatKey } from './settings-cats.mjs'
+import { catByKey, normalizeCatKey } from './settings-cats.mjs'
 import { vendorIconSvg } from './vendor-icons.mjs'
 import { USAGE_NOTE } from './usage.mjs'
 import { ABOUT_LOG_VIEWER, aboutView } from './about-info.mjs'
 import { AsnAboutPanel } from '../parts/about-panel.mjs'
 import { AsnNotifyPanel, notifyItems } from '../parts/notify-panel.mjs'
+import { AsnLookPanel, lookItems } from '../parts/look-panel.mjs'
+import { LOOK_CUSTOM } from './look-info.mjs'
 import { capsDesktop } from '../shells/caps-desktop.mjs'
 import { ATTRS_DESKTOP } from '../shells/platform-attrs.mjs'
 import { NO_QUOTA_TEXT, planLabel } from './account-quota.mjs'
@@ -48,7 +47,7 @@ export const SETTING_OPS = [
 ]
 
 export const SettingsPanel = {
-  components: { ...UI_KIT, AsnAboutPanel, AsnNotifyPanel, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpMark, DeviceIdentity, TaskTree },
+  components: { ...UI_KIT, AsnAboutPanel, AsnNotifyPanel, AsnLookPanel, AsnDialog, LoginPanel, LogoutPanel, CloudInvitePanel, FpMark, DeviceIdentity, TaskTree },
   props: { title: { type: String, default: '' }, st: { type: Object, required: true }, catKey: { type: String, required: true }, meAv: { type: String, default: '' }, dev: { type: String, default: '' }, askRemove: { type: Boolean, default: false } },
   emits: ['act', 'avatar-file'],
   setup(props, { emit }) {
@@ -137,6 +136,7 @@ export const SettingsPanel = {
     const act = (op, value) => emit('act', op, value)
     const about = computed(() => aboutView({ deviceName: props.st.deviceName }))
     const notifyList = notifyItems(capsDesktop), notifyLayout = ATTRS_DESKTOP.layout   // 「提醒與聲音」頁的項目（由電腦的能力表算出）與版面
+    const lookList = lookItems(capsDesktop, LOOK_CUSTOM.desktop), lookLayout = ATTRS_DESKTOP.layout   // 「外觀」頁的項目（由電腦的能力表與設定值清單的平台欄算出）與版面
     const aboutLayout = ATTRS_DESKTOP.layout, aboutLogViewer = ABOUT_LOG_VIEWER.desktop   // 「關於」頁版面與「記錄」卡（有沒有看設定值清單 open-ui-log 那一列）
     // 帳號卡片的設備列（#2111 ②）：一台一列，列的狀態由共用的 accountDeviceRows 決定（手機同一個函式）。
     // 按下「切換」＝交給樞紐（row-switch）：該列顯示「切換中…」，結果在那一列下方原位顯示（#2111 ③；狀態在 st.accounts.rowSwitch，手機用同一份流程與文字）
@@ -209,11 +209,11 @@ export const SettingsPanel = {
     const pickFile = ev => { const f = ev.target.files?.[0]; ev.target.value = ''; if (f) emit('avatar-file', f) }
     return { LAUNCH_MAX_NOTE, TM, openTasks, KNOWN, deskFpMark, groupFp, shortFp, NAME_MAX, deviceNameError, view, setView, curBlocked, blockedKey, deviceFp, IDENTITY_TEXT, ACTION_TEXT, canShowBackRow, openInfo, renaming, renameText, renameErr, renameStart, renameCancel, renameSave, joined, removed, curKnown, forgetBox, forget, gripKey, rowLine,
       accountCardKey, accountStatusOf, QUOTA_TEXT, quotaGuideFor, shareKey, vendorSections, mmEmail, mmKey, mmOpen, addMinimax, devRows, rowResult, pickMenu, pressShareYes, accountMenuItems, shareConfirmOf, accountInUseOf, loginLostOf, SUB_LAPSED_TEXT, loginNotices, reloginHere, LOGIN_LOST_TEXT, busyNow, pressDev, DEVICE_BUTTON_TEXT, DEVICE_ROW_TEXT,
-      fileEl, act, notifyList, notifyLayout, about, aboutLayout, aboutLogViewer, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, groupOptions, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
+      fileEl, act, notifyList, notifyLayout, about, aboutLayout, aboutLogViewer, modLine: modStatusLine, pickFile, USAGE_NOTE, accountLine, termServerNote, termFetchLine, TERM_SERVER_MISSING_NOTE, termServerWhyLine, keyProtectionNote,
       rp, REPLACE_TEXT, cat, catIcon, ROSTER_TEXT, usedOnText, DESK_RELOGIN_TEXT, switchTargets, devs, curDev, askRemove, backToList, removeNow, dragKey, overKey, overAfter, clearDrag, dragStart, dragOver, drop, DEVICE_TEXT, canRemoveRow, vendorIcon: vendorIconSvg, NO_QUOTA_TEXT, planLabel, isIncomplete: loginIncomplete, INCOMPLETE_LABEL, INCOMPLETE_REASON, usableAt: a => usableAtText(a),
       AUTO_CHOICES, AUTO_LABEL, STT_LANGS, STT_LANG_LABEL, STT_MODELS, STT_MODEL_LABEL,
-      MODES, MODE_LABEL, DP_MODES, DP_LABEL, TOOLBARS, TOOLBAR_LABEL, BUBBLES, BUBBLE_LABEL, SKINS, SKIN_LABEL, lookShows,
-      CLOSE_CHOICES, CLOSE_LABEL, FRAMES, FRAME_LABEL, DIMS,
+      lookList, lookLayout,
+      CLOSE_CHOICES, CLOSE_LABEL,
     }
   },
   template: `<div class="list settings panel-set">
@@ -545,35 +545,8 @@ export const SettingsPanel = {
         </div>
       </template>
       <template v-if="catKey === 'look'">
-        <!-- 外觀（0.2.18）：復古 Aero／現代，0.2.22 起加 LINE 風格（三選一），兩套是同一份畫面，只換樣式與圖示；切換馬上生效、不用重開 -->
-        <fieldset class="skin-pick" aria-label="外觀">
-          <legend>外觀</legend>
-          <label v-for="k in SKINS" :key="k" class="skin-opt" :class="{ on: (st.skin || 'aero') === k }">
-            <span class="skin-mini" :class="'skin-mini-' + k" aria-hidden="true"><i></i><b></b></span>
-            <span class="chk"><input type="radio" name="skin" :value="k" :checked="(st.skin || 'aero') === k" @change="act('skin', k)" /><span>{{ SKIN_LABEL[k] }}</span></span>
-          </label>
-        </fieldset>
-        <label>視窗外框
-          <select class="set-sel" :value="st.frame" @change="act('frame', $event.target.value)" aria-label="視窗外框"><option v-for="f in FRAMES" :key="f" :value="f">{{ FRAME_LABEL[f] }}</option></select>
-        </label>
-        <label>視窗模式
-          <select class="set-sel" :value="st.mode" @change="act('mode', $event.target.value)" aria-label="視窗模式"><option v-for="m in MODES" :key="m" :value="m">{{ MODE_LABEL[m] }}</option></select>
-        </label>
-        <label v-if="lookShows(st.skin, 'dpMode')">頭像模式
-          <select class="set-sel" :value="st.dpMode" @change="act('dpMode', $event.target.value)" aria-label="頭像模式"><option v-for="m in DP_MODES" :key="m" :value="m">{{ DP_LABEL[m] }}</option></select>
-        </label>
-        <label v-if="lookShows(st.skin, 'toolbar')">工具列位置
-          <select class="set-sel" :value="st.toolbar" @change="act('toolbar', $event.target.value)" aria-label="工具列位置"><option v-for="b in TOOLBARS" :key="b" :value="b">{{ TOOLBAR_LABEL[b] }}</option></select>
-        </label>
-        <label v-if="lookShows(st.skin, 'bubble')">文字底色
-          <select class="set-sel" :value="st.bubble" @change="act('bubble', $event.target.value)" aria-label="文字底色"><option v-for="b in BUBBLES" :key="b" :value="b">{{ BUBBLE_LABEL[b] }}</option></select>
-        </label>
-        <label v-if="lookShows(st.skin, 'tabDim')">分頁依
-          <select class="set-sel" :value="st.tabDim" @change="act('tabDim', $event.target.value)" aria-label="分頁依"><option v-for="d in DIMS" :key="d.key" :value="d.key">{{ d.label }}</option></select>
-        </label>
-        <label>分組依
-          <select class="set-sel" :value="st.groupDim" @change="act('groupDim', $event.target.value)" aria-label="分組依"><option v-for="d in groupOptions(st.tabDim)" :key="d.key" :value="d.key">{{ d.label }}</option></select>
-        </label>
+        <!-- 外觀（0.2.18）：復古 Aero／現代，0.2.22 起加 LINE 風格（三選一），兩套是同一份畫面，只換樣式與圖示；切換馬上生效、不用重開。畫面在共用元件 AsnLookPanel（#1763 C3） -->
+        <asn-look-panel :items="lookList" :skin="st.skin" :values="st" :layout="lookLayout" @skin="k => act('skin', k)" @pick="p => act(p.key, p.value)"></asn-look-panel>
       </template>
       <template v-if="catKey === 'window'">
         <label>關閉視窗時
