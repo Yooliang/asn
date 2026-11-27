@@ -7,6 +7,8 @@
 
 const NOTICE = '使用者環境變數裡有 ASN 不傳給夥伴的變數（ASN_RELAY_KEY）。Claude 夥伴不會收到；建議移到別處'
 
+const SETTINGS_ME = { winMode: 'merged', session: { v: 1, tabs: [{ id: '@setting' }], active: { id: '@setting' }, panel: { guide: '', setting: 'window' }, windows: [], panelWindows: [] } }
+
 export const listnotesProbeSource = ({ listnotes }) => `(async () => {
   try {
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -24,17 +26,6 @@ export const listnotesProbeSource = ({ listnotes }) => `(async () => {
     return { ok: true, why: '' };
   }
   if (kind === 'env-settings') {
-    const find = (vn, d) => {
-      if (!vn || d > 60) return null;
-      const comp = vn.component;
-      if (comp) { const st = comp.setupState; if (st && 'openPanel' in st) return comp; const r = find(comp.subTree, d + 1); if (r) return r }
-      if (Array.isArray(vn.children)) for (const ch of vn.children) { const r = find(ch, d + 1); if (r) return r }
-      return null;
-    };
-    const root = document.querySelector('#app')?._vnode;
-    const host = root && find(root, 0);
-    if (!host) return { ok: false, why: '找不到有 openPanel 的元件' };
-    await host.setupState.openPanel('setting', 'window');
     const row = await wait(() => [...document.querySelectorAll('label.chk')].find(e => vis(e) && (e.textContent || '').includes('夥伴共用同一個終端服務')), 60);
     if (!row) return { ok: false, why: '設定頁終端區沒有出現「夥伴共用同一個終端服務」' };
     row.scrollIntoView({ block: 'center' });
@@ -59,9 +50,14 @@ export default {
   kind: '名單頁提示搬家檢查',
   source: probe => listnotesProbeSource(probe),
   scenarios: [scenario('list-notes-env', 'env-list'), scenario('list-notes-env-settings', 'env-settings')],
-  table: scenario => {
+  table: (scenario, t) => {
     if (!scenario.state.listnotes) return undefined
+    // 設定頁終端區：整合模式、直接開在「@setting」分頁的「window」類別
+    const store_load = scenario.state.listnotes === 'env-settings'
+      ? { ...t.store_load, values: { ...t.store_load.values, me: JSON.stringify(SETTINGS_ME) } }
+      : t.store_load
     return {
+      store_load,
       term_env_notice: NOTICE,
       bridge_status: { enabled: true, running: true, term_server: true, term_server_supported: true, term_server_active: true, term_server_why: '' },
     }
