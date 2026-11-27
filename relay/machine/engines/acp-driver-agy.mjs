@@ -30,6 +30,7 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
   let resumeLost = false
   let cur = null
   let buf = ''
+  let lineNo = 0
   let stderrTail = []
   let exitCb = () => {}
   let killedBy = null
@@ -59,6 +60,14 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
       log(`agy 工具步驟解讀或檢查出錯，當成沒通過 → kill agy：${name}（${kind}）`)
       kill('violation')
     }
+  }
+
+  // 解析不了的行：事後才看工具步驟，這一行的步驟沒經過讀取檢查，當成沒通過、整輪中止。只記行號、長度、類別，不記內容
+  function onUnparsed(len, kind) {
+    log(`agy 輸出第 ${lineNo} 行無法解讀（長度 ${len}，${kind}）${cur ? ' → kill agy' : '，目前沒有進行中的一輪，略過'}`)
+    if (!cur) return
+    if (!cur.violation) cur.violation = { reason: '工具步驟無法解讀，這一輪已中止', summary: '工具步驟無法解讀' }
+    kill('violation')
   }
 
   function handleStep(s) {
@@ -118,9 +127,16 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
           while ((i = buf.indexOf('\n')) >= 0) {
             const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1)
             if (!line) continue
-            try { onEvent(JSON.parse(line)) } catch (e) { if (!(e instanceof SyntaxError)) log(`agy event handler failed: ${e.message}`) }
+            lineNo++
+            // 解碼出替換字元＝原始位元組不是有效文字，跟解析失敗同樣處理
+            let ev
+            if (line.includes('�')) { onUnparsed(line.length, 'InvalidEncoding'); continue }
+            try { ev = JSON.parse(line) } catch (e) { onUnparsed(line.length, String(e?.name ?? 'Error')); continue }
+            try { onEvent(ev) } catch (e) { log(`agy event handler failed: ${e.message}`) }
           }
         })
+        // 讀取串流本身出錯：記 log、結束這一輪與行程，不能讀取停了行程還活著
+        p.stdout.on('error', e => { log(`agy 輸出讀取出錯 → kill agy（${String(e?.name ?? 'Error')}）`); kill('stream') })
         p.stderr.on('data', d => { stderrTail = [...stderrTail, String(d).trim().slice(0, 300)].slice(-5) })
         p.stdin.on('error', () => {})
         p.once('spawn', resolve)
