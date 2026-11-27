@@ -25,6 +25,10 @@ import { LAUNCH_INSTALL_BTN } from '../ui/lib/flags.mjs'
 import { RESUME_WAIT_MS, ASN_RESTART_WAIT_MS } from '../ui/lib/task-manager.mjs'
 import { LOCAL_KEYS } from '../ui/lib/local-prefs.mjs'
 import { LAUNCH_PREFS_FIELDS, ME_FIELDS_DESKTOP, ME_FIELDS_MOBILE, ME_FIELDS_PENDING, ONBOARD_FIELDS } from '../ui/lib/storage-keys.mjs'
+import { ITEM_NEEDS, isRegistered, missingCatNeeds, settingNeeds } from '../ui/lib/setting-needs.mjs'
+import { capsDesktop } from '../ui/shells/caps-desktop.mjs'
+import { capsAndroid } from '../ui/shells/caps-android.mjs'
+import { capsWeb } from '../ui/shells/caps-web.mjs'
 import { COLS, bridgeDefault, checkList, colOf, diffOps, dropRow, editRow, fmtErrors, parseList, parsePlatform, rustConst, rustDocs, scanOpLiterals } from './settings-list-check.mjs'
 
 export { parseList }
@@ -105,6 +109,15 @@ const filesTruth = (docsRs = readFile(DOCS_RS)) => ({
   local: LOCAL_KEYS,
 })
 
+// needs 的標準答案（#1853 第 3 張）：每個標記需要的能力、有沒有登記、各平台的能力表
+const needsTruth = () => ({
+  of: settingNeeds,
+  registered: isRegistered,
+  itemKeys: Object.keys(ITEM_NEEDS),
+  missingCats: missingCatNeeds(SETTING_CATS.map(c => c.key)),
+  caps: { desktop: capsDesktop, mobile: capsAndroid, web: capsWeb },
+})
+
 const truth = () => ({
   ops: SETTING_OPS,
   cats: SETTING_CATS,
@@ -113,6 +126,7 @@ const truth = () => ({
   flags: { AGENT_INSTALL_UI },
   defaults: defaults(),
   files: filesTruth(),
+  needs: needsTruth(),
   readFile,
 })
 
@@ -171,7 +185,7 @@ test('還原驗證：刪掉一列（指令、手機偏好、分類）→ 報缺�
 
 test('還原驗證：清單多寫一個程式沒有的指令／偏好／分類 → 報多出來', () => {
   const bad = (text, extra) => text.replace('| `autostart` |', `${extra}\n| \`autostart\` |`)
-  const row = tok => `| \`${tok}\` | x | 開關 | 關 | 這台自己 | 有 | 無：手機沒有 | 無：尚無網頁版 | 《ui/list.js#case 'skin':》 |`
+  const row = tok => `| \`${tok}\` | x | 開關 | 關 | 這台自己 | 有 | 無（未做）：手機沒有 | 無（未做）：尚無網頁版 | 《ui/list.js#case 'skin':》 |`
   assert.ok(kinds(bad(doc, row('not-a-real-op'))).has('op-extra'))
   assert.ok(kinds(bad(doc, row('prefs.ghost'))).has('pref-extra'))
   assert.ok(kinds(bad(doc, row('cat.ghost'))).has('cat-extra'))
@@ -208,12 +222,59 @@ test('還原驗證：清空某個平台欄、平台欄只寫「無」、原因�
   assert.ok(kinds(editRow(doc, 'cat.voice', COLS.web, '無')).has('platform-bad'))
 })
 
-test('還原驗證：平台欄規則本身（parsePlatform）', () => {
+test('還原驗證：平台欄規則本身（parsePlatform）：只認「有」「無（平台）：原因」「無（未做）：原因」', () => {
   assert.equal(parsePlatform('有').has, true)
   assert.equal(parsePlatform('有（只有 Windows）').ok, true)
-  assert.equal(parsePlatform('無：手機沒有系統匣').reason, '手機沒有系統匣')
-  assert.equal(parsePlatform('無（手機沒有系統匣）').reason, '手機沒有系統匣')
-  for (const s of ['', '無', '無：', '無（同上）', '無：同上', '沒有']) assert.equal(parsePlatform(s).ok, false, s)
+  assert.deepEqual(parsePlatform('無（平台）：手機沒有系統匣'), { ok: true, has: false, kind: 'platform', reason: '手機沒有系統匣' })
+  assert.deepEqual(parsePlatform('無（未做）：手機版還沒做'), { ok: true, has: false, kind: 'todo', reason: '手機版還沒做' })
+  for (const s of ['', '無', '無：', '無（同上）', '無：同上', '沒有', '無（平台）', '無（平台）：', '無（平台）：同上', '無（未做）：無', '無（其他）：手機沒有系統匣']) assert.equal(parsePlatform(s).ok, false, s)
+})
+
+// ---- 平台欄與能力表雙向比對、同一列需求相同、沒登記就紅（#1853 第 3 張）----
+const withNeeds = patch => ({ ...T, needs: { ...T.needs, ...patch } })
+const needsOver = (map) => token => (token in map ? map[token] : settingNeeds(token))
+
+test('#1853 平台欄：舊寫法「無：原因」「無（原因）」不再接受', () => {
+  assert.ok(kinds(editRow(doc, 'frame', COLS.mobile, '無：手機沒有視窗外框')).has('platform-bad'))
+  assert.ok(kinds(editRow(doc, 'frame', COLS.mobile, '無（手機沒有視窗外框）')).has('platform-bad'))
+  assert.ok(kinds(editRow(doc, 'frame', COLS.web, '無（尚無網頁版）')).has('platform-bad'))
+  assert.ok(!kinds(editRow(doc, 'frame', COLS.mobile, '無（平台）：手機沒有視窗外框')).has('platform-bad'))
+})
+
+test('還原驗證：標「無（平台）」的列，needs 都被該平台滿足 → 紅（把 frame 的需求拿掉）', () => {
+  const k = kinds(doc, withNeeds({ of: needsOver({ frame: [], 'file.me.frame': [] }) }))
+  assert.ok(k.has('platform-not-platform'))
+})
+
+test('還原驗證：needs 都滿足的列標成「無（平台）」→ 紅（skin 手機、網頁）', () => {
+  assert.ok(kinds(editRow(doc, 'skin', COLS.mobile, '無（平台）：手機做不到')).has('platform-not-platform'))
+  assert.ok(kinds(editRow(doc, 'skin', COLS.web, '無（平台）：網頁做不到')).has('platform-not-platform'))
+})
+
+test('還原驗證：標「有」或「無（未做）」但 needs 該平台滿足不了 → 紅（frame 手機）', () => {
+  assert.ok(kinds(editRow(doc, 'frame', COLS.mobile, '有')).has('platform-has-unmet'))
+  assert.ok(kinds(editRow(doc, 'frame', COLS.mobile, '無（未做）：手機還沒做')).has('platform-todo-unmet'))
+  assert.ok(kinds(editRow(doc, 'frame', COLS.web, '有')).has('platform-has-unmet'))
+})
+
+test('還原驗證：同一列兩個代號 needs 不同 → 紅（frame 與 file.me.frame、closeTo 與 file.me.closeTo）', () => {
+  assert.ok(kinds(doc, withNeeds({ of: needsOver({ 'file.me.frame': [] }) })).has('needs-row-mismatch'))
+  assert.ok(kinds(doc, withNeeds({ of: needsOver({ 'file.me.closeTo': ['tray', 'bridge'] }) })).has('needs-row-mismatch'))
+})
+
+test('還原驗證：沒在 needs 登記就紅（類別、項目標記、登記了清單沒有的）', () => {
+  const noFrame = Object.fromEntries(Object.entries({ ...ITEM_NEEDS }).filter(([t]) => t !== 'frame'))
+  assert.deepEqual(missingCatNeeds(['voice', 'me'], { 'cat.me': [] }), ['cat.voice'])
+  assert.ok(kinds(doc, withNeeds({ missingCats: ['cat.voice'] })).has('needs-cat-missing'))
+  assert.ok(kinds(doc, withNeeds({ registered: t => t in noFrame || t.startsWith('cat.') })).has('needs-unregistered'))
+  assert.ok(kinds(doc, withNeeds({ itemKeys: [...T.needs.itemKeys, 'ghost-op'] })).has('needs-extra'))
+  assert.ok(kinds(doc, { ...T, needs: undefined }).has('needs-truth'))
+})
+
+test('#1853 needs 標準答案取得到（登記表與類別表都有內容、清單每個標記都有登記）', () => {
+  assert.ok(T.needs.itemKeys.length >= 150)
+  assert.deepEqual(T.needs.missingCats, [])
+  for (const e of real.entries) assert.ok(isRegistered(e.token), `${e.token} 沒登記 needs`)
 })
 
 test('還原驗證：錨點——內容對不上、檔案不存在、沒寫錨點、還在用行號 → 各報錯', () => {
