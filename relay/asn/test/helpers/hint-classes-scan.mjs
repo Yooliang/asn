@@ -89,17 +89,94 @@ export function scanText(text, ext) {
 const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
   e.isDirectory() ? (SKIP_DIRS.has(e.name) ? [] : walk(path.join(dir, e.name))) : SCAN_EXT.has(path.extname(e.name)) ? [path.join(dir, e.name)] : [])
 
-/** 掃 relay/asn/ui：回傳 { files: 掃到的檔案數, classes: Map(class → 排序後的檔案清單，相對 relay/asn、用 /) } */
-export function scanUi(asnRoot) {
-  const uiDir = path.join(asnRoot, 'ui')
-  const files = walk(uiDir)
+// 一個 class 在一段檔案內容裡的「用處數」：class 名稱整個字（前後不是字母數字底線或 -）出現的次數。
+// 不管是哪種寫法（屬性、:class、class:、選擇器）都算一次，跟掃描器用哪一關抓到無關；搬家前後用同一支數，數字才比得起來
+export const countUses = (text, name) => {
+  const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return [...text.matchAll(new RegExp(`(?<![\\w-])${esc}(?![\\w-])`, 'g'))].length
+}
+
+/**
+ * 掃一批來源：entries 是 [{ rel: 相對 relay/asn 的路徑（用 /）, text: 內容 }]。
+ * 回傳 { files, classes: Map(class → 排序後的檔案清單), uses: Map(class → 總用處數，只算掃得到那個 class 的檔) }。
+ * 本機的檔與 git 某個提交上的檔共用這一支，base 與 head 的次數才是同一把尺。
+ */
+export function scanSources(entries) {
   const classes = new Map()
-  for (const f of files) {
-    const rel = path.relative(asnRoot, f).split(path.sep).join('/')
-    for (const n of scanText(fs.readFileSync(f, 'utf8'), path.extname(f))) {
+  const uses = new Map()
+  for (const { rel, text } of entries) {
+    for (const n of scanText(text, path.extname(rel))) {
       if (!classes.has(n)) classes.set(n, new Set())
       classes.get(n).add(rel)
+      uses.set(n, (uses.get(n) ?? 0) + countUses(text, n))
     }
   }
-  return { files: files.length, classes: new Map([...classes].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => [k, [...v].sort()])) }
+  const byName = ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)
+  return {
+    files: entries.length,
+    classes: new Map([...classes].sort(byName).map(([k, v]) => [k, [...v].sort()])),
+    uses: new Map([...uses].sort(byName)),
+  }
+}
+
+/** 掃 relay/asn/ui：回傳 { files: 掃到的檔案數, classes: Map(class → 排序後的檔案清單，相對 relay/asn、用 /), uses: Map(class → 總用處數) } */
+export function scanUi(asnRoot) {
+  const files = walk(path.join(asnRoot, 'ui'))
+  return scanSources(files.map(f => ({ rel: path.relative(asnRoot, f).split(path.sep).join('/'), text: fs.readFileSync(f, 'utf8') })))
+}
+
+// 要掃的檔：副檔名在清單內、路徑裡沒有 vendor／node_modules
+export const isScanPath = p => SCAN_EXT.has(path.extname(p)) && !p.split('/').some(s => SKIP_DIRS.has(s))
+
+/** 掃 git 某個提交上的 relay/asn/ui（不碰工作樹）。gitShow(路徑) 讀該提交上的檔，gitList() 回傳該提交上 relay/asn/ui 底下的全部路徑（從 repo 根算）。 */
+export function scanUiAt(gitList, gitShow) {
+  const entries = gitList()
+    .filter(isScanPath)
+    .map(p => ({ rel: p.replace(/^relay\/asn\//, ''), text: gitShow(p) }))
+  return scanSources(entries)
+}
+
+// ── 一對一搬家（#2425）──────────────────────────────────────────────
+// 搬進 ui/parts/ 的基準那一列要有這句註記（放在基準檔的 moved 對照表）。之後換成 AsnStatus 時，那一列連註記一起清掉
+export const MOVE_NOTE = '搬家帶進共用元件、待換'
+export const PARTS_PREFIX = 'ui/parts/'
+export const moveKey = (cls, file) => `${cls}（${file}）`
+
+/**
+ * 同一張 PR 裡的一對一搬家比對（純函式）。
+ *  baseGolden／headGolden：基準檔內容 { classes: {class: [檔…]}, moved?: {"class（檔）": 註記} }
+ *  baseUses／headUses：base 與 head 實際掃到的各 class 總用處數（Map 或物件）
+ * 一個 class 在 head 基準多記了檔（＝新增）時，只有同時符合三個條件才放行：
+ *  1. 總檔案數不增加（head 的檔數 ≤ base 的檔數，也就是有檔消失才有檔出現）
+ *  2. 總用處數不增加（headUses ≤ baseUses）
+ *  3. 目的地在 ui/parts/ 的，moved 要有 MOVE_NOTE 註記
+ * 另外：新 class 一律紅（extra）；moved 的註記必須對得上基準裡真的記著的 class／檔（orphanNote）；
+ * base 上已有註記、檔還在，註記不准偷刪（droppedNote）。
+ * 回傳各種違規的清單，全空才算過。
+ */
+export function evaluateMoves({ baseGolden, headGolden, baseUses, headUses }) {
+  const num = (u, k) => (u instanceof Map ? u.get(k) : u?.[k])
+  const bc = baseGolden.classes; const hc = headGolden.classes
+  const bm = baseGolden.moved ?? {}; const hm = headGolden.moved ?? {}
+  const out = { extra: [], moreFiles: [], usesGrew: [], missingNote: [], orphanNote: [], droppedNote: [] }
+  for (const [k, files] of Object.entries(hc)) {
+    if (!(k in bc)) { out.extra.push(k); continue }
+    const added = files.filter(f => !bc[k].includes(f))
+    if (added.length === 0) continue
+    if (files.length > bc[k].length) out.moreFiles.push(...added.map(f => moveKey(k, f)))
+    const b = num(baseUses, k); const h = num(headUses, k)
+    if (!Number.isFinite(b) || !Number.isFinite(h)) out.usesGrew.push(`${k}（讀不到用處數：base ${b}、head ${h}）`)
+    else if (h > b) out.usesGrew.push(`${k}（${b} → ${h}）`)
+    for (const f of added) if (f.startsWith(PARTS_PREFIX) && hm[moveKey(k, f)] !== MOVE_NOTE) out.missingNote.push(moveKey(k, f))
+  }
+  for (const [key, note] of Object.entries(hm)) {
+    const m = /^(.+)（(.+)）$/.exec(key)
+    if (!m || !hc[m[1]]?.includes(m[2]) || note !== MOVE_NOTE) out.orphanNote.push(key)
+  }
+  for (const key of Object.keys(bm)) {
+    const m = /^(.+)（(.+)）$/.exec(key)
+    if (m && hc[m[1]]?.includes(m[2]) && !(key in hm)) out.droppedNote.push(key)
+  }
+  for (const v of Object.values(out)) v.sort()
+  return out
 }
