@@ -4,6 +4,9 @@
 // 其他平台（CI、開發機）退回 Node 的 detached。
 import { spawnSync, spawn } from 'node:child_process'
 
+// 排程動作用 conhost.exe 啟動巡檢時帶的參數（不開視窗）；手冊第 9 節的指令用它
+export const CONHOST_NO_WINDOW_FLAG = '--headless'
+
 // 命令列與工作目錄用環境變數傳給 PowerShell，不經過引號跳脫
 export const WMI_ENV_CMDLINE = 'ASN_START_CMDLINE'
 export const WMI_ENV_CWD = 'ASN_START_CWD'
