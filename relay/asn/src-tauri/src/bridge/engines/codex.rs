@@ -340,6 +340,7 @@ impl Inner {
                     },
                     on_incoming: Arc::new(|_, _| {}), // 通知與伺服器主動請求：唯讀的讀取者一律忽略
                     on_json_line: None,
+                    on_unparsed_line: None,
                     on_exit: Arc::new(|_| {}),
                     on_end: Some(Arc::new(move || pids.remove(pc2.load(Ordering::SeqCst)))),
                 })

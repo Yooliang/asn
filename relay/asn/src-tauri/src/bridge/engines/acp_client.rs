@@ -79,6 +79,7 @@ impl AcpClient {
             }),
             on_exit: o.on_exit,
             on_json_line: None,
+            on_unparsed_line: None,
             on_end: o.on_end,
         })?;
         Ok(AcpClient { rpc, chunks })

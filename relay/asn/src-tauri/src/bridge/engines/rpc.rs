@@ -25,6 +25,34 @@ pub struct RpcError {
     pub code: Option<i64>,
 }
 
+/// 一行解析不了的輸出：只描述它，不帶內容（可能含檔案內容或路徑）
+#[derive(Debug, Clone, PartialEq)]
+pub struct UnparsedLine {
+    /// 第幾行（從 1 起，含空行）
+    pub line_no: usize,
+    /// 去掉頭尾空白後的字元數
+    pub len: usize,
+    /// 錯誤類別（白話）
+    pub kind: &'static str,
+}
+
+/// serde_json 錯誤的類別（只回固定字串，不帶原文）。巢狀超過 128 層會報 recursion limit
+fn parse_error_kind(e: &serde_json::Error) -> &'static str {
+    if e.to_string().contains("recursion limit") {
+        return "巢狀超過深度上限";
+    }
+    match e.classify() {
+        serde_json::error::Category::Eof => "內容被截斷",
+        serde_json::error::Category::Syntax => "語法錯誤",
+        serde_json::error::Category::Data => "資料型別不符",
+        serde_json::error::Category::Io => "讀取錯誤",
+    }
+}
+
+fn log_unparsed(log: &Log, u: &UnparsedLine) {
+    log(format!("輸出第 {} 行解析不了（長度 {}，{}），已略過", u.line_no, u.len, u.kind));
+}
+
 pub struct SpawnOpts {
     pub command: String,
     pub args: Vec<String>,
@@ -40,6 +68,9 @@ pub struct SpawnOpts {
     pub on_exit: Arc<dyn Fn(String) + Send + Sync>,
     /// 有值＝每一行（已解析成 JSON）都直接交給它，不做請求／回應配對（agy 原生 stream-json 用）
     pub on_json_line: Option<Arc<dyn Fn(Value) + Send + Sync>>,
+    /// 有 `on_json_line` 時，解析不了的那一行交給它（只有行號、長度、錯誤類別，不含行內容）。
+    /// 解析不了的行沒經過任何檢查，呼叫端要自己決定怎麼處理；不給就只記 log
+    pub on_unparsed_line: Option<Arc<dyn Fn(UnparsedLine) + Send + Sync>>,
     /// 行程確實結束後一定呼叫（含被 stop 停掉的）：記錄 PID 的帳本在這裡劃掉
     pub on_end: Option<Arc<dyn Fn() + Send + Sync>>,
 }
@@ -107,22 +138,30 @@ impl Rpc {
         let mut drains: Vec<oneshot::Receiver<()>> = Vec::new();
         if let Some(out) = stdout {
             let (r, inc, raw) = (rpc.clone(), o.on_incoming.clone(), o.on_json_line.clone());
+            let (bad, log) = (o.on_unparsed_line.clone(), o.log.clone());
             let (done_tx, done_rx) = oneshot::channel::<()>();
             drains.push(done_rx);
             crate::rt::spawn(async move {
                 let mut lines = BufReader::new(out).lines();
+                let mut line_no = 0usize;
                 while let Ok(Some(l)) = lines.next_line().await {
+                    line_no += 1;
                     let l = l.trim();
                     if l.is_empty() {
                         continue;
                     }
                     match &raw {
-                        Some(f) => {
-                            if let Ok(v) = serde_json::from_str::<Value>(l) {
-                                f(v);
+                        Some(f) => match serde_json::from_str::<Value>(l) {
+                            Ok(v) => f(v),
+                            Err(e) => {
+                                let u = UnparsedLine { line_no, len: l.chars().count(), kind: parse_error_kind(&e) };
+                                log_unparsed(&log, &u);
+                                if let Some(b) = &bad {
+                                    b(u);
+                                }
                             }
-                        }
-                        None => r.on_line(l, &inc),
+                        },
+                        None => r.on_line(l, &inc, &log, line_no),
                     }
                 }
                 let _ = done_tx.send(());
@@ -207,8 +246,15 @@ impl Rpc {
         }
     }
 
-    fn on_line(&self, line: &str, inc: &Arc<dyn Fn(Rpc, Value) + Send + Sync>) {
-        let Ok(m) = serde_json::from_str::<Value>(line) else { return };
+    /// 標準 JSON-RPC 模式：解析不了的行只記 log、照舊略過（權限請求要回覆才會執行，沒解析到＝沒回覆＝不會執行，不放行任何動作）
+    fn on_line(&self, line: &str, inc: &Arc<dyn Fn(Rpc, Value) + Send + Sync>, log: &Log, line_no: usize) {
+        let m = match serde_json::from_str::<Value>(line) {
+            Ok(m) => m,
+            Err(e) => {
+                log_unparsed(log, &UnparsedLine { line_no, len: line.chars().count(), kind: parse_error_kind(&e) });
+                return;
+            }
+        };
         if m.get("method").is_some() {
             inc(self.clone(), m);
             return;
@@ -326,6 +372,7 @@ mod tests {
             on_incoming: Arc::new(|_, _| {}),
             on_exit,
             on_json_line: Some(on_json),
+            on_unparsed_line: None,
             on_end: None,
         }
     }
@@ -427,6 +474,44 @@ mod tests {
         assert!(!rpc.alive(), "行程結束了：alive 要是 false");
         let (end, exit) = (ended_at.lock().unwrap().unwrap(), exit_at.lock().unwrap().unwrap());
         assert!(exit.duration_since(end) >= Duration::from_millis(500), "on_exit 要等管線（有上限），on_end 不等：on_end 比 on_exit 早 {:?}", exit.duration_since(end));
+    }
+
+    /// 解析不了的行：回呼被呼叫（行號、長度、類別）、log 有記且不含行內容；能解析的行照常交給 on_json_line
+    #[tokio::test]
+    async fn 解析不了的行_通知呼叫端並記_log_不含內容() {
+        if node().is_none() {
+            return;
+        }
+        let got = Arc::new(Mutex::new(Vec::<UnparsedLine>::new()));
+        let good = Arc::new(AtomicUsize::new(0));
+        let logs = Arc::new(Mutex::new(Vec::<String>::new()));
+        let (g2, ok2, l2) = (got.clone(), good.clone(), logs.clone());
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        let done_tx = Mutex::new(Some(done_tx));
+        let mut o = opts(
+            // 第 1 行正常、第 2 行截斷、第 3 行巢狀 300 層（超過上限）
+            "console.log('{\"event\":\"x\"}'); console.log('{\"secret\":\"SECRETVALUE'); console.log('['.repeat(300)+']'.repeat(300)); process.exit(0)",
+            Arc::new(move |_| {
+                ok2.fetch_add(1, Ordering::SeqCst);
+            }),
+            Arc::new(move |_| {
+                if let Some(t) = done_tx.lock().unwrap().take() {
+                    let _ = t.send(());
+                }
+            }),
+        );
+        o.log = Arc::new(move |m| l2.lock().unwrap().push(m));
+        o.on_unparsed_line = Some(Arc::new(move |u| g2.lock().unwrap().push(u)));
+        let _rpc = Rpc::spawn(o).unwrap();
+        tokio::time::timeout(Duration::from_secs(25), done_rx).await.expect("on_exit 要被呼叫").unwrap();
+        assert_eq!(good.load(Ordering::SeqCst), 1);
+        let got = got.lock().unwrap().clone();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert_eq!((got[0].line_no, got[0].kind), (2, "內容被截斷"));
+        assert_eq!((got[1].line_no, got[1].len, got[1].kind), (3, 600, "巢狀超過深度上限"));
+        let l = logs.lock().unwrap().join("\n");
+        assert!(l.contains("第 2 行解析不了") && l.contains("第 3 行解析不了"), "{l}");
+        assert!(!l.contains("SECRETVALUE") && !l.contains("[[["), "log 不記行內容：{l}");
     }
 
     /// 正常結束（沒有被佔住的管線）不多等
