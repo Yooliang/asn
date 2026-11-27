@@ -286,7 +286,7 @@ export const RemoteView = {
     return { host, phase, note, soon, stateView, again: start, expire, refit, expired, TEXT: REMOTE_TEXT }
   },
   template: `
-<div class="term-view term-remote" :class="{ 'term-desk': !barInline }">
+<div class="term-view term-remote" :class="{ 'term-desk': !barInline }" :data-toast-anchor="phase === 'ended' ? 'chat' : null">
   <p class="term-view-ask" role="status" v-if="barInline && (phase === 'starting' || phase === 'waiting')">{{ TEXT.waiting }}</p>
   <p class="term-view-lost" role="status" v-if="barInline && soon && phase !== 'ended'">{{ TEXT.soon }}</p>
   <div class="term-view-screen" data-toast-anchor="chat" data-toast-edge="top" ref="host" aria-label="別台電腦上的畫面" v-show="phase === 'waiting' || phase === 'watching'"></div>

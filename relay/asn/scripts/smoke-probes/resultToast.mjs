@@ -19,6 +19,8 @@ const CASES = {
   'term-watch': { kind: 'ok', text: ARCHIVED, at: 'chat', prelude: 'watch', inside: '.term-view-screen', edge: 'top' },
   'term-paste': { kind: 'ok', text: ARCHIVED, at: 'chat', prelude: 'paste', inside: '.term-view-screen', edge: 'top' },
   'term-typing': { kind: 'ok', text: ARCHIVED, at: 'chat', prelude: 'typing', inside: '.term-view-screen', edge: 'top' },
+  // #2452：終端「已結束觀看」——整塊終端區（.term-view）當對話錨點，貼下緣；它在輸入區上面，「重新看」在最下面的狀態列，所以不蓋到
+  'term-ended': { kind: 'ok', text: ARCHIVED, at: 'chat', prelude: 'ended', inside: '.term-view', edge: 'bottom' },
   'phone-archive': { kind: 'ok', text: ARCHIVED, old: { set: 'archiveNote', has: 'setArchived' }, sel: '.m-archive-note' },
   'phone-pin-full': { kind: 'fail', text: PIN_FULL, old: { set: 'toast', has: 'leaveAsk' }, sel: '.m-toast' },
 }
@@ -44,6 +46,24 @@ export const resultToastProbeSource = mode => `(async () => {
       const ms = [...document.querySelectorAll('.msgs')];
       if (ms.length < 2) return { ok: false, why: '兩個分頁的訊息區沒有各一個（只有 ' + ms.length + ' 個），測不到「第一個藏起來」' };
       if (vis(ms[0]) || !vis(ms[1])) return { ok: false, why: '目前要在第二個分頁：第一個訊息區該藏起來、第二個該看得到' };
+    } else if (c.prelude === 'ended') {
+      // #2452：看完終端畫面 → 切到另一個分頁、超過寬限 → 切回來，停在「已結束觀看」（畫面本體藏起來，訊息區也藏著；「重新看」在視窗最下面的狀態列）。寬限（5 分鐘）縮成 0.4 秒，只換掉這個長度的計時
+      const real = globalThis.setTimeout;
+      globalThis.setTimeout = (fn, ms, ...a) => real(fn, ms === 300000 ? 400 : ms, ...a);
+      const entry = await wait(() => visAll('.chatpane .actionbar button').find(b => (b.getAttribute('aria-label') || b.textContent || '').includes('終端')));
+      if (!entry) return { ok: false, why: '按鈕列沒有「終端」' };
+      entry.click();
+      if (!(await wait(() => (visAll('.term-view-screen .xterm-rows')[0] || {}).textContent?.includes('測試通過')))) return { ok: false, why: '終端畫面沒有出現假畫面的字' };
+      const tabs = [...document.querySelectorAll('.ctab')];
+      if (tabs.length < 2) return { ok: false, why: '分頁不到兩個' };
+      tabs[1].click();
+      if (!(await wait(() => visAll('.term-view-screen').length === 0))) return { ok: false, why: '切到第二個分頁後，第一個分頁的終端還看得到' };
+      await sleep(1500);
+      tabs[0].click();
+      const bar = () => (visAll('.chatpane .typing')[0] || {}).textContent || '';
+      if (!(await wait(() => bar().includes('已結束觀看')))) return { ok: false, why: '切回來狀態列沒有「已結束觀看」：' + bar().slice(0, 60) };
+      if (visAll('.msgs').length || visAll('.term-view-screen').length) return { ok: false, why: '已結束時訊息區與終端畫面都該藏著（這個情境要測的狀態）' };
+      if (!visAll('.chatpane .typing button').some(b => b.textContent.trim() === '重新看')) return { ok: false, why: '狀態列沒有「重新看」' };
     } else if (c.prelude) {
       const entry = await wait(() => visAll('.chatpane .actionbar button').find(b => (b.getAttribute('aria-label') || b.textContent || '').includes('終端')));
       if (!entry) return { ok: false, why: '按鈕列沒有「終端」' };
@@ -133,6 +153,7 @@ export default {
     deskBar('list-result-archive', 'desk-archive'), deskBar('list-result-pin-full', 'desk-pin-full'), deskBar('list-result-chat-archive', 'chat-archive'),
     phone('m-result-archive', 'phone-archive'), phone('m-result-pin-full', 'phone-pin-full'),
     deskTerm('list-result-chat-two', 'chat-two', 900, true), deskTerm('list-result-chat-two-narrow', 'chat-two', 500, true),
+    deskTerm('list-result-term-ended-narrow', 'term-ended', 500, true), deskTerm('list-result-term-ended', 'term-ended', 900, true),
     deskTerm('list-result-term-watch', 'term-watch', 900), deskTerm('list-result-term-paste', 'term-paste', 900), deskTerm('list-result-term-typing', 'term-typing', 900),
   ],
 }

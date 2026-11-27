@@ -210,7 +210,7 @@ export const RemoteInput = {
     return { host, hostShown, phase, note, soon, warn, askPaste, again: start, stop, back, sendLine, sendKey, pasteYes, pasteNo, pasteLines, pasteSummary, PASTE_TEXT, TEXT: INPUT_TEXT }
   },
   template: `
-<div class="term-view term-remote term-remote-input" :class="{ 'term-desk': !barInline }">
+<div class="term-view term-remote term-remote-input" :class="{ 'term-desk': !barInline }" :data-toast-anchor="phase === 'ended' ? 'chat' : null">
   <p class="term-view-ask" role="status" v-if="barInline && (phase === 'starting' || phase === 'waiting')">{{ TEXT.waiting }}</p>
   <p class="term-remote-bar term-remote-typing" role="status" v-else-if="barInline && phase === 'typing'">{{ TEXT.typing(machine || node, name) }}
     <button class="aero-btn" type="button" @click="stop">{{ TEXT.stop }}</button>
