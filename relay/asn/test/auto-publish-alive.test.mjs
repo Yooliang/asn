@@ -4,7 +4,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { EventEmitter } from 'node:events'
-import { parseArgs, ALERT_CAUSES, realDeps } from '../../../tools/release/auto_publish.mjs'
+import { parseArgs, ALERT_CAUSES, realDeps, runDaemon } from '../../../tools/release/auto_publish.mjs'
+import { startViaWmi, buildCommandLine, WMI_ENV_CMDLINE, WMI_ENV_CWD } from '../../../tools/release/auto_publish_start.mjs'
 import { checkAlive, handleStopSignal, installStopHandlers, writeHeartbeat, heartbeatPathOf, HEARTBEAT_STALE_MS, DEAD_MESSAGE, STUCK_MESSAGE, STOP_SIGNALS } from '../../../tools/release/auto_publish_alive.mjs'
 import { env, STATE, ALERT, alertOf, lk, T0, opts, seededState } from './helpers/auto-publish-env.mjs'
 
@@ -112,7 +113,7 @@ test('巡檢：pid 在但心跳超過 10 分鐘 → 寫告警、貼群組，但�
   const e = aliveEnv({ alive: [7000], hb: T0 - HEARTBEAT_STALE_MS - 1000 })
   const r = checkAlive(opts, e.deps)
   assert.equal(r.outcome, 'stuck')
-  assert.equal(r.code, 1)
+  assert.equal(r.code, 0, '只告警：回非 0 會讓排程以為失敗而重跑')
   const a = alertOf(e).alerts['daemon-dead']
   assert.equal(a.reason, 'heartbeat-stale')
   assert.equal(a.message, STUCK_MESSAGE)
@@ -174,12 +175,118 @@ test('巡檢：沒有 --room 只寫 log 與告警，不貼群組', () => {
   assert.equal(alertOf(e).alerts['daemon-dead'].status, 'active')
 })
 
-test('巡檢：重啟失敗 → 另記 start-failed 告警並回非 0', () => {
+test('巡檢：重啟失敗 → 另記 daemon-start-failed 告警（也貼群組）並回非 0', () => {
   const e = aliveEnv({ alive: [], startThrows: true })
   const r = checkAlive(opts, e.deps)
   assert.equal(r.outcome, 'start-failed')
   assert.equal(r.code, 1)
-  assert.equal(alertOf(e).alerts['daemon-dead'].reason, 'start-failed')
+  assert.equal(alertOf(e).alerts['daemon-start-failed'].reason, 'start-failed')
+  assert.equal(alertOf(e).alerts['daemon-dead'].reason, 'not-running', '起不來不能把原本的告警原因蓋掉')
+  assert.equal(e.calls.posts.length, 2, '沒在跑一則、起不來一則')
+})
+
+test('巡檢：起不來而且連續巡檢 4 次 → 群組各只貼一次（共 2 則），告警次數累加', () => {
+  const e = aliveEnv({ alive: [], startThrows: true })
+  for (let i = 0; i < 4; i++) { checkAlive(opts, e.deps); e.clock.t += 10 * 60_000 }
+  assert.equal(e.calls.posts.length, 2)
+  assert.equal(alertOf(e).alerts['daemon-start-failed'].count, 4)
+})
+
+test('巡檢：卡住與沒在跑交替出現 → 同一類別只貼一次群組', () => {
+  const e = aliveEnv({ alive: [7000], hb: T0 - HEARTBEAT_STALE_MS - 1000 })
+  checkAlive(opts, e.deps) // stuck
+  e.deps.pidAlive = () => false
+  checkAlive(opts, e.deps) // not-running
+  e.deps.pidAlive = (p) => p === 7000
+  checkAlive(opts, e.deps) // stuck
+  assert.equal(e.calls.posts.length, 1)
+})
+
+test('巡檢：恢復正常後再出事才會重新貼群組', () => {
+  const e = aliveEnv({ alive: [], startThrows: true })
+  checkAlive(opts, e.deps)
+  assert.equal(e.calls.posts.length, 2)
+  e.deps.pidAlive = (p) => p === 7000
+  e.fsMap.set(HB, String(T0))
+  assert.equal(checkAlive(opts, e.deps).outcome, 'alive')
+  assert.equal(alertOf(e).alerts['daemon-start-failed'].status, 'resolved')
+  e.deps.pidAlive = () => false
+  checkAlive(opts, e.deps)
+  assert.equal(e.calls.posts.length, 4)
+})
+
+test('巡檢：心跳時間在未來 → 無效，當成不正常（不算新鮮）', () => {
+  const e = aliveEnv({ alive: [7000], hb: T0 + 3600_000 })
+  const r = checkAlive(opts, e.deps)
+  assert.equal(r.outcome, 'stuck')
+  assert.equal(alertOf(e).alerts['daemon-dead'].reason, 'heartbeat-invalid')
+})
+
+test('巡檢：inflight 的 pid 已經不在 → 不能拿來免告警', () => {
+  const inflight = { key: 'desktop@0.2.99', step: 'publish', startedAt: new Date(T0 - 30 * 60_000).toISOString(), pid: 9999, platform: 'desktop', tag: 'v0.2.99', runId: '1' }
+  const e = aliveEnv({ alive: [7000], hb: T0 - 30 * 60_000, files: { [STATE]: JSON.stringify(seededState({ inflight })) } })
+  assert.equal(checkAlive(opts, e.deps).outcome, 'stuck')
+})
+
+// ---- 接線：主迴圈真的有裝停止處理、寫心跳
+
+test('runDaemon：常駐模式會裝結束訊號處理、每輪寫心跳；收到訊號寫 daemon-stopped', async () => {
+  const e = env()
+  const proc = new EventEmitter()
+  const exits = []
+  proc.exit = (c) => exits.push(c)
+  const r = await runDaemon({ ...opts, interval: 120, once: false }, e.deps, { proc, rounds: 2, sleep: async () => { e.clock.t += 120_000 } })
+  assert.equal(r.code, 0)
+  for (const sig of STOP_SIGNALS) assert.equal(proc.listenerCount(sig), 1, `沒裝 ${sig} 處理`)
+  assert.equal(e.fsMap.get(HB), String(T0 + 120_000), '第二輪開頭的心跳')
+  proc.emit('SIGTERM')
+  assert.deepEqual(exits, [0])
+  assert.equal(alertOf(e).alerts['daemon-stopped'].reason, 'SIGTERM')
+})
+
+test('runDaemon：--once 不裝處理、不寫心跳；拿不到單例鎖回 3', async () => {
+  const e = env()
+  const proc = new EventEmitter()
+  await runDaemon({ ...opts, interval: 120, once: true }, e.deps, { proc, rounds: 1 })
+  assert.equal(proc.listenerCount('SIGINT'), 0)
+  assert.equal(e.fsMap.has(HB), false)
+  const e2 = env({ files: { [PID_FILE]: lk(7000) }, alive: [7000] })
+  e2.deps.isAutoPublish = () => true
+  assert.equal((await runDaemon({ ...opts, interval: 120, once: false }, e2.deps, { proc: new EventEmitter(), rounds: 1 })).code, 3)
+})
+
+// ---- 啟動方式：WMI，不是 Node 的 detached
+
+test('startDaemon：Windows 用 WMI Win32_Process.Create 啟動，命令列、工作目錄用環境變數傳；回新 pid', () => {
+  const calls = []
+  const run = (bin, args, o) => { calls.push({ bin, args, o }); return { status: 0, stdout: '31337\r\n', stderr: '' } }
+  const d = realDeps({ state: path.resolve('/w/state.json') }, path.resolve('/repo'), { start: { run, platform: 'win32', spawnChild: () => { throw new Error('不該用 Node spawn') } } })
+  const pid = d.startDaemon({ state: path.resolve('/w/state.json'), interval: 120, room: 'r1', dryRunOnly: true })
+  assert.equal(pid, 31337)
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].bin, 'powershell.exe')
+  assert.ok(calls[0].args.join(' ').includes('Win32_Process'))
+  assert.ok(calls[0].args.join(' ').includes('Create'))
+  const cmdline = calls[0].o.env[WMI_ENV_CMDLINE]
+  assert.ok(cmdline.includes('auto_publish.mjs'))
+  for (const frag of ['--state', '--interval', '"120"', '--room', '"r1"', '--dry-run-only']) assert.ok(cmdline.includes(frag), frag)
+  assert.ok(!cmdline.includes('--check-alive'), '常駐程式本體不能帶 --check-alive')
+  assert.equal(calls[0].o.env[WMI_ENV_CWD], path.resolve('/repo'))
+  assert.equal(calls[0].o.windowsHide, true)
+})
+
+test('startViaWmi：WMI 回非 0 或沒有 pid → 丟例外；buildCommandLine 每個參數加引號', () => {
+  assert.throws(() => startViaWmi({ execPath: 'node', args: [], cwd: '/x' }, { run: () => ({ status: 1, stdout: '', stderr: '拒絕' }), platform: 'win32' }), /WMI 啟動失敗/)
+  assert.throws(() => startViaWmi({ execPath: 'node', args: [], cwd: '/x' }, { run: () => ({ status: 0, stdout: '', stderr: '' }), platform: 'win32' }), /WMI 啟動失敗/)
+  assert.equal(buildCommandLine('C:\\Program Files\\nodejs\\node.exe', ['a b.mjs', '--x']), '"C:\\Program Files\\nodejs\\node.exe" "a b.mjs" "--x"')
+})
+
+test('startViaWmi：非 Windows 退回 Node detached（只在 CI、開發機用）', () => {
+  const seen = []
+  const child = { pid: 5, on() {}, unref() { seen.push('unref') } }
+  const pid = startViaWmi({ execPath: 'node', args: ['x'], cwd: '/c' }, { platform: 'linux', spawnChild: (bin, args, o) => { seen.push(o.detached); return child } })
+  assert.equal(pid, 5)
+  assert.deepEqual(seen, [true, 'unref'])
 })
 
 // ---- 參數與設定
@@ -196,7 +303,6 @@ test('parseArgs：--check-alive 可搭配 --room、--state、--interval；不能
   assert.equal(parseArgs(['--ack-alert', 'daemon-dead']).error, null)
 })
 
-test('realDeps：提供不掛主控台的啟動方式（startDaemon）', () => {
-  const d = realDeps({ state: path.join(path.resolve('/w'), 'state.json') })
-  assert.equal(typeof d.startDaemon, 'function')
+test('ALERT_CAUSES 含 daemon-start-failed', () => {
+  assert.ok(ALERT_CAUSES.includes('daemon-start-failed'))
 })

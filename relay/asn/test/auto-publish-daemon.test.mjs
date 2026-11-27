@@ -628,7 +628,8 @@ test('#2003c resolveStatePath：相對路徑以啟動目錄解析並留說明；
 test('#2003c 運行手冊存在、涵蓋關鍵字，且手冊裡每個 --參數 parseArgs 都認得', () => {
   const doc = fs.readFileSync(new URL('../../../docs/release/自動發佈運行手冊.md', import.meta.url), 'utf8')
   for (const k of ['--seed', '--yes', '--ack', '--ack-alert', '--dry-run-only', '備援']) assert.ok(doc.includes(k), `手冊要提到 ${k}`)
-  const flags = [...new Set(doc.match(/--[a-z][a-z-]*/g))]
+  // --headless 是 conhost.exe 的參數（排程動作用它啟動巡檢，#2436），不是 auto_publish 的
+  const flags = [...new Set(doc.match(/--[a-z][a-z-]*/g))].filter((f) => f !== '--headless')
   const needsVal = new Set(['--interval', '--state', '--room', '--seed', '--seed-desktop', '--seed-linux', '--ack', '--ack-alert'])
   for (const f of flags) {
     const o = parseArgs(needsVal.has(f) ? [f, f === '--interval' ? '120' : f === '--ack-alert' ? 'post-failed' : 'x'] : [f])

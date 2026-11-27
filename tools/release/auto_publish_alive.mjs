@@ -39,11 +39,9 @@ export function installStopHandlers(opts, deps, proc = process) {
 
 const readJson = (deps, p) => { try { return JSON.parse(deps.readFile(p)) } catch { return null } }
 
-// 同類別、同原因已經是 active 就不再重貼群組（告警檔自己會累計次數）
-const alreadyAlerted = (opts, deps, cause, reason) => {
-  const a = readJson(deps, alertPathOf(opts))?.alerts?.[cause]
-  return a?.status === 'active' && a?.reason === reason
-}
+// 同一個類別已經是 active 就不再重貼群組（不看原因：stuck 與 not-running 交替也只貼一次；告警檔自己會累計次數）。
+// 恢復正常（標成 resolved）之後再出事才會重新貼
+const alreadyAlerted = (opts, deps, cause) => readJson(deps, alertPathOf(opts))?.alerts?.[cause]?.status === 'active'
 
 // 常駐程式是不是活著：pid 檔裡的 pid 還在、而且命令列確實是 auto_publish（查不到命令列時保守當作活著）
 function daemonPid(opts, deps) {
@@ -55,10 +53,11 @@ function daemonPid(opts, deps) {
 }
 
 // 發佈子程序執行中（state 的 inflight 還沒超過 STALE_MS）：事件迴圈被 spawnSync 卡住，心跳不會更新，不算卡住
+// inflight 記的 pid 也要還活著，否則是程式當掉留下的標記，不能拿來免告警
 function publishInFlight(opts, deps) {
-  const st = readJson(deps, opts.state)
-  const started = Date.parse(st?.inflight?.startedAt)
-  return Number.isFinite(started) && deps.now() - started <= STALE_MS
+  const inf = readJson(deps, opts.state)?.inflight
+  const started = Date.parse(inf?.startedAt)
+  return Number.isFinite(started) && deps.now() - started <= STALE_MS && Number.isFinite(inf?.pid) && deps.pidAlive(inf.pid)
 }
 
 // 巡檢；回 { code, outcome, msg }
@@ -67,9 +66,9 @@ function publishInFlight(opts, deps) {
 export function checkAlive(opts, deps) {
   const alerts = makeAlerts(opts, deps)
   const post = makePost(opts, deps, alerts)
-  const notify = (reason, message) => {
-    const first = !alreadyAlerted(opts, deps, 'daemon-dead', reason)
-    alerts.raise('daemon-dead', reason, message)
+  const notify = (cause, reason, message) => {
+    const first = !alreadyAlerted(opts, deps, cause)
+    alerts.raise(cause, reason, message)
     if (first) {
       // 巡檢不在 Claude 視窗底下，asn-cli 可能寄不出；寄不出就把原文寫進 log（告警檔也已記）。不另寫 post-failed：它的固定句是叫人跑 --post-pending，而這種訊息不在待貼佇列裡
       if (!post(message, { noAlert: true })) deps.log(`巡檢的群組通知沒貼成，原文：${message}`)
@@ -80,23 +79,32 @@ export function checkAlive(opts, deps) {
   if (pid !== null) {
     let hb = NaN
     try { hb = Number(deps.readFile(heartbeatPathOf(opts))) } catch { /* 沒有心跳檔＝沒有心跳 */ }
-    const fresh = Number.isFinite(hb) && deps.now() - hb <= HEARTBEAT_STALE_MS
-    if (fresh) { alerts.resolve('daemon-dead'); return { code: 0, outcome: 'alive', msg: `常駐程式在跑（pid ${pid}）` } }
-    if (publishInFlight(opts, deps)) return { code: 0, outcome: 'busy', msg: `常駐程式在跑（pid ${pid}），正在發佈，心跳沒更新屬正常` }
-    notify('heartbeat-stale', STUCK_MESSAGE)
-    deps.log(`巡檢：pid ${pid} 還在但心跳超過 10 分鐘沒更新`)
-    return { code: 1, outcome: 'stuck', msg: STUCK_MESSAGE }
+    const now = deps.now()
+    // 心跳時間在未來（時鐘被調、檔案被改）不可信，當成無效
+    const future = Number.isFinite(hb) && hb > now
+    const fresh = Number.isFinite(hb) && !future && now - hb <= HEARTBEAT_STALE_MS
+    if (fresh) {
+      alerts.resolve('daemon-dead')
+      alerts.resolve('daemon-start-failed')
+      return { code: 0, outcome: 'alive', msg: `常駐程式在跑（pid ${pid}）` }
+    }
+    if (!future && publishInFlight(opts, deps)) return { code: 0, outcome: 'busy', msg: `常駐程式在跑（pid ${pid}），正在發佈，心跳沒更新屬正常` }
+    notify('daemon-dead', future ? 'heartbeat-invalid' : 'heartbeat-stale', STUCK_MESSAGE)
+    deps.log(`巡檢：pid ${pid} 還在但心跳${future ? '時間在未來（無效）' : '超過 10 分鐘沒更新'}`)
+    // 只告警：回 0，免得排程把它當失敗而重跑
+    return { code: 0, outcome: 'stuck', msg: STUCK_MESSAGE }
   }
 
-  notify('not-running', DEAD_MESSAGE)
+  notify('daemon-dead', 'not-running', DEAD_MESSAGE)
   deps.log('巡檢：找不到執行中的自動發佈常駐程式，重新啟動')
   try {
     const started = deps.startDaemon(opts)
     deps.log(`巡檢：已啟動常駐程式（pid ${started ?? '未知'}）`)
+    alerts.resolve('daemon-start-failed')
     return { code: 0, outcome: 'restarted', msg: `${DEAD_MESSAGE}（新 pid ${started ?? '未知'}）` }
   } catch (e) {
     deps.log(`巡檢：啟動常駐程式失敗：${e.message}`)
-    alerts.raise('daemon-dead', 'start-failed', START_FAILED_MESSAGE)
+    notify('daemon-start-failed', 'start-failed', START_FAILED_MESSAGE)
     return { code: 1, outcome: 'start-failed', msg: START_FAILED_MESSAGE }
   }
 }

@@ -12,7 +12,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawnSync, spawn as spawnChild } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
+import { startViaWmi } from './auto_publish_start.mjs'
 import { checkAlive, writeHeartbeat, installStopHandlers } from './auto_publish_alive.mjs'
 import { decide, applyResult, seed, acknowledge, compareVersions, validateState, STALE_MS } from './auto_publish_core.mjs'
 import { makeAsnCli, asnCliFail, parsePostFailedMarker } from './asn_cli.mjs'
@@ -41,7 +42,7 @@ export const BLOCKED_NOTICE_MS = 30 * 60 * 1000
 export const GH_FAIL_NOTICE_MS = 30 * 60 * 1000
 
 // 告警檔裡會出現的類別（--ack-alert 只認這些）
-export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad', 'pending-write-failed', 'daemon-stopped', 'daemon-dead']
+export const ALERT_CAUSES = ['post-failed', 'already-running', 'bad-state', 'gh-failed', 'prep-failed', 'pending-bad', 'pending-write-failed', 'daemon-stopped', 'daemon-dead', 'daemon-start-failed']
 
 export function parseArgs(argv) {
   const o = { once: false, interval: 120, state: DEFAULT_STATE, room: null, dryRunOnly: false, seedDesktop: null, seedLinux: null, ack: null, ackAlert: null, yes: false, postPending: false, checkAlive: false, error: null }
@@ -635,7 +636,7 @@ export function resolveStatePath(state, cwd) {
   return { state: abs, note: `--state 給的是相對路徑 ${state}，以啟動目錄 ${cwd} 解析，實際使用：${abs}` }
 }
 
-export function realDeps(opts, repoRoot = REPO_ROOT) {
+export function realDeps(opts, repoRoot = REPO_ROOT, inject = {}) {
   const cmd = (bin) => (args, o = {}) => {
     const r = spawnSync(bin, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, cwd: repoRoot, ...o })
     return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: (r.stderr ?? '') + (r.error ? String(r.error.message) : '') }
@@ -666,21 +667,18 @@ export function realDeps(opts, repoRoot = REPO_ROOT) {
           : spawnSync('ps', ['-p', String(Number(pid)), '-o', 'args='], { encoding: 'utf8', timeout: 15000 })
         const out = String(r.stdout ?? '').trim()
         if (r.status !== 0 || !out) return null
-        return /auto_publish/.test(out)
+        // 命令列要是「node … auto_publish.mjs」，而且不是 --post-pending／--check-alive／--ack 這類一次性子命令（編輯器開著這支檔也不算）
+        return /node(\.exe)?["']?\s+.*auto_publish\.mjs/i.test(out) && !/--(post-pending|check-alive|ack|ack-alert|seed|seed-desktop|seed-linux)(\s|$)/.test(out)
       } catch { return null }
     },
     pidAlive: (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } },
-    // 以「不掛任何主控台」的方式啟動常駐程式本體（#2436）：detached 在 Windows 會用 DETACHED_PROCESS 建立，
-    // 沒有主控台就收不到主控台關閉事件／Ctrl+C，對它送不加 /F 的 taskkill 也沒有視窗可以收 WM_CLOSE；windowsHide 避免閃出視窗。
-    // stdio 全丟掉（log 自己寫檔）。回子程序 pid。
+    // 以 WMI Win32_Process.Create 啟動常駐程式本體（#2436）：沒有主控台、不開視窗，而且不在工作排程的 job object 裡，
+    // 排程結束巡檢那次執行時不會被一起收掉（做法與理由見 auto_publish_start.mjs）。回新程序 pid，失敗丟例外。
     startDaemon: (o) => {
       const args = [fileURLToPath(import.meta.url), '--state', o.state, '--interval', String(o.interval)]
       if (o.room) args.push('--room', o.room)
       if (o.dryRunOnly) args.push('--dry-run-only')
-      const c = spawnChild(process.execPath, args, { cwd: repoRoot, detached: true, windowsHide: true, stdio: 'ignore' })
-      c.on('error', () => { /* 起不來由下一次巡檢發現 */ })
-      c.unref()
-      return c.pid
+      return startViaWmi({ execPath: process.execPath, args, cwd: repoRoot }, inject.start)
     },
     log: (m) => {
       const line = `[${new Date().toISOString()}] ${m}\n`
@@ -721,22 +719,28 @@ async function main() {
   if (!wt.ok) { console.error(wt.why); process.exit(2) }
   const st = checkStartup(opts, deps)
   if (!st.ok) { console.error(st.why); process.exit(2) }
+  const r = await runDaemon(opts, deps)
+  if (r.code) process.exit(r.code)
+}
+
+// 常駐（或 --once）主迴圈。proc、rounds、sleep 讓測試注入；rounds 是最多跑幾輪（預設不設限）
+export async function runDaemon(opts, deps, { proc = process, rounds = Infinity, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
   let inst = null
   if (!opts.once) {
     inst = claimInstance(opts, deps)
-    if (!inst.got) process.exit(3)
+    if (!inst.got) return { code: 3 }
     if (inst.tookOver) deps.log(`發現殘留的 pid 檔（pid ${inst.tookOver} 已不在或不是自動發佈），已接手`)
-    const cleanup = () => releaseInstance(opts, deps, inst.content)
-    process.on('exit', cleanup)
+    proc.on('exit', () => releaseInstance(opts, deps, inst.content))
     // 收到結束訊號：先寫 daemon-stopped 告警再結束（#2436）
-    installStopHandlers(opts, deps, process)
+    installStopHandlers(opts, deps, proc)
   }
-  do {
+  for (let i = 0; i < rounds; i++) {
     if (!opts.once) writeHeartbeat(opts, deps)
     try { await runOnce(opts, deps) } catch (e) { deps.log(`這一輪發生例外：${e.stack || e.message}`) }
     if (opts.once) break
-    await new Promise((r) => setTimeout(r, opts.interval * 1000))
-  } while (true)
+    await sleep(opts.interval * 1000)
+  }
+  return { code: 0 }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main()
