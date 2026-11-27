@@ -166,6 +166,10 @@ impl SensitiveRoots {
             }
         }
         let mut env_paths: Vec<PathBuf> = ENV_ROOTS.iter().filter_map(|n| get(n)).collect();
+        // ASN 資料夾：跟 home 解析同一套（相對值接在目前工作資料夾上）；上面收的相對值會在下面因為不是絕對路徑被略過，這裡補上解成絕對路徑的那一份
+        if let Some(p) = crate::home::override_dir_in(env) {
+            env_paths.push(p);
+        }
         if let Some(la) = get("LOCALAPPDATA") {
             env_paths.extend(LOCALAPPDATA_ROOTS.iter().map(|r| la.join(r)));
         }

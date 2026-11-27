@@ -637,6 +637,19 @@ fn 放行資料夾_asn_資料夾改了位置也成立() {
     assert_eq!(v_in(&plain, &own, &asn.join("key.bin"), ReadTool::Single), ReadVerdict::Allow);
 }
 
+// 相對路徑的 ASN_HOME 要看目前的工作資料夾，共用向量表達不了，所以電腦版與 Node 版各有一支同樣規則的測試
+#[test]
+fn 清單_asn_home_設成相對路徑_照_home_解成絕對位置_底下的檔判定為擋() {
+    let rel = "asn-rel-home-test-dir";
+    let target = std::env::current_dir().unwrap().join(rel).join("key.bin");
+    for name in ["ASN_HOME", "IRORI_HOME"] {
+        let r = rig_with(&kv(&[(name, rel)]));
+        assert!(blocked(&r, &ps(&target)), "{name}");
+        assert!(!blocked(&r, &ps(&std::env::current_dir().unwrap().join("asn-other-dir").join("a.txt"))), "{name} 旁邊的資料夾放行");
+    }
+    assert!(!blocked(&rig(), &ps(&target)), "沒設時不在清單裡");
+}
+
 #[test]
 fn 放行資料夾_自己的資料夾有兩個位置_ASN_資料夾與機器工作資料夾_搬位置後也成立() {
     let d = tempfile::tempdir().unwrap();

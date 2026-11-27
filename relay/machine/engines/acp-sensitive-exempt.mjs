@@ -10,7 +10,7 @@ import path from 'node:path'
 import { agyBrainDir } from './acp-brain.mjs'
 import { DATA } from './acp-sensitive-data.mjs'
 import { nstr } from './acp-sensitive-path.mjs'
-import { buildRoots, envPairs, homesFrom, pushForms, sealRoots } from './acp-sensitive-roots.mjs'
+import { asnHomeOverride, buildRoots, envPairs, homesFrom, pushForms, sealRoots } from './acp-sensitive-roots.mjs'
 
 /** 收信附件的下載資料夾（工作資料夾底下的 attachments）要不要開放給背景夥伴讀。領隊還沒裁決，預設開放；要關掉改成 false */
 export const ATTACHMENTS_READABLE = true
@@ -29,6 +29,8 @@ export function withWorkdirs(roots, name, ownDirs, workDir, attachments) {
     const hit = roots.env.find(([a, b]) => a.toUpperCase() === k && b.trim() !== '')
     if (hit) pushForms(asn, hit[1].trim(), canon)
   }
+  const asnHome = asnHomeOverride(roots.env)
+  if (asnHome !== null) pushForms(asn, asnHome, canon) // 跟 home.mjs 同一套解析：相對值也算進來
   // 容器的位置一律由「上層的各形式＋固定的下一層」組出來，不去解開容器自己：容器自己若是捷徑，它的實際位置就不在預期位置，不放行。
   // 自己的容器有兩個位置（名字要先過名字驗證）：ASN 資料夾底下的 workers/<名字>、機器工作資料夾底下的 workers/<名字>
   const workForms = workDir ? pushForms([], workDir, canon) : []

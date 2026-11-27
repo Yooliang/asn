@@ -128,6 +128,22 @@ test('extract：巢狀深到連轉成字串都失敗也不丟例外，照樣收�
   assert.equal(containerLike(got[0]), true)
 })
 
+// 相對路徑的 ASN_HOME 要看目前的工作資料夾，共用向量表達不了，所以電腦版與 Node 版各有一支同樣規則的測試
+test('清單：ASN_HOME（含舊名 IRORI_HOME）設成相對路徑——照 home.mjs 解成絕對位置，那個資料夾底下的檔判定為擋', () => {
+  mkdirs([P.HOME, P.WORK, path.join(T, 'cwd', 'rel-asn')])
+  const prev = process.cwd()
+  process.chdir(path.join(T, 'cwd'))
+  try {
+    for (const name of ['ASN_HOME', 'IRORI_HOME']) {
+      const roots = buildRoots([P.HOME], [[name, 'rel-asn']])
+      const ctx = { roots, base: P.WORK, tool: ReadTool.Single }
+      assert.equal(readVerdict(path.join(T, 'cwd', 'rel-asn', 'key.bin'), ctx), ReadVerdict.Sensitive, name)
+      assert.equal(readVerdict(path.join(T, 'cwd', 'other', 'a.txt'), ctx), ReadVerdict.Allow, `${name} 旁邊的資料夾放行`)
+    }
+    assert.equal(readVerdict(path.join(T, 'cwd', 'rel-asn', 'key.bin'), { roots: buildRoots([P.HOME], []), base: P.WORK, tool: ReadTool.Single }), ReadVerdict.Allow, '沒設時不在清單裡')
+  } finally { process.chdir(prev) }
+})
+
 test('trimWs 與 extractReadPaths：中間有大量連續空白也是線性時間', () => {
   const s = `a${' '.repeat(80000)}b`
   const t0 = Date.now()

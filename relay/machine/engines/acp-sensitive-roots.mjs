@@ -1,6 +1,8 @@
 // 敏感根清單（與 Rust 端 acp_sensitive.rs 的 SensitiveRoots::build 對應）。啟動時算好（每個家目錄各算一次，字面與實際位置兩種形式），之後每次請求只比字串。
 import fs from 'node:fs'
 import path from 'node:path'
+import { createLegacyLog } from '../env-compat.mjs'
+import { overrideDir } from '../home.mjs'
 import { agyBrainDir } from './acp-brain.mjs'
 import { DATA } from './acp-sensitive-data.mjs'
 import { nstr, realPathWith } from './acp-sensitive-path.mjs'
@@ -51,6 +53,12 @@ export function homesFrom(env, realHome) {
 
 const isAbs = p => path.isAbsolute(p) || p.startsWith('/')
 
+/** ASN 資料夾（ASN_HOME，舊名 IRORI_HOME）的實際位置：跟 home.mjs 同一套解析（相對值也解成絕對路徑）；沒設回 null。env 是 [名, 值] 陣列，名字大小寫不分 */
+export function asnHomeOverride(env) {
+  const obj = Object.fromEntries(env.map(([k, v]) => [k.toUpperCase(), v]))
+  return overrideDir(obj, createLegacyLog()) // 這裡只是算清單，不算「本程序用了舊名」，另給一份用完即丟的記錄
+}
+
 /** homes：agy 環境的家目錄＋這台電腦實際的使用者資料夾；env：展開變數與環境變數指定位置用。canon 可注入（測試用） */
 export function buildRoots(homes, envIn, canon = stdCanon) {
   const env = envPairs(envIn)
@@ -59,6 +67,8 @@ export function buildRoots(homes, envIn, canon = stdCanon) {
   const paths = []
   for (const h of homes) for (const d of [...DATA.homeDirs, ...DATA.extraHomePaths]) paths.push(path.join(h, d))
   const envPaths = DATA.envRoots.map(n => getEnv(env, n)).filter(v => v !== null)
+  const asnHome = asnHomeOverride(env)
+  if (asnHome !== null) envPaths.push(asnHome) // 相對值在上面會因為不是絕對路徑被略過，這裡補上解成絕對路徑的那一份
   const la = getEnv(env, 'LOCALAPPDATA')
   if (la !== null) for (const r of DATA.localAppDataRoots) envPaths.push(path.join(la, r))
   const ap = getEnv(env, 'APPDATA')
