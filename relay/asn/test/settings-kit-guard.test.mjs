@@ -35,7 +35,9 @@ test('#2105 設定頁：舊按鈕（aero-btn）與裸 <button> 都不得再出�
   try { aboutBtns = m.findAll('button.asn-btn').length; assert.equal(m.findAll('button').length, aboutBtns, '「關於」畫出的按鈕全是共用按鈕（asn-btn）') } finally { m.unmount() }
   assert.equal(aboutBtns, 5)
   const inPanel = (panel.match(/<asn-button[\s>]/g) ?? []).length
-  assert.ok(inPanel + aboutBtns >= 55, `原本約 75 顆按鈕都換成共用按鈕（#1860 拿掉設備詳情的帳號區之後剩約 59 顆）；現在 settings-panel ${inPanel} 顆＋「關於」元件 ${aboutBtns} 顆`)
+  // 下限 57（#2455 二審收緊）：搬完 52＋5＝57 顆；下限留 55 的話從設定頁拿掉 2 顆還是綠。二審建議 56，但 56 只擋得住拿掉 2 顆，
+  // 要做到「拿掉 1 顆就紅」得是 57（目前實際顆數）。之後真的有意減按鈕要連這個數字一起改。
+  assert.ok(inPanel + aboutBtns >= 57, `原本約 75 顆按鈕都換成共用按鈕（#1860 拿掉設備詳情的帳號區之後剩約 59 顆）；現在 settings-panel ${inPanel} 顆＋「關於」元件 ${aboutBtns} 顆`)
 })
 
 test('#2105 設定頁：樣板不寫死字級與間距（px），尺寸只來自共用按鈕與設計變數', () => {

@@ -105,6 +105,37 @@ test('兩個殼都把 ABOUT_LOG_VIEWER 的值傳給元件（不寫死、不看 c
   assert.ok(!/logViewer/.test(read('../ui/shells/caps-desktop.mjs') + read('../ui/shells/caps-android.mjs') + read('../ui/shells/caps-web.mjs')), 'logViewer 不是能力')
 })
 
+// ---- 版面接線（#2455 二審）：手機一定畫 stack、電腦一定畫 split；元件預設是 split，所以手機漏傳 :layout 會靜默畫成電腦版面 ----
+test('版面接線：電腦殼真的掛載，「關於」畫成 split（is-split）', async () => {
+  const { SettingsPanel } = await import('../ui/lib/settings-panel.mjs')
+  const m = mountComponent(SettingsPanel, { st: { version: '9.9.9' }, catKey: 'about' })
+  try {
+    assert.ok(m.find('.asn-about-intro.is-split'), '電腦的關於要帶 is-split')
+    assert.equal(m.find('.is-stack'), null)
+    assert.equal(m.findAll('.m-row-btn').length, 0)
+  } finally { m.unmount() }
+  assert.match(read('../ui/lib/settings-panel.mjs'), /aboutLayout = ATTRS_DESKTOP\.layout/)
+  assert.match(read('../ui/lib/settings-panel.mjs'), /<asn-about-panel [^>]*:layout="aboutLayout"/)
+  assert.equal(ATTRS_DESKTOP.layout, 'split')
+})
+
+test('版面接線：手機殼把 ATTRS_ANDROID.layout（stack）傳給元件；用同一個值真的掛載，畫出 is-stack 與一列一列的連結', () => {
+  const html = read('../ui/m.html'), js = read('../ui/m.js')
+  const tag = /<asn-about-panel\s[^>]*>/.exec(html)?.[0]
+  assert.ok(tag, 'm.html 找不到 asn-about-panel')
+  assert.match(tag, /\s:layout="aboutLayout"/, '手機要傳 :layout（元件預設是 split，沒傳會畫成電腦版面）')
+  const src = /\baboutLayout = (\w+)\.layout\b/.exec(js)?.[1]
+  assert.equal(src, 'ATTRS_ANDROID', 'm.js 的 aboutLayout 要取自 ATTRS_ANDROID')
+  assert.match(js, /import \{[^}]*\bATTRS_ANDROID\b[^}]*\} from '\.\/shells\/platform-attrs\.mjs'/, 'ATTRS_ANDROID 來自 platform-attrs')
+  assert.equal(ATTRS_ANDROID.layout, 'stack')
+  const m = mountComponent(AsnAboutPanel, props({ layout: ATTRS_ANDROID.layout }))
+  try {
+    assert.ok(m.find('.asn-about-intro.is-stack'), '手機的關於要帶 is-stack')
+    assert.equal(m.findAll('.m-row-btn').length, 4)
+    assert.equal(m.find('.is-split'), null)
+  } finally { m.unmount() }
+})
+
 // ---- 舊樣式已刪、新樣式只在一個檔 ----
 test('舊的 about 樣式規則已從 style.css、mobile.css、modern.css、line.css、skin-common.css 刪掉，新規則只在 parts/about-panel.css', () => {
   const OLD = /\.ver-line|\.about-(intro|device|maker|links)|\.m-about(-|\b)/
