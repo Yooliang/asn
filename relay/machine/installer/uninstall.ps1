@@ -59,11 +59,11 @@ if ($preview) {
 $delete = [bool]$DeleteData
 if (-not $DeleteData -and -not $KeepData -and -not $preview) {
   Say ''
-  Say "金鑰與資料夾：$irori\$id.key、node、machine-$id、app"
+  Say "金鑰與資料夾：$irori\$id.key、node、machine-$id、app、shared"
   $delete = Read-YesNo '要刪除這些嗎？刪除後要再用這台電腦，需要重新拿邀請碼' $false $ni
 }
 if ($preview) {
-  Say "（預覽）會問你要不要刪除金鑰（$id.key）、node 檔、machine-$id 資料夾與 app 資料夾；不刪的話它們原地保留。"
+  Say "（預覽）會問你要不要刪除金鑰（$id.key）、node 檔、machine-$id 資料夾、app 資料夾與 shared 資料夾；不刪的話它們原地保留。"
   Say '（預覽）刪除時還會問你要不要同時從 ASN 的名單移除這台電腦。'
   exit 0
 }
@@ -96,6 +96,8 @@ if ((Test-Path -LiteralPath $nodeFile) -and ((Get-Content -LiteralPath $nodeFile
 if (Test-Path -LiteralPath $workDir) { Remove-Item -LiteralPath $workDir -Recurse -Force }
 $appDir = Join-Path $irori 'app'
 if (Test-Path -LiteralPath $appDir) { Remove-Item -LiteralPath $appDir -Recurse -Force }
+$sharedDir = Join-Path $irori 'shared'
+if (Test-Path -LiteralPath $sharedDir) { Remove-Item -LiteralPath $sharedDir -Recurse -Force }
 # 解除安裝程式自己的副本（正在執行的這支可能刪不掉，刪不掉就留著，不影響結果）
 $selfDir = Join-Path $irori 'uninstall'
 if (Test-Path -LiteralPath $selfDir) { try { Remove-Item -LiteralPath $selfDir -Recurse -Force -ErrorAction Stop } catch { } }

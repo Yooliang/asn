@@ -44,6 +44,11 @@ $appSrc = Join-Path $PSScriptRoot 'app'
 if (-not (Test-Path -LiteralPath (Join-Path $appSrc 'bridge.mjs'))) {
   Stop-Install '找不到程式檔（app 資料夾）。請先把 zip「全部解壓縮」到一個資料夾，再到那個資料夾裡雙擊「安裝.cmd」；不要直接在壓縮檔裡執行。'
 }
+# 程式會用相對路徑引用旁邊的 shared 資料夾；少了它裝上去的橋會缺檔，所以在動任何東西之前先擋下來
+$sharedSrc = Join-Path $PSScriptRoot 'shared'
+if (-not (Test-Path -LiteralPath $sharedSrc -PathType Container)) {
+  Stop-Install '找不到程式檔（shared 資料夾）。請先把 zip「全部解壓縮」到一個資料夾，再到那個資料夾裡雙擊「安裝.cmd」；不要直接在壓縮檔裡執行，也不要只複製其中幾個檔案。'
+}
 
 # ---- 2. Node.js ----
 $nodeCmd = Get-Command $NodeCommand -ErrorAction SilentlyContinue
@@ -71,6 +76,7 @@ if ($hasClaude) {
 $home_ = Get-AsnHome $HomeDir
 $irori = Get-AsnDataDir $HomeDir
 $appDst = Join-Path $irori 'app'
+$sharedDst = Join-Path $irori 'shared'   # 跟 app 同一層，程式引用的 ../shared 才對得上
 $existingId = ''
 $nodeFile = Join-Path $irori 'node'
 if (Test-Path -LiteralPath $nodeFile) { $existingId = (Get-Content -LiteralPath $nodeFile -Raw).Trim() }
@@ -84,6 +90,9 @@ function Install-AppFiles {
   if (Test-Path -LiteralPath $appDst) { Remove-Item -LiteralPath $appDst -Recurse -Force }
   New-Item -ItemType Directory -Force -Path $appDst | Out-Null
   Copy-Item -Path (Join-Path $appSrc '*') -Destination $appDst -Recurse -Force
+  if (Test-Path -LiteralPath $sharedDst) { Remove-Item -LiteralPath $sharedDst -Recurse -Force }
+  New-Item -ItemType Directory -Force -Path $sharedDst | Out-Null
+  Copy-Item -Path (Join-Path $sharedSrc '*') -Destination $sharedDst -Recurse -Force
   # 解除安裝程式留一份在 .irori-relay\uninstall，下載的資料夾刪掉了也能移除
   $un = Join-Path $irori 'uninstall'
   New-Item -ItemType Directory -Force -Path $un | Out-Null
@@ -126,7 +135,7 @@ if ($installed) {
   Say ''
   Say "這台電腦已經裝過了（代號 $id），這次只更新程式，不會重新註冊。" 'Cyan'
   if ($preview) {
-    Say "（預覽）會停止目前的橋（只停它自己記錄的程序）、把程式換成新版（$newVer）、重新啟動。金鑰與設定不動。"
+    Say "（預覽）會停止目前的橋（只停它自己記錄的程序）、把程式（含 shared 資料夾）換成新版（$newVer）、重新啟動。金鑰與設定不動。"
     exit 0
   }
   $null = Stop-AsnBridge (Join-Path $irori "machine-$id") "AsnBridge-$id" ([bool]$NoSchedule)
@@ -150,7 +159,7 @@ if ($preview) {
   Say '（預覽）第一次安裝會依序做：' 'Yellow'
   Say '  1. 請你貼上邀請碼（帳號擁有者給的，15 分鐘內有效、只能用一次），並輸入這台電腦的名稱'
   Say "  2. 用邀請碼向 ASN 註冊這台電腦（建議代號：$sugg），金鑰存到 $irori\<代號>.key，不會顯示在畫面上"
-  Say "  3. 把程式放到 $appDst（版本 $newVer）"
+  Say "  3. 把程式放到 $appDst（版本 $newVer），並把共用檔放到 $sharedDst"
   Say "  4. 建立「登入時自動執行」的排程 AsnBridge-<代號> 並立刻啟動"
   Say '  5. 檢查連線並告訴你結果'
   exit 0

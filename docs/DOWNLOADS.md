@@ -31,12 +31,12 @@ Irori 的手機／電視 App（`irori.apk`、`irori-tv.apk`）是 Irori 自己�
 安裝程式做的事：檢查 Node 版本（沒有或太舊就說明去 nodejs.org 裝 LTS 並結束）→ 檢查 `claude` 是否在 PATH
 （沒有只提示，照樣安裝；橋會先連上、信留在信箱，裝好 Claude Code 後再雙擊一次「安裝.cmd」重啟）→ 用邀請碼向仲介
 `?action=register` 註冊（kind＝`other`、machine＝電腦名稱，≤40 字）→ 金鑰存 `%USERPROFILE%\.asn\<代號>.key`
-（**不印出**）、代號寫進 `node` 檔 → 程式複製到 `%USERPROFILE%\.asn\app\` → 呼叫 `app\install-task.ps1 -Apply`
+（**不印出**）、代號寫進 `node` 檔 → 程式複製到 `%USERPROFILE%\.asn\app\`、共用檔複製到同一層的 `%USERPROFILE%\.asn\shared\`（程式用 `../shared/` 引用它，少了橋會缺檔） → 呼叫 `app\install-task.ps1 -Apply`
 建立登入排程 `AsnBridge-<代號>`（舊名 `IroriRelayMachine-<代號>` 若存在會一併移除；設定同手冊：登入時、隱藏視窗、失敗 1 分鐘後重啟 5 次）並立刻啟動 → 檢查連線。
 
 - **代號規則**（同後端 register）：英數、`-`、`_`，1～32 字，全名單唯一。預設由電腦名稱產生。邀請碼若限定前綴
   （工頭開的邀請碼，例如 `W-`），安裝程式自動補上前綴再試；撞名（409）會請使用者換一個；`t<數字>-` 開頭留給其他租戶。
-- **已安裝過**：再雙擊「安裝.cmd」＝更新程式（只換 `app\`、重啟橋，不重註冊、不動金鑰）。
+- **已安裝過**：再雙擊「安裝.cmd」＝更新程式（只換 `app\` 與 `shared\`、重啟橋，不重註冊、不動金鑰）。
 - **金鑰不見了**（但名單上還有這個代號）：帳號擁有者產生「重設碼」，使用者在命令列跑 `安裝.cmd -Reissue`，貼重設碼並輸入原代號。
 - **解除安裝**：「解除安裝.cmd」（安裝後 `%USERPROFILE%\.asn\uninstall\` 也有一份）：移除排程、**只結束
   `bridge.pid`、`mailbox.pid` 記的程序**（且確認 pid 沒被別的程式重用）、詢問是否刪除金鑰與資料夾，並可同時 `leave` 離開名單
@@ -44,7 +44,8 @@ Irori 的手機／電視 App（`irori.apk`、`irori-tv.apk`）是 Irori 自己�
 - 所有 ps1 支援 `-WhatIf`（預覽，不改任何東西、不連網）。
 
 **zip 內容**：根目錄 `安裝.cmd`、`解除安裝.cmd`、`install.ps1`、`uninstall.ps1`、`asn-common.ps1`（舊檔名 `irori-common.ps1` 留一個只載入新檔的薄殼）、`使用說明.txt`；
-`app/` 是 `relay/machine/` 執行所需檔案（含 `register.mjs`、`README.md`、`VERSION.json`）。**不含**：`test/`、`tools-*.mjs`、
+`app/` 是 `relay/machine/` 執行所需檔案（含 `register.mjs`、`README.md`、`VERSION.json`）；`shared/` 是 `relay/shared/`（不含 `test-vectors/`），
+安裝程式會把它放到 ASN 資料夾裡跟 `app\` 同一層，zip 裡缺 `shared/` 時安裝會停下來、不留任何東西；解除安裝時一併刪除。**不含**：`test/`、`tools-*.mjs`、
 任何 `*.key`、`pending.json`、`*.log`、`*.pid`、Aegis（Linux）專用檔。`build_downloads` 測試會檢查這份清單。
 
 **已知限制（要管理者配合）**：用邀請碼註冊的節點是一般成員（`can_invite=false`、`can_roster=false`），仲介的 `roster`
