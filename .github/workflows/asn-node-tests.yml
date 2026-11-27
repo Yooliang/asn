@@ -27,10 +27,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # #2425 提示樣式守門要跟 PR 的 base 上的基準檔比（基準只准刪不准加）；淺層 checkout 沒有它，要另外抓。
-      # 只抓 sha、不寫進任何分支，所以連續合併時不會 non-fast-forward；推 main 時不比（沒有 base）
+      # 只抓 sha、不寫進任何分支，所以連續合併時不會 non-fast-forward；推 main 時沒有 base，這一步什麼都不做
+      # （這支 workflow 不准用 if: 略過步驟，見 ci-workflow-guard 的 #2370；判斷寫在指令裡，抓失敗照常紅）
       - name: 取得 PR 的 base（給基準檔比對）
-        if: github.event_name == 'pull_request'
-        run: git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then git fetch --no-tags --depth=1 origin "$BASE_SHA"; else echo "不是 PR，沒有 base，不抓"; fi
 
       - uses: ./.github/actions/asn-node-setup
 
