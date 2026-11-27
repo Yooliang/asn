@@ -1,7 +1,7 @@
 // 設定項目基本件 U1（#1763 F2）：卡片、一列、開關、下拉、輸入框、按鈕、說明。樣式在 ui/parts/parts.css（只用 --asn-* 變數）。
 // 寫法同 lib/ui-kit.mjs：物件式元件、template 是字串、Vue 只在 setup 裡取用（node 也能載入）；按鈕直接用 #2105 的 AsnButton，不另做一套。
 // 目前沒有任何頁面使用，只有測試在用；之後搬頁面時，確認才送出（change 事件），畫面暫存留在元件內。
-import { AsnButton } from '../lib/ui-kit.mjs'
+import { AsnButton, AsnNote } from '../lib/ui-kit.mjs'
 
 // ---------- 卡片 ----------
 export const AsnSettingCard = {
@@ -81,11 +81,7 @@ export const AsnPartButton = {
   template: `<asn-button class="asn-part-btn" :level="level" :state="state" :disabled="disabled" @click="$emit('click', $event)"><slot></slot></asn-button>`,
 }
 
-// ---------- 說明文字 ----------
-export const AsnNote = {
-  name: 'AsnNote',
-  template: `<p class="asn-note"><slot></slot></p>`,
-}
+// ---------- 說明文字：併入共用元件（#2425），這裡只轉出同名元件，不另留一份 ----------
 
 /** U1 基本件（目前沒有頁面註冊它們；搬頁面時再 app.component） */
 export const PARTS_U1 = Object.freeze({ AsnSettingCard, AsnSettingRow, AsnToggle, AsnSelect, AsnText, AsnPartButton, AsnNote })
