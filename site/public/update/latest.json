@@ -1,15 +1,11 @@
 {
-  "version": "0.2.104",
-  "notes": "- 修正：電腦重開後，前台和背景夥伴的終端會自己重試接回，不再一直顯示灰色\n- 改善：替別台電腦開夥伴時可以指定型號，開好會顯示實際用的型號；手機也能選型號\n- 修正：Linux 上背景夥伴能讀哪些檔，改成和電腦版同一套規則\n- 修正：Linux 上臨時開背景夥伴不再出錯\n- 改善：Windows 安裝檔一併裝好共用元件，解除安裝時一起移除",
-  "pub_date": "2026-11-27T06:04:04.385Z",
+  "version": "0.2.105",
+  "notes": "- 修正：夥伴需要重新登入或額度用完時，名單和對話視窗會顯示出來，不再看起來像正常\n- 修正：開夥伴視窗逾時時會把窗格找回來；夥伴終端分成已接上、暫時接不回、確定不在三種狀態\n- 改善：對話視窗的提示換了位置和樣式，終端停止的原因收進按鈕，黃條附上可以直接按的動作\n- 改善：封存、釘選等操作的結果改用統一的提示，電腦和手機一致，也不會蓋到按鈕或輸入框\n- 修正：夥伴讀到看不懂的輸出時會停下這一輪並記錄，不再卡住或亂回",
+  "pub_date": "2026-11-27T14:33:32.901Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0Nybjd3TW90MlNFR1RWekpJZ3FvOERCRWl4VW1zejkvT1I1MGp2WDE3TlltUDZMMWpQQkkwUU1acGxOMFNPZzZCblFSVEtuaHptM0d2TWRML0swd0NDTHdFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NzU5NDQzCWZpbGU6QVNOXzAuMi4xMDRfeDY0LXNldHVwLmV4ZQpHNzQ3Nm52VW9tQzcvUythTVNJbkV5aFZFOW1aWVIzendwR0FFMW9INGR5TjdWdGlRTUJCU1QyT2ZXWDAwNXltOEFMV0xOSXc0SHlOK2lzTFIwVWRBUT09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.104_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjJTaWJOdDJnN1luRGNxSjN1ZWpGb3hramhmUlQ4ME80akdnWVlHdnhaU3Z4ZG9JQ01IMWNkcDdYZGV0YWZPZm02aE50WHlOWXNYK09XbzBSSmt5aUFzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NzYwMDc5CWZpbGU6QVNOXzAuMi4xMDRfYW1kNjQuQXBwSW1hZ2UKZk9IajNLL0ZjY0cwWDN2ZjBJcXRnVlFiOXZWY1R2MzI1cUduL3hIMkhRd2lYQVQvaXlnTDdXOEJ3cmdNcXZpc1E2elpUQ3hiWXJTRGlQOW1GQVJ6Q0E9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.104_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjZkbWU3Y0ZCSUYzdE1CQkVxb0N2QW92WGhmREJvUktLcTlEeHB6V2UrNlRnMzlCRzA4ejl6TkE3RDRUdElkQ1VuZUQ0VGdvQWIwUFlLV3ZBT0FaSkFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1NzkwMDEyCWZpbGU6QVNOXzAuMi4xMDVfeDY0LXNldHVwLmV4ZQp4a3hmOVdmS3A4UWVQWFU4Q0k4d2VpNzFGK3I1NXY1ZGdEaDVvY0Z3NUo2bGdxYVk3ZTRIZ3JzRnNicmhXU2VYdXMzS3oxd0VpNTV0eFc5enRiYktDdz09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.105_x64-setup.exe"
     }
   }
 }
