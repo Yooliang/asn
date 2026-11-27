@@ -309,8 +309,8 @@ test('守門：手機設定頁——分類列表在上、使用指引在列表�
   assert.equal((html.match(/@click="doLogout"/g) || []).length, 1, '整頁只有一顆登出鈕')
   const nameAt = detail.indexOf('我的名字<input'), acctAt = detail.indexOf('{{ accountText }}')
   assert.ok(nameAt > 0 && acctAt > nameAt && detail.slice(nameAt, acctAt).indexOf('m-card') < 0, '帳號文字緊接在我的名字之後、同一張卡')
-  const updAt = detail.indexOf('檢查更新'), verAt = detail.indexOf('{{ info.version }}')
-  assert.ok(updAt > 0 && verAt > updAt, '檢查更新在「更新」頁、版本號在「關於」頁')
+  const updAt = detail.indexOf('檢查更新'), verAt = detail.indexOf(':version="info.version"')   // 版本號改由共用元件 AsnAboutPanel 畫（#1763 C1），手機把 info.version 傳進去
+  assert.ok(updAt > 0 && verAt > updAt && verAt > detail.indexOf("settingCat === 'about'"), '檢查更新在「更新」頁、版本號在「關於」頁')
   assert.match(fs.readFileSync(new URL('../ui/mobile.css', import.meta.url), 'utf8'), /\.m-logout\{[^}]*margin-top:(2[4-9]|[3-9]\d)px/)
 })
 

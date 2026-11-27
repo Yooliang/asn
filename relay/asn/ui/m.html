@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="kit.css">
 <link rel="stylesheet" href="mobile.css">
+<link rel="stylesheet" href="parts/about-panel.css">
 <link rel="stylesheet" href="group.css">
 <link rel="stylesheet" href="skin-common.css">
 <link rel="stylesheet" href="modern.css">
@@ -598,19 +599,8 @@
                   </div>
                 </template>
                 <template v-else-if="settingCat === 'about'">
-                  <div class="m-card m-form m-about">
-                    <p class="m-about-intro">{{ about.intro }}</p>
-                    <p class="m-ver">版本 {{ info.version }}</p>
-                    <p class="m-ver m-about-device" v-if="about.deviceLine">{{ about.deviceLine }}</p>
-                  </div>
-                  <div class="m-card m-form m-set-list m-about-links">
-                    <ul class="m-guide-list">
-                      <li v-for="l in about.items" :key="l.key">
-                        <button class="m-row-btn" :class="'m-about-' + l.key" type="button" @click="aboutAct(l)"><span class="m-row-tx"><b>{{ l.label }}</b></span><span class="m-caret" aria-hidden="true">{{ l.kind === 'link' ? '↗' : '▸' }}</span></button>
-                      </li>
-                    </ul>
-                  </div>
-                  <p class="m-ver m-about-maker">{{ about.maker }}</p>
+                  <!-- 檢視記錄：設定值清單 open-ui-log 的手機欄是「無（未做）」，所以 ABOUT_LOG_VIEWER.mobile 是 false（test/about-panel.test.mjs 比對清單） -->
+                  <asn-about-panel :about="about" :version="info.version" :layout="aboutLayout" :show-log-viewer="aboutLogViewer" @open-link="openAboutLink" @open-update="openSetting('update')" @open-guide="openGuides()"></asn-about-panel>
                 </template>
               </div>
             </div>

@@ -42,7 +42,8 @@ test('退回開資料夾時，說明顯示在按鈕下面', async () => {
 test('按下去：送出 open-ui-log，樞紐接得住並交給 openUiLog', () => {
   assert.ok(SETTING_OPS.includes('open-ui-log'))
   const comp = read('ui', 'lib', 'settings-panel.mjs')
-  assert.match(comp, /@click="act\('open-ui-log'\)">檢視記錄</)
+  assert.match(comp, /@open-log="act\('open-ui-log'\)"/)   // 按鈕在共用元件 AsnAboutPanel（#1763 C1），按了送 open-log，電腦殼接成 act('open-ui-log')
+  assert.match(read('ui', 'parts', 'about-panel.mjs'), /@click="\$emit\('open-log'\)">檢視記錄</)
   const hub = read('ui', 'list.js')
   const fn = hub.slice(hub.indexOf('const applySetting'), hub.indexOf('const pushSettings'))
   assert.match(fn, /case 'open-ui-log': uiLogMsg\.value = ''; uiLogMsg\.value = await openUiLog\(invoke\); break/)
