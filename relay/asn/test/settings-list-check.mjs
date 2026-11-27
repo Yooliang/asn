@@ -264,6 +264,7 @@ export function checkList(text, truth) {
 
     // 平台欄與能力表雙向比對：這一列的 needs（同一列所有標記都相同）跟各平台的能力表比
     if (truth.needs) {
+      // 只看第一個代號就夠：同一列其他代號的 needs 由下方 needs-row-mismatch 保證與第一個一致
       const needs = r.tokens.length ? truth.needs.of(r.tokens[0]) : []
       for (const [k, name] of Object.entries(COLS)) {
         const p = platforms[k]

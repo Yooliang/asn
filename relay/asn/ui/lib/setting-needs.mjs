@@ -51,10 +51,10 @@ export const ITEM_NEEDS = build(
   group([], 'replace-pick', 'replace-do', 'replace-keep'),
   group([], 'known-forget'),
   // 「允許別台設備對這台做事」這一類（信任手機直接登入、替這台切換帳號）跟收發信的橋同一個角色：接受遠端的要求
-  group(['bridge'], 'known-login-ok'),
+  group(['hostAgents'], 'known-login-ok'),
   group(['taskManager'], 'tm-open', 'tm-close', 'tm-ask', 'tm-cancel', 'tm-confirm', 'tm-wake', 'tm-adopt', 'tm-view', 'tm-handover', 'tm-restart-ask', 'tm-restart-cancel', 'tm-restart-confirm'),
   group([], 'row-switch'),
-  group(['bridge'], 'acct-allow-switch', 'file.acct-prefs.remote_allow_switch', 'file.acct-prefs.remote_trust_own', 'file.acct-prefs.remote_trust_signed'),
+  group(['hostAgents'], 'acct-allow-switch', 'file.acct-prefs.remote_allow_switch', 'file.acct-prefs.remote_trust_own', 'file.acct-prefs.remote_trust_signed'),
   group([], 'flag.AGENT_INSTALL_UI'),
   group([], 'relogin-ask', 'relogin-yes', 'relogin-no', 'relogin-close'),
   // 三、帳號
