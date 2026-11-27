@@ -73,7 +73,7 @@ test('畫面：名單灰字、名牌、對話標題都看得到新狀態（用�
   assert.equal(infoRows({ status: 'limit' }).find(r => r.label === '狀態').value, '額度用完')
 })
 
-test('對話視窗：login-required 帶到 friend.status，「要重新登入」黃條真的出現；額度用完、狀態不明不加「可能無法馬上回應」那一行', () => {
+test('對話視窗：login-required 帶到 friend.status，「要重新登入」資訊橫幅真的出現；額度用完、狀態不明不加「可能無法馬上回應」那一行', () => {
   assert.equal(warnKind('login-required'), 'login')
   assert.equal(warnKind('quota'), null, '額度用完：只留名牌與灰字')
   assert.equal(warnKind('unknown'), null, '狀態不明：只留名牌與灰字')
@@ -83,7 +83,10 @@ test('對話視窗：login-required 帶到 friend.status，「要重新登入」
   assert.equal(warnKind(friend.status), 'login')
   assert.match(loginNote(friend), /Gemini 需要重新登入/)
   const cp = rd('lib/chatpane.mjs')
-  assert.match(cp, /<div class="warn" v-if="warn === 'login'">\s*<i>i<\/i>\s*<span>\{\{ loginText \}\}<\/span>/, '黃條接在 warn === login 上')
+  const loginBanner = cp.match(/<asn-note v-if="warn === 'login'"([^>]*)>\{\{ loginText \}\}<\/asn-note>/)
+  assert.ok(loginBanner, '要重新登入的橫幅接在 warn === login 上，字句沿用 loginNote')
+  assert.match(loginBanner[1], /\bbanner\b/, '是橫幅')
+  assert.doesNotMatch(loginBanner[1], /kind=|action-label|@action/, '資訊種類（預設 info）、沒有動作鈕')
   assert.match(cp, /warnKind\(props\.friend\?\.status/)
 })
 
