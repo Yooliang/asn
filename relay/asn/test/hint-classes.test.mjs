@@ -5,7 +5,7 @@
 //  - 每個 class 記著出現的檔：出現在基準沒記錄的新檔 → 紅（舊 class 不准擴散）；基準記著、實際已不用的檔 → 也紅（從基準刪掉）
 //  - 基準檔只准刪不准加：ASN_GOLDEN_UPDATE=1 只會把已消失的 class 移掉、刷新檔案清單，不會把新 class 放進去；
 //    另外現在的基準必須是 PR base 上基準檔的子集（手改基準檔偷加會紅）；
-//    唯一的例外是同一張 PR 裡的「一對一搬家」（evaluateMoves）：同一個 class 從 A 檔消失、在 B 檔出現，且該 class 的總檔案數與
+//    唯一的例外是同一張 PR 裡的搬家（evaluateMoves；只准一對一換檔，搬進 ui/parts/ 且帶註記與來源檔的可以多一個檔）：同一個 class 從 A 檔消失、在 B 檔出現，且該 class 的總檔案數與
 //    總用處數（base 與 head 各用同一支掃描器數一次）都沒增加，基準照改（把 A 換成 B）；搬進 ui/parts/ 的，基準的 moved 表要註明「搬家帶進共用元件、待換」；node-test 在 pull_request 時只抓 base 的 sha 並設 ASN_HINT_BASE，讀不到就紅（不准空跑）；
 //    沒設 ASN_HINT_BASE 時（本機、推 main）改比本機的 origin/main，沒有就略過
 // 規範：docs/畫面規範.md〈四之一、訊息與提示的位置〉。
@@ -114,7 +114,11 @@ const scanAt = ref => {
   let blobs
   return scanUiAt(() => paths, p => (blobs ??= blobsAt(ref, paths)).get(p))
 }
-const EMPTY = { extra: [], moreFiles: [], usesGrew: [], missingNote: [], orphanNote: [], droppedNote: [] }
+const EMPTY = { extra: [], moreFiles: [], usesGrew: [], missingNote: [], noFrom: [], badSource: [], orphanNote: [], droppedNote: [] }
+// 接線：把 base 與 head 的基準、掃描結果交給 evaluateMoves（真比對與假資料的接線測試共用這一條）
+const wire = (baseGolden, baseScan, headGolden, headScan) => evaluateMoves({
+  baseGolden, headGolden, baseUses: baseScan.uses, headUses: headScan.uses, baseByFile: baseScan.byFile, headByFile: headScan.byFile,
+})
 
 test('#2425 子集比對真的讀得到提交上的基準檔（HEAD 一定有，否則比對會永遠略過）；拿 HEAD 的基準當 base，偷加 class、多記檔案都抓得到', () => {
   assert.equal(baseHasGolden('HEAD'), true, 'HEAD 上讀不到基準檔：子集比對會永遠當成「第一次加入」略過')
@@ -122,7 +126,7 @@ test('#2425 子集比對真的讀得到提交上的基準檔（HEAD 一定有，
   assert.ok(Object.keys(head.classes).length >= 40, '前提：HEAD 上的基準讀得出內容')
   const at = scanAt('HEAD')
   assert.ok(at.files > 50 && at.classes.size >= 40 && at.uses.size === at.classes.size, '前提：能從提交上掃出 ui（base 的用處數靠這個）')
-  const ev = h => evaluateMoves({ baseGolden: head, headGolden: h, baseUses: at.uses, headUses: at.uses })
+  const ev = h => wire(head, at, h, at)
   assert.deepEqual(ev({ ...head, classes: { ...head.classes, 'an-ghost-note': ['ui/x.html'] } }).extra, ['an-ghost-note'])
   const [first] = Object.keys(head.classes)
   assert.deepEqual(ev({ ...head, classes: { ...head.classes, [first]: [...head.classes[first], 'ui/new-file.mjs'] } }).moreFiles, [`${first}（ui/new-file.mjs）`])
@@ -147,41 +151,68 @@ test('#2425 基準檔只准刪不准加：必須是 PR base（或本機 origin/m
   // 檔案存在卻讀不出來或解析失敗，也一律紅，不能略過
   if (!baseHasGolden(ref)) { t.skip(`${ref} 上還沒有基準檔（第一次加入）`); return }
   const main = JSON.parse(git(['show', `${ref}:${GOLDEN_GIT}`]))
-  const baseScan = scanAt(ref)
-  const r = evaluateMoves({ baseGolden: main, headGolden: golden, baseUses: baseScan.uses, headUses: scan.uses })
-  assert.deepEqual(r.extra, [], `基準檔只准減少，這些是新加的：${MSG}`)
-  assert.deepEqual(r.moreFiles, [], '基準檔只准減少，這些 class 多記了使用的檔且總檔案數增加（只有同一張 PR 裡一對一搬家，檔案總數不增，才放行）')
-  assert.deepEqual(r.usesGrew, [], '搬家的 class 總用處數增加了（base → head）')
-  assert.deepEqual(r.missingNote, [], `搬進 ui/parts/ 的，基準檔的 moved 要註明「${MOVE_NOTE}」`)
-  assert.deepEqual(r.orphanNote, [], 'moved 的註記對不上基準裡記著的 class／檔，或註記文字不對')
-  assert.deepEqual(r.droppedNote, [], '搬家註記不准偷刪：那一列還在基準裡，註記就要留著（換成 AsnStatus 後會一起清掉）')
+  const baseScan = scanAt(ref)   // base 的用處數與各檔次數：用掃描器數 base 提交上的檔（不是讀基準檔）
+  // 一次比對整個結果等於全空。各欄的意思：extra＝新 class；moreFiles＝檔案數增加不合規（只有搬進 ui/parts/ 且只多一個檔才准）；
+  // usesGrew＝總用處數增加；missingNote／noFrom／badSource＝搬進 ui/parts/ 的註記沒寫、沒寫來源檔、來源檔沒減夠；
+  // orphanNote＝註記對不上基準；droppedNote＝偷刪註記
+  assert.deepEqual(wire(main, baseScan, golden, scan), EMPTY, `基準檔只准減少（${MSG}）。上面哪一欄不是空的就是哪一條沒過；搬家的規則見畫面規範 4A-4`)
 })
 
-// ── 一對一搬家的純邏輯（假資料；寫法照 #1763 C4：m-err 原樣從 ui/m.html 搬進 ui/parts/notify-panel.mjs）──
+// ── 搬家的純邏輯（假資料；形狀照 #1763 C4 的真實情況）──
+// C4：m-err 在 ui/m.html（25 處）和 ui/mobile.css（1 處）；搬走 1 處到 ui/parts/notify-panel.mjs，m.html 剩 24 處、仍在用
+const DEST = 'ui/parts/notify-panel.mjs'
+const KEY = `m-err（${DEST}）`
 const G = (classes, moved) => ({ note: 'x', classes, ...(moved ? { moved } : {}) })
-const NOTED = { 'm-err（ui/parts/notify-panel.mjs）': MOVE_NOTE }
-const move = ({ baseUses = { 'm-err': 1 }, headUses = { 'm-err': 1 }, base = G({ 'm-err': ['ui/m.html'] }), head = G({ 'm-err': ['ui/parts/notify-panel.mjs'] }, NOTED) } = {}) =>
-  evaluateMoves({ baseGolden: base, headGolden: head, baseUses, headUses })
+const NOTE = { note: MOVE_NOTE, from: 'ui/m.html' }
+const BASE_FILES = { 'm-err': { 'ui/m.html': 25, 'ui/mobile.css': 1 } }
+const BASE = G({ 'm-err': ['ui/m.html', 'ui/mobile.css'] })
+const HEAD = G({ 'm-err': ['ui/m.html', 'ui/mobile.css', DEST] }, { [KEY]: NOTE })
+const HEAD_FILES = { 'm-err': { 'ui/m.html': 24, 'ui/mobile.css': 1, [DEST]: 1 } }
+const total = f => Object.fromEntries(Object.entries(f).map(([k, v]) => [k, Object.values(v).reduce((a, b) => a + b, 0)]))
+const move = ({ base = BASE, head = HEAD, baseFiles = BASE_FILES, headFiles = HEAD_FILES } = {}) =>
+  evaluateMoves({ baseGolden: base, headGolden: head, baseUses: total(baseFiles), headUses: total(headFiles), baseByFile: baseFiles, headByFile: headFiles })
+const withFiles = (extra, m = HEAD.moved) => G({ 'm-err': ['ui/m.html', 'ui/mobile.css', ...extra] }, m)
 
-test('#2425 搬家（綠）：C4 的實例——m-err 從 ui/m.html 原樣搬進 ui/parts/notify-panel.mjs，基準把 A 換成 B 並註記', () => {
+test('#2425 搬家（綠）：C4 的真實形狀——m.html 25→24、mobile.css 還在、notify-panel.mjs 新增 1 處，有註記並寫明來源', () => {
   assert.deepEqual(move(), EMPTY)
-  assert.deepEqual(move({ headUses: { 'm-err': 0 } }), EMPTY, '用處數減少也行')
 })
-test('#2425 搬家（綠）：目的地不在 ui/parts/ 時不需要註記；一個 class 搬兩個檔（兩進兩出）也行', () => {
-  assert.deepEqual(move({ head: G({ 'm-err': ['ui/lib/x.mjs'] }) }), EMPTY)
-  const base = G({ a: ['ui/p.html', 'ui/q.html'] })
-  assert.deepEqual(evaluateMoves({ baseGolden: base, headGolden: G({ a: ['ui/lib/p.mjs', 'ui/lib/q.mjs'] }), baseUses: { a: 2 }, headUses: { a: 2 } }), EMPTY)
+test('#2425 搬家（綠）：整個搬空的一對一換檔——到 ui/parts/ 要註記；不在 ui/parts/ 不需要註記', () => {
+  const baseFiles = { 'm-err': { 'ui/m.html': 1 } }
+  const one = f => move({ baseFiles, base: G({ 'm-err': ['ui/m.html'] }), headFiles: { 'm-err': { [f]: 1 } }, head: G({ 'm-err': [f] }, f === DEST ? { [KEY]: NOTE } : undefined) })
+  assert.deepEqual(one(DEST), EMPTY)
+  assert.deepEqual(one('ui/lib/x.mjs'), EMPTY)
 })
-test('#2425 搬家（紅）：搬家之外又在 B 多加一處，總用處數增加', () => {
-  assert.deepEqual(move({ headUses: { 'm-err': 2 } }).usesGrew, ['m-err（1 → 2）'])
+test('#2425 搬家（紅）：總用處數增加（搬家之外又在 B 多加一處）', () => {
+  assert.deepEqual(move({ headFiles: { 'm-err': { 'ui/m.html': 24, 'ui/mobile.css': 1, [DEST]: 2 } } }).usesGrew, ['m-err（26 → 27）'])
 })
-test('#2425 搬家（紅）：只在 B 出現、A 沒有消失，總檔案數增加', () => {
-  const r = move({ head: G({ 'm-err': ['ui/m.html', 'ui/parts/notify-panel.mjs'] }, NOTED) })
-  assert.deepEqual(r.moreFiles, ['m-err（ui/parts/notify-panel.mjs）'])
+test('#2425 搬家（紅）：目的地不在 ui/parts/，檔案數增加（來源檔還在）', () => {
+  const dest = 'ui/lib/x.mjs'
+  const r = move({ head: withFiles([dest], {}), headFiles: { 'm-err': { 'ui/m.html': 24, 'ui/mobile.css': 1, [dest]: 1 } } })
+  assert.deepEqual(r, { ...EMPTY, moreFiles: [`m-err（${dest}）`] })
 })
-test('#2425 搬家（紅）：搬到 ui/parts/ 但基準沒寫註記，或註記寫錯字', () => {
-  assert.deepEqual(move({ head: G({ 'm-err': ['ui/parts/notify-panel.mjs'] }) }).missingNote, ['m-err（ui/parts/notify-panel.mjs）'])
-  assert.deepEqual(move({ head: G({ 'm-err': ['ui/parts/notify-panel.mjs'] }, { 'm-err（ui/parts/notify-panel.mjs）': '待換' }) }).missingNote, ['m-err（ui/parts/notify-panel.mjs）'])
+test('#2425 搬家（紅）：同一個 class 多出兩個以上的新檔，即使都在 ui/parts/ 也紅', () => {
+  const d2 = 'ui/parts/other.mjs'
+  const r = move({ head: withFiles([DEST, d2], { [KEY]: NOTE, [`m-err（${d2}）`]: NOTE }), headFiles: { 'm-err': { 'ui/m.html': 23, 'ui/mobile.css': 1, [DEST]: 1, [d2]: 1 } } })
+  assert.deepEqual(r.moreFiles, [`m-err（${d2}）`, KEY].sort())
+})
+test('#2425 搬家（紅）：搬到 ui/parts/ 但基準沒寫註記，或註記文字寫錯', () => {
+  assert.deepEqual(move({ head: withFiles([DEST], {}) }), { ...EMPTY, missingNote: [KEY] })
+  assert.deepEqual(move({ head: withFiles([DEST], { [KEY]: { note: '待換', from: 'ui/m.html' } }) }).missingNote, [KEY])
+})
+test('#2425 搬家（紅）：註記沒寫來源檔', () => {
+  assert.deepEqual(move({ head: withFiles([DEST], { [KEY]: { note: MOVE_NOTE } }) }), { ...EMPTY, noFrom: [KEY] })
+})
+test('#2425 搬家（紅）：來源檔寫錯（那個檔的用處數沒減少，或根本不是這個 class 記著的檔）', () => {
+  const wrong = move({ head: withFiles([DEST], { [KEY]: { note: MOVE_NOTE, from: 'ui/mobile.css' } }) })
+  assert.deepEqual(wrong.badSource.length, 1, '寫 mobile.css：它沒減少')
+  const nope = move({ head: withFiles([DEST], { [KEY]: { note: MOVE_NOTE, from: 'ui/never.html' } }) })
+  assert.match(nope.badSource[0], /不是 base 上這個 class 記著的檔/)
+})
+test('#2425 搬家（紅）：來源檔減少的量比目的地新增的少（總用處數沒增加，但搬的比寫的少）', () => {
+  // 來源只少 1，目的地多了 2，另一個檔（mobile.css）少 1 讓總數不增加：總數守得住，來源守不住
+  const r = move({ headFiles: { 'm-err': { 'ui/m.html': 24, 'ui/mobile.css': 0, [DEST]: 2 } } })
+  assert.deepEqual(r.usesGrew, [])
+  assert.match(r.badSource[0], /減少 1 處，少於新增的 2 處/)
 })
 test('#2425 搬家（紅）：搬家了但基準沒把 A 換成 B（還記著 A、沒記 B）——檔案層「基準有、實際沒有」那條會紅', () => {
   // 假資料：基準還是 A，實際找到的是 B。compareHintFiles 一邊抓到擴散、一邊抓到已不用
@@ -189,21 +220,56 @@ test('#2425 搬家（紅）：搬家了但基準沒把 A 換成 B（還記著 A�
     { spread: ['m-err（ui/parts/notify-panel.mjs）'], stale: ['m-err（ui/m.html）'] })
 })
 test('#2425 搬家（紅）：新 class、孤兒註記、偷刪既有註記', () => {
-  assert.deepEqual(move({ head: G({ 'm-err': ['ui/parts/notify-panel.mjs'], 'n-new': ['ui/x.mjs'] }, NOTED) }).extra, ['n-new'])
-  assert.deepEqual(move({ head: G({ 'm-err': ['ui/parts/notify-panel.mjs'] }, { ...NOTED, 'm-err（ui/m.html）': MOVE_NOTE }) }).orphanNote, ['m-err（ui/m.html）'])
-  const had = G({ 'm-err': ['ui/parts/notify-panel.mjs'] }, NOTED)
-  assert.deepEqual(evaluateMoves({ baseGolden: had, headGolden: G({ 'm-err': ['ui/parts/notify-panel.mjs'] }), baseUses: { 'm-err': 1 }, headUses: { 'm-err': 1 } }).droppedNote, ['m-err（ui/parts/notify-panel.mjs）'])
-  assert.deepEqual(evaluateMoves({ baseGolden: had, headGolden: G({}), baseUses: {}, headUses: {} }), EMPTY, '換成共用元件、那一列連註記一起清掉：綠')
-  assert.deepEqual(move({ baseUses: {}, headUses: {} }).usesGrew.length, 1, '讀不到用處數時不放行')
+  assert.deepEqual(move({ head: G({ 'm-err': ['ui/m.html', 'ui/mobile.css', DEST], 'n-new': ['ui/x.mjs'] }, { [KEY]: NOTE }) }).extra, ['n-new'])
+  assert.deepEqual(move({ head: withFiles([DEST], { [KEY]: NOTE, 'm-err（ui/gone.html）': NOTE }) }).orphanNote, ['m-err（ui/gone.html）'])
+  const had = G({ 'm-err': ['ui/m.html', DEST] }, { [KEY]: NOTE })
+  const hadFiles = { 'm-err': { 'ui/m.html': 24, [DEST]: 1 } }
+  const stay = G({ 'm-err': ['ui/m.html', DEST] })
+  assert.deepEqual(evaluateMoves({ baseGolden: had, headGolden: stay, baseUses: total(hadFiles), headUses: total(hadFiles), baseByFile: hadFiles, headByFile: hadFiles }), { ...EMPTY, droppedNote: [KEY] })
+  assert.deepEqual(evaluateMoves({ baseGolden: had, headGolden: G({ 'm-err': ['ui/m.html'] }), baseUses: total(hadFiles), headUses: { 'm-err': 24 }, baseByFile: hadFiles, headByFile: { 'm-err': { 'ui/m.html': 24 } } }), EMPTY, '換成共用元件、那一列連註記一起清掉：綠')
+  assert.equal(move({ baseFiles: {}, headFiles: {} }).usesGrew.length, 1, '讀不到用處數時不放行')
 })
-test('#2425 用處數：同一個 class 不管哪種寫法、搬到哪種檔，都用同一把尺數（C4 實例：html 屬性 → mjs 模板字串）', () => {
+test('#2425 接線：用假的 base／head 提交內容走一遍「掃描 → evaluateMoves」，C4 形狀綠；把用處數接錯就紅', () => {
+  const html = n => Array.from({ length: n }, () => '<i class="m-err">x</i>').join('\n')
+  const baseScan = scanSources([{ rel: 'ui/m.html', text: html(25) }, { rel: 'ui/mobile.css', text: '.m-err{color:red}' }])
+  const headScan = scanSources([
+    { rel: 'ui/m.html', text: html(24) }, { rel: 'ui/mobile.css', text: '.m-err{color:red}' },
+    { rel: DEST, text: '// 這一行說明 m-err 從 m.html 搬來，註解不算用處\nexport const t = `<p class="m-err">${x}</p>`' },
+  ])
+  assert.equal(baseScan.uses.get('m-err'), 26)
+  assert.equal(headScan.uses.get('m-err'), 26)
+  assert.deepEqual(wire(BASE, baseScan, HEAD, headScan), EMPTY)
+  const more = scanSources([
+    { rel: 'ui/m.html', text: html(24) }, { rel: 'ui/mobile.css', text: '.m-err{color:red}' },
+    { rel: DEST, text: 'export const t = `<p class="m-err">a</p><p class="m-err">b</p>`' },
+  ])
+  assert.deepEqual(wire(BASE, baseScan, HEAD, more).usesGrew, ['m-err（26 → 27）'], '目的地多一處：用處數與各檔次數都有接到比對')
+  assert.equal(wire(BASE, baseScan, HEAD, more).badSource.length, 1, '來源只少 1、目的地多 2')
+})
+test('#2425 用處數：只數 class 位置——註解、一般字串、屬性名、role="note" 不算；一個 class="a note b" 算 1 次', () => {
+  const n = (text, ext = '.mjs', name = 'note') => countUses(text, ext).get(name) ?? 0
+  assert.equal(n('// 這裡提到 m-err 與 note\nconst x = 1', '.mjs', 'm-err'), 0, '註解不算')
+  assert.equal(n('/* .note{} */ a{}', '.css'), 0, 'CSS 註解不算')
+  assert.equal(n(`const s = 'note'; log("note", st.voice.note)`), 0, '一般字串、屬性名不算')
+  assert.equal(n('<p role="note">x</p>'), 0, 'role="note" 本身不算')
+  assert.equal(n('<p class="a note b">x</p>', '.html'), 1)
+  assert.equal(n('<p class="note">x</p><p class="note">y</p>', '.html'), 2, '兩處 class 算兩次')
+  assert.equal(n(`<p role="note" class="note">x</p>`, '.html'), 1, '同一個標籤被多關抓到只算一次')
+  assert.equal(n('const t = "<p class=\\"note\\">x</p>"'), 1, '跳脫的 class=\\"…\\" 算一次')
+  assert.equal(n(`h('p', { class: ['x-err', ok && 'x-note'] }); el.className = 'x-err'`, '.mjs', 'x-err'), 2)
+  assert.equal(n(`el.classList.add('q-why', 'q-why')`, '.js', 'q-why'), 2, 'classList 兩個字串各算一次')
+  assert.equal(n('.x-hint:hover{color:red} .x-hint .y{} <style>.q{}</style>', '.css', 'x-hint'), 2, 'CSS 選擇器每出現一次算一次')
   const a = scanSources([{ rel: 'ui/m.html', text: '<p class="m-err">x</p>' }])
-  const b = scanSources([{ rel: 'ui/parts/notify-panel.mjs', text: 'const t = `<p class="m-err">${x}</p>`' }, { rel: 'ui/lib/y.mjs', text: 'const q = 1' }])
-  assert.equal(a.uses.get('m-err'), 1)
-  assert.equal(b.uses.get('m-err'), 1)
-  const c = scanSources([{ rel: 'ui/parts/notify-panel.mjs', text: 'a = `<p class="m-err">`; b = `<p class="m-err">`' }])
-  assert.equal(c.uses.get('m-err'), 2)
-  assert.equal(countUses('x-m-err m-err2 m-err', 'm-err'), 1, '整個字才算')
+  const b = scanSources([{ rel: DEST, text: 'const t = `<p class="m-err">${x}</p>`' }])
+  assert.equal(a.uses.get('m-err'), b.uses.get('m-err'), 'html 屬性 → mjs 模板字串，同一把尺')
+})
+test('#2425 用處數：note 從 1 處改成放 2 處 class，守門要紅（舊版用整個字數，一般字會當餘額）', () => {
+  const base = scanSources([{ rel: 'ui/lib/s.mjs', text: '<p class="note">x</p> ' + 'st.voice.note '.repeat(12) + '<i role="note">' }])
+  const head = scanSources([{ rel: 'ui/lib/s.mjs', text: 'st.voice.note '.repeat(12) + '<i role="note">' }, { rel: 'ui/lib/n.mjs', text: '<p class="note">a</p><p class="note">b</p>' }])
+  assert.equal(base.uses.get('note'), 1)
+  assert.equal(head.uses.get('note'), 2)
+  const g0 = G({ note: ['ui/lib/s.mjs'] })
+  assert.deepEqual(wire(g0, base, G({ note: ['ui/lib/n.mjs'] }), head).usesGrew, ['note（1 → 2）'])
 })
 
 test('#2425 規範那一章存在，守門訊息指到的章名對得上', () => {
