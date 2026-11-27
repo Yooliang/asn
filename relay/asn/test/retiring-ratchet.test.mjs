@@ -72,7 +72,7 @@ export function parseDoc(md) {
   return out
 }
 
-// 「基準怎麼改」欄寫「檔數 107」「行數 23456 → 23470」這種樣子；取該項最後一個數字（改完之後的值），沒提到就回 null
+// 「基準怎麼改」欄寫「檔數 80」「行數 7984 → 7990」這種樣子；取該項最後一個數字（改完之後的值），沒提到就回 null
 const KEYS = { files: '檔數', lines: '行數' }
 const numAfter = (text, key) => {
   const at = text.indexOf(key)
@@ -121,7 +121,7 @@ export function checkRetiring(md, root, count = countRetiring) {
     }
   }
   // 某個路徑最後一筆紀錄寫的數字（紀錄由上往下，新的加在最下面）
-  const recorded = (p, key) => t.log.filter(l => same(ticks(l.cells[1] ?? '')[0] ?? '') === same(p)).map(l => numAfter(l.cells[2] ?? '', key)).filter(n => n !== null).at(-1)
+  const lastLogged = (p, key) => t.log.filter(l => same(ticks(l.cells[1] ?? '')[0] ?? '') === same(p)).map(l => numAfter(l.cells[2] ?? '', key)).filter(n => n !== null).at(-1)
 
   for (const r of rows) {
     const p = `\`${r.path}\``
@@ -133,9 +133,9 @@ export function checkRetiring(md, root, count = countRetiring) {
     if (!Number.isInteger(r.baseFiles) || !Number.isInteger(r.baseLines)) { bad('base-bad', `${p} 的基準檔數、基準行數要填整數`); continue }
 
     for (const [key, base] of [['files', r.baseFiles], ['lines', r.baseLines]]) {
-      const top = recorded(r.path, KEYS[key])
-      if (top === undefined) bad('log-missing', `「基準調整紀錄」裡找不到 ${p} 的${KEYS[key]}：登記時要有一列建立基準（寫成「${KEYS.files} 12、${KEYS.lines} 345」這種樣子）`)
-      else if (base > top) bad('log-over', `${p} 的基準${KEYS[key]} ${base} 比「基準調整紀錄」最後一筆寫的 ${top} 高：調高基準要在同一張 PR 到「基準調整紀錄」最下面加一列，「基準怎麼改」寫成「${KEYS[key]} ${top} → ${base}」，並寫原因`)
+      const last = lastLogged(r.path, KEYS[key])
+      if (last === undefined) bad('log-missing', `「基準調整紀錄」裡找不到 ${p} 的${KEYS[key]}：登記時要有一列建立基準（寫成「${KEYS.files} 12、${KEYS.lines} 345」這種樣子）`)
+      else if (base !== last) bad('log-mismatch', `${p} 的基準${KEYS[key]}是 ${base}，「基準調整紀錄」最後一筆寫的卻是 ${last}：改基準（調高或調低）要在同一張 PR 到「基準調整紀錄」最下面加一列，「基準怎麼改」寫成「${KEYS[key]} ${last} → ${base}」，並寫原因`)
     }
 
     if (!exists(r.path)) { bad('path-missing', `${p} 不存在：已經刪掉的話，把這一列從「退場中」搬到「已退場」表（寫刪除日期和 PR）；只是搬家或改名，就把路徑改對`); continue }
@@ -157,7 +157,7 @@ const real = checkRetiring(doc, ROOT, count)
 const kinds = text => new Set(checkRetiring(text, ROOT, count).errors.map(e => e.kind))
 // 某一種錯裡、講某個路徑的那幾筆（訊息都以反引號路徑開頭）。還原驗證用：只看被改壞的那一列，別的列本來就有錯時不跟著紅
 const hits = (text, kind, about) => checkRetiring(text, ROOT, count).errors.filter(e => e.kind === kind && e.msg.startsWith(about))
-const clean = (...ks) => { const hit = real.errors.filter(e => ks.includes(e.kind)); assert.equal(hit.length, 0, `\n${fmt(hit)}`) }
+const clean = (...ks) => { const hit = real.errors.filter(e => ks.includes(e.kind)); if (hit.length) assert.fail(`\n${fmt(hit)}`) }
 
 test(`退場清單：登記的列（退場中＋已退場）至少 ${MIN_ROWS} 列，每列七欄，路徑不重複`, () => {
   clean('row-count', 'row-shape', 'dup')
@@ -177,14 +177,14 @@ test('退場清單：每一列都有負責人和刪除條件', () => {
 
 test('退場清單棘輪：每一列的檔數、行數都不超過基準（只修不加）', t => {
   for (const r of real.rows.filter(x => x.actual)) {
-    const slack = r.actual.files < r.baseFiles || r.actual.lines < r.baseLines ? '。已經變少了，可以把表一的基準調低' : ''
+    const slack = r.actual.files < r.baseFiles || r.actual.lines < r.baseLines ? '。已經變少了，可以把基準調低（表一改數字，「基準調整紀錄」加一列）' : ''
     t.diagnostic(`${r.path}：實際 ${r.actual.files} 個檔、${r.actual.lines} 行（基準 ${r.baseFiles} 個檔、${r.baseLines} 行）${slack}`)
   }
   clean('base-bad', 'files-over', 'lines-over')
 })
 
-test('退場清單：基準調整紀錄至少有建立基準那一筆；表一的基準不能比紀錄寫的高', () => {
-  clean('log-empty', 'log-shape', 'log-missing', 'log-over')
+test('退場清單：基準調整紀錄至少有建立基準那一筆；表一的基準跟每個路徑最後一筆紀錄一致', () => {
+  clean('log-empty', 'log-shape', 'log-missing', 'log-mismatch')
 })
 
 test('退場清單：「已退場」表上的路徑真的刪掉了，而且不再列在「退場中」', () => {
@@ -237,12 +237,14 @@ const setCell = (text, p, col, value) => {
   const row = rowOf(text, p)
   return withLines(text, lines => { lines[row.line - 1] = toRow(row.cells.map((c, i) => (i === COL[col] ? String(value) : c))) })
 }
-// 在某張表的表頭與分隔線後面插一列
-const addRow = (text, table, cells) => withLines(text, lines => {
+// 某張表的表頭在第幾行（從 0 起算）
+const headAt = (lines, table) => {
   const at = lines.findIndex(l => l.trim().startsWith('|') && splitRow(l).join('|') === HEADS[table].join('|'))
   assert.ok(at >= 0, `找不到表頭：${HEADS[table].join(' | ')}`)
-  lines.splice(at + 2, 0, toRow(cells))
-})
+  return at
+}
+// 在某張表的表頭與分隔線後面插一列
+const addRow = (text, table, cells) => withLines(text, lines => { lines.splice(headAt(lines, table) + 2, 0, toRow(cells)) })
 // 拿表一第一個數得到的列來改；清單本身壞到沒有任何一列數得到時，還原驗證各自報錯，不讓整支檔在載入時就倒
 const R = real.rows.find(r => r.actual)
 const mut = (name, fn) => test(name, () => { assert.ok(R, '表一沒有任何一列數得到（先修好上面幾項），還原驗證做不了'); fn() })
@@ -288,15 +290,18 @@ mut('還原驗證：表格結構——少一欄、重複登記、路徑沒用反
   assert.ok(kinds(setCell(doc, R.path, '基準行數', '很多')).has('base-bad'))
   const allRows = new Set(parseDoc(doc).retiring.map(r => r.line - 1))
   assert.ok(kinds(doc.split('\n').filter((_, i) => !allRows.has(i)).join('\n')).has('row-count'))
-  assert.ok(kinds(doc.replace(toRow(HEADS.retiring), toRow(['路徑', '說明', ...HEADS.retiring.slice(2)]))).has('row-count'), '表頭被改掉、讀不到任何一列也要紅（不能變成沒有東西可檢查而通過）')
+  const badHead = withLines(doc, lines => { lines[headAt(lines, 'retiring')] = toRow(['路徑', '說明', ...HEADS.retiring.slice(2)]) })
+  assert.ok(kinds(badHead).has('row-count'), '表頭被改掉、讀不到任何一列也要紅（不能變成沒有東西可檢查而通過）')
 })
 
-mut('還原驗證：調高基準卻沒在「基準調整紀錄」加一列 → 紅；補了一列 → 不紅；紀錄整個拿掉 → 紅', () => {
+mut('還原驗證：改了基準（調高、調低）卻沒在「基準調整紀錄」加一列 → 紅；補了一列 → 不紅；紀錄整個拿掉 → 紅', () => {
   const up = setCell(doc, R.path, '基準行數', R.baseLines + 14)
-  assert.ok(kinds(up).has('log-over'))
+  assert.ok(kinds(up).has('log-mismatch'))
   const logged = text => withLines(text, lines => { lines.splice(parseDoc(text).log.at(-1).line, 0, toRow(['2026-12-01', `\`${R.path}\``, `行數 ${R.baseLines} → ${R.baseLines + 14}`, '修正需要', '#1'])) })
-  assert.equal(kinds(logged(up)).has('log-over'), false)
-  assert.ok(kinds(setCell(doc, R.path, '基準檔數', R.baseFiles + 1)).has('log-over'))
+  assert.equal(kinds(logged(up)).has('log-mismatch'), false)
+  assert.ok(kinds(logged(doc)).has('log-mismatch'), '紀錄寫了調高、表一卻沒改，也對不上')
+  assert.ok(kinds(setCell(doc, R.path, '基準檔數', R.baseFiles + 1)).has('log-mismatch'))
+  assert.ok(kinds(setCell(doc, R.path, '基準行數', R.baseLines - 1)).has('log-mismatch'))
   const logLines = new Set(parseDoc(doc).log.map(r => r.line - 1))
   const noLog = kinds(doc.split('\n').filter((_, i) => !logLines.has(i)).join('\n'))
   assert.ok(noLog.has('log-empty') && noLog.has('log-missing'))
