@@ -130,6 +130,23 @@ test('#2425 AsnToast 在 UI_KIT 裡；樣式只用變數（字級、間距、顏
   assert.match(css, /\.m-body\{[^}]*--toast-bottom:/, '手機把提示放在底部分頁列上方')
 })
 
+test('#2425 電腦版 toast 在右上角、不貼底：不會蓋到輸入區（使用者按完封存常接著打字）；手機維持底部', () => {
+  const css = read('kit.css')
+  const base = css.split('\n').find(l => /^\.asn-toast\{/.test(l))
+  assert.ok(base, '找得到 .asn-toast 基本規則')
+  assert.match(base, /position:fixed/)
+  assert.match(base, /top:var\(--toast-top\)/, '電腦版從上面算位置')
+  assert.match(base, /right:var\(--sp-/, '靠右')
+  assert.doesNotMatch(base, /(?:^|[;{\s])bottom\s*:/, '電腦版不能貼底（輸入區在底部）')
+  // 離頂端要夠遠，才不蓋到 32 高的自訂標題列（最小化、最大化、關閉鈕在右上角）
+  assert.match(css, /--toast-top:calc\(var\(--sp-5\) \+ var\(--sp-4\)\)/, '24 + 16 = 40，在 32 高的標題列下面')
+  assert.match(css, /--sp-5:24px/); assert.match(css, /--sp-4:16px/)
+  assert.match(read('style.css'), /\.titlebar\{[^}]*height:32px/, '標題列高度是 32，toast 的離頂端距離要大於它')
+  const phone = css.split('\n').find(l => /^\.m-body \.asn-toast\{/.test(l))
+  assert.ok(phone, '手機另有規則')
+  assert.match(phone, /bottom:var\(--toast-bottom\)/); assert.match(phone, /top:auto/)
+})
+
 // ---- 唯一出口守門：結果提示只能從 showResult 出去 ----
 function* walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

@@ -7,7 +7,7 @@
   --kit-ok:#2e7d32; --kit-fail:#b3261e; --kit-current:#4b5058;
   --radius-1:4px; --shadow-pop:0 4px 14px rgba(0,0,0,.18);   /* 圓角、浮出層（選單）的陰影 */
   --kit-warn:#a86f00; --kit-warn-line:#d9b25a;   /* 警告色（登入已失效的提示與標籤）；黃色鈕另用 --kit-relogin-* */
-  --kit-toast-bg:#1c2430; --kit-toast-fg:#fff; --toast-bottom:var(--sp-5); --toast-max:480px;   /* 結果提示（AsnToast）：深底白字、離底部的距離、最寬 */
+  --kit-toast-bg:#1c2430; --kit-toast-fg:#fff; --toast-top:calc(var(--sp-5) + var(--sp-4)); --toast-bottom:var(--sp-5); --toast-max:480px;   /* 結果提示（AsnToast）：深底白字；電腦在右上角、離頂端 40（在 32 高的自訂標題列下面，不蓋到標題列按鈕）、手機離底部、最寬 */
   --kit-relogin-bg:#ffd84d; --kit-relogin-fg:#3b2c00; --kit-relogin-line:#c79a00;
 }
 /* 手機：字級各加大一檔、鈕高 40（最小觸控目標） */
@@ -60,7 +60,9 @@
 .asn-note-banner .asn-note-text{flex:1 1 auto}
 .asn-note-banner.asn-note-warn{border-bottom-color:var(--kit-warn-line)}
 /* ---- 結果提示 AsnToast（#2425 位置 D）：底部浮出一則，成功 4 秒、失敗 6 秒自己消失；成功綠邊、失敗紅邊；字級與觸控尺寸跟著 .m-body 走 ---- */
-.asn-toast{position:fixed; z-index:calc(var(--z-mask, 100) + 10); left:50%; bottom:var(--toast-bottom); transform:translateX(-50%); box-sizing:border-box; display:flex; align-items:center; gap:var(--sp-2); width:max-content; max-width:min(var(--toast-max), calc(100vw - 2 * var(--sp-4))); padding:var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3); border-radius:var(--radius-1); border-left:var(--sp-1) solid var(--kit-ok); background:var(--kit-toast-bg); color:var(--kit-toast-fg); font-size:var(--fs-3); line-height:1.4; box-shadow:var(--shadow-pop); overflow-wrap:anywhere}
+.asn-toast{position:fixed; z-index:calc(var(--z-mask, 100) + 10); top:var(--toast-top); right:var(--sp-4); box-sizing:border-box; display:flex; align-items:center; gap:var(--sp-2); width:max-content; max-width:min(var(--toast-max), calc(100vw - 2 * var(--sp-4))); padding:var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3); border-radius:var(--radius-1); border-left:var(--sp-1) solid var(--kit-ok); background:var(--kit-toast-bg); color:var(--kit-toast-fg); font-size:var(--fs-3); line-height:1.4; box-shadow:var(--shadow-pop); overflow-wrap:anywhere}
+/* 手機：維持底部置中、浮在分頁列上方（電腦版在右上角，不蓋到輸入區） */
+.m-body .asn-toast{top:auto; right:auto; left:50%; bottom:var(--toast-bottom); transform:translateX(-50%)}
 .asn-toast.k-fail{border-left-color:var(--kit-fail)}
 .asn-toast-text{min-width:0; flex:1 1 auto}
 .asn-toast-close{flex:none; box-sizing:border-box; min-width:var(--btn-h); min-height:var(--btn-h); padding:0; border:0; border-radius:var(--radius-1); background:transparent; color:inherit; font:inherit; font-size:var(--fs-4); line-height:1; cursor:pointer}
