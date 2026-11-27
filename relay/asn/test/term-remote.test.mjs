@@ -113,9 +113,12 @@ test('#1029 開始後這一格被收掉或建不了 xterm：一定結束這次�
   assert.match(chat, /!\(r === null && remoteOn\.value\)\) remoteAvail\.value = r/, '正在看時一時問不到，不把這一格收掉')
 })
 
-test('#1029 收到的畫面直接是內容（lib/tauri.mjs 的 listen 已經拆掉 payload）：收到第一幅就算開始看，結束也收得到', async () => {
+test('#1029 收到的畫面直接是內容（拆 payload 在 lib/host.mjs，lib/tauri.mjs 的 listen 原樣轉交）：收到第一幅就算開始看，結束也收得到', async () => {
+  // #1763 F3：拆 payload 從 tauri.mjs 搬到主機接縫 host.mjs；tauri.mjs 的 listen 只轉交，不再自己拆、也不准拆第二次
   const tauri = read('../ui/lib/tauri.mjs')
-  assert.match(tauri, /export const listen = \(evt, fn\) => T\.event\.listen\(evt, e => fn\(e\.payload\)\)/, 'listen 交給回呼的是 payload 本身')
+  const host = read('../ui/lib/host.mjs')
+  assert.match(host, /listen: \(evt, fn\) => raw\.event\.listen\(evt, e => fn\(e\.payload\)\)/, 'host.listen 交給回呼的是 payload 本身')
+  assert.match(tauri, /export const listen = \(evt, fn\) => H\(\)\.listen\(evt, fn\)/, 'tauri.mjs 的 listen 原樣轉交給 host（不再包一層）')
   for (const f of ['../ui/lib/term-remote.mjs', '../ui/lib/term-remote-input.mjs']) {
     const code = read(f).replace(/^\s*\/\/.*$/gm, '')
     assert.ok(!code.includes('.payload'), `${f} 不能再讀 .payload（每一幅都會被丟掉，畫面一直停在「等」）`)

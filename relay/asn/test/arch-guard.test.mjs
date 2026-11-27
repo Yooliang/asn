@@ -49,7 +49,7 @@ const LIB_ALLOW = {
     'lib/mobile-confirm.mjs': '手機確認框的橋接呼叫，F3 併入 caps-android',
   },
   tauriGlobal: {
-    'lib/tauri.mjs': '前端呼叫後端的唯一出口（F3 要加主機接縫）',
+    'lib/host.mjs': '主機接縫（#1763 F3）：前端讀主機物件的唯一處（skin-boot.js 不在 lib 內；test/host-seam.test.mjs 守整個 ui/）',
   },
   storage: {
     'lib/local-prefs.mjs': '本機偏好的唯一存取處（鍵名由 prefs-keys 測試鎖住）',

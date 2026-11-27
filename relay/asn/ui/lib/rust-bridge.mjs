@@ -1,6 +1,6 @@
 // Rust 事件橋（#2038）：每個事件名最多掛一個底層 listener。
 // 有人訂閱才註冊、最後一個人退訂就取消；底層 listen 是非同步的，所以要處理「還沒註冊完就退訂」「退訂後馬上又訂閱」的交錯。
-// 這裡不碰 __TAURI__：listen 由外面注入（唯一的注入點在 tauri.mjs），形狀＝ (evt, fn) => Promise<() => void>，fn 收到的是 payload。
+// 這裡不碰主機物件：listen 由外面注入（唯一的注入點在 tauri.mjs），形狀＝ (evt, fn) => Promise<() => void>，fn 收到的是 payload。
 const safeOff = off => { if (typeof off !== 'function') return; try { off() } catch { /* 取消失敗（視窗已關）：沒有可補救的，不影響其他事件 */ } }
 
 /** readyFor 丟的錯：訊息是給 log 的原文（含事件名與狀態），帶 code 讓畫面改顯示白話 */
