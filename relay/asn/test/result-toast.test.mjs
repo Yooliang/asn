@@ -130,7 +130,7 @@ test('#2425 AsnToast 在 UI_KIT 裡；樣式只用變數（字級、間距、顏
   assert.match(css, /\.m-body\{[^}]*--toast-bottom:/, '手機把提示放在底部分頁列上方')
 })
 
-// ---- 位置（asn真 二審原則：不准蓋到任何按得到的東西，只准蓋純文字）----
+// ---- 位置（asn真 二審原則，畫面規範〈四之一〉D：不准蓋住控制項；訊息、名單列這類內容列可以短暫被蓋）----
 test('#2425 toastPlace：提示的下緣貼在錨點下緣往上 8、水平置中、寬度不超出錨點；看不到的錨點回 null', () => {
   const p = toastPlace({ left: 450, right: 890, top: 140, bottom: 480, width: 440, height: 340 }, 640)
   assert.deepEqual(p, { left: '670px', bottom: '168px', maxWidth: '424px' })   // 640 - 480 + 8

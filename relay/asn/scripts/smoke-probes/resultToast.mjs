@@ -33,17 +33,18 @@ export const resultToastProbeSource = mode => `(async () => {
     if (!vis(t)) return { ok: false, why: '沒有出現結果提示' };
     if (!t.classList.contains('k-' + c.kind)) return { ok: false, why: '種類不對：' + t.className };
     if ((t.querySelector('.asn-toast-text')?.textContent || '') !== c.text) return { ok: false, why: '字不對' };
-    // 電腦版（asn真 二審原則）：提示不准蓋到任何按得到的東西——按鈕、輸入框、分頁、功能列、搜尋框、輸入區；只准蓋純文字。手機維持底部，不在這裡量
+    // 電腦版（asn真 二審原則）：提示不准蓋住控制項——按鈕、輸入框、下拉選單、分頁、功能列、搜尋框、輸入區；訊息、名單列這類內容列可以短暫被蓋。手機維持底部，不在這裡量
     if (c.at) {
       const tr = t.getBoundingClientRect();
       const hit = r => r.width > 0 && r.height > 0 && r.left < tr.right && r.right > tr.left && r.top < tr.bottom && r.bottom > tr.top;
       const bad = [];
+      // 只檢查「控制項」（畫面規範〈四之一〉D：按鈕、輸入框、下拉選單、分頁、功能列、搜尋框）；訊息、名單列這類內容列可以短暫被蓋，不在檢查範圍
       const sel = 'button, input, textarea, select, a[href], [role="tab"], [role="button"], .actionbar, .top-tabs, .tabbar, .compose-row, .composer, .search';
       for (const e of document.querySelectorAll(sel)) {
         if (t.contains(e) || !vis(e)) continue;
         if (hit(e.getBoundingClientRect())) bad.push((e.className && String(e.className).split(' ')[0]) || e.tagName.toLowerCase());
       }
-      if (bad.length) return { ok: false, why: '提示蓋到了按得到的東西：' + [...new Set(bad)].join('、') };
+      if (bad.length) return { ok: false, why: '提示蓋到了控制項：' + [...new Set(bad)].join('、') };
     }
     return { ok: true, why: '' };
   }
