@@ -185,10 +185,25 @@ test('#2425 終端與對方畫面的錨點掛在 .term-view-screen（畫面本�
   for (const f of ['lib/term-view.mjs', 'lib/term-remote.mjs', 'lib/term-remote-input.mjs']) {
     const src = read(f)
     assert.match(src, /<div class="term-view-screen" data-toast-anchor="chat" data-toast-edge="top"/, `${f}：畫面本體是貼上緣的對話錨點`)
-    assert.doesNotMatch(src, /<div class="term-view(?: [^"]*)?"[^>]*data-toast-anchor/, `${f}：外層容器不能是錨點`)
+    assert.doesNotMatch(src, /<div class="term-view(?: [^"]*)?"[^>]*[ "]data-toast-anchor=/, `${f}：外層容器不能一直是錨點（只有已結束時才是，見下一條）`)
   }
   assert.match(read('lib/chatpane.mjs'), /<div class="msgs" data-toast-anchor="chat" ref/, '訊息區貼下緣（沒有 edge）')
   assert.doesNotMatch(read('lib/chatpane.mjs'), /data-toast-edge/)
+})
+
+test('#2452 終端「已結束觀看」：畫面本體與訊息區都藏著時，整塊終端區當對話錨點（貼下緣，在輸入區上面、「重新看」狀態列的上方）；沒結束時不是錨點', () => {
+  for (const f of ['lib/term-remote.mjs', 'lib/term-remote-input.mjs']) {
+    const src = read(f)
+    const root = src.split('\n').find(l => /^<div class="term-view term-remote/.test(l))
+    assert.ok(root, `${f}：找得到終端區根元素`)
+    assert.match(root, /:data-toast-anchor="phase === 'ended' \? 'chat' : null"/, `${f}：只有 phase 是 ended 時才是對話錨點`)
+    assert.doesNotMatch(root, /data-toast-edge/, `${f}：沒有 edge＝貼下緣`)
+  }
+  // 優先順序靠「第一個看得到的」自然排出：訊息區看得到時終端區不看（一邊顯示終端時 .conv 整個藏起來）；畫面本體看得到時終端區不是錨點（phase 不是 ended）；
+  // 兩者都藏、只剩已結束的終端區時才輪到它。「重新看」在 chatpane 最下面的狀態列（.typing），終端區在輸入區上面，所以貼終端區下緣不蓋到
+  const pane = read('lib/chatpane.mjs')
+  assert.ok(pane.indexOf('<remote-view') < pane.indexOf('<div class="typing"'), '終端區在狀態列之前（上面）')
+  assert.match(pane, /GRACE_AGAIN_LABEL \}\}<\/button>/, '「重新看」鈕畫在狀態列')
 })
 
 test('#2425 AsnToast 依 at 寫行內位置：給 at 才有，手機（沒給）沒有；換一則會重算', async () => {
