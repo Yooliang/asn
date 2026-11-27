@@ -4,6 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createAgyDriver } from '../engines/acp-driver-agy.mjs'
 
@@ -83,6 +84,27 @@ test('agy 驅動：不合法的 0xFF 位元組 → 整輪中止、有 log、不�
     assert.ok(line, logs.join('\n'))
     assert.match(line, /InvalidEncoding/)
     assert.ok(!logs.some(l => l.includes('RAWSECRET')))
+  } finally { d.stop() }
+})
+
+test('agy 驅動：輸出串流本身出錯 → 記 log、結束進行中的一輪與行程', async () => {
+  const logs = []
+  let child = null
+  const d = createAgyDriver({
+    cfg: { command: process.execPath, args: [FAKE_AGY], envPass: [], cwd: process.cwd(), model: '' },
+    env: { PATH: process.env.PATH ?? '' }, log: m => logs.push(m), guard: { checkTool: () => ({ ok: true }) },
+    spawnFn: (...a) => (child = spawn(...a)),
+  })
+  await d.start()
+  try {
+    const turn = assert.rejects(d.turn('@@SLEEP', { timeoutMs: 5000, maxMs: 8000 }), e => e.code === 'crash')
+    await new Promise(r => setTimeout(r, 200))
+    child.stdout.emit('error', new Error('boom'))
+    await turn
+    assert.ok(logs.some(l => l.includes('輸出讀取出錯')), logs.join('\n'))
+    const deadline = Date.now() + 5000
+    while (d.alive() && Date.now() < deadline) await new Promise(r => setTimeout(r, 20))
+    assert.equal(d.alive(), false, '行程要被結束')
   } finally { d.stop() }
 })
 

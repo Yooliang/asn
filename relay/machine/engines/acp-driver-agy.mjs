@@ -8,6 +8,7 @@
 // 但寫檔（write_to_file…）在無頭模式下不問就直接寫，連工作資料夾之外也寫得進去。所以這裡看每個工具步驟的事件，
 // 違反政策就立刻殺掉行程（絆線：能擋住後續動作並明確回報，但那一次寫入可能已經發生）。
 import { spawn } from 'node:child_process'
+import { isUtf8 } from 'node:buffer'
 import { cleanEnv } from './acp-client.mjs'
 import { classifyFailure, WorkerError } from './acp-errors.mjs'
 import { describeAgyTool, isRegisteredAgyTool, redact } from './acp-policy.mjs'
@@ -24,13 +25,12 @@ export function agyArgs({ cfg, sessionId, fullAccess }) {
 }
 
 // guard.checkTool({category, paths, summary, state}) → { ok: true } | { ok: false, reason }
-export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = false, guard }) {
+export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = false, guard, spawnFn = spawn }) {
   let proc = null
   let sid = sessionId
   let resumeLost = false
   let cur = null
   let buf = Buffer.alloc(0)   // 還沒收到換行的位元組：行在位元組層切，換行之後才解碼，多位元組字元被切在兩個 data 事件之間也不會壞
-  const utf8 = new TextDecoder('utf-8', { fatal: true })
   let lineNo = 0
   let stderrTail = []
   let exitCb = () => {}
@@ -119,7 +119,7 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
       const childEnv = cleanEnv(env)
       for (const n of cfg.envPass) if (env[n] !== undefined) childEnv[n] = env[n]
       await new Promise((resolve, reject) => {
-        const p = spawn(cfg.command, agyArgs({ cfg, sessionId, fullAccess }), { cwd: cfg.cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
+        const p = spawnFn(cfg.command, agyArgs({ cfg, sessionId, fullAccess }), { cwd: cfg.cwd, env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
         proc = p
         p.stdout.on('data', d => {
           buf = buf.length ? Buffer.concat([buf, d]) : d
@@ -128,13 +128,12 @@ export function createAgyDriver({ cfg, env, log, sessionId = '', fullAccess = fa
             const bytes = buf.subarray(0, i); buf = buf.subarray(i + 1)
             // 這一行的位元組不是有效的 UTF-8 才算無效編碼，跟解析失敗同樣處理；
             // 合法 UTF-8 裡的替換字元（agy 讀到別的編碼的檔時寫進去的）是正常內容，照常解析
-            let text = null
-            try { text = utf8.decode(bytes) } catch { /* 無效編碼：下面處理 */ }
-            if (text !== null && !text.trim()) continue
+            const valid = isUtf8(bytes)
+            const line = valid ? bytes.toString('utf8').trim() : ''
+            if (valid && !line) continue
             lineNo++
             let ev
-            if (text === null) { onUnparsed(bytes.length, 'InvalidEncoding'); continue }
-            const line = text.trim()
+            if (!valid) { onUnparsed(bytes.length, 'InvalidEncoding'); continue }
             try { ev = JSON.parse(line) } catch (e) { onUnparsed(line.length, String(e?.name ?? 'Error')); continue }
             try { onEvent(ev) } catch (e) { log(`agy event handler failed: ${e.message}`) }
           }
