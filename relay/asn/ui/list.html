@@ -524,7 +524,7 @@
       </label>
       <!-- #2355：型號清單的狀況（正在讀取、讀不到的白話原因、清單是幾分鐘前的）；沒寫 engine 的自訂設定也在這裡說明為什麼沒有下拉 -->
       <p class="partner-hint" v-if="!dlgPiPick &amp;&amp; launchModel.note" role="status" aria-label="型號清單狀況">{{ launchModel.note }}
-        <button type="button" class="aero-btn" v-if="launchModel.canRetry" @click="reloadLaunchModels">重新讀取</button></p>
+        <button type="button" class="aero-btn" v-if="launchModel.canRetry" @click="reloadLaunchModels">{{ launchModel.retryLabel || '重新讀取' }}</button></p>
       <p class="partner-hint" v-if="dlgPiPick &amp;&amp; dlgRemote">{{ PI_REMOTE_VERSION_NOTE }}</p>
       <p class="partner-hint" v-else-if="!dlgAuto.ok &amp;&amp; dlgAuto.why">{{ dlgAuto.why }}</p>
       </div>

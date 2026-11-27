@@ -6,6 +6,8 @@ import { deviceNameOf, unnamedLabelOf } from './device-known.mjs'
 import { MODEL_CATALOG, vendorRows } from './model-catalog.mjs'
 import { PI_ONLY_VENDORS, cleanPiModels, piChoiceFor, piLaunchArgs, piOnlyVendorRows, piVendorState } from './pi-models.mjs'
 import { vendorCards } from './auto-run.mjs'
+import { isValidModelId } from './model-id.mjs'
+import { remoteLaunchModelChoice } from './remote-launch-models.mjs'
 
 export const REASON = {
   needLogin: '要先登入，才能替電腦開新夥伴',
@@ -56,16 +58,19 @@ export const FIRST_MAX = 4000
 
 // 還在開（送出後、還沒開好也還沒失敗）：關掉畫面也照常在背景追蹤，再進「開新夥伴」接著顯示進度
 export const launchInProgress = l => l?.phase === 'progress' && l.vphase !== 'done' && l.vphase !== 'failed'
-export const initialLaunch = () => ({ open: false, phase: 'form', node: '', deviceLabel: '', profile: '', vendor: '', piModel: '', cwd: '', name: '', first: '', error: '', busy: false, id: '', text: '', detail: '', friendId: '', since: 0 })
+export const initialLaunch = () => ({ open: false, phase: 'form', node: '', deviceLabel: '', profile: '', vendor: '', piModel: '', model: '', cwd: '', name: '', first: '', error: '', busy: false, id: '', text: '', detail: '', friendId: '', since: 0 })
 
 // 送出前的檢查：不能開的電腦、缺欄位、名字格式都擋在這裡（不送出）。回中文錯誤，通過回空字串
 // run：這個廠牌自動用的開法（autoRunFor，null＝現在沒有能用的開法，why 是原因）；piOk：經 pi 時選的模型在那台的清單裡
-export function launchFormError(f, elig, { run = 'term', piOk = true, why = '' } = {}) {
+// modelOk：選的型號還在那台目前的清單裡（沒選型號＝true）；清單換了、選的不見了就請他重選，不偷偷改成不指定
+export const MODEL_PICK_ERR = '請重新選一次型號'
+export function launchFormError(f, elig, { run = 'term', piOk = true, why = '', modelOk = true } = {}) {
   if (!f.node) return '請先選一台電腦'
   if (!elig?.ok) return elig?.reason || REASON.unknown
   if (!f.profile) return '請選一個模型'
   if (!run) return why || '這個模型在那台電腦沒有能用的開法'
   if (run === 'pi' && !piOk) return '請選一個 pi 的模型'
+  if (!modelOk) return MODEL_PICK_ERR
   if (!f.cwd) return '請選工作資料夾'
   if (!NAME_RE.test(f.name.trim())) return '名字只能用英數、連字號、中文，1～40 字，不能以連字號開頭'
   if (f.first.trim().length > FIRST_MAX) return `第一句話最多 ${FIRST_MAX} 字`
@@ -129,19 +134,27 @@ export function launchVendorCards(launcher, { loggedOut = {} } = {}) {
 
 // 送給 Rust 的內容（Rust、後台、那台電腦還會各檢查一次；指令內容一律不帶）。
 // 經 pi：profile 一律是 pi，帶這次查到清單裡的提供者與模型；不在清單裡就回 null（不送）
-export function buildLaunchRequest(f, { run = '', row = null, launcher = null } = {}) {
+export function buildLaunchRequest(f, { run = '', row = null, launcher = null, model = '' } = {}) {
   const base = { node: f.node, name: f.name.trim(), cwd: f.cwd, first_message: f.first.trim() || null }
   // asn終端（原生 cli）且那台摘要有這一家的 <id>-term：送 <id>-term（那台開進 asn終端）；Claude、Codex 等開窗點的照舊送原本的 profile
+  // 型號（#2355 P4）：asn終端與經 pi 都不帶（那台會拒絕；pi 用自己的提供者與模型欄位）；不指定就不送這個鍵（不送 null，舊後台的欄位判斷不被攪亂）
   const termId = run === 'term' ? remoteTermProfile(launcher, row) : ''
   if (termId) return { ...base, profile: termId }
-  if (run !== 'pi') return { ...base, profile: f.profile }
+  if (run !== 'pi') {
+    // 呼叫端已先用 pickedModel 擋過；這裡自己再擋一次（呼叫端漏了也不會送出）：這一家這個開法在那台不能指定型號（Codex、沒寫 engine 的自訂設定、那台沒有 launch_model）就一律不帶，原因寫進 console
+    const want = typeof model === 'string' && model !== ''
+    const ok = want && isValidModelId(model) && remoteLaunchModelChoice(launcher, row, run).show
+    if (want && !ok) console.info('[ASN] 這個開法不能指定型號（或格式不合），這次不帶型號', { vendor: row?.id ?? '', run })
+    return { ...base, profile: f.profile, ...(ok ? { model } : {}) }
+  }
   const pc = launchPiChoice(row, launcher)
   const pi = pc.ok ? piLaunchArgs(row?.id, f.piModel || pc.defaultModel, pc.models) : null
   return pi ? { ...base, profile: 'pi', pi_provider: pi.provider, pi_model: pi.model } : null
 }
 
 // Rust／後台的錯誤字串（例如「launch HTTP 409 name_taken」）→ 給人看的中文
-const CODE_TEXT = {
+// bad_model、model_unsupported 兩句跟後台 launch.ts 的 ERROR_TEXT 逐字相同（test/remote-launch-models-2355p4.test.mjs 讀原始碼比對；supabase 的 deno 測試 launch_chain_1752_test.ts 再比一次）
+export const CODE_TEXT = {
   forbidden: '只有本人能替電腦開新夥伴，請確認已登入同一個帳號',
   not_found: '找不到這台電腦',
   no_launcher: REASON.closed,
@@ -150,6 +163,8 @@ const CODE_TEXT = {
   bad_cwd: '工作資料夾不在這台電腦允許的清單裡',
   bad_first_message: `第一句話最多 ${FIRST_MAX} 字`,
   bad_pi_model: 'pi 的模型不對，請重新選一次',
+  bad_model: '型號格式不對（或不能和 pi 的提供者、模型一起指定）',
+  model_unsupported: '那台電腦的 ASN 版本還不支援指定型號，請先更新',
   name_taken: '這台電腦已經有同名的夥伴，換個名字',
   rate_limited: '這台電腦這個小時開太多夥伴了，稍後再試',
   bad_request: '送出的內容不合格',
@@ -161,18 +176,34 @@ export function launchErrorText(msg) {
   if (/連線失敗|逾時|timed? ?out/i.test(m)) return '連不上 ASN，請檢查網路'
   const code = /HTTP \d+ (\w+)/.exec(m)?.[1]
   if (code && CODE_TEXT[code]) return CODE_TEXT[code]
-  if (/格式不對|不對|最多|只能用/.test(m) && !/HTTP/.test(m)) return m   // Rust 端自己擋下的（已經是中文）
+  if (/格式不對|不對|最多|只能用|不支援指定型號/.test(m) && !/HTTP/.test(m)) return m   // Rust 端自己擋下的（已經是中文）
   return '送出失敗，請稍後再試'
 }
 
 // 進度：launchers 回的那一筆（status：pending／taken／ok／failed／unconfirmed）＋名單上新視窗出現了沒
 // model＝名單上那個新視窗回報的模型（經 pi 時是「提供者/模型」）：開好時寫出實際的模型，選的跟開出來的不同一看就知道
-export function progressView(row, appeared, name = '', model = '') {
+// 實際型號（#2355 D8）：那台開好後回報的 model_used（後台 launchers 的 launches[].model_used，經 isValidModelId 驗過）。
+// 沒回報就不提型號，絕不拿使用者選的值頂替（例如背景夥伴同名已記同型號時那台刻意不回）。used＝之前輪詢拿到的（這一輪沒查到時沿用）
+export const modelUsedOf = (row, used = '') => {
+  for (const v of [row?.model_used, used]) if (typeof v === 'string' && isValidModelId(v.trim())) return v.trim()
+  return ''
+}
+// label＝實際型號的顯示名（呼叫端用那台的清單查，usedModelLabel；沒給或查不到就用代號本身）
+export const NO_MODEL_REPORTED_TEXT = '（那台沒有回報實際使用的型號）'
+export function progressView(row, appeared, name = '', model = '', { used = '', picked = '', label = '' } = {}) {
   const m = String(model ?? '').trim()
-  if (appeared) return { phase: 'done', text: m ? `「${name}」已經開好了（模型：${m}），可以直接對話。` : `「${name}」已經開好了，可以直接對話。` }
+  const actual = modelUsedOf(row, used)
+  const shown = actual ? (String(label ?? '').trim() || actual) : ''
+  if (appeared) {
+    if (actual) return { phase: 'done', text: `「${name}」已經開好了（型號：${shown}），可以直接對話。` }
+    if (m) return { phase: 'done', text: `「${name}」已經開好了（型號：${m}），可以直接對話。` }
+    // 有選型號、那台卻沒說實際用了哪個：照實講，不寫成已套用
+    if (picked) return { phase: 'done', text: `「${name}」已經開好了，可以直接對話。${NO_MODEL_REPORTED_TEXT}` }
+    return { phase: 'done', text: `「${name}」已經開好了，可以直接對話。` }
+  }
   switch (row?.status) {
     case 'failed': return { phase: 'failed', text: `沒有開成功：${friendlyDetail(row.detail)}` }
-    case 'ok': return { phase: 'waiting', text: '那台已經開好，等它出現在名單上…' }
+    case 'ok': return { phase: 'waiting', text: actual ? `那台已經開好（型號：${shown}），等它出現在名單上…` : '那台已經開好，等它出現在名單上…' }
     case 'unconfirmed': return { phase: 'waiting', text: '已經送出，但還沒確認開好；等一下看看名單。' }
     case 'taken': return { phase: 'opening', text: '那台正在開…' }
     default: return { phase: 'sending', text: '正在發送指令…' }

@@ -2,8 +2,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { EMPTY_CHAT_TEXT, LOADING_CHAT_TEXT, MODEL_NOTE, OP_STEP, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, phoneModels, renamedChatId, runBanner, runFor, setRun, showsInSheet } from '../ui/lib/mobile-ops.mjs'
+import { EMPTY_CHAT_TEXT, LOADING_CHAT_TEXT, MODEL_NOTE, OP_STEP, chatPageState, clearRun, moveRun, normalizeLastChat, opStep, renamedChatId, runBanner, runFor, setRun, showsInSheet } from '../ui/lib/mobile-ops.mjs'
 import { MODEL_RE, OPS, buildOpRequest, menuItems } from '../ui/lib/partner-ops.mjs'
+import { switchModelsFor } from '../ui/lib/model-catalog.mjs'
 
 const read = (...p) => fs.readFileSync(new URL(`../${p.join('/')}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const F = (node, agent, extra = {}) => ({ id: `${node}/${agent}`, node, agent, nick: agent, status: 'online', engine: 'claude', device: `設備${node}`, ...extra })
@@ -39,11 +40,12 @@ test('「⋯」選單：項目與可按條件完全來自 partner-ops.menuItems�
   assert.equal(showsInSheet('info'), true); assert.equal(showsInSheet('close'), false)
 })
 
-test('切換模型：手機列常用三個（opus／sonnet／haiku），都過後台的模型名稱規則，並註明只是常用清單', () => {
-  const ms = phoneModels()
-  assert.deepEqual(ms.map(m => m.id), ['opus', 'sonnet', 'haiku'])
+test('切換模型：手機列 Claude 的四個別名（fable／opus／sonnet／haiku，跟電腦版同一份），都過後台的模型名稱規則，並註明是會指向最新版的別名', () => {
+  const ms = switchModelsFor('claude')
+  assert.deepEqual(ms.map(m => m.id), ['fable', 'opus', 'sonnet', 'haiku'])
   for (const m of ms) assert.match(m.id, MODEL_RE)
-  assert.match(MODEL_NOTE, /常用/)
+  assert.match(MODEL_NOTE, /別名/)
+  assert.match(MODEL_NOTE, /最新版/)
   assert.deepEqual(buildOpRequest(F('H', '小文'), 'model', { model: 'sonnet' }), { node: 'H', name: '小文', op: 'model', model: 'sonnet' })
 })
 

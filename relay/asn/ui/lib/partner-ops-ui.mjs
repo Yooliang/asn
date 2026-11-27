@@ -163,9 +163,17 @@ export const PartnerOpStrip = {
  * 回廠牌代號（給 agent_models）；不用讀回空字串。
  */
 export function acpListVendor(friend, { selfNode = '', canRead = true } = {}) {
-  if (!canRead || dialogEngine(friend) !== 'acp') return ''
-  if (String(friend?.engine ?? '').toLowerCase() !== 'gemini') return ''
-  return selfNode && friend?.node === selfNode ? 'gemini' : ''
+  return acpListWhere(friend, { selfNode, canReadLocal: canRead }) === 'local' ? 'gemini' : ''
+}
+
+/**
+ * 清單向哪裡讀（#2355 P4）：工作者就在這台＝'local'（本機命令 agent_models）；在別台＝'remote'（那台回報的摘要，經後台 launchers）；
+ * 不是 Gemini 內建通道（Grok 沒有清單）、不知道這台是哪一台、或讀的管道沒有（手機沒有本機命令）＝''（輸入框）。
+ */
+export function acpListWhere(friend, { selfNode = '', canReadLocal = true, canReadRemote = false } = {}) {
+  if (dialogEngine(friend) !== 'acp' || String(friend?.engine ?? '').toLowerCase() !== 'gemini' || !selfNode) return ''
+  if (friend?.node === selfNode) return canReadLocal ? 'local' : ''
+  return canReadRemote ? 'remote' : ''
 }
 
 /**
@@ -244,16 +252,18 @@ export const PartnerOpDialog = {
   setup(props, { emit }) {
     const { ref, reactive, computed, onMounted, onBeforeUnmount } = globalThis.Vue
     const name = props.friend.agent || props.friend.nick
-    // 內建通道（Gemini）的型號清單向這台電腦讀（#2355）；別台的工作者、或沒有清單的（Grok）退回輸入框
-    const acpVendor = props.op === 'model' ? acpListVendor(props.friend, { selfNode: props.selfNode, canRead: typeof props.api?.agentModels === 'function' }) : ''
-    const acpView = reactive({ models: [], note: '', canRetry: false })
+    // 內建通道（Gemini）的型號清單：工作者在這台就向本機讀；在別台就讀那台回報的摘要（向後台問 launchers）；沒有清單的（Grok）退回輸入框（#2355）
+    const acpWhere = props.op === 'model' ? acpListWhere(props.friend, { selfNode: props.selfNode, canReadLocal: typeof props.api?.agentModels === 'function', canReadRemote: typeof props.api?.launchers === 'function' }) : ''
+    const acpVendor = acpWhere ? 'gemini' : ''
+    const fetchRemoteLauncher = async () => machinesByNode(await props.api.launchers())[props.friend.node]?.launcher ?? null
+    const acpView = reactive({ models: [], note: '', canRetry: false, retryLabel: '' })
     const acpModels = computed(() => acpView.models)
     const text = computed(() => opDialogText(props.op, name, props.friend.device, dialogEngine(props.friend), { hasList: acpView.models.length > 0 }))
     const form = reactive({ newName: name, note: '', ack: false, model: '' })
     const acpLoader = acpVendor ? createModelLoader({
-      fetch: a => props.api.agentModels(a), vendorLabel: v => (v === 'gemini' ? 'Gemini' : v),
+      where: acpWhere, fetch: acpWhere === 'remote' ? fetchRemoteLauncher : a => props.api.agentModels(a), vendorLabel: v => (v === 'gemini' ? 'Gemini' : v),
       onChange: (_v, view) => {
-        Object.assign(acpView, { models: view.models, note: view.note, canRetry: view.canRetry && !view.loading })
+        Object.assign(acpView, { models: view.models, note: view.note, canRetry: view.canRetry && !view.loading, retryLabel: view.retryLabel || '' })
         if (view.models.length && !view.models.some(m => m.id === form.model)) form.model = acpSwitchChoices(props.friend, { list: view.models }).selected
       },
     }) : null
@@ -344,7 +354,7 @@ export const PartnerOpDialog = {
     </label>
     <small class="partner-hint" v-if="piNote">{{ piNote }}</small>
     <small class="partner-hint" v-if="op === 'model' && acpView.note" role="status" aria-label="型號清單狀況">{{ acpView.note }}
-      <button type="button" class="aero-btn" v-if="acpView.canRetry" @click="reloadAcp">重新讀取</button></small>
+      <button type="button" class="aero-btn" v-if="acpView.canRetry" @click="reloadAcp">{{ acpView.retryLabel || '重新讀取' }}</button></small>
     <ul class="model-points" v-if="text.points.length"><li v-for="p in text.points" :key="p">{{ p }}</li></ul>
     <label class="op-field" v-if="text.ack"><input type="checkbox" v-model="form.ack" aria-label="確認接手前要先關掉終端機"> {{ text.ack }}</label>
     <label class="op-field" v-if="op === 'handover' && !text.ack && !isSelfPull">補充的話（選填，會附在新夥伴的第一句話後面）

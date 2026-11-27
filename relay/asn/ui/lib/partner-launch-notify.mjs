@@ -1,4 +1,5 @@
 // 開新夥伴：背景逾時與遠端啟動失敗的使用者可見通知（純邏輯，可單測）。
+import { isValidModelId } from './model-id.mjs'
 
 export const BACKGROUND_LAUNCH_TIMEOUT_MS = 30_000
 
@@ -28,6 +29,31 @@ export function launchFailedNoticeText(partnerName, detail) {
     title: '開新夥伴失敗',
     body: `「${name}」沒有成功啟動。\n${reason}\n詳細原因可以看記錄檔。`,
   }
+}
+
+/**
+ * 別台開好了、而且那台回報了實際採用的型號（launches[].model_used，#2355 D8）：挑出來給「開好了」的通知。
+ * 沒有 model_used 的（沒指定型號、或那台沒回報）不挑——沒有東西可講，也絕不拿使用者選的值頂替。
+ */
+export function collectLaunchModelUsed(launches, track) {
+  const byId = new Map((track ?? []).map(t => [t.id, t]))
+  const out = []
+  for (const row of launches ?? []) {
+    if (row?.status !== 'ok' || typeof row.model_used !== 'string') continue
+    const modelUsed = row.model_used.trim()
+    if (!isValidModelId(modelUsed)) continue
+    out.push({ id: row.id, node: byId.get(row.id)?.node ?? '', name: byId.get(row.id)?.name ?? row.name ?? '', modelUsed })
+  }
+  return out
+}
+
+/**
+ * 開好了的提示（右下角、不打斷操作的那種，#2355 P4 一審）：title＝「名字」開好了、line＝實際型號。label＝型號的顯示名（用那台的清單查，查不到就是代號）。
+ * 提示小窗很窄（一行約 20 字，超過會被切掉），所以型號單獨放第二行，不跟前面的話擠在一起。
+ */
+export function launchOkToastText(partnerName, label) {
+  const name = String(partnerName ?? '').trim() || '夥伴'
+  return { title: `「${name}」在那台開好了`, line: `型號：${String(label ?? '').trim()}` }
 }
 
 /** 仍在啟動中、背景模式、本機、逾時且尚未改回前台 */

@@ -7,7 +7,7 @@ import { CLAUDE_ALIAS_LABEL } from '../ui/lib/remote-models.mjs'
 import { createModelSwitcher } from '../ui/lib/model-switch.mjs'
 import { acpSwitchChoices, opDialogText } from '../ui/lib/partner-ops-ui.mjs'
 import * as mobileOps from '../ui/lib/mobile-ops.mjs'
-import { ACP_ONLY_OPS, PHONE_LEAD_OPS, phoneModels, phoneOpApplies, phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
+import { ACP_ONLY_OPS, PHONE_LEAD_OPS, phoneOpApplies, phoneOpsRows } from '../ui/lib/mobile-ops.mjs'
 import { manageItems } from '../ui/lib/archive.mjs'
 import { headerPsm } from '../ui/lib/tasks.mjs'
 import { MODEL_RE } from '../ui/lib/partner-ops.mjs'
@@ -26,19 +26,23 @@ test('switchModelsFor：Claude 只有別名（fable、opus、sonnet、haiku）�
   for (const e of ['grok', 'codex', 'acp', '', undefined]) assert.deepEqual(switchModelsFor(e), [], String(e))
 })
 
-test('電腦版切換模型讀 switchModelsFor；手機在 P4 以前維持改版前的清單（以 main 568a87db 的輸出為標準答案）', () => {
+test('手機切換模型跟電腦版同一套（#2355 P4）：Claude 四個別名、Gemini 讀摘要；手機自己的清單（PHONE_*）已拿掉', () => {
   assert.deepEqual(createModelSwitcher({ transport: {} }).models, switchModelsFor('claude'))
-  const before = JSON.parse(read('test/fixtures/phone-models-before-2355.json'))
-  assert.deepEqual(phoneModels(), before.claude)
-  assert.deepEqual(phoneModels('claude'), before.claude)
-  assert.deepEqual(phoneModels('gemini'), before.gemini, '手機的 Gemini 清單維持改版前，不能退成輸入框')
-  for (const e of ['grok', 'codex', 'acp', 'pi', '']) assert.deepEqual(phoneModels(e), before.others, String(e))
-  // 手機內建通道對話框：m.js 用 phoneAcpList 當 list，結果跟改版前的 acpSwitchChoices(friend) 一樣
+  // 手機的 Claude 按鈕直接用 switchModelsFor('claude')：跟電腦版一樣是 fable、opus、sonnet、haiku 四個
+  const m = read('ui/m.js')
+  assert.match(m, /const opsModels = switchModelsFor\('claude'\)/, '手機 Claude 的按鈕用電腦版同一份清單')
+  assert.deepEqual(switchModelsFor('claude').map(x => x.id), ['fable', 'opus', 'sonnet', 'haiku'])
+  // 手機自己的暫時清單整段拿掉：mobile-ops 不再有，m.js 也不再用
+  for (const k of ['PHONE_CLAUDE_MODELS', 'PHONE_GEMINI_MODELS', 'phoneModels', 'phoneAcpList']) {
+    assert.equal(k in mobileOps, false, `mobile-ops 不該再有 ${k}`)
+    assert.doesNotMatch(m, new RegExp(k), `m.js 不該再用 ${k}`)
+  }
+  assert.match(m, /acpSwitchChoices\(opsFriend\.value, \{ list: opsAcpView\.value\?\.models \?\? \[\] \}\)/, 'Gemini 的清單來自讀取結果（摘要），不是寫死的')
+  // Gemini 的清單晚到時，沿用電腦版的 acpSwitchChoices：目前用的在清單裡就選它，否則第一個
   const gem = { node: 'H', agent: '小格', engine: 'gemini', model: 'gemini-3.8-flash-low' }
-  assert.deepEqual(acpSwitchChoices(gem, { list: mobileOps.phoneAcpList(gem) }), { models: before.gemini, selected: 'gemini-3.8-flash-low' })
-  assert.equal(acpSwitchChoices({ ...gem, model: '' }, { list: mobileOps.phoneAcpList(gem) }).selected, before.gemini[0].id)
-  assert.deepEqual(acpSwitchChoices({ ...gem, engine: 'grok' }, { list: mobileOps.phoneAcpList({ engine: 'grok' }) }).models, [])
-  assert.match(read('ui/m.js'), /acpSwitchChoices\(opsFriend\.value, \{ list: phoneAcpList\(opsFriend\.value\) \}\)/, 'm.js 用手機自己的清單')
+  const list = [{ id: 'a', label: 'A' }, { id: 'gemini-3.8-flash-low', label: 'F' }]
+  assert.deepEqual(acpSwitchChoices(gem, { list }), { models: list, selected: 'gemini-3.8-flash-low' })
+  assert.deepEqual(acpSwitchChoices({ ...gem, engine: 'grok' }, { list: [] }).models, [], 'Grok 維持輸入框')
 })
 
 test('內建通道切換模型：Gemini 有清單（預設目前的，不在清單就第一個）；Grok 沒清單＝手動輸入', () => {
@@ -70,7 +74,7 @@ test('開新夥伴接線：第 2 頁有型號下拉（預設不指定），本�
   const html = read('ui/list.html'), js = read('ui/list.js')
   assert.match(html, /<label class="partner-model-pick" v-else-if="launchModel\.show">型號[\s\S]*?<option value="">不指定（照預設）<\/option>[\s\S]*?v-for="m in launchModel\.models"/)
   assert.match(js, /launchModelChoices\(dlgRow\.value\?\.id, dlgAuto\.value\.run, \{ engine: localProfileEngine\(partnerDlg\.profile, remoteLaunchers\.value\[info\.node\]\) \}\)/)
-  assert.match(js, /if \(!launchModelOnThisPc\.value\) return \{ \.\.\.c, show: false/, '別台電腦照舊不出（P4 才做）')
+  assert.match(js, /: remoteLaunchModelChoice\(dlgRemoteLauncher\.value, dlgRow\.value, dlgAuto\.value\.run\)/, '別台電腦：清單讀那台回報的摘要（P4）')
   assert.match(js, /localLaunchRequest\(dlgAuto\.value, \{[^}]*model: launchModelPick\.value,/, '選了型號就帶進送出內容')
   assert.match(read('ui/lib/auto-run.mjs'), /\.\.\.\(model \? \{ model \} : \{\}\)/, '有選才帶 model')
   assert.match(read('ui/lib/partner-ops-ui.mjs'), /<label class="op-field" v-if="op === 'model' && acpView\.models\.length">模型/)

@@ -660,6 +660,12 @@
                     <!-- 只能經 pi 的廠牌（DeepSeek、MiniMax）：那台回報的 pi 模型清單；預設第一個 -->
                     <label class="m-field" v-if="lchAuto.run === 'pi' && lchPi.ok">型號<select class="set-sel" v-model="lch.piModel"><option value="">{{ lchPi.defaultModel }}（預設）</option><option v-for="pm in lchPi.models" :key="pm.model" :value="pm.model">{{ pm.model }}</option></select></label>
                     <p class="m-note" v-if="lchAuto.run === 'pi' && lchPi.ok">{{ PI_REMOTE_VERSION_NOTE }}</p>
+                    <!-- 一般型號（#2355 P4）：清單是那台回報的摘要（Claude 是別名）；那台沒有回報 launch_model、或讀不到時，只有說明；預設＝不指定 -->
+                    <label class="m-field" v-if="lchModel.show">型號<select class="set-sel" v-model="lch.model" aria-label="型號"><option value="">不指定（照預設）</option><option v-for="mo in lchModel.models" :key="mo.id" :value="mo.id">{{ mo.label }}</option></select></label>
+                    <template v-if="lchModel.note">
+                      <p class="m-note" role="status" aria-label="型號清單狀況">{{ lchModel.note }}</p>
+                      <button class="m-btn" type="button" v-if="lchModel.canRetry" @click="reloadLchModels">{{ lchModel.retryLabel || '再查一次' }}</button>
+                    </template>
                     <label class="m-field">名字<input class="set-input" v-model="lch.name" maxlength="40" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
                     <label class="m-field">工作資料夾<select class="set-sel" v-model="lch.cwd"><option v-for="c in lchChoices.cwds" :key="c" :value="c">{{ c }}</option></select></label>
                     <label class="m-field">第一句話（選填）<textarea class="set-area" v-model="lch.first" rows="3" maxlength="4000"></textarea></label>
@@ -723,8 +729,10 @@
           <select class="set-sel m-ops-input" v-else-if="opsAcp.models.length" v-model="ops.model" aria-label="模型">
             <option v-for="m in opsAcp.models" :key="m.id" :value="m.id">{{ m.label }}</option>
           </select>
-          <input class="set-input m-ops-input" v-else v-model="ops.model" maxlength="101" autocomplete="off" autocapitalize="off" spellcheck="false" :placeholder="opsText.placeholder || '例如 anthropic/claude-sonnet-5'" aria-label="模型" @keydown.enter.prevent="submitOp('model')">
+          <input class="set-input m-ops-input" v-else-if="!opsAcpReading" v-model="ops.model" maxlength="101" autocomplete="off" autocapitalize="off" spellcheck="false" :placeholder="opsText.placeholder || '例如 anthropic/claude-sonnet-5'" aria-label="模型" @keydown.enter.prevent="submitOp('model')">
           <p class="m-note" v-if="opsPiNote">{{ opsPiNote }}</p>
+          <p class="m-note" v-if="opsAcpNote" role="status" aria-label="型號清單狀況">{{ opsAcpNote }}</p>
+          <button type="button" class="m-btn" v-if="opsAcpCanRetry" @click="reloadOpsAcp">{{ opsAcpRetryLabel }}</button>
           <p class="m-err" v-if="ops.error" role="alert">{{ ops.error }}</p>
           <button type="button" class="m-btn m-btn-big" @click="submitOp('model')">{{ opsText.ok }}</button>
           <button type="button" class="m-btn m-ops-cancel" @click="ops.phase = 'menu'; ops.error = ''">返回</button>

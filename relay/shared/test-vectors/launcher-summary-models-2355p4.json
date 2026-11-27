@@ -1,0 +1,58 @@
+{
+  "_說明": "#2355 P4：電腦端（Rust）名單摘要裡 `launch_model` 與 `models` 的線上形狀 golden。Rust 測試（bridge/tests/rooms_launch.rs「名單摘要的_launch_model_與_models_跟共用_golden_逐字相同」）把快取換成真的 agy 實機清單（src-tauri/tests/fixtures/agy-models/sample.txt）後，用真的 Launcher::summary 與 report_value() 產出，跟這份逐字比對；形狀改了就紅，要改檔時用失敗訊息印出的實際輸出貼進來（程式不寫檔）。後台 Edge 測試（launch_chain_1752_test.ts）與前端 node 測試（remote-launch-models-2355p4.test.mjs）讀同一份：它們拿到的是 Rust 真的送出的內容，不是另外手寫的鏡像。",
+  "launch_model": true,
+  "models": [
+    {
+      "vendor": "claude",
+      "status": "unavailable",
+      "code": "unsupported",
+      "models": []
+    },
+    {
+      "vendor": "codex",
+      "status": "unavailable",
+      "code": "not_installed",
+      "models": []
+    },
+    {
+      "vendor": "gemini",
+      "status": "ok",
+      "code": "ok",
+      "models": [
+        { "id": "gemini-4-neon-high", "name": "Gemini 4 Neon (High)" },
+        { "id": "gemini-4-neon-xhigh", "name": "Gemini 4 Neon (XHigh)" },
+        { "id": "gemini-4-neon-medium", "name": "Gemini 4 Neon (Medium)" },
+        { "id": "gemini-4-neon-low", "name": "Gemini 4 Neon (Low)" },
+        { "id": "gemini-4-carbon-medium", "name": "Gemini 4 Carbon (Medium)" },
+        { "id": "gemini-4-carbon-high", "name": "Gemini 4 Carbon (High)" },
+        { "id": "gemini-4-carbon-low", "name": "Gemini 4 Carbon (Low)" },
+        { "id": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)" },
+        { "id": "gemini-4-argon-high", "name": "Gemini 4 Argon (High)" },
+        { "id": "gemini-4-argon-low", "name": "Gemini 4 Argon (Low)" },
+        { "id": "gemini-4-hydrogen-high", "name": "Gemini 4 Hydrogen (High)" },
+        { "id": "gemini-4-hydrogen-xhigh", "name": "Gemini 4 Hydrogen (XHigh)" },
+        { "id": "gemini-4-hydrogen-medium", "name": "Gemini 4 Hydrogen (Medium)" },
+        { "id": "gemini-4-hydrogen-low", "name": "Gemini 4 Hydrogen (Low)" },
+        { "id": "gemini-pro-orchestrator-neon", "name": "Orchestrator (Neon)" },
+        { "id": "gemini-pro-orchestrator", "name": "Orchestrator (Carbon)" },
+        { "id": "gemini-pro-orchestrator-argon", "name": "Orchestrator (Argon)" },
+        { "id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash (High)" },
+        { "id": "gemini-3.8-flash-medium", "name": "Gemini 3.8 Flash (Medium)" },
+        { "id": "gemini-3.8-flash-low", "name": "Gemini 3.8 Flash (Low)" },
+        { "id": "claude-opus-5-5-low", "name": "Claude Opus 5.5 (Low)" },
+        { "id": "claude-opus-5-5-medium", "name": "Claude Opus 5.5 (Medium)" },
+        { "id": "claude-opus-5-5-high", "name": "Claude Opus 5.5 (High)" },
+        { "id": "claude-sonnet-5-5-low", "name": "Claude Sonnet 5.5 (Low)" },
+        { "id": "claude-sonnet-5-5-medium", "name": "Claude Sonnet 5.5 (Medium)" },
+        { "id": "claude-sonnet-5-5-high", "name": "Claude Sonnet 5.5 (High)" },
+        { "id": "gpt-oss-120b-medium", "name": "GPT-OSS 120B (Medium)" }
+      ]
+    },
+    {
+      "vendor": "pi",
+      "status": "unavailable",
+      "code": "not_installed",
+      "models": []
+    }
+  ]
+}

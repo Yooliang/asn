@@ -1050,6 +1050,8 @@ export const injectSource = table => `(() => {
   const missing = (globalThis.__smokeMissing = []);
   // 手機看終端的本人確認（PR③ 的外殼）：表裡的 __confirmViewer＝'ok'／'cancel'／'no_lock'；每次確認都記在 __smokeConfirms
   // 語音輸入（#1536）：表裡的 __dict＝true 就給一個假的通話外殼（還沒允許麥克風：按下去先停在準備中，探測用 __asnCallEvent 送「允許」才開始聽；開始聽之後一直停在聆聽中、不回結果），手機輸入列才會有麥克風
+  // 冒煙：把「15 秒一次」的計時縮短（#2355 P4：電腦版追別台開窗進度每 15 秒查一次，探測不用真的等）；只在假後台設了 __fastPoll（毫秒）的情境，且只動 15000 這一種間隔
+  if (T.__fastPoll) { const si = globalThis.setInterval.bind(globalThis); globalThis.setInterval = (fn, ms, ...rest) => si(fn, ms === 15000 ? T.__fastPoll : ms, ...rest) }
   if (T.__launchInstallBtn) globalThis.__smokeLaunchInstallBtn = true;   // 冒煙：打開 Claude 那一列的「進行安裝／進行更新」旗標（#1548 ⑤；正式版旗標預設關）
   if (T.__dict) globalThis.AsnAndroid = Object.assign(globalThis.AsnAndroid || {}, { vibrate() {}, callAvailable: () => true, callMicState: () => 'ask', callRequestMic() { (globalThis.__smokeDict ||= []).push('ask') }, callListen() { (globalThis.__smokeDict ||= []).push('listen') }, callStopListen() {}, callEnd() {}, callSpeak() {}, callStopSpeak() {} });
   // 念出訊息（#2304）：表裡的 __speak＝true 就給一個假的念出外殼（念與停都記在 __smokeSpeak），手機對方的每則訊息才有喇叭鈕
