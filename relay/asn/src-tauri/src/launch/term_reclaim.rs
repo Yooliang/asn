@@ -345,13 +345,23 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         };
         let probed = probes.borrow().get(&pane.pane_id) == Some(&PaneProbe::Alive);
         // 分頁標題沒帶編號（開窗逾時、標題還沒設就接回的窗格）時，用記下來的標題，夥伴名字才不會掉
-        let title = if title_marks(&pane.tab_title, &term.id) {
+        // 存檔的標題帶得出夥伴名就以存檔為準（改名時分頁標題可能沒設成、或那一列當時暫時接不回，分頁標題還是舊的，#2471）；其次才看分頁標題
+        let saved_named = partner_label(&term.id, &term.title).is_some();
+        let title = if saved_named {
+            term.title.clone()
+        } else if title_marks(&pane.tab_title, &term.id) {
             pane.tab_title.clone()
         } else if title_marks(&term.title, &term.id) {
             term.title.clone()
         } else {
             format!("ASN:{}", term.id)
         };
+        // 以存檔為準而分頁標題不同：補設一次分頁標題（失敗只記 log，不擋接回）
+        if saved_named && pane.tab_title != title {
+            if let Err(e) = w.set_tab_title(&sock, pane.pane_id, &title) {
+                view_log(&format!("終端對照表：{}認回後分頁標題沒補設成功，照存檔的名字登記：{e}", row_label(term)));
+            }
+        }
         Row::Restored {
             probed,
             session: Session {

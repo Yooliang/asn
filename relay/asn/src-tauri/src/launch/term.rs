@@ -7265,6 +7265,75 @@ mod tests {
             assert!(svc2.partner_term_id("小乙").is_err());
         }
 
+        /// #2471：pi 開的終端列（kind 空、標題只有 ASN:{編號}）不會被夥伴改名誤改
+        #[test]
+        fn _2471_夥伴改名_pi_的終端列沒有名字_不會被誤改() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            for old in ["小皮", "", "pi"] {
+                assert_eq!(rig.svc.relabel_partner(old, "小丙"), 0, "舊名 {old:?}");
+            }
+            let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert_eq!(stored["terms"][0]["title"], format!("ASN:{id}"), "pi 列的標題不變");
+            assert!(stored["terms"][0].get("kind").is_none(), "pi 列沒有種類");
+        }
+
+        /// #2471 二審：全域的 relabel_partner 在正式建置（gui 且非 test）要真的呼叫 TermService 的 relabel_partner
+        /// （測試版本來就是空動作，行為測試看不到接線，所以釘原始碼）
+        #[test]
+        fn 守門_夥伴改名的全域出口在正式建置接到終端服務() {
+            let src = include_str!("term.rs").replace("\r\n", "\n");
+            let start = src.find("pub(crate) fn relabel_partner(old: &str, new: &str) -> usize {").expect("有全域 relabel_partner");
+            let body = &src[start..];
+            let body = &body[..body.find("\n}\n").unwrap()];
+            let real = &body[body.find("#[cfg(all(feature = \"gui\", not(test)))]").unwrap()..body.find("#[cfg(not(all(feature = \"gui\", not(test))))]").unwrap()];
+            assert!(real.contains("GLOBAL.get()") && real.contains(".relabel_partner(old, new)"), "正式建置要呼叫 TermService::relabel_partner：{real}");
+        }
+
+        /// #2471 二審：分頁標題設不成（表照改）→ 重啟認回時以存檔的新名為準，並補設一次分頁標題；存檔仍是新名
+        #[test]
+        fn _2471_夥伴改名_分頁標題設不成_認回後仍是新名_並補設分頁標題() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            *rig.runner.inner.fail_substr.borrow_mut() = Some("set-tab-title".into());
+            assert_eq!(rig.svc.relabel_partner("小乙", "小丙"), 1, "分頁標題沒設成，表照改");
+            *rig.runner.inner.fail_substr.borrow_mut() = None;
+            // 窗格的分頁標題還是舊名
+            *rig.runner.inner.list_json.borrow_mut() = one_pane(&format!("asn-{id}"), &format!("ASN:{id} 小乙"), 9, 0);
+            let before = count_cmd(&rig.runner, "set-tab-title");
+            let mut svc2 = restarted(&rig, true);
+            svc2.set_hold_config(true);
+            svc2.reclaim().unwrap();
+            assert_eq!(svc2.partner_term_id("小丙"), Ok(id.clone()), "認回後仍是新名");
+            assert!(svc2.partner_term_id("小乙").is_err());
+            assert_eq!(count_cmd(&rig.runner, "set-tab-title"), before + 1, "認回後補設一次分頁標題");
+            let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
+            assert_eq!(titles.last().unwrap().last().unwrap(), &format!("ASN:{id} 小丙"));
+            let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert_eq!(stored["terms"][0]["title"], format!("ASN:{id} 小丙"), "存檔仍是新名");
+        }
+
+        /// #2471 二審：暫時接不回（parked）的列改名只改存檔標題 → 之後認回仍是新名，存檔不退回舊名
+        #[test]
+        fn _2471_夥伴改名_暫時接不回的列_認回後仍是新名() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            // 重啟後開關關著：夥伴列留在 parked
+            let svc2 = restarted(&rig, true);
+            svc2.reclaim().unwrap();
+            assert_eq!(svc2.partner_term_id("小乙"), Err("這位夥伴不是 ASN 開的視窗，這裡看不到畫面".to_string()), "還沒接回");
+            assert_eq!(svc2.relabel_partner("小乙", "小丙"), 1, "parked 列只改存檔標題");
+            // 之後開關打開、窗格的分頁標題還是舊名
+            *rig.runner.inner.list_json.borrow_mut() = one_pane(&format!("asn-{id}"), &format!("ASN:{id} 小乙"), 9, 0);
+            let mut svc3 = restarted(&rig, true);
+            svc3.set_hold_config(true);
+            svc3.reclaim().unwrap();
+            assert_eq!(svc3.partner_term_id("小丙"), Ok(id.clone()), "認回後仍是新名");
+            assert!(svc3.partner_term_id("小乙").is_err());
+            let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert_eq!(stored["terms"][0]["title"], format!("ASN:{id} 小丙"), "存檔沒有退回舊名");
+        }
+
         #[test]
         fn 看畫面的_gui_開窗帶_120x40_設定在子命令前面() {
             let args = super::super::view_args(Path::new("C:/m/mux.lua"), "asn-3");

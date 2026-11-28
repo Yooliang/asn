@@ -2557,6 +2557,17 @@ fn pi_改名_新擴充_成功_同名拒絕_名字不合規則_忙時排隊_遠�
     assert!(r.terminated().is_empty() && r.launched().is_empty(), "改名不關、不開任何程序");
 }
 
+/// #2471 二審：正式環境的接線（FakeEnv 換掉了它，行為測試看不到）：SystemOpsEnv::relabel_terminal 要呼叫終端服務的 relabel_partner
+#[test]
+fn 守門_正式環境的改名同步接到終端服務() {
+    let src = include_str!("../partner_ops.rs").replace("\r\n", "\n");
+    let impl_start = src.find("impl OpsEnv for SystemOpsEnv {").expect("有 SystemOpsEnv 的實作");
+    let from = &src[impl_start..];
+    let f = &from[from.find("    fn relabel_terminal(&self, old: &str, new: &str) {").expect("SystemOpsEnv 有覆寫 relabel_terminal")..];
+    let body = &f[..f.find("\n    }\n").unwrap()];
+    assert!(body.contains("crate::launch::term::relabel_partner(old, new)"), "SystemOpsEnv::relabel_terminal 要呼叫 crate::launch::term::relabel_partner：{body}");
+}
+
 #[test]
 fn _2471_pi_改名成功_要同步終端對照表_失敗不同步() {
     let r = rig(Opt::default());
