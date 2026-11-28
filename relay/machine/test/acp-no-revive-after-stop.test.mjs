@@ -1,4 +1,5 @@
-// #2462：已停止的背景工作者，列名單時的「試著喚回」不能再把它暖機起來；另補「啟動中被停止、又馬上啟動」。
+// #2462：已停止的背景工作者，列名單時的「試著喚回」不能再把它暖機起來。
+// （「啟動中被停止、又馬上啟動」不在 Node 版測：Node 版同一個工作者物件不會停了又啟動，引擎每次都另建，見 engines/acp.mjs 的 start 與 addPartnerWorker）
 // 用假驅動（不開真的 AI 工具）。執行：node --test relay/machine/test/acp-no-revive-after-stop.test.mjs
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -61,22 +62,4 @@ test('已 stop 的工作者：健康狀態不可用、超過重試間隔後 mayb
   r.w.maybeRevive()
   await settle()
   assert.equal(r.made.length, 2, '已停止：不能再建新的驅動')
-})
-
-test('啟動中被停止、又馬上啟動：第一支被停掉不留下，第二支正常成為目前的驅動，沒有失敗通知', async () => {
-  const r = rig({ hold: true })
-  r.w.start()
-  await settle()
-  assert.equal(r.made.length, 1, '第一支驅動開始啟動（卡住）')
-  r.w.stop()
-  r.holdNext(false)
-  r.w.start()
-  r.made[0].release()
-  await settle()
-  assert.equal(r.made.length, 2, '第二支驅動要建出來')
-  assert.equal(r.made[0].stopped, true, '第一支要被停掉')
-  assert.equal(r.made[1].stopped, false, '第二支沒被停')
-  assert.equal(r.w.health().health, 'ok', '健康狀態不變')
-  assert.deepEqual(r.fails, [], '沒有失敗通知')
-  assert.equal(r.w.status(), 'idle')
 })

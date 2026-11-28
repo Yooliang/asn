@@ -165,7 +165,7 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
   const baseFull = cfg.protocol === 'agy-stream' && policy.rules.execute === 'allow'
   async function ensureDriver(fullAccess = baseFull) {
     if (driver && driver.alive() && !!driver.fullAccess === fullAccess) return driver
-    if (starting) { await starting.catch(e => { if (e?.code !== 'stopped') throw e }); if (driver && driver.alive() && !!driver.fullAccess === fullAccess) return driver }   // 前一次啟動被停止（#2462）：不算這次失敗，往下自己啟動
+    if (starting) { await starting; if (driver && driver.alive() && !!driver.fullAccess === fullAccess) return driver }
     if (driver) { try { driver.stop() } catch { /* ignore */ } driver = null }
     const d = makeDriver({ cfg, env, log: m => log(`[${name}] ${m}`), sessionId: store.get(name), fullAccess, guard })
     d.onExit(info => { if (driver === d) { driver = null; log(`[${name}] 驅動行程結束了${info?.stderr ? `：${info.stderr}` : ''}`) } })
