@@ -17,6 +17,7 @@ pub(crate) mod perm_risk;
 #[cfg(desktop)]
 pub(crate) mod screen_watch;
 mod resume;
+pub(crate) mod resume_name;
 pub(crate) mod codex_open;
 pub(crate) mod opening;
 pub(crate) mod live_process;

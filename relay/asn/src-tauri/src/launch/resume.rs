@@ -17,7 +17,7 @@ pub(super) fn project_dir_name(cwd: &str) -> String {
     cwd.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
-fn find_project_dir(projects_root: &Path, cwd: &str) -> Option<PathBuf> {
+pub(super) fn find_project_dir(projects_root: &Path, cwd: &str) -> Option<PathBuf> {
     let want = project_dir_name(super::local::strip_verbatim_prefix(cwd).trim_end_matches(['\\', '/']));
     let exact = projects_root.join(&want);
     if exact.is_dir() {
@@ -36,7 +36,7 @@ fn valid_session_id(s: &str) -> bool {
 }
 
 /// 一個對話檔現在的名字與編號：最後一筆標題記錄
-fn last_title(path: &Path) -> Option<(String, String)> {
+pub(super) fn last_title(path: &Path) -> Option<(String, String)> {
     let f = std::fs::File::open(path).ok()?;
     let mut rd = std::io::BufReader::new(f);
     let mut line = String::new();

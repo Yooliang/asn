@@ -199,6 +199,13 @@ pub(crate) fn rewrite_args(args: &[String], session_id: &str, name: &str, model:
 /// `rewrite_args` 的通用版（遠端管理夥伴視窗用）：session_id＝None 不接續（開新對話）；model＝None 不指定模型；
 /// prompt＝Some 時，原本 `--` 之後的內容丟掉，換成 `-- <prompt>`（第一句話）。其餘行為與 `rewrite_args` 完全相同。
 pub(crate) fn rewrite_args_opts(args: &[String], session_id: Option<&str>, name: &str, model: Option<&str>, prompt: Option<&str>) -> Vec<String> {
+    rewrite_args_named(args, session_id, name, true, model, prompt)
+}
+
+/// `rewrite_args_opts` 加一個開關：`pass_n`＝false 時不帶 `-n`（接回一位對話本來就有名字的夥伴，見 launch/resume_name.rs，#2493）。
+/// 舊命令列的 `--remote-control <值>` 也一併換成目前的名字（值是開窗當時的名字，改名後就是舊名）；名字是空的就原樣不動。
+/// 這是唯一拼 `-n` 的地方（接回路徑另有 resume_name::apply_to_args 只做「換值或拿掉」，不從存檔名新增）
+pub(crate) fn rewrite_args_named(args: &[String], session_id: Option<&str>, name: &str, pass_n: bool, model: Option<&str>, prompt: Option<&str>) -> Vec<String> {
     let plen = program_len(args).min(args.len());
     let rest = &args[plen..];
     let mut kept: Vec<String> = Vec::new();
@@ -208,6 +215,19 @@ pub(crate) fn rewrite_args_opts(args: &[String], session_id: Option<&str>, name:
         if a == "--" {
             kept.extend(rest[i..].iter().cloned());
             break;
+        }
+        if !name.is_empty() {
+            // 位置不動，只把值換成目前的名字
+            if a == "--remote-control" {
+                kept.extend(["--remote-control".to_string(), name.to_string()]);
+                i += if rest.get(i + 1).is_some_and(|v| !v.starts_with('-')) { 2 } else { 1 };
+                continue;
+            }
+            if a.starts_with("--remote-control=") {
+                kept.extend(["--remote-control".to_string(), name.to_string()]);
+                i += 1;
+                continue;
+            }
         }
         match a {
             "--model" | "-n" | "--name" | "--session-id" => {
@@ -235,7 +255,7 @@ pub(crate) fn rewrite_args_opts(args: &[String], session_id: Option<&str>, name:
         i += 1;
     }
     let mut out: Vec<String> = args[..plen].to_vec();
-    if !name.is_empty() {
+    if !name.is_empty() && pass_n {
         out.push("-n".into());
         out.push(name.into());
     }

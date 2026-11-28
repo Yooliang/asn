@@ -347,7 +347,7 @@ fn after_mux(work_dir: &Path, data_dir: &Path, names: &[String], resume: bool, w
     let known = crate::bridge::known::Known::load(&work_dir.join(crate::bridge::known::KNOWN_FILE), now);
     let entries = crash_entries(names, known.entries(), known.archived_names());
     let pre_skipped = archived_skips(names, known.archived_names());
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: why.cause, native: Default::default(), pre_skipped };
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: why.cause, native: Default::default(), used: Default::default(), pre_skipped };
     resume_entries_why(work_dir, entries, resume, why, &deps, || RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
 }
 
@@ -416,14 +416,22 @@ pub fn perm_args_from_cmdline(line: &str) -> Vec<String> {
 
 /// 接回用的參數：profile 的參數拿掉權限旗標，換上原本的（存檔再驗一次），最前面加 --resume。
 /// 自訂的包裝指令、或 profile 自己指定了對話，這裡不猜，回錯
-pub fn resumed_args(command: &str, profile_args: &[String], session: &str, perm: &[String]) -> Result<Vec<String>, String> {
+///
+/// 名字（#2493）：`-n` 與 `--remote-control` 的值不直接用存檔名（`stored`，副本），一律問 `resume_name` 出口：
+/// 對話有名字就拿掉 `-n`（接回帶 -n 會把對話改回舊名）、`--remote-control` 用現名。
+/// `projects_root`＝None 用真實的 Claude 設定資料夾。回 (參數, 名字結果)：視窗標題、登記都要用名字結果的 `name`
+pub fn resumed_args(command: &str, profile_args: &[String], session: &str, perm: &[String], projects_root: Option<&Path>, cwd: &str, stored: &str) -> Result<(Vec<String>, super::resume_name::ResumeName), String> {
     if !super::resume::is_claude_command(command) {
         return Err("啟動設定不是直接開 Claude，不能自動接回".to_string());
     }
     if !crate::bridge::roster::valid_sid(session) {
         return Err(NO_SESSION.to_string());
     }
-    let mut out = vec!["--resume".to_string(), session.to_string()];
+    let rn = match projects_root {
+        Some(root) => super::resume_name::resume_name(root, session, Some(cwd), stored),
+        None => super::resume_name::resume_name_real(session, Some(cwd), stored),
+    };
+    let mut kept: Vec<String> = Vec::new();
     let mut it = profile_args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -434,11 +442,13 @@ pub fn resumed_args(command: &str, profile_args: &[String], session: &str, perm:
             "--resume" | "-r" | "--continue" | "-c" | "--session-id" | "--fork-session" => return Err("啟動設定自己指定了對話，不能自動接回".to_string()),
             _ if a.starts_with("--permission-mode=") => {}
             _ if a.starts_with("--resume=") || a.starts_with("--session-id=") => return Err("啟動設定自己指定了對話，不能自動接回".to_string()),
-            _ => out.push(a.clone()),
+            _ => kept.push(a.clone()),
         }
     }
+    let mut out = vec!["--resume".to_string(), session.to_string()];
+    out.extend(super::resume_name::apply_to_args(&kept, &rn));
     out.extend(perm_args_from_argv(perm));
-    Ok(out)
+    Ok((out, rn))
 }
 
 /// 第一個 Claude 視窗型 profile（claude 優先），與喚醒同樣的選法
@@ -513,6 +523,8 @@ struct RealDeps {
     cause: &'static str,
     /// 退回系統終端（原生主控台）開出來的夥伴名字（開窗後讀 `win_term::take_native_why`，同一個執行緒）
     native: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// 存檔名 → 接回時實際用的名字（對話現名，#2493）：等上線、顯示視窗都要用實際的名字，存檔名可能是舊的
+    used: std::sync::Mutex<std::collections::HashMap<String, String>>,
     /// 名單之外事先排掉的夥伴（本人封存的），寫進結果的 skipped
     pre_skipped: Vec<Skipped>,
 }
@@ -520,6 +532,11 @@ struct RealDeps {
 #[cfg(feature = "gui")]
 impl RealDeps {
     /// 同名視窗還活著（名字的判斷維持原樣，用心跳的存活規則）
+    /// 這位接回時實際用的名字；還沒開過就是存檔名
+    fn used_name(&self, stored: &str) -> String {
+        self.used.lock().ok().and_then(|m| m.get(stored).cloned()).unwrap_or_else(|| stored.to_string())
+    }
+
     fn live_name(&self, name: &str) -> bool {
         let live = crate::bridge::roster::read_sessions_with(&self.sessions, crate::heartbeat::session_alive, 0, "").unwrap_or_default();
         live.iter().any(|w| w.name == name)
@@ -551,7 +568,7 @@ impl Deps for RealDeps {
         already_live(&super::switch::RealOs, &super::console::read_sessions(&self.sessions), self.live_name(name), session)
     }
     fn unclaim(&self, e: &KnownEntry) {
-        super::opening::release(&e.facts.session, &e.name);
+        super::opening::release(&e.facts.session, &self.used_name(&e.name));
     }
     fn still_starting(&self, e: &KnownEntry) -> bool {
         super::live_process::real_resumes(&e.facts.session)
@@ -561,7 +578,14 @@ impl Deps for RealDeps {
         // 一般使用者從畫面選的資料夾記在本機同意清單（launch-prefs.json），不在 launcher.json；併進來才接得回來
         super::cwds::allow_consented(&mut config, &e.facts.cwd, &self.data_dir);
         super::win_term::clear_native_why();
-        let pid = super::local::start_resumed_window(&config, &e.name, &e.facts.cwd, &e.facts.session, &e.facts.perm, e.facts.hidden)?;
+        let (pid, used) = super::local::start_resumed_window(&config, &e.name, &e.facts.cwd, &e.facts.session, &e.facts.perm, e.facts.hidden)?;
+        if used != e.name {
+            // 存檔裡的名字還是舊的：視窗上線後橋會照現名登記進存檔（同一段對話以最新那列為準，#2475）；這裡不另寫存檔，免得和橋互蓋
+            elog!("[接回] 存檔名與實際用的名字不同：對話 {}、存檔名 {}、實際 {}", e.facts.session, e.name, used);
+        }
+        if let Ok(mut m) = self.used.lock() {
+            m.insert(e.name.clone(), used);
+        }
         if let Ok(mut m) = self.opened.lock() {
             m.insert(e.name.clone(), pid);
         }
@@ -583,10 +607,10 @@ impl Deps for RealDeps {
     }
     fn reveal(&self, e: &KnownEntry) -> bool {
         let pid = self.opened.lock().ok().and_then(|m| m.get(&e.name).copied());
-        super::console::show_partner_window("claude", &e.name, pid)
+        super::console::show_partner_window("claude", &self.used_name(&e.name), pid)
     }
     fn appeared(&self, name: &str) -> bool {
-        self.live_name(name)
+        self.live_name(&self.used_name(name))
     }
     fn report(&self, status: &Status) {
         write_status(&self.data_dir, status);
@@ -608,7 +632,7 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
     if entries.is_empty() {
         return;
     }
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: "", native: Default::default(), pre_skipped: Vec::new() };
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: "", native: Default::default(), used: Default::default(), pre_skipped: Vec::new() };
     let log_dir = work_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-auto-resume".into()).spawn(move || {
         deps.sleep(START_DELAY_MS);
@@ -1285,21 +1309,27 @@ mod tests {
         assert!(perm_args_from_cmdline("claude -n x --settings a.json").is_empty(), "其他參數不留");
     }
 
+    /// 測這些參數的拼法：空的 projects 資料夾＝讀不到對話檔，名字照存檔、照舊帶 -n（名字的判斷另有 launch/resume_name.rs 與 `_2493_` 測試）
+    fn ra(command: &str, profile: &[String], session: &str, perm: &[String]) -> Result<Vec<String>, String> {
+        let d = tempfile::tempdir().unwrap();
+        resumed_args(command, profile, session, perm, Some(d.path()), "D:/w", "甲").map(|(a, _)| a)
+    }
+
     #[test]
     fn 接回參數_拿掉現在的權限_換上原本的_最前面是對話編號() {
         let profile = sv(&["--dangerously-skip-permissions", "-n", "甲", "--remote-control", "甲"]);
-        assert_eq!(resumed_args("claude.exe", &profile, "s1", &sv(&["--permission-mode", "auto"])).unwrap(), sv(&["--resume", "s1", "-n", "甲", "--remote-control", "甲", "--permission-mode", "auto"]));
-        assert_eq!(resumed_args("claude", &sv(&["--permission-mode", "plan", "-n", "甲"]), "s1", &sv(&[BYPASS_FLAG])).unwrap(), sv(&["--resume", "s1", "-n", "甲", BYPASS_FLAG]));
-        assert_eq!(resumed_args("claude", &sv(&[BYPASS_FLAG, "-n", "甲"]), "s1", &[]).unwrap(), sv(&["--resume", "s1", "-n", "甲"]), "原本是一般權限，不因為 profile 變成略過權限");
+        assert_eq!(ra("claude.exe", &profile, "s1", &sv(&["--permission-mode", "auto"])).unwrap(), sv(&["--resume", "s1", "-n", "甲", "--remote-control", "甲", "--permission-mode", "auto"]));
+        assert_eq!(ra("claude", &sv(&["--permission-mode", "plan", "-n", "甲"]), "s1", &sv(&[BYPASS_FLAG])).unwrap(), sv(&["--resume", "s1", "-n", "甲", BYPASS_FLAG]));
+        assert_eq!(ra("claude", &sv(&[BYPASS_FLAG, "-n", "甲"]), "s1", &[]).unwrap(), sv(&["--resume", "s1", "-n", "甲"]), "原本是一般權限，不因為 profile 變成略過權限");
     }
 
     #[test]
     fn 接回參數_存檔裡不認得的權限與壞編號進不了啟動參數() {
-        assert_eq!(resumed_args("claude", &[], "s1", &sv(&["--settings", "x.json", "--permission-mode", "亂寫"])).unwrap(), sv(&["--resume", "s1"]));
-        assert!(resumed_args("claude", &[], "a b;rm", &[]).is_err());
-        assert!(resumed_args("cmd.exe", &[], "s1", &[]).is_err(), "包裝指令不猜");
-        assert!(resumed_args("claude", &sv(&["--resume", "x"]), "s1", &[]).is_err());
-        assert!(resumed_args("claude", &sv(&["--session-id=x"]), "s1", &[]).is_err());
+        assert_eq!(ra("claude", &[], "s1", &sv(&["--settings", "x.json", "--permission-mode", "亂寫"])).unwrap(), sv(&["--resume", "s1"]));
+        assert!(ra("claude", &[], "a b;rm", &[]).is_err());
+        assert!(ra("cmd.exe", &[], "s1", &[]).is_err(), "包裝指令不猜");
+        assert!(ra("claude", &sv(&["--resume", "x"]), "s1", &[]).is_err());
+        assert!(ra("claude", &sv(&["--session-id=x"]), "s1", &[]).is_err());
     }
 
     #[test]
@@ -1308,6 +1338,115 @@ mod tests {
         let before = stray.exists();
         note_user_quit(Path::new(""));
         assert_eq!(stray.exists(), before, "不能寫到目前目錄");
+    }
+
+    // ---- #2493：接回時對話名字不能被存檔的舊名蓋掉（冷啟動：沒有任何活程序，存檔只有一列舊名，對話檔最後一筆標題是新名）----
+
+    const SID_2493: &str = "bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb";
+
+    /// (暫存資料夾, 工作資料夾, projects 資料夾, 啟動設定)：啟動設定是預設的 claude profile（`-n {name} --remote-control {name}`）
+    fn cold(titles: &[&str]) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, crate::launch::config::LaunchConfig) {
+        use crate::launch::profiles::{LaunchMode, Profile};
+        let base = tempfile::tempdir().unwrap();
+        let cwd = base.path().join("工作");
+        std::fs::create_dir_all(&cwd).unwrap();
+        let projects = base.path().join("projects");
+        if !titles.is_empty() {
+            let d = projects.join(crate::launch::resume::project_dir_name(&cwd.to_string_lossy()));
+            std::fs::create_dir_all(&d).unwrap();
+            let mut text = String::from("{\"type\":\"user\",\"message\":\"hi\"}\n");
+            for t in titles {
+                text.push_str(&format!("{{\"type\":\"custom-title\",\"customTitle\":\"{t}\",\"sessionId\":\"{SID_2493}\"}}\n"));
+            }
+            std::fs::write(d.join(format!("{SID_2493}.jsonl")), text).unwrap();
+        }
+        let mut profiles = std::collections::HashMap::new();
+        profiles.insert("claude".to_string(), Profile { label: "Claude".into(), command: "claude".into(), args: sv(&[BYPASS_FLAG, "-n", "{name}", "--remote-control", "{name}"]), engine: "claude".into(), mode: LaunchMode::Window, disabled: false, disabled_reason: String::new() });
+        let config = crate::launch::config::LaunchConfig { profiles, cwd_allow: vec![crate::launch::config::canonical_launch_cwd(&cwd.to_string_lossy()).unwrap()], max_per_hour: 6 };
+        (base, cwd, projects, config)
+    }
+
+    /// 存檔裡只有「舊名」一列（沒有新名那一列）
+    fn stale_entry(cwd: &Path) -> KnownEntry {
+        let mut e = entry("舊名");
+        e.facts.session = SID_2493.into();
+        e.facts.cwd = cwd.to_string_lossy().into_owned();
+        e.seen = 1_000;
+        e
+    }
+
+    fn plan_of(e: &KnownEntry, projects: &Path, config: &crate::launch::config::LaunchConfig) -> crate::launch::local::ResumedPlan {
+        crate::launch::local::plan_resumed_window(config, Some(projects), &e.name, &e.facts.cwd, &e.facts.session, &e.facts.perm).unwrap()
+    }
+
+    fn assert_named_new(plan: &crate::launch::local::ResumedPlan) {
+        let a = &plan.args;
+        assert!(!a.iter().any(|x| x == "-n" || x == "--name"), "對話有名字，接回不帶 -n：{a:?}");
+        assert!(!a.iter().any(|x| x == "舊名"), "舊名不能出現在任何參數：{a:?}");
+        assert!(a.windows(2).any(|w| w[0] == "--remote-control" && w[1] == "新名"), "遙控名稱用現名：{a:?}");
+        assert!(a.windows(2).any(|w| w[0] == "--resume" && w[1] == SID_2493), "{a:?}");
+        assert_eq!(plan.rn.name, "新名", "視窗標題、登記、等上線都用這個名字");
+    }
+
+    #[test]
+    fn _2493_開機接回_冷啟動_存檔只有舊名_不帶n_遙控與視窗名用現名() {
+        let (_b, cwd, projects, config) = cold(&["舊名", "新名"]);
+        let got = pick(vec![stale_entry(&cwd)], Some(1), Some(100_000_000), true, false, &Default::default());
+        assert_eq!(got.len(), 1);
+        assert_named_new(&plan_of(&got[0], &projects, &config));
+    }
+
+    #[test]
+    fn _2493_終端服務中斷接回_冷啟動_名單與存檔都是舊名_不帶n_遙控與視窗名用現名() {
+        let (_b, cwd, projects, config) = cold(&["舊名", "新名"]);
+        let got = crash_entries(&sv(&["舊名"]), vec![stale_entry(&cwd)], &Default::default());
+        assert_eq!(got.len(), 1);
+        assert_named_new(&plan_of(&got[0], &projects, &config));
+    }
+
+    #[test]
+    fn _2493_對話沒有名字_照舊帶n用存檔名_讀不到對話檔也照舊() {
+        // 對話檔在、沒有標題
+        let (_b, cwd, projects, config) = cold(&[]);
+        std::fs::create_dir_all(projects.join(crate::launch::resume::project_dir_name(&cwd.to_string_lossy()))).unwrap();
+        std::fs::write(projects.join(crate::launch::resume::project_dir_name(&cwd.to_string_lossy())).join(format!("{SID_2493}.jsonl")), "{\"type\":\"user\",\"message\":\"hi\"}\n").unwrap();
+        let e = stale_entry(&cwd);
+        let plan = plan_of(&e, &projects, &config);
+        assert!(plan.args.windows(2).any(|w| w[0] == "-n" && w[1] == "舊名"), "{:?}", plan.args);
+        assert!(plan.args.windows(2).any(|w| w[0] == "--remote-control" && w[1] == "舊名"), "{:?}", plan.args);
+        assert_eq!(plan.rn.name, "舊名");
+        // 根本沒有對話檔
+        let (_b2, cwd2, projects2, config2) = cold(&[]);
+        let plan = plan_of(&stale_entry(&cwd2), &projects2, &config2);
+        assert!(plan.args.windows(2).any(|w| w[0] == "-n" && w[1] == "舊名"), "{:?}", plan.args);
+        assert_eq!(plan.rn.name, "舊名");
+    }
+
+    /// 接線守門（拿掉任何一處呼叫要紅）：三條接回路都問 resume_name 出口，不再自己拿存檔名組 -n
+    #[test]
+    fn 守門_接回的名字只問出口() {
+        let body = |src: &str, sig: &str| -> String { src.replace("\r\n", "\n").split(sig).nth(1).unwrap_or_else(|| panic!("找不到 {sig}")).split("\n}\n").next().unwrap().to_string() };
+        let auto = crate::settings::src_scan::prod_source(include_str!("auto_resume.rs"));
+        let local = crate::settings::src_scan::prod_source(include_str!("local.rs"));
+        let ops = crate::settings::src_scan::prod_source(include_str!("../bridge/partner_ops.rs"));
+        let resumed_args = body(&auto, "pub fn resumed_args(");
+        assert!(resumed_args.contains("resume_name(") && resumed_args.contains("resume_name_real("), "開機接回與終端服務中斷接回的參數要問出口");
+        let start = body(&local, "pub fn start_resumed_window(");
+        assert!(start.contains("plan_resumed_window(") && start.contains("opening::claim(session, &used)") && start.contains("start_window(&used,"), "開窗、登記要用出口回的名字");
+        assert!(body(&local, "pub(crate) fn plan_resumed_window(").contains("resumed_args("), "組參數走 resumed_args");
+        let argv = body(&ops, "pub(crate) fn resume_argv(");
+        assert!(argv.contains("resume_name("), "喚醒的參數要問出口");
+        assert!(!ops.contains(".replace(\"{name}\""), "喚醒不能再自己把存檔名換進啟動設定的 {{name}}");
+        // 這三個檔不准自己用字面的 "-n" 組參數；拼 -n 的只有 switch.rs 的 rewrite_args_named 與 resume_name.rs
+        for (f, src) in [("auto_resume.rs", &auto), ("local.rs", &local), ("partner_ops.rs", &ops)] {
+            assert!(!src.contains("\"-n\""), "{f} 不准自己組 -n，要經 resume_name 出口");
+        }
+        // 兄弟副本：重組參數的出口會換掉舊的 --remote-control 值
+        let sw = crate::settings::src_scan::prod_source(include_str!("switch.rs"));
+        assert!(body(&sw, "pub(crate) fn rewrite_args_named(").contains("\"--remote-control\""), "重組參數要更新 --remote-control 的值");
+        // 出口只有這三處呼叫（新增接回路徑沒接出口就紅，要加請同步這份清單與 docs/唯一出口.md）
+        let users = [("auto_resume.rs", auto.matches("resume_name::resume_name").count()), ("partner_ops.rs", ops.matches("resume_name::resume_name(").count())];
+        assert_eq!(users, [("auto_resume.rs", 2), ("partner_ops.rs", 1)], "resume_name 的呼叫點變了");
     }
 
     #[test]

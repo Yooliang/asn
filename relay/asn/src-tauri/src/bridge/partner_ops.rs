@@ -19,7 +19,8 @@ use super::core::BridgeLog;
 use super::corrlog::{CorrLog, Dir, Entry};
 use super::engines::acp_admin::AcpAdmin;
 use super::roster;
-use crate::launch::config::{canonical_launch_cwd, check_launch, child_env, expand_vars, valid_partner_name, LaunchConfig, LaunchReq};
+use crate::launch::config::{canonical_launch_cwd, check_launch, valid_partner_name, LaunchConfig, LaunchReq};
+#[cfg(test)]
 use crate::launch::profiles::LaunchMode;
 use crate::launch::console;
 use crate::launch::switch::{self, Os, Plan, Proc, SwitchRunReq, Timing};
@@ -1589,7 +1590,8 @@ impl PartnerOps {
 
     // ---- resume（喚醒）---------------------------------------------------------------------------
 
-    /// 視窗已經關了：用 `claude --resume <sessionId> -n <原名字>` 在原本的工作資料夾重開，同一段對話接回來。
+    /// 視窗已經關了：用 `claude --resume <sessionId>` 在原本的工作資料夾重開，同一段對話接回來
+    /// （對話有名字就不帶 -n，名字問 `resume_name` 出口，#2493；對話沒有名字才帶存檔的名字）。
     /// 每一步都是守門：格式、已在線、對話紀錄（只認檔名）、資料夾白名單、本機開關，任何一關不過就什麼都不開。
     fn resume(&self, op: &Op) -> OpResult {
         let (name, sid) = (op.name.as_str(), op.session_id.as_str());
@@ -1651,9 +1653,11 @@ impl PartnerOps {
             return failed("原本的工作資料夾已經不存在了");
         }
         // 5. 用啟動設定的第一個 Claude 視窗型 profile（只拿指令與固定參數，名字與對話編號由我們補）
-        let Some(argv) = resume_argv(&cfg, name, sid) else {
+        let Some((argv, rn)) = resume_argv(&cfg, &self.dirs.projects, Some(&cwd), name, sid) else {
             return failed("這台電腦沒有可用的 Claude 啟動設定");
         };
+        // 之後登記、等上線、回報都用出口回的名字（對話現名優先；手機名單送來的 name 可能是舊名）
+        let name = rn.name.as_str();
         let plan = Plan { name: name.to_string(), cwd: PathBuf::from(crate::launch::local::strip_verbatim_prefix(&canon.to_string_lossy())), argv, in_wt: false };
         // 6. 動手前再驗一次本機開關
         if !self.env.allow_remote() {
@@ -1893,14 +1897,19 @@ fn pick_handover_model(recorded: Option<String>, launched: Option<String>) -> (O
 
 /// 喚醒用的啟動參數（含程式本身）：第一個 Claude 視窗型 profile（claude 優先），固定參數照啟動設定，
 /// 名字與 `--resume <sessionId>` 由這裡補（舊的 -n／--resume／--model 之外的旗標原樣保留，模型沿用設定裡的）。
-pub(crate) fn resume_argv(cfg: &LaunchConfig, name: &str, sid: &str) -> Option<Vec<String>> {
-    let mut ids: Vec<&String> = cfg.profiles.keys().collect();
-    ids.sort_by(|a, b| (a.as_str() != "claude").cmp(&(b.as_str() != "claude")).then(a.cmp(b)));
-    let p = ids.into_iter().map(|id| &cfg.profiles[id]).find(|p| p.mode == LaunchMode::Window && !p.disabled && (p.engine.is_empty() || p.engine == "claude"))?;
-    let mut full = vec![expand_vars(&p.command, &child_env())];
-    full.extend(p.args.iter().map(|a| a.replace("{name}", name)));
+/// 名字（#2493）：`name` 是手機名單的副本、可能是舊名，不直接拿來組 -n；問 `resume_name` 出口，
+/// 對話有名字就不帶 -n、`--remote-control` 用現名。回 (參數, 名字結果)：等上線、登記都要用名字結果的 `name`。
+/// `projects`＝Claude 的 projects 資料夾；`cwd`＝對話檔記的資料夾
+pub(crate) fn resume_argv(cfg: &LaunchConfig, projects: &Path, cwd: Option<&str>, name: &str, sid: &str) -> Option<(Vec<String>, crate::launch::resume_name::ResumeName)> {
+    let id = crate::launch::auto_resume::claude_profile(cfg)?;
+    let rn = crate::launch::resume_name::resume_name(projects, sid, cwd, name);
+    let req = crate::launch::config::LaunchReq { profile: &id, name: &rn.name, cwd: cwd.unwrap_or_default().to_string() };
+    let (command, args, _) = crate::launch::config::build_spawn_spec(cfg, &req).ok()?;
+    let mut full = vec![command];
+    full.extend(args);
     let model = switch::current_model(&full);
-    Some(switch::rewrite_args_opts(&full, Some(sid), name, model.as_deref(), None))
+    let argv = switch::rewrite_args_named(&full, Some(sid), &rn.name, rn.pass_n, model.as_deref(), None);
+    Some((argv, rn))
 }
 
 /// 在 `<projects>/*/<sessionId>.jsonl` 找對話紀錄（只比對檔名＝sessionId，sessionId 先過格式），

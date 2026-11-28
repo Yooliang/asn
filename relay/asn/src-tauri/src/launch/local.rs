@@ -2,7 +2,7 @@ use super::config::{build_spawn_spec, check_launch, load_launch_config, LaunchRe
 use super::profiles::LaunchMode;
 use crate::launch::LocalLaunchReq;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use crate::nowin::NoWindow;
 use std::process::{Command, Stdio};
 
@@ -296,7 +296,37 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
 
 /// 重開機後自動接回一位 Claude 夥伴（#767）：用本機的 Claude 視窗 profile，換上它原本的權限旗標，指定對話編號接回。
 /// 資料夾要在允許清單內；不走開新夥伴的每小時上限（這是本機的開機流程，不是遠端要求，一次要接回的可能超過上限）。回視窗 PID
-pub fn start_resumed_window(config: &super::config::LaunchConfig, name: &str, cwd: &str, session: &str, perm: &[String], hidden: bool) -> Result<u32, String> {
+///
+/// 回 (視窗 PID, 實際用的名字)：名字問 `resume_name` 出口（對話現名優先，#2493），可能和 `name`（存檔名）不同；
+/// 視窗標題、「正在開」登記、等上線都要用回的名字
+pub fn start_resumed_window(config: &super::config::LaunchConfig, name: &str, cwd: &str, session: &str, perm: &[String], hidden: bool) -> Result<(u32, String), String> {
+    let plan = plan_resumed_window(config, None, name, cwd, session, perm)?;
+    let used = plan.rn.name.clone();
+    let req = &plan;
+    super::pretrust::ensure_claude_cwd_trusted("claude", &req.cwd);
+    // 別條路（本人喚醒、開機接回、終端服務中斷接回）剛開了同一位、還沒上線：不開第二個。開失敗要解除，不然本人之後手動喚醒會被擋
+    if !super::opening::claim(session, &used) {
+        return Err(super::opening::BUSY.to_string());
+    }
+    let opened = start_window(&used, &plan.command, &plan.args, &plan.spawn_cwd, hidden);
+    if opened.is_err() {
+        super::opening::release(session, &used);
+    }
+    opened.map(|pid| (pid, used))
+}
+
+/// 接回要開的視窗（還沒開）：指令、啟動參數、資料夾與名字結果
+pub(crate) struct ResumedPlan {
+    pub command: String,
+    pub args: Vec<String>,
+    pub spawn_cwd: PathBuf,
+    /// 要信任的資料夾（去掉 \\?\ 前綴）；`spawn_cwd` 是開窗用的
+    pub cwd: String,
+    pub rn: super::resume_name::ResumeName,
+}
+
+/// 接回前的檢查與組參數（不開視窗，測試走到最後的啟動參數）。`projects_root`＝None 用真實的 Claude 設定資料夾
+pub(crate) fn plan_resumed_window(config: &super::config::LaunchConfig, projects_root: Option<&Path>, name: &str, cwd: &str, session: &str, perm: &[String]) -> Result<ResumedPlan, String> {
     // canonical_launch_cwd 遇到不存在的路徑會原樣交回（不報錯），所以要另外確認資料夾還在
     let canon = super::config::canonical_launch_cwd(cwd).ok().filter(|p| p.is_dir()).ok_or_else(|| format!("原本的工作資料夾（{cwd}）已經不存在或不能用"))?;
     if !config.cwd_allow.contains(&canon) {
@@ -305,17 +335,9 @@ pub fn start_resumed_window(config: &super::config::LaunchConfig, name: &str, cw
     let profile = super::auto_resume::claude_profile(config).ok_or("這台電腦沒有可用的 Claude 啟動設定")?;
     let req = LaunchReq { profile: &profile, name, cwd: strip_verbatim_prefix(&canon.to_string_lossy()) };
     let (command, args, spawn_cwd) = build_spawn_spec(config, &req)?;
-    let args = super::auto_resume::resumed_args(&command, &args, session, perm)?;
-    super::pretrust::ensure_claude_cwd_trusted("claude", &req.cwd);
-    // 別條路（本人喚醒、開機接回、終端服務中斷接回）剛開了同一位、還沒上線：不開第二個。開失敗要解除，不然本人之後手動喚醒會被擋
-    if !super::opening::claim(session, name) {
-        return Err(super::opening::BUSY.to_string());
-    }
-    let opened = start_window(name, &command, &args, &spawn_cwd, hidden);
-    if opened.is_err() {
-        super::opening::release(session, name);
-    }
-    opened
+    // 名字與帶不帶 -n 由唯一出口決定（resumed_args 內問 resume_name），這裡不再用存檔名組 -n
+    let (args, rn) = super::auto_resume::resumed_args(&command, &args, session, perm, projects_root, &req.cwd, name)?;
+    Ok(ResumedPlan { command, args, spawn_cwd, cwd: req.cwd, rn })
 }
 
 /// 接手使用者自己開的 pi（0.2 A5）：用本機 pi 的啟動設定、載入收信擴充、帶名字，在原本的資料夾用 --session 接回同一段對話。
