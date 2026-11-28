@@ -47,7 +47,8 @@ struct Input<'a> {
     name: &'a str,
     cwd: &'a str,
     fresh: bool,
-    /// 型號（#2353 才會傳；這一版一律 None＝用 Codex 的預設）
+    /// 開新夥伴選的型號（#2353 第④階段）：None＝用 Codex 的預設。只在「建新對話」時交給 thread/start；
+    /// 接續舊對話一律不帶（接續時換型號沒實測過，Codex 自己會跳型號不符的警告），帶了也會被忽略並記一行 log
     model: Option<&'a str>,
     /// 名字索引裡這個名字對到的代號，舊→新
     candidates: &'a [String],
@@ -86,6 +87,10 @@ fn open_with(inp: &Input, srv: &mut dyn Server, log: &dyn Fn(String)) -> Result<
     }
     if inp.locked.contains(id) {
         return Err(name_open_msg(inp.name));
+    }
+    // 接舊對話一律不帶型號：選了也不傳，記一行 log（不是靜默；畫面上的下拉在這種情況本來就是灰的）
+    if let Some(m) = inp.model {
+        log(format!("[Codex 開窗] 名字「{}」接續舊對話 {id}，沿用原本的型號，忽略這次選的型號 {m}", inp.name));
     }
     // 既存的對話（含只有種子、還沒講過話的）直接用代號接續，不補種子
     Ok(Opened::Continue(id.clone()))
@@ -161,9 +166,12 @@ fn apply_core(
     locked: &HashSet<String>,
     cwd: &str,
     fresh: bool,
+    model: Option<&str>,
+    model_ignored: &mut bool,
     open_server: &mut dyn FnMut() -> Result<Box<dyn Server>, String>,
     log: &dyn Fn(String),
 ) -> Result<Option<String>, String> {
+    *model_ignored = false;
     let (base, own_resume) = strip_own_resume(args, command, name);
     if own_resume {
         return Ok(None); // 使用者自己寫了別的接續寫法：不碰
@@ -176,10 +184,12 @@ fn apply_core(
         log(format!("[Codex 開窗] app-server 開不起來：{e}"));
         MSG_PREP_FAILED.to_string()
     })?;
-    let inp = Input { name, cwd, fresh, model: None, candidates: &candidates, locked };
+    let inp = Input { name, cwd, fresh, model, candidates: &candidates, locked };
     let res = open_with(&inp, srv.as_mut(), log);
     srv.close(); // 成功失敗都關；之後 codex resume 才接得上（寫入鎖要等它結束才放）
     let opened = res?;
+    // 選了型號卻接續舊對話＝型號沒有套用，讓呼叫端告訴使用者
+    *model_ignored = model.is_some() && matches!(opened, Opened::Continue(_));
     let (id, resumed) = match opened {
         Opened::Continue(id) => (id.clone(), Some(id)),
         Opened::Created(id) => (id, None),
@@ -188,21 +198,36 @@ fn apply_core(
     Ok(resumed)
 }
 
-/// 真實環境：與 `resume::apply_resume_real` 同位置、同簽名風格。只處理 engine＝codex；回接續的代號（新建的回 Ok(None)）
-pub(super) fn apply_codex_open_real(args: &mut Vec<String>, command: &str, engine: &str, name: &str, cwd: &str, fresh: bool) -> Result<Option<String>, String> {
+/// 選了型號卻接續舊對話、型號沒有套用時，開窗結果帶給畫面的一句白話
+pub(crate) const MODEL_NOT_APPLIED_NOTE: &str = "接續舊對話，沿用原本的型號，這次選的型號沒有套用";
+
+/// 出口的結果：`resumed`＝接續的代號（新建、沒動的是 None）；`model_ignored`＝選了型號但這次是接舊對話，型號沒有套用
+#[derive(Debug, Default, PartialEq)]
+pub(super) struct CodexOpened {
+    pub resumed: Option<String>,
+    pub model_ignored: bool,
+}
+
+/// 真實環境：與 `resume::apply_resume_real` 同位置、同簽名風格。只處理 engine＝codex（其他引擎回預設值＝什麼都沒做）。
+/// model＝開新夥伴選的型號（沒選＝None）；只有「建新對話」會帶給 thread/start，接舊對話忽略並回 `model_ignored`（見 [`Input::model`]）
+pub(super) fn apply_codex_open_real(args: &mut Vec<String>, command: &str, engine: &str, name: &str, cwd: &str, fresh: bool, model: Option<&str>) -> Result<CodexOpened, String> {
     if engine != "codex" {
-        return Ok(None);
+        return Ok(CodexOpened::default());
+    }
+    // 型號代號先過統一規則（呼叫端多半驗過，這裡不信任：不合格就整個不開，不退回預設型號）
+    if model.is_some_and(|m| !crate::model_id::valid_model_id(m)) {
+        return Err(super::local::MODEL_BAD.to_string());
     }
     // 同名的另一次開窗正在建對話：不再造第二段（只在登記的瞬間持有鎖，不跨 app-server 的等待）
     if !super::opening::claim("", name) {
         return Err(format!("{}，請稍候幾秒再看名單", super::opening::BUSY));
     }
-    let out = apply_real_inner(args, command, name, cwd, fresh);
+    let out = apply_real_inner(args, command, name, cwd, fresh, model);
     super::opening::release("", name);
     out
 }
 
-fn apply_real_inner(args: &mut Vec<String>, command: &str, name: &str, cwd: &str, fresh: bool) -> Result<Option<String>, String> {
+fn apply_real_inner(args: &mut Vec<String>, command: &str, name: &str, cwd: &str, fresh: bool, model: Option<&str>) -> Result<CodexOpened, String> {
     let env: Vec<(String, String)> = std::env::vars().collect();
     let home = crate::bridge::engines::codex::codex_home(&env, &crate::identity::home_dir());
     let candidates = crate::bridge::engines::codex_state::read_name_index_checked(&home)
@@ -214,7 +239,9 @@ fn apply_real_inner(args: &mut Vec<String>, command: &str, name: &str, cwd: &str
         let l = real_launch(&env, cwd)?;
         Ok(Box::new(AppServer::open(l)?))
     };
-    apply_core(args, command, name, candidates, &locked, cwd, fresh, &mut open, &log)
+    let mut model_ignored = false;
+    let resumed = apply_core(args, command, name, candidates, &locked, cwd, fresh, model, &mut model_ignored, &mut open, &log)?;
+    Ok(CodexOpened { resumed, model_ignored })
 }
 
 /// app-server 的執行檔與環境：先認測試／使用者指定的（ASN_CODEX_SCRIPT、ASN_CODEX_BIN）與 npm 安裝，

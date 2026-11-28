@@ -131,17 +131,22 @@ export function switchModelsFor(engine, { piModels = null } = {}) {
  * 開新夥伴第 2 頁「型號」（#539 之四、#2355）：選完廠牌與運行後，這家有清單才出現（預設＝不指定，照原本的開法）。
  * 只有開在這台電腦才能選（別台要改後台開窗表，是 #2355 P4）；呼叫端自己判斷是不是這台，這裡不看。
  * Claude 只在開成視窗時帶 --model，清單是別名；Gemini 只在內建通道時記下型號，清單向本機讀。
- * 跟後端 launch_model_plan（launch/local.rs）同一個判斷：內建通道（背景）照記；開成視窗只認 profile 明寫 engine "claude"，
- * 沒寫 engine 的自訂 profile 後端會回錯誤，所以不出下拉，改寫一句說明。engine＝這次要用的 profile 的 engine（partner-launch-ui.mjs 的 localProfileEngine）。
+ * 跟後端 launch_model_plan（launch/local.rs）同一個判斷：內建通道（背景）照記；開成視窗只認 profile 明寫 engine "claude" 或 "codex"，
+ * 沒寫 engine 的自訂 profile 後端會回錯誤，所以不出下拉，改寫一句說明。
+ * Codex（#2353 第④階段）：只有本機對話框有下拉（remote 為 true 時回沒有）；型號只在建新對話時套用，接舊對話時後端不套用並在開窗結果說明。engine＝這次要用的 profile 的 engine（partner-launch-ui.mjs 的 localProfileEngine）。
  * 回 { show, kind: 'aliases'|'list'|'', vendor, models, note }；kind 'list' 的清單要向本機讀（vendor 是 agent_models 的廠牌），models 先給空的。
  */
-export const LAUNCH_MODEL_RUN = { claude: 'term', gemini: 'acp' }
+export const LAUNCH_MODEL_RUN = { claude: 'term', codex: 'term', gemini: 'acp' }
+/** 只有開在這台電腦才能選型號的廠牌（別台的後端還不收這家的型號：#2353 第④階段 Codex 先只開本機對話框） */
+const LOCAL_ONLY_VENDORS = ['codex']
 export const NO_ENGINE_NOTE = '這個啟動設定沒有寫明是哪一家，不能指定型號'
-const engineAccepts = (run, engine) => run === 'acp' || engine === 'claude'
-export function launchModelChoices(vendorId, run, { engine = '' } = {}) {
+// 視窗開法只認 profile 明寫 engine 與這一家同名（claude→claude、codex→codex），背景（內建通道）不看
+const engineAccepts = (vendorId, run, engine) => run === 'acp' || engine === vendorId
+export function launchModelChoices(vendorId, run, { engine = '', remote = false } = {}) {
   const none = { show: false, kind: '', vendor: '', models: [], note: '' }
   if (LAUNCH_MODEL_RUN[vendorId] !== run) return none
-  if (!engineAccepts(run, engine)) return engine === '' ? { ...none, note: NO_ENGINE_NOTE } : none
+  if (remote && LOCAL_ONLY_VENDORS.includes(vendorId)) return none
+  if (!engineAccepts(vendorId, run, engine)) return engine === '' ? { ...none, note: NO_ENGINE_NOTE } : none
   if (vendorId === 'claude') return { show: true, kind: 'aliases', vendor: '', models: CLAUDE_ALIAS_MODELS.map(m => ({ id: m.id, label: `${m.label}・${CLAUDE_ALIAS_LABEL}` })), note: '' }
   return { show: true, kind: 'list', vendor: vendorId, models: [], note: '' }
 }

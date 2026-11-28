@@ -11,15 +11,25 @@ export function backgroundRestoreNoticeText(partnerName) {
   }
 }
 
-export function existingPartnerNoticeText(partnerName, reason, initialDropped = false) {
+export function existingPartnerNoticeText(partnerName, reason, initialDropped = false, modelNote = '') {
   const name = String(partnerName ?? '').trim() || '夥伴'
   const why = String(reason ?? '').trim()
   const base = why ? `「${name}」已經在跑，沒有另外開新的。切到前景沒成功：${why}` : `「${name}」已經在跑，已切到前景。`
-  return {
-    title: '夥伴已在跑',
-    body: initialDropped ? `${base}
-開場訊息沒有送出。` : base,
-  }
+  const withDropped = initialDropped ? `${base}
+開場訊息沒有送出。` : base
+  const note = String(modelNote ?? '').trim()
+  return { title: '夥伴已在跑', body: note ? `${withDropped}\n${note}。` : withDropped }
+}
+
+/**
+ * 選了型號卻沒有套用（Codex 接續舊對話時沿用原本的型號，#2353 第④階段）：後端在開窗結果帶一句白話（model_note），照既有的開窗提示顯示。
+ * base＝同一次開窗已經有的另一則提示（例如「已改用一般視窗」），有就把這句接在後面，不讓兩則互相蓋掉
+ */
+export function modelNotAppliedNoticeText(partnerName, modelNote, base = null) {
+  const name = String(partnerName ?? '').trim() || '夥伴'
+  const note = String(modelNote ?? '').trim()
+  if (base) return note ? { title: base.title, body: `${base.body}\n${note}。` } : base
+  return { title: '型號沒有套用', body: `「${name}」${note}。` }
 }
 
 export function launchFailedNoticeText(partnerName, detail) {

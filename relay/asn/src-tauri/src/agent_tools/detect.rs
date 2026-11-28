@@ -36,7 +36,38 @@ fn path_candidates(path: &std::ffi::OsStr, pathext: &str, name: &str) -> Vec<Pat
 pub fn resolve_binary(name: &str) -> Option<PathBuf> {
     resolve_on_path(name)
         .or_else(|| known_home_binary_real(name))
+        .or_else(|| desktop_codex_binary_real(name))
         .or_else(|| package_manager_binary(name))
+}
+
+/// 桌面版 Codex 的執行檔資料夾（相對於 `%LOCALAPPDATA%`）：底下每個版本一個雜湊資料夾，執行檔在裡面
+const DESKTOP_CODEX_BIN: [&str; 3] = ["OpenAI", "Codex", "bin"];
+
+/// 桌面版 Codex 不在 PATH 上（#2353）：Windows 的 `%LOCALAPPDATA%\OpenAI\Codex\bin\<雜湊>\codex.exe`。
+/// 讀清單、開窗、建對話全都經 `resolve_binary`，所以用的是同一個執行檔。測試用假的執行檔資料夾時不看真實位置（同 known_home_binary_real）
+fn desktop_codex_binary_real(name: &str) -> Option<PathBuf> {
+    if name != "codex" || !cfg!(windows) || crate::flags::test_var("ASN_MOCK_BIN_DIR").is_some() {
+        return None;
+    }
+    let local = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()).map(PathBuf::from)?;
+    desktop_codex_in(&DESKTOP_CODEX_BIN.iter().fold(local, |p, s| p.join(s)))
+}
+
+/// `bin_dir` 底下有好幾個雜湊資料夾時的選法：只看裡面真的有 `codex.exe`（或 `codex`）的資料夾；
+/// 其中執行檔修改時間最新的那個；時間相同（或讀不到時間）就取資料夾名稱字母序最後的，結果固定、不隨目錄列舉順序變。
+/// 不寫死任何雜湊；資料夾不存在、沒有任何執行檔回 None
+fn desktop_codex_in(bin_dir: &std::path::Path) -> Option<PathBuf> {
+    let mut best: Option<(std::time::SystemTime, std::ffi::OsString, PathBuf)> = None;
+    for entry in std::fs::read_dir(bin_dir).ok()?.flatten() {
+        let dir = entry.path();
+        let Some(exe) = ["codex.exe", "codex"].iter().map(|f| dir.join(f)).find(|p| p.is_file()) else { continue };
+        let at = std::fs::metadata(&exe).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        let key = (at, entry.file_name());
+        if best.as_ref().map_or(true, |(t, n, _)| key > (*t, n.clone())) {
+            best = Some((key.0, key.1, exe));
+        }
+    }
+    best.map(|(_, _, p)| p)
 }
 
 /// 用套件管理員全域安裝、PATH 可能還沒跟上的工具（#394：ASN 開機自動啟動、或比 pi 早開，拿到的 PATH 是舊的）
@@ -192,6 +223,51 @@ mod tests {
         assert_eq!(find_in_dirs(&dirs, "claude"), None, "只替 pi 找；其他工具照舊只看 PATH");
         assert_eq!(package_manager_dirs(&home, None, None)[0], home.join("scoop").join("shims"), "沒有 APPDATA 就跳過");
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn touch(p: &std::path::Path, secs: u64) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"x").unwrap();
+        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        std::fs::File::options().write(true).open(p).unwrap().set_modified(t).unwrap();
+    }
+
+    #[test]
+    fn 桌面版_codex_沒有資料夾或沒有執行檔_找不到() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("OpenAI").join("Codex").join("bin");
+        assert_eq!(desktop_codex_in(&bin), None, "資料夾不存在");
+        std::fs::create_dir_all(bin.join("aaaa1111")).unwrap();
+        std::fs::write(bin.join("aaaa1111").join("readme.txt"), b"x").unwrap();
+        assert_eq!(desktop_codex_in(&bin), None, "雜湊資料夾裡沒有 codex 執行檔");
+    }
+
+    #[test]
+    fn 桌面版_codex_多個雜湊資料夾_挑執行檔修改時間最新且真的有執行檔的() {
+        let root = tempfile::tempdir().unwrap();
+        let bin = root.path().join("bin");
+        touch(&bin.join("old-hash").join("codex.exe"), 1_000);
+        touch(&bin.join("new-hash").join("codex.exe"), 5_000);
+        std::fs::create_dir_all(bin.join("newest-but-empty")).unwrap(); // 最新建立但沒有執行檔：不算
+        assert_eq!(desktop_codex_in(&bin), Some(bin.join("new-hash").join("codex.exe")));
+        // 時間相同：取資料夾名稱字母序最後的（結果固定）
+        touch(&bin.join("zz-hash").join("codex.exe"), 5_000);
+        assert_eq!(desktop_codex_in(&bin), Some(bin.join("zz-hash").join("codex.exe")));
+        // 更新的時間贏過名稱
+        touch(&bin.join("aa-hash").join("codex.exe"), 9_000);
+        assert_eq!(desktop_codex_in(&bin), Some(bin.join("aa-hash").join("codex.exe")));
+    }
+
+    #[test]
+    fn 桌面版_codex_只替_codex_找_且納入_resolve_binary() {
+        assert_eq!(desktop_codex_binary_real("grok"), None, "只替 codex 找");
+        let src = include_str!("detect.rs");
+        let body = &src[src.find("pub fn resolve_binary").unwrap()..];
+        let body = &body[..body.find("\n}").unwrap()];
+        assert!(body.contains("desktop_codex_binary_real"), "讀清單、開窗都經 resolve_binary，桌面版位置要在裡面：{body}");
+        let real = &src[src.find("fn desktop_codex_binary_real").unwrap()..];
+        let real = &real[..real.find("\n}").unwrap()];
+        assert!(real.contains("ASN_MOCK_BIN_DIR"), "mock 資料夾模式下不看真實位置");
     }
 
     #[test]

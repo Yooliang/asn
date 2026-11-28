@@ -115,7 +115,14 @@ function cleanModels(list, narrow) {
   return { models: out, dropped, narrowed }
 }
 
-const result = (state, models, note, canRetry) => ({ state, models, note, canRetry })
+/**
+ * 「清單不保證完整」的一句資訊級說明（#2353 第④階段，位置在型號欄位下方，不是警告）。
+ * 只由探測結果帶的標記 partial（Codex 的清單只列可選的、預設用的型號可能不在裡面）決定要不要出現；程式裡不寫任何具體型號名。
+ * 電腦版與手機版共用這一個常數與 modelState 的 hint 欄位
+ */
+export const PARTIAL_LIST_NOTE = '清單來自這台的 Codex，預設用的型號可能不在裡面'
+
+const result = (state, models, note, canRetry, hint = '') => ({ state, models, note, canRetry, hint })
 
 function unavailable(note, canRetry = true) { return result('unavailable', [], note, canRetry) }
 
@@ -126,7 +133,8 @@ function unavailable(note, canRetry = true) { return result('unavailable', [], n
  *   where：'local'（本機，文案說「這台電腦」）或 'remote'（別台，預設，說「那台電腦」）。
  *   now／launcherAt：毫秒數、Date 或 ISO 字串；pending 超過 PENDING_TIMEOUT_MS（以 launcherAt 為準）就當 unavailable。沒給 launcherAt（本機）就不判斷。
  *   narrow：true 時濾掉窄規則不收的型號（#2387 修好前用），被濾掉的筆數寫一行 console.info（只有廠牌與筆數）。
- * 回 { state: 'ready'|'stale'|'pending'|'unavailable'|'none', models: [{ id, label }], note, canRetry }；note 是給使用者看的白話。
+ * 回 { state: 'ready'|'stale'|'pending'|'unavailable'|'none', models: [{ id, label }], note, canRetry, hint }；note 是給使用者看的白話；
+ * hint＝清單不保證完整時的一句資訊級說明（entry.partial === true 才有，否則空字串）。
  */
 export function modelState(source, vendorId, ctx = {}) {
   const list = source?.models
@@ -154,11 +162,13 @@ export function modelState(source, vendorId, ctx = {}) {
     if (dropped) console.info('[型號清單]', vendorId, `有 ${dropped} 筆格式不正確，已略過`)
     if (narrowed) console.info(`[型號清單] ${vendorId} 有 ${narrowed} 筆因切換模型的格式限制先不列出`)
     if (!models.length) return unavailable(failNote('ok', label, where))
+    // 只認明確的 true；後台沒放行這個欄位（被丟掉）時就是沒有標記，照常顯示、不顯示那句、不出錯
+    const hint = entry.partial === true ? PARTIAL_LIST_NOTE : ''
     if (entry.stale === true) {
       console.info('[型號清單]', vendorId, '沿用上次的清單', code)
-      return result('stale', models, staleNote(entry.age_s), true)
+      return result('stale', models, staleNote(entry.age_s), true, hint)
     }
-    return result('ready', models, '', false)
+    return result('ready', models, '', false, hint)
   }
 
   if (status === 'unavailable' || status === 'error') {

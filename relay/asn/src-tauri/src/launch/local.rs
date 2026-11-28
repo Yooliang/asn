@@ -42,6 +42,9 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
             if !req.first_message.trim().is_empty() {
                 out["initial_dropped"] = json!(true);
             }
+            if matches!(model_plan, ModelPlan::Open(_)) {
+                out["model_note"] = json!(super::codex_open::MODEL_NOT_APPLIED_NOTE);
+            }
             return Ok(out);
         }
     }
@@ -81,7 +84,13 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     // 預設接續同名夥伴上一段對話（issue #82）；沒有舊對話才新開
     let resumed = if req.fresh { None } else { super::resume::apply_resume_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd)? };
     // Codex 沒有「新名字就開新對話」的寫法：由唯一出口先決定接舊或開新、建好對話，再用代號接續（#2485）
-    let resumed = super::codex_open::apply_codex_open_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd, req.fresh)?.or(resumed);
+    // 型號（只有 Codex 視窗會有）一起交給出口：新建對話才帶給 thread/start，接舊對話不套用並回報
+    let codex_model = match &model_plan {
+        ModelPlan::Open(m) => Some(m.as_str()),
+        _ => None,
+    };
+    let codex = super::codex_open::apply_codex_open_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd, req.fresh, codex_model)?;
+    let resumed = codex.resumed.or(resumed);
     // 同一位夥伴剛被別條路（開機接回、終端服務中斷接回、另一次喚醒）開了、視窗還沒上線：不開第二個（登記見 opening.rs）
     if !super::opening::claim(resumed.as_deref().unwrap_or(""), &req.name) {
         return Err(format!("{}，請稍候幾秒再看名單", super::opening::BUSY));
@@ -100,6 +109,10 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
         "resumed": resumed.is_some(),
         "display": if display_bg { "background" } else { "foreground" }
     });
+    // 選了型號卻沒有套用（接續舊對話）：開窗結果帶一句白話，畫面照既有的開窗提示顯示
+    if codex.model_ignored {
+        out["model_note"] = json!(super::codex_open::MODEL_NOT_APPLIED_NOTE);
+    }
     // 自帶終端開不起來、改用一般視窗：只在第一次提示（見 win_term）
     if let Some(n) = opened.note {
         out["note"] = json!(n);
@@ -130,16 +143,21 @@ pub(crate) enum ModelPlan {
     Arg(String),
     /// 內建通道（背景）工作者：記進 acp-models.json，建工作者時套用
     Record(String),
+    /// Codex 視窗（#2353 第④階段）：不加 `-m` 啟動參數，型號交給 codex_open 出口，建新對話時帶給 thread/start；
+    /// 接續舊對話時出口不套用，開窗結果帶一句白話說明
+    Open(String),
 }
 
 /// 型號要怎麼帶：空＝不指定；代號只收英數與 . _ -（英數開頭、60 字內）；
-/// 背景模式（Gemini 等內建通道）記下來；視窗只有 Claude 收 `--model`（Codex 的參數包在 cmd /c 與 resume 子指令裡，先不做）
+/// 背景模式（Gemini 等內建通道）記下來；視窗：Claude 收 `--model`；Codex 型號走 codex_open 出口（建新對話時帶給 thread/start，不加 `-m`）
 pub(crate) fn launch_model_plan(engine: &str, background: bool, model: &str) -> Result<ModelPlan, String> {
     let m = model.trim();
     if m.is_empty() {
         return Ok(ModelPlan::None);
     }
-    if !crate::bridge::engines::acp_models::valid_model(m) {
+    // Codex 視窗的型號是直接給 thread/start 的，只驗統一規則（model_id）；其他家仍用較窄的 acp_models::valid_model
+    let format_ok = if !background && engine == "codex" { crate::model_id::valid_model_id(m) } else { crate::bridge::engines::acp_models::valid_model(m) };
+    if !format_ok {
         return Err("型號代號格式不對（只能用英數與 . _ -）".into());
     }
     if background {
@@ -148,6 +166,7 @@ pub(crate) fn launch_model_plan(engine: &str, background: bool, model: &str) -> 
     match engine {
         // 只認明寫 "claude"：沒寫 engine 的自訂 profile 不知道是什麼程式，不補 --model
         "claude" => Ok(ModelPlan::Arg(m.to_string())),
+        "codex" => Ok(ModelPlan::Open(m.to_string())),
         _ => Err("這個廠牌開新夥伴時不能指定型號".into()),
     }
 }
@@ -269,7 +288,8 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
     if show.real_resume {
         super::resume::apply_resume_real(&mut args, &command, if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, name, &cwd.to_string_lossy())?;
         // Codex：同本機開窗，由唯一出口先決定接舊或開新、建好對話再用代號接續（#2485）
-        super::codex_open::apply_codex_open_real(&mut args, &command, prof.engine.as_str(), name, &cwd.to_string_lossy(), false)?;
+        // 遠端這一版不開放 Codex 指定型號（remote_model_args 會先擋掉），這裡一律不帶
+        super::codex_open::apply_codex_open_real(&mut args, &command, prof.engine.as_str(), name, &cwd.to_string_lossy(), false, None)?;
     }
     start_window_split(name, &command, &args, &cwd, show.in_term, show.in_console)
 }
@@ -1141,7 +1161,10 @@ mod tests {
         assert_eq!(launch_model_plan("claude", false, "sonnet"), Ok(ModelPlan::Arg("sonnet".into())));
         assert!(launch_model_plan("", false, "opus").is_err(), "沒寫 engine 的自訂 profile 不補 --model");
         assert_eq!(launch_model_plan("gemini", true, "gemini-3.8-flash-high"), Ok(ModelPlan::Record("gemini-3.8-flash-high".into())));
-        assert!(launch_model_plan("codex", false, "gpt-5.5").is_err(), "Codex 視窗先不帶型號");
+        assert_eq!(launch_model_plan("codex", false, "gpt-5.5"), Ok(ModelPlan::Open("gpt-5.5".into())), "Codex 視窗：型號交給 codex_open 出口，不加 -m");
+        assert_eq!(launch_model_plan("codex", false, ""), Ok(ModelPlan::None));
+        assert!(launch_model_plan("codex", false, "a b").is_err(), "格式不對照樣擋");
+        assert!(launch_model_plan("grok", false, "x-1").is_err(), "其他廠牌視窗仍不能指定");
         assert!(launch_model_plan("claude", false, "--dangerously").is_err(), "不能以 - 開頭（會被當成旗標）");
         assert!(launch_model_plan("claude", false, "a b").is_err());
     }

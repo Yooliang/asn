@@ -91,9 +91,16 @@ struct Run {
     calls: Vec<String>,
     logs: Vec<String>,
     opened: usize,
+    /// 選了型號卻接舊對話、型號沒有套用
+    ignored: bool,
 }
 
 fn run(command: &str, args: Vec<String>, candidates: Result<Vec<&str>, &str>, locked: &[&str], fresh: bool, fake: Fake, open_err: Option<&str>) -> Run {
+    run_m(command, args, candidates, locked, fresh, fake, open_err, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_m(command: &str, args: Vec<String>, candidates: Result<Vec<&str>, &str>, locked: &[&str], fresh: bool, fake: Fake, open_err: Option<&str>, model: Option<&str>) -> Run {
     let calls = fake.calls.clone();
     let logs: Rc<RefCell<Vec<String>>> = Rc::default();
     let l2 = logs.clone();
@@ -110,11 +117,12 @@ fn run(command: &str, args: Vec<String>, candidates: Result<Vec<&str>, &str>, lo
     let locked: HashSet<String> = locked.iter().map(|s| s.to_string()).collect();
     let cands: Result<Vec<String>, String> = candidates.map(|v| v.iter().map(|s| s.to_string()).collect()).map_err(|e| e.to_string());
     let mut a = args;
-    let out = apply_core(&mut a, command, "小乙", cands, &locked, "/w/p", fresh, &mut open, &log);
+    let mut ignored = false;
+    let out = apply_core(&mut a, command, "小乙", cands, &locked, "/w/p", fresh, model, &mut ignored, &mut open, &log);
     drop(open);
     let c = calls.borrow().clone();
     let l = logs.borrow().clone();
-    Run { out, args: a, calls: c, logs: l, opened }
+    Run { out, args: a, calls: c, logs: l, opened, ignored }
 }
 
 fn thread_map(v: &[(&str, ThreadState)]) -> HashMap<String, ThreadState> {
@@ -350,7 +358,7 @@ fn 實機錯誤句_舊寫法在新名字會失敗_新寫法不產生那個參數
     let mut fake = Some(Fake::default());
     let mut open = || -> Result<Box<dyn Server>, String> { Ok(Box::new(fake.take().unwrap())) };
     let log = |_: String| {};
-    let r = apply_core(&mut a, "cmd.exe", "測試名", Ok(vec![]), &HashSet::new(), "/w/p", false, &mut open, &log);
+    let r = apply_core(&mut a, "cmd.exe", "測試名", Ok(vec![]), &HashSet::new(), "/w/p", false, None, &mut false, &mut open, &log);
     assert_eq!(r, Ok(None));
     assert!(!a.iter().any(|x| x == "測試名"), "新寫法不會產生 resume <名字>：{a:?}");
     assert_eq!(fake_codex_0_153_4(&a, &[NEW]), (0, String::new()), "對話建好、放過種子後，用代號接續成功");
@@ -405,7 +413,7 @@ fn 守門_兩條開窗路徑都接上_codex_唯一出口() {
     let loc = local.split("pub fn partner_launch_local").nth(1).unwrap().split("pub(crate) enum ModelPlan").next().unwrap();
     let (c, r, w) = (loc.find(call).expect("本機開新夥伴要接"), loc.find("apply_resume_real(").unwrap(), loc.find("start_window_noted(").unwrap());
     assert!(r < c && c < w, "本機：接續之後、開窗之前");
-    assert!(loc.contains("req.fresh)"), "對話框的「全新開始」要傳進出口");
+    assert!(loc.contains("req.fresh, codex_model)"), "對話框的「全新開始」與型號都要傳進出口");
     let rem = local.split("pub fn start_remote_window").nth(1).unwrap().split("pub fn start_pi_session").next().unwrap();
     let (gate, c, w) = (rem.find("if show.real_resume {").unwrap(), rem.find(call).expect("遠端開窗要接"), rem.find("start_window_split(").unwrap());
     assert!(gate < c && c < w, "遠端：在 real_resume 區塊裡（測試用的隱藏視窗不開真的 app-server）、開窗之前");
@@ -505,10 +513,85 @@ fn 真轉接_沒關就丟掉也會關() {
     assert!(t.contains("EXIT"), "丟掉時要關輸入讓它結束：{t}");
 }
 
+// ---- 型號（#2353 第④階段）----
+
+#[test]
+fn 新夥伴選了型號_建對話時帶給_thread_start_沒選就沒有型號() {
+    let r = run_m("cmd.exe", win_args(), Ok(vec![]), &[], false, Fake::default(), None, Some("gpt-x-1"));
+    assert_eq!(r.calls[0], "start /w/p model=Some(\"gpt-x-1\")");
+    assert!(!r.ignored, "新建的對話型號有套用");
+    let r = run_m("cmd.exe", win_args(), Ok(vec![]), &[], false, Fake::default(), None, None);
+    assert_eq!(r.calls[0], "start /w/p model=None");
+    // 全新開始（名字沒有舊對話）一樣帶型號
+    let r = run_m("cmd.exe", win_args(), Ok(vec![]), &[], true, Fake::default(), None, Some("gpt-x-1"));
+    assert_eq!(r.calls[0], "start /w/p model=Some(\"gpt-x-1\")");
+    // 只有名字沒有紀錄檔的殘留，等於另建一段：也帶型號
+    let fake = Fake { threads: thread_map(&[(A, NO_ROLLOUT)]), ..Default::default() };
+    let r = run_m("cmd.exe", win_args(), Ok(vec![A]), &[], false, fake, None, Some("gpt-x-1"));
+    assert!(r.calls.iter().any(|c| c == "start /w/p model=Some(\"gpt-x-1\")"), "{:?}", r.calls);
+    assert!(!r.ignored);
+}
+
+#[test]
+fn 接舊對話_不傳型號給_thread_start_回報沒套用並記log() {
+    let fake = Fake { threads: thread_map(&[(A, READY)]), ..Default::default() };
+    let r = run_m("cmd.exe", win_args(), Ok(vec![A]), &[], false, fake, None, Some("gpt-x-1"));
+    assert_eq!(r.out, Ok(Some(A.to_string())));
+    assert!(!r.calls.iter().any(|c| c.starts_with("start ")), "接舊對話不建、也就不帶型號：{:?}", r.calls);
+    assert!(r.ignored, "要回報型號沒有套用");
+    assert!(r.logs.iter().any(|l| l.contains("gpt-x-1") && l.contains("忽略")), "原因進 log：{:?}", r.logs);
+    assert_eq!(&r.args[r.args.len() - 2..], ["resume".to_string(), A.to_string()], "接續照舊用代號，不加 -m");
+    assert!(!r.args.iter().any(|a| a == "-m" || a == "--model" || a.contains("gpt-x-1")), "不在啟動參數另加型號：{:?}", r.args);
+    // 沒選型號的接舊：不算忽略
+    let fake = Fake { threads: thread_map(&[(A, READY)]), ..Default::default() };
+    let r = run_m("cmd.exe", win_args(), Ok(vec![A]), &[], false, fake, None, None);
+    assert!(!r.ignored && r.logs.is_empty());
+    assert!(!MODEL_NOT_APPLIED_NOTE.contains("thread") && !MODEL_NOT_APPLIED_NOTE.contains("resume"), "畫面白話，不放英文代號");
+}
+
+/// 守門：型號只走出口（thread/start），啟動設定與開窗程式不另加 `-m`；Codex 型號的 ModelPlan 不會落到 --model 參數
+#[test]
+fn 守門_codex_型號不在啟動參數另加() {
+    let local = crate::settings::src_scan::prod_source(include_str!("../local.rs")).replace("\r\n", "\n");
+    let prof = crate::settings::src_scan::prod_source(include_str!("../profiles.rs"));
+    for (who, s) in [("local.rs", local.as_str()), ("profiles.rs", prof.as_str())] {
+        assert!(!s.contains("\"-m\""), "{who} 不准另加 -m");
+    }
+    let server = crate::settings::src_scan::prod_source(include_str!("server.rs")).replace("\r\n", "\n");
+    let from = server.rfind("fn start_thread(&mut self").unwrap();
+    let body = server[from..].split("\n    }\n").next().unwrap();
+    assert!(body.contains("p[\"model\"] = json!(m)"), "thread/start 要帶 model：{body}");
+    assert!(local.contains("ModelPlan::Open(m) => Some(m.as_str())"), "Codex 的型號要交給出口");
+}
+
+#[test]
+fn 型號代號不合格_出口整個不開() {
+    let mut a = win_args();
+    assert_eq!(apply_codex_open_real(&mut a, "cmd.exe", "codex", "小乙", "/w/p", false, Some("--bad id")), Err(crate::launch::local::MODEL_BAD.to_string()));
+    assert_eq!(a, win_args());
+}
+
+#[test]
+fn 真轉接_帶型號時_thread_start_參數有_model() {
+    if !node_ok() {
+        return;
+    }
+    let d = tempfile::tempdir().unwrap();
+    let log = d.path().join("calls.log");
+    let mut s = AppServer::open(launch_fake(&log)).unwrap();
+    s.start_thread("/w/p", Some("gpt-x-1")).unwrap();
+    s.close();
+    let t = std::fs::read_to_string(&log).unwrap();
+    let l = t.lines().find(|l| l.starts_with("thread/start ")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&l["thread/start ".len()..]).unwrap();
+    assert_eq!(v["model"], "gpt-x-1");
+    assert_eq!(v["sandbox"], "read-only");
+}
+
 #[test]
 fn 非_codex_引擎_出口什麼都不做() {
     let mut a = sv(&["--dangerously-skip-permissions", "-n", "小乙"]);
-    assert_eq!(apply_codex_open_real(&mut a, "claude", "claude", "小乙", "/w/p", false), Ok(None));
-    assert_eq!(apply_codex_open_real(&mut a, "x", "", "小乙", "/w/p", true), Ok(None));
+    assert_eq!(apply_codex_open_real(&mut a, "claude", "claude", "小乙", "/w/p", false, None), Ok(CodexOpened::default()));
+    assert_eq!(apply_codex_open_real(&mut a, "x", "", "小乙", "/w/p", true, Some("gpt-x")), Ok(CodexOpened::default()), "不是 codex：型號也不碰");
     assert_eq!(a, sv(&["--dangerously-skip-permissions", "-n", "小乙"]));
 }

@@ -8,7 +8,7 @@ export const PENDING_INTERVAL_MS = 5000
 
 /**
  * 畫面狀態：{ state, models, note, canRetry, loading }（前四個同 modelState；loading＝正在向本機問，重新讀取鈕要停用）。
- * opts：fetch({ vendor, force }) → 本機回應；onChange(vendor, view)；narrow（濾掉切換模型窄規則不收的型號）；
+ * opts：fetch({ vendor, force }) → 本機回應；onChange(vendor, view)；narrow（濾掉切換模型窄規則不收的型號；也可給 vendor => boolean）；
  *       where：'local'（預設）或 'remote'（別台，#2355 P4：fetch 回那台的摘要，force／retry 時要重新向後台問；畫面文案說「那台」，按鈕叫「再查一次」）；
  *       vendorLabel(vendor)、setTimer／clearTimer／now（測試用）。
  */
@@ -36,7 +36,8 @@ export function createModelLoader({ fetch, onChange, narrow = true, where = 'loc
       return
     }
     if (my !== gen) return
-    const v = modelState(source, vendor, { where, now: now(), narrow })
+    // narrow 也可以是函式（廠牌 → 要不要濾）：Codex 的型號代號走統一規則，不套切換模型的窄規則
+    const v = modelState(source, vendor, { where, now: now(), narrow: typeof narrow === 'function' ? narrow(vendor) : narrow })
     if (v.state === 'pending') {
       const n = (tries.get(vendor) ?? 0) + 1
       tries.set(vendor, n)
