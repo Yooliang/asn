@@ -10,7 +10,7 @@ mod server;
 mod tests;
 
 use super::profiles::shell_quote;
-use server::{AppServer, Launch, Server};
+use server::{AppServer, Launch, Server, ThreadState};
 use std::collections::HashSet;
 
 use crate::bridge::engines::mail_notes::{MAIL_EXTERNAL_DATA, MAIL_HEAD_MARK};
@@ -57,11 +57,14 @@ struct Input<'a> {
 
 /// 決定接舊或開新，並在需要時建好（原文寫 log，回給畫面的是白話）。呼叫端負責在之後關掉 server
 fn open_with(inp: &Input, srv: &mut dyn Server, log: &dyn Fn(String)) -> Result<Opened, String> {
-    let mut existing: Vec<&String> = Vec::new(); // 實際存在的，新→舊
+    let mut existing: Vec<&String> = Vec::new(); // 實際存在（有紀錄檔、可接續）的，新→舊
     for id in inp.candidates.iter().rev() {
-        match srv.thread_exists(id) {
-            Ok(true) => existing.push(id),
-            Ok(false) => {}
+        match srv.thread_state(id) {
+            Ok(ThreadState::Ready) => existing.push(id),
+            Ok(ThreadState::Missing) => {}
+            Ok(ThreadState::NoRollout) => {
+                log(format!("[Codex 開窗] 名字「{}」的對話 {id} 只有名字、沒有紀錄檔，救不回來，當成不存在", inp.name));
+            }
             Err(e) => {
                 log(format!("[Codex 開窗] 讀不到對話 {id}：{e}"));
                 return Err(MSG_CANNOT_TELL.into());
@@ -84,21 +87,12 @@ fn open_with(inp: &Input, srv: &mut dyn Server, log: &dyn Fn(String)) -> Result<
     if inp.locked.contains(id) {
         return Err(name_open_msg(inp.name));
     }
-    let has_content = srv.has_turns(id).unwrap_or_else(|e| {
-        log(format!("[Codex 開窗] 讀不到對話 {id} 有沒有內容，當成沒有、補放種子訊息：{e}"));
-        false
-    });
-    if !has_content {
-        if let Err(e) = srv.inject_seed(id, &seed_text(inp.name)) {
-            log(format!("[Codex 開窗] 對話 {id} 沒有內容，補放種子訊息失敗：{e}"));
-            return Err(MSG_PREP_FAILED.into());
-        }
-    }
+    // 既存的對話（含只有種子、還沒講過話的）直接用代號接續，不補種子
     Ok(Opened::Continue(id.clone()))
 }
 
 /// 建新對話：開始 → 取名 → 放種子。中途失敗：app-server 沒有刪除對話的方法（repo 裡沒有、也沒實機確認過），
-/// 只把留下的代號寫進 log；已取名但沒內容的對話，下次開同名夥伴時會被認出來、補放種子後沿用
+/// 只把留下的代號寫進 log；留下的對話沒有紀錄檔，下次開同名夥伴時會被當成不存在、另建一段
 fn create(inp: &Input, srv: &mut dyn Server, log: &dyn Fn(String)) -> Result<Opened, String> {
     let id = srv.start_thread(inp.cwd, inp.model).map_err(|e| {
         log(format!("[Codex 開窗] 建立新對話失敗：{e}"));
@@ -109,7 +103,7 @@ fn create(inp: &Input, srv: &mut dyn Server, log: &dyn Fn(String)) -> Result<Ope
         return Err(MSG_PREP_FAILED.into());
     }
     if let Err(e) = srv.inject_seed(&id, &seed_text(inp.name)) {
-        log(format!("[Codex 開窗] 新對話 {id}（已取名「{}」）放種子訊息失敗，留下一段空對話；下次開同名夥伴會補放後沿用它：{e}", inp.name));
+        log(format!("[Codex 開窗] 新對話 {id}（已取名「{}」）放種子訊息失敗，留下一段沒有紀錄檔的對話：{e}", inp.name));
         return Err(MSG_PREP_FAILED.into());
     }
     log(format!("[Codex 開窗] 已建好新對話 {id}（名字「{}」）", inp.name));

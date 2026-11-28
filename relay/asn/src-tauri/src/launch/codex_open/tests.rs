@@ -1,4 +1,4 @@
-use super::server::{is_not_found, AppServer, Launch, Server};
+use super::server::{is_no_rollout, is_not_found, AppServer, Launch, Server, ThreadState};
 use super::*;
 use crate::bridge::engines::rpc::RpcError;
 use std::cell::RefCell;
@@ -33,12 +33,14 @@ type Calls = Rc<RefCell<Vec<String>>>;
 #[derive(Default)]
 struct Fake {
     calls: Calls,
-    /// 代號 → 有沒有內容；沒列＝不存在
-    threads: HashMap<String, bool>,
-    /// thread_exists 對這些代號回錯誤（模擬 invalid thread id 之類）
+    /// 代號 → 既有對話的狀況；沒列＝不存在
+    threads: HashMap<String, ThreadState>,
+    /// thread_state 對這些代號回錯誤（模擬 invalid thread id 之類）
     read_err: Vec<String>,
     /// 這一步回錯誤：start／name／inject
     fail_at: Option<&'static str>,
+    /// 這次開窗期間自己建的對話（只有它是載入著的；對沒載入的對話 inject_items 回 thread not found，照 0.153.4 實機）
+    created: Option<String>,
 }
 
 impl Fake {
@@ -54,20 +56,17 @@ impl Fake {
 }
 
 impl Server for Fake {
-    fn thread_exists(&mut self, id: &str) -> Result<bool, String> {
-        self.rec(format!("exists {id}"));
+    fn thread_state(&mut self, id: &str) -> Result<ThreadState, String> {
+        self.rec(format!("state {id}"));
         if self.read_err.iter().any(|e| e == id) {
             return Err(format!("thread/read: invalid thread id: {id}"));
         }
-        Ok(self.threads.contains_key(id))
-    }
-    fn has_turns(&mut self, id: &str) -> Result<bool, String> {
-        self.rec(format!("turns {id}"));
-        Ok(self.threads.get(id).copied().unwrap_or(false))
+        Ok(self.threads.get(id).copied().unwrap_or(ThreadState::Missing))
     }
     fn start_thread(&mut self, cwd: &str, model: Option<&str>) -> Result<String, String> {
         self.rec(format!("start {cwd} model={model:?}"));
         self.step("start")?;
+        self.created = Some(NEW.to_string());
         Ok(NEW.to_string())
     }
     fn set_name(&mut self, id: &str, name: &str) -> Result<(), String> {
@@ -76,6 +75,9 @@ impl Server for Fake {
     }
     fn inject_seed(&mut self, id: &str, text: &str) -> Result<(), String> {
         self.rec(format!("inject {id} {}", text == seed_text("小乙")));
+        if self.created.as_deref() != Some(id) {
+            return Err("thread/inject_items: thread not found".into());
+        }
         self.step("inject")
     }
     fn close(&mut self) {
@@ -115,9 +117,12 @@ fn run(command: &str, args: Vec<String>, candidates: Result<Vec<&str>, &str>, lo
     Run { out, args: a, calls: c, logs: l, opened }
 }
 
-fn thread_map(v: &[(&str, bool)]) -> HashMap<String, bool> {
-    v.iter().map(|(k, b)| (k.to_string(), *b)).collect()
+fn thread_map(v: &[(&str, ThreadState)]) -> HashMap<String, ThreadState> {
+    v.iter().map(|(k, s)| (k.to_string(), *s)).collect()
 }
+
+const READY: ThreadState = ThreadState::Ready;
+const NO_ROLLOUT: ThreadState = ThreadState::NoRollout;
 
 fn closed(r: &Run) -> bool {
     r.calls.last().map(String::as_str) == Some("close")
@@ -147,10 +152,10 @@ fn 新名字_字串形_尾端補代號_沒有名字() {
 
 #[test]
 fn 既存有內容_不建新_接最新那段_同名多段記一行log() {
-    let fake = Fake { threads: thread_map(&[(A, true), (B, true)]), ..Default::default() };
+    let fake = Fake { threads: thread_map(&[(A, READY), (B, READY)]), ..Default::default() };
     let r = run("cmd.exe", win_args(), Ok(vec![A, B]), &[], false, fake, None);
     assert_eq!(r.out, Ok(Some(B.to_string())), "接續最新的（索引最後一筆）");
-    assert_eq!(r.calls, [format!("exists {B}"), format!("exists {A}"), format!("turns {B}"), "close".to_string()], "沒有建、沒有放種子");
+    assert_eq!(r.calls, [format!("state {B}"), format!("state {A}"), "close".to_string()], "沒有建、沒有放種子");
     assert_eq!(&r.args[r.args.len() - 2..], ["resume".to_string(), B.to_string()]);
     assert_eq!(r.logs.len(), 1, "{:?}", r.logs);
     assert!(r.logs[0].contains("小乙") && r.logs[0].contains("候選 2 段") && r.logs[0].contains("實際存在 2 段"), "{:?}", r.logs);
@@ -158,7 +163,7 @@ fn 既存有內容_不建新_接最新那段_同名多段記一行log() {
 
 #[test]
 fn 候選不在_索引有但對話已刪_當成不在_開新的() {
-    let fake = Fake { threads: thread_map(&[(A, true)]), ..Default::default() };
+    let fake = Fake { threads: thread_map(&[(A, READY)]), ..Default::default() };
     // B 是索引殘留（thread/read 回 thread not loaded＝不存在），只有 A 在
     let r = run("cmd.exe", win_args(), Ok(vec![A, B]), &[], false, fake, None);
     assert_eq!(r.out, Ok(Some(A.to_string())), "索引最新的 B 不存在，退而接還在的 A");
@@ -168,13 +173,48 @@ fn 候選不在_索引有但對話已刪_當成不在_開新的() {
     assert!(r.calls.iter().any(|c| c.starts_with("start ")), "索引有名字但對話不存在：要開新的");
 }
 
+/// 開了夥伴、沒講話就關掉，再開同名：有紀錄檔（只有種子），直接用代號接續。
+/// 對沒載入的對話 inject_items 一律回 thread not found（0.153.4 實機），所以不能補種子
 #[test]
-fn 既存但沒內容_補放種子後沿用() {
-    let fake = Fake { threads: thread_map(&[(A, false)]), ..Default::default() };
+fn 只有種子_再開同名_直接接續_不呼叫_inject() {
+    let fake = Fake { threads: thread_map(&[(A, READY)]), ..Default::default() };
     let r = run("cmd.exe", win_args(), Ok(vec![A]), &[], false, fake, None);
     assert_eq!(r.out, Ok(Some(A.to_string())));
-    assert_eq!(r.calls, [format!("exists {A}"), format!("turns {A}"), format!("inject {A} true"), "close".to_string()]);
+    assert_eq!(r.calls, [format!("state {A}"), "close".to_string()], "不建、不補種子");
+    assert!(!r.calls.iter().any(|c| c.starts_with("inject")));
     assert_eq!(&r.args[r.args.len() - 2..], ["resume".to_string(), A.to_string()]);
+    assert!(r.logs.is_empty(), "{:?}", r.logs);
+}
+
+/// 只有名字、沒有紀錄檔（建了對話取了名就中斷）：救不回來，當成不存在、另建一段，記一行 log
+#[test]
+fn 只有名字沒有紀錄檔_當成不存在_另建一段_記log() {
+    let fake = Fake { threads: thread_map(&[(A, NO_ROLLOUT)]), ..Default::default() };
+    let r = run("cmd.exe", win_args(), Ok(vec![A]), &[], false, fake, None);
+    assert_eq!(r.out, Ok(None), "另建的不算接續");
+    assert_eq!(r.calls, [format!("state {A}"), "start /w/p model=None".to_string(), format!("name {NEW} 小乙"), format!("inject {NEW} true"), "close".to_string()]);
+    assert_eq!(&r.args[r.args.len() - 2..], ["resume".to_string(), NEW.to_string()]);
+    assert!(r.logs.iter().any(|l| l.contains("小乙") && l.contains(A) && l.contains("沒有紀錄檔")), "要記名字、代號、原因：{:?}", r.logs);
+    // 同名舊的只有名字、更舊的有內容：接有內容的那段（只有名字的略過）
+    let fake = Fake { threads: thread_map(&[(A, READY), (B, NO_ROLLOUT)]), ..Default::default() };
+    let r = run("cmd.exe", win_args(), Ok(vec![A, B]), &[], false, fake, None);
+    assert_eq!(r.out, Ok(Some(A.to_string())));
+    // 全新開始：只有名字的不算同名存在，可以另建
+    let fake = Fake { threads: thread_map(&[(A, NO_ROLLOUT)]), ..Default::default() };
+    let r = run("cmd.exe", win_args(), Ok(vec![A]), &[], true, fake, None);
+    assert_eq!(r.out, Ok(None));
+}
+
+#[test]
+fn 沒有紀錄檔的錯誤字句_認得才算_其他錯誤仍整體失敗() {
+    assert!(is_no_rollout("thread/turns/list: missing source rollout for thread x"));
+    assert!(is_no_rollout("thread/resume: no rollout found for thread id x"));
+    assert!(!is_no_rollout("thread/turns/list: 別的錯誤"));
+    // 假伺服器對認不得的錯誤回 Err：整體失敗、不建
+    let fake = Fake { read_err: vec![A.into()], ..Default::default() };
+    let r = run("cmd.exe", win_args(), Ok(vec![A]), &[], false, fake, None);
+    assert_eq!(r.out, Err(MSG_CANNOT_TELL.to_string()));
+    assert!(!r.calls.iter().any(|c| c.starts_with("start ")));
 }
 
 #[test]
@@ -198,7 +238,7 @@ fn 找不到對話與格式錯誤要分開_thread_not_loaded_才是不在() {
 
 #[test]
 fn 全新開始遇到同名_不再造第二段_開著的與沒開著的各回白話() {
-    let mk = || Fake { threads: thread_map(&[(A, true)]), ..Default::default() };
+    let mk = || Fake { threads: thread_map(&[(A, READY)]), ..Default::default() };
     // 同名那段正被視窗開著
     let r = run("cmd.exe", win_args(), Ok(vec![A]), &[A], true, mk(), None);
     assert_eq!(r.out, Err(name_open_msg("小乙")));
@@ -235,11 +275,6 @@ fn 任一步失敗_app_server_關掉_原文進log_畫面白話_參數不動() {
             assert!(r.logs.iter().any(|l| l.contains(NEW)), "{step}：log 要記留下的代號：{:?}", r.logs);
         }
     }
-    // 已取名但沒放種子的空對話：下次開同名夥伴會被認出來、補放後沿用
-    let fake = Fake { threads: thread_map(&[(NEW, false)]), ..Default::default() };
-    let r = run("cmd.exe", win_args(), Ok(vec![NEW]), &[], false, fake, None);
-    assert_eq!(r.out, Ok(Some(NEW.to_string())));
-    assert!(r.calls.contains(&format!("inject {NEW} true")));
 }
 
 #[test]
@@ -274,7 +309,7 @@ fn 舊設定還帶_resume_名字_先去掉再依結果補() {
     // 接舊：同樣去掉再補代號
     let mut old = win_args();
     old.extend(sv(&["resume", "小乙"]));
-    let fake = Fake { threads: thread_map(&[(A, true)]), ..Default::default() };
+    let fake = Fake { threads: thread_map(&[(A, READY)]), ..Default::default() };
     let r = run("cmd.exe", old, Ok(vec![A]), &[], false, fake, None);
     let mut want = win_args();
     want.extend(sv(&["resume", A]));
@@ -378,6 +413,26 @@ fn 守門_兩條開窗路徑都接上_codex_唯一出口() {
     assert!(c < close && close < w, "出口在 real_resume 的區塊內");
 }
 
+/// 守門：建對話不改使用者設定，跟舊橋一致——thread/start 帶的 sandbox 只准 read-only。
+/// 只看 start_thread 的請求參數那一段；profiles 的 `-s workspace-write` 是啟動參數，不在這裡
+#[test]
+fn 守門_建對話的_sandbox_只准_read_only() {
+    let src = crate::settings::src_scan::prod_source(include_str!("server.rs")).replace("\r\n", "\n");
+    let from = src.rfind("fn start_thread(&mut self").expect("找得到 start_thread 的實作（trait 宣告在前、實作在後）");
+    let body = &src[from..from + src[from..].find("\n    }\n").expect("start_thread 結尾")];
+    let tag = "\"sandbox\": \"";
+    assert_eq!(body.matches(tag).count(), 1, "thread/start 的參數只有一個 sandbox：{body}");
+    let at = body.find(tag).unwrap() + tag.len();
+    let value: String = body[at..].chars().take_while(|c| *c != '"').collect();
+    assert_eq!(value, "read-only", "建對話的 sandbox 只准 read-only");
+    // 整個出口的正式程式碼都不寫 workspace-write（註解不算）
+    let code_lines = |s: &str| s.lines().filter(|l| !l.trim_start().starts_with("//")).collect::<Vec<_>>().join("\n");
+    let main = crate::settings::src_scan::prod_source(include_str!("../codex_open.rs"));
+    for (who, s) in [("server.rs", src.as_str()), ("codex_open.rs", main.as_str())] {
+        assert!(!code_lines(s).contains("workspace-write"), "{who} 的正式程式碼不准出現 workspace-write");
+    }
+}
+
 // ---- 真的 app-server 轉接（用 node 假程式，沒有 node 就略過）----
 
 fn node_ok() -> bool {
@@ -393,7 +448,7 @@ process.stdin.on('data',d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){const l
 fs.appendFileSync(log,m.method+' '+JSON.stringify(m.params||{})+'\n');const p=m.params||{};
 if(m.method==='thread/read'){if(p.threadId==='missing')w({id:m.id,error:{code:-32600,message:'thread not loaded: missing'}});else if(p.threadId==='bad')w({id:m.id,error:{code:-32600,message:'invalid thread id: bad'}});else w({id:m.id,result:{thread:{id:p.threadId}}});}
 else if(m.method==='thread/start')w({id:m.id,result:{thread:{id:'new-1'}}});
-else if(m.method==='thread/turns/list')w({id:m.id,result:{data:p.threadId==='full'?[{id:'t'}]:[]}});
+else if(m.method==='thread/turns/list'){if(p.threadId==='norollout')w({id:m.id,error:{code:-32600,message:'missing source rollout for thread norollout'}});else if(p.threadId==='weird')w({id:m.id,error:{code:-32603,message:'something else'}});else w({id:m.id,result:{data:p.threadId==='full'?[{id:'t'}]:[]}});}
 else w({id:m.id,result:{}});}});
 process.stdin.on('end',()=>{fs.appendFileSync(log,'EXIT\n');process.exit(0)});
 "#;
@@ -410,11 +465,12 @@ fn 真轉接_五個動作的參數與結果_關閉後行程真的結束() {
     let d = tempfile::tempdir().unwrap();
     let log = d.path().join("calls.log");
     let mut s = AppServer::open(launch_fake(&log)).unwrap();
-    assert_eq!(s.thread_exists("ok-1"), Ok(true));
-    assert_eq!(s.thread_exists("missing"), Ok(false), "thread not loaded＝不在");
-    assert!(s.thread_exists("bad").unwrap_err().contains("invalid thread id"), "格式錯是真錯誤");
-    assert_eq!(s.has_turns("full"), Ok(true));
-    assert_eq!(s.has_turns("empty"), Ok(false));
+    assert_eq!(s.thread_state("ok-1"), Ok(ThreadState::Ready));
+    assert_eq!(s.thread_state("full"), Ok(ThreadState::Ready));
+    assert_eq!(s.thread_state("missing"), Ok(ThreadState::Missing), "thread not loaded＝不在");
+    assert_eq!(s.thread_state("norollout"), Ok(ThreadState::NoRollout), "turns/list 回 missing source rollout＝只有名字");
+    assert!(s.thread_state("bad").unwrap_err().contains("invalid thread id"), "格式錯是真錯誤");
+    assert!(s.thread_state("weird").unwrap_err().contains("something else"), "認不得的錯誤整體失敗");
     let id = s.start_thread("/w/p", None).unwrap();
     assert_eq!(id, "new-1");
     s.set_name(&id, "小乙").unwrap();
@@ -429,7 +485,7 @@ fn 真轉接_五個動作的參數與結果_關閉後行程真的結束() {
         let l = t.lines().find(|l| l.starts_with(&format!("{method} "))).unwrap_or_else(|| panic!("沒有 {method}：{t}"));
         serde_json::from_str(&l[method.len() + 1..]).unwrap()
     };
-    assert_eq!(logged("thread/start"), serde_json::json!({ "cwd": "/w/p", "sandbox": "workspace-write", "approvalPolicy": "on-request", "serviceName": "asn" }), "沒有帶 model 這個鍵");
+    assert_eq!(logged("thread/start"), serde_json::json!({ "cwd": "/w/p", "sandbox": "read-only", "approvalPolicy": "on-request", "serviceName": "asn" }), "建對話用 read-only、沒有帶 model 這個鍵");
     assert_eq!(logged("thread/name/set"), serde_json::json!({ "threadId": "new-1", "name": "小乙" }));
     assert_eq!(logged("thread/inject_items"), serde_json::json!({ "threadId": "new-1", "items": [{ "type": "message", "role": "user", "content": [{ "type": "input_text", "text": "種子" }] }] }));
     assert_eq!(logged("thread/read"), serde_json::json!({ "threadId": "ok-1", "includeTurns": false }));
