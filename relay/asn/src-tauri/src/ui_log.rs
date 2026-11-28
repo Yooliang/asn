@@ -151,28 +151,9 @@ pub fn elog_to_file(msg: &str) {
 
 /// panic 訊息裡看起來像權杖的長字串（32 字以上的英數與 `-_.+/=`）換成「…略…」；訊息最多留 200 字。
 /// panic 訊息通常是「called `Option::unwrap()` on a `None` value」之類，但 expect 的字串可能帶進變數，保險起見再遮一次
-/// relay.rs 的 mask_long_tokens 是同一條規則的複本（relay.rs 也編進沒有本模組的無頭／手機），改這裡要一起改那邊（#1778）
+/// 遮罩規則本身在 relay.rs 的 mask_long_tokens（全專案唯一一份，也編進沒有本模組的無頭／手機，#1778）；這裡只多限 200 字
 pub fn redact(msg: &str) -> String {
-    let mut out = String::new();
-    let mut run = String::new();
-    let flush = |run: &mut String, out: &mut String| {
-        if run.chars().count() >= 32 {
-            out.push_str("…略…");
-        } else {
-            out.push_str(run);
-        }
-        run.clear();
-    };
-    for c in msg.chars() {
-        if c.is_ascii_alphanumeric() || "-_.+/=".contains(c) {
-            run.push(c);
-        } else {
-            flush(&mut run, &mut out);
-            out.push(c);
-        }
-    }
-    flush(&mut run, &mut out);
-    out.chars().take(200).collect()
+    crate::relay::mask_long_tokens(msg).chars().take(200).collect()
 }
 
 /// panic 那一行：時間、執行緒名、檔案行號、遮過的訊息

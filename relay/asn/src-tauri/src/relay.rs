@@ -510,8 +510,10 @@ pub(crate) fn body_excerpt(text: &str) -> String {
 /// 回應內容寫進 log 的字數上限（字元）
 pub(crate) const BODY_LOG_CHARS: usize = 200;
 
-/// 連續 32 個以上的英數與 `-_.+/=` 當成可能是權杖，換成「…略…」（和 ui_log::redact 同一條規則，改一邊要一起改；那個模組只有電腦版有，這裡不能引用）
-fn mask_long_tokens(msg: &str) -> String {
+/// 連續 32 個以上的英數與 `-_.+/=` 當成可能是權杖，換成「…略…」。
+/// 這是全專案唯一的一份遮罩規則：ui_log::redact（panic 訊息，另外限 200 字）與 launch::term 的一開就結束畫面尾段都呼叫它，不准各自再寫一份。
+/// 放在這裡是因為本檔所有版本（含沒有 ui_log 的無頭、手機）都有編進去
+pub(crate) fn mask_long_tokens(msg: &str) -> String {
     let mut out = String::new();
     let mut run = String::new();
     let flush = |run: &mut String, out: &mut String| {

@@ -210,7 +210,8 @@ fn screen_tail(text: &str, nonce: &str) -> Vec<String> {
         .map(|l| {
             let l = if nonce.is_empty() { l.to_string() } else { l.replace(nonce, "…") };
             let clean: String = l.chars().filter(|c| !c.is_control()).collect();
-            clean.trim_end().chars().take(EXIT_TAIL_LINE_CHARS).collect::<String>()
+            // 畫面尾段可能有登入代碼、key 片段、權杖，ui.log 夥伴讀得到：先套全專案同一條遮罩規則，再限長
+            crate::relay::mask_long_tokens(clean.trim_end()).chars().take(EXIT_TAIL_LINE_CHARS).collect::<String>()
         })
         .filter(|l| !l.contains("[asn-exit "))
         .collect();
@@ -8591,6 +8592,22 @@ mod tests {
             assert!(log.contains(CODEX_ERROR_LINE), "原文要進 log：{log}");
             assert!(log.contains("結束碼 1") && log.contains("[ASN] 程式已結束"), "{log}");
             assert!(!log.contains(NONCE) && !log.contains("[asn-exit"), "暗號與標記不進 log：{log}");
+        }
+
+        /// 一開就結束時畫面尾段若有登入代碼、key、權杖：log 裡不出現原值（ui.log 夥伴讀得到）
+        #[test]
+        fn 夥伴一開就結束_畫面尾段的長權杖不進log() {
+            fix_nonce();
+            let tok = format!("sk-ant-oat01-{}", "AbCd".repeat(10));
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.screen.borrow_mut() = format!("login failed, token {tok} rejected\nERROR: 短字 abc123 照留\n[ASN] 程式已結束（結束碼 1）\n[asn-exit n0nce 1]\n");
+            TEST_LOG.with(|l| l.borrow_mut().clear());
+            let _ = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+            let log = TEST_LOG.with(|l| l.borrow().join("\n"));
+            assert!(!log.contains("AbCdAbCd") && !log.contains(&tok), "權杖原值不能進 log：{log}");
+            assert!(log.contains("login failed, token …略… rejected"), "只遮長字串、其餘照留：{log}");
+            assert!(log.contains("短字 abc123 照留"), "{log}");
+            assert_eq!(screen_tail(&format!("x {tok} y"), "n0nce"), vec!["x …略… y".to_string()]);
         }
 
         #[test]
