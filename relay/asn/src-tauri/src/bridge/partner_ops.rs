@@ -161,6 +161,8 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn screen_code(&self, _name: &str) -> Option<&'static str> {
         None
     }
+    /// 夥伴改名成功後，把終端對照表裡的名字（分頁標題）一起改掉（#2471）。沒有終端列就是空動作。預設什麼都不做
+    fn relabel_terminal(&self, _old: &str, _new: &str) {}
 }
 
 pub(crate) struct SystemOpsEnv {
@@ -212,6 +214,16 @@ impl OpsEnv for SystemOpsEnv {
     }
     fn screen_code(&self, name: &str) -> Option<&'static str> {
         crate::launch::stuck_notice::current_code(name)
+    }
+    fn relabel_terminal(&self, old: &str, new: &str) {
+        #[cfg(desktop)]
+        {
+            crate::launch::term::relabel_partner(old, new);
+        }
+        #[cfg(not(desktop))]
+        {
+            let _ = (old, new);
+        }
     }
     fn tell(&self, name: &str, text: &str) -> Result<(), String> {
         // 走收發室既有的投遞：寄一封給自己這台電腦、指定那個視窗的信，橋收到後照一般來信轉進視窗
@@ -642,13 +654,26 @@ impl PartnerOps {
         super::engines::pi_control::window_session_id(&self.env.pi_home(), name, self.env.now_ms(), |p| os.alive(p)).is_some() && self.find_target(name).is_err()
     }
 
+    /// 改名成功才同步終端對照表（#2471）：Claude 視窗（外掛路與重開路）與 pi 視窗的改名都經過這一個函式；失敗不動，結果原樣回傳。
+    /// pi 視窗開的終端列沒有種類也沒有名字（標題只有 `ASN:{編號}`），所以 pi 改名的同步是空動作（不會改到任何列）；
+    /// 保留這個呼叫是為了日後 pi 的列帶名字時兩條路一致。
+    /// pi 正在忙時改名會排隊、照樣回成功：一排上隊就同步，因為 ASN 已回報改名成功、名單也是新名，對照表跟著換才對得上。
+    /// 已知窗口：pi 這一輪還沒做完就當掉或被關掉時，排隊的改名沒做成，pi 留著舊名、對照表卻已是新名（要不要處理見 #2475）
+    fn relabel_if_ok(&self, op: &Op, r: OpResult) -> OpResult {
+        if r.status == "ok" {
+            self.env.relabel_terminal(&op.name, &op.new_name);
+        }
+        r
+    }
+
     /// pi 視窗：開放「切換模型」「改名」（走擴充的控制檔管道，見 engines/pi_control.rs；pi 忙碌時排隊）與「關閉」
     fn execute_pi(&self, op: &Op) -> OpResult {
         if op.op == "close" {
             return self.close_pi(op);
         }
         if op.op == "rename" {
-            return self.rename_pi(op);
+            let r = self.rename_pi(op);
+            return self.relabel_if_ok(op, r);
         }
         if op.op != "model" {
             return failed("pi 視窗目前只能切換模型、改名和關閉，其他操作尚未開放");
@@ -1022,7 +1047,10 @@ impl PartnerOps {
         match op.op.as_str() {
             "info" => self.info(&target),
             "close" => self.close(&target),
-            "rename" => self.rename(op, target),
+            "rename" => {
+                let r = self.rename(op, target);
+                self.relabel_if_ok(op, r)
+            }
             "model" => self.model(op, target),
             _ => self.handover(op, target),
         }
