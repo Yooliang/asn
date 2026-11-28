@@ -64,6 +64,7 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
   const policy = { ...cfg.permissions, sensitive }
   let driver = null
   let starting = null
+  let pending = null                 // 正在啟動、還沒指給 driver 的驅動（stop 要能一併停掉）
   let health = 'ok'                  // ok | login-required | quota | unavailable
   let healthReason = ''
   let lastTryAt = 0
@@ -169,7 +170,12 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
     const d = makeDriver({ cfg, env, log: m => log(`[${name}] ${m}`), sessionId: store.get(name), fullAccess, guard })
     d.onExit(info => { if (driver === d) { driver = null; log(`[${name}] 驅動行程結束了${info?.stderr ? `：${info.stderr}` : ''}`) } })
     lastTryAt = now()
-    starting = d.start().then(() => { driver = d }).finally(() => { starting = null })
+    pending = d
+    starting = d.start().then(() => {
+      // 啟動途中被停了（#2422）：stop() 已把 pending 清掉，啟動完成的這支不能留下來，停掉並照「被停止」結束
+      if (pending !== d) { try { d.stop() } catch { /* ignore */ } throw new WorkerError('stopped', '工作者被停止') }
+      driver = d
+    }).finally(() => { starting = null; if (pending === d) pending = null })
     await starting
     if (d.resumeLost()) { needPreamble = true; log(`[${name}] 先前的對話找不到了，已開新的（之前的上下文遺失）`) }
     return d
@@ -181,7 +187,7 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
   }
 
   async function warm() {
-    try { await ensureDriver(); if (health === 'unavailable') setHealth('ok') } catch (e) { applyFailure(e, null) }
+    try { await ensureDriver(); if (health === 'unavailable') setHealth('ok') } catch (e) { if (!stopping) applyFailure(e, null) }
   }
 
   // ---- 失敗 → 狀態＋給寄件人的說明 ------------------------------------------------------------------------
@@ -295,6 +301,7 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
       for (const j of queue.splice(0)) if (!j.noReply) void handlers.onFail(j.id, `${name} 工作者正在關閉，這封信沒有處理`)
       try { driver?.stop() } catch { /* ignore */ }
       driver = null
+      try { pending?.stop() } catch { /* ignore */ } pending = null
     },
   }
 }
