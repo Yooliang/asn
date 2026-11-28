@@ -10,7 +10,21 @@ use std::path::Path;
 
 /// → (id → 名字, 名字 → id 們（舊→新）)；名字被改成空字串就視為沒有名字
 pub fn read_name_index(home: &Path) -> (HashMap<String, String>, HashMap<String, Vec<String>>) {
-    let text = std::fs::read_to_string(home.join("session_index.jsonl")).unwrap_or_default();
+    read_name_index_checked(home).unwrap_or_default()
+}
+
+/// 同 [`read_name_index`]，但讀不到要讓呼叫端知道：檔案不存在＝新機器的正常狀態（回空），其他讀取錯誤（權限、被鎖、不是文字檔）回 Err。
+/// 開新夥伴要靠它決定「接舊對話還是開新的」，讀不到時不能當成沒有（#2485）
+pub fn read_name_index_checked(home: &Path) -> std::io::Result<(HashMap<String, String>, HashMap<String, Vec<String>>)> {
+    let text = match std::fs::read_to_string(home.join("session_index.jsonl")) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e),
+    };
+    Ok(index_from_text(&text))
+}
+
+fn index_from_text(text: &str) -> (HashMap<String, String>, HashMap<String, Vec<String>>) {
     let mut by_id: Vec<(String, String)> = vec![]; // 保持寫入順序
     for line in text.lines() {
         let Ok(j) = serde_json::from_str::<serde_json::Value>(line.trim()) else { continue };
@@ -141,6 +155,17 @@ mod tests {
         assert!(!by_id.contains_key(B));
         assert_eq!(by_name.get("甲2"), Some(&vec![A.to_string()]));
         assert!(read_name_index(&d.path().join("none")).0.is_empty());
+    }
+
+    #[test]
+    fn 名字索引_檔案不存在是空_其他讀取錯誤要回錯誤() {
+        let d = tempfile::tempdir().unwrap();
+        let (by_id, by_name) = read_name_index_checked(d.path()).unwrap();
+        assert!(by_id.is_empty() && by_name.is_empty(), "新機器沒有索引檔：正常，回空");
+        // 索引的位置被資料夾佔著：讀不了，不能當成「沒有舊對話」
+        std::fs::create_dir(d.path().join("session_index.jsonl")).unwrap();
+        assert!(read_name_index_checked(d.path()).is_err());
+        assert!(read_name_index(d.path()).0.is_empty(), "舊函式照舊：讀不到就是空");
     }
 
     #[test]
