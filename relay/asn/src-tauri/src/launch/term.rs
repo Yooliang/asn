@@ -80,9 +80,9 @@ pub const MAX_READ_LINES: i32 = 500;
 pub const MAX_READ_CHARS: usize = 64_000;
 /// 忙閒只看畫面底部這幾行。
 /// 開夥伴窗格後盯多久，看它是不是一開就結束（claude 起不來等）
-const EARLY_EXIT_WATCH: Duration = Duration::from_secs(5);
+pub(super) const EARLY_EXIT_WATCH: Duration = Duration::from_secs(5);
 /// 盯的間隔
-const EARLY_EXIT_POLL: Duration = Duration::from_millis(500);
+pub(super) const EARLY_EXIT_POLL: Duration = Duration::from_millis(500);
 /// 重開認領（reclaim）剛讀過畫面、確認還活著的窗格，這段時間內監看（`sweep_exited`）不再重讀（#897：啟動時同一個窗格不要連讀兩次）。
 /// 已結束的窗格 reclaim 當場就收掉並記名字（#886），不受影響
 pub(crate) const RECENT_PROBE: Duration = Duration::from_secs(20);
@@ -103,7 +103,7 @@ pub(crate) fn session_ready(sessions: &[serde_json::Value], name: &str, since_ms
 
 /// 正式：讀本機的工作階段記錄。測試不讀這台電腦真的記錄（一律 false，等滿時間）。
 /// 夥伴若用別的 Claude 設定資料夾，這裡讀不到，就只是等滿時間，不會誤判。
-fn partner_session_started(name: &str, since_ms: u64) -> bool {
+pub(super) fn partner_session_started(name: &str, since_ms: u64) -> bool {
     #[cfg(not(test))]
     {
         let Some(dir) = super::console::sessions_dir() else { return false };
@@ -174,8 +174,16 @@ pub(crate) fn view_log(line: &str) {
     env_log(line);
 }
 
+#[cfg(test)]
+thread_local! {
+    /// 測試收集 env_log 寫出的行（正式版是寫進 ui.log，測試沒有 ui.log）
+    pub(crate) static TEST_LOG: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// 只寫變數名字，不寫值
 fn env_log(line: &str) {
+    #[cfg(test)]
+    TEST_LOG.with(|l| l.borrow_mut().push(line.to_string()));
     elog!("{line}");
     #[cfg(feature = "gui")]
     if let Some(dir) = UI_LOG_DIR.get() {
@@ -183,8 +191,43 @@ fn env_log(line: &str) {
     }
 }
 
-fn early_exit_text(code: i32) -> String {
-    format!("夥伴一開就結束（結束碼 {code}）")
+/// 夥伴程式一開就結束時給使用者看的白話（各廠牌共用；自帶終端與退路原生主控台都用這一句）。
+/// 只講發生什麼、怎麼辦：不放英文原文、不放系統用語；原文在 [`early_exit_failure`] 寫進 ui.log
+pub(crate) fn early_exit_text(name: &str, code: i32) -> String {
+    let who = if name.trim().is_empty() { "夥伴" } else { name.trim() };
+    format!("{who} 一開就結束了（結束碼 {code}），沒有開起來。詳細原因已記在紀錄裡，請再試一次；還是不行請把紀錄交給維護的人。")
+}
+
+/// 結束標記以外、窗格最後留下的行數（寫 log 用）
+const EXIT_TAIL_LINES: usize = 20;
+/// log 裡每行最多保留幾個字
+const EXIT_TAIL_LINE_CHARS: usize = 300;
+
+/// 窗格畫面的最後約 [`EXIT_TAIL_LINES`] 行：去控制字元、每行限長、拿掉結束標記那行與暗號（標記的暗號不進 log）、去掉尾端空行。純函式
+fn screen_tail(text: &str, nonce: &str) -> Vec<String> {
+    let mut lines: Vec<String> = text
+        .lines()
+        .map(|l| {
+            let l = if nonce.is_empty() { l.to_string() } else { l.replace(nonce, "…") };
+            let clean: String = l.chars().filter(|c| !c.is_control()).collect();
+            clean.trim_end().chars().take(EXIT_TAIL_LINE_CHARS).collect::<String>()
+        })
+        .filter(|l| !l.contains("[asn-exit "))
+        .collect();
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    let skip = lines.len().saturating_sub(EXIT_TAIL_LINES);
+    lines.split_off(skip)
+}
+
+/// 夥伴一開就結束：窗格最後的畫面（原文，例如程式自己印的錯誤句）寫進 ui.log，回給使用者看的白話。畫面不放原文
+fn early_exit_failure(name: &str, code: i32, screen: &str, nonce: &str) -> String {
+    env_log(&format!("開「{name}」：夥伴一開就結束（結束碼 {code}），窗格最後的畫面："));
+    for l in screen_tail(screen, nonce) {
+        env_log(&format!("    {l}"));
+    }
+    early_exit_text(name, code)
 }
 
 #[cfg(test)]
@@ -194,7 +237,7 @@ thread_local! {
 }
 
 /// 結束標記的暗號：16 位元組隨機的十六進位
-fn new_nonce() -> String {
+pub(super) fn new_nonce() -> String {
     #[cfg(test)]
     if let Some(n) = TEST_NONCE.with(|n| n.borrow().clone()) {
         return n;
@@ -714,7 +757,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// env＝已照 child_env 濾掉金鑰類變數的環境，GUI 與 pi 只拿到這些（不繼承 ASN 自己的環境）。回（終端編號, GUI 的程序編號）
     pub fn start_pi(&self, cwd: &Path, argv: &[String], env: &BTreeMap<String, String>) -> Result<(String, u32), String> {
         self.start_pi_staged(cwd, argv, env).map_err(|e| match e {
-            super::win_term::WinOpenError::NotStarted(m) | super::win_term::WinOpenError::Started(m) => m,
+            super::win_term::WinOpenError::NotStarted(m) | super::win_term::WinOpenError::Started(m) | super::win_term::WinOpenError::Exited(m) => m,
         })
     }
 
@@ -780,7 +823,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     /// env 有給＝GUI 只拿到這些環境變數（經 pi）；沒給＝照舊繼承（agy／grok）
     fn open(&self, profile: &str, cwd: PathBuf, command: &[String], env: Option<&BTreeMap<String, String>>, extra: &OpenExtra) -> Result<(String, u32), String> {
         self.open_staged(profile, cwd, command, env, extra).map_err(|e| match e {
-            super::win_term::WinOpenError::NotStarted(m) | super::win_term::WinOpenError::Started(m) => m,
+            super::win_term::WinOpenError::NotStarted(m) | super::win_term::WinOpenError::Started(m) | super::win_term::WinOpenError::Exited(m) => m,
         })
     }
 
@@ -848,8 +891,10 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 夥伴一開就結束（指令不存在等）：畫面留著不算開成功，關掉視窗、回失敗與原因
         if let Some(n) = &exit_nonce {
             let name = extra.label.clone().unwrap_or_default();
-            if let Some(code) = self.early_exit(&w, &win.sock, pane_id, n, &|| partner_session_started(&name, spawned_ms)) {
-                return fail_close(&w, &win, early_exit_text(code)).map_err(Started);
+            if let Some((code, screen)) = self.early_exit(&w, &win.sock, pane_id, n, &|| partner_session_started(&name, spawned_ms)) {
+                // 不是「登記不了視窗」：用 Exited，畫面講白話、窗格最後的畫面進 ui.log
+                let why = early_exit_failure(&name, code, &screen, n);
+                return fail_close(&w, &win, why).map_err(super::win_term::WinOpenError::Exited);
             }
         }
         {
@@ -1023,8 +1068,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         // 短時間內看窗格有沒有已結束；有就收掉窗格、回失敗與原因
         if let Some(n) = &exit_nonce {
             let name = extra.label.clone().unwrap_or_default();
-            if let Some(code) = self.early_exit(&w, &win.sock, pane_id, n, &|| partner_session_started(&name, spawned_ms)) {
-                return Err(close_pane(early_exit_text(code)));
+            if let Some((code, screen)) = self.early_exit(&w, &win.sock, pane_id, n, &|| partner_session_started(&name, spawned_ms)) {
+                let why = early_exit_failure(&name, code, &screen, n);
+                // close_pane 一律回 Started（關窗失敗的說明接在後面）；程式自己結束要換成 Exited，才不會套上「沒能登記視窗」那句
+                return Err(match close_pane(why) {
+                    Started(m) => super::win_term::WinOpenError::Exited(m),
+                    other => other,
+                });
             }
         }
         {
@@ -1056,12 +1106,13 @@ impl<R: Runner, F: Fs> TermService<R, F> {
 
     /// 剛開的夥伴窗格在 [`EARLY_EXIT_WATCH`] 內有沒有結束；有就回結束碼（見 [`wezterm::pane_exit_from_screen`]）。等待走 runner.sleep
     /// `started` 回 true＝這個夥伴已經確定起來了（claude 寫了工作階段記錄），不必再等滿時間。
-    fn early_exit(&self, w: &WezTerm<'_>, sock: &Path, pane_id: u64, nonce: &str, started: &dyn Fn() -> bool) -> Option<i32> {
+    /// 一併回讀到結束碼時的整段畫面（窗格一收就沒了，Codex 等自己的錯誤句只在這裡；呼叫端寫進 ui.log，不放畫面）
+    fn early_exit(&self, w: &WezTerm<'_>, sock: &Path, pane_id: u64, nonce: &str, started: &dyn Fn() -> bool) -> Option<(i32, String)> {
         let polls = EARLY_EXIT_WATCH.as_millis() / EARLY_EXIT_POLL.as_millis();
         for _ in 0..polls {
             self.runner.sleep(EARLY_EXIT_POLL);
-            if let Some(code) = w.pane_exit(sock, pane_id, Some(nonce)) {
-                return Some(code);
+            if let Some(hit) = w.pane_exit_screen(sock, pane_id, Some(nonce)) {
+                return Some(hit);
             }
             if started() {
                 return None;
@@ -6110,6 +6161,24 @@ mod tests {
         assert!(v["terms"][1].get("session_id").is_none());
     }
 
+    /// 一開就結束（自帶終端、非共用服務那條路徑）：同樣回「程式自己結束」，不套「沒能登記視窗」那句；原文進 log、畫面不放
+    #[test]
+    fn 開窗點_夥伴一開就結束_回exited_畫面白話_原文進log() {
+        use super::super::win_term::WinOpenError;
+        TEST_NONCE.with(|n| *n.borrow_mut() = Some("n0nce".to_string()));
+        let rig = make(default_profiles(), vec![Some(1_000), Some(1_000)]);
+        *rig.runner.inner.screen.borrow_mut() = "ERROR: No saved session found with ID 測試名. Run `codex resume` without an ID to choose from existing sessions.\n\n[ASN] 程式已結束（結束碼 1）\n[asn-exit n0nce 1]\n".into();
+        TEST_LOG.with(|l| l.borrow_mut().clear());
+        let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(None)).unwrap_err();
+        let WinOpenError::Exited(m) = e else { panic!("應該是 Exited（程式自己結束），不是登記失敗：{e:?}") };
+        assert!(m.starts_with("小乙 一開就結束了（結束碼 1），沒有開起來。詳細原因已記在紀錄裡，請再試一次；還是不行請把紀錄交給維護的人。"), "{m}");
+        assert!(!m.contains("沒能登記") && !m.contains("ERROR") && !m.contains("asn-exit"), "{m}");
+        let log = TEST_LOG.with(|l| l.borrow().join("\n"));
+        assert!(log.contains("ERROR: No saved session found with ID 測試名."), "原文進 log：{log}");
+        assert!(!log.contains("n0nce"), "暗號不進 log：{log}");
+        assert!(!std::fs::read_to_string(&rig.store).unwrap_or_default().contains("n0nce"), "沒有留下對照表的列");
+    }
+
     #[test]
     fn 舊對照表沒有_kind_與_session_id_照樣讀得進來() {
         let rig = make(default_profiles(), vec![Some(1_000)]);
@@ -8487,13 +8556,58 @@ mod tests {
             fix_nonce();
             let (rig, _) = mux_rig();
             *rig.runner.inner.screen.borrow_mut() = DEAD_SCREEN.into();
+            TEST_LOG.with(|l| l.borrow_mut().clear());
             let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
             match e {
-                crate::launch::win_term::WinOpenError::Started(m) => assert_eq!(m, "夥伴一開就結束（結束碼 1）"),
-                _ => panic!("應該是已啟動後失敗"),
+                crate::launch::win_term::WinOpenError::Exited(m) => assert_eq!(m, EXIT_SENTENCE),
+                other => panic!("應該是「程式自己結束」，不是登記失敗：{other:?}"),
             }
             assert_eq!(kill_panes(&rig.runner), 1, "死窗格要收掉");
             assert_eq!(rig.svc.partner_in_mux((MUX_PID, 1000), "小乙"), None, "沒有留下對照表的列");
+        }
+
+        /// 夥伴程式自己一開就結束的真實畫面：Codex 0.153.4 找不到名字時自己印的錯誤句＋包裝殼的結束訊息與標記，結束碼 1
+        const CODEX_DEAD_SCREEN: &str = "ERROR: No saved session found with ID 測試名. Run `codex resume` without an ID to choose from existing sessions.\n\n[ASN] 程式已結束（結束碼 1）\n[asn-exit n0nce 1]\n";
+        const CODEX_ERROR_LINE: &str = "ERROR: No saved session found with ID 測試名. Run `codex resume` without an ID to choose from existing sessions.";
+        const EXIT_SENTENCE: &str = "小乙 一開就結束了（結束碼 1），沒有開起來。詳細原因已記在紀錄裡，請再試一次；還是不行請把紀錄交給維護的人。";
+
+        /// 一開就結束（共用 mux 路徑）：不套「沒能登記視窗」那句；畫面是白話、沒有英文原文；原文（最後幾行）進 log，暗號不進 log
+        #[test]
+        fn 夥伴一開就結束_畫面白話_原文進log_不套登記失敗那句() {
+            fix_nonce();
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.screen.borrow_mut() = CODEX_DEAD_SCREEN.into();
+            TEST_LOG.with(|l| l.borrow_mut().clear());
+            // 開窗點（win_term::open_window）怎麼把 Exited 原樣交出去，另在 win_term 的測試守
+            let e = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+            let shown = match e {
+                crate::launch::win_term::WinOpenError::Exited(m) => m,
+                other => panic!("應該是 Exited（程式自己結束），不是登記失敗：{other:?}"),
+            };
+            assert_eq!(shown, EXIT_SENTENCE);
+            assert!(!shown.contains(crate::launch::win_term::STARTED_BUT_FAILED) && !shown.contains("沒能登記"), "那句講的是另一件事：{shown}");
+            assert!(!shown.contains("ERROR") && !shown.contains("codex") && !shown.contains("asn-exit"), "畫面不放原文與內部用語：{shown}");
+            let log = TEST_LOG.with(|l| l.borrow().join("\n"));
+            assert!(log.contains(CODEX_ERROR_LINE), "原文要進 log：{log}");
+            assert!(log.contains("結束碼 1") && log.contains("[ASN] 程式已結束"), "{log}");
+            assert!(!log.contains(NONCE) && !log.contains("[asn-exit"), "暗號與標記不進 log：{log}");
+        }
+
+        #[test]
+        fn 窗格最後約_20_行進_log_去控制字元_限長_空行與標記不算() {
+            let long = "長".repeat(500);
+            let mut text = String::new();
+            for i in 1..=30 {
+                text.push_str(&format!("行{i}\u{1b}[31m紅\u{7}\n"));
+            }
+            text.push_str(&format!("{long}\n\n  \n[asn-exit n0nce 9]\n"));
+            let t = screen_tail(&text, "n0nce");
+            assert_eq!(t.len(), 20, "最後 20 行");
+            assert_eq!(t[0], "行12[31m紅", "控制字元（ESC、鈴）去掉，其餘照留：{t:?}");
+            assert_eq!(t[19].chars().count(), 300, "每行限長");
+            assert!(t.iter().all(|l| !l.contains("asn-exit")), "標記那行不進來");
+            assert!(screen_tail("只有一行 n0nce\n\n", "n0nce") == vec!["只有一行 …".to_string()], "暗號換掉、尾端空行去掉");
+            assert!(screen_tail("", "n0nce").is_empty());
         }
 
         #[test]

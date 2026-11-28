@@ -322,6 +322,7 @@ mod tests {
         ("src/launch/term.rs", "TEST_TERM_STATE", Hook::Inject, "只取代 partner_term_state_of 查到的終端狀態；詳情後面怎麼判斷、怎麼顯示照正式版走（#2424 C）"),
         ("src/agent_setup/login.rs", "WIPES", Hook::Record, "只在 wipe() 開頭加一，之後照舊清零；沒有任何判斷讀它（#2435）"),
         ("src/launch/term.rs", "TEST_NONCE", Hook::Inject, "只取代 new_nonce() 的亂數；呼叫端照正式版走（#2435）"),
+        ("src/launch/term.rs", "TEST_LOG", Hook::Record, "只在 env_log 開頭把那一行存起來給測試看「原文有沒有進 ui.log」；env_log 後面照舊寫 log，沒有任何判斷讀它（#2485）"),
         ("src/launch/term.rs", "TEST_REGISTRY_NAMES", Hook::Inject, "只取代 registry_env_names() 讀登錄檔的結果；後面的邏輯照正式版（#2435）"),
         ("src/launch/wezterm.rs", "OBSERVE_TICKS", Hook::Inject, "只取代「GUI 通訊檔出現後要再核對幾次」這個次數，迴圈內的判斷照正式版；測試預設 0＝測試裡預設不跑觀察迴圈，要驗觀察的測試自己設次數（#2435）"),
         ("src/settings/migrate.rs", "FAIL_RENAME", Hook::Inject, "只取代 do_rename() 裡 std::fs::rename 的結果；改名失敗後的處理照正式版（#2435）"),

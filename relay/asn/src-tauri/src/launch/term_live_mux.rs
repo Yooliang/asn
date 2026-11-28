@@ -256,7 +256,7 @@ fn early_一開就結束_回原因_窗格收掉_不擋同名() {
     let spec = crate::launch::win_term::spec_for("測試同名", "powershell.exe", &bad, false, env.clone());
     let e = s.start_window(rig.tmp.path(), &spec).expect_err("要回失敗");
     let m = match e {
-        crate::launch::win_term::WinOpenError::NotStarted(m) | crate::launch::win_term::WinOpenError::Started(m) => m,
+        crate::launch::win_term::WinOpenError::NotStarted(m) | crate::launch::win_term::WinOpenError::Started(m) | crate::launch::win_term::WinOpenError::Exited(m) => m,
     };
     elog!("RESULT 失敗原因：{m}");
     assert!(m.contains("一開就結束") && m.contains('7'), "{m}");
