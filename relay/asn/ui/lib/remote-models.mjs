@@ -34,7 +34,7 @@ export const CODE_TEXT = Object.freeze({
   spawn_failed: same('讀取失敗'),
   too_large: same('型號太多，放不進回報（清單不完整）'),
   parse_failed: same('讀到了但看不懂格式（版本太新或太舊）'),
-  unsupported: same('這家沒有提供型號清單'),
+  unsupported: same('這家沒有提供型號清單，或版本太舊還沒有這個功能（請先更新）'),
 })
 
 /** 不認得的代碼（或沒有代碼）時的整句 */

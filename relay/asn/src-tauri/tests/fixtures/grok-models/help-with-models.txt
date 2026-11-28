@@ -1,0 +1,22 @@
+Sample Grok CLI
+
+Usage: grok [OPTIONS] [PROMPT]... [COMMAND]
+
+Arguments:
+  [PROMPT]...  Initial prompt for the interactive session
+
+Options:
+  -h, --help
+          Print help (see more with 'grok help')
+  -m, --model <MODEL>
+          Model ID to use (see the list of models with the models command)
+
+Commands:
+  agent        Run the tool without the interactive UI
+  doctor       Check terminal support
+  help         Print this message or the help of the given subcommand(s)
+  login        Sign in
+  models       List available models and exit
+  sessions     List, search, or restore sessions
+  version      Print version information
+

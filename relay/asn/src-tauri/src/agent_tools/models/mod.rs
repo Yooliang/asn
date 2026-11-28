@@ -5,6 +5,7 @@
 //! | pi（`"pi"`） | `pi --list-models`（表格；只列已設好憑證的提供者） | 10 秒 |
 //! | agy（`"gemini"`） | `agy models`（stdout 每行「代號<Tab>顯示名」） | 10 秒（切換驗證另用 20 秒） |
 //! | Codex（`"codex"`） | `codex debug models`（JSON，不用登入、不開 session）；只列 `visibility == "list"` | 10 秒 |
+//! | Grok（`"grok"`） | `grok models`（stdout 第一行是登入狀態；**未登入也是結束碼 0、照樣列一組型號**，所以第一行寫未登入就不當可用） | 10 秒 |
 //! | Claude（`"claude"`） | **沒有列型號的指令**：固定回「讀不到」，絕不寫死清單 | — |
 //!
 //! 快取：成功 10 分鐘、失敗只記 1 分鐘（不要每次回報都重打壞掉的指令）；`snapshot` 只讀快取、不等，
@@ -172,12 +173,20 @@ impl VendorModels {
     /// 只有真的沒輸出（去掉空白與 BOM 後是空的）才算「沒列出任何型號」。Codex 不需要登入，空清單一律是解析失敗
     pub fn from_text(v: Vendor, text: &str) -> Self {
         let blank = text.trim_matches(|c: char| c.is_whitespace() || c == '\u{feff}').is_empty();
+        // 每家明列、不留萬用分支：新增廠牌時編譯器會逼著決定怎麼解析，不會默默套 Codex 的 JSON 解析器
         let list = match v {
+            Vendor::Claude => return claude_unsupported(),
             Vendor::Pi => parse_pi(text),
             Vendor::Gemini => parse_agy(text),
-            _ => match parse_codex(text) {
+            Vendor::Codex => match parse_codex(text) {
                 Ok(l) => l,
                 Err(e) => return Self::error(v, Code::ParseFailed, e),
+            },
+            Vendor::Grok => match parse::parse_grok(text) {
+                Ok(g) => g.models,
+                Err(parse::GrokFail::NotLoggedIn) => return Self::unavailable(v, Code::NotLoggedIn, "grok models 第一行說還沒登入（照樣列了型號，但不當成可用清單）"),
+                Err(parse::GrokFail::Unsupported) => return Self::unavailable(v, Code::Unsupported, "這個版本的 grok 沒有 models 指令（版本太舊）"),
+                Err(parse::GrokFail::Unreadable(e)) => return Self::error(v, Code::ParseFailed, e),
             },
         };
         if !list.is_empty() {
@@ -207,16 +216,19 @@ pub enum Vendor {
     Codex,
     /// agy（目錄上的廠牌 id 是 gemini）
     Gemini,
+    Grok,
     Pi,
 }
 
 impl Vendor {
-    pub const ALL: [Vendor; 4] = [Vendor::Claude, Vendor::Codex, Vendor::Gemini, Vendor::Pi];
+    /// pi 排最後（回報上限的保底額度、wire 向量都是這個順序）
+    pub const ALL: [Vendor; 5] = [Vendor::Claude, Vendor::Codex, Vendor::Gemini, Vendor::Grok, Vendor::Pi];
     pub fn id(self) -> &'static str {
         match self {
             Vendor::Claude => "claude",
             Vendor::Codex => "codex",
             Vendor::Gemini => "gemini",
+            Vendor::Grok => "grok",
             Vendor::Pi => "pi",
         }
     }
@@ -225,6 +237,7 @@ impl Vendor {
             Vendor::Claude => "claude",
             Vendor::Codex => "codex",
             Vendor::Gemini => "agy",
+            Vendor::Grok => "grok",
             Vendor::Pi => "pi",
         }
     }
@@ -394,6 +407,11 @@ pub fn agy_env_from(vars: &[(OsString, OsString)]) -> Vec<(String, String)> {
     crate::bridge::engines::acp_clean_env(&utf8_vars(vars), &[])
 }
 
+/// Grok 的子程序環境：與工作者原生通道（ACP）相同的白名單（`acp_clean_env`；登入狀態讀的是家目錄底下 grok 自己的檔，不靠環境變數）
+pub fn grok_env_from(vars: &[(OsString, OsString)]) -> Vec<(String, String)> {
+    crate::bridge::engines::acp_clean_env(&utf8_vars(vars), &[])
+}
+
 /// Codex 的子程序環境：與其他 Codex 子程序相同（`codex_child_env`：繼承整份，黑名單擋金鑰與視窗識別，保留 CODEX_HOME）
 pub fn codex_env_from(vars: &[(OsString, OsString)]) -> Vec<(String, String)> {
     crate::bridge::engines::codex_child_env(&utf8_vars(vars))
@@ -420,15 +438,59 @@ pub fn pi_list_text_blocking() -> Result<String, RunFail> {
     run_blocking(spec, PROBE_TIMEOUT)
 }
 
+/// 問 `grok --help` 最多等多久（只是印說明，比列型號短）
+const GROK_HELP_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Grok 的兩步探測，指令怎麼跑由呼叫端給（`runner(參數, 逾時)`；測試用假的記錄參數）：
+/// 先跑 `grok --help`（不會開對話），**說明的 Commands 段裡有 `models` 子指令才**接著跑 `grok models`。
+/// 沒有 models 子指令的舊版，`grok [PROMPT]...` 會把 models 當成提示詞開一段真的對話（花額度、留紀錄），所以沒有就直接回
+/// 「版本太舊」（unsupported），絕不跑 `grok models`。`--help` 自己失敗照指令失敗處理（讀不到的原因同其他家）
+async fn probe_grok<F, Fut>(runner: F) -> VendorModels
+where
+    F: Fn(&'static [&'static str], Duration) -> Fut,
+    Fut: std::future::Future<Output = Result<String, RunFail>>,
+{
+    let v = Vendor::Grok;
+    let help = match runner(&["--help"], GROK_HELP_TIMEOUT).await {
+        Ok(t) => t,
+        Err(e) => return VendorModels::error(v, code_of(&e), e.reason("grok --help")),
+    };
+    if !parse::grok_help_has_models(&help) {
+        return VendorModels::unavailable(v, Code::Unsupported, "grok --help 的指令清單裡沒有 models（版本太舊），沒有執行 grok models");
+    }
+    match runner(&["models"], PROBE_TIMEOUT).await {
+        Ok(text) => VendorModels::from_text(v, &text),
+        Err(e) => VendorModels::error(v, code_of(&e), e.reason("grok models")),
+    }
+}
+
+/// 真的跑 Grok：找不到執行檔＝沒安裝；環境用 `grok_env_from`；stderr 也接進來（要讀得到 clap 的錯誤字句）
+async fn probe_grok_real() -> VendorModels {
+    let env = grok_env_from(&os_vars());
+    if spawn_for(Vendor::Grok, &["--help"], env.clone(), true).is_none() {
+        return VendorModels::unavailable(Vendor::Grok, Code::NotInstalled, format!("這台電腦找不到 {}", Vendor::Grok.binary()));
+    }
+    probe_grok(move |args, timeout| {
+        let spec = spawn_for(Vendor::Grok, args, env.clone(), true);
+        async move {
+            match spec {
+                Some(s) => run(s, timeout).await,
+                None => Err(RunFail::Spawn("找不到 grok".into())),
+            }
+        }
+    })
+    .await
+}
+
 /// 不看快取直接探測一家
 pub async fn probe_uncached(v: Vendor) -> VendorModels {
-    if v == Vendor::Claude {
-        return claude_unsupported();
-    }
     let (args, env, merge): (&[&str], _, _) = match v {
+        Vendor::Claude => return claude_unsupported(),
         Vendor::Pi => (&["--list-models"], pi_env(), true),
         Vendor::Gemini => (&["models"], agy_env_from(&os_vars()), false),
-        _ => (&["debug", "models"], codex_env_from(&os_vars()), false),
+        // Grok 先問 --help 確認有 models 子指令才跑 grok models（兩步與逾時都在 probe_grok_real）
+        Vendor::Grok => return probe_grok_real().await,
+        Vendor::Codex => (&["debug", "models"], codex_env_from(&os_vars()), false),
     };
     let Some(spec) = spawn_for(v, args, env, merge) else {
         return VendorModels::unavailable(v, Code::NotInstalled, format!("這台電腦找不到 {}", v.binary()));
@@ -489,7 +551,7 @@ pub fn snapshot(v: Vendor) -> VendorModels {
     value
 }
 
-/// 四家一起的快取摘要（不等）
+/// 各家一起的快取摘要（不等）
 pub fn snapshot_all() -> Vec<VendorModels> {
     Vendor::ALL.iter().map(|v| snapshot(*v)).collect()
 }
@@ -555,7 +617,7 @@ fn limit_with(list: Vec<VendorModels>, max_models: usize, max_bytes: usize, floo
         .collect()
 }
 
-/// 要放進回報的四家快取摘要（不等、已套回報上限）
+/// 要放進回報的各家快取摘要（不等、已套回報上限）
 pub fn report_snapshot() -> Vec<VendorModels> {
     limit_for_report(snapshot_all())
 }
@@ -571,14 +633,15 @@ fn to_report_value(list: &[VendorModels]) -> serde_json::Value {
 
 /// 測試用（#2355 P4 的 golden 樣本）：把全域快取換成實機樣本，讓 `report_value()` 不必去跑真的 CLI 就能產出真輸出。
 /// gemini＝agy 實機清單（呼叫端用 include_str! 讀 tests/fixtures/agy-models/sample.txt，走真的 parse_agy）；
-/// claude＝固定讀不到；codex、pi＝沒裝。四家都寫成「新鮮」的，`snapshot` 就不會在背景去探測。
+/// claude＝固定讀不到；codex、grok、pi＝沒裝。各家都寫成「新鮮」的，`snapshot` 就不會在背景去探測。
 #[cfg(test)]
 pub(crate) fn seed_samples_for_test(agy_text: &str) {
     let (c, now) = (global(), Instant::now());
     c.put(Vendor::Gemini, VendorModels::from_list(Vendor::Gemini, parse::parse_agy(agy_text)), now);
     c.put(Vendor::Claude, claude_unsupported(), now);
     c.put(Vendor::Codex, VendorModels::unavailable(Vendor::Codex, Code::NotInstalled, "沒裝"), now);
-    c.put(Vendor::Pi, VendorModels::unavailable(Vendor::Pi, Code::NotInstalled, "沒裝"), now);
+    c.put(Vendor::Grok, VendorModels::unavailable(Vendor::Grok, Code::NotInstalled, "沒裝"), now);
+    c.put(Vendor::Pi,VendorModels::unavailable(Vendor::Pi, Code::NotInstalled, "沒裝"), now);
 }
 
 #[cfg(test)]
@@ -607,7 +670,8 @@ mod tests {
         let json = serde_json::to_vec(&r).unwrap().len();
         assert!(json <= REPORT_MAX_BYTES, "序列化後 {json} 位元組超過上限");
         assert!(r[1].models.len() < 50 && r[1].reason.contains("截斷"), "中間的被截（總額不夠）：{}", r[1].models.len());
-        let last = &r[3];
+        let last = &r[Vendor::ALL.len() - 1];
+        assert_eq!(last.vendor, "pi", "pi 要排最後才吃得到保底");
         assert_eq!(last.status, Status::Ok, "pi 有保底額度，不會變 Error");
         let floor_fit = REPORT_FLOOR_BYTES / 210;
         assert!(last.models.len() >= floor_fit - 1, "pi 至少拿到保底的 {floor_fit} 筆上下，實得 {}", last.models.len());
@@ -1112,6 +1176,139 @@ mod tests {
         for t in [r#"{"models":[]}"#, "x"] {
             assert_ne!(VendorModels::from_text(Vendor::Codex, t).code, Some(Code::NotLoggedIn), "Codex 不需要登入");
         }
+    }
+
+    // ---- #2353 第④階段：Grok ----
+
+    const GROK_IN: &str = include_str!("../../../tests/fixtures/grok-models/logged-in.txt");
+    const GROK_OUT: &str = include_str!("../../../tests/fixtures/grok-models/not-logged-in.txt");
+    const GROK_OLD: &str = include_str!("../../../tests/fixtures/grok-models/old-version.txt");
+    const CODEX_FIXTURE: &str = include_str!("../../../tests/fixtures/codex-models/debug-models.json");
+
+    #[test]
+    fn grok_廠牌明列_all_五家_pi_最後_id_與執行檔() {
+        assert_eq!(Vendor::ALL, [Vendor::Claude, Vendor::Codex, Vendor::Gemini, Vendor::Grok, Vendor::Pi]);
+        assert_eq!((Vendor::Grok.id(), Vendor::Grok.binary()), ("grok", "grok"));
+        assert_eq!(Vendor::from_id("grok"), Some(Vendor::Grok));
+        // 讀清單與開 Grok 夥伴（launch/profiles.rs）找執行檔走同一個 resolve_binary
+        assert!(include_str!("mod.rs").split("#[cfg(test)]").next().unwrap().contains("super::resolve_binary(v.binary())"));
+        assert!(include_str!("../../launch/profiles.rs").contains(r#"resolve_binary("grok")"#));
+    }
+
+    #[test]
+    fn grok_已登入_清單可用_顯示名是代號() {
+        let r = VendorModels::from_text(Vendor::Grok, GROK_IN);
+        assert_eq!((r.vendor.as_str(), r.status, r.code, r.reason.as_str()), ("grok", Status::Ok, Some(Code::Ok), ""));
+        assert_eq!(r.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["grok-9-sample", "grok-9-mini", "grok-8-legacy"]);
+    }
+
+    #[test]
+    fn grok_三種讀不到各有各的代碼_原因進_log_不上雲() {
+        // 未登入：結束碼 0、照樣列型號，但清單不當可用
+        let out = VendorModels::from_text(Vendor::Grok, GROK_OUT);
+        assert_eq!(kind(&out), (Status::Unavailable, Some(Code::NotLoggedIn)));
+        assert!(out.models.is_empty(), "未登入的清單不能當可用型號");
+        // 版本太舊：沒有 models 指令
+        let old = VendorModels::from_text(Vendor::Grok, GROK_OLD);
+        assert_eq!((kind(&old), old.models.len()), ((Status::Unavailable, Some(Code::Unsupported)), 0));
+        // 指令失敗（結束碼非 0、逾時、起不來）走 code_of
+        assert_eq!(code_of(&RunFail::Exit(Some(1))), Code::SpawnFailed);
+        assert_eq!(code_of(&RunFail::Timeout), Code::Timeout);
+        assert_eq!(code_of(&RunFail::Spawn("x".into())), Code::SpawnFailed);
+        // 讀不懂（空輸出、第一行不認得、已登入卻沒有型號）＝解析失敗
+        for t in ["", "  \n", "Welcome\nAvailable models:\n  * a-1\n", "You are logged in with x.\nAvailable models:\n"] {
+            assert_eq!(kind(&VendorModels::from_text(Vendor::Grok, t)), (Status::Error, Some(Code::ParseFailed)), "{t:?}");
+        }
+        // 原因原文只進 log（遮罩後），不上雲
+        let line = failure_log_line(&out).unwrap();
+        assert!(line.starts_with("[型號探測] vendor=grok status=unavailable code=not_logged_in"), "{line}");
+        let wire = serde_json::to_string(&to_report_value(&limit_for_report(vec![out, old]))).unwrap();
+        assert!(!wire.contains("reason") && !wire.contains("grok models"), "{wire}");
+    }
+
+    #[test]
+    fn grok_from_text_每家明列_不再把非_pi_非_agy_都當_codex() {
+        // Codex 的解析器吃不到 grok 的輸出（以前 `_ =>` 會讓 Grok 走這條）
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Codex, GROK_IN)), (Status::Error, Some(Code::ParseFailed)));
+        // Grok 的解析器也不吃 Codex 的 JSON
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Grok, CODEX_FIXTURE)), (Status::Error, Some(Code::ParseFailed)));
+        // Claude 不走任何解析器
+        assert_eq!(kind(&VendorModels::from_text(Vendor::Claude, GROK_IN)), (Status::Unavailable, Some(Code::Unsupported)));
+        // 守門：from_text 與 probe_uncached 不准用 `_ =>` 兜底
+        let src = include_str!("mod.rs").split("#[cfg(test)]").next().unwrap();
+        for f in ["pub fn from_text", "pub async fn probe_uncached"] {
+            let body = src.split(f).nth(1).unwrap().split("\n}").next().unwrap();
+            assert!(!body.contains("_ =>") && body.contains("Vendor::Grok"), "{f} 要明列每家");
+        }
+    }
+
+    const HELP_WITH: &str = include_str!("../../../tests/fixtures/grok-models/help-with-models.txt");
+    const HELP_WITHOUT: &str = include_str!("../../../tests/fixtures/grok-models/help-without-models.txt");
+
+    /// 假 runner：記下每次呼叫的參數；--help 回 `help`（Err＝--help 自己失敗），models 回 `models`
+    fn run_probe_grok(help: Result<&str, RunFail>, models: Result<&str, RunFail>) -> (VendorModels, Vec<String>) {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let c2 = calls.clone();
+        let (help, models) = (help.map(String::from), models.map(String::from));
+        let r = crate::rt::block_on(probe_grok(move |args, _| {
+            c2.lock().unwrap().push(args.join(" "));
+            std::future::ready(if args == ["--help"] { help.clone() } else { models.clone() })
+        }));
+        let got = calls.lock().unwrap().clone();
+        (r, got)
+    }
+
+    #[test]
+    fn grok_說明裡沒有_models_子指令_絕不跑_grok_models_直接回版本太舊() {
+        // 沒有 models 子指令的舊版：models 會被當提示詞開一段真的對話。只能問 --help，不能發出 models 呼叫
+        let (r, calls) = run_probe_grok(Ok(HELP_WITHOUT), Ok(GROK_IN));
+        assert_eq!(calls, ["--help"], "沒有 models 子指令時不能發出 models 呼叫");
+        assert_eq!((kind(&r), r.models.len()), ((Status::Unavailable, Some(Code::Unsupported)), 0));
+        // 說明是空的、或是別的東西，一樣不跑
+        for t in ["", "garbage", "Commands:\n"] {
+            let (r, calls) = run_probe_grok(Ok(t), Ok(GROK_IN));
+            assert_eq!((calls.as_slice(), kind(&r)), (["--help".to_string()].as_slice(), (Status::Unavailable, Some(Code::Unsupported))), "{t:?}");
+        }
+    }
+
+    #[test]
+    fn grok_說明裡有_models_子指令_才接著跑_grok_models() {
+        let (r, calls) = run_probe_grok(Ok(HELP_WITH), Ok(GROK_IN));
+        assert_eq!(calls, ["--help", "models"], "先 --help、再 models");
+        assert_eq!((kind(&r), r.models.len()), ((Status::Ok, Some(Code::Ok)), 3));
+        // 有 models 但未登入：照樣只回未登入、清單不當可用
+        let (r, calls) = run_probe_grok(Ok(HELP_WITH), Ok(GROK_OUT));
+        assert_eq!((calls.len(), kind(&r), r.models.len()), (2, (Status::Unavailable, Some(Code::NotLoggedIn)), 0));
+        // grok models 自己失敗（結束碼非 0、逾時）：指令失敗
+        let (r, _) = run_probe_grok(Ok(HELP_WITH), Err(RunFail::Exit(Some(1))));
+        assert_eq!(kind(&r), (Status::Error, Some(Code::SpawnFailed)));
+        let (r, _) = run_probe_grok(Ok(HELP_WITH), Err(RunFail::Timeout));
+        assert_eq!(kind(&r), (Status::Error, Some(Code::Timeout)));
+    }
+
+    #[test]
+    fn grok_help_自己失敗_照指令失敗處理_也不跑_models() {
+        for (e, code) in [(RunFail::Exit(Some(2)), Code::SpawnFailed), (RunFail::Timeout, Code::Timeout), (RunFail::Spawn("x".into()), Code::SpawnFailed)] {
+            let (r, calls) = run_probe_grok(Err(e), Ok(GROK_IN));
+            assert_eq!((calls.as_slice(), kind(&r)), (["--help".to_string()].as_slice(), (Status::Error, Some(code))));
+        }
+    }
+
+    #[test]
+    fn grok_守門_探測先問_help_再跑_models_且真探測走這條() {
+        let src = include_str!("mod.rs").split("#[cfg(test)]").next().unwrap();
+        let body = src.split("async fn probe_grok<").nth(1).unwrap().split("\n}").next().unwrap();
+        let (h, m) = (body.find(r#"&["--help"]"#).unwrap(), body.find(r#"&["models"]"#).unwrap());
+        assert!(h < m && body.contains("grok_help_has_models"), "要先 --help、確認有 models 才跑 models");
+        assert!(src.contains("Vendor::Grok => return probe_grok_real().await"), "probe_uncached 的 Grok 要走兩步探測");
+        // 其他地方不准直接把 models 當參數送給 grok
+        assert!(!src.contains(r#"Vendor::Grok => (&["models"]"#));
+    }
+
+    #[test]
+    fn grok_環境_與工作者原生通道同一份白名單() {
+        let vars = os(&[("PATH", "/bin"), ("USERPROFILE", "C:/u"), ("XAI_API_KEY", "k"), ("ASN_RELAY_KEY", "r"), ("AWS_PROFILE", "p")]);
+        assert_eq!(names(&grok_env_from(&vars)), ["PATH", "USERPROFILE"]);
     }
 
     #[test]
