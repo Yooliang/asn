@@ -121,9 +121,14 @@ struct FakeEnv {
     /// 通知擁有者的紀錄：(視窗名, 子代理件數, 已等分鐘, 送出時的假時鐘毫秒)；notice_result＝後台的回覆（None＝成功）
     notices: Mutex<Vec<(String, Option<usize>, u64, u64)>>,
     notice_result: Mutex<Option<Result<String, String>>>,
+    /// 夥伴改名後要求同步終端對照表的紀錄 (舊名, 新名)（#2471）
+    relabeled: Mutex<Vec<(String, String)>>,
 }
 
 impl OpsEnv for FakeEnv {
+    fn relabel_terminal(&self, old: &str, new: &str) {
+        self.relabeled.lock().unwrap().push((old.to_string(), new.to_string()));
+    }
     fn mono_ms(&self) -> u64 {
         self.os.slept.load(Ordering::SeqCst)
     }
@@ -377,6 +382,7 @@ fn rig(o: Opt) -> Rig {
         poll_ms: std::sync::atomic::AtomicU64::new(1),
         notices: Mutex::new(Vec::new()),
         notice_result: Mutex::new(None),
+        relabeled: Mutex::new(Vec::new()),
     });
     let status = tmp.path().join("status");
     let control = tmp.path().join("control");
@@ -758,6 +764,29 @@ fn 改名_有外掛_寫控制檔_外掛回報成功就好_不重開() {
     assert_eq!(c["at"], NOW);
     assert!(r.terminated().is_empty() && r.launched().is_empty());
     assert!(!r.control.join("sid-220.json").exists(), "做完收掉控制檔");
+}
+
+#[test]
+fn _2471_改名成功_要同步終端對照表_失敗不同步() {
+    // 外掛路成功
+    let r = rig(Opt { mod_wait: 5000, ..Opt::default() });
+    r.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW - 10, "state": "idle" }));
+    let (control, status) = (r.control.join("sid-220.json"), r.status.join("sid-220.json"));
+    *r.os().on_sleep.lock().unwrap() = Some(Box::new(move || {
+        let c: Value = serde_json::from_str(&std::fs::read_to_string(&control).unwrap()).unwrap();
+        std::fs::write(&status, json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": c["id"], "ok": true, "detail": "已改名" } }).to_string()).unwrap();
+    }));
+    assert_eq!(r.run("rename", json!({ "new_name": "新名字" })).status, "ok");
+    assert_eq!(*r.env.relabeled.lock().unwrap(), vec![("目標".to_string(), "新名字".to_string())], "外掛路成功要同步終端對照表");
+    // 重開路成功
+    let r2 = rig(Opt::default());
+    assert_eq!(r2.run("rename", json!({ "new_name": "新名字" })).status, "ok");
+    assert_eq!(*r2.env.relabeled.lock().unwrap(), vec![("目標".to_string(), "新名字".to_string())], "重開路成功也要同步");
+    // 外掛明確回失敗：不同步
+    let r3 = rig(Opt::default());
+    r3.status_file("sid-220", json!({ "sessionId": "sid-220", "at": NOW, "state": "idle", "control": { "id": "op-1", "ok": false, "detail": "名字不合" } }));
+    assert_eq!(r3.run("rename", json!({ "new_name": "新名字" })).status, "failed");
+    assert!(r3.env.relabeled.lock().unwrap().is_empty(), "改名失敗不能動終端對照表");
 }
 
 #[test]

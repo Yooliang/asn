@@ -161,6 +161,8 @@ pub(crate) trait OpsEnv: Send + Sync {
     fn screen_code(&self, _name: &str) -> Option<&'static str> {
         None
     }
+    /// 夥伴改名成功後，把終端對照表裡的名字（分頁標題）一起改掉（#2471）。沒有終端列就是空動作。預設什麼都不做
+    fn relabel_terminal(&self, _old: &str, _new: &str) {}
 }
 
 pub(crate) struct SystemOpsEnv {
@@ -212,6 +214,16 @@ impl OpsEnv for SystemOpsEnv {
     }
     fn screen_code(&self, name: &str) -> Option<&'static str> {
         crate::launch::stuck_notice::current_code(name)
+    }
+    fn relabel_terminal(&self, old: &str, new: &str) {
+        #[cfg(desktop)]
+        {
+            crate::launch::term::relabel_partner(old, new);
+        }
+        #[cfg(not(desktop))]
+        {
+            let _ = (old, new);
+        }
     }
     fn tell(&self, name: &str, text: &str) -> Result<(), String> {
         // 走收發室既有的投遞：寄一封給自己這台電腦、指定那個視窗的信，橋收到後照一般來信轉進視窗
@@ -1022,7 +1034,14 @@ impl PartnerOps {
         match op.op.as_str() {
             "info" => self.info(&target),
             "close" => self.close(&target),
-            "rename" => self.rename(op, target),
+            "rename" => {
+                let r = self.rename(op, target);
+                // 改名成功才同步終端對照表（#2471）：外掛路與重開路都經過這裡，失敗不動
+                if r.status == "ok" {
+                    self.env.relabel_terminal(&op.name, &op.new_name);
+                }
+                r
+            }
             "model" => self.model(op, target),
             _ => self.handover(op, target),
         }
