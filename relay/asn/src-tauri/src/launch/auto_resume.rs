@@ -431,6 +431,11 @@ pub fn resumed_args(command: &str, profile_args: &[String], session: &str, perm:
         Some(root) => super::resume_name::resume_name(root, session, Some(cwd), stored),
         None => super::resume_name::resume_name_real(session, Some(cwd), stored),
     };
+    // 要放進參數的名字一定要過規則；連存檔名都不合規則就不接回（白話原因，不放名字原文）
+    if !super::resume_name::usable_name(&rn.name) {
+        elog!("[接回] 存檔名不合規則，不接回：對話 {session}");
+        return Err(super::resume_name::NAME_RULE_TEXT.to_string());
+    }
     let mut kept: Vec<String> = Vec::new();
     let mut it = profile_args.iter();
     while let Some(a) = it.next() {
@@ -556,7 +561,12 @@ impl UsedNames {
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub(crate) fn appeared_in(live: &[(String, Option<String>)], used: &UsedNames, stored: &str) -> bool {
     let (name, session) = (used.name_of(stored), used.session_of(stored));
-    live.iter().any(|(n, sid)| *n == name && session.as_deref().is_none_or(|s| sid.as_deref() == Some(s)))
+    live.iter().any(|(n, sid)| match session.as_deref() {
+        // 以對話編號為準，不要求名字相同（對話自己的名字不合規則時，程序記錄回報的是對話自己的名字）
+        Some(s) => sid.as_deref() == Some(s),
+        // 還沒記過對話編號（沒開過）：退回比名字
+        None => *n == name,
+    })
 }
 
 /// 沒上線時解除「正在開」登記：登記時用的是實際名字，解除也要用同一個
@@ -1457,6 +1467,23 @@ mod tests {
         assert_eq!(plan.rn.name, "舊名");
     }
 
+    /// 現名不合規則（含空格）：帶 -n 存檔名把對話名字改回來、--remote-control 用存檔名，參數裡沒有現名；拿掉這段（不帶 -n）會紅
+    #[test]
+    fn _2493_名字不合規則就不用_開機接回_現名不合規則_帶n存檔名() {
+        let (_b, cwd, projects, config) = cold(&["舊名", "含 空格"]);
+        let plan = plan_of(&stale_entry(&cwd), &projects, &config);
+        let a = &plan.args;
+        assert!(a.windows(2).any(|w| w[0] == "-n" && w[1] == "舊名"), "{a:?}");
+        assert!(a.windows(2).any(|w| w[0] == "--remote-control" && w[1] == "舊名"), "{a:?}");
+        assert!(!a.iter().any(|x| x.contains("空格")), "{a:?}");
+        assert_eq!(plan.rn.name, "舊名");
+        // 存檔名也不合規則：不接回
+        let mut bad = stale_entry(&cwd);
+        bad.name = "含 空格".into();
+        let err = crate::launch::local::plan_resumed_window(&config, Some(&projects), &bad.name, &bad.facts.cwd, &bad.facts.session, &bad.facts.perm).err().expect("不能接回");
+        assert!(err.contains("不合 ASN 的命名規則") && !err.contains("含 空格"), "{err}");
+    }
+
     /// 開機接回同一類：存檔舊名、對話現名「新名」，另一段對話的活視窗正叫「新名」→ 開之前就擋下（白話原因），不開第二個
     #[test]
     fn _2493_開機接回_現名已被另一段對話的視窗用著_不開第二個() {
@@ -1470,15 +1497,16 @@ mod tests {
         assert!(super::super::resume_name::ensure_name_free(&[("舊名".to_string(), Some("別段對話".to_string()))], &plan.rn.name, SID_2493).is_ok());
     }
 
-    /// 等上線：查「實際用的名字」而且要同一段對話（接回後對話編號不變）；改回查存檔名或只比名字就會紅
+    /// 等上線以對話編號為準（接回後編號不變），不要求名字相同；編號不同、名字相同的不算。改回要求名字相同就會紅
     #[test]
-    fn _2493_開機接回_等上線查實際名字_也比對話編號() {
+    fn _2493_開機接回_等上線以對話編號為準_不要求名字相同() {
         let used = UsedNames::default();
         used.record("舊名", "新名", SID_2493);
         let w = |n: &str, s: &str| vec![(n.to_string(), Some(s.to_string()))];
         assert!(appeared_in(&w("新名", SID_2493), &used, "舊名"));
-        assert!(!appeared_in(&w("舊名", SID_2493), &used, "舊名"), "存檔的舊名不是實際用的名字");
-        assert!(!appeared_in(&w("新名", "別段對話"), &used, "舊名"), "同名但別段對話不算上線");
+        // 對話自己的名字不合規則（含空格）：接回不帶 -n，程序記錄回報的是那個名字、編號相同 → 算上線
+        assert!(appeared_in(&w("含 空格", SID_2493), &used, "舊名"), "編號相同就算上線，名字不同沒關係");
+        assert!(!appeared_in(&w("新名", "別段對話"), &used, "舊名"), "編號不同、名字相同不算上線");
         assert!(!appeared_in(&[], &used, "舊名"));
     }
 

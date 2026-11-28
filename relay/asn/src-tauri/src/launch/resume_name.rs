@@ -14,7 +14,7 @@ pub(crate) enum Source {
     Stored,
     /// 找不到對話檔：用存檔名
     Unreadable,
-    /// 現名不合規則（名字格式不合格）：不用它，名字用存檔名、不帶 -n（不去動對話本身的名字）
+    /// 現名不合規則：不用它，名字用存檔名並帶 -n，接回時把對話的名字改回存檔名
     Rejected,
 }
 
@@ -24,7 +24,7 @@ pub(crate) fn usable_name(name: &str) -> bool {
 }
 
 /// 視窗現在的名字不合規則、因此不能重開時給使用者看的白話（不放名字原文）
-pub(crate) const NAME_RULE_TEXT: &str = "這個視窗的名字不合 ASN 的命名規則，請先把它改成只用中英文、數字等一般字元（不能以連字號開頭、最長 40 字），再試一次";
+pub(crate) const NAME_RULE_TEXT: &str = "這個視窗的名字不合 ASN 的命名規則，請先把它改成只用中文字、英文字母、數字和連字號（-）、最多 40 字、第一個字不能是連字號，再試一次";
 
 /// 要用的名字被別的活視窗佔著（同名、但不是同一段對話）。`live`＝目前活著的視窗（名字，對話編號）
 pub(crate) fn name_held_by_other(live: &[(String, Option<String>)], name: &str, session: &str) -> bool {
@@ -91,9 +91,9 @@ pub(crate) fn resume_name(projects_root: &Path, session: &str, cwd: Option<&str>
     };
     match super::resume::last_title(&path).map(|(n, _)| n).filter(|n| !n.trim().is_empty()) {
         Some(current) if !usable_name(&current) => {
-            // 不寫現名原文
-            elog!("[接回] 現名格式不合格，改用存檔名且不帶 -n：對話 {session}");
-            ResumeName { name: stored.to_string(), pass_n: false, source: Source::Rejected }
+            // 不寫現名原文。刻意帶 -n <存檔名>：把不合規則的名字改回 ASN 認得的名字
+            elog!("[接回] 現名不合規則，接回時改回存檔名：對話 {session}");
+            ResumeName { name: stored.to_string(), pass_n: true, source: Source::Rejected }
         }
         Some(current) => {
             if current != stored {
@@ -217,16 +217,27 @@ mod tests {
         assert_eq!(resume_name(d.path(), "../x", None, "存檔名").source, Source::Unreadable);
     }
 
-    /// 名字不合規則就不用：現名不通過就改用存檔名、不帶 -n（不去動對話本身的名字）
+    /// 名字不合規則就不用：現名不通過就改用存檔名並帶 -n（把對話的名字改回存檔名）
     #[test]
-    fn 名字不合規則就不用_現名不通過_改用存檔名_不帶n() {
+    fn 名字不合規則就不用_現名不通過_改用存檔名_帶n() {
         let long = "長".repeat(41);
         for bad in ["-開頭", "含 空格", "帶;分號", long.as_str()] {
             let d = tempfile::tempdir().unwrap();
             mk_transcript(d.path(), "/w/p", SID, &[bad]);
             let r = resume_name(d.path(), SID, Some("/w/p"), "存檔名");
-            assert_eq!(r, ResumeName { name: "存檔名".into(), pass_n: false, source: Source::Rejected }, "{bad}");
+            assert_eq!(r, ResumeName { name: "存檔名".into(), pass_n: true, source: Source::Rejected }, "{bad}");
         }
+    }
+
+    /// 提示文字不能比實際規則寬：照規則實際允許的字元與長度寫
+    #[test]
+    fn 名字不合規則就不用_提示文字照規則寫() {
+        assert!(usable_name("中文abc-123") && usable_name(&"長".repeat(40)));
+        assert!(!usable_name(&"長".repeat(41)) && !usable_name("-開頭") && !usable_name("底_線") && !usable_name("含 空格"));
+        for must in ["中文字", "英文字母", "數字", "連字號", "最多 40 字", "第一個字不能是連字號"] {
+            assert!(NAME_RULE_TEXT.contains(must), "{must}");
+        }
+        assert!(!NAME_RULE_TEXT.contains("一般字元") && !NAME_RULE_TEXT.contains("底線"));
     }
 
     /// 組參數這一步再驗一次：直接餵不合規則的名字，參數裡不會出現它，也沒有 -n；遙控保留原值

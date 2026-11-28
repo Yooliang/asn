@@ -88,6 +88,10 @@ struct FakeEnv {
     launched: Mutex<Vec<(String, PathBuf, Vec<String>)>>,
     /// 開視窗後要出現的新工作階段 (pid, sessionId)；None＝一直不出現
     appear: Mutex<Option<(u32, String)>>,
+    /// 開出來的視窗在程序記錄裡的名字（沒設就用計畫的名字）；模擬「對話自己的名字不合規則、接回後仍是那個名字」
+    appear_name: Mutex<Option<String>>,
+    /// 對話自己的現名（add_titles 設定）：開視窗時沒帶 -n，程序記錄回報的就是它（不是啟動時給的名字）；帶 -n 就是 -n 的值
+    conv_name: Mutex<Option<String>>,
     /// 開視窗當下退到了原生主控台的原因（None＝開在自帶終端，#1698）
     native: Mutex<Option<&'static str>>,
     sessions: PathBuf,
@@ -161,7 +165,10 @@ impl OpsEnv for FakeEnv {
     fn launch(&self, plan: &Plan) -> Result<(), String> {
         self.launched.lock().unwrap().push((plan.name.clone(), plan.cwd.clone(), plan.argv.clone()));
         if let Some((pid, sid)) = self.appear.lock().unwrap().clone() {
-            write_session(&self.sessions, pid, &sid, &plan.name, "idle", &plan.cwd.to_string_lossy());
+            // 程序記錄的名字：帶 -n 就是 -n 的值；沒帶 -n 就是對話自己的現名（沒設才退回啟動時給的名字）
+            let dash_n = plan.argv.iter().position(|a| a == "-n").and_then(|i| plan.argv.get(i + 1)).cloned();
+            let shown = self.appear_name.lock().unwrap().clone().or(dash_n).or_else(|| self.conv_name.lock().unwrap().clone()).unwrap_or_else(|| plan.name.clone());
+            write_session(&self.sessions, pid, &sid, &shown, "idle", &plan.cwd.to_string_lossy());
             self.os.alive.lock().unwrap().insert(pid);
         }
         Ok(())
@@ -360,6 +367,8 @@ fn rig(o: Opt) -> Rig {
         asked: AtomicUsize::new(0),
         launched: Mutex::new(vec![]),
         appear: Mutex::new(Some((501, "sid-new".into()))),
+        appear_name: Mutex::new(None),
+        conv_name: Mutex::new(None),
         native: Mutex::new(None),
         sessions: sessions.clone(),
         mod_wait: o.mod_wait,
@@ -1768,6 +1777,7 @@ fn add_titles(r: &Rig, titles: &[&str]) {
     for t in titles {
         text.push_str(&format!("\n{}", json!({ "type": "custom-title", "customTitle": t, "sessionId": SID })));
     }
+    *r.env.conv_name.lock().unwrap() = titles.last().map(|t| t.to_string());
     std::fs::write(&f, text).unwrap();
 }
 
@@ -1822,6 +1832,42 @@ fn _2493_喚醒_現名已被另一段對話的視窗用著_回錯誤_不開第�
     assert_eq!(resume(&r2, "離線夥伴", SID).status, "ok");
 }
 
+/// 等上線以對話編號為準：程序記錄回報的名字是對話自己的（不合規則的）名字、編號相同 → 喚醒成功；改回要求名字相同就會紅
+#[test]
+fn _2493_喚醒_等上線以對話編號為準_不要求名字相同() {
+    let r = resume_rig(Opt::default());
+    add_titles(&r, &["新名字"]);
+    // 程序記錄回報的名字（對話自己的名字）和我們用的名字不同、編號相同
+    *r.env.appear_name.lock().unwrap() = Some("含 空格".into());
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let v = res.result.unwrap();
+    assert_eq!((v["pid"].as_u64(), v["session_id"].as_str()), (Some(501), Some(SID)));
+    // 編號不同、名字相同（另一段對話）→ 不算
+    let r = resume_rig(Opt::default());
+    *r.env.appear.lock().unwrap() = Some((501, "another-session".into()));
+    assert_eq!(resume(&r, "離線夥伴", SID).status, "unconfirmed");
+}
+
+/// 受保護的名字：對話現名是受保護的名字（和手機送來的名字不同）→ 喚醒回受保護的說明，不開視窗
+#[test]
+fn _2493_喚醒_現名是受保護的名字_不開() {
+    let r = resume_rig(Opt::default());
+    add_titles(&r, &["T-ASN"]);
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!((res.status, res.detail.as_str()), ("failed", PROTECTED));
+    assert!(r.launched().is_empty());
+}
+
+/// 存檔名也不合規則：不開，白話回報（不放名字原文）
+#[test]
+fn _2493_名字不合規則就不用_存檔名也不合規則_喚醒不開() {
+    let r = resume_rig(Opt::default());
+    let cfg = launch_cfg(&[&r.work]);
+    let err = resume_argv(&cfg, &r.projects, None, "含 空格", SID).unwrap_err();
+    assert!(err.contains("不合 ASN 的命名規則") && !err.contains("含 空格"), "{err}");
+}
+
 /// 上線要同時比對話編號：同名但編號不同的視窗不算接回成功
 #[test]
 fn _2493_喚醒_等上線要比對話編號_同名但別段對話不算成功() {
@@ -1841,8 +1887,10 @@ fn _2493_名字不合規則就不用_喚醒與重組參數() {
     assert_eq!(res.status, "ok", "{}", res.detail);
     let l = r.launched();
     let argv = &l[0].2;
-    assert!(!argv.iter().any(|a| a.contains("壞名")) && !argv.iter().any(|a| a == "-n"), "{argv:?}");
+    assert!(!argv.iter().any(|a| a.contains("壞名")), "{argv:?}");
+    assert!(argv_has(argv, &["-n", "離線夥伴"]), "現名不合規則：帶 -n 存檔名，把對話名字改回來：{argv:?}");
     assert_eq!(l[0].0, "離線夥伴", "名字改用存檔名");
+    assert!(res.detail.contains("接回時已改回「離線夥伴」") && !res.detail.contains("壞名"), "結果要講一句：{}", res.detail);
     // 重組參數：名字不合規則不放進 --remote-control（保留舊值）；接回不帶 -n 時它完全不出現
     let old: Vec<String> = ["claude.exe", "--remote-control", "舊名", "-n", "舊名"].iter().map(|s| s.to_string()).collect();
     let out = switch::rewrite_args_named(&old, Some("s1"), "-壞名 字", false, None, None);
