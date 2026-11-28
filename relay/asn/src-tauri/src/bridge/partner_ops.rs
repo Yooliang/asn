@@ -19,8 +19,7 @@ use super::core::BridgeLog;
 use super::corrlog::{CorrLog, Dir, Entry};
 use super::engines::acp_admin::AcpAdmin;
 use super::roster;
-use crate::launch::config::{canonical_launch_cwd, check_launch, child_env, expand_vars, valid_partner_name, LaunchConfig, LaunchReq};
-use crate::launch::profiles::LaunchMode;
+use crate::launch::config::{canonical_launch_cwd, check_launch, valid_partner_name, LaunchConfig, LaunchReq};
 use crate::launch::console;
 use crate::launch::switch::{self, Os, Plan, Proc, SwitchRunReq, Timing};
 use crate::relay::Relay;
@@ -1589,7 +1588,8 @@ impl PartnerOps {
 
     // ---- resume（喚醒）---------------------------------------------------------------------------
 
-    /// 視窗已經關了：用 `claude --resume <sessionId> -n <原名字>` 在原本的工作資料夾重開，同一段對話接回來。
+    /// 視窗已經關了：用 `claude --resume <sessionId>` 在原本的工作資料夾重開，同一段對話接回來
+    /// （對話有名字就不帶 -n，名字問 `resume_name` 出口，#2493；對話沒有名字才帶存檔的名字）。
     /// 每一步都是守門：格式、已在線、對話紀錄（只認檔名）、資料夾白名單、本機開關，任何一關不過就什麼都不開。
     fn resume(&self, op: &Op) -> OpResult {
         let (name, sid) = (op.name.as_str(), op.session_id.as_str());
@@ -1651,9 +1651,31 @@ impl PartnerOps {
             return failed("原本的工作資料夾已經不存在了");
         }
         // 5. 用啟動設定的第一個 Claude 視窗型 profile（只拿指令與固定參數，名字與對話編號由我們補）
-        let Some(argv) = resume_argv(&cfg, name, sid) else {
-            return failed("這台電腦沒有可用的 Claude 啟動設定");
+        let (argv, rn) = match resume_argv(&cfg, &self.dirs.projects, Some(&cwd), name, sid) {
+            Ok(x) => x,
+            Err(why) => {
+                self.log.line(&format!("resume refused: session={sid}, {why}"));
+                return failed(why);
+            }
         };
+        // 現名不合規則、接回時改回存檔名：寫進結果給畫面看（不放現名原文）
+        let renamed_note = if rn.source == crate::launch::resume_name::Source::Rejected { format!("（這段對話原本的名字不合規則，接回時已改回「{}」）", rn.name) } else { String::new() };
+        // 之後登記、等上線、回報都用出口回的名字（對話現名優先；手機名單送來的 name 可能是舊名）
+        let name = rn.name.as_str();
+        // 現名可能和手機送來的舊名不同：用現名再查一次，被另一段對話的活視窗用著（或是受保護的名字）就不開，不能開出第二個同名視窗
+        if name != op.name.as_str() && (self.protect)(name, 0) {
+            self.log.line(&format!("resume refused: session={sid}, current name is protected"));
+            return failed(PROTECTED);
+        }
+        let live: Vec<(String, Option<String>)> = sessions
+            .iter()
+            .filter(|s| self.session_live(s, &table))
+            .filter_map(|s| Some((s.get("name")?.as_str()?.to_string(), s.get("sessionId").and_then(Value::as_str).map(str::to_string))))
+            .collect();
+        if let Err(why) = crate::launch::resume_name::ensure_name_free(&live, name, sid) {
+            self.log.line(&format!("resume refused: session={sid}, name {name} is held by a live window of another session"));
+            return failed(why);
+        }
         let plan = Plan { name: name.to_string(), cwd: PathBuf::from(crate::launch::local::strip_verbatim_prefix(&canon.to_string_lossy())), argv, in_wt: false };
         // 6. 動手前再驗一次本機開關
         if !self.env.allow_remote() {
@@ -1669,11 +1691,16 @@ impl PartnerOps {
         }
         // 開在哪種終端：退到原生主控台時記下原因（#1698）；只進結果的選填欄位與 log，舊版用戶端不認得也不受影響
         let native = self.env.launched_native();
-        // 7. 等名單出現同名視窗才算成功
+        // 7. 等名單出現同一段對話的視窗才算成功：以對話編號為準，不要求名字相同
+        // （對話自己的名字不合規則時接回不帶 -n，程序記錄回報的是對話自己的名字，和我們用的名字不同）
         let mut found: Option<(u32, String)> = None;
         let appeared = switch::wait_until(os, self.env.timing().appear_wait_ms, self.env.timing().poll_ms, || {
             for s in console::read_sessions(&self.dirs.sessions) {
-                if s.get("name").and_then(Value::as_str) != Some(name) || s.get("kind").and_then(Value::as_str).map(|k| k != "interactive").unwrap_or(false) {
+                if s.get("kind").and_then(Value::as_str).map(|k| k != "interactive").unwrap_or(false) {
+                    continue;
+                }
+                // 接回後對話編號不變：只比名字會認到別段對話的同名視窗
+                if s.get("sessionId").and_then(Value::as_str) != Some(sid) {
                     continue;
                 }
                 let Some(p) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { continue };
@@ -1688,8 +1715,8 @@ impl PartnerOps {
         match (appeared, found) {
             (true, Some((pid, session))) => match native {
                 // 結果照舊（pid、session_id 不動），多兩個選填欄位；畫面只補一句「這次用系統終端開的」，原因不放畫面
-                Some(why) => ok(format!("視窗已喚醒{NATIVE_TERM_NOTE}"), Some(json!({ "pid": pid, "session_id": session, "term": "native", "reason": why }))),
-                None => ok("視窗已喚醒", Some(json!({ "pid": pid, "session_id": session }))),
+                Some(why) => ok(format!("視窗已喚醒{NATIVE_TERM_NOTE}{renamed_note}"), Some(json!({ "pid": pid, "session_id": session, "term": "native", "reason": why }))),
+                None => ok(format!("視窗已喚醒{renamed_note}"), Some(json!({ "pid": pid, "session_id": session }))),
             },
             _ => {
                 self.env.release_opening(sid, name);
@@ -1779,6 +1806,11 @@ impl PartnerOps {
     /// 換班接手：記下前任 → 請前任把交接寫到規範資料夾 → 等檔案出現且大小穩定（上限 10 分鐘，逾時照樣換手並註明）
     /// → 關掉前任（沿用既有安全規則）→ 同名開新 session（不帶 --resume），第一句話指向前任對話紀錄與交接檔
     fn handover(&self, op: &Op, t: switch::Target) -> OpResult {
+        // 入口檢查：視窗現在的名字不合規則就不換班（還沒請前任寫交接、也沒動任何視窗）；不放名字原文，原因寫 log
+        if !crate::launch::resume_name::usable_name(&t.name) {
+            self.log.line(&format!("partner_op handover refused: window name is not valid, session={}", t.session_id));
+            return failed(crate::launch::resume_name::NAME_RULE_TEXT);
+        }
         let key = self.corr.pid_of(&t.name).unwrap_or_else(|| t.name.clone());
         let Some(path) = handoff_path(&self.handoff_dir, &key, self.env.now_ms()) else {
             return failed("交接檔的位置不安全，已取消");
@@ -1893,14 +1925,23 @@ fn pick_handover_model(recorded: Option<String>, launched: Option<String>) -> (O
 
 /// 喚醒用的啟動參數（含程式本身）：第一個 Claude 視窗型 profile（claude 優先），固定參數照啟動設定，
 /// 名字與 `--resume <sessionId>` 由這裡補（舊的 -n／--resume／--model 之外的旗標原樣保留，模型沿用設定裡的）。
-pub(crate) fn resume_argv(cfg: &LaunchConfig, name: &str, sid: &str) -> Option<Vec<String>> {
-    let mut ids: Vec<&String> = cfg.profiles.keys().collect();
-    ids.sort_by(|a, b| (a.as_str() != "claude").cmp(&(b.as_str() != "claude")).then(a.cmp(b)));
-    let p = ids.into_iter().map(|id| &cfg.profiles[id]).find(|p| p.mode == LaunchMode::Window && !p.disabled && (p.engine.is_empty() || p.engine == "claude"))?;
-    let mut full = vec![expand_vars(&p.command, &child_env())];
-    full.extend(p.args.iter().map(|a| a.replace("{name}", name)));
+/// 名字（#2493）：`name` 是手機名單的副本、可能是舊名，不直接拿來組 -n；問 `resume_name` 出口，
+/// 對話有名字就不帶 -n、`--remote-control` 用現名。回 (參數, 名字結果)：等上線、登記都要用名字結果的 `name`。
+/// `projects`＝Claude 的 projects 資料夾；`cwd`＝對話檔記的資料夾
+pub(crate) fn resume_argv(cfg: &LaunchConfig, projects: &Path, cwd: Option<&str>, name: &str, sid: &str) -> Result<(Vec<String>, crate::launch::resume_name::ResumeName), String> {
+    let id = crate::launch::auto_resume::claude_profile(cfg).ok_or_else(|| "這台電腦沒有可用的 Claude 啟動設定".to_string())?;
+    let rn = crate::launch::resume_name::resume_name(projects, sid, cwd, name);
+    // 換 {name} 與組參數前再驗一次：放進參數的名字一定要過規則；存檔名也不合規則就不開（白話原因，不放名字原文）
+    if !crate::launch::resume_name::usable_name(&rn.name) {
+        return Err(crate::launch::resume_name::NAME_RULE_TEXT.to_string());
+    }
+    let req = crate::launch::config::LaunchReq { profile: &id, name: &rn.name, cwd: cwd.unwrap_or_default().to_string() };
+    let (command, args, _) = crate::launch::config::build_spawn_spec(cfg, &req)?;
+    let mut full = vec![command];
+    full.extend(args);
     let model = switch::current_model(&full);
-    Some(switch::rewrite_args_opts(&full, Some(sid), name, model.as_deref(), None))
+    let argv = switch::rewrite_args_named(&full, Some(sid), &rn.name, rn.pass_n, model.as_deref(), None);
+    Ok((argv, rn))
 }
 
 /// 在 `<projects>/*/<sessionId>.jsonl` 找對話紀錄（只比對檔名＝sessionId，sessionId 先過格式），
