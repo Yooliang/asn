@@ -171,7 +171,10 @@ async fn 啟動中被停止又馬上啟動_第一支被停掉不留下_第二支
     r.made.lock().unwrap()[0].release.store(true, Ordering::SeqCst);
     assert!(wait(|| r.count() == 2).await, "第二支驅動要建出來（第一支啟動完成時回「被停止」，新的暖機照常啟動）");
     assert!(wait(|| r.settled() && r.w.st.lock().unwrap().driver.is_some()).await);
-    let (d1, d2) = (r.made.lock().unwrap()[0].clone(), r.made.lock().unwrap()[1].clone());
+    let (d1, d2) = {
+        let m = r.made.lock().unwrap();
+        (m[0].clone(), m[1].clone())
+    };
     assert!(d1.stopped.load(Ordering::SeqCst), "第一支要被停掉");
     assert!(!d2.stopped.load(Ordering::SeqCst), "第二支沒被停");
     let cur = r.w.st.lock().unwrap().driver.clone().map(|d| d.session_id());
