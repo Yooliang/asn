@@ -1852,6 +1852,29 @@ fn _2493_名字不合規則就不用_喚醒與重組參數() {
     assert!(argv_has(&out, &["--remote-control", "舊名"]), "{out:?}");
 }
 
+/// 名字不合規則就不用：換模型、換班時視窗現名不合規則 → 入口直接回白話錯誤，不重開、不結束任何程序；
+/// 保險層：直接呼叫重組函式帶 -n 時，不合規則的名字也不出現在參數裡
+#[test]
+fn _2493_名字不合規則就不用_換模型與換班_視窗現名不合規則_不重開() {
+    for op in ["model", "handover"] {
+        let r = rig(Opt::default());
+        write_session(&r.sessions, 220, "sid-220", "含 空格", "idle", r.work.to_str().unwrap());
+        let extra = if op == "model" { json!({ "name": "含 空格", "model": "sonnet" }) } else { json!({ "name": "含 空格" }) };
+        let res = r.ops.execute(&mk_op(op, extra));
+        assert_eq!(res.status, "failed", "{op}：{}", res.detail);
+        assert!(res.detail.contains("不合 ASN 的命名規則") && !res.detail.contains("含 空格"), "{op}：{}", res.detail);
+        assert!(r.launched().is_empty() && r.terminated().is_empty(), "{op}：不重開、不結束任何程序");
+    }
+    let old: Vec<String> = ["claude.exe", "-n", "舊名", "--remote-control", "舊名"].iter().map(|s| s.to_string()).collect();
+    for bad in ["含 空格", "-開頭", "帶;分號"] {
+        let out = switch::rewrite_args(&old, "s1", bad, "sonnet");
+        assert!(!out.iter().any(|a| a == bad) && !out.iter().any(|a| a == "-n"), "{bad}：{out:?}");
+        assert!(argv_has(&out, &["--remote-control", "舊名"]), "{out:?}");
+        let out = switch::rewrite_args_opts(&old, None, bad, None, Some("接班"));
+        assert!(!out.iter().any(|a| a == bad) && !out.iter().any(|a| a == "-n"), "{bad}：{out:?}");
+    }
+}
+
 /// 兄弟副本：手機改名退路、換班接手、切換模型重開時，舊命令列裡的 --remote-control 值是開窗當時的名字，要換成現在的名字
 #[test]
 fn _2493_重組參數時_遙控的值換成目前的名字() {

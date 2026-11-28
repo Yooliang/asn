@@ -23,6 +23,9 @@ pub(crate) fn usable_name(name: &str) -> bool {
     super::config::valid_partner_name(name)
 }
 
+/// 視窗現在的名字不合規則、因此不能重開時給使用者看的白話（不放名字原文）
+pub(crate) const NAME_RULE_TEXT: &str = "這個視窗的名字不合 ASN 的命名規則，請先把它改成只用中英文、數字等一般字元（不能以連字號開頭、最長 40 字），再試一次";
+
 /// 要用的名字被別的活視窗佔著（同名、但不是同一段對話）。`live`＝目前活著的視窗（名字，對話編號）
 pub(crate) fn name_held_by_other(live: &[(String, Option<String>)], name: &str, session: &str) -> bool {
     live.iter().any(|(n, sid)| n == name && sid.as_deref() != Some(session))

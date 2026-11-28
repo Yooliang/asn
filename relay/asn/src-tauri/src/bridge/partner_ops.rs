@@ -1799,6 +1799,11 @@ impl PartnerOps {
     /// 換班接手：記下前任 → 請前任把交接寫到規範資料夾 → 等檔案出現且大小穩定（上限 10 分鐘，逾時照樣換手並註明）
     /// → 關掉前任（沿用既有安全規則）→ 同名開新 session（不帶 --resume），第一句話指向前任對話紀錄與交接檔
     fn handover(&self, op: &Op, t: switch::Target) -> OpResult {
+        // 入口檢查：視窗現在的名字不合規則就不換班（還沒請前任寫交接、也沒動任何視窗）；不放名字原文，原因寫 log
+        if !crate::launch::resume_name::usable_name(&t.name) {
+            self.log.line(&format!("partner_op handover refused: window name is not valid, session={}", t.session_id));
+            return failed(crate::launch::resume_name::NAME_RULE_TEXT);
+        }
         let key = self.corr.pid_of(&t.name).unwrap_or_else(|| t.name.clone());
         let Some(path) = handoff_path(&self.handoff_dir, &key, self.env.now_ms()) else {
             return failed("交接檔的位置不安全，已取消");

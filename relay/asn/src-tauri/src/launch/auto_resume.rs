@@ -1525,6 +1525,12 @@ mod tests {
         assert!(i < j, "要先查現名有沒有人用，才登記、開窗");
         let wake = body(&ops, "fn resume(&self, op: &Op)");
         assert!(wake.contains("ensure_name_free(") && wake.contains("!= Some(sid)"), "喚醒：現名再查一次，等上線比對話編號");
+        // 帶 -n 重開的四處入口都要先驗名字：換模型、換班（視窗現名）、改名（新名字，既有的 valid_partner_name）、接回（出口）
+        let sw_all = crate::settings::src_scan::prod_source(include_str!("switch.rs"));
+        assert!(body(&sw_all, "pub(crate) fn run_with(").contains("usable_name(&target.name)"), "換模型入口要驗視窗現名");
+        assert!(body(&ops, "fn handover(&self, op: &Op, t: switch::Target)").contains("usable_name(&t.name)"), "換班入口要驗視窗現名");
+        assert!(body(&ops, "fn rename(&self, op: &Op, t: switch::Target)").contains("valid_partner_name(new)"), "改名入口要驗新名字");
+        assert!(body(&sw_all, "pub(crate) fn rewrite_args_named(").contains("usable_name(name)"), "重組參數的保險層");
         let rd = auto.split("impl Deps for RealDeps").nth(1).unwrap();
         let seg = |sig: &str| rd.split(sig).nth(1).unwrap().split("\n    fn ").next().unwrap().to_string();
         assert!(seg("fn unclaim(").contains("release_for(&self.used"), "解除登記用實際名字");

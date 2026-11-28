@@ -208,9 +208,12 @@ pub(crate) fn rewrite_args_opts(args: &[String], session_id: Option<&str>, name:
 pub(crate) fn rewrite_args_named(args: &[String], session_id: Option<&str>, name: &str, pass_n: bool, model: Option<&str>, prompt: Option<&str>) -> Vec<String> {
     let plen = program_len(args).min(args.len());
     let rest = &args[plen..];
-    if !name.is_empty() && !super::resume_name::usable_name(name) {
-        elog!("[重組參數] 名字不合規則，--remote-control 保留舊值");
+    // 保險層：名字不合規則就不帶 -n（入口另有檢查，這裡擋住漏網的呼叫）
+    let name_ok = name.is_empty() || super::resume_name::usable_name(name);
+    if !name_ok {
+        elog!("[重組參數] 名字不合規則，不帶 -n，--remote-control 保留舊值");
     }
+    let pass_n = pass_n && name_ok;
     let mut kept: Vec<String> = Vec::new();
     let mut i = 0;
     while i < rest.len() {
@@ -219,7 +222,7 @@ pub(crate) fn rewrite_args_named(args: &[String], session_id: Option<&str>, name
             kept.extend(rest[i..].iter().cloned());
             break;
         }
-        // 名字不合規則就不放進 --remote-control（保留舊值）；-n 沿用呼叫端給的名字（改名、換模型的活視窗名），接回不帶 -n 時不出現
+        // 名字不合規則就不放進 --remote-control（保留舊值）
         if !name.is_empty() && super::resume_name::usable_name(name) {
             // 位置不動，只把值換成目前的名字
             if a == "--remote-control" {
@@ -730,6 +733,11 @@ pub(crate) fn run_with(os: &dyn Os, dir: &Path, req: &SwitchRunReq, launch: &dyn
     let cwd = PathBuf::from(local::strip_verbatim_prefix(&target.cwd));
     if target.cwd.is_empty() || !cwd.is_dir() {
         return fail("check", format!("工作資料夾不存在：{}", target.cwd), "", false);
+    }
+    // 入口檢查：視窗現在的名字不合規則就不重開（不放名字原文，原因寫 log）
+    if !super::resume_name::usable_name(&target.name) {
+        elog!("[換模型] 視窗名字不合規則，不重開：對話 {}", target.session_id);
+        return fail("check", super::resume_name::NAME_RULE_TEXT, "", false);
     }
     let argv = rewrite_args(&target.args, &target.session_id, &target.name, &req.model);
     let manual = manual_command(&cwd.to_string_lossy(), &argv);
