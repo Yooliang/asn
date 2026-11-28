@@ -519,6 +519,8 @@
           <option v-for="m in launchModel.models" :key="m.id" :value="m.id">{{ m.label }}</option>
         </select>
       </label>
+      <!-- #2353：清單不保證完整時（探測結果帶 partial）欄位下方的一句資訊級說明 -->
+      <asn-note kind="info" aria-label="型號清單說明" v-if="!dlgPiPick &amp;&amp; launchModel.show &amp;&amp; launchModel.hint">{{ launchModel.hint }}</asn-note>
       <!-- #2355：型號清單的狀況（正在讀取、讀不到的白話原因、清單是幾分鐘前的）；沒寫 engine 的自訂設定也在這裡說明為什麼沒有下拉 -->
       <p class="partner-hint" v-if="!dlgPiPick &amp;&amp; launchModel.note" role="status" aria-label="型號清單狀況">{{ launchModel.note }}
         <button type="button" class="aero-btn" v-if="launchModel.canRetry" @click="reloadLaunchModels">{{ launchModel.retryLabel || '重新讀取' }}</button></p>

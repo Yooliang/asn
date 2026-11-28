@@ -643,6 +643,7 @@
                     <p class="m-note" v-if="lchAuto.run === 'pi' && lchPi.ok">{{ PI_REMOTE_VERSION_NOTE }}</p>
                     <!-- 一般型號（#2355 P4）：清單是那台回報的摘要（Claude 是別名）；那台沒有回報 launch_model、或讀不到時，只有說明；預設＝不指定 -->
                     <label class="m-field" v-if="lchModel.show">型號<select class="set-sel" v-model="lch.model" aria-label="型號"><option value="">不指定（照預設）</option><option v-for="mo in lchModel.models" :key="mo.id" :value="mo.id">{{ mo.label }}</option></select></label>
+                    <p class="m-note" role="note" aria-label="型號清單說明" v-if="lchModel.show && lchModel.hint">{{ lchModel.hint }}</p>
                     <template v-if="lchModel.note">
                       <p class="m-note" role="status" aria-label="型號清單狀況">{{ lchModel.note }}</p>
                       <button class="m-btn" type="button" v-if="lchModel.canRetry" @click="reloadLchModels">{{ lchModel.retryLabel || '再查一次' }}</button>

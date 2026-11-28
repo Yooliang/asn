@@ -2,7 +2,7 @@
 // 假後台的 agent_models 用實機抓下來的樣本：agy＝src-tauri/tests/fixtures/agy-models/sample.txt、Codex＝codex-models/debug-models.json、
 // pi＝test/fixtures/pi-list-models-30home.txt（說明檔在旁邊；custom／model-a～model-h 是替換過的假值）。
 // 狀態：ready（列清單）／stale（列清單＋幾分鐘前）／pending（正在讀取）／unavailable（白話原因＋重新讀取）／none（讀不到）；
-//   claude＝別名（不向本機讀）、codex＝清單讀得到但開窗不能帶，下拉不出現、pi＝經 pi 開的廠牌（DeepSeek）走 pi_models。
+//   claude＝別名（不向本機讀）、codex＝向本機讀清單、下方一行一般說明（#2353 第④階段）、pi＝經 pi 開的廠牌（DeepSeek）走 pi_models。
 // 不截圖的情境：pending 自動再問後變 ready（transition）、連問都 pending 時約 15 秒後當成讀不到、按重新讀取帶 force（giveup）。
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -23,7 +23,7 @@ const reply = (...v) => ({ models: v })
 const byVendor = values => ({ by: 'vendor', values, fallback: { models: [] } })
 
 export const DLM_TABLES = {
-  ready: byVendor({ gemini: reply(ok('gemini', agyModels)), codex: reply(ok('codex', codexModels)) }),
+  ready: byVendor({ gemini: reply(ok('gemini', agyModels)), codex: reply(ok('codex', codexModels, { partial: true })) }),
   stale: byVendor({ gemini: reply(ok('gemini', agyModels, { stale: true, age_s: 900, code: 'timeout' })) }),
   pending: byVendor({ gemini: reply({ vendor: 'gemini', status: 'pending', models: [] }) }),
   unavailable: byVendor({ gemini: reply(gone('gemini', 'not_logged_in')) }),
@@ -88,9 +88,18 @@ export const dlmProbeSource = ({ kase, card = '', expect = {}, closed = false })
         return { ok: true, why: '' };
       }
       case 'codex': {
-        await settle();
-        if (pick()) return fail('Codex 開窗不能帶型號，下拉不該出現：' + opts().join('、'));
-        if (calls('agent_models').length) return fail('Codex 不該向本機讀清單');
+        // #2353 第④階段：本機開 Codex 可選型號（建新對話時套用）；清單不保證完整時，下方一行一般說明（info 灰字，不是警告）
+        if (!(await waitFor(() => opts().length > 1, 60))) return fail('Codex 型號下拉沒有出現清單：' + opts().join('、'));
+        const o = opts();
+        if (o[0] !== '不指定（照預設）') return fail('第一項應是「不指定（照預設）」：' + o[0]);
+        if (o.length !== 1 + E.count) return fail('Codex 清單筆數不對：' + (o.length - 1) + '（應為 ' + E.count + '）');
+        const first = calls('agent_models')[0]?.[1];
+        if (!first || first.vendor !== 'codex') return fail('應向本機讀 Codex 的清單：' + JSON.stringify(first));
+        const note = [...dlg().querySelectorAll('[aria-label="型號清單說明"]')].find(vis);
+        if (!note || txt(note) !== '清單來自這台的 Codex，預設用的型號可能不在裡面') return fail('Codex 清單下方要有說明：' + txt(note));
+        if (!note.classList.contains('asn-note-info') || note.classList.contains('partner-hint')) return fail('說明要用一般說明樣式（AsnNote info），不是警告色：' + note.className);
+        if (hint()) return fail('讀得到清單不該有狀況說明：' + txt(hint()));
+        expand();
         return { ok: true, why: '' };
       }
       case 'pi': {
@@ -172,6 +181,7 @@ const scene = (name, kase, { card = '', expect = {}, shot = true, skin, state = 
 const READY = { count: GEMINI_COUNT, sample: 'Gemini 4 Argon (High)' }
 const UNAV = { note: '讀不到型號清單：Gemini 還沒登入（登入後再試）', retry: true }
 const NONE = { note: '這台電腦讀不到型號清單', retry: false }
+const CODEX = { count: codexModels.length }
 
 export default {
   key: 'dlaunchModels',
@@ -190,7 +200,10 @@ export default {
     // 其他截圖：stale、Claude 別名、Codex（清單讀得到但不出下拉）、經 pi 的廠牌（pi 清單）
     scene('list-launch-models-stale', 'stale', { card: 'Gemini', expect: READY }),
     scene('list-launch-models-claude', 'claude', { state: 'ready' }),
-    scene('list-launch-models-codex', 'codex', { card: 'Codex', state: 'ready' }),
+    scene('list-launch-models-codex', 'codex', { card: 'Codex', state: 'ready', expect: CODEX }),
+    scene('list-launch-models-codex-closed', 'codex', { card: 'Codex', state: 'ready', expect: CODEX, closed: true }),
+    scene('list-launch-models-codex-closed-modern', 'codex', { card: 'Codex', state: 'ready', expect: CODEX, closed: true, skin: 'modern' }),
+    scene('list-launch-models-codex-closed-line', 'codex', { card: 'Codex', state: 'ready', expect: CODEX, closed: true, skin: 'line' }),
     scene('list-launch-models-pi', 'pi', { card: 'DeepSeek', state: 'ready' }),
     // 收合版：實際畫面的下拉（上面幾張為了拍到選項，把下拉撐成清單）
     scene('list-launch-models-ready-closed', 'ready', { card: 'Gemini', expect: READY, closed: true }),

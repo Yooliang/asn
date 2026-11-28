@@ -6,14 +6,15 @@ import { localProfileEngine } from './partner-launch-ui.mjs'
 
 /**
  * 這次要開的那一家，在那台電腦上有沒有型號下拉。回 { show, kind: 'aliases'|'list'|'', vendor, models, note }（同 launchModelChoices）：
- *  - 那一家／開法本來就不能帶型號（asn終端、經 pi、Codex、Grok）：show false、沒有說明
+ *  - 那一家／開法本來就不能帶型號（asn終端、經 pi、Codex、Grok）：show false、沒有說明。
+ *    Codex 本機對話框有下拉（#2353 第④階段），但別台的後端還不收，所以這裡（remote: true）一律沒有
  *  - 沒寫 engine 的自訂設定：show false，說明為什麼（launchModelChoices 的 NO_ENGINE_NOTE）
  *  - 那台沒有回報 launch_model（舊版 ASN，後台會擋成「不支援指定型號」）：show false，寫一句說明，不讓使用者選了才失敗
  *  - Claude：別名；Gemini：kind 'list'，清單要向 loader 要（models 先給空的）
  * row：廠牌卡（launchVendorCards 的一列，id 與 profileId）；run：autoRunFor 決定的開法。
  */
 export function remoteLaunchModelChoice(launcher, row, run) {
-  const c = launchModelChoices(row?.id, run, { engine: localProfileEngine(row?.profileId, launcher) })
+  const c = launchModelChoices(row?.id, run, { engine: localProfileEngine(row?.profileId, launcher), remote: true })
   if (!c.show) return c
   if (launcher?.launch_model !== true) return { show: false, kind: '', vendor: '', models: [], note: NONE_TEXT }
   return c
@@ -24,11 +25,12 @@ export function remoteLaunchModelChoice(launcher, row, run) {
  * 回 { ...choice, models, note, canRetry, retryLabel }；kind 不是 'list' 的不看 view。還沒讀到 view 時顯示「正在讀取」。
  */
 export function launchModelView(choice, view) {
-  if (choice?.kind !== 'list') return { ...choice, canRetry: false, retryLabel: '' }
+  if (choice?.kind !== 'list') return { ...choice, canRetry: false, retryLabel: '', hint: '' }
   return {
     ...choice,
     models: view?.models ?? [],
     note: view?.note ?? PENDING_TEXT,
+    hint: view?.hint ?? '',
     canRetry: Boolean(view?.canRetry) && !view?.loading,
     retryLabel: view?.retryLabel || '',
   }

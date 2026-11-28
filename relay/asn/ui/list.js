@@ -39,7 +39,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
 import { TermView } from './lib/term-view.mjs'
 import { ActionBar } from './lib/actionbar.mjs'
-import { AsnToast, showResult } from './lib/ui-kit.mjs'
+import { AsnNote, AsnToast, showResult } from './lib/ui-kit.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
@@ -83,7 +83,7 @@ import { contextLabel } from './lib/context-usage.mjs'
 import { elevatedBadge } from './lib/elevated.mjs'
 import { NOTICE_CATS, NOTICE_CAT_ALL, NOTICE_CAT_ICON, NOTICE_CAT_LABEL, NOTICE_ID, NOTICE_TAB, filterNoticeRows, isNoticeFriend, noticeRows, noticeTime, noticeUnreadCount, withoutNoticeItems, withoutNoticeTabs } from './lib/notice.mjs'
 import { ARCHIVE_GROUP_KEY, activeFriends, archivedFriends, runArchive, setLocalArchiver, withArchivedGroup } from './lib/archive.mjs'
-import { backgroundRestoreNoticeText, collectLaunchFailures, collectLaunchModelUsed, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, launchOkToastText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
+import { backgroundRestoreNoticeText, collectLaunchFailures, collectLaunchModelUsed, existingPartnerNoticeText, findBackgroundTimeouts, launchFailedNoticeText, launchOkToastText, modelNotAppliedNoticeText, shouldRestoreForeground } from './lib/partner-launch-notify.mjs'
 import { launchModelView, pickKeptWhenShown, pickedModel, remoteLaunchModelChoice, usedModelLabel } from './lib/remote-launch-models.mjs'
 import { ONBOARD_STORE, planOnboarding } from './lib/onboard.mjs'
 import { friendId } from './lib/roster.mjs'
@@ -723,7 +723,8 @@ const dlgAuto = computed(() => autoRunFor(dlgRow.value, {
 // 「再查一次」只是重新向後台問一次（那台會自己定期更新，沒辦法從這裡叫它重讀）
 const launchModelViews = ref({})
 const remoteModelViews = ref({})
-const modelLoader = createModelLoader({ fetch: a => transport.agentModels(a), vendorLabel: v => (v === 'gemini' ? 'Gemini' : v), onChange: (v, view) => { launchModelViews.value = { ...launchModelViews.value, [v]: view } } })
+// Codex 的型號代號走統一規則（後端 launch_model_plan 對 Codex 也只驗統一規則），不套切換模型的窄規則（narrow）
+const modelLoader = createModelLoader({ fetch: a => transport.agentModels(a), vendorLabel: v => (v === 'gemini' ? 'Gemini' : v === 'codex' ? 'Codex' : v), narrow: v => v !== 'codex', onChange: (v, view) => { launchModelViews.value = { ...launchModelViews.value, [v]: view } } })
 const remoteModelLoader = createModelLoader({
   where: 'remote', vendorLabel: v => (v === 'gemini' ? 'Gemini' : v),
   fetch: async ({ force, retry }) => { if (force || retry) await refreshLaunchers(); return remoteLaunchers.value[partnerDlg.node] ?? null },
@@ -1105,8 +1106,9 @@ async function submitPartnerDlg() {
         existingHit = true
         // 同名夥伴已在跑：後端沒有另開，只把原本那個切到前景；不會多出新的夥伴，所以拿掉啟動中列
         launchPending.value = launchPending.value.filter(p => p.id !== pend.id)
-        showLaunchNotice(existingPartnerNoticeText(partnerDlg.name, opened.reason, opened.initial_dropped))
-      } else if (opened?.note) showLaunchNotice({ title: '已改用一般視窗', body: opened.note })
+        showLaunchNotice(existingPartnerNoticeText(partnerDlg.name, opened.reason, opened.initial_dropped, opened.model_note))
+      } else if (opened?.note) showLaunchNotice(modelNotAppliedNoticeText(partnerDlg.name, opened.model_note, { title: '已改用一般視窗', body: opened.note }))
+      else if (opened?.model_note) showLaunchNotice(modelNotAppliedNoticeText(partnerDlg.name, opened.model_note))
     } else {
       // 經 pi：profile 一律 pi，帶那台清單裡的提供者與模型（不在清單裡就不送）；其他開法照舊
       // 型號（#2355 P4）：選了卻已不在那台目前的清單裡（清單剛換）就請他重選，不偷偷改成不指定
@@ -2385,6 +2387,7 @@ app.component('chat-pane', ChatPane)
 app.component('term-view', TermView)
 app.component('action-bar', ActionBar)
 app.component('AsnToast', AsnToast)   // 結果提示（封存結果、釘選滿）：頁面根部掛一個，呼叫端用 showResult
+app.component('AsnNote', AsnNote)     // 一般說明（info 灰字）：開新夥伴第 2 頁 Codex 型號清單的說明（#2353）
 app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
 app.component('asn-avatar', AsnAvatar)

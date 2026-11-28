@@ -16,6 +16,8 @@
 //! 摘要裡的形狀（`models` 陣列，每家一筆；與後台 `sanitizeModels` 收的完全一致）：
 //! `{vendor, status, code?, stale?, age_s?, models:[{id,name}]}`。status：ok／unavailable／error／pending；
 //! pending＝第一次還沒有結果（讀取中）；stale＝重查失敗、沿用上次的清單（status 仍是 ok，code 是這次失敗的原因，age_s＝這份清單距今幾秒）。
+//! `partial`（#2353 第④階段，false 不輸出）＝這家的清單不保證完整（Codex 只列可選的型號，預設用的可能不在裡面）；
+//! 目前只走本機的 `agent_models` 回應給本機對話框用，後台 sanitize 尚未放行這個欄位（遠端開放 Codex 時要一起放行）。
 mod parse;
 pub mod query;
 mod redact;
@@ -117,6 +119,10 @@ pub struct VendorModels {
     /// stale 時：這份清單距上次成功讀到幾秒
     #[serde(skip_serializing_if = "Option::is_none")]
     pub age_s: Option<u64>,
+    /// 「清單不保證完整」（#2353 第④階段）：這家 CLI 列出來的清單可能少了它預設在用的型號（Codex 的清單只列「可選」的，
+    /// 預設用的不一定在裡面）。畫面看到它就在下拉下方加一句資訊級說明；沒有這個標記就不顯示。false 時不輸出
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub partial: bool,
     pub models: Vec<ModelEntry>,
     /// 給 log 看的原因（Ok 時為空）。**絕不序列化**：原文可能帶路徑、帳號、環境值
     #[serde(skip)]
@@ -132,6 +138,7 @@ impl std::fmt::Debug for VendorModels {
             .field("code", &self.code)
             .field("stale", &self.stale)
             .field("age_s", &self.age_s)
+            .field("partial", &self.partial)
             .field("models", &self.models)
             .field("reason", &format_args!("<已遮蔽 {} 字>", self.reason.chars().count()))
             .finish()
@@ -157,7 +164,7 @@ pub fn failure_log_line(v: &VendorModels) -> Option<String> {
 
 impl VendorModels {
     fn new(v: Vendor, status: Status, code: Option<Code>, models: Vec<ModelEntry>, reason: impl Into<String>) -> Self {
-        VendorModels { vendor: v.id().into(), status, code, stale: false, age_s: None, models, reason: reason.into() }
+        VendorModels { vendor: v.id().into(), status, code, stale: false, age_s: None, partial: false, models, reason: reason.into() }
     }
     pub fn unavailable(v: Vendor, code: Code, reason: impl Into<String>) -> Self {
         Self::new(v, Status::Unavailable, Some(code), vec![], reason)
@@ -190,7 +197,10 @@ impl VendorModels {
             },
         };
         if !list.is_empty() {
-            return Self::from_list(v, list);
+            let mut r = Self::from_list(v, list);
+            // Codex：`codex debug models` 只列「可選」的，它預設在用的型號可能不在裡面 → 標「清單不保證完整」
+            r.partial = v == Vendor::Codex;
+            return r;
         }
         if v == Vendor::Codex {
             return Self::error(v, Code::ParseFailed, "輸出是合法的 JSON，但沒有可列出的型號");
@@ -606,6 +616,7 @@ fn limit_with(list: Vec<VendorModels>, max_models: usize, max_bytes: usize, floo
                     v.code = Some(Code::TooLarge);
                     v.stale = false;
                     v.age_s = None;
+                    v.partial = false;
                     v.reason = format!("超過回報上限，{total} 筆都放不下");
                 } else {
                     v.reason = format!("回報時截斷：只留前 {} 筆（共 {total} 筆）", kept.len());
@@ -728,6 +739,30 @@ mod tests {
         assert_eq!(serde_json::to_value(VendorModels::unavailable(Vendor::Gemini, Code::NotInstalled, "x")).unwrap()["status"], "unavailable");
         // pending：沒有 code、stale、age_s 這些鍵
         assert_eq!(serde_json::to_value(VendorModels::pending(Vendor::Pi)).unwrap(), serde_json::json!({ "vendor": "pi", "status": "pending", "models": [] }));
+    }
+
+    #[test]
+    fn codex_清單標_partial_其他家與失敗不標_false_不輸出() {
+        let codex = r#"{"models":[{"slug":"a-1","display_name":"A","visibility":"list","priority":1},{"slug":"hid","visibility":"hide"}]}"#;
+        let r = VendorModels::from_text(Vendor::Codex, codex);
+        assert!(r.partial, "Codex 的清單不保證完整");
+        assert_eq!(r.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["a-1"], "隱藏的不列");
+        assert_eq!(serde_json::to_value(&r).unwrap()["partial"], true);
+        // 其他家、失敗、解析不出來：不標，序列化也沒有這個鍵
+        let agy = VendorModels::from_text(Vendor::Gemini, "x-1\tX\n");
+        assert!(!agy.partial && serde_json::to_value(&agy).unwrap().get("partial").is_none());
+        let bad = VendorModels::from_text(Vendor::Codex, "not json");
+        assert!(!bad.partial && serde_json::to_value(&bad).unwrap().get("partial").is_none());
+        assert!(!ok(Vendor::Codex).partial, "只有探測的解析結果會標，手建的不標");
+        // 沿用上次清單（stale）時標記跟著留下
+        let (c, t0) = (leak(), Instant::now());
+        c.put(Vendor::Codex, r, t0);
+        c.put(Vendor::Codex, VendorModels::error(Vendor::Codex, Code::Timeout, "逾時"), t0 + Duration::from_secs(700));
+        let kept = c.current(Vendor::Codex, t0 + Duration::from_secs(710));
+        assert!(kept.stale && kept.partial);
+        // 回報一筆都放不下時改成 error，標記要拿掉
+        let big = VendorModels { partial: true, ..VendorModels::from_list(Vendor::Codex, vec![ModelEntry { id: "m".into(), name: "n".repeat(80) }]) };
+        assert!(!limit_with(vec![big], 50, 100, 0)[0].partial);
     }
 
     #[test]
@@ -1354,6 +1389,7 @@ mod tests {
                 code: Some(Code::Ok),
                 stale: false,
                 age_s: None,
+                partial: false,
                 models: (0..300).map(|i| ModelEntry { id: pad(format!("{v}-{i:03}-"), 'x', 100), name: pad(format!("{v} {i:03} "), 'N', 80) }).collect(),
                 reason: String::new(),
             })
