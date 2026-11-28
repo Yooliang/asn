@@ -107,8 +107,8 @@ export const ITEM_NEEDS = build(
   // 十、用量
   group(['claudeLocalLogs'], 'usage-refresh'),
   // 十一、更新
-  group([], 'autoCheck', 'prefs.autoUpdate', 'file.me.autoUpdate'),
-  group([], 'check-update'),
+  group(['shellSelfUpdate'], 'autoCheck', 'prefs.autoUpdate', 'file.me.autoUpdate'),
+  group(['shellSelfUpdate'], 'check-update'),
   group([], 'releases-retry'),
   // 十二、關於
   group([], 'open-link', 'open-update', 'open-guide'),

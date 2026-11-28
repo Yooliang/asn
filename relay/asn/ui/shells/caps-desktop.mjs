@@ -13,7 +13,7 @@ export const capsDesktop = Object.freeze({
   hostAgents: true,       // 本機 AI 視窗：在這台電腦上開 AI 視窗、安裝與偵測 AI 工具、工作資料夾白名單
   claudeLocalLogs: true,  // 本機 Claude 記錄：這台電腦上的 Claude 記錄，用量從這裡估算
   push: false,            // 推播：系統推播通知（只有安卓外殼）
-  shellSelfUpdate: false, // 外殼自己更新：外殼自己下載安裝包更新（Play 安裝的版本由商店更新）
+  shellSelfUpdate: true,  // 外殼自己更新：自己檢查、下載並安裝新版（不經應用程式商店）；網頁版由伺服器更新，沒有這項
   vibrate: false,         // 震動：手機的振動馬達
   desktopToast: true,     // 電腦通知：右下角通知和提示音
   quotaReader: true,      // 讀額度：這台電腦替各帳號讀額度、產生查詢代碼

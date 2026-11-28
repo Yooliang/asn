@@ -27,13 +27,16 @@ test('能力名稱快照：能力名稱定了不能改，#1853 會引用', () =>
   assert.deepEqual(Object.keys(capsDesktop), NAMES, '能力名稱定了不能改，#1853 會引用')
 })
 
-test('電腦與手機的能力互補（這幾個本來就一邊有一邊沒有），網頁先全部沒有', () => {
+test('電腦與手機的能力互補（這幾個本來就一邊有一邊沒有）；外殼自己更新電腦與手機都有、網頁沒有；網頁其餘全部沒有', () => {
   for (const k of ['tray', 'desktopWindow', 'autostart', 'guard', 'bridge', 'localSpeech', 'hostAgents', 'claudeLocalLogs', 'desktopToast', 'quotaReader', 'taskManager']) {
     assert.equal(capsDesktop[k], true, `電腦 ${k}`); assert.equal(capsAndroid[k], false, `手機 ${k}`)
   }
-  for (const k of ['push', 'shellSelfUpdate', 'vibrate']) {
+  for (const k of ['push', 'vibrate']) {
     assert.equal(capsDesktop[k], false, `電腦 ${k}`); assert.equal(capsAndroid[k], true, `手機 ${k}`)
   }
+  assert.equal(capsDesktop.shellSelfUpdate, true, '電腦 shellSelfUpdate')
+  assert.equal(capsAndroid.shellSelfUpdate, true, '手機 shellSelfUpdate')
+  assert.equal(capsWeb.shellSelfUpdate, false, '網頁 shellSelfUpdate')
   assert.ok(Object.values(capsWeb).every(v => v === false))
 })
 
