@@ -10,7 +10,7 @@ export const capsAndroid = Object.freeze({
   hostAgents: false,       // 手機不在本機開 AI 視窗，只能下指令請電腦開
   claudeLocalLogs: false,  // 手機上沒有 Claude 記錄可讀
   push: true,              // 安卓外殼有推播
-  shellSelfUpdate: true,   // 安卓外殼可自己更新（Play 版除外，畫面另判）
+  shellSelfUpdate: true,   // 外殼自己更新：安卓外殼可自己下載並安裝新版（Play 安裝的版本由商店更新，畫面另判）
   vibrate: true,           // 手機有振動馬達
   desktopToast: false,     // 手機沒有右下角通知；提示改走推播與震動
   quotaReader: false,      // 額度是電腦本機讀的，手機只顯示回報的數字

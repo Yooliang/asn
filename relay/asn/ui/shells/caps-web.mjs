@@ -11,7 +11,7 @@ export const capsWeb = Object.freeze({
   hostAgents: false,
   claudeLocalLogs: false,
   push: false,
-  shellSelfUpdate: false,
+  shellSelfUpdate: false,  // 網頁版由伺服器更新，重新整理就是新版，沒有外殼自己更新這回事
   vibrate: false,
   desktopToast: false,
   quotaReader: false,
