@@ -524,19 +524,55 @@ struct RealDeps {
     /// 退回系統終端（原生主控台）開出來的夥伴名字（開窗後讀 `win_term::take_native_why`，同一個執行緒）
     native: std::sync::Mutex<std::collections::HashSet<String>>,
     /// 存檔名 → 接回時實際用的名字（對話現名，#2493）：等上線、顯示視窗都要用實際的名字，存檔名可能是舊的
-    used: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    used: UsedNames,
     /// 名單之外事先排掉的夥伴（本人封存的），寫進結果的 skipped
     pre_skipped: Vec<Skipped>,
 }
 
-#[cfg(feature = "gui")]
-impl RealDeps {
-    /// 同名視窗還活著（名字的判斷維持原樣，用心跳的存活規則）
-    /// 這位接回時實際用的名字；還沒開過就是存檔名
-    fn used_name(&self, stored: &str) -> String {
-        self.used.lock().ok().and_then(|m| m.get(stored).cloned()).unwrap_or_else(|| stored.to_string())
+/// 存檔名 → (接回時實際用的名字, 對話編號)。等上線、解除「正在開」登記、顯示視窗都查這張，不用存檔裡可能已經舊了的名字
+#[derive(Default)]
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) struct UsedNames(std::sync::Mutex<std::collections::HashMap<String, (String, String)>>);
+
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+impl UsedNames {
+    pub(crate) fn record(&self, stored: &str, used: &str, session: &str) {
+        if let Ok(mut m) = self.0.lock() {
+            m.insert(stored.to_string(), (used.to_string(), session.to_string()));
+        }
     }
 
+    /// 這位接回時實際用的名字；還沒開過就是存檔名
+    pub(crate) fn name_of(&self, stored: &str) -> String {
+        self.0.lock().ok().and_then(|m| m.get(stored).map(|(n, _)| n.clone())).unwrap_or_else(|| stored.to_string())
+    }
+
+    fn session_of(&self, stored: &str) -> Option<String> {
+        self.0.lock().ok().and_then(|m| m.get(stored).map(|(_, s)| s.clone()))
+    }
+}
+
+/// 開出來的視窗上線了：活著的視窗裡有「實際用的名字」而且是同一段對話（接回後對話編號不變，只比名字會認到別段對話的同名視窗）
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) fn appeared_in(live: &[(String, Option<String>)], used: &UsedNames, stored: &str) -> bool {
+    let (name, session) = (used.name_of(stored), used.session_of(stored));
+    live.iter().any(|(n, sid)| *n == name && session.as_deref().is_none_or(|s| sid.as_deref() == Some(s)))
+}
+
+/// 沒上線時解除「正在開」登記：登記時用的是實際名字，解除也要用同一個
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) fn release_for(used: &UsedNames, e: &KnownEntry) {
+    super::opening::release(&e.facts.session, &used.name_of(&e.name));
+}
+
+#[cfg(feature = "gui")]
+impl RealDeps {
+    /// 這位接回時實際用的名字；還沒開過就是存檔名
+    fn used_name(&self, stored: &str) -> String {
+        self.used.name_of(stored)
+    }
+
+    /// 同名視窗還活著（名字的判斷維持原樣，用心跳的存活規則）
     fn live_name(&self, name: &str) -> bool {
         let live = crate::bridge::roster::read_sessions_with(&self.sessions, crate::heartbeat::session_alive, 0, "").unwrap_or_default();
         live.iter().any(|w| w.name == name)
@@ -568,7 +604,7 @@ impl Deps for RealDeps {
         already_live(&super::switch::RealOs, &super::console::read_sessions(&self.sessions), self.live_name(name), session)
     }
     fn unclaim(&self, e: &KnownEntry) {
-        super::opening::release(&e.facts.session, &self.used_name(&e.name));
+        release_for(&self.used, e);
     }
     fn still_starting(&self, e: &KnownEntry) -> bool {
         super::live_process::real_resumes(&e.facts.session)
@@ -583,9 +619,7 @@ impl Deps for RealDeps {
             // 存檔裡的名字還是舊的：視窗上線後橋會照現名登記進存檔（同一段對話以最新那列為準，#2475）；這裡不另寫存檔，免得和橋互蓋
             elog!("[接回] 存檔名與實際用的名字不同：對話 {}、存檔名 {}、實際 {}", e.facts.session, e.name, used);
         }
-        if let Ok(mut m) = self.used.lock() {
-            m.insert(e.name.clone(), used);
-        }
+        self.used.record(&e.name, &used, &e.facts.session);
         if let Ok(mut m) = self.opened.lock() {
             m.insert(e.name.clone(), pid);
         }
@@ -610,7 +644,8 @@ impl Deps for RealDeps {
         super::console::show_partner_window("claude", &self.used_name(&e.name), pid)
     }
     fn appeared(&self, name: &str) -> bool {
-        self.live_name(&self.used_name(name))
+        let live: Vec<(String, Option<String>)> = crate::bridge::roster::read_sessions_with(&self.sessions, crate::heartbeat::session_alive, 0, "").unwrap_or_default().into_iter().map(|w| (w.name, w.session_id)).collect();
+        appeared_in(&live, &self.used, name)
     }
     fn report(&self, status: &Status) {
         write_status(&self.data_dir, status);
@@ -1422,6 +1457,54 @@ mod tests {
         assert_eq!(plan.rn.name, "舊名");
     }
 
+    /// 開機接回同一類：存檔舊名、對話現名「新名」，另一段對話的活視窗正叫「新名」→ 開之前就擋下（白話原因），不開第二個
+    #[test]
+    fn _2493_開機接回_現名已被另一段對話的視窗用著_不開第二個() {
+        let (_b, cwd, projects, config) = cold(&["舊名", "新名"]);
+        let plan = plan_of(&stale_entry(&cwd), &projects, &config);
+        let other = vec![("新名".to_string(), Some("別段對話".to_string()))];
+        let err = super::super::resume_name::ensure_name_free(&other, &plan.rn.name, SID_2493).unwrap_err();
+        assert!(err.contains("已經有另一個視窗叫「新名」"), "{err}");
+        // 同一段對話自己的視窗不算撞名；別的名字也不算
+        assert!(super::super::resume_name::ensure_name_free(&[("新名".to_string(), Some(SID_2493.to_string()))], &plan.rn.name, SID_2493).is_ok());
+        assert!(super::super::resume_name::ensure_name_free(&[("舊名".to_string(), Some("別段對話".to_string()))], &plan.rn.name, SID_2493).is_ok());
+    }
+
+    /// 等上線：查「實際用的名字」而且要同一段對話（接回後對話編號不變）；改回查存檔名或只比名字就會紅
+    #[test]
+    fn _2493_開機接回_等上線查實際名字_也比對話編號() {
+        let used = UsedNames::default();
+        used.record("舊名", "新名", SID_2493);
+        let w = |n: &str, s: &str| vec![(n.to_string(), Some(s.to_string()))];
+        assert!(appeared_in(&w("新名", SID_2493), &used, "舊名"));
+        assert!(!appeared_in(&w("舊名", SID_2493), &used, "舊名"), "存檔的舊名不是實際用的名字");
+        assert!(!appeared_in(&w("新名", "別段對話"), &used, "舊名"), "同名但別段對話不算上線");
+        assert!(!appeared_in(&[], &used, "舊名"));
+    }
+
+    /// 記下實際用的名字：存檔名查得到實際名字；沒記過就是存檔名
+    #[test]
+    fn _2493_開機接回_記下實際用的名字() {
+        let used = UsedNames::default();
+        assert_eq!(used.name_of("舊名"), "舊名");
+        used.record("舊名", "新名", SID_2493);
+        assert_eq!(used.name_of("舊名"), "新名");
+    }
+
+    /// 沒上線解除「正在開」登記：要用登記時的實際名字，用存檔名解除會留著登記、本人之後手動喚醒被擋
+    #[test]
+    fn _2493_開機接回_解除正在開登記用實際名字() {
+        let sid = "dddddddd-4444-4444-8444-dddddddddddd";
+        let mut e = entry("舊名");
+        e.facts.session = sid.into();
+        let used = UsedNames::default();
+        used.record("舊名", "新名", sid);
+        assert!(crate::launch::opening::claim(sid, "新名"), "開窗時用實際名字登記");
+        release_for(&used, &e);
+        assert!(crate::launch::opening::claim(sid, "新名"), "解除後再登記得到（用舊名解除就會留著登記）");
+        crate::launch::opening::release(sid, "新名");
+    }
+
     /// 接線守門（拿掉任何一處呼叫要紅）：三條接回路都問 resume_name 出口，不再自己拿存檔名組 -n
     #[test]
     fn 守門_接回的名字只問出口() {
@@ -1437,6 +1520,17 @@ mod tests {
         let argv = body(&ops, "pub(crate) fn resume_argv(");
         assert!(argv.contains("resume_name("), "喚醒的參數要問出口");
         assert!(!ops.contains(".replace(\"{name}\""), "喚醒不能再自己把存檔名換進啟動設定的 {{name}}");
+        // 現名再查一次有沒有別段對話的視窗在用（開窗前）、等上線比對話編號、RealDeps 的收尾都用實際名字
+        let (i, j) = (start.find("ensure_name_free(").expect("開窗前要查現名"), start.find("opening::claim(").unwrap());
+        assert!(i < j, "要先查現名有沒有人用，才登記、開窗");
+        let wake = body(&ops, "fn resume(&self, op: &Op)");
+        assert!(wake.contains("ensure_name_free(") && wake.contains("!= Some(sid)"), "喚醒：現名再查一次，等上線比對話編號");
+        let rd = auto.split("impl Deps for RealDeps").nth(1).unwrap();
+        let seg = |sig: &str| rd.split(sig).nth(1).unwrap().split("\n    fn ").next().unwrap().to_string();
+        assert!(seg("fn unclaim(").contains("release_for(&self.used"), "解除登記用實際名字");
+        assert!(seg("fn launch(").contains("self.used.record(&e.name, &used, &e.facts.session)"), "要記下實際用的名字");
+        assert!(seg("fn appeared(").contains("appeared_in(&live, &self.used"), "等上線查實際名字與對話編號");
+        // 掃描範圍：只掃下面這三個檔的正式碼；在別的檔新增接回路，要自己把那個檔加進這份清單
         // 這三個檔不准自己用字面的 "-n" 組參數；拼 -n 的只有 switch.rs 的 rewrite_args_named 與 resume_name.rs
         for (f, src) in [("auto_resume.rs", &auto), ("local.rs", &local), ("partner_ops.rs", &ops)] {
             assert!(!src.contains("\"-n\""), "{f} 不准自己組 -n，要經 resume_name 出口");

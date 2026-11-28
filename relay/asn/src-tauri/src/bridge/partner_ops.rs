@@ -20,8 +20,6 @@ use super::corrlog::{CorrLog, Dir, Entry};
 use super::engines::acp_admin::AcpAdmin;
 use super::roster;
 use crate::launch::config::{canonical_launch_cwd, check_launch, valid_partner_name, LaunchConfig, LaunchReq};
-#[cfg(test)]
-use crate::launch::profiles::LaunchMode;
 use crate::launch::console;
 use crate::launch::switch::{self, Os, Plan, Proc, SwitchRunReq, Timing};
 use crate::relay::Relay;
@@ -1658,6 +1656,20 @@ impl PartnerOps {
         };
         // 之後登記、等上線、回報都用出口回的名字（對話現名優先；手機名單送來的 name 可能是舊名）
         let name = rn.name.as_str();
+        // 現名可能和手機送來的舊名不同：用現名再查一次，被另一段對話的活視窗用著（或是受保護的名字）就不開，不能開出第二個同名視窗
+        if name != op.name.as_str() && (self.protect)(name, 0) {
+            self.log.line(&format!("resume refused: session={sid}, current name is protected"));
+            return failed(PROTECTED);
+        }
+        let live: Vec<(String, Option<String>)> = sessions
+            .iter()
+            .filter(|s| self.session_live(s, &table))
+            .filter_map(|s| Some((s.get("name")?.as_str()?.to_string(), s.get("sessionId").and_then(Value::as_str).map(str::to_string))))
+            .collect();
+        if let Err(why) = crate::launch::resume_name::ensure_name_free(&live, name, sid) {
+            self.log.line(&format!("resume refused: session={sid}, name {name} is held by a live window of another session"));
+            return failed(why);
+        }
         let plan = Plan { name: name.to_string(), cwd: PathBuf::from(crate::launch::local::strip_verbatim_prefix(&canon.to_string_lossy())), argv, in_wt: false };
         // 6. 動手前再驗一次本機開關
         if !self.env.allow_remote() {
@@ -1678,6 +1690,10 @@ impl PartnerOps {
         let appeared = switch::wait_until(os, self.env.timing().appear_wait_ms, self.env.timing().poll_ms, || {
             for s in console::read_sessions(&self.dirs.sessions) {
                 if s.get("name").and_then(Value::as_str) != Some(name) || s.get("kind").and_then(Value::as_str).map(|k| k != "interactive").unwrap_or(false) {
+                    continue;
+                }
+                // 接回後對話編號不變：只比名字會認到別段對話的同名視窗
+                if s.get("sessionId").and_then(Value::as_str) != Some(sid) {
                     continue;
                 }
                 let Some(p) = s.get("pid").and_then(Value::as_u64).and_then(|p| u32::try_from(p).ok()) else { continue };
@@ -1903,6 +1919,15 @@ fn pick_handover_model(recorded: Option<String>, launched: Option<String>) -> (O
 pub(crate) fn resume_argv(cfg: &LaunchConfig, projects: &Path, cwd: Option<&str>, name: &str, sid: &str) -> Option<(Vec<String>, crate::launch::resume_name::ResumeName)> {
     let id = crate::launch::auto_resume::claude_profile(cfg)?;
     let rn = crate::launch::resume_name::resume_name(projects, sid, cwd, name);
+    // 換 {name} 與組參數前再驗一次：名字不合規則就不用（改用存檔名、不帶 -n）；存檔名也不合規則就不開
+    let rn = if crate::launch::resume_name::usable_name(&rn.name) {
+        rn
+    } else {
+        crate::launch::resume_name::ResumeName { name: name.to_string(), pass_n: false, source: crate::launch::resume_name::Source::Rejected }
+    };
+    if !crate::launch::resume_name::usable_name(&rn.name) {
+        return None;
+    }
     let req = crate::launch::config::LaunchReq { profile: &id, name: &rn.name, cwd: cwd.unwrap_or_default().to_string() };
     let (command, args, _) = crate::launch::config::build_spawn_spec(cfg, &req).ok()?;
     let mut full = vec![command];

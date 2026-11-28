@@ -302,6 +302,8 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
 pub fn start_resumed_window(config: &super::config::LaunchConfig, name: &str, cwd: &str, session: &str, perm: &[String], hidden: bool) -> Result<(u32, String), String> {
     let plan = plan_resumed_window(config, None, name, cwd, session, perm)?;
     let used = plan.rn.name.clone();
+    // 現名可能和存檔名不同：開之前用現名再查一次，被另一段對話的活視窗用著就不開第二個同名視窗
+    super::resume_name::ensure_name_free(&super::resume_name::live_windows_real(), &used, session)?;
     let req = &plan;
     super::pretrust::ensure_claude_cwd_trusted("claude", &req.cwd);
     // 別條路（本人喚醒、開機接回、終端服務中斷接回）剛開了同一位、還沒上線：不開第二個。開失敗要解除，不然本人之後手動喚醒會被擋

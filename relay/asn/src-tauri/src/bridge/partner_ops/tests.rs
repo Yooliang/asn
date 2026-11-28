@@ -1,6 +1,7 @@
 //! 遠端管理夥伴視窗的單元測試：作業系統一律用假的（不開視窗、不結束程序），資料夾都是暫存資料夾，
 //! 後台只連 127.0.0.1 的假伺服器。六條安全規則各有對應的測試（名稱以「規則N」開頭）。
 use super::*;
+use crate::launch::profiles::LaunchMode;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::io::{Read, Write};
@@ -1803,6 +1804,52 @@ fn _2493_喚醒_對話沒有名字_照舊帶n用存檔名_讀不到對話檔也�
     let cfg = launch_cfg(&[&r.work]);
     let (argv, rn) = resume_argv(&cfg, &r.tmp.path().join("沒有這個資料夾"), None, "離線夥伴", SID).unwrap();
     assert!(rn.pass_n && rn.name == "離線夥伴" && argv_has(&argv, &["-n", "離線夥伴"]), "{argv:?}");
+}
+
+/// 手機名單是舊名、對話現名是「目標」，而另一段對話的活視窗正叫「目標」：喚醒要回白話錯誤，不開第二個、不回成功
+#[test]
+fn _2493_喚醒_現名已被另一段對話的視窗用著_回錯誤_不開第二個() {
+    let r = resume_rig(Opt::default());
+    add_titles(&r, &["離線夥伴", "目標"]);
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "failed", "{}", res.detail);
+    assert!(res.detail.contains("已經有另一個視窗叫「目標」"), "{}", res.detail);
+    assert!(r.launched().is_empty(), "不能開第二個同名視窗");
+    assert!(res.result.is_none(), "不能回另一段對話的 pid／session_id");
+    // 名字沒被佔：照常接回
+    let r2 = resume_rig(Opt::default());
+    add_titles(&r2, &["新名字"]);
+    assert_eq!(resume(&r2, "離線夥伴", SID).status, "ok");
+}
+
+/// 上線要同時比對話編號：同名但編號不同的視窗不算接回成功
+#[test]
+fn _2493_喚醒_等上線要比對話編號_同名但別段對話不算成功() {
+    let r = resume_rig(Opt::default());
+    add_titles(&r, &["新名字"]);
+    *r.env.appear.lock().unwrap() = Some((501, "another-session".into()));
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "unconfirmed", "{}", res.detail);
+}
+
+/// 名字不合規則就不用：現名格式不合格時，喚醒的參數裡沒有它，也沒有 -n（不去蓋對話本身的名字）
+#[test]
+fn _2493_名字不合規則就不用_喚醒與重組參數() {
+    let r = resume_rig(Opt::default());
+    add_titles(&r, &["-壞名 字"]);
+    let res = resume(&r, "離線夥伴", SID);
+    assert_eq!(res.status, "ok", "{}", res.detail);
+    let l = r.launched();
+    let argv = &l[0].2;
+    assert!(!argv.iter().any(|a| a.contains("壞名")) && !argv.iter().any(|a| a == "-n"), "{argv:?}");
+    assert_eq!(l[0].0, "離線夥伴", "名字改用存檔名");
+    // 重組參數：名字不合規則不放進 --remote-control（保留舊值）；接回不帶 -n 時它完全不出現
+    let old: Vec<String> = ["claude.exe", "--remote-control", "舊名", "-n", "舊名"].iter().map(|s| s.to_string()).collect();
+    let out = switch::rewrite_args_named(&old, Some("s1"), "-壞名 字", false, None, None);
+    assert!(!out.iter().any(|a| a.contains("壞名")) && !out.iter().any(|a| a == "-n"), "{out:?}");
+    assert!(argv_has(&out, &["--remote-control", "舊名"]), "{out:?}");
+    let out = switch::rewrite_args(&old, "s1", "含 空格", "sonnet");
+    assert!(argv_has(&out, &["--remote-control", "舊名"]), "{out:?}");
 }
 
 /// 兄弟副本：手機改名退路、換班接手、切換模型重開時，舊命令列裡的 --remote-control 值是開窗當時的名字，要換成現在的名字

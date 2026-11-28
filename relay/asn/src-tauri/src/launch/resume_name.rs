@@ -14,6 +14,43 @@ pub(crate) enum Source {
     Stored,
     /// 找不到對話檔：用存檔名
     Unreadable,
+    /// 現名不合規則（名字格式不合格）：不用它，名字用存檔名、不帶 -n（不去動對話本身的名字）
+    Rejected,
+}
+
+/// 名字能不能放進啟動參數、視窗名：只認既有的夥伴名字規則（唯一一份，不另寫）
+pub(crate) fn usable_name(name: &str) -> bool {
+    super::config::valid_partner_name(name)
+}
+
+/// 要用的名字被別的活視窗佔著（同名、但不是同一段對話）。`live`＝目前活著的視窗（名字，對話編號）
+pub(crate) fn name_held_by_other(live: &[(String, Option<String>)], name: &str, session: &str) -> bool {
+    live.iter().any(|(n, sid)| n == name && sid.as_deref() != Some(session))
+}
+
+/// 真實環境：活著的視窗（名字，對話編號）。讀不到 session 資料夾當沒有
+#[cfg(desktop)]
+pub(crate) fn live_windows_real() -> Vec<(String, Option<String>)> {
+    let Some(dir) = super::console::sessions_dir() else { return Vec::new() };
+    crate::bridge::roster::read_sessions_with(&dir, crate::heartbeat::session_alive, 0, "")
+        .unwrap_or_default()
+        .into_iter()
+        .map(|w| (w.name, w.session_id))
+        .collect()
+}
+
+#[cfg(not(desktop))]
+pub(crate) fn live_windows_real() -> Vec<(String, Option<String>)> {
+    Vec::new()
+}
+
+/// 接回前查一次：要用的名字被別段對話的活視窗佔著就回白話錯誤（原因也記 log），不開第二個同名視窗
+pub(crate) fn ensure_name_free(live: &[(String, Option<String>)], name: &str, session: &str) -> Result<(), String> {
+    if name_held_by_other(live, name, session) {
+        elog!("[接回] 名字已被另一段對話的活視窗使用，不接回：對話 {session}、名字 {name}");
+        return Err(format!("已經有另一個視窗叫「{name}」，請先關掉它或換一個名字"));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +87,11 @@ pub(crate) fn resume_name(projects_root: &Path, session: &str, cwd: Option<&str>
         return fallback(Source::Unreadable);
     };
     match super::resume::last_title(&path).map(|(n, _)| n).filter(|n| !n.trim().is_empty()) {
+        Some(current) if !usable_name(&current) => {
+            // 不寫現名原文
+            elog!("[接回] 現名格式不合格，改用存檔名且不帶 -n：對話 {session}");
+            ResumeName { name: stored.to_string(), pass_n: false, source: Source::Rejected }
+        }
         Some(current) => {
             if current != stored {
                 elog!("[接回] 存檔名與對話現名不同，用現名且不帶 -n：對話 {session}、存檔名 {stored}、現名 {current}");
@@ -77,7 +119,13 @@ pub(crate) fn projects_root_real() -> Option<PathBuf> {
 
 /// 把啟動參數裡的名字換成接回該用的：`-n`／`--name` 只在 `pass_n` 時留（值換成 name），否則整組拿掉；
 /// `--remote-control <值>` 的值一律換成 name。其餘參數原樣。只有接回路徑用（開新夥伴不經這裡）
+/// 組參數這一步再驗一次：名字不合規則就不放進 `-n`（整組拿掉）、`--remote-control` 保留原值，並記一行 log（不寫名字原文）
 pub(crate) fn apply_to_args(args: &[String], rn: &ResumeName) -> Vec<String> {
+    let ok = usable_name(&rn.name);
+    if !ok {
+        elog!("[接回] 名字不合規則，不放進啟動參數");
+    }
+    let rn = &ResumeName { name: rn.name.clone(), pass_n: rn.pass_n && ok, source: rn.source };
     let mut out = Vec::with_capacity(args.len());
     let mut i = 0;
     while i < args.len() {
@@ -93,7 +141,7 @@ pub(crate) fn apply_to_args(args: &[String], rn: &ResumeName) -> Vec<String> {
             "--remote-control" => {
                 out.push(args[i].clone());
                 if has_value {
-                    out.push(rn.name.clone());
+                    out.push(if ok { rn.name.clone() } else { args[i + 1].clone() });
                     i += 2;
                 } else {
                     i += 1;
@@ -106,7 +154,7 @@ pub(crate) fn apply_to_args(args: &[String], rn: &ResumeName) -> Vec<String> {
                 i += 1;
             }
             _ if a.starts_with("--remote-control=") => {
-                out.push(format!("--remote-control={}", rn.name));
+                out.push(if ok { format!("--remote-control={}", rn.name) } else { args[i].clone() });
                 i += 1;
             }
             _ => {
@@ -164,6 +212,32 @@ mod tests {
         assert_eq!(r, ResumeName { name: "存檔名".into(), pass_n: true, source: Source::Unreadable });
         // 編號格式不對：不當檔名用
         assert_eq!(resume_name(d.path(), "../x", None, "存檔名").source, Source::Unreadable);
+    }
+
+    /// 名字不合規則就不用：現名不通過就改用存檔名、不帶 -n（不去動對話本身的名字）
+    #[test]
+    fn 名字不合規則就不用_現名不通過_改用存檔名_不帶n() {
+        let long = "長".repeat(41);
+        for bad in ["-開頭", "含 空格", "帶;分號", long.as_str()] {
+            let d = tempfile::tempdir().unwrap();
+            mk_transcript(d.path(), "/w/p", SID, &[bad]);
+            let r = resume_name(d.path(), SID, Some("/w/p"), "存檔名");
+            assert_eq!(r, ResumeName { name: "存檔名".into(), pass_n: false, source: Source::Rejected }, "{bad}");
+        }
+    }
+
+    /// 組參數這一步再驗一次：直接餵不合規則的名字，參數裡不會出現它，也沒有 -n；遙控保留原值
+    #[test]
+    fn 名字不合規則就不用_組參數時再驗一次() {
+        let a = s(&["--dangerously-skip-permissions", "-n", "原名", "--remote-control", "原名"]);
+        for bad in ["-開頭", "含 空格", ""] {
+            for pass_n in [true, false] {
+                let rn = ResumeName { name: bad.into(), pass_n, source: Source::Current };
+                let out = apply_to_args(&a, &rn);
+                assert!(!out.iter().any(|x| x == bad && !bad.is_empty()) && !out.iter().any(|x| x == "-n"), "{bad:?} {out:?}");
+                assert!(out.windows(2).any(|w| w[0] == "--remote-control" && w[1] == "原名"), "{out:?}");
+            }
+        }
     }
 
     #[test]

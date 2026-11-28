@@ -39,14 +39,16 @@ fn valid_session_id(s: &str) -> bool {
 pub(super) fn last_title(path: &Path) -> Option<(String, String)> {
     let f = std::fs::File::open(path).ok()?;
     let mut rd = std::io::BufReader::new(f);
-    let mut line = String::new();
+    // 讀位元組：某一行不是合法 UTF-8 就只略過那一行，不停下來（停早了會讀到更舊的名字或讀成沒名字）
+    let mut buf: Vec<u8> = Vec::new();
     let mut found: Option<(String, Option<String>)> = None;
     loop {
-        line.clear();
-        match rd.read_line(&mut line) {
+        buf.clear();
+        match rd.read_until(b'\n', &mut buf) {
             Ok(0) | Err(_) => break,
             Ok(_) => {}
         }
+        let Ok(line) = std::str::from_utf8(&buf) else { continue };
         if !(line.contains("custom-title") || line.contains("agent-name")) {
             continue;
         }
@@ -208,6 +210,18 @@ mod tests {
         mk_session(d.path(), cwd, "aaa", &[("custom", "舊名"), ("custom", "新名")], 10);
         assert_eq!(find_latest_session(&d.path().join("projects"), cwd, "舊名"), None);
         assert_eq!(find_latest_session(&d.path().join("projects"), cwd, "新名").as_deref(), Some("aaa"));
+    }
+
+    /// 中間有一行不是合法 UTF-8：只略過那一行，後面的標題照樣讀到（不能停在壞行、讀成舊名或沒有名字）
+    #[test]
+    fn _2493_對話檔有非_utf8_的行_略過那一行繼續讀() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("x.jsonl");
+        let mut bytes = b"{\"type\":\"custom-title\",\"customTitle\":\"\xe8\x88\x8a\xe5\x90\x8d\",\"sessionId\":\"s1\"}\n".to_vec();
+        bytes.extend_from_slice(b"{\"type\":\"user\",\"message\":\"custom-title \xff\xfe\"}\n");
+        bytes.extend_from_slice(b"{\"type\":\"custom-title\",\"customTitle\":\"\xe6\x96\xb0\xe5\x90\x8d\",\"sessionId\":\"s1\"}\n");
+        std::fs::write(&p, bytes).unwrap();
+        assert_eq!(last_title(&p), Some(("新名".to_string(), "s1".to_string())));
     }
 
     #[test]

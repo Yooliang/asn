@@ -208,6 +208,9 @@ pub(crate) fn rewrite_args_opts(args: &[String], session_id: Option<&str>, name:
 pub(crate) fn rewrite_args_named(args: &[String], session_id: Option<&str>, name: &str, pass_n: bool, model: Option<&str>, prompt: Option<&str>) -> Vec<String> {
     let plen = program_len(args).min(args.len());
     let rest = &args[plen..];
+    if !name.is_empty() && !super::resume_name::usable_name(name) {
+        elog!("[重組參數] 名字不合規則，--remote-control 保留舊值");
+    }
     let mut kept: Vec<String> = Vec::new();
     let mut i = 0;
     while i < rest.len() {
@@ -216,7 +219,8 @@ pub(crate) fn rewrite_args_named(args: &[String], session_id: Option<&str>, name
             kept.extend(rest[i..].iter().cloned());
             break;
         }
-        if !name.is_empty() {
+        // 名字不合規則就不放進 --remote-control（保留舊值）；-n 沿用呼叫端給的名字（改名、換模型的活視窗名），接回不帶 -n 時不出現
+        if !name.is_empty() && super::resume_name::usable_name(name) {
             // 位置不動，只把值換成目前的名字
             if a == "--remote-control" {
                 kept.extend(["--remote-control".to_string(), name.to_string()]);
