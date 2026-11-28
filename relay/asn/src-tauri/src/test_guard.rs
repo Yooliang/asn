@@ -305,7 +305,7 @@ mod tests {
     }
 
     // ---- 測試鉤子登記：src 底下所有 .rs 裡 `#[cfg(test)]` 緊接 `thread_local!` 宣告的值，一律要在這裡登記並寫理由 ----
-    // 這些寫法還沒納入，見 #2435：`#[cfg(test)]` 掛在外層 mod 上的鉤子（例如 quota_readers.rs 的 fake::STORE、
+    // 這些寫法還沒納入，見 #2467：`#[cfg(test)]` 掛在外層 mod 上的鉤子（例如 quota_readers.rs 的 fake::STORE、
     // acp_worker.rs 的 test_hooks 模組），以及 struct 的 `#[cfg(test)]` 欄位
 
     /// 鉤子的性質。「記錄」只數次數、記東西給測試看；「注入」只取代某個外部輸入（查到的狀態、環境變數名、失敗）的回傳值。
