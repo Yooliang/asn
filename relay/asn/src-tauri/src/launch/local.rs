@@ -80,6 +80,8 @@ pub fn partner_launch_local(_node: &str, work_dir: &Path, data_dir: &Path, req: 
     }
     // 預設接續同名夥伴上一段對話（issue #82）；沒有舊對話才新開
     let resumed = if req.fresh { None } else { super::resume::apply_resume_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd)? };
+    // Codex 沒有「新名字就開新對話」的寫法：由唯一出口先決定接舊或開新、建好對話，再用代號接續（#2485）
+    let resumed = super::codex_open::apply_codex_open_real(&mut args, &command, prof.engine.as_str(), &req.name, &launch_req.cwd, req.fresh)?.or(resumed);
     // 同一位夥伴剛被別條路（開機接回、終端服務中斷接回、另一次喚醒）開了、視窗還沒上線：不開第二個（登記見 opening.rs）
     if !super::opening::claim(resumed.as_deref().unwrap_or(""), &req.name) {
         return Err(format!("{}，請稍候幾秒再看名單", super::opening::BUSY));
@@ -266,6 +268,8 @@ pub fn start_remote_window(config: &super::config::LaunchConfig, profile: &str, 
     // 同本機開窗：預設接續同名夥伴上一段對話（背景開也一樣）；只有測試用的隱藏視窗不查真實的對話檔
     if show.real_resume {
         super::resume::apply_resume_real(&mut args, &command, if prof.engine.is_empty() { "claude" } else { prof.engine.as_str() }, name, &cwd.to_string_lossy())?;
+        // Codex：同本機開窗，由唯一出口先決定接舊或開新、建好對話再用代號接續（#2485）
+        super::codex_open::apply_codex_open_real(&mut args, &command, prof.engine.as_str(), name, &cwd.to_string_lossy(), false)?;
     }
     start_window_split(name, &command, &args, &cwd, show.in_term, show.in_console)
 }

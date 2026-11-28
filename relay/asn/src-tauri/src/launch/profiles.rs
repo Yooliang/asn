@@ -29,7 +29,18 @@ pub fn default_cwd_allow(home: &Path) -> Vec<PathBuf> {
     out
 }
 
-fn shell_quote(s: &str) -> String {
+/// Codex 預設的啟動指令與參數。**不帶 `resume`**：要接舊對話還是開新的，由 launch/codex_open.rs 在開窗前決定、
+/// 再用對話代號補在最後（寫死 `resume {name}` 時，新名字沒有舊對話，Codex 會直接結束，#2485）
+pub(crate) fn codex_command(exe: &str, windows: bool, comspec: &str) -> (String, Vec<String>) {
+    if windows {
+        let args = ["/c", exe, "-c", "check_for_update_on_startup=false", "-s", "workspace-write", "-a", "on-request"];
+        (comspec.to_string(), args.iter().map(|s| s.to_string()).collect())
+    } else {
+        ("/bin/sh".into(), vec!["-lc".into(), format!("{} -c check_for_update_on_startup=false -s workspace-write -a on-request", shell_quote(exe))])
+    }
+}
+
+pub(crate) fn shell_quote(s: &str) -> String {
     if s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '/' || c == '-') {
         return s.to_string();
     }
@@ -61,32 +72,8 @@ pub fn build_default_profiles(home: &Path) -> HashMap<String, Profile> {
     }
     if let Some(cmd) = resolve_binary("codex") {
         let c = cmd.to_string_lossy().into_owned();
-        let (command, args) = if cfg!(windows) {
-            let comspec = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".into());
-            (
-                comspec,
-                vec![
-                    "/c".into(),
-                    c,
-                    "-c".into(),
-                    "check_for_update_on_startup=false".into(),
-                    "-s".into(),
-                    "workspace-write".into(),
-                    "-a".into(),
-                    "on-request".into(),
-                    "resume".into(),
-                    "{name}".into(),
-                ],
-            )
-        } else {
-            (
-                "/bin/sh".into(),
-                vec![
-                    "-lc".into(),
-                    format!("{} -c check_for_update_on_startup=false -s workspace-write -a on-request resume {{name}}", shell_quote(&c)),
-                ],
-            )
-        };
+        let comspec = std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".into());
+        let (command, args) = codex_command(&c, cfg!(windows), &comspec);
         profiles.insert(
             "codex".into(),
             Profile {
@@ -193,6 +180,35 @@ mod pi_tests {
         assert_eq!(p.mode, LaunchMode::Window);
         assert_eq!(p.engine, "pi");
         assert_eq!(p.command, r"C:\npm\pi.cmd");
+    }
+}
+
+#[cfg(test)]
+mod codex_profile_tests {
+    use super::*;
+
+    /// #2485：預設啟動方式不能寫死 resume（新名字沒有舊對話，Codex 0.153.4 會直接結束）；Windows 陣列形與非 Windows 字串形都要守
+    #[test]
+    fn codex_預設啟動方式_兩種形狀都不帶_resume() {
+        let (cmd, args) = codex_command(r"C:\npm\codex.cmd", true, "cmd.exe");
+        assert_eq!(cmd, "cmd.exe");
+        assert_eq!(args, ["/c", r"C:\npm\codex.cmd", "-c", "check_for_update_on_startup=false", "-s", "workspace-write", "-a", "on-request"]);
+        assert!(!args.iter().any(|a| a.contains("resume") || a.contains("{name}")), "{args:?}");
+        let (cmd, args) = codex_command("/usr/bin/codex", false, "cmd.exe");
+        assert_eq!(cmd, "/bin/sh");
+        assert_eq!(args, ["-lc", "/usr/bin/codex -c check_for_update_on_startup=false -s workspace-write -a on-request"]);
+        assert!(!args[1].contains("resume") && !args[1].contains("{name}"), "{args:?}");
+    }
+
+    /// 守門：正式程式的 Codex 設定段不准再寫 resume（只掃非測試區段）
+    #[test]
+    fn 守門_codex_預設設定的原始碼沒有_resume() {
+        let src = crate::settings::src_scan::prod_source(include_str!("profiles.rs")).replace("\r\n", "\n");
+        let from = src.find("pub(crate) fn codex_command").unwrap();
+        let body = &src[from..from + src[from..].find("\n}\n").unwrap()];
+        assert!(!body.contains("resume"), "{body}");
+        let build = src.split("pub fn build_default_profiles").nth(1).unwrap().split("fn grok_home_binary").next().unwrap();
+        assert!(!build.contains("resume"), "build_default_profiles 裡不准寫 resume");
     }
 }
 
