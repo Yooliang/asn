@@ -664,7 +664,8 @@ impl Worker {
     pub fn maybe_revive(self: &Arc<Self>) {
         let go = {
             let s = self.st.lock().unwrap();
-            s.health == Health::Unavailable && !s.starting && now_ms().saturating_sub(s.last_try_at) > REVIVE_AFTER_MS
+            // 已停止、已被遠端管理關閉的不喚回：否則列名單時會把它重新暖機，留下沒人管的驅動程序（#2462）
+            s.health == Health::Unavailable && !s.starting && !s.stopping && !s.admin_stopped && now_ms().saturating_sub(s.last_try_at) > REVIVE_AFTER_MS
         };
         if go {
             self.warm();
@@ -1189,6 +1190,9 @@ impl Guard for WorkerGuard {
 
 // 遠端管理夥伴（詳情、重開、換班接手）用的方法放在子模組，才能讀這裡的私有欄位
 pub mod admin;
+
+#[cfg(test)]
+mod revive_tests;
 
 #[cfg(test)]
 mod status_priority_tests {

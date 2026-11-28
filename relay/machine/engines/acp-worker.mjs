@@ -286,7 +286,7 @@ export function createWorker({ cfg, env, log, handlers, approvals, notify, store
     listed: () => health !== 'unavailable',
     health: () => ({ health, reason: healthReason, queued: queue.length, running: !!running }),
     start() { stopping = false; void warm() },
-    maybeRevive() { if (health === 'unavailable' && !starting && now() - lastTryAt > REVIVE_AFTER_MS) void warm() },
+    maybeRevive() { if (health === 'unavailable' && !starting && !stopping && now() - lastTryAt > REVIVE_AFTER_MS) void warm() },   // 已停止的不喚回（#2462）
     // job：{ id, text, sender:{node,agent}, noReply }
     enqueue(job) {
       if (health === 'unavailable') { setImmediate(() => void handlers.onFail(job.id, `${name} 工作者目前沒有在跑：${healthReason}`)); return }
