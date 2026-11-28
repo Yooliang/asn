@@ -205,16 +205,39 @@ const EXIT_TAIL_LINE_CHARS: usize = 300;
 
 /// 窗格畫面的最後約 [`EXIT_TAIL_LINES`] 行：去控制字元、每行限長、拿掉結束標記那行與暗號（標記的暗號不進 log）、去掉尾端空行。純函式
 fn screen_tail(text: &str, nonce: &str) -> Vec<String> {
-    let mut lines: Vec<String> = text
+    let cleaned: Vec<String> = text
         .lines()
         .map(|l| {
             let l = if nonce.is_empty() { l.to_string() } else { l.replace(nonce, "…") };
             let clean: String = l.chars().filter(|c| !c.is_control()).collect();
-            // 畫面尾段可能有登入代碼、key 片段、權杖，ui.log 夥伴讀得到：先套全專案同一條遮罩規則，再限長
-            crate::relay::mask_long_tokens(clean.trim_end()).chars().take(EXIT_TAIL_LINE_CHARS).collect::<String>()
+            clean.trim_end().to_string()
         })
-        .filter(|l| !l.contains("[asn-exit "))
         .collect();
+    // 畫面尾段可能有登入代碼、key 片段、權杖，ui.log 夥伴讀得到：先套全專案同一條遮罩規則，再限長。
+    // 終端會照欄寬把長權杖折成兩行以上：上一行結尾與下一行開頭都是權杖字元就先接起來再遮（寧可多遮）。
+    // 接起來之後真的有東西被遮才輸出成一行；沒被遮（只是普通文字剛好相連）就維持原本分行
+    let is_tok = |c: char| c.is_ascii_alphanumeric() || "-_.+/=".contains(c);
+    let cap = |s: String| s.chars().take(EXIT_TAIL_LINE_CHARS).collect::<String>();
+    let mut masked_lines: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < cleaned.len() {
+        let mut j = i + 1;
+        while j < cleaned.len() && cleaned[j - 1].chars().last().is_some_and(is_tok) && cleaned[j].chars().next().is_some_and(is_tok) {
+            j += 1;
+        }
+        if j - i > 1 {
+            let joined = cleaned[i..j].concat();
+            let masked = crate::relay::mask_long_tokens(&joined);
+            if masked != joined {
+                masked_lines.push(cap(masked));
+                i = j;
+                continue;
+            }
+        }
+        masked_lines.push(cap(crate::relay::mask_long_tokens(&cleaned[i])));
+        i += 1;
+    }
+    let mut lines: Vec<String> = masked_lines.into_iter().filter(|l| !l.contains("[asn-exit ")).collect();
     while lines.last().is_some_and(|l| l.is_empty()) {
         lines.pop();
     }
@@ -8608,6 +8631,33 @@ mod tests {
             assert!(log.contains("login failed, token …略… rejected"), "只遮長字串、其餘照留：{log}");
             assert!(log.contains("短字 abc123 照留"), "{log}");
             assert_eq!(screen_tail(&format!("x {tok} y"), "n0nce"), vec!["x …略… y".to_string()]);
+        }
+
+        /// 終端照欄寬把長權杖折成兩行：兩段都不能進 log；普通文字剛好上下相連則照留、維持原本分行
+        #[test]
+        fn 畫面折行的長權杖_兩段都不進log_普通文字不被誤接() {
+            fix_nonce();
+            let tok = format!("sk-ant-oat01-{}", "xYz9".repeat(7)); // 13 + 28 = 41 字
+            let (a, b) = tok.split_at(25);
+            assert!(a.len() == 25 && b.len() >= 15);
+            // 直接測 screen_tail：25＋16 切成兩行（前後還有別的字）；三行也要接得起來
+            let t = screen_tail(&format!("login token {a}\n{b} rejected\n"), "n0nce");
+            assert_eq!(t, vec!["login token …略… rejected".to_string()], "{t:?}");
+            let (a1, rest) = tok.split_at(14);
+            let (b1, c1) = rest.split_at(14);
+            let t3 = screen_tail(&format!("x {a1}\n{b1}\n{c1} y\n"), "n0nce");
+            assert_eq!(t3, vec!["x …略… y".to_string()], "{t3:?}");
+            // 普通文字：上下兩行都以英數相連，接起來沒到 32 字，照留、仍是兩行
+            assert_eq!(screen_tail("hello\nworld\n", "n0nce"), vec!["hello".to_string(), "world".to_string()]);
+            assert_eq!(screen_tail("error: no session\n\nplease retry.\n", "n0nce"), vec!["error: no session".to_string(), "".to_string(), "please retry.".to_string()]);
+            // 走完整的一開就結束：log 裡兩段都不出現
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.screen.borrow_mut() = format!("login token {a}\n{b} rejected\n[ASN] 程式已結束（結束碼 1）\n[asn-exit n0nce 1]\n");
+            TEST_LOG.with(|l| l.borrow_mut().clear());
+            let _ = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+            let log = TEST_LOG.with(|l| l.borrow().join("\n"));
+            assert!(!log.contains(a) && !log.contains(b) && !log.contains("xYz9xYz9"), "兩段都不能進 log：{log}");
+            assert!(log.contains("login token …略… rejected"), "{log}");
         }
 
         #[test]
