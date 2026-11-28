@@ -654,13 +654,22 @@ impl PartnerOps {
         super::engines::pi_control::window_session_id(&self.env.pi_home(), name, self.env.now_ms(), |p| os.alive(p)).is_some() && self.find_target(name).is_err()
     }
 
+    /// 改名成功才同步終端對照表（#2471）：Claude 視窗（外掛路與重開路）與 pi 視窗的改名都經過這一個函式；失敗不動，結果原樣回傳
+    fn relabel_if_ok(&self, op: &Op, r: OpResult) -> OpResult {
+        if r.status == "ok" {
+            self.env.relabel_terminal(&op.name, &op.new_name);
+        }
+        r
+    }
+
     /// pi 視窗：開放「切換模型」「改名」（走擴充的控制檔管道，見 engines/pi_control.rs；pi 忙碌時排隊）與「關閉」
     fn execute_pi(&self, op: &Op) -> OpResult {
         if op.op == "close" {
             return self.close_pi(op);
         }
         if op.op == "rename" {
-            return self.rename_pi(op);
+            let r = self.rename_pi(op);
+            return self.relabel_if_ok(op, r);
         }
         if op.op != "model" {
             return failed("pi 視窗目前只能切換模型、改名和關閉，其他操作尚未開放");
@@ -1036,11 +1045,7 @@ impl PartnerOps {
             "close" => self.close(&target),
             "rename" => {
                 let r = self.rename(op, target);
-                // 改名成功才同步終端對照表（#2471）：外掛路與重開路都經過這裡，失敗不動
-                if r.status == "ok" {
-                    self.env.relabel_terminal(&op.name, &op.new_name);
-                }
-                r
+                self.relabel_if_ok(op, r)
             }
             "model" => self.model(op, target),
             _ => self.handover(op, target),

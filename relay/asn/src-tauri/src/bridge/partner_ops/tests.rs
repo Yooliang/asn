@@ -2557,6 +2557,23 @@ fn pi_改名_新擴充_成功_同名拒絕_名字不合規則_忙時排隊_遠�
     assert!(r.terminated().is_empty() && r.launched().is_empty(), "改名不關、不開任何程序");
 }
 
+#[test]
+fn _2471_pi_改名成功_要同步終端對照表_失敗不同步() {
+    let r = rig(Opt::default());
+    put_pi_window_ext(&r, "小丙", 4001, "idle");
+    *r.env.pi_reply.lock().unwrap() = Some(json!({ "ok": true, "name": "小丁", "at": NOW }));
+    assert_eq!(r.run("rename", json!({ "name": "小丙", "new_name": "小丁" })).status, "ok");
+    assert_eq!(*r.env.relabeled.lock().unwrap(), vec![("小丙".to_string(), "小丁".to_string())], "pi 改名成功要同步終端對照表");
+    // 失敗（名字不合規則、遠端開關關著）：不同步
+    let f = rig(Opt::default());
+    put_pi_window_ext(&f, "小丙", 4001, "idle");
+    assert_eq!(f.run("rename", json!({ "name": "小丙", "new_name": "-x" })).status, "failed");
+    let off = rig(Opt { allow_first: 0, ..Opt::default() });
+    put_pi_window_ext(&off, "小丙", 4001, "idle");
+    assert_eq!(off.run("rename", json!({ "name": "小丙", "new_name": "小丁" })).status, "failed");
+    assert!(f.env.relabeled.lock().unwrap().is_empty() && off.env.relabeled.lock().unwrap().is_empty(), "改名失敗不能動終端對照表");
+}
+
 fn put_pi_window_ext(r: &Rig, name: &str, pid: u32, state: &str) {
     let d = r.env.pi_home.join(".asn").join("pi-windows");
     std::fs::create_dir_all(&d).unwrap();
