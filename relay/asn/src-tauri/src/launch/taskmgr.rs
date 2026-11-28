@@ -609,8 +609,8 @@ mod tests {
         let o = os(vec![p(10, 1, "claude.exe")], &[], &[]);
         let mut s = src(vec![claude("小東", 10)]);
         s.known = vec![
-            KnownEntry { name: "小東".into(), engine: "claude".into(), facts: WindowFacts::default() },
-            KnownEntry { name: "西川".into(), engine: "claude".into(), facts: WindowFacts { cwd: "G:/x".into(), ..Default::default() } },
+            KnownEntry { name: "小東".into(), engine: "claude".into(), facts: WindowFacts::default(), seen: 0 },
+            KnownEntry { name: "西川".into(), engine: "claude".into(), facts: WindowFacts { cwd: "G:/x".into(), ..Default::default() }, seen: 0 },
         ];
         let snap = build(&o, &s);
         assert_eq!(snap.known, vec![KnownRow { name: "西川".into(), engine: "claude".into(), cwd: "G:/x".into() }]);
@@ -725,7 +725,7 @@ mod tests {
         let o = resuming_os(600_000);
         let mut s = resuming_src();
         s.procs = vec![ProcAgent { pid: 502, engine: "claude".into(), model: None, label: None, background: false, hidden: None, detail: None, place_unknown: false }];
-        s.known = vec![KnownEntry { name: "小乙".into(), engine: "claude".into(), facts: WindowFacts::default() }];
+        s.known = vec![KnownEntry { name: "小乙".into(), engine: "claude".into(), facts: WindowFacts::default(), seen: 0 }];
         let snap = build(&o, &s);
         assert!(snap.rows.iter().all(|r| r.kind != "process"), "502 不能再列成自己開的");
         assert!(snap.known.is_empty(), "同名不再放進折疊區");
@@ -808,7 +808,7 @@ mod tests {
     fn 在等確認的程序不再列成自己開的() {
         let mut s = awaiting_src();
         s.procs = vec![ProcAgent { pid: 502, engine: "claude".into(), model: None, label: None, background: false, hidden: None, detail: None, place_unknown: false }];
-        s.known = vec![KnownEntry { name: "小乙".into(), engine: "claude".into(), facts: WindowFacts::default() }];
+        s.known = vec![KnownEntry { name: "小乙".into(), engine: "claude".into(), facts: WindowFacts::default(), seen: 0 }];
         let snap = build(&awaiting_os(120_000), &s);
         assert!(snap.rows.iter().all(|r| r.kind != "process"));
         assert!(snap.known.is_empty());

@@ -254,6 +254,18 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         report
     }
 
+    /// #2475：夥伴列（kind 非空）、存檔有對話編號、對話現在的名字查得到（而且是合法標題）→ `ASN:{編號} {現名}`；否則 None（退回存檔）。
+    /// 現名讀不到、讀成空的都是 None：讀失敗不等於改名，不拿空名字去蓋存檔
+    fn current_partner_title(&self, term: &StoreTerm) -> Option<String> {
+        if term.kind.is_empty() {
+            return None;
+        }
+        let sid = term.session_id.as_deref().filter(|s| !s.is_empty())?;
+        let name = (self.session_names)().into_iter().find(|(s, _)| s == sid).map(|(_, n)| n)?;
+        let name = super::normalize_title(&name).ok()?;
+        Some(format!("ASN:{} {name}", term.id))
+    }
+
     /// 單列嘗試。「確定不在」只有下面這幾種有確切依據：
     /// 1. 這一列本身不合格（不是這份程式寫的、沒有建立時間）：永遠認不了。
     /// 2. 程序的建立時間跟紀錄不同：編號已被別的程序用掉，原來那個程序確定不在。
@@ -345,9 +357,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         };
         let probed = probes.borrow().get(&pane.pane_id) == Some(&PaneProbe::Alive);
         // 分頁標題沒帶編號（開窗逾時、標題還沒設就接回的窗格）時，用記下來的標題，夥伴名字才不會掉
-        // 存檔的標題帶得出夥伴名就以存檔為準（改名時分頁標題可能沒設成、或那一列當時暫時接不回，分頁標題還是舊的，#2471）；其次才看分頁標題
+        // #2475：名字的正本是對話現在的名字（Claude 的 sessions 檔），存檔標題與分頁標題都只是副本：
+        // 存檔有對話編號、查得到同一段對話現在的名字，就以現名為準（存檔與分頁標題都改成現名），絕不拿副本去蓋正本；
+        // 查不到（沒有對話編號、那段對話還沒出現在 sessions 檔）才退回存檔標題（改名時分頁標題可能沒設成，#2471），其次才看分頁標題
+        let current = self.current_partner_title(term);
         let saved_named = partner_label(&term.id, &term.title).is_some();
-        let title = if saved_named {
+        let title = if let Some(cur) = &current {
+            cur.clone()
+        } else if saved_named {
             term.title.clone()
         } else if title_marks(&pane.tab_title, &term.id) {
             pane.tab_title.clone()
@@ -356,8 +373,8 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         } else {
             format!("ASN:{}", term.id)
         };
-        // 以存檔為準而分頁標題不同：補設一次分頁標題（失敗只記 log，不擋接回）
-        if saved_named && pane.tab_title != title {
+        // 以現名（或查不到現名時的存檔）為準而分頁標題不同：補設一次分頁標題（失敗只記 log，不擋接回）
+        if (saved_named || current.is_some()) && pane.tab_title != title {
             if let Err(e) = w.set_tab_title(&sock, pane.pane_id, &title) {
                 view_log(&format!("終端對照表：{}認回後分頁標題沒補設成功，照存檔的名字登記：{e}", row_label(term)));
             }

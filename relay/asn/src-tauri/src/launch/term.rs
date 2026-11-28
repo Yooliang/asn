@@ -432,6 +432,28 @@ pub const REMOTE_META_MAX_AGE: Duration = Duration::from_secs(2);
 
 pub type AgyArgs = Box<dyn Fn() -> Vec<String> + Send + Sync>;
 
+/// 回「（對話編號, 現在的名字）」清單的來源：讀不到、沒有就回空的（認回時退回存檔標題）
+pub(crate) type SessionNames = std::sync::Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
+
+/// 正式：讀本機 Claude 的 sessions 檔（只列程序還活著、有對話編號與名字的）。測試一律空的，不讀這台電腦真的記錄
+fn default_session_names() -> SessionNames {
+    std::sync::Arc::new(|| {
+        #[cfg(not(test))]
+        {
+            let Some(dir) = super::console::sessions_dir() else { return Vec::new() };
+            crate::bridge::roster::read_sessions_with(&dir, |p, _| crate::heartbeat::pid_alive(p), 0, "")
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|w| w.session_id.map(|sid| (sid, w.name)))
+                .collect()
+        }
+        #[cfg(test)]
+        {
+            Vec::new()
+        }
+    })
+}
+
 /// 自己開過的終端。只認這張表裡的編號，呼叫端給的其他編號一律拒絕。
 pub struct TermService<R, F> {
     source: Source,
@@ -452,6 +474,9 @@ pub struct TermService<R, F> {
     hold_config: bool,
     /// 夥伴窗格的包裝殼種類；正式＝`default_partner_shell()`，測試要驗哪一種就明確設
     partner_shell: PartnerShell,
+    /// 對話編號 → 這段對話現在的名字（#2475：名字的正本是 Claude 的 sessions 檔）。認回時以它為準；
+    /// 正式讀本機的 sessions 檔，測試換成假的（見 `set_session_names`）
+    session_names: SessionNames,
     /// mux 的檔案放在這底下的 ASN\m（正式＝%LOCALAPPDATA%；測試注入暫存資料夾）
     mux_base: Option<PathBuf>,
     inner: Mutex<Inner>,
@@ -480,6 +505,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             use_mux: false,
             hold_config: false,
             partner_shell: default_partner_shell(),
+            session_names: default_session_names(),
             mux_base: super::mux::default_base(),
             view_meta_cache: Mutex::new(BTreeMap::new()),
             #[cfg(test)]
@@ -516,6 +542,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             use_mux: false,
             hold_config: false,
             partner_shell: default_partner_shell(),
+            session_names: default_session_names(),
             mux_base: super::mux::default_base(),
             view_meta_cache: Mutex::new(BTreeMap::new()),
             #[cfg(test)]
@@ -553,6 +580,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             use_mux: false,
             hold_config: false,
             partner_shell: default_partner_shell(),
+            session_names: default_session_names(),
             mux_base: super::mux::default_base(),
             view_meta_cache: Mutex::new(BTreeMap::new()),
             #[cfg(test)]
@@ -592,6 +620,12 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     #[cfg(test)]
     pub(crate) fn use_mux_for_test(&self) -> bool {
         self.use_mux
+    }
+
+    /// 換掉「對話現在叫什麼名字」的來源（測試用；正式讀本機的 sessions 檔）
+    #[cfg(test)]
+    pub(crate) fn set_session_names(&mut self, f: SessionNames) {
+        self.session_names = f;
     }
 
     #[cfg(test)]
@@ -6874,7 +6908,7 @@ mod tests {
             }
 
             fn known(name: &str, n: u32) -> KnownEntry {
-                KnownEntry { name: name.into(), engine: "claude".into(), facts: WindowFacts { session: format!("0000000{n}-0000-4000-8000-000000000000"), cwd: "D:/w".into(), asn_opened: true, perm: vec![], hidden: false } }
+                KnownEntry { name: name.into(), engine: "claude".into(), facts: WindowFacts { session: format!("0000000{n}-0000-4000-8000-000000000000"), cwd: "D:/w".into(), asn_opened: true, perm: vec![], hidden: false }, seen: 0 }
             }
 
             /// 開兩位夥伴（小乙、小丙）在共用服務裡
@@ -7303,6 +7337,8 @@ mod tests {
             let before = count_cmd(&rig.runner, "set-tab-title");
             let mut svc2 = restarted(&rig, true);
             svc2.set_hold_config(true);
+            // #2475：名單（sessions 檔）上這段對話現在還是新名：認回以現名為準
+            svc2.set_session_names(std::sync::Arc::new(|| vec![("sid-1".to_string(), "小丙".to_string())]));
             svc2.reclaim().unwrap();
             assert_eq!(svc2.partner_term_id("小丙"), Ok(id.clone()), "認回後仍是新名");
             assert!(svc2.partner_term_id("小乙").is_err());
@@ -7327,11 +7363,65 @@ mod tests {
             *rig.runner.inner.list_json.borrow_mut() = one_pane(&format!("asn-{id}"), &format!("ASN:{id} 小乙"), 9, 0);
             let mut svc3 = restarted(&rig, true);
             svc3.set_hold_config(true);
+            // #2475：名單（sessions 檔）上這段對話現在還是新名：認回以現名為準
+            svc3.set_session_names(std::sync::Arc::new(|| vec![("sid-1".to_string(), "小丙".to_string())]));
             svc3.reclaim().unwrap();
             assert_eq!(svc3.partner_term_id("小丙"), Ok(id.clone()), "認回後仍是新名");
             assert!(svc3.partner_term_id("小乙").is_err());
             let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
             assert_eq!(stored["terms"][0]["title"], format!("ASN:{id} 小丙"), "存檔沒有退回舊名");
+        }
+
+        /// #2475：存檔是舊名、名單（sessions 檔）上同一段對話現名是新名（使用者在視窗裡自己 /rename，ASN 當時沒開或沒同步到）
+        /// → 認回後是新名、存檔標題更新成新名、分頁標題補設成新名，不是補設回舊名
+        #[test]
+        fn _2475_認回以對話現名為準_存檔舊名_現名新名_分頁標題補設成新名而不是舊名() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            *rig.runner.inner.list_json.borrow_mut() = one_pane(&format!("asn-{id}"), &format!("ASN:{id} 小乙"), 9, 0);
+            let before = count_cmd(&rig.runner, "set-tab-title");
+            let mut svc2 = restarted(&rig, true);
+            svc2.set_hold_config(true);
+            svc2.set_session_names(std::sync::Arc::new(|| vec![("別段".to_string(), "別人".to_string()), ("sid-1".to_string(), "小丁".to_string())]));
+            svc2.reclaim().unwrap();
+            assert_eq!(svc2.partner_term_id("小丁"), Ok(id.clone()), "認回後是現名");
+            assert!(svc2.partner_term_id("小乙").is_err(), "舊名不留");
+            assert_eq!(count_cmd(&rig.runner, "set-tab-title"), before + 1, "分頁標題補設一次");
+            let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
+            assert_eq!(titles.last().unwrap().last().unwrap(), &format!("ASN:{id} 小丁"), "補設成現名，不是舊名");
+            let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert_eq!(stored["terms"][0]["title"], format!("ASN:{id} 小丁"), "存檔標題更新成現名");
+        }
+
+        /// #2475：現名查不到（那段對話不在名單、名單裡名字是空的）→ 退回存檔標題，不拿空名字去蓋；分頁標題照舊補設成存檔的名字
+        #[test]
+        fn _2475_認回查不到現名_退回存檔標題() {
+            for names in [vec![], vec![("別段".to_string(), "別人".to_string())], vec![("sid-1".to_string(), "  ".to_string())]] {
+                let (rig, _) = mux_rig();
+                let id = open_partner(&rig);
+                *rig.runner.inner.list_json.borrow_mut() = one_pane(&format!("asn-{id}"), &format!("ASN:{id} 小甲"), 9, 0);
+                let mut svc2 = restarted(&rig, true);
+                svc2.set_hold_config(true);
+                svc2.set_session_names(std::sync::Arc::new(move || names.clone()));
+                svc2.reclaim().unwrap();
+                assert_eq!(svc2.partner_term_id("小乙"), Ok(id.clone()), "查不到現名：以存檔標題為準");
+                let titles: Vec<Vec<String>> = rig.runner.args().into_iter().filter(|a| a.iter().any(|x| x == "set-tab-title")).collect();
+                assert_eq!(titles.last().unwrap().last().unwrap(), &format!("ASN:{id} 小乙"), "分頁標題補設成存檔的名字");
+            }
+        }
+
+        /// #2475：不是夥伴視窗的列（pi 等，kind 空）沒有名字可言，不去名單查
+        #[test]
+        fn _2475_認回_沒有種類的列不查現名() {
+            let (rig, _) = mux_rig();
+            let (id, _) = rig.svc.start_pi(Path::new(&rig.cwd), &pi_argv(), &BTreeMap::new()).unwrap();
+            *rig.runner.inner.list_json.borrow_mut() = one_pane(&format!("asn-{id}"), &format!("ASN:{id}"), 9, 0);
+            let mut svc2 = restarted(&rig, true);
+            svc2.set_hold_config(true);
+            svc2.set_session_names(std::sync::Arc::new(|| vec![("sid-1".to_string(), "不該套用".to_string())]));
+            svc2.reclaim().unwrap();
+            let stored: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&rig.store).unwrap()).unwrap();
+            assert_eq!(stored["terms"][0]["title"], format!("ASN:{id}"), "pi 列的標題不變");
         }
 
         #[test]
