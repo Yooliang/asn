@@ -386,7 +386,11 @@ fn mux_views() -> Vec<(String, bool)> {
     super::term::partner_rows()
         .into_iter()
         .filter(|p| p.mux)
-        .filter_map(|p| super::term::mux_console_query(&p.id).get("visible").and_then(Value::as_bool).map(|v| (p.name, v)))
+        .filter_map(|p| {
+            let q = super::term::mux_console_query(&p.id);
+            // 名單的 hidden 看 visible_for_resume（重啟收掉的舊畫面在列被拿掉前仍算開著，#2464）；沒有就看 visible
+            q.get("visible_for_resume").or_else(|| q.get("visible")).and_then(Value::as_bool).map(|v| (p.name, v))
+        })
         .collect()
 }
 
