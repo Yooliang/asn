@@ -131,6 +131,11 @@ pub trait Runner {
     fn alive(&self, _pid: u32) -> bool {
         true
     }
+    /// 這個程序的父程序編號（程序表裡沒有這個程序、或讀不到＝None；父程序已經結束時編號仍記在子程序上）。
+    /// 建立時間由呼叫端自己核對（編號可能被重用）。預設沒有（#2464：認領掃描判斷看畫面視窗是誰開的）
+    fn parent_of(&self, _pid: u32) -> Option<u32> {
+        None
+    }
     /// 本機正在跑的 `wezterm-gui` 程序與命令列（#2309 重開 ASN 後認回看畫面的 GUI）。預設沒有
     fn gui_procs(&self) -> Vec<(u32, Vec<String>)> {
         Vec::new()
@@ -275,6 +280,10 @@ impl Runner for RealRunner {
 
     fn gui_procs(&self) -> Vec<(u32, Vec<String>)> {
         crate::bridge::procscan::cmdlines_of_exe("wezterm-gui")
+    }
+
+    fn parent_of(&self, pid: u32) -> Option<u32> {
+        crate::bridge::orphans::process_table().get(&pid).copied()
     }
 
     fn check_process_table(&self, mux: u32) -> Result<(), String> {

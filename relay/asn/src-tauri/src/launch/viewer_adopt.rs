@@ -27,10 +27,19 @@ pub struct Found {
     pub started_ms: u64,
 }
 
-/// 判斷結果：認回的，加上沒收的原因（只給 log，不含命令列原文）
+/// 確定是這個 ASN 的看畫面視窗、但連的 workspace 已經不在名單上（舊編號、連著已停的服務）：要收掉（#2464）
+#[derive(Clone, Debug, PartialEq)]
+pub struct Orphan {
+    pub pid: u32,
+    pub started_ms: u64,
+    pub workspace: String,
+}
+
+/// 判斷結果：認回的、要收的孤兒視窗，加上沒收的原因（只給 log，不含命令列原文）
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Plan {
     pub found: Vec<Found>,
+    pub orphans: Vec<Orphan>,
     pub skipped: Vec<String>,
 }
 
@@ -59,6 +68,7 @@ pub fn view_workspace(cmdline: &[String], config: &Path) -> Option<String> {
 /// - `known`：現在名單上、開在服務裡的夥伴（終端編號, workspace）
 /// - `already`：已經登記著的終端編號（不重複登記）
 /// 同一位夥伴有兩扇以上的 GUI：只收最早開的那一個（之後「關畫面」只結束登記的這一個），其餘寫進 skipped
+/// 確定是 ASN 的看畫面視窗、但 workspace 對不到名單：記進 `orphans`（要收）；名單是空的時一律不收（名單可能還沒接回來）
 pub fn plan(procs: &[GuiProc], config: &Path, known: &[(String, String)], already: &[String]) -> Plan {
     let mut out = Plan::default();
     let mut ordered: Vec<&GuiProc> = procs.iter().collect();
@@ -70,6 +80,9 @@ pub fn plan(procs: &[GuiProc], config: &Path, known: &[(String, String)], alread
         };
         let Some((id, _)) = known.iter().find(|(_, w)| *w == ws) else {
             out.skipped.push(format!("pid={} 對不到名單上的夥伴", p.pid));
+            if !known.is_empty() {
+                out.orphans.push(Orphan { pid: p.pid, started_ms: p.started_ms, workspace: ws });
+            }
             continue;
         };
         if already.contains(id) || out.found.iter().any(|f| f.id == *id) {
@@ -154,6 +167,22 @@ mod tests {
         let p = plan(&[gui(10, 500, "asn-9")], &cfg(), &known(), &[]);
         assert!(p.found.is_empty());
         assert_eq!(p.skipped.len(), 1);
+    }
+
+    /// #2464：舊編號（名單上已經沒有）的 ASN 看畫面視窗要收；別的設定檔、別的 domain、start 都不收；名單空時一律不收
+    #[test]
+    fn _2464_對不到名單的_asn_看畫面視窗要收_別人的不收_名單空不收() {
+        let mine_old = gui(10, 500, "asn-101");
+        let other_domain = GuiProc { pid: 11, started_ms: 1, cmdline: cmd(r"C:\U\ASN\m\mux.lua", "別人", "asn-101") };
+        let other_cfg = GuiProc { pid: 12, started_ms: 1, cmdline: cmd(r"C:\Users\x\.wezterm.lua", "asn", "asn-101") };
+        let user_own = GuiProc { pid: 13, started_ms: 1, cmdline: vec!["wezterm-gui.exe".into(), "start".into()] };
+        let live = gui(14, 600, "asn-3");
+        let all = [mine_old.clone(), other_domain, other_cfg, user_own, live];
+        let p = plan(&all, &cfg(), &known(), &[]);
+        assert_eq!(p.orphans, vec![Orphan { pid: 10, started_ms: 500, workspace: "asn-101".into() }]);
+        assert_eq!(p.found.len(), 1, "名單上的照常認回");
+        let empty = plan(&all, &cfg(), &[], &[]);
+        assert!(empty.orphans.is_empty(), "名單空時不動");
     }
 
     #[test]
