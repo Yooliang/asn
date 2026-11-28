@@ -998,7 +998,7 @@ mod tests {
         eng.stop();
     }
 
-    /// 工具步驟無法解讀（截斷的一行、巢狀超過深度上限的一行）時：記 log（不含內容）、這一輪整輪中止；正常的一輪照常。走真的驅動與子程序（node 假程式）
+    /// 工具步驟無法解讀（截斷的一行、巢狀超過深度上限的一行）時：記 log（不含內容）、這一輪整輪中止；正常的一輪照常。走真的驅動與子程序（node 假程式）。先跑一輪暖機，免得第一個 node 程序載入慢撞到逾時（#2465）
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn 工具步驟無法解讀時中止這一輪_正常的一輪照常() {
         use crate::bridge::engines::acp_agy::AgyDriver;
@@ -1031,7 +1031,9 @@ mod tests {
         )
         .unwrap();
         let mut bad: Vec<String> = vec![];
-        for (mode, expect_abort) in [("cut", true), ("deep", true), ("enc", true), ("fffd", false), ("ok", false)] {
+        // 第一項是暖機（不計結果）：先讓 node 載入一次，免得第一個子程序慢撞到逾時（#2465）
+        for (mode, expect_abort, warmup) in [("ok", false, true), ("cut", true, false), ("deep", true, false), ("enc", true, false), ("fffd", false, false), ("ok", false, false)] {
+            let (quiet_ms, total_ms, outer_s) = if warmup { (15_000u64, 20_000u64, 30u64) } else { (10_000, 16_000, 30) };
             let logs: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(vec![]));
             let l2 = logs.clone();
             let mut cfg = (*base.cfg).clone();
@@ -1041,28 +1043,33 @@ mod tests {
             let a = DriverArgs { cfg: Arc::new(cfg), log: Arc::new(move |m| l2.lock().unwrap().push(m)), session_id: String::new(), env: Arc::new(std::env::vars().collect()), ..base.clone() };
             let d = AgyDriver::new(a);
             d.start().await.expect("假 agy 要起得來");
-            let r = tokio::time::timeout(std::time::Duration::from_secs(15), d.turn("hi".into(), 5_000, 8_000)).await;
+            let t0 = std::time::Instant::now();
+            let r = tokio::time::timeout(std::time::Duration::from_secs(outer_s), d.turn("hi".into(), quiet_ms, total_ms)).await;
+            let ms = t0.elapsed().as_millis();
             d.stop();
             tokio::time::sleep(std::time::Duration::from_millis(800)).await; // 結束行程的動作在背景任務裡做，給它時間，免得假程式留著
+            if warmup {
+                continue;
+            }
             let l = logs.lock().unwrap().clone();
             match (expect_abort, r) {
                 (true, Ok(Err(e))) => {
                     if e.code != "violation" || !e.message.contains("無法解讀") {
-                        bad.push(format!("{mode}: 沒有因無法解讀而中止：{} {}", e.code, e.message));
+                        bad.push(format!("{mode}: 沒有因無法解讀而中止：{} {}（耗時 {ms} 毫秒）", e.code, e.message));
                     }
                     if !l.iter().any(|x| x.contains("第 1 行解析不了") && x.contains("長度")) {
-                        bad.push(format!("{mode}: 沒記 log：{l:?}"));
+                        bad.push(format!("{mode}: 沒記 log：{l:?}（耗時 {ms} 毫秒）"));
                     }
                     if l.iter().any(|x| x.contains("step_update") || x.contains("tool_info") || x.contains("[[[")) {
-                        bad.push(format!("{mode}: log 不該記行內容：{l:?}"));
+                        bad.push(format!("{mode}: log 不該記行內容：{l:?}（耗時 {ms} 毫秒）"));
                     }
                 }
                 (false, Ok(Ok(t))) => {
                     if t.text != "ok" || l.iter().any(|x| x.contains("解析不了")) {
-                        bad.push(format!("{mode}: 正常的一輪不照常：{} {l:?}", t.text));
+                        bad.push(format!("{mode}: 正常的一輪不照常：{} {l:?}（耗時 {ms} 毫秒）", t.text));
                     }
                 }
-                (_, other) => bad.push(format!("{mode}: 結果不符預期：{:?}", other.map(|r| r.map(|t| t.text)))),
+                (_, other) => bad.push(format!("{mode}: 結果不符預期：{:?}（耗時 {ms} 毫秒，log：{l:?}）", other.map(|r| r.map(|t| t.text)))),
             }
         }
         eng.stop(); // 先收尾再判定，失敗時才不會留著子程序卡住整個測試
