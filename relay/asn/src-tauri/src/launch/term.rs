@@ -1152,7 +1152,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
     pub fn view_text(&self, id: &str) -> Result<String, String> {
         let snap = self.view_snapshot(id)?;
         let dir = self.dir()?;
-        self.wez(&dir).get_text_escapes(&snap.window.sock, snap.pane_id)
+        super::cli_gate::source(super::cli_gate::Source::View, || self.wez(&dir).get_text_escapes(&snap.window.sock, snap.pane_id))
     }
 
     /// 讀歷史（B3）：帶顏色、往上 `lines` 行的捲動紀錄，連同同一時刻的游標與大小。一次性呼叫，不碰每幅輪詢用的狀態。
@@ -1162,7 +1162,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
         let snap = self.view_snapshot(id)?;
         let dir = self.dir()?;
         let w = self.wez(&dir);
-        let text = w.get_text_escapes_history(&snap.window.sock, snap.pane_id, lines)?;
+        let text = super::cli_gate::source(super::cli_gate::Source::View, || w.get_text_escapes_history(&snap.window.sock, snap.pane_id, lines))?;
         let meta = self.meta_cached(&w, &snap, LOCAL_META_MAX_AGE)?;
         Ok((text, meta))
     }
@@ -1856,7 +1856,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return 0;
         }
         let w = self.wez(dir);
-        let dead: Vec<(String, u64, PathBuf, Option<String>)> = rows.into_iter().filter(|(_, pane, sock, nonce, _)| super::cli_gate::routine(|| w.pane_exit(sock, *pane, Some(nonce))).is_some()).map(|(id, pane, sock, _, name)| (id, pane, sock, name)).collect();
+        let dead: Vec<(String, u64, PathBuf, Option<String>)> = rows.into_iter().filter(|(_, pane, sock, nonce, _)| super::cli_gate::source(super::cli_gate::Source::MuxWatch, || super::cli_gate::routine(|| w.pane_exit(sock, *pane, Some(nonce)))).is_some()).map(|(id, pane, sock, _, name)| (id, pane, sock, name)).collect();
         for (id, pane, sock, _) in &dead {
             let _ = w.kill_pane(sock, *pane);
             elog!("終端：夥伴自己結束了，收掉它的窗格（編號 {id}）");
@@ -3849,10 +3849,14 @@ pub fn start_screen_watch(terms: std::sync::Arc<LiveTerms>, work_dir: &Path) {
             }
             notices.retain(|id, _| windows.iter().any(|(w, _)| w == id));
             stuck.retain_windows(&all.iter().filter(|(id, _)| windows.iter().any(|(w, _)| w == id)).map(|(_, n)| n.clone()).collect::<Vec<_>>());
-            for id in schedule.due(now, &windows, free_memory_bytes()) {
+            // 統計（#2460）：這一輪被每分鐘配額擋掉就記進 cli-gate 的統計行（只計數，不影響排程）
+            let capped_before = schedule.capped_total();
+            let due = schedule.due(now, &windows, free_memory_bytes());
+            super::cli_gate::global().add_capped(schedule.capped_total().saturating_sub(capped_before));
+            for id in due {
                 let Some(pace) = windows.iter().find(|(w, _)| *w == id).map(|(_, p)| *p) else { continue };
                 // 背景讀畫面是「例行」工作：終端服務剛逾時就略過這一次（不算讀失敗、不退避），使用者按的動作不受影響
-                let view = super::cli_gate::routine(|| terms.partner_screen_view(&id));
+                let view = super::cli_gate::source(super::cli_gate::Source::ScreenWatch, || super::cli_gate::routine(|| terms.partner_screen_view(&id)));
                 if matches!(&view, Err(e) if super::cli_gate::is_skipped(e)) {
                     schedule.skipped(&id, now);
                     continue;

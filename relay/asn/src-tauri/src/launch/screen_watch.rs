@@ -147,6 +147,11 @@ impl Schedule {
         self.early_stopped.insert(id.to_string()).then(|| early_stop_line(id))
     }
 
+    /// 到目前為止被每分鐘配額擋掉的輪數（累計到下次寫統計行歸零；cli-gate 統計用它算每一輪的差）
+    pub fn capped_total(&self) -> u64 {
+        self.capped
+    }
+
     /// 這一輪要讀哪幾扇。`windows`＝（編號, 頻率）；`free_bytes` 讀不到（None）就不靠它判斷。
     /// 最久沒讀的排前面，所以總量不夠時大家輪流，不會一直讀前面幾扇
     pub fn due(&mut self, now: u64, windows: &[(String, Pace)], free_bytes: Option<u64>) -> Vec<String> {

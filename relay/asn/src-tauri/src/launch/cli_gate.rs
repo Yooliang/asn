@@ -8,6 +8,9 @@
 //!    「例行」由呼叫端用 [`routine`] 明確標出來，不看子指令名。
 //! 3. 每次逾時或失敗在 ui.log 寫一行：子指令名、耗時、結果。不寫畫面內容、不寫完整參數。
 //!
+//! 另外只計數、不影響上面任何判斷（#2460）：每 10 分鐘一行 `cli-gate …` 進 ui.log，依來源（[`source`] 標記）分開數實際下出去的次數，
+//! 連同被略過、排隊逾時、夥伴畫面監看被自己配額擋掉的次數。新增會下終端指令的呼叫來源時，要用 [`source`] 標，不然算進「其他」。
+//!
 //! 呼叫點只有 `RealRunner::run`／`run_clean`（見 wezterm.rs）：所有 cli 都從那兩個函式出去。
 //! 正式與測試走同一條程式碼：閘門的各項上限都由建構時注入（[`Limits`]），[`Limits::production`] 只回正式值。
 #![cfg(desktop)]
@@ -118,6 +121,9 @@ pub struct CliGate {
     cv: Condvar,
     clock: Box<dyn Fn() -> Instant + Send + Sync>,
     log: Box<dyn Fn(&str) + Send + Sync>,
+    /// 統計（只計數；鎖裡不呼叫別的鎖、不寫 log）
+    stats: Mutex<StatBook>,
+    report_every: Duration,
 }
 
 /// 拿到位子的憑證：放掉（含 panic）就把位子還回去並叫醒排隊的
@@ -171,6 +177,95 @@ fn in_routine() -> bool {
     ROUTINE.with(Cell::get)
 }
 
+/// 這條 cli 是誰下的（只用來統計，不影響任何排隊、略過、逾時的判斷）。沒標＝「其他」（使用者動作、開窗、send-text…）
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    /// 夥伴畫面監看（asn-screen-watch）
+    ScreenWatch,
+    /// 終端監看（asn-mux-watch：掃已結束的窗格）
+    MuxWatch,
+    /// 看畫面視窗的讀取
+    View,
+}
+
+thread_local! {
+    static SOURCE: Cell<Option<Source>> = const { Cell::new(None) };
+}
+
+/// 把 `f` 裡下的 cli 標上來源，只影響統計。出來就還原、panic 也還原。
+/// 新增一個會下終端指令的呼叫來源時，要在這裡標，不然會被算進「其他」
+pub fn source<T>(s: Source, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Source>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            SOURCE.with(|r| r.set(self.0));
+        }
+    }
+    let _restore = Restore(SOURCE.with(|r| r.replace(Some(s))));
+    f()
+}
+
+fn current_source() -> Option<Source> {
+    SOURCE.with(Cell::get)
+}
+
+/// 統計的寫出間隔
+pub const REPORT_EVERY: Duration = Duration::from_secs(600);
+
+/// 一段時間內各來源實際下出去的 cli 次數，以及被擋掉的次數
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Stats {
+    pub screen_watch: u64,
+    pub mux_watch: u64,
+    pub list: u64,
+    pub view: u64,
+    pub other: u64,
+    /// 夥伴畫面監看自己每分鐘配額擋掉的輪數（跟 screen-watch 那行的 capped 同一個數）
+    pub capped: u64,
+    /// 例行工作被暫停略過（沒送出）
+    pub skipped: u64,
+    /// 排隊等不到位子（沒送出）
+    pub queue_timeout: u64,
+}
+
+impl Stats {
+    pub fn calls(&self) -> u64 {
+        self.screen_watch + self.mux_watch + self.list + self.view + self.other
+    }
+
+    /// 子指令是 list 就算 list，不管誰下的；其餘看來源標記，沒標算其他
+    fn add_call(&mut self, sub: &str, src: Option<Source>) {
+        match (sub, src) {
+            ("list", _) => self.list += 1,
+            (_, Some(Source::ScreenWatch)) => self.screen_watch += 1,
+            (_, Some(Source::MuxWatch)) => self.mux_watch += 1,
+            (_, Some(Source::View)) => self.view += 1,
+            (_, None) => self.other += 1,
+        }
+    }
+
+    /// 寫進 ui.log 的那一行內文（格式固定）
+    pub fn line(&self, secs: u64) -> String {
+        format!(
+            "cli-gate secs={secs} calls={} screen-watch={} mux-watch={} list={} view={} other={} capped={} skipped={} queue_timeout={}",
+            self.calls(),
+            self.screen_watch,
+            self.mux_watch,
+            self.list,
+            self.view,
+            self.other,
+            self.capped,
+            self.skipped,
+            self.queue_timeout
+        )
+    }
+}
+
+struct StatBook {
+    cur: Stats,
+    since: Instant,
+}
+
 /// 從參數裡取出 cli 的子指令名（`[--config x] cli --no-auto-start <子指令> …`）；不是 cli 呼叫＝None
 pub fn sub_of(args: &[String]) -> Option<&str> {
     let i = args.iter().position(|a| a == "cli")?;
@@ -198,7 +293,40 @@ impl CliGate {
     }
 
     pub fn with(limits: Limits, clock: Box<dyn Fn() -> Instant + Send + Sync>, log: Box<dyn Fn(&str) + Send + Sync>) -> Self {
-        Self { limits, state: Mutex::new(State::default()), cv: Condvar::new(), clock, log }
+        let since = clock();
+        Self { limits, state: Mutex::new(State::default()), cv: Condvar::new(), clock, log, stats: Mutex::new(StatBook { cur: Stats::default(), since }), report_every: REPORT_EVERY }
+    }
+
+    fn bump(&self, f: impl FnOnce(&mut Stats)) {
+        f(&mut self.stats.lock().unwrap_or_else(|e| e.into_inner()).cur);
+    }
+
+    /// 夥伴畫面監看這一輪被自己的每分鐘配額擋掉了 `n` 輪（`n`＝0 不記）；順便看該不該寫統計
+    pub fn add_capped(&self, n: u64) {
+        self.bump(|s| s.capped += n);
+        self.maybe_report();
+    }
+
+    /// 離上次寫已經過了 [`REPORT_EVERY`] 就寫一行並歸零。鎖只用來取出數字，log 在鎖外寫
+    fn maybe_report(&self) {
+        let now = (self.clock)();
+        let line = {
+            let mut b = self.stats.lock().unwrap_or_else(|e| e.into_inner());
+            let elapsed = now.saturating_duration_since(b.since);
+            if elapsed < self.report_every {
+                return;
+            }
+            let line = b.cur.line(elapsed.as_secs());
+            b.cur = Stats::default();
+            b.since = now;
+            line
+        };
+        (self.log)(&line);
+    }
+
+    /// 目前累計的統計（測試與除錯用）
+    pub fn stats(&self) -> Stats {
+        self.stats.lock().unwrap_or_else(|e| e.into_inner()).cur
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, State> {
@@ -227,12 +355,22 @@ impl CliGate {
 
     /// 排隊、執行、記結果。`routine`＝這條是背景例行工作（見 [`routine`]）。`exec` 才是真的去跑 cli 的那一步
     pub fn run(&self, key: &str, sub: &str, routine: bool, exec: impl FnOnce() -> Result<RunOutput, ExecErr>) -> Result<RunOutput, String> {
+        self.maybe_report();
         if routine {
             if let Some(left) = self.cooldown_left(key) {
+                self.bump(|s| s.skipped += 1);
                 return Err(format!("{SKIPPED}（約 {} 秒後再試）", left.as_secs() + 1));
             }
         }
-        let slot = self.acquire(key, sub, routine)?;
+        let slot = match self.acquire(key, sub, routine) {
+            Ok(slot) => slot,
+            Err(e) => {
+                self.bump(|s| s.queue_timeout += 1);
+                return Err(e);
+            }
+        };
+        let src = current_source();
+        self.bump(|s| s.add_call(sub, src));
         let t0 = Instant::now();
         let r = exec();
         // 先還位子、再記 log／狀態：寫檔慢不能佔著位子
@@ -664,5 +802,153 @@ mod tests {
         let exec = src.split("fn exec_typed").nth(1).unwrap().split("const PIPE_DRAIN").next().unwrap();
         let (k, w) = (exec.find("child.kill()").unwrap(), exec.find("child.wait()").unwrap());
         assert!(k < w, "kill 之後要 wait");
+    }
+
+    // ---- #2460 統計 ----
+
+    #[test]
+    fn 統計_各來源標記後各算各的_沒標算其他_list_看子指令() {
+        let (g, _f) = Fake::gate(lim(2, 1, 500));
+        source(Source::ScreenWatch, || routine(|| g.run("k", "get-text", true, ok))).unwrap();
+        source(Source::ScreenWatch, || routine(|| g.run("k", "get-text", true, ok))).unwrap();
+        source(Source::MuxWatch, || routine(|| g.run("k", "get-text", true, ok))).unwrap();
+        source(Source::View, || g.run("k", "get-text", false, ok)).unwrap();
+        g.run("k", "send-text", false, ok).unwrap();
+        g.run("k", "spawn", false, ok).unwrap();
+        // list 不管誰標的都算 list
+        g.run("k", "list", false, ok).unwrap();
+        source(Source::MuxWatch, || g.run("k", "list", false, ok)).unwrap();
+        source(Source::View, || g.run("k", "list", false, ok)).unwrap();
+        let s = g.stats();
+        assert_eq!((s.screen_watch, s.mux_watch, s.view, s.other, s.list), (2, 1, 1, 2, 3), "{s:?}");
+        assert_eq!(s.calls(), 9);
+        assert_eq!((s.capped, s.skipped, s.queue_timeout), (0, 0, 0));
+    }
+
+    #[test]
+    fn 統計_來源標記出來就還原_panic_也還原_別的執行緒不受影響() {
+        assert_eq!(current_source(), None);
+        source(Source::View, || {
+            assert_eq!(current_source(), Some(Source::View));
+            source(Source::MuxWatch, || assert_eq!(current_source(), Some(Source::MuxWatch)));
+            assert_eq!(current_source(), Some(Source::View), "內層結束要還原成外層");
+            std::thread::scope(|s| {
+                s.spawn(|| assert_eq!(current_source(), None)).join().unwrap();
+            });
+        });
+        assert_eq!(current_source(), None);
+        let _ = std::panic::catch_unwind(|| source(Source::View, || panic!("假的當掉")));
+        assert_eq!(current_source(), None, "panic 也要還原");
+    }
+
+    #[test]
+    fn 統計_被略過與排隊逾時各被數到_沒送出的不算呼叫() {
+        let (g, _f) = Fake::gate(lim(1, 1, 50));
+        let _ = g.run("k", "get-text", true, timeout); // 這一條有送出，算一次呼叫
+        assert!(g.run("k", "get-text", true, ok).unwrap_err().starts_with(SKIPPED));
+        assert!(g.run("k", "get-text", true, ok).unwrap_err().starts_with(SKIPPED));
+        let (started_tx, started_rx) = channel::<()>();
+        let (release_tx, release_rx) = channel::<()>();
+        std::thread::scope(|s| {
+            let _release = Release(release_tx, 1);
+            let gr = &g;
+            s.spawn(move || {
+                gr.run("q", "spawn", false, || {
+                    started_tx.send(()).unwrap();
+                    let _ = release_rx.recv();
+                    ok()
+                })
+                .unwrap();
+            });
+            started_rx.recv().unwrap();
+            assert!(g.run("q", "spawn", false, ok).unwrap_err().starts_with(QUEUE_TIMEOUT));
+        });
+        let s = g.stats();
+        assert_eq!((s.skipped, s.queue_timeout), (2, 1), "{s:?}");
+        assert_eq!(s.calls(), 2, "略過與排隊逾時的沒送出，不算實際呼叫：{s:?}");
+    }
+
+    #[test]
+    fn 統計_夥伴畫面監看自己被擋的次數帶進來() {
+        let (g, _f) = Fake::gate(lim(2, 1, 500));
+        g.add_capped(0);
+        g.add_capped(3);
+        g.add_capped(2);
+        assert_eq!(g.stats().capped, 5);
+    }
+
+    #[test]
+    fn 統計_十分鐘寫一行_格式固定_寫完歸零() {
+        let (g, f) = Fake::gate(lim(2, 1, 500));
+        source(Source::ScreenWatch, || g.run("k", "get-text", true, ok)).unwrap();
+        source(Source::MuxWatch, || g.run("k", "get-text", true, ok)).unwrap();
+        g.run("k", "list", false, ok).unwrap();
+        g.run("k", "spawn", false, ok).unwrap();
+        g.add_capped(4);
+        f.advance(Duration::from_secs(599));
+        g.run("k", "spawn", false, ok).unwrap();
+        assert!(f.lines().is_empty(), "不到十分鐘不寫：{:?}", f.lines());
+        f.advance(Duration::from_secs(1));
+        g.run("k", "list", false, ok).unwrap(); // 這一條是寫出之後的新一段
+        assert_eq!(f.lines(), vec!["cli-gate secs=600 calls=5 screen-watch=1 mux-watch=1 list=1 view=0 other=2 capped=4 skipped=0 queue_timeout=0".to_string()]);
+        let s = g.stats();
+        assert_eq!((s.calls(), s.list, s.capped), (1, 1, 0), "寫出後歸零，只剩寫出之後的那一條：{s:?}");
+        // 下一段又要滿十分鐘才寫；只靠 add_capped 的巡視也會寫
+        f.advance(Duration::from_secs(600));
+        g.add_capped(0);
+        let lines = f.lines();
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(lines[1], "cli-gate secs=600 calls=1 screen-watch=0 mux-watch=0 list=1 view=0 other=0 capped=0 skipped=0 queue_timeout=0");
+    }
+
+    /// 行為不變：同一串呼叫，有標來源與沒標來源，每一條的結果（成功／略過／排隊逾時）完全一樣
+    #[test]
+    fn 統計_不改行為_有標來源與沒標來源的限流略過結果相同() {
+        let play = |tag: bool| -> Vec<String> {
+            let (g, f) = Fake::gate(lim(2, 1, 50));
+            let mut out = Vec::new();
+            let call = |g: &CliGate, sub: &str, rt: bool, r: fn() -> Result<RunOutput, ExecErr>| {
+                let go = || g.run("k", sub, rt, r);
+                let res = if tag { source(Source::ScreenWatch, go) } else { go() };
+                match res {
+                    Ok(_) => "ok".to_string(),
+                    Err(e) if is_skipped(&e) => "skipped".to_string(),
+                    Err(e) if e.starts_with(QUEUE_TIMEOUT) => "queue".to_string(),
+                    Err(_) => "err".to_string(),
+                }
+            };
+            out.push(call(&g, "get-text", true, timeout));
+            out.push(call(&g, "get-text", true, ok));
+            out.push(call(&g, "spawn", false, ok));
+            f.advance(Duration::from_secs(31));
+            out.push(call(&g, "get-text", true, ok));
+            out.push(call(&g, "list", false, timeout));
+            out.push(call(&g, "get-text", true, ok));
+            out.push(format!("{:?}", g.cooldown_left("k")));
+            out
+        };
+        assert_eq!(play(true), play(false));
+    }
+
+    /// 守門：每個已知來源的呼叫點都要標來源；拿掉任一個標記，那一路會被算進「其他」而這裡變紅
+    #[test]
+    fn 統計守門_每個呼叫來源都有標記() {
+        let term = include_str!("term.rs").replace("\r\n", "\n");
+        for need in [
+            "Source::ScreenWatch, || super::cli_gate::routine(|| terms.partner_screen_view(&id))",
+            "Source::MuxWatch, || super::cli_gate::routine(|| w.pane_exit(sock, *pane, Some(nonce)))",
+            "Source::View, || self.wez(&dir).get_text_escapes(",
+            "Source::View, || w.get_text_escapes_history(",
+            "super::cli_gate::global().add_capped(",
+        ] {
+            assert!(term.contains(need), "term.rs 缺：{need}");
+        }
+        assert_eq!(term.matches("cli_gate::source(").count(), 4, "term.rs 的來源標記只有這四處；新增來源要一起更新這裡");
+        let sw = include_str!("screen_watch.rs");
+        assert!(sw.contains("pub fn capped_total("), "夥伴畫面監看要把被擋的次數交出來");
+        // 標記只影響統計：cli_gate 的判斷（run／acquire）不能讀來源
+        let src = include_str!("cli_gate.rs").replace("\r\n", "\n");
+        let acquire = src.split("fn acquire(").nth(1).unwrap().split("/// 記這一條的結果").next().unwrap();
+        assert!(!acquire.contains("current_source"), "排隊判斷不能看來源");
     }
 }
