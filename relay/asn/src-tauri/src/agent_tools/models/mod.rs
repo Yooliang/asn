@@ -1306,6 +1306,17 @@ mod tests {
     }
 
     #[test]
+    fn grok_守門_真探測只能經_probe_grok_不准自己帶_models_參數() {
+        let src = include_str!("mod.rs").split("#[cfg(test)]").next().unwrap();
+        // 切 probe_grok_real 本體：從函式名起，到頂層的結尾大括號（行首 `}`）；找不到起點或結尾就讓測試失敗，不能空過
+        let rest = src.split("async fn probe_grok_real()").nth(1).expect("切不到 probe_grok_real（函式改名了？）");
+        let end = rest.find("\n}").expect("切不到 probe_grok_real 的結尾");
+        let body = &rest[..end];
+        assert!(body.contains("{") && body.contains("probe_grok("), "probe_grok_real 要呼叫 probe_grok（先問 --help 再決定要不要跑 models）");
+        assert!(!body.contains(r#""models""#), "probe_grok_real 不准自己帶 \"models\"，參數只能由 probe_grok 決定");
+    }
+
+    #[test]
     fn grok_環境_與工作者原生通道同一份白名單() {
         let vars = os(&[("PATH", "/bin"), ("USERPROFILE", "C:/u"), ("XAI_API_KEY", "k"), ("ASN_RELAY_KEY", "r"), ("AWS_PROFILE", "p")]);
         assert_eq!(names(&grok_env_from(&vars)), ["PATH", "USERPROFILE"]);
