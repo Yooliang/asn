@@ -67,6 +67,11 @@ pub(crate) fn open_pi(
                     elog!("經 pi 開：自帶終端已啟動但後續失敗，不改用原生主控台：{e}");
                     return Err(format!("{}：{e}", super::win_term::STARTED_BUT_FAILED));
                 }
+                // pi 一開就結束：同樣不開第二份；字串已是白話，不套「沒能登記視窗」那句
+                Err(WinOpenError::Exited(e)) => {
+                    elog!("經 pi 開：程式一開就結束，不改用原生主控台：{e}");
+                    return Err(e);
+                }
             }
         }
     };

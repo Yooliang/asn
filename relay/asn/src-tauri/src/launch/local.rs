@@ -465,6 +465,21 @@ const TERMINAL_RESET_PS: &str = "$esc = [char]27; [Console]::Write((@('?1000l', 
 
 #[cfg_attr(not(windows), allow(dead_code))]
 fn build_window_script_env(title: &str, command: &str, args: &[String], env: &[(String, String)]) -> String {
+    build_window_script_marked(title, command, args, env, None)
+}
+
+/// 退路主控台程式結束時留給 ASN 看的結束標記：`marker`（檔案路徑）與 `nonce` 都給了，腳本在程式結束後（印「程式已結束」之前）
+/// 把 `[asn-exit <暗號> <結束碼>]` 寫進那個檔案（格式與 mux 窗格的 [`exit_marker`] 相同，ASN 用同一個解析讀）。
+/// 原生主控台沒有重導向，拿不到程式的輸出原文，只有結束碼；寫不進去（路徑不能寫）就算了，不影響視窗
+#[cfg_attr(not(windows), allow(dead_code))]
+fn build_window_script_marked(title: &str, command: &str, args: &[String], env: &[(String, String)], marker: Option<(&Path, &str)>) -> String {
+    let marker_line = match marker {
+        Some((path, nonce)) => {
+            let nonce: String = nonce.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+            format!("try {{ [IO.File]::WriteAllText({}, ('[asn-exit {nonce} ' + $code + ']')) }} catch {{}}\n", ps_quote(&path.to_string_lossy()))
+        }
+        None => String::new(),
+    };
     let env_set = env_lines(env);
     let mut call = format!("& {}", ps_quote(command));
     for a in args {
@@ -482,12 +497,14 @@ fn build_window_script_env(title: &str, command: &str, args: &[String], env: &[(
          Write-Host ('[ASN] 無法啟動：' + $_.Exception.Message) -ForegroundColor Red\n\
          $code = -1\n\
          }}\n\
+         {marker_line}\
          {reset}\n\
          Write-Host ''\n\
          Write-Host ('[ASN] 程式已結束（結束碼 ' + $code + '）。上面如果有錯誤訊息請截圖回報；關閉這個視窗即可。') -ForegroundColor Yellow\n",
         title = ps_quote(title),
         env_set = env_set,
         call = call,
+        marker_line = marker_line,
         reset = TERMINAL_RESET_PS
     )
 }
@@ -663,8 +680,68 @@ pub(super) fn window_launcher_args(title: &str, command: &str, args: &[String]) 
 
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(super) fn window_launcher_args_env(title: &str, command: &str, args: &[String], env: &[(String, String)]) -> String {
-    let enc = encode_ps_command(&build_window_script_env(title, command, args, env));
+    window_launcher_args_marked(title, command, args, env, None)
+}
+
+/// 同上，另外讓視窗在程式結束時寫結束標記（見 [`build_window_script_marked`]）
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(super) fn window_launcher_args_marked(title: &str, command: &str, args: &[String], env: &[(String, String)], marker: Option<(&Path, &str)>) -> String {
+    let enc = encode_ps_command(&build_window_script_marked(title, command, args, env, marker));
     format!("-NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -EncodedCommand {enc}")
+}
+
+/// 結束標記檔超過這麼久還在 temp 裡就清掉（開窗後 ASN 只盯 5 秒，之後使用者結束程式時包裝殼照樣會寫，ASN 已不在看）
+#[cfg_attr(not(windows), allow(dead_code))]
+const EXIT_MARKER_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+
+/// 是不是 ASN 自己留的標記檔名：`asn-exit-<32 位小寫十六進位暗號>.txt`，其他一律不是
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_exit_marker_name(name: &str) -> bool {
+    name.strip_prefix("asn-exit-")
+        .and_then(|r| r.strip_suffix(".txt"))
+        .is_some_and(|n| n.len() == 32 && n.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)))
+}
+
+/// 清掉 `dir` 裡檔名符合 [`is_exit_marker_name`]、修改時間比 `now` 早超過 `max_age` 的標記檔（純函式：目錄與現在時間由外面給）。
+/// 只動符合檔名的一般檔案；刪不掉就略過。回（刪掉幾個, 失敗的說明各一行給 log）。不擋開窗
+#[cfg_attr(not(windows), allow(dead_code))]
+fn sweep_old_exit_markers(dir: &Path, now: std::time::SystemTime, max_age: std::time::Duration) -> (usize, Vec<String>) {
+    let (mut removed, mut failed) = (0, Vec::new());
+    let Ok(rd) = std::fs::read_dir(dir) else { return (0, failed) };
+    for ent in rd.flatten() {
+        let name = ent.file_name().to_string_lossy().into_owned();
+        if !is_exit_marker_name(&name) {
+            continue;
+        }
+        let Ok(meta) = ent.metadata() else { continue };
+        let old = meta.is_file() && meta.modified().ok().and_then(|m| now.duration_since(m).ok()).is_some_and(|age| age > max_age);
+        if !old {
+            continue;
+        }
+        match std::fs::remove_file(ent.path()) {
+            Ok(()) => removed += 1,
+            Err(e) => failed.push(format!("清舊的結束標記檔 {name} 失敗：{e}")),
+        }
+    }
+    (removed, failed)
+}
+
+/// 退路主控台開窗後盯結束標記檔：[`EARLY_EXIT_WATCH`](super::term::EARLY_EXIT_WATCH) 內讀到 `[asn-exit <暗號> <碼>]` 就回結束碼；
+/// `started` 回 true（夥伴已寫工作階段記錄）就提早放行。等待與讀檔都由外面傳入（測試用假時鐘與假檔案）。
+/// 包裝殼在程式結束後仍把視窗留著，所以「程序消失」不能當訊號，要看這個標記
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(super) fn watch_console_exit(nonce: &str, sleep: &dyn Fn(std::time::Duration), read: &dyn Fn() -> Option<String>, started: &dyn Fn() -> bool) -> Option<i32> {
+    let polls = super::term::EARLY_EXIT_WATCH.as_millis() / super::term::EARLY_EXIT_POLL.as_millis();
+    for _ in 0..polls {
+        sleep(super::term::EARLY_EXIT_POLL);
+        if let Some(code) = read().and_then(|t| super::wezterm::pane_exit_from_screen(&t, nonce)) {
+            return Some(code);
+        }
+        if started() {
+            return None;
+        }
+    }
+    None
 }
 
 /// 解析啟動器的 stdout／stderr，得到外層視窗的 PID；失敗時把原文帶進錯誤。
@@ -727,15 +804,24 @@ try {
     let ps = format!("{root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
     let cwd_s = strip_verbatim_prefix(&cwd.to_string_lossy());
     let style = if hidden { "Hidden" } else { "Normal" };
+    // 結束標記檔：視窗裡的包裝殼在程式結束時寫進去（暗號隨機、開窗當下才產生），開窗後 ASN 在短時間內看它有沒有出現
+    // 先清掉以前留下的（正常開著的視窗日後結束時才會寫標記，ASN 那時已不在看）；刪不掉只記 log，不擋開窗
+    for line in sweep_old_exit_markers(&std::env::temp_dir(), std::time::SystemTime::now(), EXIT_MARKER_MAX_AGE).1 {
+        super::term::view_log(&line);
+    }
+    let nonce = super::term::new_nonce();
+    let marker = std::env::temp_dir().join(format!("asn-exit-{nonce}.txt"));
+    let launcher = window_launcher_args_marked(title, command, args, env, Some((&marker, &nonce)));
+    let spawned_ms = crate::heartbeat::now_ms();
     let mut cmd = Command::new(&ps);
     cmd.no_window()
         .env_clear()
         .envs(super::config::child_env())
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
-        .env("ASN_LAUNCH_ARGS", window_launcher_args_env(title, command, args, env))
+        .env("ASN_LAUNCH_ARGS", &launcher)
         .env("ASN_LAUNCH_DIR", &cwd_s)
         .env("ASN_LAUNCH_STYLE", style)
-        .env("IRORI_LAUNCH_ARGS", window_launcher_args_env(title, command, args, env))
+        .env("IRORI_LAUNCH_ARGS", &launcher)
         .env("IRORI_LAUNCH_DIR", &cwd_s)
         .env("IRORI_LAUNCH_STYLE", style)
         .current_dir(&cwd_s)
@@ -749,7 +835,32 @@ try {
     if r.is_ok() && !stderr.trim().is_empty() {
         elog!("開夥伴視窗：{}", stderr.trim());
     }
-    r
+    if r.is_err() {
+        return r;
+    }
+    // 包裝殼在程式結束後會把視窗留著，所以不能看程序還在不在；改看結束標記檔。
+    // 短時間內就結束＝一開就結束：回白話的失敗，不當成開成功（視窗留著，使用者看得到原文；ASN 這邊拿不到原文，log 只記結束碼）
+    let code = watch_console_exit(
+        &nonce,
+        &|d| std::thread::sleep(d),
+        &|| std::fs::read_to_string(&marker).ok(),
+        &|| super::term::partner_session_started(title, spawned_ms),
+    );
+    let _ = std::fs::remove_file(&marker);
+    judge_console_open(r, code, title)
+}
+
+/// 退路主控台開窗的最後判斷（純函式）：視窗開起來了（`opened` 是 Ok）但短時間內就看到結束標記＝一開就結束，回白話的失敗，不回開成功。
+/// 這條路徑沒有重導向，拿不到程式輸出的原文，log 只記結束碼；原文只在留著的視窗畫面上
+#[cfg_attr(not(windows), allow(dead_code))]
+fn judge_console_open(opened: Result<u32, String>, exit_code: Option<i32>, title: &str) -> Result<u32, String> {
+    match (opened.is_ok(), exit_code) {
+        (true, Some(code)) => {
+            super::term::view_log(&format!("開「{title}」：原生主控台裡的程式一開就結束（結束碼 {code}）；這條路徑拿不到程式輸出的原文，原文只在視窗畫面上"));
+            Err(super::term::early_exit_text(title, code))
+        }
+        _ => opened,
+    }
 }
 
 #[cfg(not(windows))]
@@ -1284,6 +1395,105 @@ mod tests {
         assert!(parse_launcher_output("oops", "", true).unwrap_err().contains("oops"));
     }
 
+    const NONCE: &str = "n0nce";
+
+    /// 腳本裡有寫結束標記的那一行，而且在「印程式已結束」之前、跑指令之後；不給標記時和舊腳本逐字相同
+    #[test]
+    fn 視窗腳本_結束時寫標記檔_不給標記就和舊的一樣() {
+        let args = vec!["resume".to_string(), "測試名".to_string()];
+        let plain = build_window_script_env("測試名", "codex", &args, &[]);
+        let marker = std::path::PathBuf::from(r"C:\Temp\asn-exit-n0nce.txt");
+        let sc = build_window_script_marked("測試名", "codex", &args, &[], Some((&marker, NONCE)));
+        let call = sc.find("& 'codex' 'resume' '測試名'").expect("有跑指令");
+        let write = sc.find(r"[IO.File]::WriteAllText('C:\Temp\asn-exit-n0nce.txt', ('[asn-exit n0nce ' + $code + ']'))").expect("有寫標記");
+        assert!(call < write && write < sc.find("程式已結束").unwrap(), "先跑指令、再寫標記、最後才印結束訊息");
+        assert_eq!(build_window_script_marked("測試名", "codex", &args, &[], None), plain);
+        assert!(!plain.contains("asn-exit"), "不給標記就不寫");
+        // 暗號只留英數（不能被塞進引號或指令）
+        let evil = build_window_script_marked("t", "x", &[], &[], Some((&marker, "a'b; c")));
+        assert!(evil.contains("[asn-exit abc ") && !evil.contains("a'b"), "{evil}");
+    }
+
+    /// 假時鐘、假檔案：標記檔第 3 輪才出現
+    fn run_watch(appears_at: Option<usize>, text: &str, started_at: Option<usize>) -> (Option<i32>, usize) {
+        let polls = std::cell::Cell::new(0usize);
+        let sleeps = std::cell::Cell::new(0usize);
+        let r = watch_console_exit(
+            NONCE,
+            &|_| {
+                sleeps.set(sleeps.get() + 1);
+                polls.set(polls.get() + 1);
+            },
+            &|| appears_at.filter(|n| polls.get() >= *n).map(|_| text.to_string()),
+            &|| started_at.is_some_and(|n| polls.get() >= n),
+        );
+        (r, sleeps.get())
+    }
+
+    #[test]
+    fn 退路主控台_標記出現就回結束碼_沒出現等滿_起來了就提早放行() {
+        assert_eq!(run_watch(Some(3), "[asn-exit n0nce 1]", None), (Some(1), 3), "第 3 輪看到標記");
+        assert_eq!(run_watch(Some(1), "\n[asn-exit n0nce -1073741510]", None), (Some(-1_073_741_510), 1));
+        assert_eq!(run_watch(None, "", None), (None, 10), "一直沒標記：等滿 5 秒（10 輪）才算開著");
+        assert_eq!(run_watch(None, "", Some(1)), (None, 1), "工作階段記錄出現了：提早放行");
+        assert_eq!(run_watch(Some(2), "[asn-exit 別人的暗號 1]", None), (None, 10), "暗號不符不算");
+        assert_eq!(run_watch(Some(2), "半截 [asn-exit n0nce ", None), (None, 10), "標記沒寫完不算");
+    }
+
+    /// 一開就結束：回白話的錯誤、不回開成功；log 記結束碼；畫面句沒有英文原文也沒有內部代號
+    #[test]
+    fn 退路主控台_一開就結束_回錯誤_不回開成功() {
+        crate::launch::term::TEST_LOG.with(|l| l.borrow_mut().clear());
+        let e = judge_console_open(Ok(4321), Some(1), "測試名").unwrap_err();
+        assert_eq!(e, "測試名 一開就結束了（結束碼 1），沒有開起來。詳細原因已記在紀錄裡，請再試一次；還是不行請把紀錄交給維護的人。");
+        assert!(!e.contains(super::super::win_term::STARTED_BUT_FAILED) && !e.contains("沒能登記"), "不套那句講別件事的話：{e}");
+        assert!(!e.contains("ERROR") && !e.contains("codex") && !e.contains("asn-exit"), "畫面不放原文與內部用語：{e}");
+        let log = crate::launch::term::TEST_LOG.with(|l| l.borrow().join("\n"));
+        assert!(log.contains("測試名") && log.contains("結束碼 1"), "log 記結束碼：{log}");
+        // 正常開著：照樣開成功；開窗本身失敗：原樣回原本的錯
+        assert_eq!(judge_console_open(Ok(4321), None, "測試名"), Ok(4321));
+        assert_eq!(judge_console_open(Err("開不起來：x".into()), Some(1), "測試名"), Err("開不起來：x".to_string()));
+    }
+
+    #[test]
+    fn 清舊標記檔_舊的刪_新的留_別的檔名不碰() {
+        let dir = tempfile::tempdir().unwrap();
+        let old_name = format!("asn-exit-{}.txt", "a".repeat(32));
+        let new_name = format!("asn-exit-{}.txt", "0123456789abcdef".repeat(2));
+        let others = [format!("asn-exit-{}.log", "a".repeat(32)), "asn-exit-n0nce.txt".to_string(), format!("asn-exit-{}.txt", "C".repeat(32)), format!("x-asn-exit-{}.txt", "a".repeat(32)), "別人的.txt".to_string()];
+        let now = std::time::SystemTime::now();
+        let write = |name: &str, age: std::time::Duration| {
+            let f = std::fs::File::create(dir.path().join(name)).unwrap();
+            f.set_modified(now - age).unwrap();
+        };
+        let day = std::time::Duration::from_secs(24 * 3600);
+        write(&old_name, day * 3);
+        write(&new_name, std::time::Duration::from_secs(60));
+        for o in &others {
+            write(o, day * 30);
+        }
+        std::fs::create_dir(dir.path().join(format!("asn-exit-{}.txt", "b".repeat(32)))).unwrap();
+        let (n, failed) = sweep_old_exit_markers(dir.path(), now, EXIT_MARKER_MAX_AGE);
+        assert_eq!((n, failed.len()), (1, 0), "{failed:?}");
+        assert!(!dir.path().join(&old_name).exists(), "超過 1 天的刪掉");
+        assert!(dir.path().join(&new_name).exists(), "新的留著");
+        for o in &others {
+            assert!(dir.path().join(o).exists(), "別的檔名不碰：{o}");
+        }
+        assert!(dir.path().join(format!("asn-exit-{}.txt", "b".repeat(32))).is_dir(), "同名的資料夾也不碰");
+        assert_eq!(sweep_old_exit_markers(Path::new("Z:/ASN-不存在-xyz"), now, EXIT_MARKER_MAX_AGE), (0, vec![]), "目錄讀不到就略過");
+    }
+
+    /// 守門：真的開窗的函式有接上偵測（拿掉偵測，上面兩個純函式測試還綠，所以另外守這條接線）
+    #[test]
+    fn 守門_退路主控台開窗後有盯結束標記() {
+        let body = crate::settings::src_scan::prod_source(include_str!("local.rs"));
+        let console = body.split("fn start_console_window_windows(").nth(1).unwrap().split("fn judge_console_open(").next().unwrap();
+        assert!(console.contains("window_launcher_args_marked(title, command, args, env, Some("), "視窗腳本要帶結束標記");
+        assert!(console.contains("watch_console_exit(") && console.contains("judge_console_open(r, code, title)"), "開窗後要盯標記，並用同一個判斷回結果");
+        assert!(console.contains("sweep_old_exit_markers(&std::env::temp_dir()"), "開窗前要清舊的標記檔");
+    }
+
     /// 真機手動測試：用 cmd /k 走同一條啟動路徑，確認有回傳 PID、視窗留著（3 秒後仍活著），最後只關自己開的那一棵。
     /// 執行：cargo test --manifest-path src-tauri/Cargo.toml -- --ignored 真機_視窗會留著 --nocapture
     #[cfg(windows)]
@@ -1291,7 +1501,7 @@ mod tests {
     #[ignore]
     fn 真機_視窗會留著() {
         let dir = std::env::temp_dir();
-        let pid = start_console_window_windows("ASN 測試", "cmd.exe", &["/c".into(), "echo ASN 測試 & exit 3".into()], &dir, false, &[]).unwrap();
+        let pid = start_console_window_windows("ASN 測試", "cmd.exe", &["/k".into(), "echo ASN 測試".into()], &dir, false, &[]).unwrap();
         println!("ASN_TEST_PID={pid}");
         std::thread::sleep(std::time::Duration::from_secs(3));
         let list = Command::new("tasklist").no_window().args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();

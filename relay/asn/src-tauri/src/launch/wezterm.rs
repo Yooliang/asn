@@ -1114,6 +1114,14 @@ impl<'a> WezTerm<'a> {
         }
     }
 
+    /// 同 [`Self::pane_exit`]，另外把讀到的整段畫面一起回（一開就結束要把畫面最後幾行寫進 log）。
+    /// 還在跑、讀不到、沒有 nonce＝None
+    pub fn pane_exit_screen(&self, sock: &Path, pane_id: u64, nonce: Option<&str>) -> Option<(i32, String)> {
+        let nonce = nonce?;
+        let text = self.get_text(sock, pane_id, Some(-PANE_PROBE_LINES)).ok()?;
+        pane_exit_from_screen(&text, nonce).map(|code| (code, text))
+    }
+
     /// 同 [`Self::pane_exit`]，但分得出「確認還活著」與「沒讀到畫面（失敗、被暫停略過、沒有暗號）」：
     /// 後者不能當成「剛確認過還活著」（重開認領用它決定監看第一輪要不要重讀）。
     /// 是不是「例行」由呼叫端決定（背景掃描用 `cli_gate::routine` 包起來；開窗後的早退偵測是使用者動作，不能包）

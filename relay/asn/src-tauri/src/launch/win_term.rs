@@ -204,6 +204,9 @@ pub(crate) enum WinOpenError {
     /// GUI 已經啟動之後才失敗（等不到通訊檔、讀不到窗格、設不了標題、對照表寫不進去）：裡面的 claude 可能已經在跑，
     /// 不能再開第二份（同一個 --resume 兩個程序會一起寫同一段對話），直接回錯
     Started(String),
+    /// GUI 與窗格都開好了，但夥伴程式自己一開就結束（指令不存在、參數被拒絕等），窗格已收掉：
+    /// 沒有重複開同一段對話的風險，字串就是要給使用者看的白話，不能再套 [`STARTED_BUT_FAILED`]（那句講的是「登記不了視窗」）。同樣不走退路
+    Exited(String),
 }
 
 /// GUI 已經啟動之後失敗時，給使用者看的開頭（後面接原因）
@@ -294,6 +297,11 @@ pub(crate) fn open_window(host: Option<&dyn WinTermHost>, cwd: &Path, spec: &Win
             Err(WinOpenError::Started(e)) => {
                 elog!("開「{}」：自帶終端已啟動但後續失敗，不改用原生主控台：{e}", spec.title);
                 return Err(format!("{STARTED_BUT_FAILED}：{e}"));
+            }
+            // 程式自己一開就結束：已是給使用者看的白話，原文在 term 那邊寫進 ui.log 了；不開第二份、不退回原生主控台
+            Err(WinOpenError::Exited(e)) => {
+                elog!("開「{}」：夥伴一開就結束，不改用原生主控台：{e}", spec.title);
+                return Err(e);
             }
         },
     }
@@ -451,6 +459,26 @@ mod tests {
         assert_eq!(fb.get(), 0, "GUI 已經啟動就不能再開原生主控台（同一個 --resume 會有兩份）");
         assert!(e.starts_with(STARTED_BUT_FAILED) && e.contains("無法設定終端標題"), "照實說原因：{e}");
         assert!(!noted.load(Ordering::SeqCst), "沒改用一般視窗");
+        assert_eq!(h.got.lock().unwrap().len(), 1, "只開過一次");
+    }
+
+    /// 程式自己一開就結束：不走退路、不開第二份，字串原樣交給使用者，不套「沒能登記這扇視窗」那句（那句講的是另一件事）
+    #[test]
+    fn 夥伴一開就結束_不走退路_不套登記失敗那句() {
+        let noted = AtomicBool::new(false);
+        let spec = spec_for("小乙", "codex.exe", &sv(&["resume", "測試名"]), false, BTreeMap::new());
+        let said = "小乙 一開就結束了（結束碼 1），沒有開起來。詳細原因已記在紀錄裡，請再試一次；還是不行請把紀錄交給維護的人。";
+        let h = host(true, Err(WinOpenError::Exited(said.into())));
+        let fb = std::cell::Cell::new(0);
+        let e = open_window(Some(&h), Path::new("D:\\p"), &spec, &noted, &|| {
+            fb.set(fb.get() + 1);
+            Ok(77)
+        })
+        .unwrap_err();
+        assert_eq!(fb.get(), 0, "窗格已經開過又收掉：不能再開原生主控台");
+        assert_eq!(e, said);
+        assert!(!e.contains(STARTED_BUT_FAILED) && !e.contains("沒能登記"), "{e}");
+        assert!(!noted.load(Ordering::SeqCst));
         assert_eq!(h.got.lock().unwrap().len(), 1, "只開過一次");
     }
 
