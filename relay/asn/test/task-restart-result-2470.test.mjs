@@ -103,6 +103,13 @@ test('#2470 完成晚於 90 秒（開了卻沒上線的夥伴要等滿 90 秒才
   await o.tm.refresh()
   assert.equal(o.tm.state.restart, null, '90 秒到了畫面先放掉')
   assert.equal(o.tm.view().tree.root.restart.error, '', '這時結果還沒寫完，沒有可講的')
+  // 放掉之後再讀一次同一識別、仍在接回中的清單（已有一位記成沒接回）：還沒做完，不能提早講，也不能把盯梢清掉
+  o.snap.current = after({ restart_result: { id: 20, state: 'running', resumed: ['asn真', '小乙'], failed: [{ name: '小東', reason }] } })
+  o.clock.t = NOW + 95_000
+  o.logs.length = 0
+  await o.tm.refresh()
+  assert.equal(o.tm.view().tree.root.restart.error, '', '接回還在做，不等完成就講會在這裡紅')
+  assert.ok(!o.logs.some(l => l.includes('小東')), '還沒做完，log 也不寫名字')
   // 100 秒後結果才完成
   o.snap.current = after({ restart_result: { id: 20, state: 'done', resumed: ['asn真', '小乙'], failed: [{ name: '小東', reason }] } })
   o.clock.t = NOW + 100_000

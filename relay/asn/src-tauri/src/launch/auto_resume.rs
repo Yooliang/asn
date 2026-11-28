@@ -688,6 +688,37 @@ mod tests {
         assert!(!w2.resume_quota_ok(8));
     }
 
+    /// 2470 二審缺口：本人封存那一路的接線。事先排掉的封存夥伴要一路帶進結果的 skipped（接回與不接回兩條路都要），
+    /// 而且正式環境（after_mux 算好、RealDeps 帶入）那兩段接線不能被拿掉
+    #[cfg(feature = "gui")]
+    #[test]
+    fn _2470_本人封存的夥伴經事先排掉的名單帶進結果() {
+        let archived: std::collections::BTreeSet<String> = ["封存了".to_string()].into_iter().collect();
+        let names = sv(&["甲", "封存了"]);
+        let mut f = Fake::new();
+        f.pre = archived_skips(&names, &archived);
+        let d = tempfile::tempdir().unwrap();
+        let want = [("封存了", "本人封存")];
+        fn got(st: &Status) -> Vec<(&str, &str)> {
+            st.skipped.iter().map(|s| (s.name.as_str(), s.reason.as_str())).collect()
+        }
+        // 接回的路：名單只剩沒封存的，封存的記在 skipped，且寫進給畫面讀的結果檔
+        let entries = crash_entries(&names, vec![entry("甲")], &archived);
+        let st = resume_entries_why(d.path(), entries, true, WHY_RESTART, &f, || ());
+        assert_eq!(st.resumed, ["甲"]);
+        assert_eq!(got(&st), want, "接回的路要帶出本人封存");
+        // 十分鐘內第二次、不接回的路也一樣
+        let st = resume_entries_why(d.path(), vec![entry("甲")], false, WHY_RESTART, &f, || ());
+        assert_eq!(got(&st), want, "不接回的路也要帶出本人封存");
+        // 正式環境的接線（含 RealDeps 不帶就會漏）：用原始碼釘住
+        let me = &crate::settings::src_scan::prod_source(include_str!("auto_resume.rs"));
+        let am = me.split("fn after_mux(").nth(1).unwrap().split("pub fn ").next().unwrap();
+        assert!(am.contains("archived_skips(names, known.archived_names())") && am.contains("pre_skipped }"), "after_mux 要算封存名單並交給 RealDeps");
+        let rd = me.split("impl Deps for RealDeps").nth(1).unwrap();
+        let sb = rd.split("fn skipped_before").nth(1).unwrap().split("fn ").next().unwrap();
+        assert!(sb.contains("self.pre_skipped.clone()"), "RealDeps 的 skipped_before 要回 pre_skipped");
+    }
+
     #[test]
     fn _1860f_重啟的接回_不經監看_不計十分鐘冷卻() {
         let src = include_str!("auto_resume.rs");
@@ -764,11 +795,13 @@ mod tests {
         starting: Vec<String>,
         /// 這些名字開出來時退回了系統終端（原生主控台）
         native: Vec<String>,
+        /// 名單之外事先排掉的夥伴（正式環境由 after_mux 用 archived_skips 算好帶入）
+        pre: Vec<Skipped>,
     }
 
     impl Fake {
         fn new() -> Fake {
-            Fake { now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false, released: RefCell::new(vec![]), starting: vec![], native: vec![] }
+            Fake { pre: vec![], now: Cell::new(1_000_000), logins: RefCell::new(vec![]), free: RefCell::new(vec![]), live: vec![], launched: RefCell::new(vec![]), fail_launch: vec![], never_appears: vec![], states: RefCell::new(vec![]), running: Cell::new(0), peak: Cell::new(0), revealed: RefCell::new(vec![]), reveal_ok: false, released: RefCell::new(vec![]), starting: vec![], native: vec![] }
         }
     }
 
@@ -783,6 +816,9 @@ mod tests {
     }
 
     impl Deps for Fake {
+        fn skipped_before(&self) -> Vec<Skipped> {
+            self.pre.clone()
+        }
         fn opened_native(&self, name: &str) -> bool {
             self.native.iter().any(|n| n == name)
         }
