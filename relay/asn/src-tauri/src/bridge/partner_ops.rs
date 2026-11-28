@@ -654,7 +654,9 @@ impl PartnerOps {
         super::engines::pi_control::window_session_id(&self.env.pi_home(), name, self.env.now_ms(), |p| os.alive(p)).is_some() && self.find_target(name).is_err()
     }
 
-    /// 改名成功才同步終端對照表（#2471）：Claude 視窗（外掛路與重開路）與 pi 視窗的改名都經過這一個函式；失敗不動，結果原樣回傳
+    /// 改名成功才同步終端對照表（#2471）：Claude 視窗（外掛路與重開路）與 pi 視窗的改名都經過這一個函式；失敗不動，結果原樣回傳。
+    /// pi 正在忙時改名會排隊、照樣回成功：一排上隊就同步，因為 ASN 已回報改名成功、名單也是新名，對照表跟著換才對得上。
+    /// 已知窗口：pi 這一輪還沒做完就當掉或被關掉時，排隊的改名沒做成，pi 留著舊名、對照表卻已是新名（要不要處理見 #2475）
     fn relabel_if_ok(&self, op: &Op, r: OpResult) -> OpResult {
         if r.status == "ok" {
             self.env.relabel_terminal(&op.name, &op.new_name);
