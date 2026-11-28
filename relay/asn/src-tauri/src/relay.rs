@@ -514,26 +514,40 @@ pub(crate) const BODY_LOG_CHARS: usize = 200;
 /// 這是全專案唯一的一份遮罩規則：ui_log::redact（panic 訊息，另外限 200 字）與 launch::term 的一開就結束畫面尾段都呼叫它，不准各自再寫一份。
 /// 放在這裡是因為本檔所有版本（含沒有 ui_log 的無頭、手機）都有編進去
 pub(crate) fn mask_long_tokens(msg: &str) -> String {
+    let chars: Vec<char> = msg.chars().collect();
     let mut out = String::new();
-    let mut run = String::new();
-    let flush = |run: &mut String, out: &mut String| {
-        if run.chars().count() >= 32 {
-            out.push_str("…略…");
-        } else {
-            out.push_str(run);
-        }
-        run.clear();
-    };
-    for c in msg.chars() {
+    let mut pos = 0;
+    for (a, b) in long_token_ranges(msg) {
+        out.extend(&chars[pos..a]);
+        out.push_str("…略…");
+        pos = b;
+    }
+    out.extend(&chars[pos..]);
+    out
+}
+
+/// 掃描規則本身：回「被當成權杖」的字元範圍 `[起, 止)`（以字元為單位、由前到後、互不重疊），即連續 32 個以上的英數與 `-_.+/=`。
+/// [`mask_long_tokens`] 用它換成記號；一開就結束畫面尾段（launch::term）折行的權杖要照原分行各自遮，也用它找範圍，不另寫一份規則
+pub(crate) fn long_token_ranges(msg: &str) -> Vec<(usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut start: Option<usize> = None;
+    let mut n = 0;
+    for (i, c) in msg.chars().enumerate() {
+        n = i + 1;
         if c.is_ascii_alphanumeric() || "-_.+/=".contains(c) {
-            run.push(c);
-        } else {
-            flush(&mut run, &mut out);
-            out.push(c);
+            start.get_or_insert(i);
+        } else if let Some(s) = start.take() {
+            if i - s >= 32 {
+                ranges.push((s, i));
+            }
         }
     }
-    flush(&mut run, &mut out);
-    out
+    if let Some(s) = start {
+        if n - s >= 32 {
+            ranges.push((s, n));
+        }
+    }
+    ranges
 }
 
 /// 5xx 那一行 log：動作名、狀態碼、第幾次嘗試、回應內容前 200 字。不含網址、標頭、金鑰

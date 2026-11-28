@@ -214,8 +214,8 @@ fn screen_tail(text: &str, nonce: &str) -> Vec<String> {
         })
         .collect();
     // 畫面尾段可能有登入代碼、key 片段、權杖，ui.log 夥伴讀得到：先套全專案同一條遮罩規則，再限長。
-    // 終端會照欄寬把長權杖折成兩行以上：上一行結尾與下一行開頭都是權杖字元就先接起來再遮（寧可多遮）。
-    // 接起來之後真的有東西被遮才輸出成一行；沒被遮（只是普通文字剛好相連）就維持原本分行
+    // 終端會照欄寬把長權杖折成兩行以上：上一行結尾與下一行開頭都是權杖字元的行先接起來，只用來「找」權杖落在哪些字上（寧可多遮）；
+    // 找到之後照原本的分行寫回，每行只把落在權杖範圍內的那段換成記號，其他字原樣保留，不把一組併成一行
     let is_tok = |c: char| c.is_ascii_alphanumeric() || "-_.+/=".contains(c);
     let cap = |s: String| s.chars().take(EXIT_TAIL_LINE_CHARS).collect::<String>();
     let mut masked_lines: Vec<String> = Vec::new();
@@ -225,17 +225,8 @@ fn screen_tail(text: &str, nonce: &str) -> Vec<String> {
         while j < cleaned.len() && cleaned[j - 1].chars().last().is_some_and(is_tok) && cleaned[j].chars().next().is_some_and(is_tok) {
             j += 1;
         }
-        if j - i > 1 {
-            let joined = cleaned[i..j].concat();
-            let masked = crate::relay::mask_long_tokens(&joined);
-            if masked != joined {
-                masked_lines.push(cap(masked));
-                i = j;
-                continue;
-            }
-        }
-        masked_lines.push(cap(crate::relay::mask_long_tokens(&cleaned[i])));
-        i += 1;
+        masked_lines.extend(mask_group_keep_lines(&cleaned[i..j]).into_iter().map(cap));
+        i = j;
     }
     let mut lines: Vec<String> = masked_lines.into_iter().filter(|l| !l.contains("[asn-exit ")).collect();
     while lines.last().is_some_and(|l| l.is_empty()) {
@@ -243,6 +234,33 @@ fn screen_tail(text: &str, nonce: &str) -> Vec<String> {
     }
     let skip = lines.len().saturating_sub(EXIT_TAIL_LINES);
     lines.split_off(skip)
+}
+
+/// 一組相連的行：接起來用 relay::long_token_ranges 找權杖範圍（唯一一份規則），再照原分行寫回，
+/// 每行只把落在範圍內的那段換成「…略…」（同一個權杖跨兩行就兩行各自被遮），行數不變、其他字原樣
+fn mask_group_keep_lines(lines: &[String]) -> Vec<String> {
+    let ranges = crate::relay::long_token_ranges(&lines.concat());
+    let mut off = 0;
+    lines
+        .iter()
+        .map(|l| {
+            let chars: Vec<char> = l.chars().collect();
+            let (s, e) = (off, off + chars.len());
+            off = e;
+            let (mut out, mut pos) = (String::new(), s);
+            for &(a, b) in &ranges {
+                let (a2, b2) = (a.max(s), b.min(e));
+                if a2 >= b2 {
+                    continue;
+                }
+                out.extend(&chars[pos - s..a2 - s]);
+                out.push_str("…略…");
+                pos = b2;
+            }
+            out.extend(&chars[pos - s..]);
+            out
+        })
+        .collect()
 }
 
 /// 夥伴一開就結束：窗格最後的畫面（原文，例如程式自己印的錯誤句）寫進 ui.log，回給使用者看的白話。畫面不放原文
@@ -8642,11 +8660,11 @@ mod tests {
             assert!(a.len() == 25 && b.len() >= 15);
             // 直接測 screen_tail：25＋16 切成兩行（前後還有別的字）；三行也要接得起來
             let t = screen_tail(&format!("login token {a}\n{b} rejected\n"), "n0nce");
-            assert_eq!(t, vec!["login token …略… rejected".to_string()], "{t:?}");
+            assert_eq!(t, vec!["login token …略…".to_string(), "…略… rejected".to_string()], "行數照留、兩行各自被遮：{t:?}");
             let (a1, rest) = tok.split_at(14);
             let (b1, c1) = rest.split_at(14);
             let t3 = screen_tail(&format!("x {a1}\n{b1}\n{c1} y\n"), "n0nce");
-            assert_eq!(t3, vec!["x …略… y".to_string()], "{t3:?}");
+            assert_eq!(t3, vec!["x …略…".to_string(), "…略…".to_string(), "…略… y".to_string()], "{t3:?}");
             // 普通文字：上下兩行都以英數相連，接起來沒到 32 字，照留、仍是兩行
             assert_eq!(screen_tail("hello\nworld\n", "n0nce"), vec!["hello".to_string(), "world".to_string()]);
             assert_eq!(screen_tail("error: no session\n\nplease retry.\n", "n0nce"), vec!["error: no session".to_string(), "".to_string(), "please retry.".to_string()]);
@@ -8657,7 +8675,37 @@ mod tests {
             let _ = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
             let log = TEST_LOG.with(|l| l.borrow().join("\n"));
             assert!(!log.contains(a) && !log.contains(b) && !log.contains("xYz9xYz9"), "兩段都不能進 log：{log}");
-            assert!(log.contains("login token …略… rejected"), "{log}");
+            assert!(log.contains("    login token …略…\n    …略… rejected"), "兩行各自被遮、行數照留：{log}");
+        }
+
+        /// 畫面裡有 32 字以上的長字串（對話編號、網址）時不能把整段併成一行再截斷：行數與最後一行的原因照留
+        #[test]
+        fn 畫面有長編號或網址_行數照留_最後的原因完整在log() {
+            fix_nonce();
+            let sid = "0123456789abcdef-0123456789abcdef-0123456789ab";
+            let mut screen = format!("Resuming session {sid}\n");
+            for n in 2..=13 {
+                screen.push_str(&format!("step {n} of the startup sequence finished ok\n"));
+            }
+            screen.push_str("ERROR: No saved session found with ID 測試名. Run `codex resume` without an ID.\n");
+            let t = screen_tail(&screen, "n0nce");
+            assert_eq!(t.len(), 14, "行數不變：{t:?}");
+            assert_eq!(t[0], "Resuming session …略…", "{t:?}");
+            // 編號結尾與下一行開頭相連，無法分辨是不是同一個折行的權杖：寧可多遮，下一行開頭那個字也算進範圍
+            assert_eq!(t[1], "…略… 2 of the startup sequence finished ok", "{t:?}");
+            assert_eq!(t[2], "step 3 of the startup sequence finished ok", "其餘行原樣：{t:?}");
+            assert_eq!(t[13], "ERROR: No saved session found with ID 測試名. Run `codex resume` without an ID.", "最後的原因完整：{t:?}");
+            // 網址在中間：四行還是四行，不黏成一行（網址結尾與下一行開頭相連，下一行開頭那個字寧可多遮）
+            let u = screen_tail("Error loading sessions\nsee https://example.com/a/very/long/path/that/goes/on/and/on/x\ninvalid key\nplease run codex login\n", "n0nce");
+            assert_eq!(u, vec!["Error loading sessions".to_string(), "see https:…略…".to_string(), "…略… key".to_string(), "please run codex login".to_string()], "{u:?}");
+            // 走完整的一開就結束：log 裡最後一行原因在、編號不在
+            let (rig, _) = mux_rig();
+            *rig.runner.inner.screen.borrow_mut() = format!("{screen}[ASN] 程式已結束（結束碼 1）\n[asn-exit n0nce 1]\n");
+            TEST_LOG.with(|l| l.borrow_mut().clear());
+            let _ = rig.svc.start_window(Path::new(&rig.cwd), &claude_spec(Some("sid-1"))).unwrap_err();
+            let log = TEST_LOG.with(|l| l.borrow().join("\n"));
+            assert!(log.contains("ERROR: No saved session found with ID 測試名. Run `codex resume` without an ID."), "{log}");
+            assert!(!log.contains(sid) && !log.contains("0123456789abcdef-0123"), "{log}");
         }
 
         #[test]
