@@ -30,8 +30,7 @@ function setup() {
     env: { ...envWithoutHomes(), USERPROFILE: home, HOME: home, IRORI_AGENTS_FILE: file, FAKE_AGY_STATE: path.join(dir, 'st') },
     send: async () => {}, deps: { realHome: home },
   })
-  // 剛 start 就立刻 stop 會讓工作者的啟動程序殘留、測試行程不結束（另案），先等它啟動完
-  const cleanup = async () => { await new Promise(r => setTimeout(r, 1500)); engine.stop(); await new Promise(r => setTimeout(r, 150)); try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ } }
+  const cleanup = async () => { engine.stop(); await new Promise(r => setTimeout(r, 150)); try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* ignore */ } }
   return { dir, engine, logs, cleanup }
 }
 
@@ -58,7 +57,6 @@ test('start 之前就動態開夥伴：不丟 ReferenceError（能用或白話�
     // 先借 start 取得樣板，再停掉重建一個還沒 start 的引擎的情形用同一個 cfg
     engine.start(noop)
     const spec = specFrom(engine, dir, 'Partner乙')
-    await new Promise(r => setTimeout(r, 1500))
     engine.stop()
     const fresh = createEngine({
       log: () => {}, workDir: dir, mailboxName: 'T-收發室',
@@ -69,7 +67,7 @@ test('start 之前就動態開夥伴：不丟 ReferenceError（能用或白話�
       assert.ok(fresh._workers.has('Partner乙'))
     } catch (e) {
       assert.ok(!(e instanceof ReferenceError), `不該是 ReferenceError：${e.message}`)
-    } finally { await new Promise(r => setTimeout(r, 1500)); fresh.stop() }
+    } finally { fresh.stop() }
   } finally { await cleanup() }
 })
 

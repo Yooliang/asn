@@ -318,6 +318,8 @@ struct St {
     turn_grant: HashSet<String>,
     driver: Option<Arc<dyn Driver>>,
     driver_gen: u64,
+    /// 正在啟動、還沒指給 driver 的驅動：停止時要能一併停掉，不然啟動完成後行程沒人管
+    pending: Option<Arc<dyn Driver>>,
     /// 換班接手後的第一則提示（新對話成功處理第一輪才清掉）
     handover: Option<String>,
     /// 最近一次啟動驅動失敗的原因（成功啟動就清空）。接手要靠它知道載入有沒有成功
@@ -395,6 +397,7 @@ impl Worker {
                 turn_grant: HashSet::new(),
                 driver: None,
                 driver_gen: 0,
+                pending: None,
                 handover: None,
                 start_error: String::new(),
                 model: i.cfg.model.clone(),
@@ -579,8 +582,24 @@ impl Worker {
             on_exit,
             pids: self.i.pids.clone(),
         });
+        self.st.lock().unwrap().pending = Some(d.clone());
         let r = d.start().await;
-        self.st.lock().unwrap().starting = false;
+        // 啟動期間被停止（停止時 pending 已被取走並停掉、或停止旗標還立著）：這支不指給 driver，以「被停止」結束
+        let stopped = {
+            let mut s = self.st.lock().unwrap();
+            s.starting = false;
+            let ours = s.pending.as_ref().is_some_and(|p| Arc::ptr_eq(p, &d));
+            if ours {
+                s.pending = None;
+            }
+            s.stopping || !ours
+        };
+        if stopped {
+            // 停止當下那一次停止，驅動的程序可能還沒開出來而成了空動作；
+            // 所以啟動完成後一律再停一次（重複停是安全的），不管 pending 是不是被停止那邊取走
+            d.stop();
+            return Err(WorkerError::new("stopped", "工作者被停止"));
+        }
         r?;
         {
             let mut s = self.st.lock().unwrap();
@@ -633,6 +652,8 @@ impl Worker {
                         me.set_health(Health::Ok, "");
                     }
                 }
+                // 啟動中被停止：不是故障，不改健康狀態、不記啟動錯誤、不通知
+                Err(e) if e.code == "stopped" => {}
                 Err(e) => {
                     me.st.lock().unwrap().start_error = e.message.clone();
                     me.apply_failure(e, None);
@@ -1073,10 +1094,10 @@ impl Worker {
     }
 
     pub fn stop(&self) {
-        let (queued, d) = {
+        let (queued, d, starting) = {
             let mut s = self.st.lock().unwrap();
             s.stopping = true;
-            (s.queue.drain(..).collect::<Vec<_>>(), s.driver.take())
+            (s.queue.drain(..).collect::<Vec<_>>(), s.driver.take(), s.pending.take())
         };
         self.i.approvals.cancel_all(&self.i.cfg.name);
         // 重開 ASN 時這些事件沒人收，信還在後台信箱，重開後照常收；ASN 還開著（改名、移除）才會走到通知與 ack
@@ -1085,6 +1106,9 @@ impl Worker {
             let _ = self.i.events.send(ev);
         }
         if let Some(d) = d {
+            d.stop();
+        }
+        if let Some(d) = starting {
             d.stop();
         }
     }
@@ -1183,5 +1207,214 @@ mod status_priority_tests {
         assert_eq!(roster_status(false, Health::Ok, true), "busy");
         assert_eq!(roster_status(false, Health::Ok, false), "idle");
         assert_eq!(roster_status(false, Health::Unavailable, true), "busy");
+    }
+}
+
+#[cfg(test)]
+mod stop_during_start_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    /// 啟動由測試控制何時完成的假驅動：記下是否開始啟動、被停了幾次
+    struct GatedDriver {
+        gate: Arc<tokio::sync::Notify>,
+        started: Arc<AtomicBool>,
+        stops: Arc<AtomicUsize>,
+        fail_on_start: Arc<AtomicBool>,
+        alive: AtomicBool,
+        /// 模擬「程序還沒開出來前被停是空動作」：開出程序前的 stop 只計數、不讓它變成不活著
+        lazy_stop: bool,
+        up: AtomicBool,
+    }
+    impl Driver for GatedDriver {
+        fn session_id(&self) -> String {
+            "gated".into()
+        }
+        fn resume_lost(&self) -> bool {
+            false
+        }
+        fn alive(&self) -> bool {
+            self.alive.load(Ordering::SeqCst)
+        }
+        fn touch(&self) {}
+        fn start(&self) -> BoxFut<'_, Result<(), WorkerError>> {
+            Box::pin(async move {
+                self.started.store(true, Ordering::SeqCst);
+                self.gate.notified().await;
+                if self.fail_on_start.load(Ordering::SeqCst) {
+                    let mut e = WorkerError::new("crash", "測試：啟動中行程被砍");
+                    e.spawn_failed = true;
+                    return Err(e);
+                }
+                self.up.store(true, Ordering::SeqCst);
+                self.alive.store(true, Ordering::SeqCst);
+                Ok(())
+            })
+        }
+        fn turn(&self, _t: String, _a: u64, _b: u64) -> BoxFut<'_, Result<TurnResult, WorkerError>> {
+            Box::pin(async { Ok(TurnResult { text: String::new(), denied: vec![] }) })
+        }
+        fn stop(&self) {
+            if !(self.lazy_stop && !self.up.load(Ordering::SeqCst)) {
+                self.alive.store(false, Ordering::SeqCst);
+            }
+            self.stops.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    struct Rig {
+        w: WorkerHandle,
+        gate: Arc<tokio::sync::Notify>,
+        started: Arc<AtomicBool>,
+        stops: Arc<AtomicUsize>,
+        fail_on_start: Arc<AtomicBool>,
+        notices: Arc<AtomicUsize>,
+        rx: tokio::sync::mpsc::UnboundedReceiver<EngineEvent>,
+        _dir: tempfile::TempDir,
+        last: Arc<std::sync::Mutex<Option<Arc<GatedDriver>>>>,
+    }
+
+    fn rig() -> Rig {
+        rig_with(false)
+    }
+
+    fn rig_with(lazy_stop: bool) -> Rig {
+        let dir = tempfile::tempdir().unwrap();
+        let (cfg, _) = super::super::acp_config::normalize_worker(
+            &serde_json::json!({"name": "停止測試", "engine": "acp", "command": "x", "protocol": "acp"}),
+            dir.path(),
+            0,
+        )
+        .unwrap();
+        let (gate, started, stops, fail_on_start, notices) = (
+            Arc::new(tokio::sync::Notify::new()),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicUsize::new(0)),
+        );
+        let (g, s, t, f) = (gate.clone(), started.clone(), stops.clone(), fail_on_start.clone());
+        let last: Arc<std::sync::Mutex<Option<Arc<GatedDriver>>>> = Arc::new(std::sync::Mutex::new(None));
+        let l = last.clone();
+        let make_driver: MakeDriver = Arc::new(move |_a: DriverArgs| {
+            let d = Arc::new(GatedDriver {
+                gate: g.clone(),
+                started: s.clone(),
+                stops: t.clone(),
+                fail_on_start: f.clone(),
+                alive: AtomicBool::new(true),
+                lazy_stop,
+                up: AtomicBool::new(false),
+            });
+            *l.lock().unwrap() = Some(d.clone());
+            d as Arc<dyn Driver>
+        });
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let n = notices.clone();
+        let w = Worker::new(WorkerInit {
+            cfg: Arc::new(cfg),
+            env: Arc::new(vec![]),
+            log: Arc::new(|_| {}),
+            approvals: Approvals::new(),
+            notify: Arc::new(move |_| {
+                n.fetch_add(1, Ordering::SeqCst);
+            }),
+            store: Store::open(dir.path().join("acp-workers.json"), Arc::new(|_| {})),
+            make_driver,
+            events: tx,
+            pids: PidBook::new(dir.path()),
+            handoff_dir: None,
+            work_dir: dir.path().to_path_buf(),
+            real_home: dir.path().to_path_buf(),
+            record_model_on_start: None,
+        });
+        Rig { w, gate, started, stops, fail_on_start, notices, rx, _dir: dir, last }
+    }
+
+    async fn wait_until(what: &str, f: impl Fn() -> bool) {
+        for _ in 0..200 {
+            if f() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("等不到：{what}");
+    }
+
+    #[tokio::test]
+    async fn 啟動中被停止_停止當下就停掉啟動中的驅動_且不改健康狀態不發通知() {
+        let mut r = rig();
+        r.w.start();
+        wait_until("驅動開始啟動", || r.started.load(Ordering::SeqCst)).await;
+        r.fail_on_start.store(true, Ordering::SeqCst); // 行程被砍時 start 會回「起不來」，也不能當成故障
+        r.w.stop();
+        assert_eq!(r.stops.load(Ordering::SeqCst), 1, "停止當下就要停掉啟動中的那支");
+        r.gate.notify_one();
+        wait_until("暖機收尾", || !r.w.st.lock().unwrap().starting).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let s = r.w.st.lock().unwrap();
+        assert!(s.driver.is_none() && s.pending.is_none(), "不能留下任何驅動");
+        assert_eq!(s.health, Health::Ok, "停止中的失敗不改健康狀態");
+        assert!(s.start_error.is_empty(), "停止中的失敗不記成啟動錯誤");
+        drop(s);
+        assert_eq!(r.notices.load(Ordering::SeqCst), 0, "不發通知");
+        assert!(r.rx.try_recv().is_err(), "不送失敗事件");
+        assert!(r.stops.load(Ordering::SeqCst) >= 1, "停止當下至少停過一次（啟動完成後可能再停一次）");
+    }
+
+    #[tokio::test]
+    async fn 開出程序前被停是空動作_啟動完成後一律再停一次讓程序真的被停掉() {
+        let mut r = rig_with(true);
+        r.w.start();
+        wait_until("驅動開始啟動", || r.started.load(Ordering::SeqCst)).await;
+        r.w.stop(); // 走真的 stop()，不只立旗標；此時程序還沒開出來，停了等於沒停
+        let d = r.last.lock().unwrap().clone().expect("驅動已建立");
+        assert!(d.alive(), "程序開出來之前被停是空動作，這時還不會變成不活著");
+        r.gate.notify_one();
+        wait_until("暖機收尾", || !r.w.st.lock().unwrap().starting).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(!d.alive(), "啟動完成後要再停一次，程序最後必須是停掉的");
+        assert!(r.stops.load(Ordering::SeqCst) >= 2, "停止當下一次、啟動完成後再一次");
+        let s = r.w.st.lock().unwrap();
+        assert!(s.driver.is_none() && s.pending.is_none(), "不能留下任何驅動");
+        assert_eq!(s.health, Health::Ok);
+        assert!(s.start_error.is_empty());
+        drop(s);
+        assert_eq!(r.notices.load(Ordering::SeqCst), 0, "不發通知");
+        assert!(r.rx.try_recv().is_err(), "不送失敗事件");
+    }
+
+    #[tokio::test]
+    async fn 停止當下沒停到_啟動完成後發現已停就停掉這支_不指給驅動() {
+        let r = rig();
+        let me = r.w.clone();
+        let h = tokio::spawn(async move { me.ensure_driver(false).await });
+        wait_until("驅動開始啟動", || r.started.load(Ordering::SeqCst)).await;
+        // 只立停止旗標、不經 stop()：模擬停止當下沒拿到啟動中的那支
+        r.w.st.lock().unwrap().stopping = true;
+        assert_eq!(r.stops.load(Ordering::SeqCst), 0);
+        r.gate.notify_one();
+        let e = h.await.unwrap().err().expect("已被停止，不能回成功");
+        assert_eq!(e.code, "stopped");
+        assert_eq!(r.stops.load(Ordering::SeqCst), 1, "啟動完成後要把這支停掉");
+        let s = r.w.st.lock().unwrap();
+        assert!(s.driver.is_none() && s.pending.is_none());
+        assert_eq!(s.health, Health::Ok);
+        assert!(!s.starting);
+    }
+
+    #[tokio::test]
+    async fn 沒有停止時啟動完成照常留著() {
+        let r = rig();
+        let me = r.w.clone();
+        let h = tokio::spawn(async move { me.ensure_driver(false).await });
+        wait_until("驅動開始啟動", || r.started.load(Ordering::SeqCst)).await;
+        r.gate.notify_one();
+        let d = h.await.unwrap().ok().expect("正常啟動要成功");
+        assert!(d.alive());
+        assert_eq!(r.stops.load(Ordering::SeqCst), 0);
+        let s = r.w.st.lock().unwrap();
+        assert!(s.driver.is_some() && s.pending.is_none());
+        assert_eq!(s.health, Health::Ok);
     }
 }
