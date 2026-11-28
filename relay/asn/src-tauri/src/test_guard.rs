@@ -304,7 +304,9 @@ mod tests {
         assert!(own_dir().ends_with(format!("asn-tm-{}", std::process::id())));
     }
 
-    // ---- 測試鉤子登記：正式版原始碼裡 `#[cfg(test)] thread_local!` 宣告的值，一律要在這裡登記並寫理由 ----
+    // ---- 測試鉤子登記：src 底下所有 .rs 裡 `#[cfg(test)]` 緊接 `thread_local!` 宣告的值，一律要在這裡登記並寫理由 ----
+    // 這些寫法還沒納入，見 #2435：`#[cfg(test)]` 掛在外層 mod 上的鉤子（例如 quota_readers.rs 的 fake::STORE、
+    // acp_worker.rs 的 test_hooks 模組），以及 struct 的 `#[cfg(test)]` 欄位
 
     /// 鉤子的性質。「記錄」只數次數、記東西給測試看；「注入」只取代某個外部輸入（查到的狀態、環境變數名、失敗）的回傳值。
     /// 兩種都不准改正式版自己的分支條件：正式版的判斷照舊跑，鉤子只換它讀到的值或旁邊記一筆
@@ -318,11 +320,17 @@ mod tests {
     const HOOKS: &[(&str, &str, Hook, &str)] = &[
         ("src/launch/term_reclaim.rs", "KICKS", Hook::Record, "只在 kick_retry 裡加一，數「叫了幾次背景重試」；不影響是否要叫（#2424 B）"),
         ("src/launch/term.rs", "TEST_TERM_STATE", Hook::Inject, "只取代 partner_term_state_of 查到的終端狀態；詳情後面怎麼判斷、怎麼顯示照正式版走（#2424 C）"),
+        ("src/agent_setup/login.rs", "WIPES", Hook::Record, "只在 wipe() 開頭加一，之後照舊清零；沒有任何判斷讀它（#2435）"),
+        ("src/launch/term.rs", "TEST_NONCE", Hook::Inject, "只取代 new_nonce() 的亂數；呼叫端照正式版走（#2435）"),
+        ("src/launch/term.rs", "TEST_REGISTRY_NAMES", Hook::Inject, "只取代 registry_env_names() 讀登錄檔的結果；後面的邏輯照正式版（#2435）"),
+        ("src/launch/wezterm.rs", "OBSERVE_TICKS", Hook::Inject, "只取代「GUI 通訊檔出現後要再核對幾次」這個次數，迴圈內的判斷照正式版；測試預設 0＝測試裡預設不跑觀察迴圈，要驗觀察的測試自己設次數（#2435）"),
+        ("src/settings/migrate.rs", "FAIL_RENAME", Hook::Inject, "只取代 do_rename() 裡 std::fs::rename 的結果；改名失敗後的處理照正式版（#2435）"),
+        ("src/settings/migrate.rs", "FAIL_COPY", Hook::Inject, "只取代 do_copy() 裡 std::fs::copy 的結果（#2435）"),
+        ("src/settings/mod.rs", "TEST_ROOTS", Hook::Inject, "只取代 roots() 的資料夾根（#2435）"),
+        ("src/settings/mod.rs", "FAIL_WRITE", Hook::Inject, "只取代 put_text 裡 atomic::write 的結果，錯誤轉白話照正式版（#2435）"),
+        ("src/settings/mod.rs", "PEEK_LOGS", Hook::Record, "在 peek_log 通過節流判斷之後才加一，節流不看它（#2435）"),
+        ("src/settings/mod.rs", "PEEK_CLOCK_SKEW", Hook::Inject, "只取代 peek_now() 的「現在」，60 秒節流判斷照正式版（#2435）"),
     ];
-
-    /// 本 PR 新增、守門只管這兩組：term_reclaim.rs 整份（新檔，裡面所有 `#[cfg(test)]` 鉤子都要登記）、
-    /// 以及 term.rs 的 TEST_TERM_STATE。其他既有檔案的既有鉤子不在這次範圍（全域的鉤子守門另開單處理）
-    const GUARDED: &[(&str, &str)] = &[("src/launch/term_reclaim.rs", "KICKS"), ("src/launch/term.rs", "TEST_TERM_STATE")];
 
     /// 檔案文字裡每個 `#[cfg(test)]` 緊接 `thread_local!` 區塊宣告的變數名
     fn hook_statics(text: &str) -> Vec<String> {
@@ -360,23 +368,14 @@ mod tests {
             .collect();
         let (mut bad, mut used) = (Vec::new(), std::collections::BTreeSet::new());
         for (rel, text) in &texts {
-            // 只看 GUARDED 列到的檔案；term_reclaim.rs 的每個鉤子都要登記，term.rs 只看 GUARDED 指名的那一個
-            let Some(file_rule) = GUARDED.iter().filter(|(p, _)| rel.ends_with(p)).map(|(_, v)| *v).next() else { continue };
-            let whole_file = rel.ends_with("term_reclaim.rs");
+            // 整個 src 都掃：每個找到的鉤子都要用「檔案結尾＋變數名」登記（claude_quota.rs 的正式 static KICKS 不是鉤子，不會被抓）
             for var in hook_statics(text) {
-                if !whole_file && var != file_rule {
-                    continue;
-                }
                 match HOOKS.iter().position(|(p, v, _, _)| rel.ends_with(p) && *v == var) {
                     Some(i) => {
                         used.insert(i);
                     }
                     None => bad.push(format!("{rel}：測試鉤子 {var} 沒登記")),
                 }
-            }
-            // 指名的鉤子還在原始碼裡（改名或搬走要同步改守門）
-            if !hook_statics(text).iter().any(|v| v == file_rule) {
-                bad.push(format!("{rel}：找不到指名的測試鉤子 {file_rule}"));
             }
         }
         assert!(bad.is_empty(), "正式版原始碼裡的 #[cfg(test)] 鉤子要到 HOOKS 登記，寫明是記錄還是注入、為什麼不改正式版的分支條件：\n{}", bad.join("\n"));
