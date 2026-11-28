@@ -16,6 +16,9 @@ export const TREE_TEXT = Object.freeze({
   disconnected: '斷線中',
   restartFail: '重啟沒有成功，請稍後再試。',
   restartAsnTimeout: '重啟沒有完成，ASN 仍在執行。',
+  // 重啟後的接回結果（#2470）：沒接回的說得出名字與原因；不在 ASN 記錄裡的視窗講明接不回
+  resumeFailed: (name, reason) => `「${name}」沒有接回${reason ? `：${reason}` : ''}`,
+  resumeOrphan: name => `「${name}」不在 ASN 的記錄裡，無法接回`,
   // 終端服務沒有在跑（例如重啟時新的起不來）、但這台是用終端服務的：列一個空的佔位，才有地方再按「重啟」
   muxNone: '沒有在運行',
 })
