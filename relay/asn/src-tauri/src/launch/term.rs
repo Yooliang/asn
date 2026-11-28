@@ -1456,26 +1456,42 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             let Some(i) = g.viewers.iter().position(|v| v.id == id && !v.starting) else { return Ok(()) };
             g.viewers.remove(i)
         };
-        let now_at = self.runner.started_ms(v.pid);
-        view_log(&format!("mux-view unview pid={} recorded={} now={now_at:?}", v.pid, v.started_ms));
-        if now_at == Some(v.started_ms) {
-            self.runner.kill_tree(v.pid);
-            // 結束失敗不能當成功（#596）：還活著就把紀錄放回去、回錯。清掉紀錄的話，畫面還在、按鈕卻翻回「前台顯示」，再按會多開一個
-            let mut gone = false;
-            for _ in 0..VIEW_GONE_RETRIES {
-                if self.runner.started_ms(v.pid) != Some(v.started_ms) {
-                    gone = true;
-                    break;
-                }
-                self.runner.sleep(VIEW_POLL);
-            }
-            if !gone {
-                view_log(&format!("mux-view unview pid={} 結束後還活著，保留紀錄", v.pid));
-                self.inner.lock().unwrap().viewers.push(v);
-                return Err("看畫面的視窗沒有關掉，請再按一次，或直接關掉那個視窗".into());
-            }
+        // 結束失敗不能當成功（#596）：還活著就把紀錄放回去、回錯。清掉紀錄的話，畫面還在、按鈕卻翻回「前台顯示」，再按會多開一個
+        if !self.end_viewer(v.pid, v.started_ms) {
+            view_log(&format!("mux-view unview pid={} 結束後還活著，保留紀錄", v.pid));
+            self.inner.lock().unwrap().viewers.push(v);
+            return Err("看畫面的視窗沒有關掉，請再按一次，或直接關掉那個視窗".into());
         }
         Ok(())
+    }
+
+    /// 結束一個看畫面的 GUI：程序編號＋建立時間對得上才動（對不上＝已經不是同一個或早就沒了，不碰）。
+    /// 回 true＝已經不在了；false＝結束後還活著。`unview` 與收孤兒視窗（#2464）共用這一個結束方法
+    fn end_viewer(&self, pid: u32, started_ms: u64) -> bool {
+        let now_at = self.runner.started_ms(pid);
+        view_log(&format!("mux-view unview pid={pid} recorded={started_ms} now={now_at:?}"));
+        if now_at != Some(started_ms) {
+            return true;
+        }
+        self.runner.kill_tree(pid);
+        for _ in 0..VIEW_GONE_RETRIES {
+            if self.runner.started_ms(pid) != Some(started_ms) {
+                return true;
+            }
+            self.runner.sleep(VIEW_POLL);
+        }
+        false
+    }
+
+    /// 對照表的這些列沒了（服務換過、窗格不在了）：連同它們記著的看畫面 GUI 一起收（#2464），
+    /// 不然視窗連著已停的服務，從此沒人管。走 `unview`（編號＋建立時間對得上才結束）；每收一個寫一行 log
+    fn reap_viewers_of(&self, ids: &[String], why: &str) {
+        for id in ids {
+            let rec = self.inner.lock().unwrap().viewers.iter().find(|v| v.id == *id && !v.starting).cloned();
+            let Some(rec) = rec else { continue };
+            let r = self.unview(id);
+            view_log(&format!("mux-view reap id={id} pid={} 原因：{why} 結果={r:?}", rec.pid));
+        }
     }
 
     /// 這個編號現在有沒有一個還活著的看畫面的 GUI
@@ -1516,6 +1532,14 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             .filter_map(|(pid, cmdline)| self.runner.started_ms(pid).map(|started_ms| super::viewer_adopt::GuiProc { pid, started_ms, cmdline }))
             .collect();
         let plan = super::viewer_adopt::plan(&procs, &config, &known, &already);
+        // 舊編號、連著已停服務的 ASN 看畫面視窗（#2464）：收掉。名單空時 plan 不會給孤兒；使用者自己的 wezterm 本來就不在 plan 裡
+        for o in &plan.orphans {
+            let gone = self.end_viewer(o.pid, o.started_ms);
+            view_log(&format!("mux-view reap pid={} workspace={} 原因：名單上已經沒有這個夥伴的舊看畫面視窗 結果={}", o.pid, o.workspace, if gone { "已收" } else { "結束後還活著" }));
+            if gone {
+                self.inner.lock().unwrap().viewers.retain(|v| v.pid != o.pid);
+            }
+        }
         let mut g = self.inner.lock().unwrap();
         let mut n = 0;
         for f in &plan.found {
@@ -1611,9 +1635,17 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             }
         };
         // 「沒有服務在跑」＝已經停了（例如上次起新的失敗）：繼續起新的並接回
-        let stop = || match m.stop() {
-            Err(e) if e == STOP_NOT_RUNNING => Ok(()),
-            other => other,
+        let stop = || {
+            let r = match m.stop() {
+                Err(e) if e == STOP_NOT_RUNNING => Ok(()),
+                other => other,
+            };
+            // 舊服務停掉了：連到它的看畫面視窗沒有用了，一起收（#2464）；停失敗時服務還在，不動
+            if r.is_ok() {
+                let ids: Vec<String> = self.inner.lock().unwrap().viewers.iter().filter(|v| !v.starting).map(|v| v.id.clone()).collect();
+                self.reap_viewers_of(&ids, "重啟終端服務，舊服務已停");
+            }
+            r
         };
         let resume = |names: Vec<String>| {
             drop(guard.borrow_mut().take());
@@ -1809,6 +1841,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
                 elog!("終端：服務裡已經沒有這個窗格，拿掉對照表的列（編號 {id}）");
             }
             let _ = self.persist();
+            self.reap_viewers_of(&gone,"對照表的列被拿掉（服務換過或窗格已不在）");
         }
         gone.len()
     }
@@ -2428,6 +2461,7 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             g.sessions.retain(|s| s.id != snap.id);
         }
         let _ = self.persist();
+        self.reap_viewers_of(std::slice::from_ref(&snap.id), "核對時服務已換掉，拿掉對照表的列");
         Err(MUX_GONE.into())
     }
 
@@ -7737,6 +7771,85 @@ mod tests {
             *rig.runner.inner.gui_procs.borrow_mut() = vec![(70, other_domain), (71, other_cfg), (72, vec!["wezterm-gui.exe".into(), "start".into()])];
             assert_eq!(rig.svc.adopt_viewers(), (1, 0));
             assert!(!rig.svc.viewing(&id));
+        }
+
+        /// #2464：服務換掉、對照表的列被 sweep_missing 拿掉，連同這一列的看畫面視窗一起收；
+        /// 使用者自己的 wezterm（別的設定檔）、別的編號的看畫面視窗不動
+        #[test]
+        fn _2464_服務換掉_舊列被拿掉時_連同它的看畫面視窗一起收() {
+            let (rig, paths) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.view(&id).unwrap();
+            assert!(rig.svc.viewing(&id));
+            // 另一個編號的看畫面視窗（不屬於被拿掉的列）
+            rig.svc.inner.lock().unwrap().viewers.push(Viewer { id: "77".into(), pid: 55, started_ms: 1000, starting: false });
+            *rig.runner.inner.gui_procs.borrow_mut() = vec![(70, gui_cmdline(Path::new("C:\\Users\\x\\.wezterm.lua"), &format!("asn-{id}")))];
+            std::fs::write(&paths.pid, "4001 1000").unwrap();
+            snap(&rig.svc);
+            assert_eq!(stored_terms(&rig), 0, "舊 mux 的列收掉了");
+            let killed = rig.runner.killed();
+            assert!(killed.contains(&42), "這一列的看畫面視窗要收：{killed:?}");
+            assert!(!killed.contains(&55), "別的編號的不動：{killed:?}");
+            assert!(!killed.contains(&70), "使用者自己的 wezterm 不動：{killed:?}");
+            let g = rig.svc.inner.lock().unwrap();
+            assert!(g.viewers.iter().all(|v| v.id != id), "紀錄也清掉");
+            assert!(g.viewers.iter().any(|v| v.id == "77"));
+        }
+
+        /// #2464：操作前核對（verify_mux）發現服務已換掉、拿掉列時，同樣收掉它的看畫面視窗
+        #[test]
+        fn _2464_核對時服務已換掉_拿掉列也收它的看畫面視窗() {
+            let (rig, paths) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.view(&id).unwrap();
+            std::fs::write(&paths.pid, "4001 1000").unwrap();
+            assert!(rig.svc.view(&id).is_err(), "服務換掉了，對新服務不下指令");
+            assert_eq!(stored_terms(&rig), 0);
+            assert!(rig.runner.killed().contains(&42), "看畫面視窗要收：{:?}", rig.runner.killed());
+            assert!(!rig.svc.viewing(&id));
+        }
+
+        /// #2464：重啟終端服務停掉舊服務後，記著的看畫面視窗都收掉
+        #[test]
+        fn _2464_重啟終端服務後_舊的看畫面視窗被收() {
+            let (rig, _) = mux_rig();
+            let id = open_partner(&rig);
+            rig.svc.view(&id).unwrap();
+            *rig.runner.inner.list_json.borrow_mut() = "[]".into();
+            let r = rig.svc.restart_mux_with(false, |_| Ok(()), |_| {}, |_| {});
+            assert_eq!(r, Ok(()), "{r:?}");
+            let killed = rig.runner.killed();
+            assert!(killed.contains(&MUX_PID), "舊服務被停：{killed:?}");
+            assert!(killed.contains(&42), "連到舊服務的看畫面視窗被收：{killed:?}");
+            assert!(rig.svc.inner.lock().unwrap().viewers.iter().all(|v| v.id != id));
+        }
+
+        /// #2464：認領掃描時，ASN 的看畫面視窗但連的 workspace 不在名單上＝收；名單上的認回；別人的 wezterm 不動；名單空時不動
+        #[test]
+        fn _2464_認領掃描_對不到名單的舊看畫面視窗被收_別人的不動() {
+            let (rig, paths) = mux_rig();
+            let id = open_partner(&rig);
+            let mut other_domain = gui_cmdline(&paths.config, "asn-101");
+            let k = other_domain.iter().position(|a| a == "asn").unwrap();
+            other_domain[k] = "別人".into();
+            *rig.runner.inner.gui_procs.borrow_mut() = vec![
+                (80, gui_cmdline(&paths.config, "asn-101")),
+                (81, gui_cmdline(Path::new("C:\\Users\\x\\.wezterm.lua"), "asn-101")),
+                (82, vec!["wezterm-gui.exe".into(), "start".into()]),
+                (83, gui_cmdline(&paths.config, &format!("asn-{id}"))),
+                (84, other_domain),
+            ];
+            assert_eq!(rig.svc.adopt_viewers(), (1, 1));
+            assert_eq!(rig.runner.killed(), vec![80], "只收對不到名單的 ASN 看畫面視窗");
+            assert!(rig.svc.viewing(&id), "名單上的照常認回");
+        }
+
+        #[test]
+        fn _2464_認領掃描_名單是空的時候不收() {
+            let (rig, paths) = mux_rig();
+            *rig.runner.inner.gui_procs.borrow_mut() = vec![(80, gui_cmdline(&paths.config, "asn-101"))];
+            assert_eq!(rig.svc.adopt_viewers(), (0, 0));
+            assert!(rig.runner.killed().is_empty(), "名單還沒接回來，不能動");
         }
 
         #[test]
