@@ -1,0 +1,8 @@
+You are logged in with example.test.
+
+Default model: grok-9-sample
+
+Available models:
+  * grok-9-sample (default)
+  - grok-9-mini
+  - grok-8-legacy

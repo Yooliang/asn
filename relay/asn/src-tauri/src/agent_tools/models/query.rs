@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 pub const LOCAL_MAX_MODELS: usize = PI_REPORT_MAX_MODELS;
 
 impl Vendor {
-    /// 廠牌 id（`claude`／`codex`／`gemini`／`pi`）→ 廠牌；大小寫、空白都不放寬
+    /// 廠牌 id（`claude`／`codex`／`gemini`／`grok`／`pi`）→ 廠牌；大小寫、空白都不放寬
     pub fn from_id(s: &str) -> Option<Vendor> {
         Vendor::ALL.iter().copied().find(|v| v.id() == s)
     }
@@ -204,7 +204,8 @@ mod tests {
     fn 廠牌驗證_不帶是全部_帶了只一家_不合法回錯誤() {
         assert_eq!(pick_vendors(None).unwrap(), Vendor::ALL.to_vec());
         assert_eq!(pick_vendors(Some("gemini")).unwrap(), vec![Vendor::Gemini]);
-        for bad in ["", "agy", "Claude", " pi", "pi ", "grok", "pi;rm", "../pi"] {
+        assert_eq!(pick_vendors(Some("grok")).unwrap(), vec![Vendor::Grok]);
+        for bad in ["", "agy", "Claude", " pi", "pi ", "Grok", "pi;rm", "../pi"] {
             assert_eq!(pick_vendors(Some(bad)).unwrap_err(), "不認得的廠牌", "{bad:?}");
         }
     }

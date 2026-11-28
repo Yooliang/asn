@@ -49,6 +49,12 @@
       ]
     },
     {
+      "vendor": "grok",
+      "status": "unavailable",
+      "code": "not_installed",
+      "models": []
+    },
+    {
       "vendor": "pi",
       "status": "unavailable",
       "code": "not_installed",

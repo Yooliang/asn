@@ -92,6 +92,104 @@ pub fn parse_codex(text: &str) -> Result<Vec<ModelEntry>, String> {
     Ok(out)
 }
 
+/// `grok models` 解析後的結果：預設型號（沒寫＝None）與可用清單
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GrokModels {
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub default: Option<String>,
+    pub models: Vec<ModelEntry>,
+}
+
+/// `grok models` 沒讀到可用清單的三種原因（讀不到的原文由呼叫端寫 log）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GrokFail {
+    /// 第一行說還沒登入（結束碼照樣是 0、照樣列了一組型號，但那組不能當成可用的）
+    NotLoggedIn,
+    /// 這個版本沒有 `models` 指令（clap 的「不認得的子指令」錯誤）
+    Unsupported,
+    /// 其他讀不懂：沒有輸出、第一行不是已知的登入狀態、已登入卻沒有任何型號
+    Unreadable(String),
+}
+
+/// 第一行出現這些字＝還沒登入（要先比「已登入」那組判斷：「not logged in」也含「logged in」）
+const GROK_LOGGED_OUT: [&str; 5] = ["not authenticated", "not logged in", "not signed in", "unauthenticated", "log in to"];
+/// 第一行出現這些字＝已登入
+const GROK_LOGGED_IN: [&str; 4] = ["logged in", "signed in", "authenticated", "api key"];
+/// 第一行出現這些字＝這版沒有 models 指令（clap 新舊版的常見錯誤字句）
+const GROK_NO_COMMAND: [&str; 5] = ["unrecognized subcommand", "unknown subcommand", "unknown command", "no such command", "wasn't expected"];
+
+/// `grok models`（stdout，結束碼 0）：
+/// ```text
+/// <登入狀態一行>            已登入：You are logged in with …；未登入：You are not authenticated.
+/// Default model: <代號>
+/// Available models:
+///   * <代號> (default)      `*`＝預設
+///   - <代號>
+/// ```
+/// 登入狀態看第一行：先認「這版沒有這個指令」，再認未登入（回 `NotLoggedIn`，清單不讀），**已登入才讀清單**；
+/// 第一行兩種都不像就回 `Unreadable`（寧可顯示讀不到，也不把可能是未登入的清單當成可用）。
+/// 清單每行「記號 代號 …」，顯示名＝代號（CLI 沒給顯示名）；代號過統一規則、重複只留第一個
+pub fn parse_grok(text: &str) -> Result<GrokModels, GrokFail> {
+    let mut lines = strip_bom(text).lines().map(str::trim).filter(|l| !l.is_empty());
+    let Some(first) = lines.next() else { return Err(GrokFail::Unreadable("沒有任何輸出".into())) };
+    let head = first.to_lowercase();
+    if GROK_NO_COMMAND.iter().any(|m| head.contains(m)) {
+        return Err(GrokFail::Unsupported);
+    }
+    if GROK_LOGGED_OUT.iter().any(|m| head.contains(m)) {
+        return Err(GrokFail::NotLoggedIn);
+    }
+    if !GROK_LOGGED_IN.iter().any(|m| head.contains(m)) {
+        return Err(GrokFail::Unreadable(format!("第一行看不出登入狀態（{} 字）", first.chars().count())));
+    }
+    let (mut default, mut in_list, mut out) = (None, false, Vec::new());
+    for line in lines {
+        const DEFAULT_KEY: &str = "default model:";
+        if let Some(rest) = line.get(..DEFAULT_KEY.len()).filter(|p| p.eq_ignore_ascii_case(DEFAULT_KEY)).map(|_| &line[DEFAULT_KEY.len()..]) {
+            default = rest.split_whitespace().next().filter(|id| valid_model_id(id)).map(str::to_string).or(default);
+            continue;
+        }
+        if line.to_lowercase().starts_with("available models") {
+            in_list = true;
+            continue;
+        }
+        let Some(mark) = line.chars().next().filter(|c| in_list && matches!(c, '*' | '-' | '•')) else { continue };
+        let rest = line[mark.len_utf8()..].trim();
+        let Some(id) = rest.split_whitespace().next() else { continue };
+        if (mark == '*' || rest.contains("(default)")) && valid_model_id(id) {
+            default = Some(id.to_string());
+        }
+        if !push_unique(&mut out, id, id) {
+            break;
+        }
+    }
+    if out.is_empty() {
+        return Err(GrokFail::Unreadable("已登入但清單裡沒有任何可用型號".into()));
+    }
+    Ok(GrokModels { default, models: out })
+}
+
+/// `grok --help` 的「Commands:」段裡有沒有 `models` 這個子指令。嚴格判斷：只看 `Commands:` 那一段（到空行或不縮排的行為止），
+/// 一行要是「縮排＋models＋空白（或行尾）」才算；選項說明、別的指令說明裡剛好出現 models 這個字不算。
+/// 沒有這個子指令的舊版，`grok models` 的 models 會被當成提示詞開一段真的對話，所以一定要先用這個確認
+pub fn grok_help_has_models(help: &str) -> bool {
+    let mut in_commands = false;
+    for line in strip_bom(help).lines() {
+        if !in_commands {
+            in_commands = line.trim() == "Commands:";
+            continue;
+        }
+        if line.trim().is_empty() || !line.starts_with([' ', '\t']) {
+            in_commands = line.trim() == "Commands:";
+            continue;
+        }
+        if line.trim_start().strip_prefix("models").is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace)) {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -186,6 +284,69 @@ aegis         claude-sonnet-5-5           1M       128K     yes       yes   \n";
         // 一般文字（含中日文、emoji）不受影響
         assert_eq!(parse_agy("x-3\t繁體 モデル 🚀\n")[0].name, "繁體 モデル 🚀");
         assert!(is_format_char('\u{200d}') && !is_format_char('a') && !is_format_char('中'));
+    }
+
+    const GROK_IN: &str = include_str!("../../../tests/fixtures/grok-models/logged-in.txt");
+    const GROK_OUT: &str = include_str!("../../../tests/fixtures/grok-models/not-logged-in.txt");
+    const GROK_OLD: &str = include_str!("../../../tests/fixtures/grok-models/old-version.txt");
+
+    fn ids(m: &GrokModels) -> Vec<&str> {
+        m.models.iter().map(|x| x.id.as_str()).collect()
+    }
+
+    #[test]
+    fn grok_已登入_讀預設與清單_顯示名就是代號() {
+        let m = parse_grok(GROK_IN).unwrap();
+        assert_eq!(ids(&m), ["grok-9-sample", "grok-9-mini", "grok-8-legacy"]);
+        assert_eq!(m.default.as_deref(), Some("grok-9-sample"));
+        assert_eq!(m.models[1], ModelEntry { id: "grok-9-mini".into(), name: "grok-9-mini".into() });
+        // CRLF、BOM 也一樣
+        assert_eq!(parse_grok(&GROK_IN.replace('\n', "\r\n")).unwrap(), m);
+        assert_eq!(parse_grok(&format!("\u{feff}{GROK_IN}")).unwrap(), m);
+        // 預設只標在清單那行（沒有 Default model: 那行）也讀得到；只有那一行有時也讀得到
+        let only_mark = "You are logged in with x.\nAvailable models:\n  - a-1\n  * b-2 (default)\n";
+        assert_eq!(parse_grok(only_mark).unwrap().default.as_deref(), Some("b-2"));
+        let only_head = "You are logged in with x.\nDefault model: a-1\nAvailable models:\n  - a-1\n";
+        assert_eq!(parse_grok(only_head).unwrap().default.as_deref(), Some("a-1"));
+    }
+
+    #[test]
+    fn grok_未登入_第一行說了算_照樣列的清單不當可用() {
+        // 結束碼 0、照樣列了型號：不能把這組型號當成可用
+        assert_eq!(parse_grok(GROK_OUT), Err(GrokFail::NotLoggedIn));
+        assert_eq!(parse_grok("You are not logged in.\nAvailable models:\n  * a-1\n"), Err(GrokFail::NotLoggedIn), "not logged in 也含 logged in，要先認未登入");
+        // 第一行看不出登入狀態：寧可讀不到，不把清單當可用
+        assert!(matches!(parse_grok("Welcome!\nAvailable models:\n  * a-1\n"), Err(GrokFail::Unreadable(_))));
+    }
+
+    #[test]
+    fn grok_版本太舊_指令讀不到_空輸出_沒有型號() {
+        assert_eq!(parse_grok(GROK_OLD), Err(GrokFail::Unsupported));
+        assert_eq!(parse_grok("error: Found argument 'models' which wasn't expected\n"), Err(GrokFail::Unsupported));
+        assert!(matches!(parse_grok(""), Err(GrokFail::Unreadable(_))));
+        assert!(matches!(parse_grok("  \n\u{feff}\n"), Err(GrokFail::Unreadable(_))));
+        assert!(matches!(parse_grok("You are logged in with x.\nAvailable models:\n"), Err(GrokFail::Unreadable(_))), "已登入但一筆都沒有");
+    }
+
+    #[test]
+    fn grok_說明的_commands_段_嚴格找_models_子指令() {
+        assert!(grok_help_has_models(include_str!("../../../tests/fixtures/grok-models/help-with-models.txt")));
+        // 選項說明、別的指令說明裡有 models 這個字，或只是長得像（models-info）都不算
+        assert!(!grok_help_has_models(include_str!("../../../tests/fixtures/grok-models/help-without-models.txt")));
+        assert!(grok_help_has_models("Commands:\n  models\n"), "行尾也算");
+        assert!(grok_help_has_models("\u{feff}Commands:\r\n  help   x\r\n\tmodels\tList\r\n"));
+        for bad in ["", "models\n", "  models   List\n", "Commands:\nmodels   List\n", "Commands:\n\n  models   List\n", "Options:\n  models  x\n\nCommands:\n  agent  y\n"] {
+            assert!(!grok_help_has_models(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn grok_壞列丟掉_重複只留一個() {
+        let t = "You are logged in with x.\nAvailable models:\n  * a-1 (default)\n  - a-1\n  - x?y\n  - -x\n  note: not a model\n  -\n  - b-2\n";
+        let m = parse_grok(t).unwrap();
+        assert_eq!(ids(&m), ["a-1", "b-2"]);
+        // 還沒看到 Available models: 之前的記號行不是型號
+        assert_eq!(parse_grok("You are logged in with x.\n  - early-1\nAvailable models:\n  - a-1\n").unwrap().models.len(), 1);
     }
 
     #[test]
