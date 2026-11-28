@@ -386,12 +386,14 @@ fn mux_views() -> Vec<(String, bool)> {
     super::term::partner_rows()
         .into_iter()
         .filter(|p| p.mux)
-        .filter_map(|p| {
-            let q = super::term::mux_console_query(&p.id);
-            // 名單的 hidden 看 visible_for_resume（重啟收掉的舊畫面在列被拿掉前仍算開著，#2464）；沒有就看 visible
-            q.get("visible_for_resume").or_else(|| q.get("visible")).and_then(Value::as_bool).map(|v| (p.name, v))
-        })
+        .filter_map(|p| view_flag(&super::term::mux_console_query(&p.id)).map(|v| (p.name, v)))
         .collect()
+}
+
+/// 名單的 hidden 看 `visible_for_resume`（重啟收掉的舊畫面在列被拿掉前仍算開著，#2464）；沒有這欄才看 `visible`
+#[cfg_attr(not(all(windows, not(test))), allow(dead_code))]
+fn view_flag(q: &Value) -> Option<bool> {
+    q.get("visible_for_resume").or_else(|| q.get("visible")).and_then(Value::as_bool)
 }
 
 pub(crate) fn window_snapshot() -> WindowSnapshot {
@@ -649,6 +651,24 @@ pub(crate) mod win {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #2464：名單的 hidden 優先讀 visible_for_resume（重啟收掉的舊畫面仍算開著）；沒有這欄才讀 visible
+    #[test]
+    fn _2464_名單的看畫面旗標_優先讀_visible_for_resume() {
+        assert_eq!(view_flag(&json!({ "visible": false, "visible_for_resume": true })), Some(true));
+        assert_eq!(view_flag(&json!({ "visible": true, "visible_for_resume": false })), Some(false));
+        assert_eq!(view_flag(&json!({ "visible": true })), Some(true), "舊格式沒有這欄就看 visible");
+        assert_eq!(view_flag(&json!({ "ok": false })), None);
+    }
+
+    /// 接線：mux_views 一定經 view_flag 取旗標（不能自己只讀 visible）
+    #[test]
+    fn _2464_守門_mux_views_經_view_flag_取旗標() {
+        let src = include_str!("console.rs").replace("\r\n", "\n");
+        let body = src.split("fn mux_views() -> Vec<(String, bool)> {").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(body.contains("view_flag(&super::term::mux_console_query("), "mux_views 要經 view_flag：{body}");
+        assert!(!body.contains("\"visible\""), "mux_views 不能自己只讀 visible");
+    }
 
     /// #596：列名單每次都可能走到 via_attach，`console-attach` 紀錄同一次執行只記第一次，之後只有前後代號不同才再記，不灌滿 ui.log
     #[cfg(windows)]

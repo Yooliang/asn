@@ -7999,6 +7999,8 @@ mod tests {
                 (81, gui_cmdline(&paths.config, "asn-102")),
                 (83, gui_cmdline(&paths.config, &format!("asn-{id}"))),
             ];
+            // 兩個視窗的父程序都已結束（沒有父程序資料會被「查不到不收」擋掉，測不到 parked 核對）
+            rig.runner.inner.parents.borrow_mut().insert(80, 900);
             rig.runner.inner.parents.borrow_mut().insert(81, 900);
             rig.runner.inner.dead_pids.borrow_mut().insert(900);
             assert_eq!(rig.svc.adopt_viewers(), (1, 1));
