@@ -34,6 +34,8 @@ pub struct KnownEntry {
     pub name: String,
     pub engine: String,
     pub facts: WindowFacts,
+    /// 最後看到的時間（毫秒）：同一段對話在存檔裡有兩列（改名後舊名那列還沒過期）時，用它挑最新的一列（#2475）
+    pub seen: u64,
 }
 
 /// 開機時間容許的誤差：開機時間是用「現在－開機至今」算的，校時會讓它飄。
@@ -109,6 +111,35 @@ impl Known {
         }
     }
 
+    /// 同一個視窗改名（#2475）：把舊名那一列整列（引擎、最後看到的時間、對話編號、資料夾、權限等事實）搬到新名，
+    /// 不留舊名那一列，也不在新名那裡重新猜一份。新名已經有一列（例如先前某個舊視窗留下的）就以搬過來的為準，最後看到的時間取較晚的。
+    /// 封存名單裡的舊名也跟著換成新名（封存的視窗改名後仍是封存的，不會被記回認得的夥伴）。回傳有沒有動到
+    pub fn rename(&mut self, old: &str, new: &str) -> bool {
+        if old == new || old.is_empty() || new.is_empty() {
+            return false;
+        }
+        let mut changed = false;
+        if let Some(mut moved) = self.names.remove(old) {
+            if let Some(existing) = self.names.get(new) {
+                moved.1 = moved.1.max(existing.1);
+            }
+            self.names.insert(new.to_string(), moved);
+            changed = true;
+        }
+        if let Some(f) = self.facts.remove(old) {
+            self.facts.insert(new.to_string(), f);
+            changed = true;
+        }
+        if self.archived.remove(old) {
+            self.archived.insert(new.to_string());
+            changed = true;
+        }
+        if changed {
+            self.dirty = true;
+        }
+        changed
+    }
+
     /// 記下接回要用的資料；有變才存檔
     pub fn set_facts(&mut self, name: &str, facts: WindowFacts) {
         if self.archived.contains(name) {
@@ -151,7 +182,7 @@ impl Known {
 
     /// 所有認得的名字與接回資料（沒有資料的是空的）
     pub fn entries(&self) -> Vec<KnownEntry> {
-        self.names.iter().map(|(n, (e, _))| KnownEntry { name: n.clone(), engine: e.clone(), facts: self.facts.get(n).cloned().unwrap_or_default() }).collect()
+        self.names.iter().map(|(n, (e, seen))| KnownEntry { name: n.clone(), engine: e.clone(), facts: self.facts.get(n).cloned().unwrap_or_default(), seen: *seen }).collect()
     }
 
     /// 有變動才寫檔；寫不進去只回錯誤文字（呼叫端記 log），名單照常用記憶體裡的
@@ -221,6 +252,13 @@ impl JustClosed {
 
     pub fn contains(&self, name: &str) -> bool {
         self.at.contains_key(name)
+    }
+
+    /// 同一個視窗改名（#2475）：剛關掉的記號跟著搬到新名（關掉這個視窗的意圖不因改名消失）
+    pub fn rename(&mut self, old: &str, new: &str) {
+        if let Some(t) = self.at.remove(old) {
+            self.at.insert(new.to_string(), t);
+        }
     }
 
     /// 每輪名單更新先呼叫：`is_present`＝這一輪名單裡還看不看得到這個名字
@@ -418,6 +456,51 @@ mod tests {
         assert!(archived_among(&list, "舊後台", &partners, &names).is_none(), "舊後台沒有 archived_keys：不改動");
         assert!(archived_among(&list, "Z", &partners, &names).is_none(), "名單裡沒有這台");
         assert!(archived_among(&json!({ "error": "x" }), "H", &partners, &names).is_none());
+    }
+
+    /// #2475：改名＝整列搬到新名（事實、引擎、最後看到的時間都帶過去），不留舊名；存檔讀得回來
+    #[test]
+    fn _2475_改名把舊名那一列整列搬到新名_事實保留_舊名不留_存檔讀得回來() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join(KNOWN_FILE);
+        let mut k = Known::default();
+        k.touch("甲", "claude", 5000);
+        let facts = WindowFacts { session: "s1".into(), cwd: "D:/w".into(), asn_opened: true, perm: vec!["--permission-mode".into(), "auto".into()], hidden: true };
+        k.set_facts("甲", facts.clone());
+        assert!(k.rename("甲", "乙"));
+        assert!(!k.contains("甲") && k.contains("乙"));
+        let e = k.entries();
+        assert_eq!((e.len(), e[0].name.as_str(), e[0].engine.as_str(), e[0].seen), (1, "乙", "claude", 5000));
+        assert_eq!(e[0].facts, facts, "事實保留");
+        k.save_if_dirty(&f, 5000).unwrap();
+        let back = Known::load(&f, 5000);
+        assert!(!back.contains("甲") && back.contains("乙"));
+        assert_eq!(back.entries()[0].facts, facts);
+        // 舊名沒有這一列：什麼都不動、不要求存檔
+        let mut k2 = Known::default();
+        assert!(!k2.rename("甲", "乙"));
+        assert!(!k2.dirty);
+        assert!(!k.rename("乙", "乙"), "同名不動");
+    }
+
+    /// #2475：新名那邊已有一列：以搬過來的為準，最後看到的時間取較晚的；封存的視窗改名後仍是封存的（不會被記回來）
+    #[test]
+    fn _2475_改名_新名已有一列以搬過來的為準_封存的跟著換名() {
+        let mut k = Known::default();
+        k.touch("甲", "claude", 1000);
+        k.set_facts("甲", WindowFacts { session: "s-甲".into(), ..Default::default() });
+        k.touch("乙", "claude", 9000);
+        k.set_facts("乙", WindowFacts { session: "s-舊乙".into(), ..Default::default() });
+        k.rename("甲", "乙");
+        let e = k.entries();
+        assert_eq!((e.len(), e[0].seen, e[0].facts.session.as_str()), (1, 9000, "s-甲"));
+        let mut a = Known::default();
+        a.touch("丙", "claude", 1000);
+        a.set_archived(["丙".to_string()].into_iter().collect());
+        a.rename("丙", "丁");
+        assert!(a.archived_names().contains("丁") && !a.archived_names().contains("丙"));
+        a.touch("丁", "claude", 2000);
+        assert!(!a.contains("丁"), "封存的改名後仍不記回");
     }
 
     #[test]

@@ -39,6 +39,7 @@ mod compact_notice;
 mod archive_sync;
 mod wait_notice;
 mod outbox;
+mod rename;
 
 /// 後台節點信箱一次最多回幾封（與 asn_relay_inbox 的 limit 一致）
 const INBOX_PAGE: usize = 50;
@@ -567,6 +568,12 @@ pub struct Core {
     self_pull_first: HashMap<String, u64>,
     /// 已經告訴寄件人「對方要自己收信」的（寄件人／收件視窗）：每組只說一次
     self_pull_told: HashSet<String>,
+    /// #2475：上一輪每個 Claude 視窗（程序編號＋建立時間）的名字，下一輪重掃正本時比對有沒有改名（見 core/rename.rs）
+    rename_prev: Vec<rename::Seen>,
+    /// 改名被擋下、已經告訴過本人的（舊名, 新名）：同一組只說一次
+    rename_told: std::collections::BTreeSet<(String, String)>,
+    /// 夥伴改名後同步終端對照表的出口（正式＝launch::term::relabel_partner；測試換成會記錄的假函式）
+    relabel: Arc<dyn Fn(&str, &str) -> usize + Send + Sync>,
 }
 
 /// 自動回信模式：交辦後這段時間內，就算 worker 這一輪的結果已回來，仍視為忙碌（它可能正接著處理排隊中的下一則）
@@ -641,7 +648,7 @@ impl Core {
             last_requester: BTreeMap::new(), notice_ids: HashMap::new(), notice_windows: HashMap::new(), self_handled: HashSet::new(), ack_wait: HashSet::new(), channel_wait: HashSet::new(), channel_back: HashSet::new(), room_redo: HashMap::new(), reply_fail: HashSet::new(), reject_notified: HashSet::new(), room_trig: HashMap::new(), up_retry: Default::default(), outbox, outbox_bad_pending: None, outbox_bad_retry_at: 0, unrouted: HashSet::new(), owner_receipts: vec![], owner_receipt_at: HashMap::new(),
             last_saved: String::new(), persist_failed: false, pruned_at: 0, fail_step: 0, retry_at: None, cursors, held, cursor_warned: false, launcher: None, partner_ops: None, mod_src: Arc::new(crate::claude_mod::current_report), mod_sent: None, legacy_src: default_legacy_src(), roster_fp: None, roster_at: 0, remote_flags_sent: None, remote_flags_fails: 0, remote_flags_fail_at: 0, engines: None, claude_roster: vec![], corr,
             partners: BTreeMap::new(), partner_off: false, partner_warned: false, own_device: std::sync::Mutex::new((None, 0)), respond_open: false, fwd_turn_open: None, fwd_gated: false, respond_sent: String::new(), active: BTreeMap::new(), dup_held: HashMap::new(),
-            wait_alerts: Default::default(), wait_retry_at: 0, login_alerts: Default::default(), stuck_todo: Vec::new(), stuck_retry_at: 0, login_retry_at: 0, mux_notice_retry_at: 0, mux_resume_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, just_closed: Default::default(), wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, rotate: Default::default(), late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(),
+            wait_alerts: Default::default(), wait_retry_at: 0, login_alerts: Default::default(), stuck_todo: Vec::new(), stuck_retry_at: 0, login_retry_at: 0, mux_notice_retry_at: 0, mux_resume_notice_retry_at: 0, mux_blind_retry_at: 0, mux_pending: Default::default(), mux_lost: Default::default(), mux_exited: Default::default(), mux_pending_at: 0, archive_next_at: 0, archive_warned: false, just_closed: Default::default(), wait_fields_warned: false, quota_until: 0, hold_auth: false, held_auth: HashSet::new(), hold_since: 0, relogin_since: Self::default_relogin_check(), quota_ep: None, held_items: HashMap::new(), fwd_items: HashMap::new(), fwd_rooms: HashMap::new(), bounce_notices: HashSet::new(), room_fail_notices: HashMap::new(), worker_fails: 0, rotate: Default::default(), late_from: None, fwd_text: HashMap::new(), misrouted_once: HashSet::new(), misroute_notified: HashSet::new(), ack_retry: Vec::new(), ack_retry_at: 0, ack_retry_gap: 0, recent_forwards: Vec::new(), held_open: Vec::new(), fwd_origin: HashMap::new(), hold_sent: None, hold_try_at: 0, cap_sent: false, next_probe_at: 0, probe_id: None, probe_misses: 0, probe_after_reset: false, probe_prev_until: 0, held_first: HashMap::new(), known: super::known::Known::default(), window_probe: Self::default_window_probe(), probed: HashMap::new(), seen_run: HashSet::new(), missing: HashMap::new(), started_at: 0, awaiting: HashMap::new(), awaiting_told: HashSet::new(), await_first: HashMap::new(), exact_ids: HashMap::new(), exact_verified: false, selftest_slot: Arc::new(std::sync::Mutex::new(None)), selftest_busy: false, selftest_next_at: 0, selftest_src: Arc::new(selftest::real_selftest), not_applied_once: HashSet::new(), probing: false, self_pull: HashSet::new(), self_pull_first: HashMap::new(), self_pull_told: HashSet::new(), rename_prev: Vec::new(), rename_told: Default::default(), relabel: Arc::new(|old, new| crate::launch::term::relabel_partner(old, new)),
         };
         c.restore();
         for w in &outbox_logs {
@@ -1368,6 +1375,9 @@ impl Core {
             self.roster_fp = Some(roster::local_fingerprint(&l));
             self.roster_at = now;
             self.claude_roster = l;
+            // #2475：正本（sessions 檔）這一輪讀到了：跟上一輪比對同一個視窗的名字，改名了就把副本一起對齊
+            // （讀不到的那一輪不會走到這裡，副本不動）
+            self.sync_renames(now).await;
         }
         let mut list = self.claude_roster.clone();
         if let Some(e) = &self.engines {

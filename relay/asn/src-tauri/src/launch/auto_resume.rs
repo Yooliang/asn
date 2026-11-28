@@ -141,7 +141,10 @@ pub fn pick(entries: Vec<KnownEntry>, saved_boot: Option<u64>, boot: Option<u64>
     if !enabled || user_quit || same_boot(saved, boot) {
         return Vec::new();
     }
-    entries.into_iter().filter(|e| e.facts.asn_opened && (e.engine == "claude" || e.engine == "pi") && !archived.contains(&e.name)).collect()
+    // #2475：同一段對話只留最新那一列，重開用的名字（-n）才是現名
+    // 先篩「ASN 開的」再去重（手開的視窗不參與），封存仍在去重之後篩
+    let opened: Vec<KnownEntry> = entries.into_iter().filter(|e| e.facts.asn_opened && (e.engine == "claude" || e.engine == "pi")).collect();
+    latest_per_session(opened).into_iter().filter(|e| !archived.contains(&e.name)).collect()
 }
 
 /// 依序接回。一位失敗不擋下一位；未登入與記憶體不足是全體都要等
@@ -261,17 +264,55 @@ static RESUME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// 這條路的對象是 ASN 自己開在共用 mux 裡的夥伴，不看存檔裡「ASN 開的」那一欄
 /// 本人封存的夥伴（`archived`，存檔記的）不接回，和重開機的 `pick` 一樣
 pub fn crash_entries(names: &[String], known: Vec<KnownEntry>, archived: &std::collections::BTreeSet<String>) -> Vec<KnownEntry> {
+    // #2475：名字（來自終端對照表）可能還是舊名；存檔裡同一段對話有好幾列時一律以最新那一列為準（重開用的 -n 是現名），
+    // 兩個名字指同一段對話只接一次
+    let mut taken: Vec<String> = Vec::new();
     names
         .iter()
         .filter(|n| !archived.contains(n.as_str()))
-        .map(|n| {
-            known.iter().find(|e| &e.name == n && e.engine == "claude").cloned().unwrap_or_else(|| KnownEntry {
+        .filter_map(|n| {
+            let found = known.iter().find(|e| &e.name == n && e.engine == "claude").map(|e| newest_row_of_session(&known, e));
+            if let Some(e) = &found {
+                if archived.contains(e.name.as_str()) {
+                    return None;
+                }
+                // 兩個名字解出同一列（舊名與現名都在名單裡）只接一次；不同的列（例如手開的視窗接了同一段對話）各管各的
+                if taken.contains(&e.name) {
+                    return None;
+                }
+                taken.push(e.name.clone());
+            }
+            Some(found.unwrap_or_else(|| KnownEntry {
                 name: n.clone(),
                 engine: "claude".into(),
                 facts: crate::bridge::known::WindowFacts { session: String::new(), cwd: String::new(), asn_opened: true, perm: Vec::new(), hidden: false },
-            })
+                seen: 0,
+            }))
         })
         .collect()
+}
+
+/// 存檔裡跟這一列同一段對話（對話編號相同、不是空的）的列之中，最後看到的時間最晚的那一列（時間相同取排在前面的）；
+/// 沒有對話編號就是它自己
+fn newest_row_of_session(known: &[KnownEntry], e: &KnownEntry) -> KnownEntry {
+    // 只在「ASN 開的」列之間比：手開的視窗接了同一段對話，不能搶走 ASN 開的那一列（也不能被拿來決定名字）；時間相同保留自己
+    if e.facts.session.is_empty() || !e.facts.asn_opened {
+        return e.clone();
+    }
+    let mut best = e;
+    for k in known.iter().filter(|k| k.engine == e.engine && k.facts.session == e.facts.session && k.facts.asn_opened) {
+        if k.seen > best.seen {
+            best = k;
+        }
+    }
+    best.clone()
+}
+
+/// 同一段對話在存檔裡有好幾列（改名後舊名那一列還沒過期，#2475）：只留最新（最後看到的時間最晚）那一列，其餘拿掉；
+/// 沒有對話編號的各自獨立。順序照原本
+pub fn latest_per_session(entries: Vec<KnownEntry>) -> Vec<KnownEntry> {
+    let keep: Vec<bool> = entries.iter().map(|e| e.facts.session.is_empty() || newest_row_of_session(&entries, e).name == e.name).collect();
+    entries.into_iter().zip(keep).filter_map(|(e, k)| k.then_some(e)).collect()
 }
 
 /// 為什麼接回：寫進結果的原因文字，以及接回做完要不要另外排「終端服務中斷」的結果通知
@@ -774,7 +815,7 @@ mod tests {
     }
 
     fn entry(name: &str) -> KnownEntry {
-        KnownEntry { name: name.into(), engine: "claude".into(), facts: WindowFacts { session: format!("s-{}", name.chars().map(|c| c as u32).sum::<u32>()), cwd: "D:/w".into(), asn_opened: true, perm: sv(&["--permission-mode", "auto"]), hidden: false } }
+        KnownEntry { name: name.into(), engine: "claude".into(), facts: WindowFacts { session: format!("s-{}", name.chars().map(|c| c as u32).sum::<u32>()), cwd: "D:/w".into(), asn_opened: true, perm: sv(&["--permission-mode", "auto"]), hidden: false }, seen: 0 }
     }
 
     struct Fake {
@@ -1011,6 +1052,86 @@ mod tests {
         let archived: std::collections::BTreeSet<String> = ["乙".to_string()].into_iter().collect();
         let es = crash_entries(&sv(&["甲", "乙"]), known, &archived);
         assert_eq!(es.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["甲"]);
+    }
+
+    /// 同一段對話在存檔裡有舊名與新名兩列（改名後舊名那一列還沒過期）
+    fn renamed_pair() -> Vec<KnownEntry> {
+        let mut old = entry("舊名");
+        let mut new = entry("新名");
+        old.facts.session = "11111111-1111-4111-8111-111111111111".into();
+        new.facts.session = old.facts.session.clone();
+        old.seen = 1_000;
+        new.seen = 2_000;
+        vec![old, entry("別人"), new]
+    }
+
+    /// #2475：開機接回——同一個 session 只出一列、用最新那一列的名字（重開用的 -n 是現名）；順序照原本、沒有對話編號的不受影響
+    #[test]
+    fn _2475_開機接回_同一段對話只出一列_用最新那列的現名() {
+        let got = pick(renamed_pair(), Some(1), Some(100_000_000), true, false, &Default::default());
+        assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["別人", "新名"], "舊名那列不出");
+        // 舊名那列比較新（不合理但要照規則：以最後看到的時間為準）
+        let mut flipped = renamed_pair();
+        flipped[0].seen = 9_000;
+        let got = pick(flipped, Some(1), Some(100_000_000), true, false, &Default::default());
+        assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["舊名", "別人"]);
+        // 最新那列被封存：整段對話都不接（舊名那列不能漏網）
+        let archived: std::collections::BTreeSet<String> = ["新名".to_string()].into_iter().collect();
+        let got = pick(renamed_pair(), Some(1), Some(100_000_000), true, false, &archived);
+        assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["別人"]);
+    }
+
+    /// #2475：終端服務中斷接回——名單裡還是舊名（終端對照表的標題沒跟上），也用最新那列的現名；舊名新名兩個都在名單裡只接一次
+    #[test]
+    fn _2475_終端服務中斷接回_同一段對話只出一列_用現名() {
+        let got = crash_entries(&sv(&["舊名"]), renamed_pair(), &Default::default());
+        assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["新名"], "舊名換成現名");
+        let got = crash_entries(&sv(&["舊名", "別人", "新名"]), renamed_pair(), &Default::default());
+        assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["新名", "別人"], "同一段對話只出一列");
+    }
+
+    /// #2475 二審：另有手開視窗（不是 ASN 開的）接了同一段對話——不能搶走 ASN 開的那一列：
+    /// 開機接回要照樣接「甲」，終端服務接回也用「甲」重開，不用手開視窗的名字；手開視窗排前面、時間較晚或相同都一樣
+    #[test]
+    fn _2475_手開視窗接同一段對話_接回照樣用_asn_開的那一列() {
+        let session = "22222222-2222-4222-8222-222222222222";
+        for (hand_name, hand_seen) in [("A手開", 5_000u64), ("手開", 9_000), ("A手開", 1_000)] {
+            let mut mine = entry("甲");
+            mine.facts.session = session.into();
+            mine.seen = 5_000;
+            let mut hand = entry(hand_name);
+            hand.facts.session = session.into();
+            hand.facts.asn_opened = false;
+            hand.seen = hand_seen;
+            let known = vec![hand.clone(), mine.clone()];
+            let got = pick(known.clone(), Some(1), Some(100_000_000), true, false, &Default::default());
+            assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["甲"], "開機接回：{hand_name} 時間 {hand_seen}");
+            let got = crash_entries(&sv(&["甲"]), known, &Default::default());
+            assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["甲"], "終端服務接回用甲重開：{hand_name} 時間 {hand_seen}");
+        }
+    }
+
+    /// #2475 二審：同一段對話有兩列都是 ASN 開的、最後看到的時間相同（分不出哪個是現名）→ 照原本的做法，兩列都留
+    #[test]
+    fn _2475_同一段對話兩列時間相同_不去重() {
+        let mut a = entry("甲");
+        let mut b = entry("乙");
+        b.facts.session = a.facts.session.clone();
+        a.seen = 7;
+        b.seen = 7;
+        let got = pick(vec![a, b], Some(1), Some(100_000_000), true, false, &Default::default());
+        assert_eq!(got.len(), 2);
+    }
+
+    /// #2475 二審：接線守門——開機接回與終端服務接回都經過去重，而且是「先篩 ASN 開的」再去重（拿掉任何一處要紅）
+    #[test]
+    fn 守門_接回的去重接線() {
+        let src = include_str!("auto_resume.rs").replace("\r\n", "\n");
+        let pick_body = src.split("pub fn pick(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        let (opened, dedup) = (pick_body.find("let opened"), pick_body.find("latest_per_session(opened)"));
+        assert!(matches!((opened, dedup), (Some(a), Some(b)) if a < b), "pick 要先篩 ASN 開的再去重：{pick_body}");
+        let crash_body = src.split("pub fn crash_entries(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(crash_body.contains("newest_row_of_session(&known, e)"), "crash_entries 要取最新那列");
     }
 
     #[test]
