@@ -261,8 +261,23 @@ impl<R: Runner, F: Fs> TermService<R, F> {
             return None;
         }
         let sid = term.session_id.as_deref().filter(|s| !s.is_empty())?;
-        let name = (self.session_names)().into_iter().find(|(s, _)| s == sid).map(|(_, n)| n)?;
-        let name = super::normalize_title(&name).ok()?;
+        let all = (self.session_names)();
+        let mut hit = all.iter().filter(|(s, _)| s == sid);
+        let (_, name) = hit.next()?;
+        // 同一段對話在名單上有兩個以上視窗：分不出哪一個是這一列的視窗，不拿對話決定名字，退回存檔標題
+        let extra = hit.count();
+        if extra > 0 {
+            view_log(&format!("終端對照表：對話 {sid} 在名單上有 {} 個視窗，認回不套用現名，照存檔標題", extra + 1));
+            return None;
+        }
+        // 存檔的名字現在還有別的視窗在用（例如本人 /clear 換了對話、舊對話被別的視窗接去）：那一列的視窗不是現名那個，不套用
+        if let Some(saved) = partner_label(&term.id, &term.title) {
+            if all.iter().any(|(s, n)| s != sid && n == saved) {
+                view_log(&format!("終端對照表：{}的名字現在有別的視窗在用，認回不套用對話的現名，照存檔標題", row_label(term)));
+                return None;
+            }
+        }
+        let name = super::normalize_title(name).ok()?;
         Some(format!("ASN:{} {name}", term.id))
     }
 

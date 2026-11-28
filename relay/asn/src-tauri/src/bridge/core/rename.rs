@@ -196,8 +196,21 @@ impl Core {
             return;
         }
         let why = if ch.verdict == Verdict::Collision { "another window already uses the new name" } else { "the new name was another window's name last round (swap or chained rename)" };
-        self.log.line(&format!("rename blocked pid={} {} -> {}: {why}; terminal table and known-windows left alone, window told", ch.pid, ch.old, ch.new));
-        self.tell_window(&ch.new, &blocked_text(&ch.old, &ch.new, ch.verdict));
+        // 轉交指令只能用名字指定視窗：新名只有改名的這一個視窗在用時，寄給這個名字就是寄給它本人（以程序編號核對）；
+        // 有兩個以上視窗叫這個名字（撞名）時，寄給這個名字分不出是誰（橋對來信也是這樣擋，見 core/dup.rs），所以不寄，
+        // 改記進 bridge.log 與 ui.log（桌面版），不能只是沒反應
+        let holders: Vec<u32> = self.claude_roster.iter().filter(|w| w.name == ch.new).map(|w| w.pid).collect();
+        if holders == [ch.pid] {
+            self.log.line(&format!("rename blocked pid={} {} -> {}: {why}; terminal table and known-windows left alone, window told", ch.pid, ch.old, ch.new));
+            self.tell_window(&ch.new, &blocked_text(&ch.old, &ch.new, ch.verdict));
+        } else {
+            self.log.line(&format!("rename blocked pid={} {} -> {}: {why}; {} windows share the new name so it cannot be told to the window by name; terminal table and known-windows left alone", ch.pid, ch.old, ch.new, holders.len()));
+            #[cfg(feature = "gui")]
+            {
+                let line = format!("[ASN] 夥伴改名：有 {} 個視窗都叫「{}」，其中一個剛從「{}」改名，終端清單先沒有跟著改，請把其中一個改成不同的名字", holders.len(), ch.new, ch.old);
+                let _ = crate::ui_log::append(&self.cfg.work_dir, &[format!("{} info {line}", crate::quota_core::iso_secs(crate::heartbeat::now_ms() as i64))]);
+            }
+        }
     }
 }
 
@@ -374,6 +387,19 @@ mod tests {
         assert_eq!(next.iter().find(|s| s.pid == 2).unwrap().name, "丙");
         let again = detect_renames(&next, &cur);
         assert_eq!(again, vec![Change { pid: 1, old: "甲".into(), new: "乙".into(), verdict: Verdict::Go }]);
+    }
+
+    /// 接線守門：正式的出口要接到 launch::term::relabel_partner（測試版的 relabel_partner 本來就是空動作，
+    /// 行為測試看不到接線，所以釘原始碼）；偵測點也要在 refresh_roster 裡
+    #[test]
+    fn 守門_改名出口與偵測點接線() {
+        let src = include_str!("../core.rs").replace("\r\n", "\n");
+        let ctor = src.find("c.restore();").expect("建構式");
+        let head = &src[..ctor];
+        assert!(head.contains("relabel: Arc::new(|old, new| crate::launch::term::relabel_partner(old, new))"), "Core.relabel 預設要接 crate::launch::term::relabel_partner");
+        let refresh = src.split("pub async fn refresh_roster(").nth(1).unwrap().split("\n    }\n").next().unwrap();
+        assert!(refresh.contains("self.sync_renames(now).await;") && !refresh.contains("// self.sync_renames"), "refresh_roster 要呼叫改名偵測點");
+        assert!(refresh.find("self.sync_renames").unwrap() < refresh.find("self.note_known_windows(now)").unwrap(), "要在記 known 之前對齊");
     }
 
     /// 不在名單上的視窗的名字不算「被占用」：關掉的視窗留下的名字，別的視窗可以改成它

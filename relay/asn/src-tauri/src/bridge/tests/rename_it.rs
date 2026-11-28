@@ -177,6 +177,7 @@ async fn _2475_條件3_兩個視窗互換名字_不對齊_告訴本人_不連鎖
     assert!(r.calls().is_empty(), "互換：不呼叫出口，免得第二次把兩列都改掉");
     let told = r.told();
     assert_eq!(told.len(), 2, "兩個視窗各收到一次：{told:?}");
+    assert!(told.iter().any(|t| t.contains("to=T-乙]")) && told.iter().any(|t| t.contains("to=T-甲]")), "各寄給自己現在的名字（那個名字只有它一個視窗）：{told:?}");
     assert!(told.iter().all(|t| t.contains("（收發室）") && t.contains("終端清單先沒有跟著改")), "{told:?}");
     assert!(!told.iter().any(|t| t.contains("pid")), "白話，不放內部編號：{told:?}");
     assert_eq!(r.h.core.log.count("rename blocked"), 2, "原文進 log");
@@ -192,9 +193,11 @@ async fn _2475_條件3_撞名被擋下_之後對方改走才跟上() {
     r.rename_in_file(5000, "T-乙", SID_A);
     r.h.core.refresh_roster(T0 + 1_000).await;
     assert!(r.calls().is_empty());
-    let told = r.told();
-    assert_eq!(told.len(), 1, "{told:?}");
-    assert!(told[0].contains("另一個視窗也叫這個名字"), "{told:?}");
+    // 撞名：有兩個視窗叫「T-乙」，轉交指令只能用名字指定，寄過去分不出是誰（橋對來信也擋），所以不寄；改記 log，只記一次
+    assert!(r.told().is_empty(), "不寄給重複的名字：{:?}", r.told());
+    assert_eq!(r.h.core.log.count("cannot be told to the window by name"), 1, "原文進 log，不是沒反應");
+    r.h.core.refresh_roster(T0 + 1_500).await;
+    assert_eq!(r.h.core.log.count("cannot be told to the window by name"), 1, "同一組只記一次");
     // 對方改走：乙→丙 照做；甲→乙 這一輪仍被擋（乙剛才還是對方的名字），下一輪跟上
     r.rename_in_file(5001, "T-丙", SID_B);
     r.h.core.refresh_roster(T0 + 2_000).await;

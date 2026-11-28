@@ -142,7 +142,9 @@ pub fn pick(entries: Vec<KnownEntry>, saved_boot: Option<u64>, boot: Option<u64>
         return Vec::new();
     }
     // #2475：同一段對話只留最新那一列，重開用的名字（-n）才是現名
-    latest_per_session(entries).into_iter().filter(|e| e.facts.asn_opened && (e.engine == "claude" || e.engine == "pi") && !archived.contains(&e.name)).collect()
+    // 先篩「ASN 開的」再去重（手開的視窗不參與），封存仍在去重之後篩
+    let opened: Vec<KnownEntry> = entries.into_iter().filter(|e| e.facts.asn_opened && (e.engine == "claude" || e.engine == "pi")).collect();
+    latest_per_session(opened).into_iter().filter(|e| !archived.contains(&e.name)).collect()
 }
 
 /// 依序接回。一位失敗不擋下一位；未登入與記憶體不足是全體都要等
@@ -274,12 +276,11 @@ pub fn crash_entries(names: &[String], known: Vec<KnownEntry>, archived: &std::c
                 if archived.contains(e.name.as_str()) {
                     return None;
                 }
-                if !e.facts.session.is_empty() {
-                    if taken.contains(&e.facts.session) {
-                        return None;
-                    }
-                    taken.push(e.facts.session.clone());
+                // 兩個名字解出同一列（舊名與現名都在名單裡）只接一次；不同的列（例如手開的視窗接了同一段對話）各管各的
+                if taken.contains(&e.name) {
+                    return None;
                 }
+                taken.push(e.name.clone());
             }
             Some(found.unwrap_or_else(|| KnownEntry {
                 name: n.clone(),
@@ -294,12 +295,12 @@ pub fn crash_entries(names: &[String], known: Vec<KnownEntry>, archived: &std::c
 /// 存檔裡跟這一列同一段對話（對話編號相同、不是空的）的列之中，最後看到的時間最晚的那一列（時間相同取排在前面的）；
 /// 沒有對話編號就是它自己
 fn newest_row_of_session(known: &[KnownEntry], e: &KnownEntry) -> KnownEntry {
-    if e.facts.session.is_empty() {
+    // 只在「ASN 開的」列之間比：手開的視窗接了同一段對話，不能搶走 ASN 開的那一列（也不能被拿來決定名字）；時間相同保留自己
+    if e.facts.session.is_empty() || !e.facts.asn_opened {
         return e.clone();
     }
-    let mut group = known.iter().filter(|k| k.engine == e.engine && k.facts.session == e.facts.session);
-    let mut best = group.next().unwrap_or(e);
-    for k in group {
+    let mut best = e;
+    for k in known.iter().filter(|k| k.engine == e.engine && k.facts.session == e.facts.session && k.facts.asn_opened) {
         if k.seen > best.seen {
             best = k;
         }
@@ -1051,6 +1052,50 @@ mod tests {
         assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["新名"], "舊名換成現名");
         let got = crash_entries(&sv(&["舊名", "別人", "新名"]), renamed_pair(), &Default::default());
         assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["新名", "別人"], "同一段對話只出一列");
+    }
+
+    /// #2475 二審：另有手開視窗（不是 ASN 開的）接了同一段對話——不能搶走 ASN 開的那一列：
+    /// 開機接回要照樣接「甲」，終端服務接回也用「甲」重開，不用手開視窗的名字；手開視窗排前面、時間較晚或相同都一樣
+    #[test]
+    fn _2475_手開視窗接同一段對話_接回照樣用_asn_開的那一列() {
+        let session = "22222222-2222-4222-8222-222222222222";
+        for (hand_name, hand_seen) in [("A手開", 5_000u64), ("手開", 9_000), ("A手開", 1_000)] {
+            let mut mine = entry("甲");
+            mine.facts.session = session.into();
+            mine.seen = 5_000;
+            let mut hand = entry(hand_name);
+            hand.facts.session = session.into();
+            hand.facts.asn_opened = false;
+            hand.seen = hand_seen;
+            let known = vec![hand.clone(), mine.clone()];
+            let got = pick(known.clone(), Some(1), Some(100_000_000), true, false, &Default::default());
+            assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["甲"], "開機接回：{hand_name} 時間 {hand_seen}");
+            let got = crash_entries(&sv(&["甲"]), known, &Default::default());
+            assert_eq!(got.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["甲"], "終端服務接回用甲重開：{hand_name} 時間 {hand_seen}");
+        }
+    }
+
+    /// #2475 二審：同一段對話有兩列都是 ASN 開的、最後看到的時間相同（分不出哪個是現名）→ 照原本的做法，兩列都留
+    #[test]
+    fn _2475_同一段對話兩列時間相同_不去重() {
+        let mut a = entry("甲");
+        let mut b = entry("乙");
+        b.facts.session = a.facts.session.clone();
+        a.seen = 7;
+        b.seen = 7;
+        let got = pick(vec![a, b], Some(1), Some(100_000_000), true, false, &Default::default());
+        assert_eq!(got.len(), 2);
+    }
+
+    /// #2475 二審：接線守門——開機接回與終端服務接回都經過去重，而且是「先篩 ASN 開的」再去重（拿掉任何一處要紅）
+    #[test]
+    fn 守門_接回的去重接線() {
+        let src = include_str!("auto_resume.rs").replace("\r\n", "\n");
+        let pick_body = src.split("pub fn pick(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        let (opened, dedup) = (pick_body.find("let opened"), pick_body.find("latest_per_session(opened)"));
+        assert!(matches!((opened, dedup), (Some(a), Some(b)) if a < b), "pick 要先篩 ASN 開的再去重：{pick_body}");
+        let crash_body = src.split("pub fn crash_entries(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(crash_body.contains("newest_row_of_session(&known, e)"), "crash_entries 要取最新那列");
     }
 
     #[test]
