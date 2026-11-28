@@ -54,6 +54,23 @@ pub struct Failed {
     pub reason: String,
 }
 
+/// 沒有重開、但也不算失敗的夥伴（名字在接回名單之外，畫面不能把它們當成「不在記錄裡」）
+const SKIP_OPEN: &str = "已經開著";
+const SKIP_OPENING: &str = "正在由別的地方開";
+/// 本人封存的夥伴不接回（`crash_entries` 在名單裡就排掉了，由呼叫端用 `archived_skips` 記下）
+const SKIP_ARCHIVED: &str = "本人封存";
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Skipped {
+    pub name: String,
+    pub reason: String,
+}
+
+/// 名單裡被本人封存而排掉的夥伴，記成「沒有重開」的名字（只含名單裡真的有的）
+pub fn archived_skips(names: &[String], archived: &std::collections::BTreeSet<String>) -> Vec<Skipped> {
+    names.iter().filter(|n| archived.contains(n.as_str())).map(|n| Skipped { name: n.clone(), reason: SKIP_ARCHIVED.to_string() }).collect()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Status {
     /// running／waiting_login／paused_memory／done
@@ -68,6 +85,9 @@ pub struct Status {
     /// 接回了、但這幾位開在系統終端（原生主控台）而不是共用的終端服務裡：畫面要講明（#1867），原因只進 ui.log
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub native: Vec<String>,
+    /// 沒有重開的夥伴（已經開著、別條路正在開、本人封存）：不是失敗，也不是接回，名字記下來讓畫面算進已知名單。舊結果檔沒有這欄
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<Skipped>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -103,6 +123,10 @@ pub trait Deps {
     fn cause(&self) -> &'static str {
         ""
     }
+    /// 接回名單之外、事先就排掉的夥伴（例如本人封存的），寫進結果的 skipped。預設沒有
+    fn skipped_before(&self) -> Vec<Skipped> {
+        Vec::new()
+    }
     /// 接回失敗、視窗又是隱藏的：把它顯示出來讓本人看得到（回有沒有成功）。只有隱藏的視窗才會被呼叫
     fn reveal(&self, entry: &KnownEntry) -> bool;
     fn report(&self, status: &Status);
@@ -124,7 +148,7 @@ pub fn pick(entries: Vec<KnownEntry>, saved_boot: Option<u64>, boot: Option<u64>
 pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
     let started = deps.now();
     let deadline = started + LIMIT_MS;
-    let mut st = Status { state: "running", total: entries.len(), resumed: Vec::new(), failed: Vec::new(), at: started, cause: deps.cause(), native: Vec::new() };
+    let mut st = Status { state: "running", total: entries.len(), resumed: Vec::new(), failed: Vec::new(), at: started, cause: deps.cause(), native: Vec::new(), skipped: deps.skipped_before() };
     let push = |st: &Status, state: &'static str| {
         let mut s = st.clone();
         s.state = state;
@@ -181,12 +205,14 @@ pub fn run(entries: Vec<KnownEntry>, deps: &dyn Deps) -> Status {
         // 已經開著（本人先按了接回、或別的路徑開的）：不重開，也不算自動接回
         if deps.live(&e.name, &e.facts.session) {
             st.total -= 1;
+            st.skipped.push(Skipped { name: e.name.clone(), reason: SKIP_OPEN.to_string() });
             continue;
         }
         if let Err(why) = deps.launch(e) {
             // 別條路剛登記要開同一位（開機接回與終端服務中斷接回、本人喚醒撞在一起）：視窗已經在開，不重開也不算失敗
             if why == super::opening::BUSY {
                 st.total -= 1;
+                st.skipped.push(Skipped { name: e.name.clone(), reason: SKIP_OPENING.to_string() });
                 continue;
             }
             fail(&mut st, format!("開不起來：{why}"));
@@ -279,7 +305,8 @@ fn after_mux(work_dir: &Path, data_dir: &Path, names: &[String], resume: bool, w
     let now = crate::heartbeat::now_ms();
     let known = crate::bridge::known::Known::load(&work_dir.join(crate::bridge::known::KNOWN_FILE), now);
     let entries = crash_entries(names, known.entries(), known.archived_names());
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: why.cause, native: Default::default() };
+    let pre_skipped = archived_skips(names, known.archived_names());
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: why.cause, native: Default::default(), pre_skipped };
     resume_entries_why(work_dir, entries, resume, why, &deps, || RESUME_LOCK.lock().unwrap_or_else(|e| e.into_inner()));
 }
 
@@ -296,7 +323,7 @@ pub fn resume_entries_why<G>(work_dir: &Path, entries: Vec<KnownEntry>, resume: 
     let now = deps.now();
     if !resume {
         let failed = entries.iter().map(|e| Failed { name: e.name.clone(), reason: super::mux_watch::COOLDOWN_REASON.to_string() }).collect();
-        let st = Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: why.cause, native: Vec::new() };
+        let st = Status { state: "done", total: entries.len(), resumed: Vec::new(), failed, at: now, cause: why.cause, native: Vec::new(), skipped: deps.skipped_before() };
         deps.report(&st);
         return st;
     }
@@ -393,6 +420,13 @@ pub fn note_user_quit(work_dir: &Path) {
     let _ = crate::settings::atomic::write(&work_dir.join(QUIT_MARK), b"1", crate::settings::atomic::STATE);
 }
 
+/// 寫接回結果（正式的接回與測試共用同一條寫檔路徑）
+pub fn write_status(data_dir: &Path, status: &Status) {
+    if let Ok(text) = serde_json::to_string(status) {
+        let _ = crate::settings::atomic::write(&data_dir.join(STATUS_FILE), text.as_bytes(), crate::settings::atomic::STATE);
+    }
+}
+
 /// 畫面讀結果。沒有檔案或壞了回 null
 pub fn read_status(data_dir: &Path) -> Value {
     std::fs::read_to_string(data_dir.join(STATUS_FILE)).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
@@ -438,6 +472,8 @@ struct RealDeps {
     cause: &'static str,
     /// 退回系統終端（原生主控台）開出來的夥伴名字（開窗後讀 `win_term::take_native_why`，同一個執行緒）
     native: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// 名單之外事先排掉的夥伴（本人封存的），寫進結果的 skipped
+    pre_skipped: Vec<Skipped>,
 }
 
 #[cfg(feature = "gui")]
@@ -501,6 +537,9 @@ impl Deps for RealDeps {
     fn cause(&self) -> &'static str {
         self.cause
     }
+    fn skipped_before(&self) -> Vec<Skipped> {
+        self.pre_skipped.clone()
+    }
     fn reveal(&self, e: &KnownEntry) -> bool {
         let pid = self.opened.lock().ok().and_then(|m| m.get(&e.name).copied());
         super::console::show_partner_window("claude", &e.name, pid)
@@ -509,9 +548,7 @@ impl Deps for RealDeps {
         self.live_name(name)
     }
     fn report(&self, status: &Status) {
-        if let Ok(text) = serde_json::to_string(status) {
-            let _ = crate::settings::atomic::write(&self.data_dir.join(STATUS_FILE), text.as_bytes(), crate::settings::atomic::STATE);
-        }
+        write_status(&self.data_dir, status);
     }
 }
 
@@ -530,7 +567,7 @@ pub fn start(work_dir: &Path, data_dir: &Path) {
     if entries.is_empty() {
         return;
     }
-    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: "", native: Default::default() };
+    let deps = RealDeps { data_dir: data_dir.to_path_buf(), sessions: crate::bridge::core::claude_sessions_dir(), opened: Default::default(), cause: "", native: Default::default(), pre_skipped: Vec::new() };
     let log_dir = work_dir.to_path_buf();
     let spawned = std::thread::Builder::new().name("asn-auto-resume".into()).spawn(move || {
         deps.sleep(START_DELAY_MS);
@@ -568,13 +605,39 @@ mod tests {
 
     #[test]
     fn 結果帶原因_重開機是空的不寫出來_終端服務中斷才寫() {
-        let boot = Status { state: "done", total: 1, resumed: vec!["甲".into()], failed: vec![], at: 1, cause: "", native: vec![] };
+        let boot = Status { state: "done", total: 1, resumed: vec!["甲".into()], failed: vec![], at: 1, cause: "", native: vec![], skipped: vec![] };
         assert!(!serde_json::to_string(&boot).unwrap().contains("cause"), "重開機的結果檔和以前一樣");
         let mux = Status { cause: super::super::mux_watch::CAUSE, ..boot };
         let v: serde_json::Value = serde_json::to_value(&mux).unwrap();
         assert_eq!(v["cause"], "共用的終端服務中斷了");
         let f = Fake::new();
         assert_eq!(run(vec![entry("甲")], &f).cause, "", "預設原因是空的");
+    }
+
+    /// 2470：已經開著、別條路正在開的夥伴不重開也不算失敗，但名字與原因記進 skipped（畫面不能把它們當成不在記錄裡）；
+    /// 本人封存而排掉的也記下。沒有這種夥伴時結果檔不多寫欄位（通知頁讀的檔和以前一樣）
+    #[test]
+    fn _2470_沒有重開的夥伴記進_skipped() {
+        let mut f = Fake::new();
+        f.live = sv(&["已開著"]);
+        f.fail_launch = sv(&["別條路開的"]);
+        let st = run(vec![entry("已開著"), entry("別條路開的"), entry("正常")], &f);
+        assert_eq!(st.total, 1, "兩位沒重開，不算在這次要接回的數字裡");
+        assert_eq!(st.resumed, ["正常"]);
+        assert!(st.failed.is_empty(), "不是失敗");
+        assert_eq!(st.skipped.iter().map(|s| (s.name.as_str(), s.reason.as_str())).collect::<Vec<_>>(), [("已開著", "已經開著"), ("別條路開的", "正在由別的地方開")]);
+        let v = serde_json::to_value(&st).unwrap();
+        assert_eq!(v["skipped"][0]["name"], "已開著");
+        let none = run(vec![entry("正常")], &Fake::new());
+        assert!(!serde_json::to_string(&none).unwrap().contains("skipped"), "沒有就不寫這一欄");
+        // 本人封存：名單裡被排掉的記下，名單外的不記
+        let archived: std::collections::BTreeSet<String> = ["封存了".to_string(), "不在名單".to_string()].into_iter().collect();
+        let sk = archived_skips(&sv(&["甲", "封存了"]), &archived);
+        assert_eq!(sk, [Skipped { name: "封存了".into(), reason: "本人封存".into() }]);
+        // 通知頁讀的結果檔：寫得出去、讀回來帶 skipped
+        let d = tempfile::tempdir().unwrap();
+        write_status(d.path(), &st);
+        assert_eq!(read_status(d.path())["skipped"][1]["reason"], "正在由別的地方開");
     }
 
     #[cfg(feature = "gui")]

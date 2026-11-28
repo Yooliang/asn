@@ -294,6 +294,7 @@ export function createTaskManager(deps) {
   let timer = null
   let inflight = false
   let restartBaseId = null
+  let lateWatch = null
   const ctx = () => ({ friends: getFriends(), selfNode: getSelfNode(), ops: getOpsCtx(), asn: getOpsCtx()?.asn })
 
   async function refresh() {
@@ -414,6 +415,7 @@ export function createTaskManager(deps) {
     state.restart = key
     // 按下當時電腦端已有的接回結果是上一次的：記下它的識別，之後只認不同識別的
     restartBaseId = state.snapshot?.restart_result?.id ?? null
+    lateWatch = null
     state.restartFrozen = isAsn ? null : liveTree().groups.find(g => g.key === key) ?? null
     // 佔位組（服務沒在跑）底下沒有代理可記：等接回的名字用電腦端回報的存下名單（舊版電腦端沒給就空，settleRestart 至少等到真的服務列出現）
     state.restartWant = state.restartFrozen?.placeholder ? (Array.isArray(state.snapshot?.restart_pending_names) ? state.snapshot.restart_pending_names.map(String) : []) : null
@@ -459,10 +461,12 @@ export function createTaskManager(deps) {
   }
 
   /** 接回做完了：沒接回的、以及重啟前在那一組卻不在接回名單的視窗（例如開窗失敗留下、沒寫進對照表的），都在畫面與 log 講出名字 */
-  function reportResume(res) {
+  function reportResume(res, agents) {
     const failed = res.failed.filter(f => f && typeof f.name === 'string' && f.name)
-    const known = new Set([...(Array.isArray(res.resumed) ? res.resumed : []), ...failed.map(f => f.name)].map(String))
-    const orphans = (state.restartFrozen?.agents ?? []).filter(a => a.kind !== 'process' && a.kind !== 'terminal' && !known.has(a.name)).map(a => a.name)
+    // 已知名單：接回的、沒接回的、沒有重開的（已經開著、別條路正在開、本人封存）；這些都在 ASN 的記錄裡，不能當孤兒
+    const skipped = Array.isArray(res.skipped) ? res.skipped.filter(s => s && typeof s.name === 'string') : []
+    const known = new Set([...(Array.isArray(res.resumed) ? res.resumed : []), ...failed.map(f => f.name), ...skipped.map(s => s.name)].map(String))
+    const orphans = (agents ?? []).filter(a => a.kind !== 'process' && a.kind !== 'terminal' && !known.has(a.name)).map(a => a.name)
     const lines = [...failed.map(f => TREE_TEXT.resumeFailed(f.name, f.reason)), ...[...new Set(orphans)].map(TREE_TEXT.resumeOrphan)]
     if (!lines.length) return
     log(`[工作管理員] 重啟終端服務：${lines.join('；')}`)
@@ -471,6 +475,15 @@ export function createTaskManager(deps) {
 
   /** 重啟的收尾判斷（每次重讀清單後呼叫）：ASN 逾時＝回報沒完成並恢復；終端服務＝代理回齊或逾時就放掉「斷線中」 */
   function settleRestart() {
+    // 畫面逾時放掉之後，這次接回才做完（開了卻沒上線的夥伴，接回流程要等滿 90 秒才寫完）：照樣把結果講出來
+    if (lateWatch && !state.restart) {
+      const late = state.snapshot?.restart_result
+      if (late && typeof late === 'object' && late.id === lateWatch.id && late.state === 'done' && Array.isArray(late.failed)) {
+        const agents = lateWatch.agents
+        lateWatch = null
+        reportResume(late, agents)
+      }
+    }
     if (!state.restart || state.restartUntil === null) return
     const t = now()
     const expired = t >= state.restartUntil
@@ -485,7 +498,9 @@ export function createTaskManager(deps) {
         if (res.state !== 'done') {
           if (!expired) return
           log('[工作管理員] 重啟終端服務：逾時，接回還沒做完')
-        } else reportResume(res)
+          // 放掉「斷線中」之後還是盯著這次的結果，做完了要講沒接回的是誰（按下一次重啟時清掉）
+          lateWatch = { id: res.id, agents: state.restartFrozen?.agents ?? [] }
+        } else reportResume(res, state.restartFrozen?.agents)
       } else {
         const rows = rowsNow()
         const have = new Set(rows.map(r => viewRow(r, t, ctx()).name))
