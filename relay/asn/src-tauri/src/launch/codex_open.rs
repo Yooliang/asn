@@ -199,7 +199,7 @@ fn apply_core(
 }
 
 /// 選了型號卻接續舊對話、型號沒有套用時，開窗結果帶給畫面的一句白話
-pub(crate) const MODEL_NOT_APPLIED_NOTE: &str = "接續舊對話，沿用原本的型號，這次選的型號沒有套用";
+pub(crate) const MODEL_NOT_APPLIED_NOTE: &str = "接續舊對話，沿用原本的型號，這次選的型號沒有套用；要用新的型號，請換一個名字開新的夥伴";
 
 /// 出口的結果：`resumed`＝接續的代號（新建、沒動的是 None）；`model_ignored`＝選了型號但這次是接舊對話，型號沒有套用
 #[derive(Debug, Default, PartialEq)]

@@ -94,8 +94,8 @@ test('本機讀 Codex 清單：代號走統一規則（不套切換模型的窄�
 })
 
 test('開窗結果的 model_note：接舊對話沒套用時顯示一句白話；沒有就不多說', () => {
-  const note = '接續舊對話，沿用原本的型號，這次選的型號沒有套用'
-  const n = modelNotAppliedNoticeText('小乙', note)
+  const note = '接續舊對話，沿用原本的型號，這次選的型號沒有套用；要用新的型號，請換一個名字開新的夥伴'
+  const n =modelNotAppliedNoticeText('小乙', note)
   assert.equal(n.title, '型號沒有套用'); assert.equal(n.body, `「小乙」${note}。`)
   assert.doesNotMatch(n.body, /thread|resume|model/i, '畫面不放英文代號')
   const merged = modelNotAppliedNoticeText('小乙', note, { title: '已改用一般視窗', body: '原本那句' })
@@ -115,5 +115,6 @@ test('後端說明字串與前端用的是同一句（讀 Rust 原始碼比對�
   const rs = read('src-tauri/src/launch/codex_open.rs')
   const m = rs.match(/MODEL_NOT_APPLIED_NOTE: &str = "([^"]+)"/)
   assert.ok(m, '找不到常數')
-  assert.equal(m[1], '接續舊對話，沿用原本的型號，這次選的型號沒有套用')
+  assert.equal(m[1], '接續舊對話，沿用原本的型號，這次選的型號沒有套用；要用新的型號，請換一個名字開新的夥伴')
+  assert.match(m[1], /請換一個名字/, '結果提示要給使用者能做的事（雲端 #2353 issuecomment-7237356427）')
 })
