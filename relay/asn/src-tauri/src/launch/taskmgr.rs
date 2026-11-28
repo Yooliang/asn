@@ -391,9 +391,43 @@ fn add_restart_state(out: &mut serde_json::Value, restarting: bool, pending: &[S
     out["restart_pending_names"] = serde_json::json!(pending);
 }
 
+/// 這次重啟的接回結果放進清單（欄位 `restart_result`；這次執行還沒重啟過就不放，畫面照舊判斷）。
+/// 內容直接取自接回結果檔（通知頁讀的是同一份），不另算名單：
+/// - `id`：這次重啟的識別（見 `mux_restart::begin_resume`），畫面用它分辨是不是上一次的結果
+/// - `state`：`running`（接回中，含等重新登入、等記憶體）或 `done`
+/// - `resumed`：接回的名字；`failed`：沒接回的名字與白話原因
+/// - `skipped`：沒有重開、也不算失敗的名字與原因（已經開著、別條路正在開、本人封存）；畫面把它們算進已知名單，不當成「不在記錄裡」
+///
+/// 結果檔是別的原因寫的（例如終端服務中斷），或是這次重啟還沒寫第一筆（時間早於識別）時，一律當作接回中、名單空
+#[cfg(desktop)]
+fn add_restart_result(out: &mut serde_json::Value, id: Option<u64>, status: &serde_json::Value) {
+    let Some(id) = id else { return };
+    let mine = status.get("cause").and_then(|c| c.as_str()) == Some("重啟") && status.get("at").and_then(|a| a.as_u64()).is_some_and(|at| at >= id);
+    let names = |k: &str| -> Vec<String> { status.get(k).and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|n| n.as_str().map(String::from)).collect()).unwrap_or_default() };
+    let pairs = |k: &str| -> Vec<serde_json::Value> {
+        status
+            .get(k)
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|f| Some(serde_json::json!({ "name": f.get("name")?.as_str()?, "reason": f.get("reason").and_then(|r| r.as_str()).unwrap_or("") }))).collect())
+            .unwrap_or_default()
+    };
+    let (state, resumed, failed, skipped) = if mine {
+        (if status.get("state").and_then(|s| s.as_str()) == Some("done") { "done" } else { "running" }, names("resumed"), pairs("failed"), pairs("skipped"))
+    } else {
+        ("running", Vec::new(), Vec::new(), Vec::new())
+    };
+    out["restart_result"] = serde_json::json!({ "id": id, "state": state, "resumed": resumed, "failed": failed, "skipped": skipped });
+}
+
+/// 從資料資料夾讀接回結果檔（通知頁讀的同一份）再放進清單。`collect` 走這一條：傳錯資料夾（例如工作資料夾）就讀不到，會停在接回中
+#[cfg(desktop)]
+fn add_restart_result_from_dir(out: &mut serde_json::Value, id: Option<u64>, data_dir: &std::path::Path) {
+    add_restart_result(out, id, &super::auto_resume::read_status(data_dir));
+}
+
 /// 讀真實環境：視窗名單、程序掃描、終端面板（呼叫端給）、認得的名字。讀不到視窗名單就回錯（畫面顯示暫時讀不到，不當成沒有程式）
 #[cfg(desktop)]
-pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, terms: Vec<TermIn>, partners: Vec<PartnerRef>, use_mux: bool) -> Result<serde_json::Value, String> {
+pub(crate) fn collect(work_dir: &std::path::Path, data_dir: &std::path::Path, node: &str, asn_window: &str, terms: Vec<TermIn>, partners: Vec<PartnerRef>, use_mux: bool) -> Result<serde_json::Value, String> {
     use crate::bridge::{engines, known, procscan, roster};
     let home = crate::identity::home_dir();
     let now = crate::heartbeat::now_ms();
@@ -413,6 +447,8 @@ pub(crate) fn collect(work_dir: &std::path::Path, node: &str, asn_window: &str, 
     let src = Sources { claude, claude_ok, pi, procs, terms, partners, all_sessions, known: known_entries, protected, own_pid: std::process::id(), now_ms: now };
     let mut out = serde_json::to_value(build(&switch::RealOs, &src)).map_err(|e| e.to_string())?;
     add_restart_state(&mut out, super::mux_restart::is_restarting(), &super::mux_restart::STASH.get(), use_mux, super::mux_restart::last_failed());
+    // 這次重啟的接回結果：直接讀通知頁用的那份接回結果檔
+    add_restart_result_from_dir(&mut out, super::mux_restart::resume_id(), data_dir);
     // 壓縮次數（#1852）：只有 Claude 視窗有；內建收發室還沒數過的視窗是 null（畫面顯示「—」）
     if let Some(rows) = out.get_mut("rows").and_then(|r| r.as_array_mut()) {
         for r in rows.iter_mut().filter(|r| r.get("kind").and_then(|k| k.as_str()) == Some("claude")) {
@@ -993,6 +1029,137 @@ mod tests {
             add_restart_state(&mut out, false, pending, use_mux, failed);
             assert_eq!(out["mux_expected"], want, "use_mux={use_mux} 名單={} 失敗={failed}", pending.len());
         }
+    }
+
+    /// 2470：重啟走完流程後，快照帶這一次的接回結果：接回 甲、乙，沒接回 丙（附原因），識別是這一次（比上一次新）；
+    /// 上一次留下的結果檔（時間早於這次識別、或別的原因寫的）不算這次
+    #[cfg(desktop)]
+    #[test]
+    fn _2470_重啟後快照帶這一次的接回結果() {
+        use super::super::auto_resume::{Failed, Status};
+        use super::super::mux_restart::{resume_id, run_steps, Stash};
+        let before = resume_id().unwrap_or(0);
+        let stale = Status { state: "done", total: 1, resumed: vec!["舊".into()], failed: vec![], at: 1, cause: "重啟", native: vec![], skipped: vec![] };
+        let status_of = std::cell::RefCell::new(serde_json::Value::Null);
+        let r = run_steps(
+            true,
+            &Stash::new(),
+            || Some(vec!["甲".into(), "乙".into(), "丙".into()]),
+            || Ok(()),
+            || Ok(()),
+            || Ok(()),
+            |_names| {
+                // 假的接回：照真的結果檔格式寫「接回 甲、乙；丙沒接回」，時間在識別之後
+                let id = resume_id().expect("開始接回前要先蓋識別");
+                let st = Status { state: "done", total: 3, resumed: vec!["甲".into(), "乙".into()], failed: vec![Failed { name: "丙".into(), reason: "視窗名不能用，請手動喚醒".into() }], at: id + 5, cause: "重啟", native: vec![], skipped: vec![] };
+                *status_of.borrow_mut() = serde_json::to_value(st).unwrap();
+            },
+            |_| {},
+            &|_| {},
+        );
+        assert!(r.is_ok());
+        let id = resume_id().expect("重啟後有識別");
+        assert!(id > before, "識別是這一次的（比上一次新）");
+        let mut out = serde_json::json!({});
+        add_restart_result(&mut out, Some(id), &status_of.borrow());
+        let res = &out["restart_result"];
+        assert_eq!((res["id"].clone(), res["state"].clone()), (serde_json::json!(id), serde_json::json!("done")));
+        assert_eq!(res["resumed"], serde_json::json!(["甲", "乙"]));
+        assert_eq!(res["failed"], serde_json::json!([{ "name": "丙", "reason": "視窗名不能用，請手動喚醒" }]));
+        // 上一次留下的結果檔：不能當成這一次
+        let mut out2 = serde_json::json!({});
+        add_restart_result(&mut out2, Some(id), &serde_json::to_value(stale).unwrap());
+        assert_eq!(out2["restart_result"]["state"], "running", "舊結果不算");
+        assert_eq!(out2["restart_result"]["resumed"], serde_json::json!([]));
+        // 別的原因寫的結果（終端服務中斷）也不算
+        let other = Status { state: "done", total: 1, resumed: vec!["丁".into()], failed: vec![], at: id + 9, cause: "共用的終端服務中斷了", native: vec![], skipped: vec![] };
+        let mut out3 = serde_json::json!({});
+        add_restart_result(&mut out3, Some(id), &serde_json::to_value(other).unwrap());
+        assert_eq!(out3["restart_result"]["resumed"], serde_json::json!([]));
+        // 這次執行沒重啟過：不放欄位，畫面照舊判斷
+        let mut out4 = serde_json::json!({});
+        add_restart_result(&mut out4, None, &status_of.borrow());
+        assert!(out4.get("restart_result").is_none());
+    }
+
+    /// 2470：接回結果檔的 at 和重啟識別同單位（都是毫秒，heartbeat::now_ms）。
+    /// 正式的接回用 RealDeps::now 寫 at，iso_secs 收的也是毫秒；改成別的單位這條會紅，add_restart_result 的 `at >= id` 才不會永遠判成接回中
+    #[cfg(desktop)]
+    #[test]
+    fn _2470_接回結果的時間與重啟識別同單位() {
+        let ar = include_str!("auto_resume.rs");
+        let now_fn = ar.split("impl Deps for RealDeps").nth(1).unwrap().split("fn sleep").next().unwrap();
+        assert!(now_fn.contains("crate::heartbeat::now_ms()"), "接回結果的 at 要取自毫秒時鐘");
+        let mr = include_str!("mux_restart.rs");
+        assert!(mr.contains("begin_resume(crate::heartbeat::now_ms())"), "重啟識別要取自同一個毫秒時鐘");
+        assert!(include_str!("../quota_core.rs").contains("pub fn iso_secs(ms: i64)"), "iso_secs 收的是毫秒，不是秒");
+    }
+
+    /// 2470：collect 讀的是「資料資料夾」裡通知頁用的那份接回結果檔：用接回真的寫檔路徑寫進資料資料夾，讀得到；
+    /// 傳工作資料夾（或別的資料夾）就讀不到。指令也要把資料資料夾（不是工作資料夾）傳給 collect
+    #[cfg(desktop)]
+    #[test]
+    fn _2470_collect_讀資料資料夾的接回結果檔() {
+        use super::super::auto_resume::{write_status, Status};
+        let (data, work) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let id = 1_000;
+        let st = Status { state: "done", total: 1, resumed: vec!["甲".into()], failed: vec![], at: id + 1, cause: "重啟", native: vec![], skipped: vec![] };
+        write_status(data.path(), &st);
+        let mut ok = serde_json::json!({});
+        add_restart_result_from_dir(&mut ok, Some(id), data.path());
+        assert_eq!(ok["restart_result"]["state"], "done");
+        assert_eq!(ok["restart_result"]["resumed"], serde_json::json!(["甲"]), "資料資料夾讀得到");
+        let mut wrong = serde_json::json!({});
+        add_restart_result_from_dir(&mut wrong, Some(id), work.path());
+        assert_eq!(wrong["restart_result"]["state"], "running", "傳到別的資料夾讀不到，停在接回中");
+        assert_eq!(wrong["restart_result"]["resumed"], serde_json::json!([]));
+        // 接線：collect 把收到的 data_dir 交給讀檔；指令把 app.data_dir 傳給 collect，不是 work_dir
+        let src_text = include_str!("taskmgr.rs");
+        let c = src_text.split("pub(crate) fn collect(").nth(1).unwrap().split("\n}\n").next().unwrap();
+        assert!(c.contains("resume_id()") && c.contains("add_restart_result_from_dir(&mut out, super::mux_restart::resume_id(), data_dir)"), "collect 要讀資料資料夾");
+        let lib = include_str!("../lib.rs");
+        let cmd = lib.split("async fn task_manager_list").nth(1).unwrap().split("async fn ").next().unwrap();
+        assert!(cmd.contains("data_dir) = ") || cmd.contains("data_dir, node)"), "指令要取 data_dir");
+        assert!(cmd.contains("app.data_dir.clone()") && cmd.contains("collect(&work_dir, &data_dir,"), "指令要把資料資料夾傳給 collect");
+    }
+
+    /// 2470：這一次、接回還沒做完（state=running）：帶出已接回的名字、狀態是接回中，不能一律當完成
+    #[cfg(desktop)]
+    #[test]
+    fn _2470_這一次接回中_狀態是接回中() {
+        use super::super::auto_resume::Status;
+        let id = 5_000;
+        let st = Status { state: "running", total: 3, resumed: vec!["甲".into()], failed: vec![], at: id + 3, cause: "重啟", native: vec![], skipped: vec![] };
+        let mut out = serde_json::json!({});
+        add_restart_result(&mut out, Some(id), &serde_json::to_value(st).unwrap());
+        assert_eq!(out["restart_result"]["state"], "running");
+        assert_eq!(out["restart_result"]["resumed"], serde_json::json!(["甲"]), "這一次的內容有帶出來，不是空的");
+        // 等重新登入、等記憶體也都算還在接回
+        for s in ["waiting_login", "paused_memory"] {
+            let st = Status { state: if s == "waiting_login" { "waiting_login" } else { "paused_memory" }, total: 1, resumed: vec![], failed: vec![], at: id, cause: "重啟", native: vec![], skipped: vec![] };
+            let mut o = serde_json::json!({});
+            add_restart_result(&mut o, Some(id), &serde_json::to_value(st).unwrap());
+            assert_eq!(o["restart_result"]["state"], "running", "{s}");
+        }
+    }
+
+    /// 2470：沒有重開的夥伴（已經開著、別條路正在開、本人封存）名字與原因一起帶出；舊結果檔沒有這欄也要讀得了
+    #[cfg(desktop)]
+    #[test]
+    fn _2470_沒有重開的夥伴一起帶出() {
+        use super::super::auto_resume::{Skipped, Status};
+        let id = 7_000;
+        let sk = |n: &str, r: &str| Skipped { name: n.into(), reason: r.into() };
+        let st = Status { state: "done", total: 1, resumed: vec![], failed: vec![], at: id + 1, cause: "重啟", native: vec![], skipped: vec![sk("小東", "已經開著"), sk("封存的", "本人封存")] };
+        let mut out = serde_json::json!({});
+        add_restart_result(&mut out, Some(id), &serde_json::to_value(st).unwrap());
+        assert_eq!(out["restart_result"]["skipped"], serde_json::json!([{ "name": "小東", "reason": "已經開著" }, { "name": "封存的", "reason": "本人封存" }]));
+        // 舊結果檔沒有 skipped 欄：照常讀，給空陣列
+        let old = serde_json::json!({ "state": "done", "total": 1, "resumed": ["甲"], "failed": [], "at": id + 1, "cause": "重啟" });
+        let mut o2 = serde_json::json!({});
+        add_restart_result(&mut o2, Some(id), &old);
+        assert_eq!(o2["restart_result"]["skipped"], serde_json::json!([]));
+        assert_eq!(o2["restart_result"]["resumed"], serde_json::json!(["甲"]));
     }
 
     /// 西川複看：collect 讀的是真正的存下名單與失敗記號（拿掉就永遠只靠 use_mux，佔位會永久掛著）

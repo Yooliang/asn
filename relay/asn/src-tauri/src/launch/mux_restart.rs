@@ -6,7 +6,7 @@
 //! 重啟中用一個共用記號：兩種重啟（ASN、終端服務）互斥、各自防重入；完成或失敗（含中途當掉）都會清掉。
 #![cfg(desktop)]
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 /// 給畫面的白話字；原始錯誤只寫 mux.log／ui.log
@@ -56,6 +56,24 @@ impl Drop for Restarting {
     fn drop(&mut self) {
         MUX_KIND.store(false, Ordering::SeqCst);
         BUSY.store(false, Ordering::SeqCst);
+    }
+}
+
+/// 最近一次重啟開始接回的時間（毫秒）當作這次重啟的識別；0＝這次執行還沒重啟過。只放記憶體。
+/// 工作管理員拿它分辨「接回結果檔」是不是這一次重啟寫的，不會讀到上一次的結果
+static RESUME_ID: AtomicU64 = AtomicU64::new(0);
+
+/// 開始接回時蓋一個新識別：用現在的時間，但一定比上一個大（同一毫秒連重啟兩次也分得開）
+pub fn begin_resume(now_ms: u64) -> u64 {
+    let prev = RESUME_ID.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |p| Some(now_ms.max(p + 1))).unwrap_or(0);
+    now_ms.max(prev + 1)
+}
+
+/// 最近一次重啟的識別；這次執行還沒重啟過就是 None
+pub fn resume_id() -> Option<u64> {
+    match RESUME_ID.load(Ordering::SeqCst) {
+        0 => None,
+        id => Some(id),
     }
 }
 
@@ -218,6 +236,7 @@ pub fn run_steps(
     }
     stash.set(Vec::new());
     note("工作管理員重啟終端服務：新的已起來，接回夥伴");
+    begin_resume(crate::heartbeat::now_ms());
     resume(names);
     Ok(())
 }

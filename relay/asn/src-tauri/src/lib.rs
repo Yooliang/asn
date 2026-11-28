@@ -1085,13 +1085,13 @@ async fn partner_repo(name: String) -> Result<Option<String>, String> {
 #[cfg(desktop)]
 #[tauri::command]
 async fn task_manager_list(app: State<'_, App>, terms: State<'_, Arc<launch::term::LiveTerms>>) -> Result<Value, String> {
-    let (work_dir, node) = (app.work_dir.clone(), app.node.clone());
+    let (work_dir, data_dir, node) = (app.work_dir.clone(), app.data_dir.clone(), app.node.clone());
     let asn_window = app.relay.as_ref().map(|r| r.window_name()).unwrap_or_default();
     let term_rows: Vec<launch::taskmgr::TermIn> = terms.list().into_iter().map(|t| launch::taskmgr::TermIn { id: t.id, profile: t.profile, pid: t.pid, started_ms: t.started_ms, cwd: t.cwd, adopted: t.adopted }).collect();
     // 對照表裡的夥伴視窗：只用來找「卡在接回中」的（判斷全在 taskmgr::build）
     let partners = terms.partner_rows();
     let mux_expected = terms.mux_expected();
-    tokio::task::spawn_blocking(move || launch::taskmgr::collect(&work_dir, &node, &asn_window, term_rows, partners, mux_expected)).await.map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || launch::taskmgr::collect(&work_dir, &data_dir, &node, &asn_window, term_rows, partners, mux_expected)).await.map_err(|e| e.to_string())?
 }
 
 /// 工作管理員的「重啟 ASN」（#1860 F）：走共用的重新啟動（#2204）。成功回 Ok（本頁隨後會斷線，ASN 回來後重新載入）；
