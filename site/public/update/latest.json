@@ -1,15 +1,11 @@
 {
-  "version": "0.2.107",
-  "notes": "- 修正：背景工作者在啟動途中被停掉時，不再留下沒結束的程序\n- 修正：已經停掉或關閉的背景工作者，打開名單時不會再被叫起來\n- 修正：夥伴改名後，終端打得開，重啟後也不會變回舊名字\n- 修正：重啟終端服務後，工作管理員會講出哪些夥伴沒接回\n- 修正：ASN 更新或重啟後，會自動收掉沒人管的舊看畫面視窗",
-  "pub_date": "2026-11-28T06:36:07.805Z",
+  "version": "0.2.108",
+  "notes": "- 修正：夥伴的名字改以對話為準，不會再顯示成「夥伴-1」；在視窗裡自己改名也會跟著同步\n- 修正：用新名字開 Codex 夥伴開不起來的問題；名字和現有的 Codex 對話重複時，會請你換一個名字\n- 改善：夥伴一開就結束時，畫面會講出原因，不再看起來像開成功\n- 新功能：在這台電腦開新的 Codex 夥伴時，可以選型號；沒有裝在 PATH 上的 Codex 桌面版也找得到",
+  "pub_date": "2026-11-28T11:43:15.778Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjF4TXNXeWNqNkJzR3ZMVE5VVUdUNGNMV3h3RFNsRUJRTFdia1VqL1V5a0RqdStjOHJjTGpMTW83OUFoaEN4QXdYSXNoY1FnT1I2Zkx0d0ZHN2dTcEFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODQ3NzY3CWZpbGU6QVNOXzAuMi4xMDdfeDY0LXNldHVwLmV4ZQpKNVVvcENuWWZHdVR5Ri80SENOU0twdzhCOG1RV3BXaUVzUjM3cFd4ZFlseU1kSFZoeDRVbE1nRDR6Njkzb29ta3FTQ2E2SlZUaFFmdUFhdjh3ZkxBdz09Cg==",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.107_x64-setup.exe"
-    },
-    "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjVRVm5JWTBGUVl0TENXa1NqcG1hNi8rM3RpU2hzRWNtWnBMU1ArUEF4VXJMZlI5eWVveHBKbS85YzFkYngvWWhDRkpPYXlYZlFMQVlyUkpuN1VMdWdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODQ4MzUyCWZpbGU6QVNOXzAuMi4xMDdfYW1kNjQuQXBwSW1hZ2UKTEpMSXQ2cHhwNDdKb0Z6YzlSc2x2Y3dURXNZV3NqZUxjYWJnKzh6cDJoSmpIbVBOYzF5ZTYrbFlPN1hRZXJmYk1PeVBRZHkrcmNEZU9qVzE3VDBQQnc9PQo=",
-      "url": "https://asnmessenger.web.app/update/ASN_0.2.107_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSNTIvdEVWT0NybjRxbWt1U1lkWUMveXhtN2hTVy80S1ZmZ09wUlpIdWdSbEYzMjBkam5wWTNiNEFkcnFpdC9XWjBoZnMxc0pvNkhyeVJrd3ZHd296bldtMTVDVXRqRkFVPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk1ODY2MTk1CWZpbGU6QVNOXzAuMi4xMDhfeDY0LXNldHVwLmV4ZQovdGVqV2VzVDVQSng2cXlRdXlyWGJHV0RuL25mZlQ4b2Z4NFQ0a2ZaZlYzWkRELzk4b2NXQnV3V1ZjNlF1Smo1MHdqNVVwOHNseDN1SjVmcFRleVdCdz09Cg==",
+      "url": "https://asnmessenger.web.app/update/ASN_0.2.108_x64-setup.exe"
     }
   }
 }
