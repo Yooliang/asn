@@ -39,7 +39,7 @@ import { ChatPane } from './lib/chatpane.mjs'
 import { errorText as knownError, normalizeView as knownView } from './lib/known-peers.mjs'
 import { TermView } from './lib/term-view.mjs'
 import { ActionBar } from './lib/actionbar.mjs'
-import { AsnToast, showResult } from './lib/ui-kit.mjs'
+import { AsnNote, AsnToast, showResult } from './lib/ui-kit.mjs'
 import { AsnAvatar } from './lib/avatar-badge.mjs'
 import { GroupSheet } from './lib/group-sheet.mjs'
 import { createGroupFlow } from './lib/group-flow.mjs'
@@ -2387,6 +2387,7 @@ app.component('chat-pane', ChatPane)
 app.component('term-view', TermView)
 app.component('action-bar', ActionBar)
 app.component('AsnToast', AsnToast)   // 結果提示（封存結果、釘選滿）：頁面根部掛一個，呼叫端用 showResult
+app.component('AsnNote', AsnNote)     // 一般說明（info 灰字）：開新夥伴第 2 頁 Codex 型號清單的說明（#2353）
 app.component('group-sheet', GroupSheet)
 app.component('asn-dialog', AsnDialog)
 app.component('asn-avatar', AsnAvatar)

@@ -265,6 +265,11 @@ mod tests {
         let body = &src[src.find("pub fn resolve_binary").unwrap()..];
         let body = &body[..body.find("\n}").unwrap()];
         assert!(body.contains("desktop_codex_binary_real"), "讀清單、開窗都經 resolve_binary，桌面版位置要在裡面：{body}");
+        // 順序：PATH 上有 codex（例如 npm 版）就用 PATH 那個，原本的人行為不變；桌面版只在 PATH、家目錄固定位置都找不到時才用
+        let on_path = body.find("resolve_on_path(name)").expect("resolve_binary 要先找 PATH");
+        let home = body.find("known_home_binary_real(name)").expect("resolve_binary 要找家目錄固定位置");
+        let desktop = body.find("desktop_codex_binary_real(name)").unwrap();
+        assert!(on_path < desktop && home < desktop, "桌面版要排在 PATH 與家目錄固定位置之後：{body}");
         let real = &src[src.find("fn desktop_codex_binary_real").unwrap()..];
         let real = &real[..real.find("\n}").unwrap()];
         assert!(real.contains("ASN_MOCK_BIN_DIR"), "mock 資料夾模式下不看真實位置");
